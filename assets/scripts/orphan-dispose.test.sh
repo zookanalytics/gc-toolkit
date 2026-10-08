@@ -123,7 +123,7 @@ eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
 eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
-eq "$(wc -l < "$STUB_GC_LOG")" "2" "preview reads the step and its root, nothing more"
+eq "$(wc -l < "$STUB_GC_LOG" | tr -d ' ')" "2" "preview reads the step and its root, nothing more"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
 echo "--- root arm: never returns a root to a pool ---"

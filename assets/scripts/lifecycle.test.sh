@@ -262,7 +262,16 @@ writes_when() { # <label> <bead-json> <args...>
   "$SUT" transition "$@" >/dev/null 2>&1
   eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "$label"
 }
-BASE='"id":"n-2","status":"open","assignee":"rig/refinery","notes":""'
+# BASE carries no assignee, the resting shape n-1 models. Every case built on
+# it enters a detached state at status=open, which clears a stale assignee, and
+# that clear writes by itself. With a stale assignee, a case writes no matter
+# what its own field does, so it passes without testing that field. BASE must
+# therefore be idle on its own: re-asserted unchanged, it writes nothing.
+BASE='"id":"n-2","status":"open","assignee":"","notes":""'
+store "[{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}]"
+: > "$STUB_GC_LOG"
+"$SUT" transition n-2 --to pull_request >/dev/null 2>&1
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "BASE re-asserted unchanged writes nothing"
 writes_when "a moved head writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
   n-2 --to pull_request --set-dated "pr.machine=settled@$OID2"
@@ -292,8 +301,11 @@ writes_when "--append-notes always writes" \
 writes_when "--takeaway always writes (it stamps a fresh instant)" \
   '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
   n-2 --to pull_request --route human --takeaway "same text"
+# An explicit --assignee skips the detached clear, so this bead can carry the
+# assignee the flag names. The value does not change, and only the flag can
+# force the write.
 writes_when "--assignee always writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
+  '{"id":"n-2","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}' \
   n-2 --to pull_request --assignee rig/refinery
 store '[{"id":"n-3","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc123"}}]'
 : > "$STUB_GC_LOG"

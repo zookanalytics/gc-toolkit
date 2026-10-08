@@ -452,7 +452,7 @@ fi
 # A closed visit carries a VERDICT, and two of them say a human was not needed:
 # `moot` (the premise no longer holds) and `benign` (it holds but needs nobody).
 # The converse role stamps them on gc.outcome before it closes
-# (agents/converse/prompt.template.md). Nothing read them back, and the dedup
+# (agents/_converse/prompt.template.md). Nothing read them back, and the dedup
 # above only sees OPEN visits, so a detector whose condition outlives the
 # sitting re-filed the identical situation on its next cycle and spent another
 # one. This window is where that verdict is honored.
@@ -523,7 +523,7 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 
 # The subject has to outlive the visit. A converse sitting records what it
 # settled by appending to the subject and stamps its closing takeaway there
-# (converse-signoff.sh, step 7 of agents/converse/prompt.template.md). A wisp
+# (converse-signoff.sh, step 7 of agents/_converse/prompt.template.md). A wisp
 # is burned at the end of the iteration that poured it, so on a wisp subject
 # both writes address a bead that no longer exists, and the sitting's own guard
 # ("NO TAKEAWAY ON $SUBJECT") cannot be satisfied at all.
