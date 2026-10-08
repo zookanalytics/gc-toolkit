@@ -83,7 +83,8 @@ answer for.
 - **Sets:** `metadata.gc.routed_to=<target>`, and nothing else. The
   built-in router writes that one key and does not branch on the shape
   of the target (`cliBeadRouter.Route`,
-  `rigs/gascity/cmd/gc/cmd_sling.go:759`), so `assignee` is left empty
+  `rigs/gascity/cmd/gc/cmd_sling.go:750`, read at the fork pin
+  `92344d46d`), so `assignee` is left empty
   for a **pool target** (an agent that supports instance expansion) and
   for a **singleton target** (a named session — no instance expansion)
   alike. That is the ruling's "no `assignee` by default", applied
@@ -94,7 +95,8 @@ answer for.
   `gc.routed_to=<singleton>` is never offered to the identity it names.
   The controller still counts that demand and can wake the session on it
   (`NamedSessionRoutedDemand`, wake reason `routed-demand` in
-  `rigs/gascity/cmd/gc/compute_awake_set.go:202`), which is what makes
+  `ComputeAwakeSet`, `rigs/gascity/cmd/gc/compute_awake_set.go:205-206`,
+  read at the fork pin `92344d46d`), which is what makes
   the shape hard to spot: the session wakes, and its own `gc hook`
   returns nothing. Delivering to a named session takes the Lane 2
   assignee write, in place of the sling or straight after it. See
@@ -120,10 +122,12 @@ answer for.
   value is still the base `gc-toolkit/gc-toolkit.polecat`. A slot suffix
   is a load-balancing hint, not a hard pin, and it is collapsed on write
   by `agentutil.NormalizePoolRouteTarget` before the metadata is set
-  (`rigs/gascity/cmd/gc/cmd_sling.go:766`; the default sling query
-  applies the same `PoolName` collapse at
-  `rigs/gascity/internal/config/workquery.go:532`, centralized by
-  upstream #3963). This matters because the read side is exact-match:
+  (called from `cliBeadRouter.Route` at
+  `rigs/gascity/cmd/gc/cmd_sling.go:769`; the default sling query,
+  `Agent.DefaultSlingQuery`, applies the same `PoolName` collapse at
+  `rigs/gascity/internal/config/workquery.go:1156-1160`, centralized by
+  upstream #3963). Both line numbers were read at the fork pin
+  `92344d46d`. This matters because the read side is exact-match:
   a suffixed value stamped by some *other* writer is structurally
   unclaimable — see
   ["Where they diverge"](#where-they-diverge-an-instance-suffixed-gcrouted_to).
@@ -1037,19 +1041,21 @@ So there are three configurations, and none of them yields a claim:
 **Who writes a suffixed route.** Not `gc sling`: both of its write paths
 collapse to the base pool identity before stamping, but through two
 *different* helpers taking two different inputs, and the distinction
-matters when tracing a stray route back to its writer.
+matters when tracing a stray route back to its writer. The line numbers
+below were read at the fork pin `92344d46d`.
 
 - Given an explicit **target string**, the built-in routing path calls
-  `agentutil.NormalizePoolRouteTarget` (`cmd/gc/cmd_sling.go:766`),
-  which strips a valid `-N` slot suffix off a caller-supplied
-  `<rig>/<pool>-2` (`resolve.go:228`).
+  `agentutil.NormalizePoolRouteTarget` (`cmd/gc/cmd_sling.go:769`, in
+  `cliBeadRouter.Route`), which strips a valid `-N` slot suffix off a
+  caller-supplied `<rig>/<pool>-2` (`resolve.go:229`).
 - Given an **agent**, the route collapses to that agent's `PoolName`,
   which on a pool-instance copy is its base template's qualified name.
   #3963 centralized that rule as `agentutil.RoutedToIdentity`
   (`resolve.go:204`); the default sling query inlines it rather than
-  calling it (`workquery.go:532-536`), because `internal/config` cannot
-  import `agentutil` — `agentutil` already imports `config`, and its
-  package comment says it was split out for exactly that reason.
+  calling it (`Agent.DefaultSlingQuery`, `workquery.go:1156-1160`),
+  because `internal/config` cannot import `agentutil` — `agentutil`
+  already imports `config`, and its package comment says it was split
+  out for exactly that reason.
 
 A suffixed value reaches a bead only from some *other* writer — a direct
 `bd update --set-metadata gc.routed_to=<pool>-1`, or a graph/formula
