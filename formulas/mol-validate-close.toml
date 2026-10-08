@@ -146,10 +146,12 @@ fi
 if [ -n "$VISIT" ]; then
   echo "gate-visit: visit $VISIT is already open on $WORK_BEAD_ID — reusing it, not filing a second" >&2
 else
-  VISIT=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — proposed close did not validate: accept or redirect" \
-    -d "A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work." --json | jq -r '.id // .[0].id')
+  VISIT_JSON=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — proposed close did not validate: accept or redirect" \
+    -d "A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work." --json)
+  VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-    || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+    || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+         echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
   gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
     --set-metadata "gc.continuation_group=$WORK_BEAD_ID" \
     --set-metadata "task_kind=visit"

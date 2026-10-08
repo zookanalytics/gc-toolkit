@@ -327,7 +327,9 @@ ones from this rig's open beads (an unreadable listing aborts the run,
 `--outcome fail`, exit — same fail-safe as step 1). Seed a new pattern
 bead per new cluster:
 ```bash
-PATTERN=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json | jq -r '.id // .[0].id')
+PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json)
+PATTERN=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$PATTERN" ] || { CREATE_ERR=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "could not seed the pattern bead${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$PATTERN" --set-metadata task_kind=feedback-pattern
 ```
 
@@ -493,8 +495,9 @@ BODY="## Rule
 ## Reasoning
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
-BEAD=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json | jq -r '.id // .[0].id')
-[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { echo "WARN: could not create prompt-update bead for $PATTERN; skipping" >&2; continue; }
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json)
+BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 # target=main + merge_strategy=mr ride the standard pool worker -> refinery
 # pipeline; routing (stamp, don't sling) IS the dispatch.
 gc bd update "$BEAD" --set-metadata task_kind=prompt-update --set-metadata target=main --set-metadata merge_strategy=mr --set-metadata gc.routed_to="$POOL"
@@ -560,10 +563,12 @@ fi
 if [ -n "$VISIT" ]; then
   echo "gate-visit: visit $VISIT is already open on $SUBJECT — reusing it, not filing a second" >&2
 else
-  VISIT=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
-    -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json | jq -r '.id // .[0].id')
+  VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
+    -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json)
+  VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-    || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+    || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+         echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
   gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
     --set-metadata "gc.continuation_group=$SUBJECT" \
     --set-metadata "task_kind=visit"

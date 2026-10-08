@@ -63,6 +63,13 @@ case "${1:-}" in
     done
     # limit 0 is unbounded, as bd reads it.
     case "$limit" in ''|0|*[!0-9]*) : ;; *) out=$(printf '%s' "$out" | jq -c --argjson n "$limit" '.[0:$n]') ;; esac
+    # bd list puts each bead's outgoing edges on its row as
+    # {issue_id, depends_on_id, type}, and leaves the key off a bead with none.
+    out=$(printf '%s' "$out" | jq -c --rawfile edges "$DEPS" '
+      [ $edges | split("\n")[] | select(. != "") | split("|")
+        | {issue_id: .[0], type: .[1], depends_on_id: .[2]} ] as $e
+      | map(.id as $id | [ $e[] | select(.issue_id == $id) ] as $mine
+            | if ($mine | length) > 0 then . + {dependencies: $mine} else . end)')
     printf '%s\n' "$out" ;;
   show)
     shift; id="${1:-}"
@@ -109,6 +116,10 @@ case "${1:-}" in
         --append-notes) shift; note="${1:-}"
           jq -c --arg id "$id" --arg n "$note" \
             'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
+            "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --status=*|--status)
+          if [ "$1" = "--status" ]; then shift; st="${1:-}"; else st="${1#--status=}"; fi
+          jq -c --arg id "$id" --arg s "$st" 'map(if .id == $id then .status = $s else . end)' \
             "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
@@ -170,6 +181,23 @@ notes()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .notes) // ""' "$STUB_
 body()   { jq -r --arg id "$1" '(.[] | select(.id==$id) | .description) // ""' "$STUB_STORE"; }
 title()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .title) // ""' "$STUB_STORE"; }
 btype()  { jq -r --arg id "$1" '(.[] | select(.id==$id) | .issue_type) // ""' "$STUB_STORE"; }
+findings() { jq --arg k "$1" '[.[] | select(.metadata["finding.key"] == $k)] | length' "$STUB_STORE"; }
+# put_bead <id> <status> — a bead that is not a finding: the fix or the visit a
+# held finding waits on, or the subject one is about.
+put_bead() {
+  local tmp
+  tmp=$(mktemp "$TMP/store.XXXXXX")
+  jq -c --arg id "$1" --arg s "$2" '. + [{"id":$id,"status":$s,"title":$id,"metadata":{}}]' \
+    "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+}
+# hold <finding> <status> [<blocker>...] — park a finding bead at <status>,
+# waiting on each blocker through a `blocks` edge.
+hold() {
+  local f="$1" st="$2" b
+  shift 2
+  for b in "$@"; do gc bd dep add "$f" "$b" --type=blocks >/dev/null 2>&1; done
+  gc bd update "$f" --status="$st" >/dev/null 2>&1
+}
 
 echo "# patrol-finding.sh"
 
@@ -435,6 +463,114 @@ eq "$(meta fnd-1 'finding.key')" "doctor-pool-idle-routed-work" "(doctor-key) --
 reset
 "$SUT" --key dolt-backup-gc-toolkit --scope deacon-findings --title t --message m >/dev/null 2>&1
 eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
+
+# ── 16. a bead held at blocked still tracks its finding ──────────────
+# The finding's bead is parked at blocked behind the fix it waits on, and an
+# older bead for the same key is closed. A lookup that reads only open and
+# in_progress misses the held bead, files a second one, and names the older
+# closed bead as the predecessor whose fix "did not hold".
+reset
+"$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
+gc bd close fnd-1 >/dev/null 2>&1
+"$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
+put_bead fix-1 open
+hold fnd-2 blocked fix-1
+OUT=$("$SUT" --key doctor-held --title "held" --message "held fired" 2>&1); RC=$?
+eq "$RC" "0" "(held/waiting) exit 0"
+eq "$(findings doctor-held)" "2" "(held/waiting) no second bead beside the held one"
+eq "$(meta fnd-2 'finding.occurrences')" "2" "(held/waiting) the recurrence is counted on the held bead"
+has "$OUT" "fnd-2 already tracks" "(held/waiting) says the held bead tracks it"
+hasnt "$OUT" "fnd-1" "(held/waiting) the older closed bead is not named"
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "2" "(held/waiting) no reaction is slung for a recurrence it absorbed"
+
+OUT=$("$SUT" --key doctor-held --title "held" --message "held fired, wider" 2>&1)
+eq "$(findings doctor-held)" "2" "(held/waiting) changed text files nothing new either"
+has "$(notes fnd-2)" "held fired, wider" "(held/waiting) the changed text is a note on the held bead"
+
+# The fix it waited on closes and the finding fires again. bd leaves the bead
+# at blocked, so nothing will act on it again: the recurrence is news, and its
+# predecessor is the held bead.
+gc bd close fix-1 >/dev/null 2>&1
+OUT=$("$SUT" --key doctor-held --title "held" --message "held fired, wider" 2>&1); RC=$?
+eq "$RC" "0" "(held/released) exit 0"
+eq "$(findings doctor-held)" "3" "(held/released) the recurrence after the wait ended files one new bead"
+eq "$(meta fnd-3 'finding.recurrence_of')" "fnd-2" "(held/released) the new bead names the held bead"
+has "$(body fnd-3)" "while fnd-2 was held at blocked" "(held/released) the body names the held bead"
+has "$(body fnd-3)" "(fix-1) had closed" "(held/released) and the blocker that closed"
+hasnt "$(body fnd-3)" "fnd-1" "(held/released) the older closed bead is not blamed"
+has "$OUT" "recurrence of fnd-2" "(held/released) reported"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-3" "(held/released) the new bead gets its first reaction"
+"$SUT" --key doctor-held --title "held" --message "held fired, wider" >/dev/null 2>&1
+eq "$(findings doctor-held)" "3" "(held/released) one new bead, not one per tick"
+eq "$(meta fnd-3 'finding.occurrences')" "2" "(held/released) later ticks land on the new bead"
+
+# Waiting means ANY blocker still open, not just one of them closed.
+reset
+"$SUT" --key doctor-two-blockers --title t --message m >/dev/null 2>&1
+put_bead fix-a closed
+put_bead fix-b open
+hold fnd-1 blocked fix-a fix-b
+"$SUT" --key doctor-two-blockers --title t --message m >/dev/null 2>&1
+eq "$(findings doctor-two-blockers)" "1" "(held/one of two open) still waiting, so no new bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/one of two open) the recurrence lands on it"
+
+# A blocker no read resolves is not proven closed, so the held bead may still
+# be waiting and keeps the recurrence.
+reset
+"$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
+hold fnd-1 blocked gone-1
+"$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
+eq "$(findings doctor-dangling)" "1" "(held/unreadable blocker) no new bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/unreadable blocker) the recurrence lands on it"
+
+# The tracks edge --about adds names the subject. It is not a wait, so an open
+# subject does not keep a held bead taking recurrences after its blocker closed.
+reset
+put_bead tk-subj open
+"$SUT" --key witness-held --about tk-subj --title t --message m >/dev/null 2>&1
+put_bead fix-1 closed
+hold fnd-1 blocked fix-1
+"$SUT" --key witness-held --about tk-subj --title t --message m >/dev/null 2>&1
+eq "$(findings witness-held)" "2" "(held/tracks edge) an open subject is not a wait"
+eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(held/tracks edge) the recurrence names the held bead"
+
+# A bead held at blocked with no edge waits on nothing, so nothing will release
+# it; the recurrence is news and says so.
+reset
+"$SUT" --key doctor-edgeless --title t --message m >/dev/null 2>&1
+hold fnd-1 blocked
+OUT=$("$SUT" --key doctor-edgeless --title t --message m 2>&1)
+eq "$(findings doctor-edgeless)" "2" "(held/no edge) a new bead is filed"
+eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(held/no edge) naming the held bead"
+has "$(body fnd-2)" "with no blocker to" "(held/no edge) the body says it waited on nothing"
+hasnt "$(body fnd-2)" "had closed" "(held/no edge) and claims no blocker closed"
+
+# Two held beads for one key: a recurrence goes to the one still waiting, even
+# when the one whose wait ended is listed first.
+reset
+"$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
+put_bead fix-1 closed
+hold fnd-1 blocked fix-1
+"$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
+put_bead fix-2 open
+hold fnd-2 blocked fix-2
+"$SUT" --key doctor-two-held --title t --message m >/dev/null 2>&1
+eq "$(findings doctor-two-held)" "2" "(two held) no third bead while one still waits"
+eq "$(meta fnd-2 'finding.occurrences')" "2" "(two held) the recurrence lands on the waiting one"
+
+# ── 17. every other live status keeps its finding ────────────────────
+# deferred, hooked and pinned beads are as invisible to an open,in_progress
+# lookup as a blocked one. None of them is a wait on a blocker, so each keeps
+# the recurrence whatever its edges say.
+for st in in_progress deferred hooked pinned; do
+  reset
+  "$SUT" --key doctor-live --title t --message m >/dev/null 2>&1
+  put_bead fix-1 closed
+  hold fnd-1 "$st" fix-1
+  "$SUT" --key doctor-live --title t --message m >/dev/null 2>&1
+  eq "$(findings doctor-live)" "1" "(live/$st) no second bead"
+  eq "$(meta fnd-1 'finding.occurrences')" "2" "(live/$st) the recurrence lands on it"
+done
 
 echo
 echo "passed: $PASS  failed: $FAIL"
