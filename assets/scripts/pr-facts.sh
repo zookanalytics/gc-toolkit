@@ -3242,8 +3242,8 @@ pace_start "$WB_CURSOR" "$DEADLINE"
 pace_seen_start "${WB_CURSOR:+$WB_CURSOR.seen}"
 # --- write-back visit order: an anchor with something new to answer first --------
 # The sweep owes a write when a batch is routed (the disposition or a watermark
-# moves) or when work answering one closes (a rework child, a finding, a
-# validation pass leaves the anchor's live children). Its mark joins the
+# moves) or when work answering one closes (a rework child, a visit, a finding,
+# a validation pass leaves the anchor's live children). Its mark joins the
 # disposition, the three watermarks and the live child ids, so an anchor whose
 # mark moved since the sweep last visited it goes first, on
 # <cursor>.writeback.first, and the rest rotate on <cursor>.writeback.
