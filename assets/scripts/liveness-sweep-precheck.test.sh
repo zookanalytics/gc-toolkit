@@ -157,7 +157,14 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
+  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-sling-convoy","title":"sling-tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-synthetic-convoy","title":"a convoy a sling minted","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"f-titled-not-convoy","title":"input convoy for tk-yyyyy: why the walk never fires","issue_type":"bug","metadata":{}},
+  {"id":"o-wisp-aaaaa","title":"order: liveness-sweep (testrig)","issue_type":"task","metadata":{}},
+  {"id":"f-order-human","title":"order: tidy the convoy helpers","issue_type":"task","metadata":{}},
+  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}}
 ]
 JSON
 
@@ -258,6 +265,19 @@ hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not ne
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
 hasnt ",$SURV," ",f-convoy," "a convoy tracking a live member is excluded (class 2i-b)"
 hasnt ",$SURV," ",f-spec," "a bead tracking a live root is excluded (class 2i-c)"
+# class 0: the per-sling machine convoys and order-tracking wisps a sling mints
+# are machinery, not work. The sweep drops them first; the precheck must too, or
+# every pass after any sling re-arms the very session it just ran to conclude
+# "nothing new".
+hasnt ",$SURV," ",f-input-convoy," "a convoy titled 'input convoy for ...' is excluded (class 0)"
+hasnt ",$SURV," ",f-sling-convoy," "a convoy titled 'sling-...' is excluded (class 0)"
+hasnt ",$SURV," ",f-synthetic-convoy," "a gc.synthetic convoy is excluded (class 0)"
+hasnt ",$SURV," ",o-wisp-aaaaa," "an order-tracking wisp is excluded (class 0)"
+# The guards that keep class 0 from hiding real work. issue_type is load-bearing
+# for the convoy arm; order_wisp requires BOTH the wisp id and the order: title.
+has ",$SURV," ",f-titled-not-convoy," "a non-convoy whose TITLE names a convoy survives — the issue_type guard"
+has ",$SURV," ",f-order-human," "a human bead titled 'order:' with no wisp id survives — order_wisp needs both"
+has ",$SURV," ",n-wisp-bbbbb," "a wisp that is not an order survives — order_wisp needs both"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.
@@ -739,11 +759,14 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage through the shared predicate, which
-# liveness-sweep.sh sources before it. Supply the same defs ($VISIT_IDENTITY_JQ)
-# from the real lib so the extracted block resolves them and cannot drift.
+# The classify block matches visit coverage and standing records through two
+# shared definitions, which liveness-sweep.sh sources before it. Supply the same
+# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
+# extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
@@ -770,6 +793,31 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
 [ "$PRE_N" -gt "$CLASSIFY_N" ] \
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
+
+echo "── the no-resolver census reads each lane's marker under its token's own case ──"
+# The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes
+# the gates from the check_set itself. A mixed-case token reads check.<Token> —
+# the key signoff stamps — so an all-green anchor is gated, while the same anchor
+# missing that marker is still a candidate (the positive control).
+MFIX="$TMP/mfix"; mkdir -p "$MFIX"
+cat > "$MFIX/ready.json" <<'JSON'
+[
+  {"id":"f-mixed-green","title":"pre-open, mixed-case lanes green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}},
+  {"id":"f-mixed-red","title":"pre-open, mixed-case lane not green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green"}}
+]
+JSON
+READY="$MFIX/ready.json"; export READY
+# shellcheck disable=SC1090
+. "$TMP/classify.sh"
+MIXED_IDS=",$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")'),"
+case "$MIXED_IDS" in
+  *",f-mixed-green,"*) bad "an all-green mixed-case anchor is gated, not a candidate" "candidates: $MIXED_IDS" ;;
+  *) ok "an all-green mixed-case anchor is gated, not a candidate" ;;
+esac
+case "$MIXED_IDS" in
+  *",f-mixed-red,"*) ok "…while one missing its check.Arch marker is still a candidate" ;;
+  *) bad "…while one missing its check.Arch marker is still a candidate" "candidates: $MIXED_IDS" ;;
+esac
 
 echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
 # A live-held visit excludes its subject (the pass can skip it); a dead-held

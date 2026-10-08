@@ -394,6 +394,23 @@ case "$CALLS" in
   *)          bad "(LONGREASON) the full reason was lost from the body (calls: $CALLS)" ;;
 esac
 
+# --- (WIDEREASON) a reason in 4-byte characters still fits bd's byte cap ------
+# bd caps a title at 500 BYTES, so a tail at the codepoint cap overruns it when
+# every character is 4 bytes wide; the headline is cut to a byte budget too.
+: > "$FAKE_CALLS"
+set +e
+sh "$SCRIPT" open tk-real1 --reason "$(printf '\360\237\230\200%.0s' $(seq 1 200))" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(WIDEREASON) a reason in 4-byte characters still files the visit"
+TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
+TITLE_BYTES=$(printf '%s' "$TITLE" | wc -c)
+if [ "$TITLE_BYTES" -le 500 ]; then
+  ok "(WIDEREASON) the title fits bd's 500-byte cap ($TITLE_BYTES bytes)"
+else
+  bad "(WIDEREASON) the title overruns bd's 500-byte cap ($TITLE_BYTES bytes)"
+fi
+
 # --- (CREATEFAIL) a real create failure surfaces bd's error, not a jq crash ----
 # bd reports a failed create as an {"error":…} object, and the subject bead has
 # already resolved by this point. open surfaces bd's own message for such a
