@@ -20,6 +20,8 @@
 # tracked file; this suite proves what a shape check cannot — that the block
 # behaves on every byte, and that all its copies are one block.
 # Hermetic: reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 
