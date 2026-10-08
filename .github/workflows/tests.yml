@@ -12,10 +12,11 @@ name: tests
 # pushing to it once ready, runs the suite. The draft flag carries no workflow
 # state; it is only a CI-cost lever here.
 # The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
-# so a runner needs no gc binary and no running city — only bash 5, git, jq,
-# a Python with tomllib, and a Go toolchain for the gctk builds that several
-# suites make (see the setup-go step). ubuntu-latest preinstalls the rest; the
-# macOS job installs what its image lacks.
+# so a runner needs no gc binary and no running city. It needs bash 5, git,
+# jq, timeout(1), flock(1), a Python with tomllib, and the Go toolchain the
+# setup-go step installs for the gctk builds that several suites make.
+# ubuntu-latest preinstalls the rest; the macOS job installs what its image
+# lacks.
 # Main's ruleset names the checks that gate a merge by job id, so renaming a
 # job, or giving it a name: or a matrix, changes the check a merge waits on.
 
@@ -78,14 +79,15 @@ jobs:
           go-version-file: services/gctk/go.mod
           cache: false
 
-      # The image's only bash is /bin/bash 3.2, and run-tests.sh and every
-      # suite need bash 5. run-tests.sh bounds each run with timeout(1), and
-      # refinery-reconcile.sh takes its lock with flock(1); macOS ships
-      # neither. tmux-visit-prompt.test.sh runs tmux-bindings.sh under /bin/sh
-      # against a real tmux server, and skips that case without tmux. The host
-      # installs all four from Homebrew. coreutils links only the GNU names
-      # macOS lacks, such as timeout and nproc, and installs the rest under a
-      # g prefix, so date, stat, touch and the like stay BSD.
+      # The image's only bash is /bin/bash 3.2. run-tests.sh needs bash 5, and
+      # it runs each suite with the first bash on PATH. run-tests.sh bounds
+      # each run with timeout(1), and refinery-reconcile.sh takes its lock
+      # with flock(1); macOS ships neither. tmux-visit-prompt.test.sh runs
+      # tmux-bindings.sh under /bin/sh against a real tmux server, and skips
+      # that case without tmux. The host installs all four from Homebrew.
+      # coreutils links only the GNU names macOS lacks, such as timeout and
+      # nproc, and installs the rest under a g prefix, so date, stat, touch
+      # and the like stay BSD.
       - name: Install bash 5, coreutils, flock and tmux
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
