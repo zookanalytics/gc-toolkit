@@ -289,6 +289,14 @@ merge_state_key = "pr_merge_state"
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
+# What the watermarks count is feedback: every review, inline comment and
+# conversation comment that is not the city's own post, whoever wrote it. The
+# city's own post carries the mark pr-post.sh appends, or is an unmarked post
+# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
+# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
+# reads the open PR; absent or malformed, every post under the city's login is
+# the city's own.
+provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
 # the merge until it closes — the child through a blocks edge, the visit through
@@ -344,7 +352,8 @@ since_format = "RFC 3339 UTC"
 # The metadata-key registry: every key the pack writes, grouped and defined. A
 # key absent from the groups below is not pack state (docs/component-model.md
 # §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired. Each key's definition names five things a reader needs and only
+# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
+# there). Each key's definition names five things a reader needs and only
 # two of which the value shows: what WRITES it, what READS it, what its ABSENCE
 # means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
 # cannot recover those from the group and the sections above; a key whose
@@ -416,7 +425,10 @@ keys = [
 #   workspace-setup writes it on the anchor; pr-facts.sh writes it on a rework
 #   child (the branch that child reworks). Read by merge.sh (the live head must
 #   match it), pr-open.sh, pr-facts.sh and gate-ensure.sh. Absent leaves those
-#   checks unarmed and pr-open skips the anchor. Never cleared. Shape
+#   checks unarmed and pr-open skips the anchor. The gc runtime's
+#   detached-handoff orphan sweep reads it too: it restores the pool route on an
+#   open, unassigned, unrouted bead only when the bead carries branch and a
+#   session pin (gc.session_id or gc.session_name). Never cleared. Shape
 #   `polecat/<bead-id>` for fresh work.
 # target — the landing branch the work merges into: the polecat records it at
 #   submit, the refinery stamps it on a rework child (pr-facts.sh,
@@ -649,8 +661,9 @@ keys = [
   # files a finding unvalidated and the validator rules it; every ruling ends the
   # finding closed or converts it to a visit. must-fix wires finding --blocks
   # anchor, the hold merge.sh's blocker probe reads, until the fix unit lands.
-  # deferred files a claimable follow-up bead (its provenance edge --discovered-from
-  # the anchor) and closes the finding; declined closes it with the reason, no edge.
+  # deferred files a claimable follow-up bead (gated behind the anchor, its
+  # provenance edge --discovered-from the finding) and closes the finding; declined
+  # closes it with the reason, no edge.
   # needs-you files a visit for the operator and leaves the finding OPEN — an open
   # finding holds its human review changes-requested until they rule the visit.
   "finding.disposition",
@@ -675,7 +688,8 @@ keys = [
   "finding.reply_posted",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the anchor for provenance.
+  # reason, and a --discovered-from edge to the finding for provenance; the anchor
+  # --blocks it until the merge.
   "finding.follow_up",
   # The visit a needs-you finding files for the operator, set by finding.sh as the
   # ruling runs. The finding stays open and its visit id is posted to the raiser's
@@ -709,6 +723,17 @@ keys = [
   # only when a later head still carries the threads, so the same head never
   # re-files.
   "pr_unengaged_threads",
+  # The provenance cutover, mechanics in [posture] above. Written once per
+  # anchor; signoff.sh reads it for the same test.
+  "pr_provenance_since",
+  # How far the review threads have answered past pr_comment_watermark and
+  # pr_review_watermark: every inline comment (or counted review body) above the
+  # watermark through this id was confirmed answered by the last thread read.
+  # pr-facts.sh writes them when a read moves them and skips the read on a pass
+  # whose newest feedback sits at or below both, so feedback answered off the
+  # watermark is not re-read on every pass. They never stand in for the
+  # watermarks: a routing writes those, and the write-back reads only those.
+  "pr_comment_answered", "pr_review_answered",
 ]
 
 [metadata.pr_round_trip]
@@ -753,42 +778,79 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 
 [metadata.proactive]
 # The proactive first-reaction surface. gc.proactive and gc.proactive_reaction
-# answer different questions and are not duplicates: the first is the standing
-# opt-in that makes a bead eligible for a reaction, the second is the completion
-# proof the guards key on.
+# answer different questions and are not duplicates: the first asks the scan for
+# a reaction, the second is the completion proof the guards key on. The group
+# also holds the recommendation a recommend exit leaves for the operator's
+# Accept, and the marker that stands the scan down on a subject a live owner
+# already reacts to.
 keys = [
   "gc.proactive", "gc.proactive_reaction",
   "gc.first_reaction", "gc.first_reaction_reason",
   "gc.first_reaction_target", "gc.first_reaction_at",
   "gc.blocker_key",
+  "gc.recommended_formula", "gc.recommended_formula_dispatched",
+  "gc.reaction_owned",
 ]
-# gc.proactive — `1`, the standing scan opt-in. Written by patrol-finding.sh when
-#   it files a finding; read by tools/gc-proactive.sh, which offers the bead to
-#   the proactive pool by `bd ready --metadata-field gc.proactive=1`. Absent is
-#   not eligible. Never cleared, so a scan that was down picks it up later.
-# gc.proactive_reaction — `1`, the completion proof, written by gc-helm.sh
-#   `takeaway --release` in the same write that parks the subject. It is what
+# gc.proactive — `1`, the standing scan opt-in, written by patrol-finding.sh in
+#   the create payload of each finding it files. Read by tools/gc-proactive.sh,
+#   whose scan unions the opt-in query (`bd ready --metadata-field
+#   gc.proactive=1`) with a movable-forward query of every ready, unassigned,
+#   non-epic bead, and runs both through one precision filter. An absent key
+#   therefore excludes no bead. Never cleared.
+# gc.proactive_reaction — `1`, the completion proof. gc-helm.sh `takeaway
+#   --release` writes it in the same write that parks the subject. The close
+#   exit of first-reaction-dispose.sh releases nothing, so it writes the key
+#   itself once the closer is dispatched. mol-first-reaction.toml's
+#   advance-and-drain writes it on a subject gc.reaction_owned marks, before it
+#   consumes that marker. It is what
 #   first-reaction-dispose.sh, tools/gc-proactive.sh and mol-first-reaction.toml
 #   read to refuse a SECOND dispose, which would re-release a bead a worker now
 #   holds. Absent means the reaction has not landed. Never cleared.
-# gc.first_reaction — the disposition chosen, `actionable | blocked | ruling`,
-#   written by first-reaction-dispose.sh BEFORE the act. Its presence proves the
-#   reaction was ATTEMPTED, not that it landed: a record present with no
-#   gc.proactive_reaction=1 is a part-way failure, and the run RESUMES rather
-#   than refusing. The completion proof is gc.proactive_reaction, not this key.
-#   Read by that script's own guard, tools/gc-proactive.sh and
+# gc.first_reaction — the disposition chosen, `actionable | recommend | blocked |
+#   close | ruling`, written by first-reaction-dispose.sh BEFORE the act. Its
+#   presence proves the reaction was ATTEMPTED, not that it landed: a record
+#   present with no gc.proactive_reaction=1 is a part-way failure, and the run
+#   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
+#   not this key. Read by that script's own guard, tools/gc-proactive.sh and
 #   mol-first-reaction.toml. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route or waiting-ids or visit it
-#   named, and the timestamp. _target and _at are read only to compose the
-#   "already landed" message; _reason has no reader and is the one collapse
-#   candidate this surface still carries. Never cleared. _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
+#   visit it named, and the timestamp. A ruling or recommend that files its own
+#   gate stamps _target in a second write, once the gate exists. _target and _at
+#   are read only to compose the "already landed" message; _reason has no reader
+#   and is the one collapse candidate this surface still carries. Never cleared.
+#   _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
 #   existing one up by it). It does not replace a blocks edge: the wait itself is
 #   already a blocks edge (--waiting-on), and this key only names the cause across
 #   instances. Never cleared. A caller-supplied string.
+# gc.recommended_formula — the execution mol a recommend exit names, which the
+#   operator can Accept from the subject's visit. first-reaction-dispose.sh sets
+#   it in the record write of a recommend disposition and unsets a stale one on
+#   every other disposition, reading the key back either way. gc-helm.sh
+#   `accept` unsets it in the write that records its dispatch, and
+#   converse-invalidate-recommendation.sh unsets it when a sitting judges the
+#   recommendation no longer valid. The board's Accept derivation
+#   (services/helm/internal/board/derive.go), gc-helm.sh `accept` and
+#   converse-invalidate-recommendation.sh all read it as a non-empty value, so
+#   absent and empty both mean no live recommendation, and the visit offers
+#   Discuss only. A formula name that `gc formula show` resolves.
+# gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
+#   written in the update that unsets gc.recommended_formula and read back after
+#   it. `accept` reads it to resume a run that dispatched but did not finish: it
+#   completes the unset and the visit dismiss, and never slings again. `accept`
+#   slings before it writes this key, so absent means no Accept has recorded a
+#   dispatch. Never cleared. A formula name.
+# gc.reaction_owned — `1`, the stand-down marker on a subject whose reaction a
+#   live owner already holds. gc-helm.sh `engage --new-subject` writes it in the
+#   create payload of the subject it files, beside gc.origin, so no scan sees
+#   that subject unmarked. tools/gc-proactive.sh drops a marked bead from its
+#   scan and refuses to sling one. When a reaction is poured anyway,
+#   mol-first-reaction.toml's advance-and-drain writes gc.proactive_reaction=1,
+#   reads it back, and only then unsets this key. Absent means no live owner.
+#   Cleared only by that consume.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
@@ -830,11 +892,11 @@ keys = [
   # reads it, and it is rewritten with every headline rather than surviving one.
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.takeaway_settled",
   "gc.demand_for", "gc.hold_demand", "gc.gate_visit",
-  "gc.continuation_group", "gc.origin",
+  "gc.continuation_group", "gc.origin", "gc.outcome_reason",
   "escalation_key", "escalation_raised_by",
   "escalation.recurrences", "escalation.recurrence_last",
   "stale_escalated_at", "stale_escalated_to",
-  "visit.recheck", "sweep.*", "triage.*", "stall_root",
+  "visit.recheck", "sweep.*", "triage.*",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -850,10 +912,23 @@ keys = [
 #   group-scoped re-claim fence. Written on the visit by gc-helm.sh and
 #   escalate.sh, and repaired toward the subject id when a read-back finds it
 #   empty (an empty group disables the fence). Never cleared. A bead id.
-# gc.origin — `operator` marks a topic a human commissioned through
-#   gc-visit-open.sh and is waiting to talk about, so first-reaction-dispose.sh
-#   refuses to route or hold it — the visit is the answer. Absent is an ordinary
-#   bead. Not cleared.
+# gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
+#   stamps it on its subject when the key is absent, and gc-helm.sh `engage
+#   --new-subject` writes it in the create payload of the subject it files.
+#   bead-context.sh returns it with a subject's context. It decides no
+#   first-reaction exit. The rubric in mol-first-reaction.toml has the reacting
+#   agent triage an operator capture on its merits like any other bead, and
+#   first-reaction-dispose.sh gates nothing on it. Absent is an ordinary bead.
+#   Not cleared.
+# gc.outcome_reason — on a closed VISIT, the one-line sentence naming why it
+#   closed, stamped beside the gc.outcome word a reader groups by. Three writers
+#   stamp the pair before they close a visit: visit-close.sh, the guarded close;
+#   gc-helm.sh `dismiss`, with gc.outcome=dismissed; and bead-rehome.sh, on a
+#   visit it re-homes that records no outcome yet. Each reads the pair back and
+#   refuses the close when it did not land. The helm board
+#   (services/helm/internal/source/facts.go) shows it as the sitting's headline
+#   when the sitting left no takeaway. Absent, the headline falls back to the
+#   subject's title. Never cleared. Freeform text.
 # escalation_key / escalation_raised_by — escalate.sh files one open visit per
 #   situation, keyed on escalation_key (the caller's dedup handle, read back and
 #   read by pr-facts.sh); escalation_raised_by records the ephemeral wisp id that
@@ -879,21 +954,18 @@ keys = [
 #   escalate.sh), triage.last_seen the last pass a subject was seen (set to the
 #   time when present, cleared to empty when gone), and triage.hold a
 #   held-by-design marker ([holds] marker_keys).
-# stall_root — the stalled root a visit sits on, read by the converse scripts
-#   (the item a hold, fold or sign-off acts on, else the subject) and by
-#   gate-visit-sweep.sh. The pack has no writer of it; it is set by whatever
-#   opens the visit. A bead id.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one open bead per key, narrowed to
+# it). finding.key is the dedup identity — one live bead per key, narrowed to
 # finding.about when the finding names a subject bead. finding.scope is which
 # patrol filed it; finding.digest is the message hash that tells a recurrence
 # with changed text from an identical one. finding.occurrences counts the
 # recurrences and finding.first_seen/finding.last_seen bracket them.
-# finding.recurrence_of names the earlier CLOSED finding a reappearance repeats,
-# so a fix that did not hold is visible.
+# finding.recurrence_of names the earlier finding a reappearance repeats: a
+# closed one, or one held at blocked with nothing open left to wait on. Either
+# way a fix that did not hold is visible.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
@@ -1024,9 +1096,14 @@ keys = [
 #   branch, written by the gascity binary on the claim/close path (gc.work_branch
 #   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
 #   and gc.work_commit — with the pack-written bare work_dir defined in
-#   merge_identity — as proof a run produced work before disposing a duplicate,
-#   and gc.work_branch is the key the runtime's detached-handoff orphan sweep
-#   matches on. Absent means no such product was recorded. A path, a sha, a branch.
+#   merge_identity — as proof a run produced work before disposing a duplicate.
+#   mol-polecat-work's workspace-setup also writes gc.work_branch, with the branch
+#   the work lands on, since the claim stamps the pool worktree's base checkout.
+#   The runtime's work-record close gate reads it: a `shipped` close needs
+#   gc.work_commit reachable on gc.work_branch (warn-only by default).
+#   No pack script reads gc.work_branch, and the runtime's detached-handoff
+#   orphan sweep reads the bare branch defined in merge_identity, not this key.
+#   Absent means no such product was recorded. A path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). A pack component stamps
 #   `no-op` — dead-molecule-dispose.sh, and converse by hand — while its meaning

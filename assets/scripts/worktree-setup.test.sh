@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test for worktree-setup.sh's orphaned-stage self-heal and for its
-# --sync of a detached worktree.
+# Hermetic test for worktree-setup.sh's orphaned-stage self-heal, for its
+# --sync of a detached worktree, and for the provisioning (bead redirect, local
+# excludes) a re-run completes.
 #
 # Uses a real temp git rig (a clone of a bare remote, so origin/HEAD resolves)
 # and drives the real script. No live city, gc, or network. Covers:
@@ -32,6 +33,15 @@
 #   (m) an untracked file the tip would overwrite blocks the move: the worktree
 #       stays put, the file intact, the run still exits 0, and the warning
 #       carries git's reason.
+#   (n) a post-checkout hook that fails the add leaves a half-built worktree
+#       (git keeps it), and the re-run gives it the bead redirect and the Gas
+#       City exclude marker, so runtime files stay out of git status;
+#   (o) a re-run keeps a non-empty redirect, so a deliberate one survives, and
+#       rewrites an empty one;
+#   (p) a main checkout (.git is a directory) is never given a redirect, and
+#       its exclude file is left alone;
+#   (q) a worktree whose git metadata is gone still gets its redirect, and the
+#       run still exits 0.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -72,6 +82,13 @@ head_of()   { git -C "$1" rev-parse HEAD; }
 branch_of() { git -C "$1" symbolic-ref -q --short HEAD || echo DETACHED; }
 lines()     { printf '%s' "$1" | grep -c '' || true; }   # "" counts as 0
 has()       { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (stderr '$1' lacks '$2')" ;; esac; }
+# the run's exit status, captured so an expected failure does not end the suite
+rc_of()     { local rc=0; sh "$SCRIPT" "$@" >>"$TMP/run.log" 2>&1 || rc=$?; echo "$rc"; }
+# whether the exclude file git resolves for a checkout carries the Gas City marker
+marker_in() {
+    grep -qF "# Gas City worktree infrastructure (local excludes)" \
+        "$(git -C "$1" rev-parse --path-format=absolute --git-path info/exclude)" && echo yes || echo no
+}
 
 # --- (a) a legacy un-scoped orphan is quarantined, not adopted. ---------------
 # It carries no target name, so the run cannot prove it is agentA's; adopting it
@@ -245,6 +262,59 @@ has "$ERR" "$P/agentM"                       "(m) warning names the worktree"
 has "$ERR" "git checkout origin/main failed" "(m) warning names the failed checkout"
 has "$ERR" "untracked working tree files"    "(m) warning carries git's reason"
 eq "$(lines "$ERR")" "1"                     "(m) exactly one stderr line, so the run exited 0"
+
+# --- (n) a post-checkout hook that fails the add: git keeps the worktree, so the
+#         first run leaves it half-built, and the re-run completes it. The rig
+#         is its own clone because the exclude file is shared by all of a
+#         repo's worktrees, and the other cases' worktrees already marked $RIG's.
+HR="$TMP/hookrig"; git clone -q "$TMP/remote.git" "$HR"
+mkdir -p "$TMP/hooks"; printf '#!/bin/sh\nexit 1\n' > "$TMP/hooks/post-checkout"
+chmod +x "$TMP/hooks/post-checkout"
+git -C "$HR" config core.hooksPath "$TMP/hooks"
+P="$TMP/n"; mkdir -p "$P"; W="$P/agentN"
+eq "$(rc_of "$HR" "$W" agentN --sync)" "1"   "(n) the hook failure fails the first run"
+present "$W/.git"                            "(n) git kept the worktree the failed add made"
+absent  "$W/.beads/redirect"                 "(n) the failed run left no bead redirect"
+eq "$(marker_in "$W")" "no"                  "(n) the failed run left no exclude marker"
+eq "$(rc_of "$HR" "$W" agentN --sync)" "0"   "(n) the re-run succeeds"
+eq "$(cat "$W/.beads/redirect" 2>/dev/null)" "$HR/.beads" "(n) the re-run writes the bead redirect"
+eq "$(marker_in "$W")" "yes"                 "(n) the re-run writes the Gas City exclude marker"
+mkdir -p "$W/.claude"; echo x > "$W/.claude/settings.json"
+eq "$(git -C "$W" status --porcelain)" ""    "(n) runtime files stay out of git status"
+
+# --- (o) a re-run keeps a non-empty bead redirect, so a deliberate one survives,
+#         and rewrites an empty one, which points nowhere. --------------------
+P="$TMP/o"; mkdir -p "$P"
+run "$P/agentO" agentO
+echo "/elsewhere/.beads" > "$P/agentO/.beads/redirect"
+run "$P/agentO" agentO --sync
+eq "$(cat "$P/agentO/.beads/redirect")" "/elsewhere/.beads" "(o) a deliberate redirect survives a re-run"
+: > "$P/agentO/.beads/redirect"
+run "$P/agentO" agentO --sync
+eq "$(cat "$P/agentO/.beads/redirect")" "$RIG/.beads" "(o) an empty redirect is rewritten"
+
+# --- (p) a main checkout (.git is a directory) is never provisioned: its .beads
+#         is the rig's own store, not a pointer to one. A fresh clone, so its
+#         exclude file carries no marker from another case. ------------------
+MAIN="$TMP/main"; git clone -q "$TMP/remote.git" "$MAIN"
+mkdir -p "$MAIN/.beads"; echo store > "$MAIN/.beads/config.yaml"
+eq "$(rc_of "$MAIN" "$MAIN" agentP --sync)" "0" "(p) a main checkout target exits 0"
+absent "$MAIN/.beads/redirect"               "(p) a main checkout is never given a bead redirect"
+eq "$(marker_in "$MAIN")" "no"               "(p) a main checkout's exclude file is left alone"
+
+# --- (q) a worktree whose git metadata is gone (its admin dir under the rig's
+#         .git/worktrees removed) still gets its redirect, and the run exits 0:
+#         git resolves no exclude file for it and cannot stage from it. -------
+P="$TMP/q"; mkdir -p "$P"
+run "$P/agentQ" agentQ
+rm -f "$P/agentQ/.beads/redirect"
+ADMIN=$(sed -n 's/^gitdir: //p' "$P/agentQ/.git")
+case "$ADMIN" in   # git records the real path
+    "$(cd "$RIG" && pwd -P)/.git/worktrees/"?*) rm -rf "$ADMIN" ;;
+    *) bad "(q) admin dir '$ADMIN' is not under $RIG/.git/worktrees" ;;
+esac
+eq "$(rc_of "$RIG" "$P/agentQ" agentQ --sync)" "0" "(q) a worktree with no git metadata still exits 0"
+eq "$(cat "$P/agentQ/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(q) it still gets its bead redirect"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

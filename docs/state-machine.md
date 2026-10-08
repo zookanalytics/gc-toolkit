@@ -250,29 +250,53 @@ Feedback from a person is review the branch has never been answered against.
 validation pass on the batch (see "Review cycle",
 `specs/tk-ztapg/review-cycle-architecture.md`): `gate-ensure.sh`'s quiescence
 holds a fresh whole-diff review off the anchor while the validator rules the
-batch. What makes a batch operator feedback is the author — the posture
-derivation counts only ids written by a login other than the city's own, so
-`signoff.sh`'s verdicts (posted under that login), re-reviews, and rework
-hand-backs (which post nothing) are not it.
+batch. What makes an item feedback is its provenance, not its author: every
+review, inline comment, and conversation comment that is not the city's own
+post is feedback, whoever wrote it. The city's own post is one that
+`assets/scripts/pr-post.sh` marked, which is every post the pack makes —
+`signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
+replies, the visit reminder, a demo delivery, `pr-dispose.sh`'s closing
+comment. A model review the operator runs under the city's GitHub account is
+unmarked, so it is feedback like a person's. Rework hand-backs post nothing.
+
+A PR's posts from before the city marked anything carry no mark. Each anchor
+records the instant `pr-facts.sh` first read its open PR
+(`pr_provenance_since`), and an unmarked post under the city's login from
+before that instant is still the city's own, so the notices already on a PR do
+not turn into feedback all at once. A post counts from the moment it was
+published: an inline comment from its review's submission, not from its draft,
+so a review drafted before the instant and submitted after it is feedback whole.
+Without the instant, or with a stamp that is not a UTC instant, every post under
+that login is the city's own. `tools/lint-learned.d/pr-post-bypass.sh` fails any
+post in the pack that does not go through the helper, and the agents' gh guard
+refuses an unmarked one an agent types ([gh-origin-guard.md](gh-origin-guard.md)).
 
 `pr-facts.sh` records each batch once: it opens the validation pass, routes the
 batch, and advances the watermark, which stops the batch being re-read once its
 comments are answered and the posture stops being `commented`.
 
-A standing `CHANGES_REQUESTED` from the city's own reviewer raises no batch:
-every id in a batch is authored by a login other than the city's, so a codex
-veto is not operator feedback. A human's is, on the same terms as any other
-feedback — it routes to a rework child or a visit and opens a validation pass.
+The city posts no `CHANGES_REQUESTED`: `signoff.sh` records both of its
+verdicts as COMMENT reviews, and `pr-post.sh` has no change-request verb. A
+codex veto is therefore a marked COMMENT review, the city's own, and raises no
+batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
+city's login from before the cutover is the city's own the same way. Every
+other `CHANGES_REQUESTED` is feedback, including a model review run under the
+city's account after the cutover, and it routes on the same terms as any other
+feedback, to a rework child or a visit, and opens a validation pass. GitHub
+refuses a change request from a PR's author, so on a PR the city opened only
+another login can leave one.
 
 The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. A human
-`CHANGES_REQUESTED` is auto-dismissed once every finding it raised has closed,
-so a `needs-you` finding holds that review open until the operator rules its
-visit while the others let it clear. The review the operator reads on the PR
-therefore always matches what is still owed.
+the operator can judge — files a visit and stays open. A `CHANGES_REQUESTED`
+that is feedback is auto-dismissed once every finding it raised has closed, and
+its author is asked for a fresh review, unless the author is the city's own
+login, which has no review queue to return to. A `needs-you` finding holds that
+review open until the operator rules its visit while the others let it clear.
+The review the operator reads on the PR therefore always matches what is still
+owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -347,14 +371,17 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
 | `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
+| `pr_comment_answered` | `<id>` | every inline comment above `pr_comment_watermark`, through this id, was answered by its thread at the last read |
+| `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
+| `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 
 The postures, in the precedence the derivation applies:
 
 | Posture | When | Merge effect |
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
-| `commented` | a review comment sits above its watermark, and no veto stands | holds |
+| `commented` | an unanswered review comment sits above its watermark, and no veto stands | holds |
 | `approved` | GitHub reports `APPROVED` | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
@@ -390,14 +417,35 @@ it are what the comment space already sees, and counting the review would leave
 a posture no comment id can answer. A plain conversation comment on the PR is an
 issue comment, carries no review, and raises no posture.
 
+An inline comment above the watermark is not outstanding once its review thread
+has answered it: the thread is resolved, and it holds a reply written after the
+comment that is the city's own post. That is how feedback answered by a path
+other than this arm, such as a sitting that replies in-thread and resolves the
+thread, stops holding the merge. A comment written after the city's last reply in
+the thread stays outstanding, because a reply does not reopen a resolved thread,
+and a thread resolved with no reply from the city answers nothing. An unmarked
+reply under the city's login after the cutover is feedback, not an answer. A review body
+above its watermark is answered once the thread read has answered every inline
+comment the review carries, since the body frames those comments. A review with
+no inline comment has no thread to answer it and stays on the watermark.
+
+Nothing routes answered feedback, so nothing moves a watermark past it. Each
+thread read records how far it found the feedback answered past each watermark,
+in `pr_comment_answered` and `pr_review_answered`, and a pass whose newest
+feedback sits at or below both skips the read. The answered marks never move the
+watermarks, which only a routing writes. A thread unresolved after its answered
+mark passed it routes nothing until a new comment brings the read back, the same
+as an unresolve under the watermark.
+
 A `changes_requested` posture reads and watermarks the same ids a `commented`
 one does. The veto holds the merge; it answers nothing, and the objections
 under it are exactly the feedback that most needs routing. A human's
 `CHANGES_REQUESTED` body therefore joins the review id space beside a
 COMMENTED one, and the inline comments underneath join the comment space. The
-city's own veto raises no batch, because both spaces count only ids authored by
-some other login — `signoff.sh`'s rework loop owns those, and reaches them
-through the review bead rather than through this arm. A review that is later
+city's own verdicts raise no batch, because every space counts only ids that
+are not the city's own post (see [Operator feedback](#operator-feedback)) —
+`signoff.sh`'s rework loop owns them, and reaches them through the review bead
+rather than through this arm. A review that is later
 dismissed leaves both `COMMENTED` and `CHANGES_REQUESTED`, so the same read
 that would have counted it drops it. The comment space asks a narrower question
 of each inline comment's parent review: whether that review was dismissed. A
@@ -601,11 +649,13 @@ review's result set.
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
-  acting on the anchor — an open `must-fix` finding on any lane, a fix unit in
-  flight, a validation pass in flight, or a full review already in flight on
-  the lane. One authority computes the set, so it cannot disagree with itself
-  about whether a review was already out, and a review that read a mid-change
-  diff would raise only the no-op rework the declination texts are full of.
+  acting on the anchor — a fix unit in flight (including the one answering an
+  open `must-fix` finding on any lane), a validation pass in flight, or a full
+  review already in flight on the lane. A `must-fix` finding no fix unit answers
+  holds the merge, not the dispatch. One authority computes the set, so it
+  cannot disagree with itself about whether a review was already out, and a
+  review that read a mid-change diff would raise only the no-op rework the
+  declination texts are full of.
   There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
   would have bounded, and the runaway shapes it used to catch — a reviewer that
   dies after claim, a rework child filed with its dependency edge reversed —
@@ -713,3 +763,28 @@ holding its close. It never touches `task_kind=review` (`review-sweep.sh`'s) or
 it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
 open. Clearing the machine side is what lets that close land once the human side
 is done.
+
+The consummation also retires, before the close, the visits `pr-facts.sh`
+filed on the anchor to hold the PR's merge until a person answered: rework or
+close, a moved base, feedback nothing routed, review threads nobody engaged,
+threads branch protection requires resolved, and red checks parked to a person.
+A PR closed with a recorded disposition has no merge left to hold, and what
+those visits raised stays on the PR. Each is closed `gc.outcome=moot`. One a
+person is engaged in keeps holding the close until they conclude it. The
+exception is the rework-or-close visit: the disposition answers its question,
+and the sitting that recorded the disposition may still hold it, so it is
+retired over the claim. Every other visit on the anchor still holds the close.
+
+When `bead-rehome.sh` refuses the close, the anchor stays open with its marker,
+and the arm files one visit under `pr-dispose-failed.<num>` naming the
+obstruction. Every later pass retries the close. That visit tracks the anchor,
+but it reports the arm's own failed close and asks for exactly that retry. So
+the retry names its key to `finalize-gate.sh`, which excepts every visit filed
+under that key for the anchor while nobody is engaged in it, and the arm
+retracts those visits as moot once the close lands. A visit a person has engaged
+holds the close like any other, and every other open visit on the anchor still
+holds it. When a retry is refused for a different obstruction than the one the
+visit names, the arm rewrites the description of each such visit nobody is
+engaged in to name the new one. A retract that does not land is retried by
+every full pass, which retracts an open `pr-dispose-failed.<num>` visit nobody
+is engaged in once its anchor reads closed with its `gc.superseded_by` pointer.
