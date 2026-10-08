@@ -1,6 +1,7 @@
 #!/bin/sh
 # gh-origin-guard.sh — Claude PreToolUse hook: refuse an agent-typed `gh` write
-# aimed at a repository this rig does not own.
+# aimed at a repository this rig does not own, and a post on one it does own
+# whose body does not carry the city's provenance mark.
 #
 # One bot account backs every agent's gh token, so any agent can write to any
 # repository that token reaches. Filing an issue, a PR, or a comment on someone
@@ -11,6 +12,12 @@
 # live outside the operator's org — shutupandlisten's origin is
 # suandl/shutupandlisten — so an org-keyed rule would refuse that rig's whole PR
 # flow while still permitting writes to unrelated repositories inside the org.
+#
+# On a repository we own, a post (a comment, a review, a thread reply, or an
+# edit of one) has to carry the provenance mark assets/scripts/pr-post.sh
+# appends. pr-facts.sh tells the city's own posts from feedback by that mark,
+# so an unmarked post under the city's login reads back as feedback and loops
+# into rework (docs/gh-origin-guard.md, "Posts carry the city's mark").
 #
 # What it sees: the command an agent types into Bash. A `gh` call made inside a
 # script the agent runs is invisible here, and pr-open.sh and pr-facts.sh
@@ -277,7 +284,70 @@ function shortrun(t, nxt, vals,   s, c) {
     }
     return 1
 }
-function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, method, haveparams, endpoint, apihost, p, t, M, ep) {
+# The body of a post travels on the scan line, so the characters that frame
+# the line and its fields become spaces. The provenance mark is one line of
+# plain text, so flattening never hides it or forges it.
+function flat(s) { gsub("\n", " ", s); gsub("\036", " ", s); gsub("\037", " ", s); return s }
+# One `gh api` field, given as key=value. A typed field (-F/--field) whose value
+# starts with @ reads that file. The last body= wins, the way gh builds its
+# request, and every value is kept for a GraphQL call, whose body rides in a
+# variable of any name.
+function apifield(typed, kv,   eq, k, v) {
+    eq = index(kv, "=")
+    if (eq == 0) return
+    k = substr(kv, 1, eq - 1); v = substr(kv, eq + 1)
+    if (typed && substr(v, 1, 1) == "@") {
+        allfiles = allfiles "\036" substr(v, 2)
+        if (k == "body") { abody = ""; afile = substr(v, 2) }
+        return
+    }
+    allvals = allvals " " flat(v)
+    if (k == "body") { abody = flat(v); afile = "" }
+}
+# The body of a porcelain comment or review, read from its flags the way gh
+# reads them: -b/--body text, -F/--body-file path, the last one given winning.
+# Sets pbody, pfile, pevent (approve or request-changes, which the city never
+# posts) and pinter (an editor or browser body, which no scan can read), and
+# clears ppost for --delete-last, which posts nothing.
+function porcelain_post(from,   k, t, s, c, v) {
+    ppost = 1; pbody = ""; pfile = ""; pevent = ""; pinter = 0
+    k = from
+    while (k <= ntok) {
+        t = T[k]
+        if (t == "--repo" || t == "-R" || t == "--attach") { k += 2; continue }
+        if (t == "--body") { pbody = flat(T[k + 1]); pfile = ""; k += 2; continue }
+        if (t ~ /^--body=/) { pbody = flat(substr(t, 8)); pfile = ""; k++; continue }
+        if (t == "--body-file") { pfile = T[k + 1]; pbody = ""; k += 2; continue }
+        if (t ~ /^--body-file=/) { pfile = substr(t, 13); pbody = ""; k++; continue }
+        if (t == "--approve") { pevent = "approve"; k++; continue }
+        if (t == "--request-changes") { pevent = "request-changes"; k++; continue }
+        if (t == "--editor" || t == "--web") { pinter = 1; k++; continue }
+        if (t == "--delete-last") { ppost = 0; k++; continue }
+        if (substr(t, 1, 2) == "--") { k++; continue }
+        if (t ~ /^-./) {
+            # A shorthand run: -a, -r, -e and -w are booleans; -b, -F and -R take
+            # the rest of the token after an optional "=", or else the next token.
+            s = substr(t, 2)
+            while (s != "") {
+                c = substr(s, 1, 1); s = substr(s, 2)
+                if (c == "a") { pevent = "approve"; continue }
+                if (c == "r") { pevent = "request-changes"; continue }
+                if (c == "e" || c == "w") { pinter = 1; continue }
+                if (c == "b" || c == "F" || c == "R") {
+                    if (substr(s, 1, 1) == "=") s = substr(s, 2)
+                    if (s != "") v = s
+                    else { v = T[k + 1]; k++ }
+                    if (c == "b") { pbody = flat(v); pfile = "" }
+                    if (c == "F") { pfile = v; pbody = "" }
+                    s = ""
+                }
+            }
+            k++; continue
+        }
+        k++
+    }
+}
+function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, method, haveparams, endpoint, apihost, p, q, t, M, ep, postmut, apost, afiles) {
     if (ntok == 0) return
     i = 1; inl = ""; inlhost = ""
     # Leading assignments and command wrappers sit in front of the real command.
@@ -399,6 +469,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
     # repository lives in the query, the second because gh rejects it.
     if (noun == "api") {
         method = ""; haveparams = 0; endpoint = ""; apihost = ""
+        abody = ""; afile = ""; allvals = ""; allfiles = ""; ainput = ""
         p = i + 1
         while (p <= ntok) {
             t = T[p]
@@ -406,8 +477,11 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
             if (t ~ /^--method=/) { method = substr(t, 10); p++; continue }
             if (t == "--hostname") { if (p < ntok) apihost = T[p + 1]; p += 2; continue }
             if (t ~ /^--hostname=/) { apihost = substr(t, 12); p++; continue }
-            if (t == "--raw-field" || t == "--field" || t == "--input") { haveparams = 1; p += 2; continue }
-            if (t ~ /^--raw-field=/ || t ~ /^--field=/ || t ~ /^--input=/) { haveparams = 1; p++; continue }
+            if (t == "--raw-field" || t == "--field") { haveparams = 1; apifield(t == "--field", T[p + 1]); p += 2; continue }
+            if (t ~ /^--raw-field=/) { haveparams = 1; apifield(0, substr(t, 13)); p++; continue }
+            if (t ~ /^--field=/) { haveparams = 1; apifield(1, substr(t, 9)); p++; continue }
+            if (t == "--input") { haveparams = 1; ainput = T[p + 1]; p += 2; continue }
+            if (t ~ /^--input=/) { haveparams = 1; ainput = substr(t, 9); p++; continue }
             if (t == "--header" || t == "--jq" || t == "--template" ||
                 t == "--cache" || t == "--preview") { p += 2; continue }
             if (substr(t, 1, 2) == "--") { p++; continue }
@@ -416,7 +490,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
             if (t ~ /^-./) {
                 p += shortrun(t, (p < ntok ? T[p + 1] : ""), "XfFHqtp")
                 if (sflag == "X") method = sval
-                if (sflag == "f" || sflag == "F") haveparams = 1
+                if (sflag == "f" || sflag == "F") { haveparams = 1; apifield(sflag == "F", sval) }
                 continue
             }
             if (endpoint == "") endpoint = t
@@ -427,10 +501,31 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
         if (M != "POST" && M != "PATCH" && M != "PUT" && M != "DELETE") return
         if (endpoint == "") return
         ep = tolower(endpoint)
-        if (ep == "graphql" || ep ~ /\/graphql$/ || ep ~ /^graphql\?/ || ep ~ /\/graphql\?/) return
-        verb = M; repo = ""; urlop = ""
         if (apihost != "") inlhost = apihost
-        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint
+        if (ainput != "") allfiles = allfiles "\036" ainput
+        if (ep == "graphql" || ep ~ /\/graphql$/ || ep ~ /^graphql\?/ || ep ~ /\/graphql\?/) {
+            # A GraphQL call names no repository the origin rule can measure, so
+            # only a mutation that posts or edits a comment or review is emitted,
+            # for its provenance alone. Its body rides in a variable of any
+            # name, so every field value is read.
+            postmut = 0
+            for (q = i + 1; q <= ntok; q++) if (T[q] ~ POSTMUT) postmut = 1
+            if (!postmut) return
+            printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, "graphql", "", inl, cdspec, ghset, ghval, inlhost, hostset, hostval, "", endpoint, 1, "", 0, allvals, allfiles, inbody
+            return
+        }
+        verb = M; repo = ""; urlop = ""
+        # A write to a comment, reply or review endpoint is a post. A dismissal,
+        # a reaction and a reviewer re-request carry no body, and a DELETE posts
+        # nothing.
+        apost = 0
+        if (M != "DELETE" && (ep ~ /(^|\/)repos\/[^\/]+\/[^\/]+\/(issues|pulls)\/([^\/?]+\/)?comments(\/|\?|$)/ ||
+                              ep ~ /(^|\/)repos\/[^\/]+\/[^\/]+\/pulls\/[^\/?]+\/reviews(\/|\?|$)/) &&
+            ep !~ /\/(dismissals|reactions|requested_reviewers)(\/|\?|$)/) apost = 1
+        afiles = ""
+        if (afile != "") afiles = "\036" afile
+        if (ainput != "") afiles = afiles "\036" ainput
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, apost, "", 0, abody, afiles, inbody
         return
     }
     # Exactly the verbs the ruling names, for the porcelain path.
@@ -467,14 +562,81 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
             if (j < ntok) { repo = T[j + 1]; j++ }
         }
     }
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint
+    # issue comment, pr comment and pr review post a body on the conversation or
+    # the review; the two creates post nothing pr-facts reads as feedback.
+    ppost = 0; pbody = ""; pfile = ""; pevent = ""; pinter = 0
+    if (verb == "comment" || verb == "review") porcelain_post(i + 2)
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, ppost, pevent, pinter, pbody, (pfile != "" ? "\036" pfile : ""), inbody
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
-BEGIN { SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96) }
+# Mark the lines of every here-document body, its terminator included, in BODY.
+# An opener counts only outside quotes, as the shell reads it; `<<<` is a
+# here-string and opens none. The bodies queued on one line follow it in order,
+# each up to the line that equals its delimiter, leading tabs dropped for <<-.
+function hd_mark(   x, c, q, r, d, tk, ln, k, e, line, t) {
+    q = ""; ln = 1; HQ = 0; x = 1
+    while (x <= n) {
+        c = substr(buf, x, 1)
+        if (q == SQ) { if (c == SQ) q = ""; if (c == "\n") ln++; x++; continue }
+        if (c == "\\") { if (substr(buf, x + 1, 1) == "\n") ln++; x += 2; continue }
+        if (q == DQ) { if (c == DQ) q = ""; if (c == "\n") ln++; x++; continue }
+        if (c == SQ || c == DQ) { q = c; x++; continue }
+        if (c == "<" && substr(buf, x + 1, 1) == "<") {
+            if (substr(buf, x + 2, 1) == "<") { x += 3; continue }
+            r = substr(buf, x + 2); d = 0
+            if (substr(r, 1, 1) == "-") { d = 1; r = substr(r, 2) }
+            sub(/^[ \t]+/, "", r)
+            if (match(r, /^[^ \t\n<>;&|()]+/) > 0) {
+                tk = substr(r, 1, RLENGTH)
+                gsub(SQ, "", tk); gsub(DQ, "", tk); gsub(/\\/, "", tk)
+                HQ++; HQT[HQ] = tk; HQD[HQ] = d
+            }
+            x += 2; continue
+        }
+        if (c == "\n") {
+            ln++; x++
+            for (k = 1; k <= HQ; k++) {
+                while (x <= n) {
+                    e = index(substr(buf, x), "\n")
+                    if (e == 0) { line = substr(buf, x); x = n + 1 }
+                    else { line = substr(buf, x, e - 1); x += e }
+                    BODY[ln] = 1
+                    t = line
+                    if (HQD[k]) sub(/^\t+/, "", t)
+                    ln++
+                    if (t == HQT[k]) break
+                }
+            }
+            HQ = 0
+            continue
+        }
+        x++
+    }
+}
+BEGIN {
+    SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96)
+    # The GraphQL mutations that post or edit a comment or review body, called
+    # with their arguments.
+    POSTMUT = "(addComment|addPullRequestReview[A-Za-z]*|submitPullRequestReview|updateIssueComment|updatePullRequestReview[A-Za-z]*)[ \t]*[(]"
+}
 { buf = (NR > 1 ? buf "\n" $0 : $0) }
 END {
     n = length(buf); tok = ""; have = 0; ntok = 0; inS = 0; inD = 0; cdspec = ""; cddepth = 0; ghset = 0; ghval = ""; hostset = 0; hostval = ""
+    # A here-document body is lexed like any other line, so the origin rule
+    # still reads a body fed to a shell, but each command found in one is
+    # flagged (inbody): a body is far more often text being written than
+    # commands being run. Quote state starts fresh at each side of a body, so a
+    # quote inside one cannot swallow the commands after it.
+    hd_mark()
+    ln = 1; inbody = 0
     for (i = 1; i <= n; i++) {
+        if (i > 1 && substr(buf, i - 1, 1) == "\n") {
+            ln++
+            if ((ln in BODY) != inbody) {
+                push(); analyze(); reset()
+                inS = 0; inD = 0; inbody = (ln in BODY)
+            }
+        }
         c = substr(buf, i, 1)
         if (inS) { if (c == SQ) inS = 0; else { tok = tok c; have = 1 } ; continue }
         if (inD) {
@@ -528,13 +690,83 @@ END {
 
 # --- verdict -------------------------------------------------------------
 
+# --- provenance ----------------------------------------------------------
+
+# The city posts on a pull request under the same login an operator's review
+# tools can use, so pr-facts.sh tells the city's own post from feedback by the
+# provenance mark pr-post.sh appends, never by the author. A post on a
+# repository we own passes the origin rule and is then held to the mark: its
+# body, inline or in a file this guard can read, has to carry it. What counts as
+# the mark is pr-post.sh's own definition, read from beside this script.
+GUARD_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
+PR_POST="$GUARD_DIR/pr-post.sh"
+CITY_DEF=""
+
+city_marked() { # city_marked <text> — 0 when the text carries the city's mark
+    [ -n "$CITY_DEF" ] || return 1
+    printf '%s' "$1" | jq -Rs "$CITY_DEF"'{body: .} | gc_city_marked' 2>/dev/null | grep -qx true
+}
+
+# post_refusal <event> <interactive> <body> <files> <base> — prints why a post
+# cannot be shown to carry the mark, or nothing when it can. <event> is a
+# review's approve or request-changes, graphql for a GraphQL mutation, or empty.
+# <files> are the body files the call reads, each led by \036; a relative one
+# resolves against <base>.
+post_refusal() {
+    case "$1" in
+        approve|request-changes)
+            echo "the city never approves or requests changes on a pull request; it posts COMMENT reviews only"
+            return 0 ;;
+    esac
+    if [ "$2" = "1" ]; then
+        echo "a body written in an editor or a browser cannot be read here, so its mark cannot be shown"
+        return 0
+    fi
+    if [ -z "$CITY_DEF" ]; then
+        [ -x "$PR_POST" ] && CITY_DEF=$("$PR_POST" own-def 2>/dev/null)
+        if [ -z "$CITY_DEF" ]; then
+            echo "pr-post.sh, beside this guard, did not print its provenance definition, so no body can be shown to carry the mark"
+            return 0
+        fi
+    fi
+    city_marked "$3" && return 0
+    _pr_ifs=$IFS
+    IFS=$(printf '\036')
+    set -f
+    for _pf in $4; do
+        case "$_pf" in
+            ''|-) continue ;;
+            \~/*) _pf="$HOME/${_pf#??}" ;;
+            /*) : ;;
+            *) [ -n "$5" ] || continue; _pf="$5/$_pf" ;;
+        esac
+        if [ -f "$_pf" ] && [ -r "$_pf" ] && city_marked "$(cat -- "$_pf" 2>/dev/null)"; then
+            set +f; IFS=$_pr_ifs
+            return 0
+        fi
+    done
+    set +f; IFS=$_pr_ifs
+    # A GraphQL body is every field value, the query among them, whose own
+    # $variables are not the shell's.
+    if [ "$1" = "graphql" ]; then
+        echo "none of its fields carries a city mark this guard can read"
+        return 0
+    fi
+    case "$3" in
+        *'$'*|*'`'*) echo "its body is built by the shell as the command runs, so this guard cannot read a mark in it" ;;
+        *[![:space:]]*) echo "its body carries no city mark" ;;
+        *) [ -n "$4" ] && echo "its body file carries no city mark, or cannot be read here (standard input cannot)" \
+               || echo "it gives no body this guard can read" ;;
+    esac
+}
+
 # Every guarded write on the command line is judged, not only the first: a
 # legitimate write chained ahead of an off-origin one must not shield it.
 ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
-NOUN=""; VERB=""; TARGET=""; REFUSE=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop _endpoint; do
+NOUN=""; VERB=""; TARGET=""; REFUSE=""; UNMARKED=""
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop _endpoint _post _event _inter _body _files _hd; do
     [ -n "${_noun:-}" ] || continue
 
     # Where this call would actually run, after any cd ahead of it.
@@ -569,6 +801,19 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
     # nothing and is refused. The owner and repo placeholders are filled from
     # GH_REPO, else from the working directory's origin, in the order gh
     # consults the two.
+    # A GraphQL mutation names no repository to measure; only its provenance is.
+    # A post found in a here-document body is not held to the mark (inbody,
+    # above); the origin rule below still reads it.
+    if [ "$_noun" = "api" ] && [ "$_verb" = "graphql" ]; then
+        [ "${_hd:-0}" = "1" ] && continue
+        _why=$(post_refusal graphql 0 "${_body:-}" "${_files:-}" "$_base")
+        if [ -n "$_why" ]; then
+            NOUN=api; VERB=graphql; TARGET=""; UNMARKED=$_why
+            break
+        fi
+        continue
+    fi
+
     if [ "$_noun" = "api" ]; then
         _fill=""
         case "${_endpoint:-}" in
@@ -623,6 +868,13 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
 
     if [ -n "${ALLOWED:-}" ] && [ -n "${_target:-}" ] \
        && printf '%s\n' "$ALLOWED" | grep -Fxq "$_target"; then
+        if [ "${_post:-0}" = "1" ] && [ "${_hd:-0}" != "1" ]; then
+            _why=$(post_refusal "${_event:-}" "${_inter:-0}" "${_body:-}" "${_files:-}" "$_base")
+            if [ -n "$_why" ]; then
+                NOUN=$_noun; VERB=$_verb; TARGET=$_target; UNMARKED=$_why
+                break
+            fi
+        fi
         continue
     fi
 
@@ -631,6 +883,23 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
 done <<SCANLINES
 $SCAN
 SCANLINES
+
+if [ -n "$UNMARKED" ]; then
+    deny "gh-origin-guard: refused \`gh $NOUN $VERB\`${TARGET:+ on $TARGET}: $UNMARKED.
+
+The city posts on a pull request under the same login an operator's review
+tools can use, so pr-facts.sh tells the city's own posts from feedback by the
+provenance mark, not by the author. A post without the mark reads back as
+feedback, and the reconcile routes it into a rework child that answers the
+city's own words.
+
+Post through $PR_POST, which appends the mark:
+  comment --repo <host/owner/name> --pr <n> --body-file <path>
+  reply   --host <host> --thread <thread node id> --body-file <path>
+  review  --repo <host/owner/name> --pr <n> --body-file <path>
+  edit    --repo <host/owner/name> --comment <id> --body-file <path>
+A body that already carries <!-- gc:city --> may be posted as it is."
+fi
 
 [ -n "$REFUSE" ] || exit 0
 
