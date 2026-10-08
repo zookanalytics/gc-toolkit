@@ -1386,6 +1386,12 @@ GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board
 GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 ```
 
+helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
+Homebrew installs icu4c keg-only, off cgo's default search path, so a bare
+`go build` or `go test` there needs it named first:
+`export CGO_CPPFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib"`.
+`gc-helm-build.sh` adds both flags itself.
+
 Discovery env:
 
 - `GC_HELM_SOURCE` — `beads` | `supervisor`; see *Picking a backend* above.

@@ -204,6 +204,7 @@ pending exceeds {{distill_max_age_days}} days (an unparseable timestamp
 forces the trickle guard OPEN, not shut).
 
 ```bash
+# >>> distiller-cadence-gate
 N=$(jq 'length' "$PENDING")
 URGENT=$(jq '[.[] | select(((.metadata["obs.endorsed"] // "") == "operator")
                         or ((.metadata["obs.directive"] // "") == "standing"))] | length' "$PENDING")
@@ -211,7 +212,7 @@ NOW=$(date -u +%s)
 OLDEST=$(jq -r '[.[] | (.created_at // .created // empty)] | sort | first // empty' "$PENDING")
 AGE_D=0
 if [ -n "$OLDEST" ]; then
-  if OLDEST_S=$(date -u -d "$OLDEST" +%s 2>/dev/null); then AGE_D=$(( (NOW - OLDEST_S) / 86400 )); else AGE_D=$(( {{distill_max_age_days}} + 1 )); fi
+  if OLDEST_S=$(jq -rn --arg t "$OLDEST" '$t | fromdateiso8601' 2>/dev/null); then AGE_D=$(( (NOW - OLDEST_S) / 86400 )); else AGE_D=$(( {{distill_max_age_days}} + 1 )); fi
 elif [ "$N" -gt 0 ]; then
   AGE_D=$(( {{distill_max_age_days}} + 1 ))
 fi
@@ -226,6 +227,7 @@ else
   # retirement pass (inputs: the fragments on disk) still runs every run.
   echo '[]' > "$PENDING"
 fi
+# <<< distiller-cadence-gate
 ```
 
 ## 4. Vetoed-PR sweep (the D6 meta-loop's input)
