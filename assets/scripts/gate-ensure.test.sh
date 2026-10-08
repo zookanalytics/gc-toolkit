@@ -5,10 +5,12 @@
 # state (green settles when a closed approve review backs the lane, through the
 # real lane-state.sh — a stale check.<g> marker settles nothing, and a backed
 # lane stays settled at a head no verdict ever named); QUIESCENCE (no review is
-# dispatched while an open must-fix finding, a fix unit, or a validation pass is
-# out on the anchor — anchor-wide, so a sibling lane's must-fix holds this lane
-# too; a closed validation pass holds nothing; an unreadable probe holds the
-# dispatch fail-closed); a declared lane still carrying a legacy exception@<oid>
+# dispatched while a fix unit, including the one answering an open must-fix
+# finding, or a validation pass is out on the anchor — anchor-wide, so the fix
+# for a sibling lane's must-fix holds this lane too; a must-fix finding no fix
+# unit answers holds the merge, not the dispatch; a closed validation pass holds
+# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane
+# still carrying a legacy exception@<oid>
 # park is a pre-migration hold (wedged, no dispatch); the live-head read, which
 # decides only the dispatch pin and the machine axis (a deleted ref, a body
 # without .sha, and a failed read are all unanswerable); the stray-marker sweep
@@ -47,7 +49,7 @@ harness_init
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation
 # helpers gate-ensure now shells out to — lane-state.sh (lane green) and
-# finding.sh (open must-fix), copied in unstubbed so the fixtures exercise the
+# finding.sh (fix-in-flight), copied in unstubbed so the fixtures exercise the
 # real derivation, plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
@@ -146,7 +148,7 @@ backed() { # <id> <anchor> [lane=correctness]
     "$1" "${3:-correctness}" "$2" "$(oid "backing-$1")"
 }
 # An open must-fix finding on <anchor> (quiescence clause a): a task_kind=finding
-# bead whose finding.disposition is must-fix, which finding.sh open-must-fix reads.
+# bead whose finding.disposition is must-fix, which finding.sh fix-in-flight reads.
 mustfix() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"%s","finding.disposition":"must-fix"}}' \
     "$1" "$2" "${3:-correctness}"
@@ -163,6 +165,14 @@ unvalidated() { # <id> <anchor> [lane=correctness]
 validation() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"validation","anchor_bead":"%s","check_name":"%s"}}' \
     "$1" "$2" "${3:-correctness}"
+}
+# A fix unit on <anchor> (quiescence clause a, through the finding it answers): a
+# task_kind=rework bead. The rework child a request-changes files carries
+# source_review_bead; the human batch's fix unit pr-facts.sh files carries none,
+# which is the lane split finding.sh matches an edge-less finding by.
+fixunit() { # <id> <anchor> <status> [source-review-bead]
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"%s"%s}}' \
+    "$1" "$3" "$2" "$( [ -n "${4:-}" ] && printf ',"source_review_bead":"%s"' "$4" )"
 }
 # A CLOSED request-changes review recording a verdict at <head-oid> — the per-head
 # fingerprint reviewed_at_head reads. Unlike backed() it does NOT back the lane
@@ -311,29 +321,67 @@ has "$out" "1 reviews dispatched" "a green marker over no backing review is igno
 
 echo "# quiescence: no review is dispatched while anything is acting on the anchor"
 # The marker never held this; the graph does. Each lane has no backing review (so
-# it is short of green and would otherwise dispatch), but an open must-fix finding
-# or a validation pass holds the dispatch — a review that read the diff now would
-# read a state no one intends to ship.
-store "[$(anchor Q1 pull_request correctness "" polecat/q1), $(mustfix find-q1 Q1),
+# it is short of green and would otherwise dispatch), but the fix unit answering
+# an open must-fix finding, or a validation pass, holds the dispatch — a review
+# that read the diff now would read a state no one intends to ship. The hold names
+# the actor: the fix unit, with the finding it answers. The fix unit blocks only
+# the finding here, so the request-changes clause (a live rework child blocking
+# the anchor) cannot be what holds it.
+store "[$(anchor Q1 pull_request correctness "" polecat/q1), $(mustfix find-q1 Q1), $(fixunit fix-q1 Q1 in_progress rev-q1),
         $(anchor Q2 pull_request correctness "" polecat/q2), $(validation val-q2 Q2)]"
+printf 'find-q1|blocks|Q1\nfix-q1|blocks|find-q1\n' >> "$STUB_DEPS"
 oid q1 > "$GH_DIR/head_polecat_q1"
 oid q2 > "$GH_DIR/head_polecat_q2"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "the quiesced pass exits 0"
-has "$out" "0 reviews dispatched" "an open must-fix finding and a validation pass each hold the dispatch"
-has "$out" "quiesced (open must-fix finding find-q1)" "the must-fix finding is named as the reason on Q1"
+has "$out" "0 reviews dispatched" "a fix unit answering a must-fix finding and a validation pass each hold the dispatch"
+has "$out" "quiesced (fix unit fix-q1 is in_progress, answering must-fix finding find-q1)" "the fix unit answering the finding is named as the reason on Q1"
 has "$out" "quiesced (validation pass val-q2 in flight)" "the validation pass is named as the reason on Q2"
 hasnt "$(cat "$STUB_GC_LOG")" "bd create" "…and no review bead is created behind either hold"
 
-echo "# a must-fix finding on a SIBLING lane holds this lane's dispatch too (anchor-wide)"
+echo "# a fix unit answering a SIBLING lane's must-fix finding holds this lane's dispatch too (anchor-wide)"
 # The finding is on the arch lane; the dispatch would be for correctness. An anchor
 # mid-change is read by no lane while a sibling's fix is half-applied.
-store "[$(anchor Q3 pull_request correctness "" polecat/q3), $(mustfix find-q3 Q3 arch)]"
+store "[$(anchor Q3 pull_request correctness "" polecat/q3), $(mustfix find-q3 Q3 arch), $(fixunit fix-q3 Q3 open rev-q3)]"
+printf 'find-q3|blocks|Q3\nfix-q3|blocks|find-q3\n' >> "$STUB_DEPS"
 oid q3 > "$GH_DIR/head_polecat_q3"
 out=$(run)
-has "$out" "0 reviews dispatched" "a sibling lane's open must-fix holds the correctness dispatch"
-has "$out" "quiesced (open must-fix finding find-q3)" "…and the finding is named"
+has "$out" "0 reviews dispatched" "the fix unit answering a sibling lane's must-fix holds the correctness dispatch"
+has "$out" "quiesced (fix unit fix-q3 is open, answering must-fix finding find-q3)" "…and the fix unit is named with its finding"
+
+echo "# a must-fix finding NOTHING answers holds the merge, not the dispatch"
+# No fix unit answers it and no validation pass is open, so nothing is changing the
+# diff and the mid-change read quiescence forbids cannot happen. The lane short of
+# green dispatches; the finding stays open and its blocks edge still holds the
+# merge; the log reports it unanswered and never calls the anchor acted on.
+store "[$(anchor Q5 pull_request correctness "" polecat/q5), $(mustfix find-q5 Q5)]"
+printf 'find-q5|blocks|Q5\n' >> "$STUB_DEPS"
+oid q5 > "$GH_DIR/head_polecat_q5"
+out=$(run)
+has "$out" "1 reviews dispatched" "an unanswered must-fix finding does not quiesce the lane"
+has "$out" "Q5 must-fix finding(s) find-q5 open with no fix unit or validation pass answering them" "…it is reported unanswered"
+hasnt "$out" "being acted on" "…and the anchor is never reported as being acted on"
+eq "$(bstatus find-q5)" "open" "…the finding stays open"
+grep -qxF 'find-q5|blocks|Q5' "$STUB_DEPS" && ok "…and keeps the blocks edge that holds the merge" || bad "the unanswered finding lost its blocks edge onto the anchor"
+
+echo "# an edge-less must-fix finding is answered by the live fix unit on its lane"
+# A missed close-ordering edge leaves the finding with no blocker, so finding.sh
+# matches it by lane, the census close-answered uses. A human finding takes the
+# human batch's fix unit, which carries no source_review_bead, so only the finding
+# clause can see it; the hold names it.
+store "[$(anchor Q6 pull_request correctness "" polecat/q6), $(mustfix find-q6 Q6 human), $(fixunit fix-q6 Q6 open)]"
+oid q6 > "$GH_DIR/head_polecat_q6"
+out=$(run)
+has "$out" "0 reviews dispatched" "the human batch's fix unit holds the dispatch for its edge-less finding"
+has "$out" "quiesced (fix unit fix-q6 is open, answering must-fix finding find-q6)" "…and is named as the actor"
+
+echo "# an unreadable read of a must-fix finding's blockers holds the dispatch, fail-closed"
+store "[$(anchor Q7 pull_request correctness "" polecat/q7), $(mustfix find-q7 Q7)]"
+oid q7 > "$GH_DIR/head_polecat_q7"
+out=$(STUB_DEP_GARBAGE=1 run)
+has "$out" "quiescence probe unreadable" "a finding whose blockers cannot be read holds the dispatch"
+has "$out" "0 reviews dispatched" "…so nothing is dispatched"
 
 echo "# a CLOSED validation pass no longer quiesces — the unreviewed lane dispatches"
 store "[$(anchor Q4 pull_request correctness "" polecat/q4),
@@ -708,11 +756,12 @@ oid r1c > "$GH_DIR/head_polecat_r1c"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed rework child no longer withholds the review"
 
-echo "# a landed fix unit's must-fix finding is closed, so quiescence clears and the wedged anchor re-gates"
+echo "# a landed fix unit's must-fix finding is closed before quiescence reads it, and the wedged anchor re-gates"
 # The pre_open_gate deadlock: the fix unit closed having pushed its fix onto the
-# branch, but the must-fix finding it answered was left open, and clause (a)
-# holds the re-gate on that open finding forever. gate-ensure closes the finding
-# whose blockers have all closed, so quiescence clears and the re-gate dispatches.
+# branch, but the must-fix finding it answered was left open, holding the publish
+# and the merge forever. gate-ensure closes the finding whose blockers have all
+# closed before it computes quiescence, so the finding is neither held on nor
+# reported unanswered, and the re-gate dispatches.
 store "[$(anchor W1 pre_open_gate correctness "" polecat/w1),
         $(mustfix find-w1 W1),
         $(rework_kid fix-w1 rev-w1 closed)]"
@@ -723,7 +772,8 @@ oid w1 > "$GH_DIR/head_polecat_w1"
 : > "$STUB_GC_LOG"
 out=$(run)
 eq "$(bstatus find-w1)" "closed" "gate-ensure closes the must-fix finding once its fix unit has landed"
-hasnt "$out" "quiesced (open must-fix finding find-w1)" "…so the landed fix no longer holds the re-gate"
+hasnt "$out" "must-fix finding(s) find-w1" "…before quiescence reads it, so it is not reported unanswered"
+hasnt "$out" "being acted on" "…and the landed fix holds no dispatch"
 has "$out" "1 reviews dispatched" "…and the wedged anchor re-gates"
 
 echo "# …but a must-fix finding whose fix unit is still IN FLIGHT is left open (not closed early)"
@@ -737,6 +787,92 @@ oid w2 > "$GH_DIR/head_polecat_w2"
 out=$(run)
 eq "$(bstatus find-w2)" "open" "an in-flight fix unit's finding is left open"
 has "$out" "0 reviews dispatched" "…and the fix unit still in flight quiesces the anchor"
+
+# The validation pass closing BEFORE the fix lands. No later pass re-opens a
+# validation pass at the rework's head, and none is needed: the fix unit holds the
+# anchor while it is in flight, and the first pass after it lands closes the
+# finding (close-answered) and lets each lane follow its standing ruling.
+landed() { # <fix-unit-id> — merge-push closes the fix unit; nothing else moves
+  jq -c --arg id "$1" 'map(if .id == $id then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/landed.json" \
+    && mv "$TMP/landed.json" "$STUB_STORE"
+}
+open_passes() { # <anchor> — validation passes still open on it
+  jq --arg a "$1" '[ .[] | select(.metadata.anchor_bead == $a and .metadata.task_kind == "validation" and .status != "closed") ] | length' "$STUB_STORE"
+}
+closed_pass() { # <id> <anchor> <lane> <reviewed-oid>
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"validation","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","gc.outcome":"recorded"}}' \
+    "$1" "$2" "$3" "$4"
+}
+
+echo "# pass closed before the fix landed, codex lane: the next pass releases the finding and re-reviews the new head"
+# The PR#1008 order. A codex review requested changes at the old head. Its
+# validation pass ruled the finding must-fix, superseded the lane's verdict (a
+# fresh whole-diff review is warranted), and closed. Then the rework landed its
+# fix and moved the head.
+store "[$(anchor CX1 pull_request codex "" polecat/cx1),
+        $(judged_rc rc-cx1 CX1 "$(oid cx1-old)" superseded),
+        $(closed_pass val-cx1 CX1 codex "$(oid cx1-old)"),
+        $(mustfix find-cx1 CX1 codex),
+        $(fixunit fix-cx1 CX1 in_progress rc-cx1)]"
+printf 'find-cx1|blocks|CX1\nfix-cx1|blocks|find-cx1\nfix-cx1|blocks|CX1\n' >> "$STUB_DEPS"
+oid cx1-new > "$GH_DIR/head_polecat_cx1"
+out=$(run)
+has "$out" "quiesced (fix unit fix-cx1 is in_progress, answering must-fix finding find-cx1)" "while the fix is in flight the hold names its fix unit, not the finding"
+has "$out" "0 reviews dispatched" "…and nothing is dispatched"
+landed fix-cx1
+out=$(run)
+eq "$(bstatus find-cx1)" "closed" "the first pass after the fix unit lands closes the must-fix finding"
+has "$out" "1 reviews dispatched" "…and the superseded lane is re-reviewed in that same pass"
+rid=$(jq -r '[ .[] | select(.metadata.anchor_bead == "CX1" and .metadata.task_kind == "review" and .status == "open") ] | .[0].id // empty' "$STUB_STORE")
+eq "$(meta "$rid" reviewed_oid)" "$(oid cx1-new)" "…at the rework's head"
+hasnt "$out" "being acted on" "…with no quiescence claim left behind"
+eq "$(open_passes CX1)" "0" "…and no validation pass is opened"
+
+echo "# pass closed before the fix landed, codex lane, back-lane: the anchor settles once the finding releases"
+# The same order under a back-lane ruling: the validator recorded the lane's
+# convergence as a closed approve outcome, so the lane derives green throughout
+# and no fresh review is owed. The open finding keeps the anchor progressing while
+# its fix is in flight; the pass after the fix unit lands closes it and the anchor
+# settles.
+store "[$(anchor CB1 pull_request codex "" polecat/cb1),
+        $(backed conv-cb1 CB1 codex),
+        $(closed_pass val-cb1 CB1 codex "$(oid cb1-old)"),
+        $(mustfix find-cb1 CB1 codex),
+        $(fixunit fix-cb1 CB1 open rc-cb1)]"
+printf 'find-cb1|blocks|CB1\nfix-cb1|blocks|find-cb1\nfix-cb1|blocks|CB1\n' >> "$STUB_DEPS"
+oid cb1-new > "$GH_DIR/head_polecat_cb1"
+run >/dev/null
+eq "$(pinned CB1)" "progressing@$(oid cb1-new)" "while the fix is in flight the green anchor reads progressing"
+landed fix-cb1
+out=$(run)
+eq "$(bstatus find-cb1)" "closed" "the pass after the fix unit lands closes the finding"
+has "$out" "0 reviews dispatched" "…the converged lane owes no fresh review"
+eq "$(pinned CB1)" "settled@$(oid cb1-new)" "…and the anchor settles"
+eq "$(open_passes CB1)" "0" "…with no validation pass opened"
+
+echo "# pass closed before the fix landed, human lane: the batch's fix unit holds, then the next pass releases"
+# The PR#966 order. pr-facts.sh filed a human batch: the finding, a validation
+# pass, and the batch's fix unit, which carries no source_review_bead, so the
+# request-changes clause never sees it. The validator ruled the finding must-fix
+# and closed; then the rework landed. While the fix is in flight its fix unit
+# holds the unreviewed correctness lane, and the pass after it lands closes the
+# finding and reviews that lane at the new head.
+store "[$(anchor HM1 pull_request correctness "" polecat/hm1),
+        $(closed_pass val-hm1 HM1 human "$(oid hm1-old)"),
+        $(mustfix find-hm1 HM1 human),
+        $(fixunit fix-hm1 HM1 in_progress)]"
+printf 'find-hm1|blocks|HM1\nfix-hm1|blocks|find-hm1\nfix-hm1|blocks|HM1\n' >> "$STUB_DEPS"
+oid hm1-new > "$GH_DIR/head_polecat_hm1"
+out=$(run)
+has "$out" "quiesced (fix unit fix-hm1 is in_progress, answering must-fix finding find-hm1)" "the human batch's fix unit holds the lane and is named as the actor"
+has "$out" "0 reviews dispatched" "…and nothing is dispatched"
+landed fix-hm1
+out=$(run)
+eq "$(bstatus find-hm1)" "closed" "the first pass after the human fix unit lands closes the finding"
+has "$out" "1 reviews dispatched" "…and the correctness lane is reviewed in that pass"
+rid=$(jq -r '[ .[] | select(.metadata.anchor_bead == "HM1" and .metadata.task_kind == "review" and .status == "open") ] | .[0].id // empty' "$STUB_STORE")
+eq "$(meta "$rid" reviewed_oid)" "$(oid hm1-new)" "…at the rework's head"
+eq "$(open_passes HM1)" "0" "…and no validation pass is opened"
 
 echo "# a green lane resolves its own still-unvalidated findings as moot (the stage-3 close moved out of signoff.sh)"
 # A lane that re-reviewed clean (a backing approve) answers its own unruled
@@ -1123,13 +1259,14 @@ for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; 
 done
 
 echo "# machine axis: a green anchor still being acted on is progressing, not settled"
-# Every declared lane deriving green is not the same as nothing owed. Quiescence
-# is anchor-wide — an open must-fix finding, an in-flight fix unit, or an open
-# validation pass — and none of those is a pool-routed blocker the check loop
-# visits, so a fully green anchor reaches the settle decision with the loop's
-# progress flag still clear. Recording settled would render the board row green
-# while the anchor is still being worked, so quiescence is computed before
-# settling and any hold names the anchor progressing.
+# Every declared lane deriving green is not the same as nothing owed. What is
+# owed is anchor-wide — an open must-fix finding, answered or not, an in-flight
+# fix unit, or an open validation pass — and none of those is a pool-routed
+# blocker the check loop visits, so a fully green anchor reaches the settle
+# decision with the loop's progress flag still clear. Recording settled would
+# render the board row green while the anchor is still being worked, so
+# quiescence is computed before settling, and a hold or an unanswered must-fix
+# finding names the anchor progressing.
 store "[$(anchor X10 pull_request correctness "" polecat/x10), $(backed rev-x10 X10), $(mustfix find-x10 X10)]"
 oid x10 > "$GH_DIR/head_polecat_x10"
 run >/dev/null

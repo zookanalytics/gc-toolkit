@@ -85,94 +85,126 @@ printf '%s' "$WORK_BEAD_JSON" | jq '.[0].metadata'  # Check for existing metadat
 Two dispatch surfaces can reach one work bead — this workflow, and a direct
 pool route left on the bead itself. When both fire, two workers set up the same
 branch and one silently destroys the other's commits. Before touching the
-workspace, prove that the bead is neither in flight nor already completed
-elsewhere:
+workspace, prove that the bead is readable, not parked, not in flight under
+another live owner, and not already finished:
 
 ```bash
 # >>> load-context-duplicate-dispatch-hold
-WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty')
-WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty')
-if [ -z "$WORK_STATUS" ]; then
-  # An unreadable bead is not proof of safety. Treat it as blocked.
-  WORK_STATUS=unknown
-  WORK_OWNER="${WORK_OWNER:-unreadable}"
-fi
-OWNER_LIVE=0
-DONE_ELSEWHERE=""
-case "$WORK_OWNER" in
-  ""|"$GC_SESSION_NAME"|"$GC_SESSION_ID"|"$GC_AGENT"|"$GC_ALIAS") ;;   # unowned, or owned by you
-  *)
-    case "$WORK_STATUS" in
-      in_progress|unknown)
-        # In flight: a live worker may still hold it, so the hold is gated on
-        # that owner being alive. An assignee is any of the three forms a claim
-        # writes — the session name (what `gc bd update --claim` sets), the
-        # session id, or the agent address — and a session record exposes them
-        # as .session_name, .id and .alias respectively, with no .name field.
-        # Match all of them.
-        OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
-        # No answer means you could not disprove a live owner — assume one.
-        [ -z "$OWNER_LIVE" ] && OWNER_LIVE=1 ;;
+WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty' 2>/dev/null)
+WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty' 2>/dev/null)
+WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty' 2>/dev/null)
+# A refusal sets WHY. A finished bead keeps the default labels and sets no
+# ESCALATE_KEY, so it quiesces without a visit; every other refusal names the
+# visit a human must answer.
+WHY=""
+NOTE_LABEL="Duplicate dispatch refused (work finished; quiesced without escalation)"
+HOLD_LABEL="duplicate dispatch (work finished)"
+ESCALATE_KEY=""
+ESCALATE_MESSAGE=""
+# A merge_result stamp means a PR or merge already exists for THIS bead (fresh
+# work is its own anchor), and it outlives a cleared assignee.
+MERGED=""
+[ -n "$WORK_MERGE_RESULT" ] && MERGED="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
+case "$WORK_STATUS" in
+  "")
+    # An unreadable bead is not proof of safety, and no liveness answer can
+    # clear a bead nobody can read, so a human looks at it.
+    WHY="unreadable (gc bd show returned no status)"
+    NOTE_LABEL="Unreadable work bead; held for a human"
+    HOLD_LABEL="unreadable work bead"
+    ESCALATE_KEY=polecat-unreadable-work
+    ESCALATE_MESSAGE="Could not read work bead $WORK_BEAD_ID at load-context (gc bd show returned no status), so nothing proves it is safe to build. Held at load-context; no workspace was touched and nothing was closed. Check that the bead exists and its store answers, then re-offer this molecule." ;;
+  closed)
+    # Closed is finished whoever holds it. A close that lands after the pour,
+    # such as a duplicate or a no-work close, leaves the assignee empty and
+    # stamps no merge_result, so the reason carries what the bead records about
+    # its close.
+    if [ -n "$MERGED" ]; then
+      WHY="$MERGED"
+    else
+      CLOSED_HOW=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0] | [(.metadata["gc.superseded_by"] // "" | tostring | select(length > 0) | "superseded by " + .), (.metadata["gc.outcome"] // "" | tostring | select(length > 0) | "outcome " + .), (.close_reason // "" | tostring | gsub("[[:space:]]+"; " ") | select(length > 0) | "close reason: " + .[0:200])] | join("; ")' 2>/dev/null)
+      WHY="already closed${CLOSED_HOW:+ ($CLOSED_HOW)}; its work is done or was ruled unnecessary"
+      NOTE_LABEL="Closed before claim; quiesced without escalation"
+      HOLD_LABEL="closed before claim"
+    fi ;;
+  open|in_progress)
+    case "$WORK_OWNER" in
+      ""|"$GC_SESSION_NAME"|"$GC_SESSION_ID"|"$GC_AGENT"|"$GC_ALIAS") ;;   # unowned, or owned by you
       *)
-        # Open or closed under a foreign assignee is a completed hand-off, not a
-        # live conflict: the refinery handoff leaves the bead open, assigned to
-        # the refinery, route cleared, and a merge leaves it closed. A fresh or
-        # rework dispatch reaches load-context with an empty assignee (routed by
-        # gc.routed_to, cleared on re-dispatch), so a foreign one here means
-        # another dispatch already carried the work past this point. Building it
-        # now rebuilds a branch that already has a PR, so the liveness gate does
-        # not apply — hold regardless.
-        DONE_ELSEWHERE="already handed off or merged ($WORK_STATUS, held by $WORK_OWNER); another dispatch carried it to completion" ;;
-    esac ;;
+        if [ "$WORK_STATUS" = "in_progress" ]; then
+          # In flight: a live worker may still hold it, so the hold is gated on
+          # that owner being alive. An assignee is any of the three forms a
+          # claim writes — the session name (what `gc bd update --claim` sets),
+          # the session id, or the agent address — and a session record exposes
+          # them as .session_name, .id and .alias respectively, with no .name
+          # field. Match all of them.
+          OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
+          # No answer means you could not disprove a live owner — assume one.
+          if [ "${OWNER_LIVE:-1}" != "0" ]; then
+            WHY="already in_progress under live $WORK_OWNER"
+            NOTE_LABEL="Duplicate dispatch refused"
+            HOLD_LABEL="duplicate dispatch"
+            ESCALATE_KEY=polecat-duplicate-dispatch
+            ESCALATE_MESSAGE="Duplicate dispatch on $WORK_BEAD_ID: it is $WHY, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Two dispatches are live: decide which owns the bead, then re-offer that one."
+          fi
+        else
+          # Open under a foreign assignee is a completed hand-off, not a live
+          # conflict: the refinery handoff leaves the bead open, assigned to
+          # the refinery, route cleared. A fresh or rework dispatch reaches
+          # load-context with an empty assignee (routed by gc.routed_to, cleared
+          # on re-dispatch), so a foreign one here means another dispatch
+          # already carried the work past this point. Building it now rebuilds a
+          # branch that already has a PR, so the liveness gate does not apply.
+          WHY="already handed off (open, held by $WORK_OWNER); another dispatch carried it past this point"
+        fi ;;
+    esac
+    [ -z "$WHY" ] && WHY="$MERGED" ;;
+  *)
+    # blocked, deferred, hooked, pinned: whoever parked the bead releases it,
+    # and a release does not resume a held molecule, so a visit is what says
+    # this one needs re-offering. A merge_result still reads as finished:
+    # the PR is with the refinery.
+    if [ -n "$MERGED" ]; then
+      WHY="$MERGED"
+    else
+      WHY="parked (status $WORK_STATUS), so it is not this session's to build"
+      NOTE_LABEL="Parked work bead; held for a human"
+      HOLD_LABEL="parked work bead"
+      ESCALATE_KEY=polecat-parked-work
+      ESCALATE_MESSAGE="Work bead $WORK_BEAD_ID is $WORK_STATUS, and convoy {{convoy_id}} reached $GC_SESSION_NAME with it. A parked bead is not built, so its molecule is held at load-context; no workspace was touched and nothing was closed. Releasing the bead does not resume the molecule: once the bead is ready to build, re-offer this molecule."
+    fi ;;
 esac
-# A merge_result stamp means a PR or merge already exists for THIS bead — fresh
-# work is its own anchor — and it outlives a cleared assignee, so a bead the
-# handoff left unowned would otherwise sail its open PR through the arms above.
-if [ "$OWNER_LIVE" = "0" ] && [ -z "$DONE_ELSEWHERE" ]; then
-  WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
-  [ -n "$WORK_MERGE_RESULT" ] && DONE_ELSEWHERE="already carrying merge_result=$WORK_MERGE_RESULT; a PR or merge exists for this bead"
-fi
-if [ "$OWNER_LIVE" != "0" ] || [ -n "$DONE_ELSEWHERE" ]; then
+if [ -n "$WHY" ]; then
   SCRIPTS=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  if [ -n "$DONE_ELSEWHERE" ]; then
-    # FINISHED, not a live conflict: a PR or merge already exists for this bead
-    # (a completed hand-off, or a merge_result stamp), so the work has landed or
-    # is landing with the refinery and no human has a decision to make. This
-    # reaches a polecat two ways — a redundant dispatch the refinery already
-    # carried past, or a lease-expiry re-offer of THIS molecule's own
-    # load-context after its own work finished — and both are husks. Quiesce the
-    # molecule and drain; do NOT escalate. A human visit here answers nothing and
-    # is what stranded finished work: molecule-hold.sh is one-way and
-    # dead-molecule-dispose.sh refuses a live root, so a false hold behind a
-    # visit had no way back. molecule-hold.sh never touches the work bead, so the
-    # refinery keeps it and its PR proceeds.
-    DUP_REASON="$DONE_ELSEWHERE"
-    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused (work finished; quiesced without escalation): $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
-    if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch (work finished): $WORK_BEAD_ID $DUP_REASON"; then
-      gc runtime drain-ack
-    else
-      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
-    fi
+  # The note is the bead's own record of the refusal. The hold reason on this
+  # step carries the same text, so a note the store refuses is reported here
+  # and the hold still runs.
+  gc bd update "$WORK_BEAD_ID" --append-notes "$NOTE_LABEL: $GC_SESSION_NAME found $WORK_BEAD_ID $WHY." || echo "The refusal note did not land on $WORK_BEAD_ID; the hold reason on this step still records it." >&2
+  # A FINISHED bead (closed, handed off, or carrying a merge_result) files no
+  # visit. Its work has landed, is landing with the refinery, or was ruled
+  # unnecessary, so no human has a decision to make. It reaches a polecat as a
+  # redundant dispatch the refinery already carried past, as a lease-expiry
+  # re-offer of THIS molecule's own load-context after its own work finished,
+  # or as a pour whose work bead closed before this claim, and all three are
+  # husks. A visit there answers nothing, and a hold behind it has no way back:
+  # molecule-hold.sh is one-way and dead-molecule-dispose.sh refuses a live
+  # root. molecule-hold.sh never touches the work bead, so a closed bead stays
+  # closed and the refinery keeps a handed-off one while its PR proceeds.
+  #
+  # Every other refusal records its release path first and holds only if that
+  # landed: a blocked, de-routed molecule with no visit is a silent stall no
+  # one is asked to clear. Its drain is conditional on the escalation AND the
+  # hold.
+  if [ -n "$ESCALATE_KEY" ] && ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --message "$ESCALATE_MESSAGE"; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "$HOLD_LABEL: $WORK_BEAD_ID $WHY"; then
+    gc runtime drain-ack
   else
-    # A LIVE conflict: in flight under a foreign owner still present in the
-    # session list. Two live dispatches building at once are a routing anomaly a
-    # human must adjudicate, so record the release path first and hold only if it
-    # landed. A blocked, de-routed molecule with no visit is a silent stall no
-    # one is asked to clear, so the drain is conditional on the escalation AND
-    # the hold.
-    DUP_REASON="already $WORK_STATUS under live $WORK_OWNER"
-    gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID $DUP_REASON."
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is $DUP_REASON, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Two dispatches are live: decide which owns the bead, then re-offer that one."; then
-      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID $DUP_REASON"; then
-      gc runtime drain-ack
-    else
-      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
-    fi
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
   fi
   exit 1
 fi
@@ -193,32 +225,42 @@ repair sweeps `open` and `in_progress` beads assigned to a drained session and
 re-stamps a run_target fallback on any it finds unrouted. `blocked` is outside
 that sweep.
 
-The two arms dispose of two different situations and drain differently.
+The bead's status decides first. Only an `open` or `in_progress` bead can be
+built, so only those reach the owner check. Every refusal holds the molecule,
+and the refusals split by whether a human has a decision to make.
 
-A FINISHED bead — a completed hand-off or a `merge_result` — is not a live
-conflict. A PR or merge already exists for it, so the work has landed or is
-landing with the refinery and no human has a decision to make. The arm quiesces
-the molecule and drains with no escalation; the drain is conditional on the hold
-alone. A human visit here answers nothing, and it is what stranded finished
-work with no way back — `molecule-hold.sh` is one-way and
+A FINISHED bead — closed, a completed hand-off, or carrying a `merge_result` —
+is not a live conflict. Its work has landed, is landing with the refinery, or
+was ruled unnecessary by whoever closed it, so no human has a decision to make.
+The gate quiesces the molecule and drains with no escalation; the drain is
+conditional on the hold alone. A human visit here answers nothing, and a hold
+behind one has no way back, because `molecule-hold.sh` is one-way and
 `dead-molecule-dispose.sh` refuses a live root. `molecule-hold.sh` never touches
-the work bead, so the refinery keeps the bead and its PR proceeds.
+the work bead, so a closed bead stays closed and a handed-off bead stays with
+the refinery while its PR proceeds. A closed bead's note and hold reason read
+`closed before claim` and carry what the bead records about its close, so a
+duplicate close reads differently from a merge.
 
-A LIVE conflict — in flight under a foreign owner still present in `gc session
-list --state all` — is two dispatches building at once, a routing anomaly a
-human must adjudicate. That arm records the release path first: `escalate.sh`
-files a board-visible visit a human can claim, and the drain is conditional on
-that visit AND the hold. A hold on its own is never enough there — a blocked,
-de-routed molecule with no visit is a silent stall no one is asked to clear. If
-`escalate.sh` cannot file or route the visit it exits non-zero and the arm
-neither holds nor drains, leaving the step claimable so the next worker retries.
+Three other situations need a human, and each files its own visit. A LIVE
+conflict, in flight under a foreign owner still present in `gc session list
+--state all`, is two dispatches building at once, a routing anomaly a human
+must adjudicate. An UNREADABLE bead proves nothing, so no liveness answer can
+clear it. A PARKED bead (`blocked`, `deferred`, `hooked`, `pinned`) waits on
+whoever parked it, and releasing it does not resume a held molecule, so the
+visit is what says the molecule needs re-offering. These record the release
+path first: `escalate.sh` files a board-visible visit a human can claim, and
+the drain is conditional on that visit AND the hold. A hold on its own is never
+enough there, because a blocked, de-routed molecule with no visit is a silent
+stall no one is asked to clear. If `escalate.sh` cannot file or route the visit
+it exits non-zero, and the gate neither holds nor drains, leaving the step
+claimable so the next worker retries.
 
 `molecule-hold.sh` in turn exits non-zero when it cannot prove which bead this
 shell is executing, when duplicate step beads make that ambiguous, when the
 blocking write is refused, and when a route it had to clear — on the molecule
 root or on a sibling step — survived. Draining on any of those leaves this step
-or the molecule around it claimable, the loop the hold exists to stop, so both
-arms drain only after a hold that landed.
+or the molecule around it claimable, the loop the hold exists to stop, so
+every refusal drains only after a hold that landed.
 
 `CLAIMED_STEP_BEAD_ID` is the `bead_id` from the `gc hook --claim --json` that
 handed you the step you are running. Set it at the top of each step. It is a
@@ -233,9 +275,10 @@ Owner liveness gates the in-flight case only: an idle pool worker between
 claims looks identical to an abandoned one, so an `in_progress` bead is a
 conflict only while its owner is present in `gc session list --state all` — a
 crashed owner leaves the work yours to take, and only a session absent from
-that list is safely gone. A bead already handed off (open or closed under a
-foreign assignee) or carrying a `merge_result` is finished rather than in
-flight, and holds regardless of any session's liveness.
+that list is safely gone. A bead that is closed, already handed off (open
+under a foreign assignee), or carrying a `merge_result` is finished rather than
+in flight, and holds regardless of its assignee or any session's liveness. So
+does a parked or unreadable bead.
 
 **4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
 
@@ -986,23 +1029,24 @@ Empty means this is not that case and the run falls through to the branch
 gate. The block refuses the arm when a diff exists, so a run that merely
 forgot to commit cannot park itself as store work.
 
-The release is the one the halt arm writes: open, unassigned, route cleared.
-That shape can be undone from outside. The gc runtime's detached-handoff
-orphan sweep (`isDetachedHandoffOrphanCandidate`,
-`cmd/gc/pool_detached_orphan_sweep.go` in gascity) re-stamps the pool route on
-a bead that is open and unassigned, carries no route of either kind, no
-`gc.kind` and no `merge_result`, and still holds `gc.work_branch` and a
-session back-reference from its claim. This arm leaves exactly that bead, and
-`gc.work_branch` is why it matches: `hookClaimIdentityPatch` in
-`cmd_hook_claim.go` stamps that key at CLAIM time from the worker's own
-checkout, so it stands on a run that produced nothing to merge. The fix for
-that belongs in the runtime. Do not pick a route value here to dodge the
-predicate and do not re-clear the route in a loop; until the runtime changes,
-a bead released by this arm can come back.
+The release is the one the halt arm writes: open, unassigned, route cleared,
+and the claim's session pins `gc.session_id` and `gc.session_name` removed.
+A claim through `gc hook` stamps the claiming session's pins on the bead it
+claims (`hookClaimIdentityPatch` in `cmd_hook_claim.go`), so a work bead routed
+straight to a pool carries them. The gc runtime's detached-handoff orphan
+sweep (`isDetachedHandoffOrphanCandidate`,
+`cmd/gc/pool_detached_orphan_sweep.go` in gascity) restores the pool route on
+an open, unassigned, unrouted bead only when the bead carries a `branch` record
+and a session pin, and it recovers the route from the pin. This bead keeps the
+`branch` that workspace-setup recorded when it cut the branch. The witness's
+orphan scan resolves a bead's owner from the same pins, so once this session
+closes, a pin left in place makes the released bead read as orphaned pool
+work, and the witness runs its recovery on it. With the pins removed, neither
+the sweep nor the witness acts on the bead, whichever path claimed it.
 
-A bead that comes back carries the note. A claim on one already stamped
-`halt_reason=store_only`, whose notes name what was filed, is this arm's own
-release returning: re-take the arm, do not redo the work.
+A claim on a bead already stamped `halt_reason=store_only`, whose notes name
+what was filed, is this arm's own release offered again: re-take the arm, do
+not redo the work.
 
 The three writes are separate on purpose. A `gc bd update` that changes the
 assignee while you still hold the bead is refused by the claim guard, and the
@@ -1031,7 +1075,7 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
     gc runtime drain-ack
     exit 1
   fi
-  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
+  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
   gc bd update "$WORK_BEAD_ID" --status=open
   gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-store-only-chain-close
@@ -1208,8 +1252,10 @@ if [ "$AUTO_PUSH" = "false" ]; then
   # which rolls back the batched metadata and notes with it. Metadata and notes
   # bypass the guard and clear the route first, --status=open is accepted from
   # the holder, and the assignee write lands once the bead is open — the same
-  # order the store-only arm releases a bead in.
-  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  # order the store-only arm releases a bead in. The first write also removes
+  # the session pins, for the reason step 0 gives: the runtime's orphan sweep
+  # and the witness both act on a released bead that still carries them.
+  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
   gc bd update "$WORK_BEAD_ID" --status=open
   gc bd update "$WORK_BEAD_ID" --assignee=""
   # >>> submit-halt-chain-close

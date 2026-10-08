@@ -421,13 +421,27 @@ that releases it and the two cannot disagree.
 **No full review is dispatched while anything is acting on the anchor.**
 Concretely, a lane may not be dispatched while any of these hold:
 
-- a must-fix finding on this anchor is open, on any lane
+- the fix unit answering an open must-fix finding on this anchor is in flight, on any lane
 - a fix unit resolving a finding on this anchor is in flight
 - a validation pass on this anchor is in flight
 - a full review on this lane is in flight
 
 Every clause is an open-bead query. Quiescence reads no lane marker, so dropping
 the marker leaves it unchanged — it was graph-native already.
+
+The first two clauses read one fact from two sides. The first starts at the
+finding: its live `blocks` blocker, or for a finding whose close-ordering edge
+was missed, the live fix unit on its lane. That covers the fix unit `pr-facts.sh`
+files for a human batch, which the second clause, reading the anchor's
+request-changes rework child, cannot see. The hold names that fix unit.
+
+An open must-fix finding is not itself on the list. It is a demand on the
+anchor, not an actor on it. When no fix unit answers it and no validation pass
+is open, nothing is changing the diff, so the mid-change read the clauses exist
+to prevent cannot happen, and a lane short of green is dispatched, still subject
+to the per-head bar below. The finding still holds the merge through its
+`blocks` edge (the merge predicate's second condition), and the anchor still
+reads `progressing` rather than `settled`.
 
 The fourth clause is what retires the 83: two actors disagreeing about whether
 a review was already out is exactly how the same head got read twice, and one

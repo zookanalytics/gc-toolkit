@@ -235,11 +235,11 @@ your claimed bead everything else.
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
-- **Never close the work bead** — no `bd close`, no `--status=closed` — even
-  if the work looks already merged, and equally when it is a child whose
-  anchor is elsewhere. Hand it to the refinery with a note: merge-push is
-  where a bead leaves the anchor class and closes, and it is the only thing
-  that verifies a merge.
+- **Never close the work bead** — no `bd close`, no
+  `bd update --status=closed` — even if the work looks already merged, and
+  equally when it is a child whose anchor is elsewhere. Hand it to the
+  refinery with a note: merge-push is where a bead leaves the anchor class
+  and closes, and it is the only thing that verifies a merge.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
@@ -448,7 +448,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -459,7 +459,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \
