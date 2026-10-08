@@ -104,8 +104,13 @@ shape. It backs up an event-driven closer with the same predicate.
   sweep's page and time go to beads with no workflow. tk-qm9ynri (PR #1125)
   landed `sling_live_workflow_guard` in the same file while this branch was in
   review. That guard refuses the sling itself, before `gc sling` runs, which
-  removes the pack's source of producer 2 on its own. tk-eui2sgp folds the two
-  into one definition.
+  removes the pack's source of producer 2 on its own. The drop and the guard
+  read one definition of a live workflow (`LIVE_WORKFLOW_JQ`) and one read of
+  the workflow roots. Each takes its own reads: the drop once per sweep, the
+  guard for each bead it is about to sling, so a pour that lands during a
+  sweep is still refused. A read the drop cannot use leaves the page
+  unfiltered and logs it, and one the guard cannot use fails the sling
+  closed.
 - **A one-time backfill, not shipped.** A hand-run script applied the
   live-namer gate approved on tk-vc5my. A convoy is dead when no non-closed
   bead names it as `gc.input_convoy_id`, and a 60-minute grace window protects
@@ -114,8 +119,10 @@ shape. It backs up an event-driven closer with the same predicate.
   The answer is the two producers above, and each has a fix at its source:
   the scan change and the sling guard in the pack, and gc-4by8wa in gascity,
   which closes a convoy where its workflow ends. So the script was dropped
-  from the branch before merge. The PR's commit history keeps it, as
-  `assets/scripts/input-convoy-reap.sh` at 5285301f.
+  from the branch before merge, and it is not on main. GitHub keeps a PR's
+  head ref after a squash merge, so `git fetch origin pull/1045/head` brings
+  back commit 5285301f, and
+  `git show 5285301f:assets/scripts/input-convoy-reap.sh` prints the script.
 - **Upstream.** gc-4by8wa asks gascity to close the convoy when its root
   closes, in the controller's bead-close autoclose, and to give `gc convoy
   check` the same predicate as the backstop. On 2026-10-07 it is open at P2,
