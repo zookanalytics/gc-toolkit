@@ -66,10 +66,12 @@ has its working directory or an open file inside it, and one of these holds:
 
 A bead that is not closed holds its directory at any age, and so does a bead
 whose status cannot be read, because an unreadable ledger is not a closed
-review. The process check is read fresh before each removal. A walk of `/proc`
-that sees no process at all, not even the reaper's own, is a broken probe
-rather than an idle host, so it holds everything. If the city's rigs cannot be
-read, the pass removes nothing and exits 1.
+review. An entry whose age cannot be read is held too. The process check is an
+`lsof` listing of the working directory and open files of every process this
+user can see, on Linux and on macOS, read fresh before each removal. A listing
+that fails, or that names no file at all, not even the reaper's own, is a
+broken probe rather than an idle host, so it holds everything. If the city's
+rigs cannot be read, the pass removes nothing and exits 1.
 
 ## How a directory is removed
 
