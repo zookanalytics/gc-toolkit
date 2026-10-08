@@ -8,15 +8,16 @@
 # Covers the horizon and its boundary (a tree past it goes whole, a tree inside
 # it is untouched); the age reading, which takes the NEWEST entry in a tree so
 # one stale file cannot condemn an active session; the live-session hold,
-# exercised against a real process carrying CLAUDE_CODE_SESSION_ID; the
-# read-only tree that refuses deletion until it is chmod-ed; stray files above
-# the session trees, and stray symlinks, which are unlinked without a chmod
-# that would reach their targets; the large-file report, which must name a
-# stray dump as well as a file inside a tree; the budget yield, which must
-# report zero for the tier it skipped and name none of its files, while still
-# naming the files of the tier that ran; --dry-run; and the root rails, which
-# are what keep a recursive delete off any directory that is not a scratch
-# root.
+# exercised against real processes carrying CLAUDE_CODE_SESSION_ID, holding a
+# file open in a tree, or standing in one; the read-only tree that refuses
+# deletion until it is chmod-ed; stray files above the session trees, and stray
+# symlinks, which are unlinked without a chmod that would reach their targets;
+# the large-file report, which must name a stray dump as well as a file inside
+# a tree; the budget yield, which must report zero for the tier it skipped and
+# name none of its files, while still naming the files of the tier that ran;
+# --dry-run; the root rails, which are what keep a recursive delete off any
+# directory that is not a scratch root; and the default root, which is where
+# Claude Code writes rather than anywhere TMPDIR points.
 #
 # The ended rule is exercised the same way: a tree inside the horizon goes once
 # nothing can own it, and each of its holds is shown holding and then, with the
@@ -24,7 +25,8 @@
 # command line, a process standing in the project directory or below it since
 # before the tree was written, an open gc session keyed by the id, and the quiet
 # window. A gc or ps that cannot be read judges nothing, and only the trees
-# Claude Code writes are judged at all.
+# Claude Code writes are judged at all. An lsof or environment reading that
+# cannot be taken leaves every session tree in place.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +46,10 @@ NOW="$(date +%s)"
 HOUR=3600
 export SCRATCH_REAP_ROOT="$ROOT"
 export SCRATCH_REAP_INACTIVE_AFTER=$((24 * HOUR))
+
+# The UTC ISO-8601 stamp of an epoch second. GNU and BSD touch -d both read it,
+# where only GNU reads @<epoch>.
+iso() { jq -nr --argjson t "$1" '$t | todate'; }
 
 # gc stand-in. The registry names one city, the session list is STUB_SESSIONS,
 # STUB_FAIL=cities|sessions fails that call, and every call is logged so a test
@@ -74,9 +80,32 @@ mk_session_at() { # <slug> <id> <epoch> [file-bytes]
     local d="$ROOT/$1/$2" bytes="${4:-4096}"
     mkdir -p "$d/scratchpad"
     head -c "$bytes" /dev/zero > "$d/scratchpad/f"
-    find "$d" -depth -exec touch -h -d "@$3" {} +
+    find "$d" -depth -exec touch -h -d "$(iso "$3")" {} +
 }
 exists() { [ -e "$1" ]; }
+
+# A process carrying <id> in CLAUDE_CODE_SESSION_ID, as every command a session
+# runs does; its pid lands in CARRIER. It is the bash on PATH rather than sleep
+# because macOS hides the environment of its own binaries, /bin/sleep among
+# them, from every other process. The trailing `true` keeps bash from exec-ing
+# sleep in its own place.
+carry() { # <session-id>
+    env CLAUDE_CODE_SESSION_ID="$1" bash -c 'sleep 25; true' > /dev/null 2>&1 &
+    CARRIER=$!
+}
+# Stop a backgrounded process and the child it is waiting on, so no orphan
+# outlives the test.
+stop() { pkill -P "$1" 2>/dev/null; kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }
+# A backgrounded subshell forks first and only then opens its file or changes
+# directory, so wait for lsof, the reading the pass takes, to show <path>.
+shows() { # <pid> <path>
+    local _
+    for _ in $(seq 50); do
+        lsof -w -n -P -F n -p "$1" 2>/dev/null | awk -v n="n$2" '$0 == n { f = 1 } END { exit f ? 0 : 1 }' && return 0
+        sleep 0.1
+    done
+    return 1
+}
 
 reset_root() { chmod -R u+w "$ROOT" 2>/dev/null; rm -rf "$ROOT"; mkdir -p "$ROOT"; }
 run() { bash "$SUT" "$@" 2>&1; }
@@ -105,7 +134,7 @@ if exists "$ROOT/slug-a/just-outside"; then bad "an hour past the horizon is rea
 # does not condemn the session.
 reset_root
 mk_session slug-b mixed 100
-touch -d "@$NOW" "$ROOT/slug-b/mixed/scratchpad/recent"
+touch -d "$(iso "$NOW")" "$ROOT/slug-b/mixed/scratchpad/recent"
 run > /dev/null
 if exists "$ROOT/slug-b/mixed/scratchpad/f"; then ok "newest entry sets the age: a stale sibling survives"; else bad "newest entry sets the age: a stale sibling survives"; fi
 
@@ -119,7 +148,7 @@ if exists "$ROOT/slug-b/mixed"; then bad "without the recent entry the same tree
 # mkdir still reads as active.
 reset_root
 mk_session slug-b dironly 100
-touch -d "@$NOW" "$ROOT/slug-b/dironly/scratchpad"
+touch -d "$(iso "$NOW")" "$ROOT/slug-b/dironly/scratchpad"
 run > /dev/null
 if exists "$ROOT/slug-b/dironly/scratchpad/f"; then ok "a recent directory mtime holds the tree"; else bad "a recent directory mtime holds the tree"; fi
 
@@ -127,13 +156,39 @@ if exists "$ROOT/slug-b/dironly/scratchpad/f"; then ok "a recent directory mtime
 reset_root
 mk_session slug-c live-abc 100
 mk_session slug-c dead-abc 100
-env CLAUDE_CODE_SESSION_ID=live-abc sleep 25 &
-SLEEPER=$!
+carry live-abc
 OUT="$(run)"
-kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+stop "$CARRIER"
 if exists "$ROOT/slug-c/live-abc/scratchpad/f"; then ok "a session with a running process is held past the horizon"; else bad "a session with a running process is held past the horizon"; fi
 if exists "$ROOT/slug-c/dead-abc"; then bad "its equally stale neighbour is still reaped"; else ok "its equally stale neighbour is still reaped"; fi
 has "$OUT" "held 1 live" "a held session is reported as held, not kept"
+
+# Claude Code writes every command's output to a file in the session's tree,
+# so a running command holds that file open whatever its environment shows. A
+# process holding a file open inside a tree, or standing anywhere in it, holds
+# the tree past the horizon; with the process gone the same tree goes. Opening
+# a file that exists and changing directory write nothing, so both trees stay
+# as stale as their fixture.
+reset_root
+mk_session slug-o open-held 100
+mk_session slug-o cwd-held 100
+mk_session slug-o unheld 100
+mkdir -p "$ROOT/slug-o/open-held/tasks"; : > "$ROOT/slug-o/open-held/tasks/cmd.output"
+find "$ROOT/slug-o/open-held" -depth -exec touch -h -d "$(iso $((NOW - 100 * HOUR)))" {} +
+( exec 9>> "$ROOT/slug-o/open-held/tasks/cmd.output"; exec sleep 25 ) > /dev/null 2>&1 &
+OPENER=$!
+( cd "$ROOT/slug-o/cwd-held/scratchpad" && exec sleep 25 ) > /dev/null 2>&1 &
+STANDER=$!
+shows "$OPENER" "$ROOT/slug-o/open-held/tasks/cmd.output" && shows "$STANDER" "$ROOT/slug-o/cwd-held/scratchpad"
+OUT="$(run)"
+if exists "$ROOT/slug-o/open-held/scratchpad/f"; then ok "a process holding a file open in a tree holds it past the horizon"; else bad "a process holding a file open in a tree holds it past the horizon"; fi
+if exists "$ROOT/slug-o/cwd-held/scratchpad/f"; then ok "a process standing in a tree holds it past the horizon"; else bad "a process standing in a tree holds it past the horizon"; fi
+if exists "$ROOT/slug-o/unheld"; then bad "their equally stale unheld neighbour is still reaped"; else ok "their equally stale unheld neighbour is still reaped"; fi
+has "$OUT" "held 2 live" "trees with a holder are reported as held"
+stop "$OPENER"; stop "$STANDER"
+run > /dev/null
+if exists "$ROOT/slug-o/open-held"; then bad "with the file closed the same tree goes"; else ok "with the file closed the same tree goes"; fi
+if exists "$ROOT/slug-o/cwd-held"; then bad "with nothing standing in it the same tree goes"; else ok "with nothing standing in it the same tree goes"; fi
 
 # --- read-only trees ------------------------------------------------------
 # A Go module cache copied into scratch is mode 0555/0444: rm refuses it, and
@@ -145,16 +200,16 @@ mkdir -p "$ROOT/slug-d/readonly/scratchpad/modcache"
 echo locked > "$ROOT/slug-d/readonly/scratchpad/modcache/pkg"
 chmod 444 "$ROOT/slug-d/readonly/scratchpad/modcache/pkg"
 chmod 555 "$ROOT/slug-d/readonly/scratchpad/modcache"
-find "$ROOT/slug-d" -depth -exec touch -h -d "@$((NOW - 100 * HOUR))" {} + 2>/dev/null
+find "$ROOT/slug-d" -depth -exec touch -h -d "$(iso $((NOW - 100 * HOUR)))" {} + 2>/dev/null
 run > /dev/null
 if exists "$ROOT/slug-d/readonly"; then bad "a read-only subtree is still removed"; else ok "a read-only subtree is still removed"; fi
 
 # --- stray files above the session trees -----------------------------------
 reset_root
 mk_session slug-e keeper 1
-printf 'old\n' > "$ROOT/all.json";   touch -d "@$((NOW - 100 * HOUR))" "$ROOT/all.json"
-printf 'new\n' > "$ROOT/fresh.json"; touch -d "@$NOW" "$ROOT/fresh.json"
-printf 'old\n' > "$ROOT/slug-e/loose.json"; touch -d "@$((NOW - 100 * HOUR))" "$ROOT/slug-e/loose.json"
+printf 'old\n' > "$ROOT/all.json";   touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/all.json"
+printf 'new\n' > "$ROOT/fresh.json"; touch -d "$(iso "$NOW")" "$ROOT/fresh.json"
+printf 'old\n' > "$ROOT/slug-e/loose.json"; touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/slug-e/loose.json"
 run > /dev/null
 if exists "$ROOT/all.json"; then bad "a stale stray file at the root is deleted"; else ok "a stale stray file at the root is deleted"; fi
 if exists "$ROOT/fresh.json"; then ok "a fresh stray file at the root survives"; else bad "a fresh stray file at the root survives"; fi
@@ -168,7 +223,7 @@ if exists "$ROOT/slug-e/keeper/scratchpad/f"; then ok "the live session beside i
 reset_root
 mk_session slug-l intree 100 $((9 * 1024 * 1024))
 head -c $((10 * 1024 * 1024)) /dev/zero > "$ROOT/dump.json"
-touch -d "@$((NOW - 100 * HOUR))" "$ROOT/dump.json"
+touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/dump.json"
 OUT="$(run)"
 has "$OUT" "reaped 10 MiB  $ROOT/dump.json" "a large stray file is named in the report"
 has "$OUT" "reaped 9 MiB  $ROOT/slug-l/intree/scratchpad/f" "a large file inside a doomed tree is named in the report"
@@ -197,7 +252,7 @@ if exists "$ROOT/slug-g/here/scratchpad"; then ok "an empty scratchpad in a kept
 reset_root
 mk_session slug-k ancient 100 $((9 * 1024 * 1024))
 head -c $((10 * 1024 * 1024)) /dev/zero > "$ROOT/stray.json"
-touch -d "@$((NOW - 100 * HOUR))" "$ROOT/stray.json"
+touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/stray.json"
 SLOWBIN="$TMP/slowbin"; mkdir -p "$SLOWBIN"
 REAL_DU="$(command -v du)"
 printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_DU" > "$SLOWBIN/du"
@@ -236,12 +291,23 @@ if exists "$ROOT/slug-i/ancient/scratchpad/f"; then ok "the refused run deleted 
 OUT="$(SCRATCH_REAP_INACTIVE_AFTER=notanumber run)"; RC=$?
 eq "$RC" 2 "a non-numeric horizon is refused"
 
+# The default root is the one Claude Code writes: claude-<uid> under
+# $CLAUDE_CODE_TMPDIR, or under /tmp, and never under TMPDIR, which macOS sets
+# for every process. The runs are a dry run and a --session for an id no
+# session has, so a wrong default touches nothing.
+mkdir -p "$TMP/cc-tmp/claude-$(id -u)" "$TMP/elsewhere/claude-$(id -u)"
+OUT="$(env -u SCRATCH_REAP_ROOT CLAUDE_CODE_TMPDIR="$TMP/cc-tmp" TMPDIR="$TMP/elsewhere" bash "$SUT" --dry-run 2>&1)"
+has "$OUT" "DRY RUN — root $TMP/cc-tmp/claude-$(id -u)" "the default root follows CLAUDE_CODE_TMPDIR"
+OUT="$(env -u SCRATCH_REAP_ROOT -u CLAUDE_CODE_TMPDIR TMPDIR="$TMP/elsewhere" bash "$SUT" --session "no-such-session-$$" 2>&1)"
+has "$OUT" "/tmp/claude-$(id -u)" "without CLAUDE_CODE_TMPDIR the default root is /tmp/claude-<uid>"
+hasnt "$OUT" "$TMP/elsewhere" "the default root is never under TMPDIR"
+
 # --- symlinks are unlinked, never followed ---------------------------------
 reset_root
 OUTSIDE="$TMP/outside"; mkdir -p "$OUTSIDE"; : > "$OUTSIDE/precious"
 mk_session slug-j linked 100
 ln -s "$OUTSIDE" "$ROOT/slug-j/linked/scratchpad/link"
-find "$ROOT/slug-j" -depth -exec touch -h -d "@$((NOW - 100 * HOUR))" {} + 2>/dev/null
+find "$ROOT/slug-j" -depth -exec touch -h -d "$(iso $((NOW - 100 * HOUR)))" {} + 2>/dev/null
 run > /dev/null
 if exists "$OUTSIDE/precious"; then ok "a symlink out of the root is not followed"; else bad "a symlink out of the root is not followed"; fi
 if exists "$ROOT/slug-j"; then bad "the tree holding it is still removed"; else ok "the tree holding it is still removed"; fi
@@ -252,10 +318,10 @@ if exists "$ROOT/slug-j"; then bad "the tree holding it is still removed"; else 
 reset_root
 GUARDED="$TMP/guarded"; mkdir -p "$GUARDED"; : > "$GUARDED/f"; chmod 400 "$GUARDED/f"
 ln -s "$GUARDED/f" "$ROOT/stale-link"
-touch -h -d "@$((NOW - 100 * HOUR))" "$ROOT/stale-link"
+touch -h -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/stale-link"
 run > /dev/null
 if [ -L "$ROOT/stale-link" ]; then bad "a stale loose symlink is unlinked"; else ok "a stale loose symlink is unlinked"; fi
-eq "$(stat -c %a "$GUARDED/f")" 400 "the target of a stray symlink keeps its mode"
+eq "$(ls -l "$GUARDED/f" | cut -c1-10)" "-r--------" "the target of a stray symlink keeps its mode"
 if exists "$GUARDED/f"; then ok "the target of a stray symlink survives"; else bad "the target of a stray symlink survives"; fi
 
 # --- targeted --session mode -----------------------------------------------
@@ -277,10 +343,9 @@ has "$OUT" "reaped session target" "--session names the session it took"
 # retiring session naming itself, and takes its tree anyway.
 reset_root
 mk_session slug-u live-xyz 1
-env CLAUDE_CODE_SESSION_ID=live-xyz sleep 25 &
-SLEEPER=$!
+carry live-xyz
 run --session live-xyz > /dev/null
-kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+stop "$CARRIER"
 if exists "$ROOT/slug-u/live-xyz"; then bad "--session reaps a session even while its process is live"; else ok "--session reaps a session even while its process is live"; fi
 
 # --session with no id is a usage error, not a reap of everything.
@@ -376,11 +441,22 @@ if exists "$ROOT/$IDLE/$(uuid 3)"; then bad "once that process is gone the tree 
 # CLAUDE_CODE_SESSION_ID holds a UUID-named tree from the ended rule as well.
 reset_root
 mk_session "$IDLE" "$(uuid 4)" 1
-env CLAUDE_CODE_SESSION_ID="$(uuid 4)" sleep 25 > /dev/null 2>&1 &
-SLEEPER=$!
+carry "$(uuid 4)"
 run > /dev/null
-kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
+stop "$CARRIER"
 if exists "$ROOT/$IDLE/$(uuid 4)/scratchpad/f"; then ok "a running child's session id holds its tree from the ended rule"; else bad "a running child's session id holds its tree from the ended rule"; fi
+
+# So does a process holding a file open inside the tree.
+reset_root
+mk_session "$IDLE" "$(uuid 15)" 1
+( exec 9< "$ROOT/$IDLE/$(uuid 15)/scratchpad/f"; exec sleep 25 ) > /dev/null 2>&1 &
+OPENER=$!
+shows "$OPENER" "$ROOT/$IDLE/$(uuid 15)/scratchpad/f"
+run > /dev/null
+stop "$OPENER"
+if exists "$ROOT/$IDLE/$(uuid 15)/scratchpad/f"; then ok "a process holding a file in a tree holds it from the ended rule"; else bad "a process holding a file in a tree holds it from the ended rule"; fi
+run > /dev/null
+if exists "$ROOT/$IDLE/$(uuid 15)"; then bad "with the file closed the same tree goes as ended"; else ok "with the file closed the same tree goes as ended"; fi
 
 # A process standing in the project directory, or below it, holds every tree
 # written after it started: a /clear or an interactive session names nothing on
@@ -425,13 +501,62 @@ for failure in "STUB_FAIL=cities" "STUB_FAIL=sessions" "STUB_SESSIONS=not-json" 
     has "$OUT" "ended sessions not judged" "$failure: the summary says the rule did not run"
 done
 
-# A ps that cannot be read leaves every process undated, so nothing is judged.
-reset_root
-mk_session "$IDLE" "$(uuid 10)" 1
-NOPS="$TMP/nops"; mkdir -p "$NOPS"; printf '#!/bin/sh\nexit 1\n' > "$NOPS/ps"; chmod +x "$NOPS/ps"
-OUT="$(PATH="$NOPS:$PATH" run)"
-if exists "$ROOT/$IDLE/$(uuid 10)/scratchpad/f"; then ok "an unreadable ps judges nothing ended"; else bad "an unreadable ps judges nothing ended"; fi
-has "$OUT" "process start times could not be read" "an unreadable ps is named as the reason"
+# A ps that cannot be read leaves every process undated, so nothing is judged:
+# one that fails, and one that succeeds without listing the pass itself.
+NOPS="$TMP/nops"; mkdir -p "$NOPS/fails" "$NOPS/empty"
+printf '#!/bin/sh\nexit 1\n' > "$NOPS/fails/ps"
+printf '#!/bin/sh\nexit 0\n' > "$NOPS/empty/ps"
+chmod +x "$NOPS"/*/ps
+for fake in fails empty; do
+    reset_root
+    mk_session "$IDLE" "$(uuid 10)" 1
+    OUT="$(PATH="$NOPS/$fake:$PATH" run)"
+    if exists "$ROOT/$IDLE/$(uuid 10)/scratchpad/f"; then ok "ps $fake: an unreadable ps judges nothing ended"; else bad "ps $fake: an unreadable ps judges nothing ended"; fi
+    has "$OUT" "process start times could not be read" "ps $fake: an unreadable ps is named as the reason"
+done
+
+# The live-session readings have to answer, or no session tree is taken: a tree
+# past the horizon and an ended session's tree both stay, a stale stray file
+# still goes, and the summary says why. An lsof that lists nothing, one that
+# fails after listing what it could, and one whose listing does not show the
+# pass itself each leave the pass blind. With lsof answering, the same trees go.
+LSOFS="$TMP/lsofs"; mkdir -p "$LSOFS/none" "$LSOFS/fails" "$LSOFS/others"
+printf '#!/bin/sh\nexit 0\n' > "$LSOFS/none/lsof"
+printf '#!/bin/sh\nprintf "p%%s\\nfcwd\\nn/\\n" "$PPID"\nexit 1\n' > "$LSOFS/fails/lsof"
+printf '#!/bin/sh\nprintf "p1\\nfcwd\\nn/\\n"\n' > "$LSOFS/others/lsof"
+chmod +x "$LSOFS"/*/lsof
+for fake in none fails others; do
+    reset_root
+    mk_session slug-q ancient 100
+    mk_session "$IDLE" "$(uuid 14)" 1
+    printf 'old\n' > "$ROOT/stray.json"; touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/stray.json"
+    OUT="$(PATH="$LSOFS/$fake:$PATH" run)"
+    if exists "$ROOT/slug-q/ancient/scratchpad/f"; then ok "lsof $fake: a tree past the horizon is kept"; else bad "lsof $fake: a tree past the horizon is kept"; fi
+    if exists "$ROOT/$IDLE/$(uuid 14)/scratchpad/f"; then ok "lsof $fake: an ended session's tree is kept"; else bad "lsof $fake: an ended session's tree is kept"; fi
+    if exists "$ROOT/stray.json"; then bad "lsof $fake: a stale stray file still goes"; else ok "lsof $fake: a stale stray file still goes"; fi
+    has "$OUT" "no session tree judged — open files could not be read" "lsof $fake: the summary says why"
+done
+run > /dev/null
+if exists "$ROOT/slug-q/ancient"; then bad "with lsof answering, the tree past the horizon goes"; else ok "with lsof answering, the tree past the horizon goes"; fi
+if exists "$ROOT/$IDLE/$(uuid 14)"; then bad "with lsof answering, the ended session's tree goes"; else ok "with lsof answering, the ended session's tree goes"; fi
+
+# Where there is no /proc, ps -E is the environment reading, and a ps that
+# fails on it, or that lists processes without their environments, leaves the
+# pass blind the same way. Linux reads /proc, so these run only where there is
+# none.
+if [ ! -r "/proc/$$/environ" ]; then
+    PSES="$TMP/pses"; mkdir -p "$PSES/fails" "$PSES/bare"
+    printf '#!/bin/sh\ncase " $* " in *" -E "*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v ps)" > "$PSES/fails/ps"
+    printf '#!/bin/sh\nfor a; do shift; [ "$a" = -E ] || set -- "$@" "$a"; done\nexec %s "$@"\n' "$(command -v ps)" > "$PSES/bare/ps"
+    chmod +x "$PSES"/*/ps
+    for fake in fails bare; do
+        reset_root
+        mk_session slug-q ancient 100
+        OUT="$(PATH="$PSES/$fake:$PATH" run)"
+        if exists "$ROOT/slug-q/ancient/scratchpad/f"; then ok "ps -E $fake: a tree past the horizon is kept"; else bad "ps -E $fake: a tree past the horizon is kept"; fi
+        has "$OUT" "no session tree judged — process environments could not be read" "ps -E $fake: the summary says why"
+    done
+fi
 
 # Only trees Claude Code writes are judged, and gc is not asked when there is
 # nothing to judge: a non-UUID tree, a UUID under a name not drawn from a path,
