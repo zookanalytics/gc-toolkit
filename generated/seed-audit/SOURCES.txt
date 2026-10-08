@@ -64,7 +64,7 @@ formulas/mol-deacon-patrol.toml
 formulas/mol-dog-shutdown-dance.toml
 4f0781395c758f844b5833e8da83727d711230c35f9a61572332b2537fd19807
 formulas/mol-feedback-distiller.toml
-6139c868cd1b40293a728a6b129444c1acc4524dc47209bb37656482df3ccabd
+334316897859c880c8a5479a84847545bd6d69fd952e22bfa489a645492dae07
 formulas/mol-feedback-miner.toml
 393f222951204105cba158692cd03be44802b65fc506e1267c0f0c2f250f2ccc
 formulas/mol-first-reaction.toml
@@ -86,7 +86,7 @@ formulas/mol-validate.toml
 formulas/mol-visit.toml
 0279f28992dc140d1ce95477287a0ee543c34660e5039de491bad5d4bb2ead84
 formulas/mol-witness-patrol.toml
-563219faf7d90430e4fe89a2feaa27f98613b085b8940f680d6402d3ced770cc
+0b312874e97b03ebb6b6666ba77ead336778e83b15bac41bd2d286a8295a0b50
 pack.toml
 ad01c07323f6c18840caa35b9bbd9141c7affb6a9e3544df81f020561c31376c
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
