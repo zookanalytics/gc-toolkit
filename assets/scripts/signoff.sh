@@ -72,6 +72,7 @@ usage() {
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>] [--add-gates <checks>]
+                  [--visual <decision>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
@@ -97,12 +98,18 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  remove a declared check, validated against the check index at
                  the reviewed commit; each check added is recorded on the anchor
                  as a `triage-add:` note.
+  --visual       the demo check's decision: none when the change needs no
+                 visual, else the modality that conveys it (repo-artifact,
+                 screenshot or video). Required on every demo verdict and
+                 refused on any other check's; none records with approve only.
+                 Stamped on the review bead as visual=<decision> and named on
+                 the posted artifact's `Visual:` line.
 U
 }
 
 warn() { echo "signoff: $*" >&2; }
 
-REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""
+REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -111,6 +118,7 @@ while [ $# -gt 0 ]; do
     --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
+    --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
@@ -136,6 +144,8 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 
 # The check whose method owns the checks-needed decision; no other check widens.
 TRIAGE_GATE=triage
+# The check whose method owns the visual decision; no other check records one.
+VISUAL_GATE=demo
 INDEX_PARSER="$SCRIPT_DIR/review-checks.sh"
 # A check_set as one lowercase token per line. The comma split comes first and
 # the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
@@ -204,6 +214,27 @@ CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 if [ -n "$ADD_GATES" ]; then
   [ "$VERDICT" = "approve" ] || { warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1; }
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
+fi
+
+# --visual carries the demo check's decision: whether the change needs a visual
+# and, when it does, the modality that conveys it. A demo verdict without one is
+# refused rather than recorded without the decision it exists to make, and no
+# other check records one. none is approve-only: a check that found no visual
+# needed has nothing to block on. Refused before a marker is touched.
+VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
+  case "$VISUAL" in
+    none|repo-artifact|screenshot|video) ;;
+    '') warn "the '$VISUAL_GATE' check records its visual decision on every verdict: pass --visual none|repo-artifact|screenshot|video. Nothing written"; exit 1 ;;
+    *)  warn "--visual must be none, repo-artifact, screenshot or video (got '$VISUAL'); nothing written"; exit 1 ;;
+  esac
+  if [ "$VISUAL" = none ] && [ "$VERDICT" != approve ]; then
+    warn "--visual none records that the change needs no visual, which leaves the '$VISUAL_GATE' check nothing to block on; it records with --verdict approve only. Nothing written"
+    exit 1
+  fi
+elif [ -n "$VISUAL" ]; then
+  warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
+  exit 1
 fi
 
 # The anchor the check lands on: the durable anchor_bead stamp first, the
@@ -357,7 +388,9 @@ else
   printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$BODY_FILE" 2>/dev/null
 fi
 [ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
-printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
+printf '\n' >> "$BODY_FILE"
+[ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL" >> "$BODY_FILE"
+printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
 
 # The commit a verdict bound to is recorded on the review bead first, and only
 # then does the artifact go where its findings are read. That record is the
@@ -370,12 +403,23 @@ printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID
 # read, never which commit was judged, so the record does not vary with it.
 # request-changes records it too: it leaves no marker, but the round it spent
 # is part of the same ledger. Because the record is written first, a store that
-# will not take it costs a re-run instead of a marker nothing accounts for.
+# will not take it costs a re-run instead of a marker nothing accounts for. A
+# demo verdict's visual decision rides in the same write, so the record names
+# what the check decided as well as the commit it decided on.
 post_artifact() {
-  gc bd update "$REVIEW_BEAD" --set-metadata "reviewed_oid=$REVIEWED_OID" >/dev/null 2>&1 || true
-  local got; got=$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)
+  local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
+  [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
+  gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
+  local row got
+  row=$(bd_json show "$REVIEW_BEAD")
+  got=$(row_meta "$row" reviewed_oid)
   if [ "$got" != "$REVIEWED_OID" ]; then
     warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" visual)
+  if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
+    warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then
