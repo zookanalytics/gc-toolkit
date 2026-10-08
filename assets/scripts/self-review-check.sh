@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Exit condition for the `self-review` check loop in mol-polecat-work.
 #
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY

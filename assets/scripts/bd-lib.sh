@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it. Sourced, never executed.
+# queries it, and the gating-PR read the merge and pr-facts arms share. Sourced,
+# never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -111,4 +112,97 @@ bd_list() {
       || rm -f "$cache_file.$$.tmp" 2>/dev/null
   fi
   printf '%s' "$raw"
+}
+
+# bd_live_children — the live beads hung on each anchor through anchor_bead:
+# its reviews, validation passes, findings, rework children and visits, in one
+# read of the store. Prints one line per anchor that has any:
+#   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
+# A walking arm compares the id list with what it saw at its last visit, so a
+# child that opened or closed since then shows without a read per anchor.
+# Non-zero without output = the store did not answer.
+bd_live_children() {
+  local rows
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --has-metadata-key anchor_bead) || return 1
+  printf '%s' "$rows" | jq -r '
+    [ .[] | { a: ((.metadata.anchor_bead // "") | tostring), id: ((.id // "") | tostring),
+              rw: (((.metadata.task_kind // "") | tostring) == "rework") }
+          | select(.a != "" and .id != "") ]
+    | group_by(.a)[]
+    | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
+    | @tsv' 2>/dev/null
+}
+
+# The gating-PR read. The merge arm (merge.sh) and the pr-facts arm
+# (pr-facts.sh) both read each gating PR and decide on its merge state, so they
+# read it with one field set and the two arms see the same facts.
+# gh_pr_view_settled re-reads a PR whose merge state answered UNKNOWN, and
+# merge.sh calls it before it judges a candidate's merge state.
+
+# The pinned read's field set. pr-facts.sh asks for it plus labels. A re-read
+# asks for the set its pinned read asked for, so the two answers compare field
+# for field.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
+
+# GitHub computes a PR's mergeability lazily. The first read after the PR's base
+# moves answers UNKNOWN and starts the computation, which finishes within
+# seconds, and a PR nobody reads stays UNKNOWN. A re-read that answers a
+# computed state decides its PR. One that answers UNKNOWN again spends one of
+# the MERGE_STATE_REREADS that one run of the sourcing script gets, and an arm's
+# run is one pass. Once they are spent, no PR is re-read for the rest of the run.
+# So a computation stalled across the repository costs a pass at most
+# MERGE_STATE_REREADS reads that decide nothing, however many PRs answer
+# UNKNOWN. A PR's first re-read goes out at once, because its pinned read
+# already started the computation, and each later one waits
+# MERGE_STATE_REREAD_SECS.
+MERGE_STATE_REREADS="${MERGE_STATE_REREADS:-3}"
+MERGE_STATE_REREAD_SECS="${MERGE_STATE_REREAD_SECS:-5}"
+case "$MERGE_STATE_REREADS" in ''|*[!0-9]*) MERGE_STATE_REREADS=3 ;; esac
+case "$MERGE_STATE_REREAD_SECS" in ''|*[!0-9]*) MERGE_STATE_REREAD_SECS=5 ;; esac
+MERGE_STATE_REREADS_SPENT=0
+
+# gh_pr_view_settled <pr-number> <repo> <fields> <pinned-json> — read again a PR
+# whose pinned read, <pinned-json> asked with --json <fields>, answered an
+# UNKNOWN merge state. Sets PR_REREADS to the number of re-reads made, and
+# returns:
+#   0  a re-read answered a computed state. PR_REREAD_JSON holds that answer and
+#      PR_REREAD_STATE its mergeStateStatus.
+#   1  the state is still UNKNOWN and the run's re-reads are spent, by this PR's
+#      re-reads or, with PR_REREADS=0, by earlier ones.
+#   2  a re-read differs from the pinned read in a field other than
+#      mergeStateStatus, mergeable and reviewDecision, so the PR changed after
+#      the caller judged it. PR_REREAD_CHANGED names each such field with its
+#      pinned and re-read values.
+#   3  a re-read failed: gh exited non-zero, or printed nothing or something
+#      other than a JSON object. That says nothing about the merge state, so it
+#      spends nothing and is not reported as UNKNOWN.
+# shellcheck disable=SC2034  # the PR_REREAD_* results are the caller's to read
+gh_pr_view_settled() {
+  local n="$1" repo="$2" fields="$3" pinned="$4" again verdict
+  PR_REREADS=0; PR_REREAD_JSON=""; PR_REREAD_STATE=""; PR_REREAD_CHANGED=""
+  while [ "$MERGE_STATE_REREADS_SPENT" -lt "$MERGE_STATE_REREADS" ]; do
+    [ "$PR_REREADS" -eq 0 ] || sleep "$MERGE_STATE_REREAD_SECS"
+    PR_REREADS=$((PR_REREADS + 1))
+    again=$(gh pr view "$n" --repo "$repo" --json "$fields" 2>/dev/null) || return 3
+    [ -n "$again" ] || return 3
+    verdict=$(jq -rn --arg q "'" --argjson a "$pinned" --argjson b "$again" '
+      def pinned: del(.mergeStateStatus, .mergeable, .reviewDecision);
+      if ($b | type) != "object" then "unreadable"
+      else
+        [ ([$a, $b] | map(pinned | keys[]) | unique)[] as $k
+          | select($a[$k] != $b[$k])
+          | "\($k) \($q)\($a[$k] | tostring)\($q) -> \($q)\($b[$k] | tostring)\($q)" ] as $changed
+        | if ($changed | length) > 0 then "changed " + ($changed | join(", "))
+          else "state " + (($b.mergeStateStatus // "") | tostring) end
+      end' 2>/dev/null) || return 3
+    case "$verdict" in
+      "changed "*) PR_REREAD_CHANGED="${verdict#changed }"; return 2 ;;
+      "state "|"state UNKNOWN") MERGE_STATE_REREADS_SPENT=$((MERGE_STATE_REREADS_SPENT + 1)) ;;
+      "state "*) PR_REREAD_JSON="$again"; PR_REREAD_STATE="${verdict#state }"; return 0 ;;
+      *) return 3 ;;
+    esac
+  done
+  return 1
 }

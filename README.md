@@ -30,7 +30,7 @@ All agents are native to this pack — no gastown import.
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
-| `converse` | conversation role | holds subject conversations, claims visits |
+| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged visit: `gc-helm engage` opens it on a board visit, and it holds that subject's conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 
@@ -88,6 +88,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
+- [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 

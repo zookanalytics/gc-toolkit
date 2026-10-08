@@ -100,24 +100,26 @@ NOW="$START"
 over_budget() { [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - START)) -ge "$BUDGET" ]; }
 
 # --- repos and the city root ----------------------------------------------
-# Rig name and repo path travel together: the ledger a worktree's beads live
-# in is the rig's, and `gc bd` needs the name to reach it.
-REPO_NAMES=(); REPO_PATHS=()
+# Each repo travels with the bead store its worktrees' beads live in, opened by
+# path as `gc bd --db <path>/.beads`. A rig name cannot stand in for the path:
+# `gc bd --rig` resolves only the rigs city.toml declares, and the HQ row `gc rig
+# list` reports is the city itself, so the town's store answers to no name.
+REPO_DBS=(); REPO_PATHS=()
 CITY="${GC_CITY_PATH:-}"
 if [ -n "${WORKTREE_REAP_REPOS:-}" ]; then
     while IFS= read -r p; do
         [ -n "$p" ] || continue
-        REPO_NAMES+=(""); REPO_PATHS+=("$p")
+        REPO_DBS+=(""); REPO_PATHS+=("$p")
     done <<< "$WORKTREE_REAP_REPOS"
 else
-    RIGS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | [.name, .path, (.hq // false | tostring)] | join("\u001f")' 2>/dev/null)" || RIGS=""
+    RIGS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | [.path, (.hq // false | tostring)] | join("\u001f")' 2>/dev/null)" || RIGS=""
     if [ -z "$RIGS" ]; then
         echo "$PROG: no rigs readable — nothing to reap"
         exit 0
     fi
-    while IFS="$US" read -r name path hq; do
+    while IFS="$US" read -r path hq; do
         [ -n "${path:-}" ] && [ -d "$path/.git" ] || continue
-        REPO_NAMES+=("$name"); REPO_PATHS+=("$path")
+        REPO_DBS+=("$path/.beads"); REPO_PATHS+=("$path")
         [ "${hq:-false}" = "true" ] && [ -z "$CITY" ] && CITY="$path"
     done <<< "$RIGS"
 fi
@@ -170,16 +172,18 @@ done < <(gc session list --state all --json 2>/dev/null | jq -r '.sessions[]? | 
 # protects — a session between turns owns no process — so the checks above
 # carry the rest.
 #
-# `find` walks /proc rather than a glob over it. A shell glob stats every
-# candidate and drops what it cannot read, and passing the survivors to
-# `readlink` in bulk drops more still: measured on this host, find reported
-# around 360 cwds on every sample while the pair returned between 27 and 180,
-# and the pair missed a process started a moment earlier in 3 of 15 trials
-# where find missed none in 42. A protection that finds a varying fraction of
-# the live processes is worse than none, because it still reads as a check.
+# lsof lists the cwd of every process this user can see, on Linux and macOS
+# alike, and exits 0 on a walk it completed. A protection that finds none of
+# the live processes is worse than none, because it still reads as a check, so
+# a listing that failed, or that names no cwd at all, not even lsof's own,
+# refuses the pass.
+if ! LIVE_CWDS="$(lsof -w -n -P -F n -d cwd 2>/dev/null)" || ! grep -q '^n' <<< "$LIVE_CWDS"; then
+    echo "$PROG: no process cwd readable — refusing to reap without the live-cwd guard" >&2
+    exit 0
+fi
 while IFS= read -r d; do
     [ -n "$d" ] && protect_with_ancestors "$d" live-cwd
-done < <(find /proc -maxdepth 2 -name cwd -type l -printf '%l\n' 2>/dev/null || true)
+done < <(sed -n 's/^n//p' <<< "$LIVE_CWDS")
 SELF_CWD="$(pwd -P 2>/dev/null || true)"
 [ -n "$SELF_CWD" ] && protect_with_ancestors "$SELF_CWD" self
 
@@ -220,10 +224,10 @@ declare -A CLOSED_AT=() CLOSED_BEAD=() CLOSED_BRANCHES=()
 declare -A LEDGER_OK=()
 LEDGER_READ=0
 for i in "${!REPO_PATHS[@]}"; do
-    name="${REPO_NAMES[$i]}"; repo="${REPO_PATHS[$i]}"
-    RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
+    repo="${REPO_PATHS[$i]}"
+    STORE_ARG=(); [ -n "${REPO_DBS[$i]}" ] && STORE_ARG=(--db "${REPO_DBS[$i]}")
 
-    LIVE_STATUSES="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" statuses --json 2>/dev/null \
+    LIVE_STATUSES="$(gc bd "${STORE_ARG[@]+${STORE_ARG[@]}}" statuses --json 2>/dev/null \
         | jq -r '[.. | objects | select(has("name") and has("category"))
                  | select(.category != "done") | .name] | unique | join(",")' 2>/dev/null || true)"
     [ -n "$LIVE_STATUSES" ] || continue
@@ -233,7 +237,7 @@ for i in "${!REPO_PATHS[@]}"; do
     # result is "no live beads" and still ready, a failed query is "unknown" and
     # is not. Only a read that succeeded marks the repo ledger-ready, so an empty
     # OPEN_BRANCH reads as knowledge and not as a store that never answered.
-    LIVE_ROWS="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)" \
+    LIVE_ROWS="$(gc bd "${STORE_ARG[@]+${STORE_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)" \
         && LEDGER_OK["$repo"]=1 || LIVE_ROWS=""
 
     while IFS="$US" read -r wd br; do
@@ -258,7 +262,7 @@ for i in "${!REPO_PATHS[@]}"; do
         fi
         [ -n "$br" ] && CLOSED_BRANCHES["$wd"]="${CLOSED_BRANCHES[$wd]:-}$US$br"
         seen=1
-    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status closed --limit=0 --json 2>/dev/null \
+    done < <(gc bd "${STORE_ARG[@]+${STORE_ARG[@]}}" list --status closed --limit=0 --json 2>/dev/null \
         | jq -r '.[]? | . as $r | (.metadata // {}) as $md
                  | select(($md.work_dir // "") != "")
                  | [$md.work_dir, $r.id,
@@ -322,7 +326,7 @@ Restore: git -C $repo worktree add $path $tag" </dev/null >/dev/null 2>&1 || pru
             /^locked/     { lock = "locked"; next }
             END           { flush() }' >> "$WORK/wt"
 done
-TOTAL=$(wc -l < "$WORK/wt")
+TOTAL=$(($(wc -l < "$WORK/wt")))   # BSD wc pads the count with spaces
 
 # A registry that enumerated nothing means the walk failed, not that the city
 # has one checkout: the main worktree of every repo is always a row.
@@ -476,8 +480,8 @@ done < "$WORK/plan"
 
 for i in "${!REPO_PATHS[@]}"; do
     if over_budget; then br_stopped="budget"; break; fi
-    repo="${REPO_PATHS[$i]}"; name="${REPO_NAMES[$i]}"
-    RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
+    repo="${REPO_PATHS[$i]}"
+    STORE_ARG=(); [ -n "${REPO_DBS[$i]}" ] && STORE_ARG=(--db "${REPO_DBS[$i]}")
 
     # Hold the whole family on the two signals that also hold a worktree. An
     # unreadable PR listing (REPO_HELD) means an open PR could head a ref
@@ -534,7 +538,7 @@ for i in "${!REPO_PATHS[@]}"; do
     unset CLOSED_ID; declare -A CLOSED_ID=()
     while IFS= read -r id; do
         [ -n "$id" ] && CLOSED_ID["$id"]=1
-    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status closed --id "${ids#,}" --limit 0 --json 2>/dev/null \
+    done < <(gc bd "${STORE_ARG[@]+${STORE_ARG[@]}}" list --status closed --id "${ids#,}" --limit 0 --json 2>/dev/null \
              | jq -r '.[]?.id // empty' 2>/dev/null || true)
 
     landed_built=0

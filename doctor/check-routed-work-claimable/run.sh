@@ -7,13 +7,18 @@
 # held to the same test — assignment polls are the same exact-match contract.
 # Arm 3: no scope="rig" order is registered with no rig bound (an unbound copy
 # strands an unclaimable workflow root in the city store every fire). Arm 4:
-# an open, unassigned, routed bead appears in `bd ready` or in `bd blocked` —
-# an address arms 1-2 accept still names nobody who can be OFFERED the bead,
-# and a bead in neither list waits where no queue reports it. A live graph.v2
-# molecule step (gc.step_id with a LIVE gc.root_bead_id — open or in_progress)
-# is exempt: its molecule schedules it through session affinity, so it is in
-# neither list by design, not stranded — an orphan step of a CLOSED molecule
-# stays a finding, and a root whose liveness cannot be read warns, never passes.
+# an open, unassigned, routed bead is reachable from the store it lives in — an
+# address arms 1-2 accept still names nobody who can be OFFERED the bead. Two
+# ways it is not: the route reads a different store than the bead lives in (a
+# rig-scope pool queries only its own rig's store, so a cross-store route is
+# offered by nobody however valid the address, even while the bead sits in its
+# own store's `bd ready` — the shape gc sling refuses as CrossStoreRouteError),
+# or the bead is in neither `bd ready` nor `bd blocked`, waiting where no queue
+# reports it. A live graph.v2 molecule step (gc.step_id with a LIVE
+# gc.root_bead_id — open or in_progress) is exempt: its molecule schedules it
+# through session affinity, so it is in neither list by design, not stranded —
+# an orphan step of a CLOSED molecule stays a finding, and a root whose liveness
+# cannot be read warns, never passes.
 # Each candidate is re-read at report time, so one that closed between the
 # listing and the report is dropped, not flagged from a stale snapshot.
 # Values are compared AS STORED; normalization is a diagnostic, never a pass.
@@ -114,6 +119,22 @@ fi
 declare -A STORE_PATH=()
 while IFS=$'\037' read -r _sn _sp; do [ -n "$_sp" ] && STORE_PATH["$_sn"]="$_sp"; done <<< "$scopes"
 
+# Identity -> the store PATH it actually reads, so arm 4 can tell a valid address
+# that reads THIS store from one that reads another. A rig-scope agent reads its
+# rig's store (the "<rig>/" prefix of its qualified name); a city-scope agent
+# reads the city store. Any other scope is left unmapped, so the cross-store arm
+# below makes a positive finding only where the target store is known.
+declare -A ROUTE_STORE=()
+while IFS=$'\037' read -r _qn _scope; do
+    [ -n "$_qn" ] || continue
+    case "$_scope" in
+        rig)  case "$_qn" in */*) _rn="${_qn%%/*}"; [ -n "${STORE_PATH[$_rn]:-}" ] && ROUTE_STORE["$_qn"]="${STORE_PATH[$_rn]}" ;; esac ;;
+        city) [ -n "$city_path" ] && ROUTE_STORE["$_qn"]="$city_path" ;;
+    esac
+done <<< "$(printf '%s' "$agents_raw" | jq -r '.agents[]?
+    | [((.qualified_name // "") | gsub("[[:cntrl:]]"; " ")), ((.scope // "") | tostring)]
+    | join("\u001f")' 2>/dev/null)"
+
 while IFS=$'\037' read -r rig_name rig_path; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -199,7 +220,17 @@ while IFS=$'\037' read -r rig_name rig_path; do
     while IFS=$'\037' read -r id btype route parent blockers; do
         [ -n "$id" ] || continue
         [ -n "${addr_errors[$id]:-}" ] && continue
-        [ -n "${offerable[$id]:-}" ] && continue
+        # Cross-store reachability. A route can name a live identity (arm 1 passed
+        # it) yet read a store that does not hold this bead: a rig-scope pool
+        # queries only its own rig's store, so it never offers a bead that lives
+        # elsewhere — even one sitting in its own store's `bd ready`. That in-store
+        # `bd ready` membership is exactly what `offerable` records, so this test
+        # precedes it: a cross-store route is not rescued by being offerable where
+        # no routed-to pool reads. Positive finding only — a route whose store is
+        # unknown (ROUTE_STORE unset) falls through to the offerable test below.
+        xstore=""; target_store="${ROUTE_STORE[$route]:-}"
+        [ -n "$target_store" ] && [ "$target_store" != "$rig_path" ] && xstore=1
+        [ -z "$xstore" ] && [ -n "${offerable[$id]:-}" ] && continue
         case "$READY_EXCLUDES" in
             *" $btype "*)
                 notes+=("$label bead $id: gc.routed_to=\"$route\" is set on a $btype, a type \`bd ready\` never returns — in neither list by that type's design rather than by a stranded route; reported, not judged")
@@ -266,6 +297,10 @@ while IFS=$'\037' read -r rig_name rig_path; do
             fi
         fi
         # <<< arm4-live-molecule-and-recheck
+        if [ -n "$xstore" ]; then
+            errors+=("$label bead $id: gc.routed_to=\"$route\" is a live identity, but its pool reads a different store than the one $id lives in ($label) — a rig-scope pool claims only beads in its own store, so this route is offered by nobody however valid the address, even while $id sits in $label's own \`bd ready\`. This is the cross-store route gc sling refuses as CrossStoreRouteError; route it at a pool whose store holds $id, or file the demand in the store that pool reads")
+            continue
+        fi
         stranded="$label bead $id: gc.routed_to=\"$route\" is set, but the bead is in neither \`bd ready\` nor \`bd blocked\` — no pool offers it and no queue shows it waiting"
         if [ -n "$parent" ]; then
             errors+=("$stranded; it has parent $parent, and a parent-child child inherits its ancestor's blocked flag and drops out of ready — a routed bead must be parentless, or slung so a parentless workflow root carries the demand")
@@ -314,6 +349,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every route and assignee on open work names a live agent identity, and every rig-scoped order is bound"
+echo "OK: every route and assignee on open work names a live agent identity whose store holds the bead, and every rig-scoped order is bound"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

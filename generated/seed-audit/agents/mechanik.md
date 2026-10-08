@@ -182,9 +182,11 @@ branch is rejected non-fast-forward and stays with its polecat.
 
 `gc sling` stamps `gc.routed_to` and nothing else, whatever the target.
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
-proactive, converse — because pool members run the routed tier of the
-work query, and the bead has to stay unassigned for their claim filter
-to offer it.
+proactive — because pool members run the routed tier of the work query,
+and the bead has to stay unassigned for their claim filter to offer it.
+A converse sitting is neither a pool nor a named agent: a visit parks on
+the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
+sitting when the operator draws it off the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a
@@ -487,7 +489,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -498,7 +500,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \

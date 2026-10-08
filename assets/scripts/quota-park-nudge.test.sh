@@ -95,6 +95,8 @@ SCRIPT="$HERE/quota-park-nudge.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-quota-park-nudge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -1109,9 +1111,9 @@ grep -q '^session=lx-inject quota_park=unknown ' "$TMP/status-no-hb" \
 # this file.
 ORDER_ROOT="$(cd "$HERE/../.." && pwd)"
 ORDER_TOML="$ORDER_ROOT/orders/quota-park-nudge.toml"
-if ! python3 -c 'import tomllib' >/dev/null 2>&1; then
-    echo "skip - order wiring tests (no python3 tomllib on this host)"
-elif python3 - "$ORDER_TOML" > "$TMP/order.env" 2>"$TMP/order.err" <<'PY'
+if ! TOML_PY="$(tomllib_python)"; then
+    echo "skip - order wiring tests: $TOML_PY"
+elif "$TOML_PY" - "$ORDER_TOML" > "$TMP/order.env" 2>"$TMP/order.err" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as fh:
     order = tomllib.load(fh).get("order", {})

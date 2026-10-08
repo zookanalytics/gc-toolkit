@@ -60,6 +60,15 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 warn() { echo "review-outcome: $*" >&2; }
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# The one resolver of the check index: the anchor-wide supersede asks it for
+# every declared lane (`--through merge` spans all phases), which drops the
+# non-lanes none/off and the approval merge rule in one place.
+REVIEW_CHECKS="$SCRIPT_DIR/review-checks.sh"
+# A missing resolver would supersede no lanes on a non-converged batch, leaving a
+# stale green that merges. Require it, so the supersede holds instead.
+[ -x "$REVIEW_CHECKS" ] || { echo "review-outcome: the check resolver is missing ($REVIEW_CHECKS)" >&2; exit 2; }
+
 ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
 usage() {
@@ -73,10 +82,11 @@ USAGE
 
 # The closed review beads that currently back this lane green — the approve half
 # lane-state.sh reads, minus its in-flight test: a closed task_kind=review bead
-# for (anchor, lane) carrying reviewed_oid, either signoff_verdict=approve and
-# not superseded, or a legacy no-verdict gc.outcome=recorded. Ids on stdout, one
-# per line; exit 2 when the store would not read so a caller never mistakes an
-# unreadable store for "nothing backs the lane".
+# for (anchor, lane) carrying reviewed_oid and signoff_verdict=approve, not
+# superseded. A close with no signoff_verdict names no verdict (signoff stamps
+# gc.outcome=recorded on every close, approve and request-changes alike), so it
+# backs no lane. Ids on stdout, one per line; exit 2 when the store would not
+# read so a caller never mistakes an unreadable store for "nothing backs the lane".
 backing_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
   rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
@@ -89,7 +99,7 @@ backing_ids() { # <anchor> <lane>
           | select((($m.reviewed_oid // "") | tostring) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv
           | (($m["gc.outcome"] // "") | tostring) as $oc
-          | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded")) ]
+          | select($sv == "approve" and $oc != "superseded") ]
     | .[].id' 2>/dev/null
 }
 
@@ -178,7 +188,7 @@ cmd_back_lane() {
   title="lane $lane converged: validator ruled no further review — anchor $anchor"
   desc=$(printf 'The validator ruled lane %s converged on anchor %s at %s: no further whole-diff review is warranted. This closed approve outcome is what lane-state.sh reads to derive green once nothing else holds the lane. The reviewed_oid is a dispatch pin, not a claim that green is bound to that commit.%s' \
     "$lane" "$anchor" "$oid" "${batch:+ Batch: $batch.}")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r '.id // .[0].id // empty' 2>/dev/null)
+  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$id" ] || { warn "could not create the approve outcome bead for lane $lane on $anchor"; exit 2; }
   local note="validator: lane $lane converged at $oid"
   [ -n "$reason" ] && note="$note — $reason"
@@ -242,12 +252,18 @@ cmd_supersede_anchor() {
   [ -n "$checkset" ] \
     || { warn "anchor $anchor declares no check_set; refusing to treat that as no gating lane"; exit 2; }
 
-  # Drop the non-lane check_set tokens, the same list merge.sh and pr-open.sh
-  # apply: none/off is checkless by choice and approval is met by a GitHub review,
-  # not a lane derivation. A check_set naming only those has no lane to move, so a
-  # deliberately checkless anchor is a zero no-op, not an error.
+  # The declared lanes, from the one resolver merge.sh and pr-open.sh also ask:
+  # none/off is checkless by choice and approval is the universal merge rule, not a
+  # lane, so all three drop there. A check_set naming only those has no lane to
+  # move, so a deliberately checkless anchor is a zero no-op, not an error.
   local lanes
-  lanes=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' | grep -Eiv '^(none|off|approval)$')
+  # The resolver's exit status separates a crash from a deliberately checkless
+  # anchor: a non-zero exit could not name the lanes and must fail closed (exit 2,
+  # like the unreadable-anchor arms above), never collapse to a zero no-op that
+  # leaves the merge open on a review the validator required.
+  if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
+    warn "the check resolver failed for anchor $anchor; refusing to supersede on an unreadable lane set"; exit 2
+  fi
   [ -n "$lanes" ] || { echo 0; return 0; }
 
   local note="validator: superseded (anchor-wide human batch) — a fresh whole-diff review is warranted"

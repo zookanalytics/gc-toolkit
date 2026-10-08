@@ -21,6 +21,9 @@
 # 5 react no-op: the subject already carries a first reaction, so nothing was
 # slung (a first reaction happens once) — distinct from 4 so an intake caller
 # files its own visit instead of reading a skip as a dispatched reaction.
+# 6 react no-op: a live workflow already drives the subject, so nothing was
+# slung (a first reaction never races work in flight) — distinct from 5 so the
+# intake caller names the cause in the visit it files.
 
 set -eu
 
@@ -45,7 +48,7 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue) and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -60,7 +63,8 @@ parks it on the board (gc.routed_to=human); its --reason is the short title
 tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
-name so the session's own claim adopts it with no pool routing, and attaches;
+name so the session's own claim adopts it with no pool routing, and attaches
+once the reconciler has started it;
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -181,15 +185,18 @@ normalize_headline() {
 }
 
 # visit_headline <raw> — the board headline for a visit title, whitespace
-# collapsed and capped at TAKEAWAY_MAX codepoints. normalize_headline REJECTS
-# over its cap because a demand/takeaway headline IS the deliverable and only
-# the author knows which clause to keep; a visit carries its full reason in the
-# body, so here the over-cap tail is TRUNCATED with an ellipsis instead. That
-# keeps "visit: <id> — <tail>" under bd's title cap without dropping the reason.
+# collapsed and capped at TAKEAWAY_MAX codepoints and at 400 bytes.
+# normalize_headline REJECTS over its cap because a demand/takeaway headline IS
+# the deliverable and only the author knows which clause to keep; a visit
+# carries its full reason in the body, so here the over-cap tail is TRUNCATED
+# with an ellipsis instead. bd caps a title at 500 BYTES, and a codepoint cap
+# alone overruns it once the tail is in 4-byte characters, so the byte cap is
+# what keeps "visit: <id> — <tail>" under bd's cap without dropping the reason.
 visit_headline() {
     printf '%s' "$1" | jq -Rsr --argjson n "$TAKEAWAY_MAX" \
         '((gsub("\\s+"; " ")) | sub("^ "; "") | sub(" $"; "")) as $h
-         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end' \
+         | if ($h | length) > $n then (($h[:($n - 1)]) | sub("\\s+$"; "")) + "…" else $h end
+         | until(utf8bytelength <= 400; (.[:-2] | sub("\\s+$"; "")) + "…")' \
         2>/dev/null || printf '%s' "$1" | cut -c1-"$TAKEAWAY_MAX"
 }
 
@@ -220,6 +227,12 @@ ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
 # that it closed). Best-effort and self-silencing when the subject has no PR;
 # overridable so a hermetic test can point it at a fixture.
 VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
+# The longest engage waits, in seconds, for the reconciler to start the sitting
+# it spawned before attaching to it. 120 is the default `gc session new` puts on
+# the same wait. Overridable, so a slow controller can be given longer and a
+# hermetic test can reach the bound.
+ENGAGE_WAIT_TIMEOUT="${GC_HELM_ENGAGE_WAIT_TIMEOUT:-120}"
+case "$ENGAGE_WAIT_TIMEOUT" in ''|*[!0-9]*) ENGAGE_WAIT_TIMEOUT=120 ;; esac
 TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
@@ -1510,7 +1523,7 @@ cmd_demand() {
         demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
         if [ -z "$demand" ]; then
             demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="$(demand_await_id "$gated" "$topic")" --title "$text" --reason "$body" --json 2>/dev/null \
-                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+                | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
             if [ -z "$demand" ] || [ "$demand" = null ]; then
                 candidate=$(demand_lookup "$gated" "$topic") \
                     || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: $(demand_await_id "$gated" "$topic")." >&2; exit 4; }
@@ -1905,10 +1918,12 @@ cmd_react() {
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
     # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
-    # guard skipped an already-reacted bead: a no-op, not a failure, and NO
-    # reaction was dispatched. Re-raise that as exit 5 so an intake caller
-    # (gc-visit-open) files its own visit instead of waiting for a reaction that
-    # never ran; any other non-zero is a real failure.
+    # guard skipped an already-reacted bead, and 4 (RC_LIVE_WORKFLOW) when its
+    # live-workflow guard skipped a bead a live workflow already drives. Each is
+    # a no-op, not a failure, and NO reaction was dispatched. Re-raise them as
+    # exit 5 and exit 6 so an intake caller (gc-visit-open) files its own visit,
+    # naming the cause, instead of waiting for a reaction that never ran; any
+    # other non-zero is a real failure.
     if "$tool" "$@"; then
         :
     else
@@ -1916,6 +1931,10 @@ cmd_react() {
         if [ "$sling_rc" -eq 3 ]; then
             echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
             exit 5
+        fi
+        if [ "$sling_rc" -eq 4 ]; then
+            echo "$PROG: react: a live workflow already drives $bead — nothing slung (a first reaction never races work in flight). React once that workflow's root closes, or file the visit directly." >&2
+            exit 6
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4
@@ -2327,12 +2346,72 @@ accept_mark_dispatched() {
     [ -z "$_amd_live" ] && [ "$_amd_mark" = "$_amd_formula" ]
 }
 
+# accept_open_demands <subject> — the open, unassigned demands on the subject,
+# one id per line: what a person still owes on it. A first reaction's recommend
+# exit puts its recommendation to the operator as one such human gate. An
+# assigned demand is a task a named person performs, not a question Accept
+# answers, so it is left alone (converse-signoff.sh's discharge reads the same
+# pair). --include-gates because `bd list` hides gates; the status set is the
+# demand readers', so a gate an operator deferred or pinned is found too. Returns
+# non-zero on a listing it cannot read, since an unread store is not proof that
+# nothing is owed.
+accept_open_demands() {
+    _aod_raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+        --include-gates --has-metadata-key gc.demand_for --json --limit=0 2>/dev/null) || return 1
+    printf '%s' "$_aod_raw" | scrub | jq -r --arg s "$1" '
+        if type != "array" then error("not an array") else
+          .[] | objects
+          | select(((.metadata // {})["gc.demand_for"] // "") == $s)
+          | select(((.assignee // "") | tostring) == "")
+          | (.id // empty)
+        end' 2>/dev/null
+}
+
+# accept_resolve_demands <subject> <reason> — resolve each open, unassigned
+# demand on the subject with the operator's answer. A demand filed before
+# demands were gates (issue_type=decision) is refused by `gate resolve` ("is not
+# a gate issue"), so it is closed on the same terms, as converse-signoff.sh
+# does. A resolve can report success without the gate closing, so the demands
+# are listed again after: returns 0 only when none is left open, and leaves the
+# survivors, or "unreadable", in ACCEPT_DEMANDS_LEFT for the caller's message.
+ACCEPT_DEMANDS_LEFT=""
+accept_resolve_demands() {
+    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""
+    if ! _ard_ids=$(accept_open_demands "$_ard_subj"); then
+        ACCEPT_DEMANDS_LEFT="unreadable"; return 1
+    fi
+    [ -n "$_ard_ids" ] || return 0
+    for _ard_d in $_ard_ids; do
+        gc bd gate resolve "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
+            || gc bd close "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
+            || true
+    done
+    if ! _ard_left=$(accept_open_demands "$_ard_subj"); then
+        ACCEPT_DEMANDS_LEFT="unreadable"; return 1
+    fi
+    ACCEPT_DEMANDS_LEFT=$(printf '%s' "$_ard_left" | tr '\n' ' ' | sed 's/ *$//')
+    [ -z "$ACCEPT_DEMANDS_LEFT" ]
+}
+
+# accept_demand_refused <subject> <formula> — the refusal when the subject's
+# demand did not resolve after a landed dispatch. Nothing is dismissed, so a
+# re-run of accept resumes at the resolve without dispatching again.
+accept_demand_refused() {
+    if [ "$ACCEPT_DEMANDS_LEFT" = "unreadable" ]; then
+        echo "$PROG: accept: dispatched $2 at $1, but could not read its demands to resolve the human gate that put it to the operator, so accept stops before dismissing anything. Re-run accept once the store answers; it resumes here without dispatching again." >&2
+    else
+        echo "$PROG: accept: dispatched $2 at $1, but its human gate $ACCEPT_DEMANDS_LEFT is still open, so the dispatched work stays blocked on it and accept stops before dismissing anything. Resolve the gate (gc bd gate resolve <id> --reason \"accepted\"), or re-run accept, which resumes here without dispatching again." >&2
+    fi
+    exit 4
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation straight off the board: dispatch the subject's
-# gc.recommended_formula at the subject and dismiss its visit, in one procedural
-# order with no sitting. It is the low-friction actuation of a ruling the human
-# has made (Accept/Discuss flow); the board renders the affordance on a subject
-# whose visit is un-engaged, and this verb performs it.
+# gc.recommended_formula at the subject, resolve the human gate that put it to
+# the operator, and dismiss its visit, in one procedural order with no sitting.
+# It is the low-friction actuation of a ruling the human has made
+# (Accept/Discuss flow); the board renders the affordance on a subject whose
+# visit is un-engaged, and this verb performs it.
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
@@ -2459,6 +2538,10 @@ cmd_accept() {
             engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
             absent)
                 if [ "$resume" = 1 ]; then
+                    # The visit is gone, but its gate is the one write that may
+                    # still be owed, so it is resolved before calling this done.
+                    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
+                        || accept_demand_refused "$bead" "$formula"
                     echo "$PROG: accept: $bead was already dispatched ($formula) and its visit already dismissed — nothing left to do."
                     exit 0
                 fi
@@ -2488,6 +2571,18 @@ cmd_accept() {
         echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
         exit 4
     fi
+
+    # The recommendation reached the operator as a human gate on the subject,
+    # and Accept is the operator's answer to it, so the gate is resolved here.
+    # Left open, it would hold the dispatched work out of `bd ready` with no
+    # sitting ever offered for it: the dismiss below closes the gate's visit, and
+    # gate-visit-sweep does not re-offer a gate it has stamped. A subject held on
+    # its visit alone carries no demand, and this resolves nothing. The board
+    # suppresses a closed demand's unanswered question, so no answer is stamped
+    # back onto the gate. A gate that will not resolve refuses the dismiss, and a
+    # re-run resumes here, after the dispatch the marker above records.
+    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
+        || accept_demand_refused "$bead" "$formula"
 
     # The recommendation is dispatched, so the operator's decision is made: dismiss
     # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
@@ -3557,30 +3652,87 @@ cmd_engage() {
     printf '[debug] visit=%s sitting=%s (%s) routed_to=%s cont_group=%s work_dir=%s\n' \
         "$VISIT" "$sid" "$sname" "${_eng_routed:-?}" "$bead" "${swork_dir:-?}" >&2
 
-    # A freshly spawned sitting self-starts from the prompt its launch delivers.
-    # `gc session new` puts the rendered converse prompt on argv (every converse
-    # provider resolves to prompt_mode=arg) and step 1 of that prompt is the claim
-    # block, so a claude sitting (opus, fable) claims its visit, re-checks the
-    # premise, preps, and posts its framing with no keystrokes. Sending it a kick
-    # as well is worse than redundant. engage would deliver the kick while that
-    # self-started turn is still running, so the harness holds it as a deferred
-    # reminder and releases it after the framing lands, and the operator reads a
-    # stale "begin now" once per engage.
+    # A freshly spawned sitting self-starts from the prompt its launch delivers,
+    # and only the reconciler's launch delivers one. `gc session new --no-attach`
+    # records the sitting as start-pending. The reconciler then launches it with
+    # the rendered converse prompt on argv (every converse provider resolves to
+    # prompt_mode=arg), and step 1 of that prompt is the claim block. So a claude
+    # sitting (opus, fable) claims its visit, re-checks the premise, preps, and
+    # posts its framing with no keystrokes. Sending it a kick as well is worse
+    # than redundant. engage would deliver the kick while that self-started turn
+    # is still running, so the harness holds it as a deferred reminder and
+    # releases it after the framing lands, and the operator reads a stale
+    # "begin now" once per engage.
     #
-    # codex is the exception. gascity delivers its prompt the same way, but the
-    # codex CLI is not trusted to consume an argv prompt at launch: its pool slots
-    # carry no prompt template and are primed by an explicit nudge instead. A
-    # codex sitting can wake idle at its prompt, so it keeps a START directive
-    # kick. A bare poke reads as a connectivity check and does not begin the loop,
-    # so the kick names the action. An idle session takes it at once, with no
-    # in-flight turn for the harness to defer it behind. The kick precedes the
-    # attach so the operator lands on a started sitting, and on the --no-attach
-    # board-picker path it starts the sitting for whoever attaches later. A failed
-    # kick is not fatal: the visit is bound, so report it and let the operator
-    # start it by hand.
+    # An attach must not reach the sitting before the reconciler does.
+    # `gc session attach` on a sitting the reconciler has not launched yet
+    # launches it itself, from the stored command with no prompt, and that
+    # sitting idles at its input until someone types into it. So the attach path
+    # waits for the launch first (engage_await_start), the same wait
+    # `gc session new` runs before its own attach, and attaches only a started
+    # sitting. --no-attach attaches nothing, so it does not wait.
+    #
+    # codex is the exception to self-starting. gascity delivers its prompt the
+    # same way, but the codex CLI is not trusted to consume an argv prompt at
+    # launch: its pool slots carry no prompt template and are primed by an
+    # explicit nudge instead. A codex sitting can wake idle at its prompt, so it
+    # keeps a START directive kick. A bare poke reads as a connectivity check and
+    # does not begin the loop, so the kick names the action. An idle session takes
+    # it at once, with no in-flight turn for the harness to defer it behind. The
+    # kick follows the start wait and precedes the attach, so the operator lands
+    # on a started sitting. On the --no-attach board-picker path it starts the
+    # sitting for whoever attaches later; a kick that reaches the sitting before
+    # its launch does not launch it, because gc queues the nudge and delivers it
+    # once the reconciler has. A failed kick is not fatal: the visit is bound, so
+    # report it and let the operator start it by hand.
     #
     # A --reason is filed into the visit body by cmd_open, so every sitting reads
     # it when it claims. The kick also carries it, for the one provider kicked.
+    #
+    # engage_await_start returns 0 once the sitting's `gc session list` row reads
+    # `active`, which it does only once the runtime is running; before the launch
+    # it reads start-pending or creating. It returns 2 when the sitting ended
+    # first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. A closed sitting
+    # drops out of the list when gc reads it from the store, and stays listed
+    # with an empty state when gc reads it from the supervisor, so both a row
+    # that leaves the list and an empty state mean it ended, as does
+    # failed-create. A sitting not listed yet may only lag the supervisor's read
+    # cache, so it is waited on, and so is a listing that did not read.
+    # start_state keeps the last state read, for the messages below.
+    engage_await_start() {
+        _start_deadline=$(( $(date +%s) + ENGAGE_WAIT_TIMEOUT ))
+        _start_seen=0; _start_told=0; start_state=""
+        while :; do
+            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+                if type == "object" and ((.sessions // null) | type) == "array"
+                then (first(.sessions[] | select((.id // "") == $id)
+                            | if (.state // "") == "" then "closed" else .state end)
+                      // "unlisted")
+                else "unreadable" end' 2>/dev/null || true)
+            case "$start_state" in
+                active) return 0 ;;
+                closed|failed-create) return 2 ;;
+                unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
+                ''|unreadable) ;;
+                *) _start_seen=1 ;;
+            esac
+            [ "$(date +%s)" -lt "$_start_deadline" ] || return 1
+            if [ "$_start_told" = 0 ]; then
+                printf '  waiting up to %ss for the reconciler to start %s...\n' "$ENGAGE_WAIT_TIMEOUT" "$sname"
+                _start_told=1
+            fi
+            sleep 1
+        done
+    }
+    start_rc=0
+    if [ "$engage_attach" = "1" ]; then
+        engage_await_start || start_rc=$?
+        if [ "$start_rc" -eq 2 ]; then
+            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Visit $VISIT is still bound to it; unbind it to put it back on the board: gc bd update $VISIT --assignee \"\"" >&2
+            exit 4
+        fi
+    fi
+
     case "$engage_model" in
         opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
         *)
@@ -3592,9 +3744,15 @@ cmd_engage() {
             ;;
     esac
 
-    # The summary already printed the attach line; on the default path we attach.
+    # The summary already printed the attach line; on the default path we attach
+    # a started sitting. One still unstarted at the bound is left unattached,
+    # because the attach would launch it without its prompt.
     if [ "$engage_attach" = "1" ]; then
-        gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        if [ "$start_rc" -eq 0 ]; then
+            gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        else
+            echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
+        fi
     fi
     return 0
 }
