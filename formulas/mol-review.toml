@@ -146,8 +146,13 @@ id = "review"
 title = "Read the diff, run the tests, write the verdict body"
 needs = ["load-dispatch"]
 description = """
-Each block is its own shell, so re-derive the pins first:
+Each block is its own shell, so re-derive the pins first.
+`CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim --json` returned
+for this step: the review step bead, which carries the claim's lease.
+`REVIEW_BEAD` is the review bead the convoy tracks. It stays open and unassigned
+while this molecule runs, so it has no lease to refresh.
 ```bash
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
@@ -173,6 +178,15 @@ workspace is a directory named for the review bead, and it belongs to the
 review rather than to any one shell: `add` returns the same worktree each time
 it runs, so a later block gets it back by running these lines again.
 ```bash
+# >>> review-lease-keepalive
+# Keep this review claim's lease in the future across the suites: a claim's
+# lease has a fixed five-minute TTL and a suite can outlive it, so a live
+# reviewer whose lease expired reads to a lease consumer like a dead one.
+# Refresh $CLAIMED_STEP_BEAD_ID through the keepalive while each suite runs
+# (best-effort — an unresolved wrapper runs the command plain and never fails it).
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
+# <<< review-lease-keepalive
 # >>> review-workspace-add
 # The worktree is made in the rig's repository, named by path, so the
 # session's cwd cannot pick the repo. Without --repo, add uses the current
@@ -187,7 +201,8 @@ done
 REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
-# run the suites the diff touches; record real pass/fail counts
+# run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
+# record real pass/fail counts
 ```
 Anything else the review writes to disk, such as a log, probe output, or a
 second worktree at the base, goes in the workspace beside `wt`

@@ -552,17 +552,36 @@ Check if the codebase is healthy BEFORE starting your work.
 **Skip this step if resuming a rejected branch** — pre-flights were
 already verified on the prior attempt. Close this step and proceed.
 
-**1. Run pre-flights (skip empty commands silently):**
+**1. Run pre-flights (skip empty commands silently).** The test suite can run
+far longer than a claim's five-minute lease TTL, so run it through the
+claim-lease keepalive: `assets/scripts/lease-heartbeat.sh` refreshes your claim
+every couple of minutes while the suite runs, so a live holder is not taken for
+a dead one. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim
+--json` returned for this step. The lease is on that step bead, and an earlier
+step's claim is already closed, so its id refreshes nothing. The keepalive is
+best-effort — an unresolved wrapper runs the command plain.
 ```bash
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
+# >>> preflight-lease-keepalive
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
+# <<< preflight-lease-keepalive
 {{typecheck_command}}
 {{lint_command}}
+# A quoted heredoc hands the test command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
 {{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
 
 **If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
 (whichever your provider uses) for quality-gate guidance. Look for sections
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
-verification commands listed there — in code blocks or bullet lists.
+verification commands listed there — in code blocks or bullet lists. Run the
+test command through the keepalive the same way, `hb bash -c '<test command>'`,
+so a long suite keeps the lease fresh.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
 Do NOT run install, cleanup, publish, release, `git push`, or any
@@ -867,14 +886,33 @@ than re-deriving from scratch.
 {{build_command}}
 ```
 
-**4. Tests — affected subset when the rig provides one, full suite otherwise:**
+**4. Tests — affected subset when the rig provides one, full suite otherwise.**
+Run them through the claim-lease keepalive. A claim's lease has a fixed
+five-minute TTL and the suite routinely outlives it, so a live holder whose
+lease expired reads, to any lease consumer, exactly like a dead one;
+`assets/scripts/lease-heartbeat.sh` refreshes `$CLAIMED_ITER_BEAD` every couple
+of minutes while the command runs. It is best-effort. An unresolved wrapper runs
+the command plain, and a refresh the store refuses is reported once on stderr.
+Neither fails the command.
 ```bash
-if [ -n "{{affected_tests_command}}" ]; then
-    {{affected_tests_command}}
-else
-    {{test_command}}
-fi
+# >>> self-review-lease-keepalive
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_ITER_BEAD" -- "$@"; else "$@"; fi; }
+# <<< self-review-lease-keepalive
+# A quoted heredoc hands each command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{affected_tests_command}}
+TEST_CMD_EOF
+)
+[ -n "$TEST_CMD" ] || TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
+If the rig declares no test command (both empty) and you run the repo's own
+quality gate instead, invoke it the same way — `hb bash -c '<your test
+command>'` — so the long run keeps the lease fresh.
 
 **A failure your diff introduced blocks the stamp — fix it and commit.** A
 failure that reproduces on `origin/{{base_branch}}` is pre-existing:
