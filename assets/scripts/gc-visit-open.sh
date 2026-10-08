@@ -344,7 +344,7 @@ board; this body is the record. Ask before assuming scope."
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
-    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
         # A refused create STATES its reason in .error — surface it (tk-wp50s).
         SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
