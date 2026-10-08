@@ -133,6 +133,8 @@ through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
 --message "<what is wrong + recommendation>"`. Context recycling is the
 cycle-recycle Stop hook's job — never something you ask about.
 
+{{ template "visit-close" . }}
+
 {{ template "heartbeat-no-consent-ui" . }}
 
 {{ template "operator-profile" . }}

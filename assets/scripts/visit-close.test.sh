@@ -31,6 +31,8 @@ mkdir -p "$BIN"
 #   FAIL_STAMP  the update exits 0 but records nothing (the silent drop)
 #   FAIL_CLOSE  the close logs but the status never becomes closed
 #   NEED_FORCE  a plain close is refused; only a --force close takes
+#   RECLOSE_REFUSED  a close of a bead already closed exits 1 (bd answers it
+#               as a no-op success; this knob covers a store that refuses it)
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] || exit 2
@@ -50,6 +52,9 @@ case "${2:-}" in
         if [ -n "${NEED_FORCE:-}" ] && [ "$forced" -eq 0 ]; then
             printf 'close-refused %s\n' "$*" >>"$LOG"; exit 1
         fi
+        if [ -n "${RECLOSE_REFUSED:-}" ] && [ "$(cat "$ST" 2>/dev/null)" = "closed" ]; then
+            printf 'reclose-refused %s\n' "$*" >>"$LOG"; exit 1
+        fi
         printf 'close %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_CLOSE:-}" ] || printf 'closed' >"$ST" ;;
     show)   jq -nc \
@@ -57,7 +62,7 @@ case "${2:-}" in
               --arg r "$(cat "$R" 2>/dev/null)" \
               --arg s "$(cat "$ST" 2>/dev/null)" \
               '[{id:"v-x",status:(if $s=="" then "open" else $s end),metadata:{"gc.outcome":$o,"gc.outcome_reason":$r}}]' ;;
-    *) exit 2 ;;
+    *) printf 'other %s\n' "$*" >>"$LOG"; exit 2 ;;
 esac
 STUB
 chmod +x "$BIN/gc"
@@ -111,6 +116,23 @@ has "the forced close is the one that took" 'close v-x --reason dismissed: opera
 reset; RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" NEED_FORCE=1 bash "$SUT" --visit v-x --outcome dismissed --reason "operator ended it" >/dev/null 2>&1 ) || RC=$?
 is "without --force a refused close is not silently a success" "$RC" "4"
+
+# A visit someone closed by hand carries no outcome, and visit-close.sh is the
+# repair the role prompts name for it: it records both keys on the closed visit
+# and leaves the close standing. The store answers the re-close as a no-op, or
+# refuses it; either way the status read decides, and nothing reopens the visit.
+echo "── on a visit already closed by hand it records the outcome and exits 0 ──"
+for knob in "" RECLOSE_REFUSED; do
+    reset; printf 'closed' >"$LOG.st"; RC=0
+    ( PATH="$BIN:$PATH" LOG="$LOG" env ${knob:+"$knob=1"} bash "$SUT" --visit v-x --outcome moot \
+        --reason "filed in error" >/dev/null 2>&1 ) || RC=$?
+    label="${knob:-re-close is a no-op}"
+    is "$label: it exits 0" "$RC" "0"
+    has "$label: the outcome word is stamped" 'set-metadata gc.outcome=moot' "$LOG"
+    has "$label: the board-visible reason is stamped" 'set-metadata gc.outcome_reason=filed in error' "$LOG"
+    hasnt "$label: no status write reopens the visit" '--status' "$LOG"
+    hasnt "$label: no other bd verb runs" 'other ' "$LOG"
+done
 
 echo
 echo "visit-close: $PASS passed, $FAIL failed"

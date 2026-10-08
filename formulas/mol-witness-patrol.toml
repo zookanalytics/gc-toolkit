@@ -869,8 +869,10 @@ fi
 # The candidate pass runs only after a queue read that parsed as an array
 # ($STUCK_N set); a failed queue read leaves every visit as it is until a later
 # cycle reads the queue. Only a visit whose group is exactly the handoff bead id
-# is a candidate; a legacy group carrying extra tokens (a malformed-subject
-# filing) is left for repair.
+# is a candidate. A legacy group carrying extra tokens (a malformed-subject
+# filing) names no handoff, so this arm leaves it. Such a visit was filed in
+# error, and it closes through visit-close.sh with outcome moot, never a bare
+# gc bd close.
 if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
