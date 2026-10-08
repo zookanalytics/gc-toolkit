@@ -200,10 +200,10 @@ workflow_roots_read() {
 # hold or close the bead while the polecat builds it.
 #
 # The guard takes its reads for each bead it is about to sling, never from the
-# scan's reads at the start of the sweep. The scan keeps a bead armed for
-# deferred dispatch, and that dispatch can pour mol-polecat-work onto it while
-# the sweep runs. It reads the convoys tracking the bead, of every status, and
-# the workflow roots.
+# scan's reads at the start of the sweep, because a pour can land while the
+# sweep runs: the deferred-dispatch order slings an armed bead once its
+# blockers close, and anyone can run gc sling. It reads the convoys tracking the
+# bead, of every status, and the workflow roots.
 #
 # Returns 0 when no live workflow drives the bead, 1 when one does, and 2 when
 # a read fails. A failed read is not proof that none does, so the caller fails
