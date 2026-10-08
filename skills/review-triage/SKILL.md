@@ -42,14 +42,15 @@ done
 INDEX=$(mktemp); FOUND=""
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] || continue
-  git -C "$c" show "$REVIEWED_OID:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
+  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
 done
 [ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
 ```
 
-Each row gives you the check, its method, and one line of purpose. When a check
-applies is a judgment its method states — read the method, do not expect an
-applies-when column in the index.
+Each row gives you the check, its method, one line of purpose, and its phase —
+the stage transition by which it must read green. When a check applies is a
+judgment its method states, so read the method; the phase is fixed per check and
+not triage's to choose, and there is no applies-when column in the index.
 
 A commit that carries no index is the no-index case below, not a reason to reach
 for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
@@ -106,7 +107,7 @@ above. Filing is recording, not proposing: the distiller judges it and a
 reviewed PR writes the index.
 
 ```bash
-OBS=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
+OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
   -t task -l learning -l observation -d "## Statement
 <what a reviewer could not classify the diff against>
 
@@ -114,12 +115,14 @@ OBS=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHO
 Triage on $ANCHOR at $REVIEWED_OID.
 
 ## Proposed norm
-<draft — explicitly non-binding>" --json | jq -r '.id // .[0].id')
+<draft — explicitly non-binding>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" --set-metadata task_kind=observation \
   --set-metadata obs.category=review-index-gap \
   --set-metadata "obs.scope=repo:${GC_RIG:-unknown}" \
   --set-metadata obs.source=self --set-metadata obs.directive=standing \
-  --set-metadata "obs.provenance=bead:$ANCHOR:turn:$(date -u +%Y-%m-%d)" \
+  --set-metadata "obs.provenance=bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   --set-metadata gc.outcome=recorded --status=closed
 ```
 
