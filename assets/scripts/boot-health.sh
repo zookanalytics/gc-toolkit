@@ -27,7 +27,18 @@ PEEK_LINES="${BOOT_HEALTH_PEEK_LINES:-30}"
 CALL_TIMEOUT="${BOOT_HEALTH_CALL_TIMEOUT:-15}"
 KILL_AFTER="${BOOT_HEALTH_KILL_AFTER:-5}"
 
-BUSY_RE="${BOOT_HEALTH_BUSY:-esc to interrupt|ctrl.{0,2}c to (stop|interrupt)}"
+# Busy markers: both CLIs print these while mid-turn. Held as one single-quoted
+# literal, because a `}` inside ${VAR:-default} closes the expansion early.
+DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
+BUSY_RE="${BOOT_HEALTH_BUSY:-$DEFAULT_BUSY}"
+# grep exits 2 on a pattern it rejects, and the busy test reads that as "not
+# busy", so an override grep rejects gives way to the default markers.
+BUSY_RC=0
+grep -Eq -- "$BUSY_RE" </dev/null >/dev/null 2>&1 || BUSY_RC=$?
+if [ "$BUSY_RC" -gt 1 ]; then
+    echo "boot-health: BOOT_HEALTH_BUSY is not a valid ERE — using the default busy markers"
+    BUSY_RE="$DEFAULT_BUSY"
+fi
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime/packs/gc-toolkit}"
@@ -145,7 +156,9 @@ if [ -n "$WISPS" ]; then
         NEWEST="${WISP_ROW%%$'\t'*}"
         WISP_STATUS="${WISP_ROW#*$'\t'}"
         if [ -n "$NEWEST" ]; then
-            T="$(date -d "$NEWEST" +%s 2>/dev/null || echo "")"
+            # jq reads this UTC form the same on every host; date(1) needs -d
+            # on GNU and -j -f on BSD.
+            T="$(jq -rn --arg t "$NEWEST" '$t | fromdateiso8601' 2>/dev/null)" || T=""
             [ -n "$T" ] && WISP_AGE=$((NOW - T))
         fi
     fi
@@ -217,7 +230,7 @@ context, not the trigger (tk-uz3de).
 
   patrol wisp     $AGE_TXT
   freshness gate  ${WISP_FRESH}s
-  cold since      $(date -u -d "@$cold_since" '+%Y-%m-%dT%H:%M:%SZ')
+  cold since      $(jq -rn --argjson s "$cold_since" '$s | todateiso8601' 2>/dev/null)
   pane            $PANE_MOVE_TXT; $PANE_BUSY_TXT
 
 This order does NOT nudge or file warrants. Escalation is deliberately a human

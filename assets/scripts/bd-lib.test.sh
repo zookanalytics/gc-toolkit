@@ -53,8 +53,7 @@ eq "$(list_calls)" 1 "cache: open,closed and closed,open are one entry"
 bd_cache_clear; reset_log
 bd_list --status=deferred >/dev/null                       # store
 f=$(find "$CACHE" -maxdepth 1 -type f -name '*.json' | head -1)
-touch -d "$((GC_BD_CACHE_MAX_AGE + 100)) seconds ago" "$f" 2>/dev/null \
-  || touch -A -00:03:20 "$f" 2>/dev/null                   # BSD fallback
+touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - GC_BD_CACHE_MAX_AGE - 100 ))" '$t | todate')" "$f"
 bd_list --status=deferred >/dev/null                       # expired -> refetch
 eq "$(list_calls)" 2 "cache: an entry older than GC_BD_CACHE_MAX_AGE is refetched"
 
