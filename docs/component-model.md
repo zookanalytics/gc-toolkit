@@ -197,6 +197,12 @@ order within its cadence, so one that has stayed armed and open past that window
 one armed at a non-open status `bd ready` never answers — is a dispatch silently not
 firing; the is_blocked flag cascades down parent-child edges, so such an arm appears in
 `bd blocked` under an ancestor and `check-blocked-work-armed` cannot see it; warn-only),
+and `doctor/check-until-resolved-owed` (the resolved-by mirror of
+`check-armed-dispatch-owed`: the same reconcile order disposes an open, unassigned
+bead through `bead-rehome.sh` within its cadence once every one of its own `until`
+targets has closed, so one still undisposed past that window, with no open
+`blocks` blocker holding it, is a disposition silently not firing; the common
+stuck case is an open visit on the bead holding the close; warn-only),
 and `doctor/check-feedback-routing-owed` (the complement to the merge cadence's
 feedback arm: a cheap pre-merge arm records a PR's review posture on the anchor and
 a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture` is
@@ -332,8 +338,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | Component | Workflow | Why it sits there |
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
-| `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
-| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
+| `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed, and disposes work whose `until` targets have closed. |
+| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs. A pending dispatch is a fact about the work, so it lives on the work bead, and so does a resolution: an `until` edge records that the bead is resolved when another one closes. The pass slings an armed bead once its blockers close, and disposes an open, unassigned bead through `bead-rehome.sh` once every one of its `until` targets has closed. A `blocks` edge never disposes. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
@@ -371,7 +377,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
-| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
+| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, `duplicate-sweep.sh`, `pr-facts.sh` consummating a pre-recorded PR-close disposition, and `deferred-dispatch.sh` disposing a bead its `until` targets resolved. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close visit. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
 | `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
