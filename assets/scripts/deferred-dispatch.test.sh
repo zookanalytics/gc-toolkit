@@ -864,7 +864,7 @@ TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
-LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l)
+LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
 echo
