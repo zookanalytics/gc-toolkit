@@ -3,14 +3,21 @@ name: tests
 # Runs the pack's *.test.sh suite off-host on pull requests to main and on
 # pushes to main, so the suite gates changes without loading the polecat
 # self-review or the pool host, and a regression that lands is still caught.
+# The suite runs twice, on Linux (test) and on macOS (test-macos). The city's
+# host is macOS, where sed, grep, awk, date, stat, find and the rest of the
+# userland are the BSD tools, so a GNU-only construct that passes on Linux
+# fails the macOS job the way it fails on the host.
 # A draft pull request does not run the suite. That saves Actions minutes while
 # a change is still taking follow-up commits. Marking the pull request ready, or
 # pushing to it once ready, runs the suite. The draft flag carries no workflow
 # state; it is only a CI-cost lever here.
 # The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
-# so the runner image needs no gc binary and no running city — only bash, git,
-# jq (preinstalled on ubuntu-latest) and a Go toolchain for the gctk builds
-# that several suites make (see the setup-go step).
+# so a runner needs no gc binary and no running city — only bash 5, git, jq,
+# a Python with tomllib, and a Go toolchain for the gctk builds that several
+# suites make (see the setup-go step). ubuntu-latest preinstalls the rest; the
+# macOS job installs what its image lacks.
+# Main's ruleset names the checks that gate a merge by job id, so renaming a
+# job, or giving it a name: or a matrix, changes the check a merge waits on.
 
 on:
   pull_request:
@@ -51,6 +58,62 @@ jobs:
         with:
           go-version-file: services/gctk/go.mod
           cache: false
+
+      - name: Run the *.test.sh suite in parallel
+        run: bash tools/run-tests.sh
+
+  test-macos:
+    # The same draft gate as test.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same gctk toolchain as test.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/gctk/go.mod
+          cache: false
+
+      # The image's only bash is /bin/bash 3.2, and run-tests.sh and every
+      # suite need bash 5. run-tests.sh bounds each run with timeout(1), and
+      # refinery-reconcile.sh takes its lock with flock(1); macOS ships
+      # neither. The host installs all three from Homebrew. coreutils links
+      # only the GNU names macOS lacks, such as timeout and nproc, and installs
+      # the rest under a g prefix, so date, stat, touch and the like stay BSD.
+      - name: Install bash 5, coreutils and flock
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: brew install bash coreutils flock
+
+      # This job tests the BSD userland only while the runner resolves the
+      # tools the host does. Without a tomllib python3, the suites that read
+      # TOML skip and still pass. A GNU tool ahead of /usr/bin on PATH lets a
+      # GNU-only construct pass. Either drift fails this step by name instead.
+      - name: Check the runner resolves the host's tools
+        run: |
+          sw_vers
+          fail=0
+          v="$(env bash -c 'echo "${BASH_VERSINFO[0]}"')"
+          [ "${v:-0}" -ge 5 ] || { echo "::error::env bash is bash ${v:-unknown}; the suite needs bash 5"; fail=1; }
+          env bash --version | head -n 1
+          python3 -c 'import sys, tomllib; print(sys.executable, sys.version.split()[0], "has tomllib")' \
+            || { echo "::error::python3 ($(command -v python3)) has no tomllib"; fail=1; }
+          for t in jq go git timeout flock; do
+            p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
+            echo "$t: $p"
+          done
+          for t in sed grep awk find date stat xargs du cut head tail ps readlink realpath cp ln install mktemp touch wc sort tr; do
+            p="$(command -v "$t")" || p=""
+            case "$p" in
+              /usr/bin/*|/bin/*) ;;
+              *) echo "::error::$t resolves to '${p:-nothing}', not the BSD tool in /usr/bin or /bin"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
 
       - name: Run the *.test.sh suite in parallel
         run: bash tools/run-tests.sh
