@@ -128,7 +128,8 @@ deeper belongs to a session the pass chose to keep.
 
 `assets/scripts/scratch-reap.test.sh` is the regression suite, hermetic
 against a synthetic root in a tempdir, with a stand-in for gc's session list —
-no city and no network. The one case that resolves the default root asks it
+no city and no network. One case reaches outside the tempdir: with neither
+`SCRATCH_REAP_ROOT` nor `CLAUDE_CODE_TMPDIR` set, it asks the real default root
 for a session id no session has, which reads that root's directory names and
 removes nothing. The live-session and ended-session cases run real processes,
 so each hold is shown holding a tree and then, with that process gone, letting
