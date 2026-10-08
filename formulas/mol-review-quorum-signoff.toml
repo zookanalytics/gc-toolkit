@@ -281,6 +281,12 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework or
 finding beads, and never run `gh pr review --approve`.
 
+Pass on this same call any flag the check section of the review bead's dispatch
+note names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+When signoff.sh refuses a verdict for a missing or invalid flag, it has written
+nothing, so re-run the call with the flag corrected; that is still the one
+verdict.
+
 **7. Failure arms** are mol-review's `verdict-and-drain` arms verbatim: a
 `superseded`/`already closed` exit from signoff needs no re-pin (drop the
 verdict, close the chain, drain); any other failure appends your findings to

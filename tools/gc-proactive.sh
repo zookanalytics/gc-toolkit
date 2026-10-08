@@ -67,6 +67,14 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
 # resolve_pool_target [override] -> the RIG-QUALIFIED pool target. The pool
 # is rig-scoped and gc sling rejects a bare agent name, so a bare base is
 # qualified from GC_RIG — failing CLOSED when GC_RIG is unset rather than
@@ -141,22 +149,64 @@ sling_first_reaction_guard() {
     return 1
 }
 
+# LIVE_WORKFLOW_JQ — the one definition of "a live workflow drives this bead",
+# read by scan_drop_inflight and sling_live_workflow_guard. A convoy-first pour
+# (gc sling <target> <bead> --on <formula>) links its root to the bead only
+# through the root's gc.input_convoy_id, which names a convoy that tracks the
+# bead. A root is live until it closes. Liveness decides, never
+# gc.execution_routed_to: the pour stamps that key on the bead and it outlives
+# the workflow, so keying on it would keep holding a bead whose workflow is
+# gone. The definitions:
+#   one_array      the rows of one slurped read. Anything but one JSON array is
+#                  an error, an empty read included.
+#   tracks_edge    a dependency row of type tracks, in either shape bd prints:
+#                  dependency_type on a `bd dep list` row, type on a row of a
+#                  `bd list` bead's dependencies.
+#   live_drivers($roots; $edges)
+#                  the {bead, root} pairs in which a live workflow root names the
+#                  convoy of a {convoy, bead} tracks edge. root reads
+#                  "<id> (<formula>)".
+# Each caller takes its own reads, fresh, and keeps its own stance on a read
+# that fails.
+LIVE_WORKFLOW_JQ='
+def one_array: if length == 1 and (.[0] | type) == "array" then .[0] else error("unreadable") end;
+def tracks_edge: ((.dependency_type // .type) // "") == "tracks";
+def live_drivers($roots; $edges):
+  [ $roots[]
+    | select((.status // "") != "closed")
+    | select((.metadata["gc.kind"] // "") == "workflow")
+    | {convoy: (.metadata["gc.input_convoy_id"] // ""),
+       root: "\(.id) (\(.metadata["gc.formula_name"] // "unknown formula"))"}
+    | select(.convoy != "") ] as $live
+  | [ $edges[] as $e | $live[] | select(.convoy == $e.convoy) | {bead: $e.bead, root} ];
+'
+
+# workflow_roots_read [db] — the one read of the workflow roots: every bead that
+# names an input convoy, ephemeral wisps included, without its free-form text,
+# scrubbed for jq. Non-zero when the read fails. Callers pass the result to jq
+# through --slurpfile, not --argjson: the list can outgrow the kernel's 128 KiB
+# limit on one argument.
+workflow_roots_read() {
+    local db="${1:-}"
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd list ${db:+--db "$db"} --has-metadata-key gc.input_convoy_id \
+        --include-ephemeral --brief --json --limit 0 2>/dev/null | scrub
+}
+
 # sling_live_workflow_guard — a first reaction never races a live workflow, so
-# refuse to start mol-first-reaction on a bead one already drives. gc sling
-# refuses a second live workflow of the SAME formula on a bead but treats a
-# different formula as concurrent work, so it pours a reaction beside a queued
-# mol-polecat-work. The scan's work-in-flight markers (branch, work_dir) land
-# only at that polecat's workspace-setup, so until then nothing else stops the
-# reaction, and its disposition can route, hold or close the bead while the
-# polecat builds it.
+# refuse to start mol-first-reaction on a bead one already drives
+# (LIVE_WORKFLOW_JQ). gc sling refuses a second live workflow of the SAME
+# formula on a bead but treats a different formula as concurrent work, so it
+# pours a reaction beside a queued mol-polecat-work. The scan's work-in-flight
+# markers (branch, work_dir) land only at that polecat's workspace-setup, so
+# until then nothing else stops the reaction, and its disposition can route,
+# hold or close the bead while the polecat builds it.
 #
-# A convoy-first pour (gc sling <target> <bead> --on <formula>) links its root
-# to the bead only through the root's gc.input_convoy_id, which names a convoy
-# that tracks the bead. So the guard joins the convoys tracking the bead to the
-# workflow roots that are still open: a root is live until it closes. Liveness
-# decides, never gc.execution_routed_to. The pour stamps that key on the bead
-# and it outlives the workflow, so keying on it would keep refusing a bead
-# whose workflow is gone.
+# The guard takes its reads for each bead it is about to sling, never from the
+# scan's reads at the start of the sweep, because a pour can land while the
+# sweep runs: the deferred-dispatch order slings an armed bead once its
+# blockers close, and anyone can run gc sling. It reads the convoys tracking the
+# bead, of every status, and the workflow roots.
 #
 # Returns 0 when no live workflow drives the bead, 1 when one does, and 2 when
 # a read fails. A failed read is not proof that none does, so the caller fails
@@ -185,31 +235,19 @@ sling_live_workflow_guard() {
             tracks=''
         }
     fi
-    # Anything but one JSON array is unreadable, an empty read included.
-    convoys="$(printf '%s' "$tracks" | jq -cs '
-        if length == 1 and (.[0] | type) == "array"
-        then [ .[0][] | select(((.dependency_type // .type) // "") == "tracks") | .id ]
-        else error("unreadable") end' 2>/dev/null)" || { log "$unreadable"; return 2; }
+    convoys="$(printf '%s' "$tracks" | jq -cs "$LIVE_WORKFLOW_JQ"'
+        one_array | [ .[] | select(tracks_edge) | .id ]' 2>/dev/null)" || { log "$unreadable"; return 2; }
     [ "$convoys" != "[]" ] || return 0
 
     if [ -n "$FIXTURE" ]; then
         roots='[]'
         if [ -f "$FIXTURE/roots.json" ]; then roots="$(cat "$FIXTURE/roots.json")"; fi
     else
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        roots="$(gc bd list ${db:+--db "$db"} --has-metadata-key gc.input_convoy_id \
-                    --include-ephemeral --brief --json --limit 0 2>/dev/null)" || roots=''
+        roots="$(workflow_roots_read "$db")" || roots=''
     fi
-    # The roots go through --slurpfile, not --argjson: the list can outgrow the
-    # kernel's 128 KiB limit on one argument.
-    live="$(jq -rn --argjson convoys "$convoys" --slurpfile r <(printf '%s' "$roots") '
-        if ($r | length) == 1 and ($r[0] | type) == "array" then $r[0] else error("unreadable") end
-        | [ .[]
-            | select((.status // "") != "closed")
-            | select((.metadata["gc.kind"] // "") == "workflow")
-            | select((.metadata["gc.input_convoy_id"] // "") as $c | ($convoys | index($c)) != null)
-            | "\(.id) (\(.metadata["gc.formula_name"] // "unknown formula"))" ]
-        | unique | join(", ")' 2>/dev/null)" || { log "$unreadable"; return 2; }
+    live="$(jq -rn --arg bead "$bead" --argjson convoys "$convoys" --slurpfile r <(printf '%s' "$roots") "$LIVE_WORKFLOW_JQ"'
+        live_drivers($r | one_array; [ $convoys[] | {convoy: ., bead: $bead} ])
+        | map(.root) | unique | join(", ")' 2>/dev/null)" || { log "$unreadable"; return 2; }
     [ -n "$live" ] || return 0
     log "$PROG: sling: $bead is already driven by live workflow(s) $live — not slinging a first reaction. A reaction would race work in flight: its disposition can route, hold or close the bead while that workflow runs. React once the workflow's root closes."
     return 1
@@ -599,12 +637,57 @@ scan_precision_filter() {
     '
 }
 
+# scan_drop_inflight — from a candidate array on stdin, drop each bead a live
+# workflow already drives (LIVE_WORKFLOW_JQ). A pour moves the bead's route to
+# gc.execution_routed_to, so the "not routed" clause above cannot see one.
+# sling_live_workflow_guard refuses to sling such a bead, and a refusal spends
+# none of SLING_CAP, so a page that offers these beads holds fewer beads a sweep
+# can sling, and the sweep spends its time on the guard's reads before it
+# reaches the beads below them.
+#
+# Both reads here are taken once per sweep: the workflow roots, and the open
+# convoys with the beads each one tracks. Listing closed convoys as well would
+# read every convoy the store has ever held. The guard's per-bead read covers
+# closed convoys too, so on the same store state the drop can keep a bead the
+# guard refuses but never drops one the guard would sling. A read that fails or
+# does not parse drops nothing and logs that the sweep went unfiltered. The
+# sling guard still refuses those beads.
+scan_drop_inflight() {
+    local cands roots convoys inflight kept dropped db
+    cands="$(cat)"
+    if [ -n "$FIXTURE" ]; then
+        roots='[]'; convoys='[]'
+        if [ -f "$FIXTURE/roots.json" ]; then roots="$(cat "$FIXTURE/roots.json")"; fi
+        if [ -f "$FIXTURE/convoys.json" ]; then convoys="$(cat "$FIXTURE/convoys.json")"; fi
+    else
+        db="$(rig_beads_db)"
+        roots="$(workflow_roots_read "$db")" || roots=''
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        convoys="$(gc bd list ${db:+--db "$db"} --type=convoy --json --limit 0 2>/dev/null | scrub)" || convoys=''
+    fi
+    inflight="$(jq -cn --slurpfile r <(printf '%s' "$roots") --slurpfile c <(printf '%s' "$convoys") "$LIVE_WORKFLOW_JQ"'
+        [ ($c | one_array)[] | .id as $cv | .dependencies[]? | select(tracks_edge)
+          | {convoy: $cv, bead: (.depends_on_id // "")} | select(.bead != "") ] as $edges
+        | live_drivers($r | one_array; $edges) | map(.bead) | unique' 2>/dev/null)" || {
+        log "$PROG: scan: could not read the workflow roots or the open convoys, so beads a live workflow drives are not filtered out of this sweep (the sling guard still refuses them)"
+        printf '%s' "$cands"
+        return 0
+    }
+    kept="$(printf '%s' "$cands" | jq -c --argjson skip "$inflight" \
+        'map(select(.id as $i | ($skip | index($i)) == null))')"
+    dropped=$(( $(printf '%s' "$cands" | jq 'length') - $(printf '%s' "$kept" | jq 'length') ))
+    if [ "$dropped" -gt 0 ]; then
+        log "$PROG: scan: $dropped candidate(s) already have a live workflow; not offered (the sling guard would refuse them)"
+    fi
+    printf '%s' "$kept"
+}
+
 scan_candidates() {
     local ranked
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        ranked="$(printf '%s' "$raw" | scan_precision_filter | board_rank)"
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)"
     else
         # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
         # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
@@ -629,10 +712,10 @@ scan_candidates() {
                     --sort oldest --limit 0 2>/dev/null || true)"
         [ -n "$movable" ] || movable='[]'
 
-        # Union the two sources, apply the shared precision filter, then rank by
-        # board weight.
+        # Union the two sources, apply the shared precision filter, drop the
+        # beads a workflow is already driving, then rank by board weight.
         ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
-            | scan_precision_filter | board_rank)"
+            | scan_precision_filter | scan_drop_inflight | board_rank)"
     fi
 
     # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and

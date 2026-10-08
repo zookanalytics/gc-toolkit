@@ -148,14 +148,12 @@ which becomes an anchored regex whose substitutions widen to one path
 under a home, and the reaper would protect the whole population it exists to
 take.
 
-Live processes are read with `find /proc -maxdepth 2 -name cwd -type l
--printf '%l\n'`, and a live cwd protects every worktree containing it, not
-only an exact path match. A shell glob over `/proc` is not an acceptable
-substitute: it stats every candidate and drops what it cannot read, and
-passing the survivors to `readlink` in bulk drops more still. Measured here,
-`find` reported around 360 cwds on every sample while the pair returned
-between 27 and 180, and the pair missed a process started a moment earlier in
-3 of 15 trials where `find` missed none in 42.
+Live processes are read with `lsof -w -n -P -F n -d cwd`, which lists the cwd
+of every process this user can see on Linux and on macOS, and a live cwd
+protects every worktree containing it, not only an exact path match. A listing
+that fails, or that names no cwd at all, refuses the pass. A protection that
+finds none of the live processes still reads as a check, so it is worse than
+none.
 
 A repo whose open-pull-request listing fails is held whole for the next pass
 rather than reaped without the check. That gate is the backstop for a ledger

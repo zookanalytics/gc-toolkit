@@ -13,7 +13,9 @@
 # tip survive removal when no branch reaches it. Covers the reporting claims:
 # a removal that returns success and leaves the directory is counted as a
 # failure and named, and a repo whose PR listing fails is held rather than
-# reaped. Covers --dry-run, the budget yield, and the rails.
+# reaped. Covers the refusals: a ledger that answers nothing, and a cwd probe
+# that lists nothing or fails. Covers --dry-run, the budget yield, and the
+# rails.
 #
 # Every keep is asserted alongside a take in the same run. A pass that
 # filtered everything and a pass that filtered nothing print the same summary,
@@ -22,6 +24,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-worktree-reap-test.XXXXXX")"
+# git lists a worktree by its resolved path, and the reaper matches a bead's
+# work_dir to that path exactly, so the fixture builds every path on a resolved
+# root. A TMPDIR behind a symlink, as macOS's is, would otherwise name no tree.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # assertions only; harness_init would stub out git
@@ -163,7 +169,7 @@ mk_wt() { # <path> <branch|--detach>
 # A bead row as `bd list --json` returns one.
 bead_to() { # <file> <id> <status> <hours-since-close> <work_dir> <branch>
     local f="$1" id="$2" st="$3" hrs="$4" wd="$5" br="$6"
-    local at; at="$(date -u -d "@$((NOW - hrs * HOUR))" +%Y-%m-%dT%H:%M:%SZ)"
+    local at; at="$(jq -nr --argjson t "$((NOW - hrs * HOUR))" '$t | todate')"
     [ -s "$f" ] || echo '[]' > "$f"
     jq -c --arg id "$id" --arg st "$st" --arg at "$at" --arg wd "$wd" --arg br "$br" \
         '. += [{id: $id, status: $st, closed_at: $at, updated_at: $at,
@@ -374,9 +380,11 @@ jq -c --arg d "$REPO/wt/session" '{sessions:[{work_dir:$d}]}' <<< '{}' > "$STUB_
 ( cd "$REPO/wt/deep-cwd/sub" && exec sleep 25 ) &
 SLEEPER=$!
 # A backgrounded subshell forks with the caller's cwd and only then chdirs, so
-# wait for /proc to show the directory the run is meant to find.
+# wait for lsof, the probe the reaper reads, to show the directory the run is
+# meant to find.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ "$(readlink -f "/proc/$SLEEPER/cwd" 2>/dev/null)" = "$REPO/wt/deep-cwd/sub" ] && break
+    lsof -w -n -P -F n -a -p "$SLEEPER" -d cwd 2>/dev/null \
+        | awk -v n="n$REPO/wt/deep-cwd/sub" '$0 == n { f = 1 } END { exit f ? 0 : 1 }' && break
     sleep 0.1
 done
 run > /dev/null
@@ -435,6 +443,25 @@ OUT="$(run 2>&1)"
 if exists "$REPO/wt/unclaimed"; then ok "an unreadable ledger reaps nothing"; else bad "an unreadable ledger reaps nothing"; fi
 has "$OUT" "refusing to reap" "the refusal says so"
 
+# A cwd probe that lists nothing, or that fails after listing part of the host,
+# cannot show that no process stands in a tree, so the pass refuses. The same
+# tree is taken once lsof answers, so the refusal is what held it.
+new_repo
+mk_wt "$REPO/wt/blind" polecat/blind
+bead b-blind closed 100 "$REPO/wt/blind" polecat/blind
+NOLSOF="$TMP/nolsof-bin"; mkdir -p "$NOLSOF"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NOLSOF/lsof"
+FAILLSOF="$TMP/faillsof-bin"; mkdir -p "$FAILLSOF"
+printf '#!/usr/bin/env bash\nprintf "p1\\nfcwd\\nn/\\n"\nexit 1\n' > "$FAILLSOF/lsof"
+chmod +x "$NOLSOF/lsof" "$FAILLSOF/lsof"
+OUT="$(PATH="$NOLSOF:$PATH" run)"
+if exists "$REPO/wt/blind"; then ok "an lsof that lists no cwd reaps nothing"; else bad "an lsof that lists no cwd reaps nothing"; fi
+has "$OUT" "refusing to reap" "the refusal says so"
+OUT="$(PATH="$FAILLSOF:$PATH" run)"
+if exists "$REPO/wt/blind"; then ok "an lsof that fails reaps nothing, whatever it listed first"; else bad "an lsof that fails reaps nothing, whatever it listed first"; fi
+run > /dev/null
+if exists "$REPO/wt/blind"; then bad "with lsof answering, the same tree is taken"; else ok "with lsof answering, the same tree is taken"; fi
+
 # --- dry run ---------------------------------------------------------------
 new_repo
 mk_wt "$REPO/wt/planned" polecat/planned
@@ -443,7 +470,7 @@ OUT="$(run --dry-run)"
 if exists "$REPO/wt/planned"; then ok "--dry-run removes nothing"; else bad "--dry-run removes nothing"; fi
 has "$OUT" "would remove 1 worktrees" "--dry-run reports the plan"
 has "$OUT" "$REPO/wt/planned" "--dry-run names each path it would take"
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run writes no archive tag"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "--dry-run writes no archive tag"
 
 # --- prunable registry litter is pinned, and a dry run prunes nothing -------
 # A worktree whose directory was deleted out from under git leaves an admin
@@ -458,7 +485,7 @@ bead b-gone closed 100 "$REPO/wt/gone" ""
 rm -rf "$REPO/wt/gone"                 # rogue delete: dir gone, admin entry lingers
 run --dry-run > /dev/null
 if registered "$REPO/wt/gone"; then ok "--dry-run does not prune registry litter"; else bad "--dry-run does not prune registry litter"; fi
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run pins no prunable tip"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "--dry-run pins no prunable tip"
 run > /dev/null
 if registered "$REPO/wt/gone"; then bad "a real run prunes the litter entry"; else ok "a real run prunes the litter entry"; fi
 GTAG="$(git -C "$REPO" tag -l 'archive/worktree/*')"
@@ -479,7 +506,7 @@ chmod -R a-w "$REPO/.git/refs" 2>/dev/null
 run > /dev/null
 chmod -R u+w "$REPO/.git/refs" 2>/dev/null
 if registered "$REPO/wt/nopin"; then ok "an unpinnable prunable tip is not pruned"; else bad "an unpinnable prunable tip is not pruned"; fi
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "and no tag was written before the prune was held"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "and no tag was written before the prune was held"
 
 # --- the budget yields, and says what it left -------------------------------
 # A slow `git` on PATH spends the budget inside the pass, which is the only way
