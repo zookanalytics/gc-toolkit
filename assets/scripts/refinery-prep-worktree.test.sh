@@ -172,11 +172,15 @@ eq "$(head_of "$S/rig")" "temp" "pre-stranded root: rig root left exactly as fou
 CITY="$TMP/city"; mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
 cp "$HERE/regen-merge.sh" "$CITY/rigs/gc-toolkit/assets/scripts/regen-merge.sh"
 chmod +x "$CITY/rigs/gc-toolkit/assets/scripts/regen-merge.sh"
+# In-place edit that BSD and GNU sed read alike: BSD sed takes the word after -i
+# as a backup suffix and GNU sed takes it as the script, so the suffix is attached.
+# The backup is removed at once, before a fixture commit can pick it up.
+sedi() { sed -i.bak "$1" "$2" && rm -f "$2.bak"; }
 build_regen_repo() {
   local d="$1"
   rm -rf "$d"; mkdir -p "$d"
   git init -q --bare "$d/origin.git"
-  git init -q "$d/seed"; (
+  git init -q -b main "$d/seed"; (
     cd "$d/seed"; git config user.email t@t; git config user.name t
     mkdir -p inputs assets/scripts
     cat > assets/scripts/render-seed-audit.sh <<'RENDER'
@@ -195,12 +199,12 @@ RENDER
     bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm base
     git remote add origin ../origin.git; git push -q origin HEAD:main
     git checkout -qb polecat/gen
-    sed -i 's/^b1$/b1 by the branch/' inputs/b.txt
+    sedi 's/^b1$/b1 by the branch/' inputs/b.txt
     bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm gen; git push -q origin polecat/gen
     git checkout -qb polecat/hand main
-    sed -i 's/^n2$/n2 by the branch/' notes.txt; git commit -qam hand; git push -q origin polecat/hand
+    sedi 's/^n2$/n2 by the branch/' notes.txt; git commit -qam hand; git push -q origin polecat/hand
     git checkout -q main
-    sed -i 's/^b6$/b6 by main/' inputs/b.txt; sed -i 's/^n2$/n2 by main/' notes.txt
+    sedi 's/^b6$/b6 by main/' inputs/b.txt; sedi 's/^n2$/n2 by main/' notes.txt
     bash assets/scripts/render-seed-audit.sh; git add -A; git commit -qm "main moves b and notes"
     git push -q origin HEAD:main
   ) >/dev/null 2>&1

@@ -77,13 +77,17 @@ BASE=$(git -C "$R" rev-parse HEAD)
 commit_on() { # <branch> <message> — commits the working tree, rendered, onto <branch>
   render; git -C "$R" add -A; git -C "$R" commit -qm "$2"
 }
+# In-place edit that BSD and GNU sed read alike: BSD sed takes the word after -i
+# as a backup suffix and GNU sed takes it as the script, so the suffix is attached.
+# The backup is removed at once, before a fixture commit can pick it up.
+sedi() { sed -i.bak "$1" "$2" && rm -f "$2.bak"; }
 # feat moves the first line of b, main moves the last: the input merges cleanly,
 # and its manifest record and index row conflict.
 git -C "$R" checkout -q -b feat "$BASE"
-sed -i 's/^b1$/b1 moved by feat/' "$R/inputs/b.txt"; commit_on feat "feat moves b"
+sedi 's/^b1$/b1 moved by feat/' "$R/inputs/b.txt"; commit_on feat "feat moves b"
 FEAT=$(git -C "$R" rev-parse HEAD)
 git -C "$R" checkout -q -b feat-hand "$FEAT"
-sed -i 's/^n2$/n2 by feat/' "$R/notes.txt"; commit_on feat-hand "feat-hand also edits notes"
+sedi 's/^n2$/n2 by feat/' "$R/notes.txt"; commit_on feat-hand "feat-hand also edits notes"
 FEAT_HAND=$(git -C "$R" rev-parse HEAD)
 git -C "$R" checkout -q -b feat-norender "$FEAT"
 git -C "$R" rm -q assets/scripts/render-seed-audit.sh; git -C "$R" commit -qm "feat-norender drops the renderer"
@@ -95,8 +99,8 @@ git -C "$R" checkout -q -b feat-c "$FEAT"
 printf 'c1\nc2\n' > "$R/inputs/c.txt"; commit_on feat-c "feat-c adds an input"
 FEAT_C=$(git -C "$R" rev-parse HEAD)
 git -C "$R" checkout -q main
-sed -i 's/^b6$/b6 moved by main/' "$R/inputs/b.txt"
-sed -i 's/^n2$/n2 by main/' "$R/notes.txt"
+sedi 's/^b6$/b6 moved by main/' "$R/inputs/b.txt"
+sedi 's/^n2$/n2 by main/' "$R/notes.txt"
 commit_on main "main moves b and notes"
 MAIN=$(git -C "$R" rev-parse HEAD)
 # main-gone also deletes notes.txt, so a merge into it drops a path the branch
