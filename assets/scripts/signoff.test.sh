@@ -319,8 +319,7 @@ OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
 OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
 OID_OLD=$(oid old)
 OID_DEAD=$(oid dead); OID_LIVE=$(oid live); OID_BASE=$(oid base)
-OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
-OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
+OID_LIVEPIN=$(oid livepin)
 export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG 2>/dev/null || true
@@ -362,6 +361,7 @@ eq "$rc" 0 "approve exits 0"
 has "$(cat "$STUB_GH_LOG")" "pr review 42 --repo github.com/o/r --comment" "artifact posted as a pinned COMMENT"
 has "$(cat "$STUB_GH_BODY")" "tk-anc" "the posted body carries the anchor link"
 has "$(cat "$STUB_GH_BODY")" "VERDICT body: findings here" "the posted body carries the verdict notes"
+has "$(cat "$STUB_GH_BODY")" "<!-- gc:city -->" "the posted verdict carries the city's provenance mark (posted through pr-post.sh)"
 eq "$(meta tk-anc check.correctness)" "green" "check.correctness records the lane green"
 eq "$(status rv-1)" "closed" "review bead closed"
 eq "$(meta rv-1 gc.outcome)" "recorded" "review bead closed with gc.outcome=recorded"
@@ -987,6 +987,22 @@ hasnt "$(cat "$STUB_GH_LOG")" "reviews/222/dismissals" "a human's block is NEVER
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed commit stands"
 eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
+echo "# supersede: past the anchor's provenance cutover, only the city's own review is ours to dismiss"
+# The same login runs model reviews (an operator's /code-review) and posts the
+# city's verdicts. Past pr_provenance_since an unmarked review under it is
+# feedback; a marked one, or an unmarked one from before the cutover, is ours.
+reset "$(printf '%s' "$ANCHOR_PR" | jq -c '.metadata.pr_provenance_since = "2026-10-07T00:00:00Z"')"
+export STUB_REVIEWS='{"id":444,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T01:00:00Z","body":"model review: fix the race"}
+{"id":555,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T02:00:00Z","body":"verdict\n\n<!-- gc:city -->"}
+{"id":666,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-06T23:00:00Z","body":"an older block of ours"}'
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/444/dismissals" "an unmarked review under our login after the cutover is feedback, never dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/555/dismissals" "a marked review of ours past the cutover is dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/666/dismissals" "an unmarked review of ours from before the cutover is still ours"
+export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_HEAD"'"}'
+
 echo "# supersede holds on a moved head"
 reset "$ANCHOR_PR"
 STUB_PR_HEAD="$OID_NEWHEAD" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
@@ -1122,6 +1138,110 @@ out=$(STUB_INDEX="$IDX" STUB_DROP_KEYS="tk-anc:check_set" "$SUT" --review-bead r
 eq "$rc" 2 "a check_set write that did not read back exits 2 (review left open)"
 has "$out" "did not read back" "the failure names the read-back"
 eq "$(meta tk-anc "check.triage")" "<absent>" "no green marker is stamped when the widening did not persist"
+
+# --- --visual: the demo check records its visual decision ---------------------------
+DEMO='{"id":"rv-demo","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"demo","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat"},"notes":"demo body: the board reads better seen"}'
+
+echo "# a demo approve with no visual needed records none and attaches nothing"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual none 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual none exits 0"
+eq "$(meta rv-demo visual)" "none" "the no-need decision is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: none" "the posted artifact names the decision"
+has "$(cat "$STUB_GH_BODY")" "Anchor: tk-anc — check.demo @" "…beside the anchor trailer"
+eq "$(meta tk-anc check.demo)" "green" "the demo lane reads green"
+eq "$(status rv-demo)" "closed" "the review bead is closed recorded"
+
+echo "# a demo approve that delivered a visual records its modality"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual screenshot exits 0"
+eq "$(meta rv-demo visual)" "screenshot" "the modality is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: screenshot" "the posted artifact names the modality"
+
+echo "# the decision is case- and space-insensitive and recorded canonical"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual ' Repo-Artifact ' 2>&1); rc=$?
+eq "$rc" 0 "a mixed-case --visual is accepted"
+eq "$(meta rv-demo visual)" "repo-artifact" "…and stamped lowercase"
+
+echo "# a demo request-changes records the modality whose capture showed the defect"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual video 2>&1); rc=$?
+eq "$rc" 0 "a demo request-changes carrying --visual video exits 0"
+eq "$(meta rv-demo visual)" "video" "the modality is stamped on the review bead"
+has "$(cat "$STUB_GH_BODY")" "Visual: video" "the posted artifact names the modality"
+eq "$(grep -c '^Rework' "$STUB_CREATED")" "1" "the request-changes still files its one rework child"
+
+echo "# pre-open, the decision reaches the notes the PR replays"
+reset "$ANCHOR_PRE" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 0 "a pre-open demo approve exits 0"
+has "$(notes rv-demo)" "Visual: screenshot" "the pre-open notes carry the decision"
+eq "$(meta rv-demo visual)" "screenshot" "…and the review bead records it"
+
+echo "# a demo verdict without the decision is refused, nothing written"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a demo verdict without --visual exits 1"
+has "$out" "--visual none|repo-artifact|screenshot|video" "the refusal names the values to pass"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open"
+eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted"
+
+echo "# an unknown decision is refused, nothing written"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual gif 2>&1); rc=$?
+eq "$rc" 1 "an unknown --visual value exits 1"
+has "$out" "--visual must be none, repo-artifact, screenshot or video" "the refusal names the closed set"
+eq "$(meta rv-demo visual)" "<absent>" "no decision is stamped"
+
+echo "# none records with approve only"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual none 2>&1); rc=$?
+eq "$rc" 1 "request-changes with --visual none exits 1"
+has "$out" "nothing to block on" "the refusal names the approve-only rule"
+eq "$(cat "$STUB_CREATED")" "" "no rework child is filed"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open"
+
+echo "# only the demo check records a visual decision"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 1 "a correctness verdict carrying --visual exits 1"
+has "$out" "only the 'demo' check records a visual decision" "the refusal names the owning check"
+eq "$(meta tk-anc check.correctness)" "<absent>" "no marker is stamped"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness verdict needs no --visual"
+hasnt "$(cat "$STUB_GH_BODY")" "Visual:" "…and its artifact carries no Visual line"
+eq "$(meta rv-1 visual)" "<absent>" "…and its review bead no visual stamp"
+
+echo "# the decision is read back before anything is posted"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$(STUB_DROP_KEYS="rv-demo:visual" "$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 2 "a decision that did not read back exits 2 (review left open)"
+has "$out" "visual decision did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# metadata-key drift against lifecycle.toml"
+# A metadata key is state, and the registry is the exhaustive declaration
+# downstream audits read (docs/component-model.md). A key the verdict writer
+# stamps that nothing registers is state no audit can account for. A key built
+# from a variable (check.<g>) is outside this extraction and registered by hand.
+REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$HERE/../../lifecycle/lifecycle.toml" \
+  | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$SUT" \
+  | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
+if grep -qx 'visual' <<< "$WRITTEN"; then
+  ok "the extraction reads signoff.sh's metadata writes, the visual decision among them"
+else
+  bad "the extraction found no visual write in signoff.sh (got: $(tr '\n' ' ' <<< "$WRITTEN"))"
+fi
+UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
+  | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
+eq "$UNREGISTERED" "" "every metadata key signoff.sh writes is registered in lifecycle.toml"
 
 echo
 echo "signoff.test.sh: $PASS passed, $FAIL failed"

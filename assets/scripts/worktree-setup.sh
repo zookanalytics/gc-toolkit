@@ -4,11 +4,13 @@
 # Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]
 #
 # Ensures <target-dir> is a git worktree of the rig repo, on a per-target
-# branch cut from the remote default-branch tip. Called from agent pre_start
-# (agents/*/agent.toml) before the session exists, so the agent starts IN the
-# worktree. Existing worktrees are left alone; --sync fast-forwards a branch to
-# its upstream and moves a detached HEAD to the default-branch tip when no
-# commit or tracked change can be lost (sync_detached).
+# branch cut from the remote default-branch tip, with the bead redirect and
+# local excludes an agent needs (provision_worktree). Called from agent
+# pre_start (agents/*/agent.toml) before the session exists, so the agent
+# starts IN the worktree. An existing worktree is never re-created: it gets
+# whatever provisioning it lacks, and --sync fast-forwards a branch to its
+# upstream and moves a detached HEAD to the default-branch tip when no commit
+# or tracked change can be lost (sync_detached).
 
 set -eu
 
@@ -16,6 +18,67 @@ RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--
 WT="${2:?missing target-dir}"
 AGENT="${3:?missing agent-name}"
 SYNC="${4:-}"
+
+# What an agent needs in its worktree beyond the checkout: the bead redirect,
+# submodule config, and the runtime excludes. Every write is skipped when it is
+# already in place, so this runs after a fresh add and on every later run. A
+# worktree an earlier run left half-built is completed by the next one: git
+# keeps the worktree when a checkout hook fails the add, and a run killed
+# between the add and these writes leaves the same state. Only a linked
+# worktree (.git is a file) is provisioned. A main checkout's .beads is the
+# rig's own store, not a pointer to one, so it never gets a redirect.
+provision_worktree() {
+    [ -f "$WT/.git" ] || return 0
+
+    # Bead redirect for filesystem beads. A non-empty one is kept, so a
+    # deliberate redirect survives.
+    mkdir -p "$WT/.beads"
+    if [ ! -s "$WT/.beads/redirect" ]; then
+        echo "$RIG_ROOT/.beads" > "$WT/.beads/redirect"
+    fi
+
+    git -C "$WT" submodule init 2>/dev/null || true
+
+    # Runtime ignores live in git metadata (--git-path resolves the exclude file
+    # for linked-worktree layouts), never in the tracked .gitignore. A worktree
+    # whose git metadata git cannot find has no exclude file to write, and git
+    # cannot stage anything from it either.
+    EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude) || return 0
+    case "$EXCLUDE" in
+        /*) ;;
+        *) EXCLUDE="$WT/$EXCLUDE" ;;
+    esac
+    mkdir -p "$(dirname "$EXCLUDE")"
+    touch "$EXCLUDE"
+
+    MARKER="# Gas City worktree infrastructure (local excludes)"
+    if ! grep -qF "$MARKER" "$EXCLUDE" 2>/dev/null; then
+        if [ -s "$EXCLUDE" ] && [ "$(tail -c 1 "$EXCLUDE" 2>/dev/null || true)" != "" ]; then
+            printf '\n' >> "$EXCLUDE"
+        fi
+        printf '%s\n' "$MARKER" >> "$EXCLUDE"
+    fi
+
+    append_exclude ".beads/redirect"
+    append_exclude ".beads/hooks/"
+    append_exclude ".beads/formulas/"
+    append_exclude ".runtime/"
+    append_exclude ".logs/"
+    append_exclude "worktrees/"
+    append_exclude "__pycache__/"
+    append_exclude ".claude/"
+    append_exclude ".codex/"
+    append_exclude ".gemini/"
+    append_exclude ".opencode/"
+    append_exclude ".github/hooks/"
+    append_exclude ".github/copilot-instructions.md"
+    append_exclude "state.json"
+}
+
+append_exclude() {
+    PATTERN="$1"
+    grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+}
 
 rebase_in_progress() {
     for STATE in rebase-merge rebase-apply; do
@@ -207,8 +270,9 @@ adopt_orphan_stages() {
 }
 adopt_orphan_stages || true
 
-# Idempotent: an existing worktree is only synced.
+# Idempotent: an existing worktree is provisioned and synced, never re-created.
 if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
+    provision_worktree
     sync_worktree
     exit 0
 fi
@@ -264,50 +328,7 @@ if [ -n "$STAGE" ]; then
 fi
 trap - EXIT HUP INT TERM
 
-# Bead redirect for filesystem beads.
-mkdir -p "$WT/.beads"
-echo "$RIG_ROOT/.beads" > "$WT/.beads/redirect"
-
-git -C "$WT" submodule init 2>/dev/null || true
-
-# Runtime ignores live in git metadata (--git-path resolves the exclude file
-# for linked-worktree layouts), never in the tracked .gitignore.
-EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude)
-case "$EXCLUDE" in
-    /*) ;;
-    *) EXCLUDE="$WT/$EXCLUDE" ;;
-esac
-mkdir -p "$(dirname "$EXCLUDE")"
-touch "$EXCLUDE"
-
-MARKER="# Gas City worktree infrastructure (local excludes)"
-if ! grep -qF "$MARKER" "$EXCLUDE" 2>/dev/null; then
-    if [ -s "$EXCLUDE" ] && [ "$(tail -c 1 "$EXCLUDE" 2>/dev/null || true)" != "" ]; then
-        printf '\n' >> "$EXCLUDE"
-    fi
-    printf '%s\n' "$MARKER" >> "$EXCLUDE"
-fi
-
-append_exclude() {
-    PATTERN="$1"
-    grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
-}
-
-append_exclude ".beads/redirect"
-append_exclude ".beads/hooks/"
-append_exclude ".beads/formulas/"
-append_exclude ".runtime/"
-append_exclude ".logs/"
-append_exclude "worktrees/"
-append_exclude "__pycache__/"
-append_exclude ".claude/"
-append_exclude ".codex/"
-append_exclude ".gemini/"
-append_exclude ".opencode/"
-append_exclude ".github/hooks/"
-append_exclude ".github/copilot-instructions.md"
-append_exclude "state.json"
-
+provision_worktree
 sync_worktree
 
 exit 0
