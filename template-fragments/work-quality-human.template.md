@@ -2,8 +2,9 @@
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (converse and its per-model variants). Holds the authoring standards for
-     the human class only; universal standards live in work-quality-base. -->
+     (the converse-opus, converse-fable and converse-codex sittings). Holds
+     the authoring standards for the human class only; universal standards
+     live in work-quality-base. -->
 
 <!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
 - When the ask is to simplify, or is about architecture or the big picture,

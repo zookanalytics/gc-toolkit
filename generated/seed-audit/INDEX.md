@@ -7,7 +7,7 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 18 · formulas: 26
+- agents: 17 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -33,16 +33,15 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse`](agents/converse.md) | 34,624 | 8,656 |
-| [`converse-codex`](agents/converse-codex.md) | 34,624 | 8,656 |
-| [`converse-fable`](agents/converse-fable.md) | 34,624 | 8,656 |
-| [`converse-opus`](agents/converse-opus.md) | 34,624 | 8,656 |
+| [`converse-codex`](agents/converse-codex.md) | 34,603 | 8,650 |
+| [`converse-fable`](agents/converse-fable.md) | 34,603 | 8,650 |
+| [`converse-opus`](agents/converse-opus.md) | 34,603 | 8,650 |
 | [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
-| [`keeper`](agents/keeper.md) | 23,590 | 5,897 |
-| [`mechanik`](agents/mechanik.md) | 29,019 | 7,254 |
+| [`keeper`](agents/keeper.md) | 23,774 | 5,943 |
+| [`mechanik`](agents/mechanik.md) | 29,203 | 7,300 |
 | [`polecat`](agents/polecat.md) | 27,452 | 6,863 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,482 | 6,870 |
 | [`proactive`](agents/proactive.md) | 12,122 | 3,030 |
@@ -105,7 +104,6 @@ runs to re-prime after compaction.
 | claude | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | codex | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
-| converse | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |

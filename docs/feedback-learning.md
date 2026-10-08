@@ -194,8 +194,9 @@ code, docs, and bead bodies someone else reads. Each such role composes the base
 and its class fragment, so a universal standard lives in the base once while a
 class-specific one reaches only the classes it impacts — a standard about
 changing a repo does not reach the human converse class. The classes: polecats
-(polecat, polecat-codex), human (converse and its per-model variants), system
-(deacon, mechanik, proactive, witness, refinery, keeper).
+(polecat, polecat-codex), human (the converse-opus, converse-fable and
+converse-codex sittings), system (deacon, mechanik, proactive, witness,
+refinery, keeper).
 `formulas/mol-review.toml` resolves these fragments during a review and holds
 the diff's output to them. Hard cap **12 entries per fragment**.
 

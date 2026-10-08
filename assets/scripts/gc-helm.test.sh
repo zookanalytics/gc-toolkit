@@ -2361,7 +2361,7 @@ case "$1 ${2:-}" in
       resolve)
         rid="${4:-}"
         case "$rid" in *NORESOLVE*) exit 1 ;; esac
-        [ -n "$rid" ] && sed -i "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null || true ;;
+        [ -n "$rid" ] && sed -i.bak "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null && rm -f "$D_GATE_EDGES.bak" || true ;;
     esac ;;
   "bd update")
     # A gate id carrying NOSTAMP models the stamp write failing after the gate
@@ -2384,7 +2384,7 @@ case "$1 ${2:-}" in
     if [ "$pairs" -le 1 ]; then
       case "$*" in
         *"gc.takeaway_settled="*)
-          case "$3" in *STUCK*) ;; *) sed -i "/^$3|/d" "$D_SETTLED" 2>/dev/null || true ;; esac ;;
+          case "$3" in *STUCK*) ;; *) sed -i.bak "/^$3|/d" "$D_SETTLED" 2>/dev/null && rm -f "$D_SETTLED.bak" || true ;; esac ;;
       esac
     fi ;;
   "bd dep")
@@ -2392,7 +2392,7 @@ case "$1 ${2:-}" in
     # the call fails AND nothing is recorded, so the read-back sees no edge.
     # On a demand id that is every edge; on a TARGET id it is that one edge,
     # while the rest of the call's edges land.
-    case "$*" in *NOEDGE*) sed -i '$d' "$D_LOG"; exit 1 ;; esac ;;
+    case "$*" in *NOEDGE*) sed -i.bak '$d' "$D_LOG" && rm -f "$D_LOG.bak"; exit 1 ;; esac ;;
 esac
 exit 0
 GC2
@@ -2887,7 +2887,7 @@ grep -q 'RIGS\[\[' <<< "$EOUT" \
 grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
   && ok "(ENUM) …and left the caller's trap table as it found it" \
   || bad "(ENUM) the helper changed the caller's traps (out: $EOUT)"
-eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
+eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
    "(ENUM) …and removed its stderr capture"
 
 echo ""

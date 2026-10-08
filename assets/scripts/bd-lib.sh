@@ -114,6 +114,26 @@ bd_list() {
   printf '%s' "$raw"
 }
 
+# bd_live_children — the live beads hung on each anchor through anchor_bead:
+# its reviews, validation passes, findings, rework children and visits, in one
+# read of the store. Prints one line per anchor that has any:
+#   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
+# A walking arm compares the id list with what it saw at its last visit, so a
+# child that opened or closed since then shows without a read per anchor.
+# Non-zero without output = the store did not answer.
+bd_live_children() {
+  local rows
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --has-metadata-key anchor_bead) || return 1
+  printf '%s' "$rows" | jq -r '
+    [ .[] | { a: ((.metadata.anchor_bead // "") | tostring), id: ((.id // "") | tostring),
+              rw: (((.metadata.task_kind // "") | tostring) == "rework") }
+          | select(.a != "" and .id != "") ]
+    | group_by(.a)[]
+    | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
+    | @tsv' 2>/dev/null
+}
+
 # The gating-PR read. The merge arm (merge.sh) and the pr-facts arm
 # (pr-facts.sh) both read each gating PR and decide on its merge state, so they
 # read it with one field set and the two arms see the same facts.
