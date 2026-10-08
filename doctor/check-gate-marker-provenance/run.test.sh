@@ -124,7 +124,7 @@ approvals 101 '[]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a no-verdict recorded bead does not back the green lane — RESOLVE A does not clear it"
 has "$OUT" "nothing reviewed" "the unbacked marker is reported, not cleared off the recorded stamp"
-eq "$(wc -l < "$GH_LOG")" "1" "RESOLVE B is consulted once no local backing resolves the marker"
+eq "$(wc -l < "$GH_LOG" | tr -d ' ')" "1" "RESOLVE B is consulted once no local backing resolves the marker"
 
 # the same marker clears when the PR carries an APPROVED review (RESOLVE B).
 approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
