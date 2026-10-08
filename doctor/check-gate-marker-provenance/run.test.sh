@@ -41,7 +41,7 @@ GC
 # the anchor file; reviewed_oid AND signoff_verdict both serve the review file, so
 # ARM A's reviewed_oid index and ARM B's signoff_verdict candidate set read the
 # same fixture through the key each asked for. --has-metadata-key returns only
-# beads carrying that key, so a legacy bead with no signoff_verdict is NOT
+# beads carrying that key, so a bead with no signoff_verdict is NOT
 # returned to ARM B — which is exactly why that arm never has to special-case it.
 # --all returns every status; otherwise --status filters, defaulting to open.
 cat > "$TMP/bin/bd" <<'BD'
@@ -97,7 +97,7 @@ reviews() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.reviews.json"; 
 # anchor <id> <extra-metadata-json-body>
 anchor() { printf '{"id":"%s","status":"open","metadata":{%s}}' "$1" "$2"; }
 # rbead <id> <status> <anchor> <verdict> <outcome> [check_name] [reviewed_oid]
-# verdict "" omits signoff_verdict (a legacy bead); outcome "" omits gc.outcome.
+# verdict "" omits signoff_verdict (names no verdict); outcome "" omits gc.outcome.
 rbead() {
   local id="$1" st="$2" anc="$3" v="$4" oc="$5" cn="${6:-}" oid="${7:-}" m
   m=$(printf '"task_kind":"review","anchor_bead":"%s"' "$anc")
@@ -116,15 +116,22 @@ anchors ""; reviews ""
 
 echo "== ARM A: the transition missing-backing marker audit =="
 
-# --- A1. RESOLVE A clears a green lane on a legacy closed backing ------------------
-# A closed bead with gc.outcome=recorded and no signoff_verdict at all predates
-# the verdict stamp; it still counts as evidence, at no GitHub cost.
+# --- A1. a close with no signoff_verdict backs no lane locally ---------------------
+# recorded is stamped on every close, approve and request-changes alike, so it
+# names no verdict. A no-verdict close resolves its green marker against the PR's
+# reviews (RESOLVE B), never off the bookkeeping recorded stamp.
 anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.correctness\":\"green\"")"
 reviews "$(rbead r-1 closed a-1 "" recorded correctness "$OID")"
+approvals 101 '[]'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a legacy closed backing (gc.outcome=recorded, no signoff_verdict) backs the green lane"
-has "$OUT" "OK:" "the pass message is the OK line"
-eq "$(wc -l < "$GH_LOG")" "0" "RESOLVE A costs no GitHub call"
+eq "$RC" "2" "a no-verdict recorded bead does not back the green lane — RESOLVE A does not clear it"
+has "$OUT" "nothing reviewed" "the unbacked marker is reported, not cleared off the recorded stamp"
+eq "$(wc -l < "$GH_LOG" | tr -d ' ')" "1" "RESOLVE B is consulted once no local backing resolves the marker"
+
+# the same marker clears when the PR carries an APPROVED review (RESOLVE B).
+approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the no-verdict-backed marker resolves against an APPROVED GitHub review"
 
 # --- A1b. an explicit approve verdict also backs the lane --------------------------
 reviews "$(rbead r-1 closed a-1 approve recorded correctness "$OID")"
@@ -313,10 +320,12 @@ reviews "$(rbead r-1 closed a-1 request-changes "" correctness "$OID")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a request-changes bead with no outcome is still not a backing (verdict is not approve)"
 
-# --- B4. a legacy no-verdict recorded bead is well-formed and never fetched --------
+# --- B4. a close with no signoff_verdict is never fetched by ARM B -----------------
+# recorded names no verdict, so such a close backs no lane; ARM B is keyed on
+# signoff_verdict, so it never fetches one and has nothing to flag.
 reviews "$(rbead r-1 closed a-1 "" recorded correctness "$OID")"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a legacy backing (gc.outcome=recorded, no signoff_verdict) is well-formed"
+eq "$RC" "0" "a close with no signoff_verdict (gc.outcome=recorded) backs no lane and is never fetched by ARM B"
 
 # --- B5. an OPEN approve bead is not a backing ------------------------------------
 reviews "$(rbead r-1 open a-1 approve "" correctness "$OID")"
