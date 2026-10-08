@@ -166,10 +166,11 @@ done
 ```
 
 `escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. `visit-close.sh`
-stamps both keys and reads them back before it closes. On a visit that is
-already closed it records the two keys and leaves the close as it was, so it
-also repairs a visit closed by hand.
+filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
+with an assignee or a bound session open for whoever holds it.
+`visit-close.sh` stamps both keys and reads them back before it closes. On a
+visit that is already closed it records the two keys and leaves the close as
+it was, so it also repairs a visit closed by hand.
 
 The word carries weight. `moot` (the premise is gone) and `benign` (it holds
 but needs nobody) stop `escalate.sh` filing the same key and subject again

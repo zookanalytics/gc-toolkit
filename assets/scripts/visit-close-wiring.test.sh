@@ -76,6 +76,14 @@ else
   bad "escalate.sh's verdict-window words changed; the fragment's word guidance is stale"
 fi
 
+# The fragment tells agents that a retract leaves a visit someone holds open;
+# that is the engagement skip in escalate.sh's retract arm.
+if sed -n '/^# >>> retract-moot/,/^# <<< retract-moot/p' "$ESC" | grep -qF 'left for its holder to close'; then
+  ok "escalate.sh's retract still leaves an engaged visit open"
+else
+  bad "escalate.sh's retract no longer skips an engaged visit; the fragment's retract guidance is stale"
+fi
+
 echo
 echo "visit-close-wiring: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
