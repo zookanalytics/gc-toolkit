@@ -300,6 +300,9 @@ eq "$RC" "2" "(ASSIGNEXIT) close refuses --assign: its closer is a pool"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1 --assign gc-toolkit.mechanik
 eq "$RC" "2" "(ASSIGNEXIT) ruling refuses --assign: it waits on the operator"
 eq "$LOG" "" "(ASSIGNEXIT) …and nothing was written"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --then-assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNEXIT) ruling refuses --then-assign: its wait is the operator's gate"
+eq "$LOG" "" "(ASSIGNEXIT) …and no gate was filed"
 
 : > "$FAKE_LOG"; RC=0
 OUT="$("$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --dry-run 2>"$TMP/err")" || RC=$?
@@ -471,6 +474,11 @@ eq "$LOG" "" "(BLKASSIGN) …and nothing was written"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --assign gc-toolkit.mechanik
 eq "$RC" "2" "(BLKASSIGN) blocked refuses --assign, the actionable exit's flag"
+
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --dry-run
+eq "$RC" "0" "(BLKASSIGN) a dry run of the --then-assign exit succeeds"
+has "would wait tk-sub on: tk-blk1, assigned to gc-toolkit.mechanik" "$OUT" "(BLKASSIGN) …and names the agent the held bead goes to"
+hasnt "UPDATE" "$LOG" "(BLKASSIGN) …writing nothing"
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness
