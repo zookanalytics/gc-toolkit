@@ -582,8 +582,12 @@ keys = [
 #   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green
 #   from a closed review carrying `approve` with a non-empty reviewed_oid and a
 #   non-superseded gc.outcome; doctor/check-gate-marker-provenance audits the
-#   same shape. Absent is a legacy review closed before the stamp existed, which
-#   still backs a lane only via gc.outcome=recorded. Never cleared; set once.
+#   same shape. A closed review with no signoff_verdict, such as a legacy review
+#   closed before the stamp existed, backs no lane locally. signoff.sh stamps
+#   gc.outcome=recorded on every close, approve and request-changes alike, so
+#   recorded names no verdict. A lane resting on such a close is green only on
+#   an APPROVED GitHub review (lane-state.sh github_approved). Never cleared;
+#   set once.
 # visual — the demo check's visual decision: `none` when the change needs no
 #   visual, else the modality that conveys it (`repo-artifact`, `screenshot` or
 #   `video`). Written by signoff.sh on a `demo` review bead in the same update as

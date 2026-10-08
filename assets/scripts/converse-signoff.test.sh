@@ -964,7 +964,7 @@ grep -q 'could not release .*tk-sib1' "$CTMP/err" \
 read_back() {
     env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
         FAKE_SHOW_DIR="$CTMP/show.d" gc bd show "$1" --json \
-        | sed -e 's/.*"status":"\([^"]*\)".*"assignee":\("\([^"]*\)"\|null\).*/\1|\3/'
+        | sed -E -e 's/.*"status":"([^"]*)".*"assignee":("([^"]*)"|null).*/\1|\3/'
 }
 eq "$(read_back tk-foreign)" "open|" \
    "(VACUUM-HELD-NAMED) fixture: the named turn did read back released"
