@@ -53,8 +53,9 @@ RC_LIVE_WORKFLOW=4
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
 # convoy, epic, step and molecule types (machinery or work-in-flight), decision
 # (already a surfaced human choice) and spec (an output, not a raw input). A
-# graph.v2 workflow root and its steps keep issue_type task, which this list
-# admits, so scan_precision_filter drops them by gc.kind and gc.step_ref.
+# graph.v2 pour does not retype its steps as step, so a workflow root and most
+# of its steps are issue_type task, which this list admits.
+# scan_precision_filter drops them by gc.kind and gc.step_ref.
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # The one definition of the standing kinds, shared with the liveness sweep and
 # the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
@@ -467,11 +468,12 @@ cmd_demand() {
 #     epic/step/molecule/spec/decision types by omission.
 #   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
 #     issue_type task, so the allowlist misses it; drop it explicitly.
-#   - molecule steps (gc.step_ref) — a graph.v2 step is issue_type task too,
-#     and its edge to its root is tracks, not parent-child, so neither the
-#     allowlist nor the top-level clause drops it. Every step a pour mints
-#     carries gc.step_ref, control steps such as workflow-finalize included. A
-#     step advances only through its own molecule, so a first reaction has no
+#   - molecule steps (gc.step_ref) — most graph.v2 steps are issue_type task
+#     too, and a graph.v2 step has no parent-child edge: a tracks edge, or
+#     gc.root_bead_id alone, ties it to its root. So neither the allowlist nor
+#     the top-level clause drops it. Every step a pour mints carries
+#     gc.step_ref, control steps such as workflow-finalize included. A step
+#     advances only through its own molecule, so a first reaction has no
 #     disposition to make on it.
 #   - a standing kind (is_standing_kind, assets/scripts/standing-kinds.sh) — a
 #     standing record is open and unrouted by design and never closes, so a

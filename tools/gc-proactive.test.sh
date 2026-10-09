@@ -28,8 +28,8 @@
 #   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
-# A molecule step (gc.step_ref) is issue_type task and tied to its root by a
-# tracks edge, so its step key is all that sets it apart from raw input:
+# A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
+# key is all that sets it apart from raw input:
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
 #   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
 #   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
@@ -182,13 +182,14 @@ for k in $PATH_KEYS; do
 done
 
 # --- a molecule step is not a scan candidate --------------------------------
-# A graph.v2 step is issue_type task, and its edge to its root is tracks, not
-# parent-child, so the type allowlist and the top-level clause both pass it.
-# tk-step-validate and tk-step-reaction are ordinary steps of two formulas.
-# tk-step-finalize is a control step whose gc.kind is not a topology kind. Each
-# is unrouted, carries the tracks row bd prints for a step, and passes every
-# other clause, so gc.step_ref is all that sets it apart from tk-raw.
-# tk-step-blank carries the key with an empty value, which names no step.
+# Most graph.v2 steps are issue_type task, and no graph.v2 step has a
+# parent-child edge, so the type allowlist and the top-level clause both pass
+# one. tk-step-validate and tk-step-reaction are ordinary steps of two formulas,
+# each tied to its root by a tracks edge. tk-step-finalize is a control step
+# whose gc.kind is not a topology kind, tied to its root by gc.root_bead_id
+# alone. Each is unrouted and passes every other clause, so gc.step_ref is all
+# that sets it apart from tk-raw. tk-step-blank carries the key with an empty
+# value, which names no step.
 cat > "$TMP/scan.json" <<'JSON'
 [
   {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
@@ -199,8 +200,7 @@ cat > "$TMP/scan.json" <<'JSON'
    "metadata":{"gc.step_ref":"mol-first-reaction.first-reaction","gc.step_id":"first-reaction","gc.root_bead_id":"tk-root-reaction"},
    "dependencies":[{"issue_id":"tk-step-reaction","depends_on_id":"tk-root-reaction","type":"tracks"}]},
   {"id":"tk-step-finalize", "issue_type":"task", "description":"finalize the workflow", "title":"workflow finalize",
-   "metadata":{"gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize","gc.step_id":"workflow-finalize","gc.root_bead_id":"tk-root-work"},
-   "dependencies":[{"issue_id":"tk-step-finalize","depends_on_id":"tk-root-work","type":"tracks"}]},
+   "metadata":{"gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize","gc.step_id":"workflow-finalize","gc.root_bead_id":"tk-root-work"}},
   {"id":"tk-step-blank", "issue_type":"task", "description":"a step key left empty", "title":"blank step key", "metadata":{"gc.step_ref":""}}
 ]
 JSON
