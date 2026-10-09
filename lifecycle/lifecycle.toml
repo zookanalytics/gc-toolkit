@@ -46,6 +46,9 @@ park_route = "human"
 # States whose legal status is closed; every other declared state is open.
 # lifecycle.sh enforces the pairing both ways: --close is accepted only into a
 # closed state, and a transition into a closed state must carry --close.
+# Entering `merged` additionally requires a non-empty --set merged_sha: its
+# meaning is "landed; merged_sha recorded", so it cannot be entered without the
+# landing that defines it.
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.

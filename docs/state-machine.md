@@ -81,7 +81,9 @@ stateDiagram-v2
 `handed_off` is the unanchored bead after the polecat's single handoff write
 (branch recorded, assignee = refinery, `merge_result` still absent); the
 anchored states are the `merge_result` values. `merged` is the only state with
-`status = closed`; the human states stay open, routed to human.
+`status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
+`merged_sha`, the landing the state names; the human states stay open, routed
+to human.
 
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
