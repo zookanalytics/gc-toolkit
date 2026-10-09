@@ -549,7 +549,7 @@ file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
 the reaction's takeaway as the question, and hold the subject on it. The topic
 keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
 already holds on the subject keeps its question. The sweep's next pass files the
-visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit, so a subject can wait up to one cooldown, five minutes, on a gate with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among

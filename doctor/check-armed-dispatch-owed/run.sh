@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # doctor/check-armed-dispatch-owed — an owed deferred dispatch is firing or
 # surfaced. A bead armed with gc.dispatch_when_ready is slung by the
-# deferred-dispatch reconcile order (orders/deferred-dispatch.toml, every 2m)
+# deferred-dispatch reconcile order (orders/deferred-dispatch.toml, every 5m)
 # once bd would let it dispatch. `arm` refuses a non-open bead and reconcile
 # retires a closed or already-delivered one, so a healthy arm is short-lived:
 # it waits on its own `blocks` blockers, then dispatches within a cadence of
@@ -36,9 +36,9 @@
 set -u
 
 # A dispatch owed longer than this has missed multiple reconcile passes. Mirrors
-# check-cadence-live's I10 floor, max(3×interval, 15m): the deferred-dispatch
-# order runs every 2m, so 900s is more than seven passes — long past any normal
-# window between a blocker closing and the next reconcile slinging.
+# check-cadence-live's I10 window, max(3×interval, 15m): the deferred-dispatch
+# order runs every 5m, so 900s is three passes, past any normal window between
+# a blocker closing and the next reconcile slinging.
 OWED_WINDOW_SECONDS=900
 
 K_ARM="gc.dispatch_when_ready"
@@ -288,7 +288,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$since_epoch" ] || continue
         age=$(( now - since_epoch ))
         if [ "$age" -ge "$OWED_WINDOW_SECONDS" ]; then
-            findings+=("$label bead $cid: armed and its own \`blocks\` edges have all been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch reconcile order slings a ready arm within its 2m cadence, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid")
+            findings+=("$label bead $cid: armed and its own \`blocks\` edges have all been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch reconcile order slings a ready arm within its 5m cadence, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid")
         fi
     done <<< "$joined"
 done <<< "$scopes"
