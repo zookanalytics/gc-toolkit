@@ -561,13 +561,12 @@ echo "── a stale PR the merge cadence settled waiting on the operator's revi
 # settled the PR at the head its posture was read at, and the posture still owes
 # a review. It classifies gated, never stale-gate. The controls fall outside that
 # settled reading: a posture read at another head than the settled verdict, a PR
-# the cadence has not settled, and an approved PR, settled or not. merge.sh
-# records no verdict at many holds an approved PR can reach, so a settled verdict
-# beside an approval can be one recorded before it, and an approved PR still idle
-# past the threshold is held by something the visit surfaces. Two settled
-# postures owe the operator nothing either: commented, review comments the city
-# owes answers to, which merge.sh holds on before it records any verdict, and
-# none, which a base with no required-review rule reads approved or not.
+# the cadence has not settled, and an approved PR, settled or not. A settled
+# verdict says the checks are done and nothing about the holds an approved PR can
+# still meet, so an approved PR still idle past the threshold is held by
+# something the visit surfaces. Two settled postures owe the operator nothing
+# either: commented, review comments the city owes answers to, and none, which a
+# base with no required-review rule reads approved or not.
 T="$(iso_ago 3)"
 raise_case() { # raise_case <pr_posture> <pr.machine>: c-pr-open's PR idle 9 days
     jq --arg p "$1" --arg m "$2" \
@@ -589,7 +588,7 @@ for c in "review_required@sha-521@$T|settled@sha-521@$T|a settled stale PR await
     esac
 done
 for c in "review_required@sha-old@$T|settled@sha-521@$T|a review owed at an earlier head than the settled verdict" \
-         "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR whose settled verdict may predate the approval" \
+         "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR the cadence reads settled" \
          "approved@sha-old@$T|settled@sha-521@$T|an approval read at an earlier head than the settled verdict" \
          "review_required@sha-521@$T|progressing@sha-521@$T|a PR the merge cadence has not settled" \
          "approved@sha-521@$T|progressing@sha-521@$T|an approved PR with a review, fix or blocker still in flight" \
@@ -633,10 +632,10 @@ eq "$(cat "$ESC_RETRACTS")" "" "a PR still stale, unapproved and not awaiting re
 grep -q 'stale-gate visits: 0 retracted, 1 kept, 0 failed' <<< "$OUT" \
     && ok "…and the pass counts it kept" || bad "kept tally" "$OUT"
 
-# An approval is not the premise's end, settled or not. merge.sh records no
-# verdict at many holds an approved PR can reach, so a settled verdict beside it
-# can predate it, and an approved PR still idle past the threshold is held by
-# something the visit surfaces.
+# An approval is not the premise's end, settled or not. A settled verdict says
+# the checks are done and nothing about the holds an approved PR can still meet,
+# so an approved PR still idle past the threshold is held by something the visit
+# surfaces.
 for m in "settled@sha-521@$T" "progressing@sha-521@$T" "settled@sha-new@$T" ""; do
     stale_live "{\"pr_posture\":\"approved@sha-521@$T\",\"pr.machine\":\"$m\"}" '{}'; retract_run
     eq "$(cat "$ESC_RETRACTS")" "" "an approved PR whose pr.machine is '$m': its visit stands"

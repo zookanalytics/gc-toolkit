@@ -40,11 +40,14 @@ STALE_GATE_JQ='
     and ((.metadata["gc.session_name"] // "") | tostring) == "";
   # An anchor -> the review posture pr-facts.sh records on it (pr_posture), when
   # the merge cadence settled the anchor (pr.machine) at the head that posture
-  # was read at, and "" otherwise. merge.sh records settled from a pass that
-  # found every lane green and no review, fix or blocker in flight, so it says
-  # what that pass found, and a posture read at another head says nothing about
-  # the live one. That is how the helm board reads a settled row (prApproval and
-  # prOwed in services/helm/internal/board/derive.go).
+  # was read at, and "" otherwise. Two arms record settled. gate-ensure.sh does
+  # so on a visit that finds each declared lane green with no fix unit or
+  # validation pass in flight, and merge.sh does so at the holds where the PR
+  # waits on a review or on GitHub. A settled verdict says the checks are done
+  # and nothing about the holds the merge itself still meets, and a posture
+  # read at another head says nothing about the live one. That is how the helm
+  # board reads a settled row (prApproval and prOwed in
+  # services/helm/internal/board/derive.go).
   def settled_posture:
     ((.metadata["pr.machine"] // "") | tostring | split("@")) as $m
     | ((.metadata.pr_posture // "") | tostring | split("@")) as $p
@@ -53,18 +56,19 @@ STALE_GATE_JQ='
       then $p[0] else "" end;
   # No approved posture appears below. merge.sh records no verdict at many of
   # the holds an approved PR can reach (a visit under another key, a reviews
-  # read that fails, a red required check, a merge that fails), so a settled
-  # verdict recorded while the approval was still owed can outlive it. An
-  # approved PR nothing holds lands within a pass, so one still open past the
-  # threshold is held by something, which is what the stale-PR gate surfaces.
+  # read that fails, a red required check, a merge that fails), and
+  # gate-ensure.sh settles on the checks alone, so a settled verdict beside an
+  # approval says nothing about those holds. An approved PR nothing holds lands
+  # within a pass, so one still open past the threshold is held by something,
+  # which is what the stale-PR gate surfaces.
   # The settled posture still owes the first review or a re-review, so the PR
   # waits on the review of the operator, whose review queue already names the
   # wait. The premise re-check of converse closes a visit raised on it as
   # benign. Two postures are left out. commented is review comments the city
-  # owes answers to, and merge.sh holds that posture before it records any
-  # verdict, so a settled verdict beside it was recorded at an earlier posture.
-  # none is what a base with no required-review rule reads, approved or not, so
-  # it says nothing about whose move is next.
+  # owes answers to, which no settled verdict speaks to: merge.sh holds that
+  # posture before it records any verdict, and gate-ensure.sh settles on the
+  # checks alone. none is what a base with no required-review rule reads,
+  # approved or not, so it says nothing about whose move is next.
   def review_owed:
     settled_posture as $s
     | (["review_required", "changes_requested"] | index($s)) != null;
