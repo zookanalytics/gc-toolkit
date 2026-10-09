@@ -176,15 +176,30 @@ PASS_EPOCH=$(date -u +%s)
 # Each repository that answered is kept as well: a PR missing from the open set
 # proves it merged or closed only when its own repository was read, and the
 # stale-gate retraction below acts on nothing weaker.
+# Two lists name the repositories read: the ones the ready PR-parked beads name,
+# which the classification intersects, and the ones the subjects of open
+# stale-gate visits name, which the retraction judges. A subject parked on a
+# blocker, assigned or deferred has left the ready set, and without the second
+# list its visit would never be judged. PR_LIVENESS speaks for the first list
+# only, because it is the word the batch visit owes about its ready beads.
 PRURLS="$TMP/prurls"; : > "$PRURLS"
 PRREAD="$TMP/prrepos-read"; : > "$PRREAD"
 PR_LIVENESS=none
+PR_REPO_JQ='[ ((.metadata.pr_url // "") | ascii_downcase) | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]+") ]
+       | .[0] | select(. != null) | (.h + "/" + .o)'
 jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request")
-       | [ ((.metadata.pr_url // "") | ascii_downcase) | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]+") ]
-       | .[0] | select(. != null) | (.h + "/" + .o) ] | unique | .[]' "$READY" 2>/dev/null > "$TMP/prrepos"
+       | '"$PR_REPO_JQ"' ] | unique | .[]' "$READY" 2>/dev/null > "$TMP/prrepos-ready"
+jq -rn --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" "$STALE_GATE_JQ"'
+  ([ ($live[0] // [])[] | select(unengaged_stale_gate_visit)
+     | ((.metadata["gc.continuation_group"] // "") | tostring) | select(. != "") ] | unique) as $subjects
+  | [ ($alive[0] // [])[] | select(((.id // "") as $i | $subjects | index($i)) != null)
+      | select((.metadata.merge_result // "") == "pull_request")
+      | '"$PR_REPO_JQ"' ] | unique | .[]' 2>/dev/null > "$TMP/prrepos-visits"
+sort -u "$TMP/prrepos-ready" "$TMP/prrepos-visits" > "$TMP/prrepos"
 while IFS= read -r R; do
     [ -n "$R" ] || continue
-    if [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
+    READY_REPO=0; grep -qxF "$R" "$TMP/prrepos-ready" && READY_REPO=1
+    if [ "$READY_REPO" -eq 1 ] && [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
     # --limit is required: gh pr list defaults to 30 and truncates in silence.
     if ROWS=$(bounded gh pr list --repo "$R" --state open --limit 1000 --json url,updatedAt 2>/dev/null) \
        && [ -n "$ROWS" ] && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -192,9 +207,11 @@ while IFS= read -r R; do
             | jq -c '.[] | {url: ((.url // "") | tostring), updated: ((.updatedAt // "") | tostring)}
                      | select(.url != "")' >> "$PRURLS"
         printf '%s\n' "$R" >> "$PRREAD"
-    else
+    elif [ "$READY_REPO" -eq 1 ]; then
         PR_LIVENESS=unverified
         echo "$PROG: WARN: open-PR read FAILED for $R — its PR-parked beads are reported, never hidden" >&2
+    else
+        echo "$PROG: WARN: open-PR read FAILED for $R — its stale-gate visits are kept, never retracted on it" >&2
     fi
 done < "$TMP/prrepos"
 OPEN_PRS=$(jq -sc '.' "$PRURLS" 2>/dev/null)

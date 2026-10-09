@@ -111,15 +111,18 @@ GC
 chmod +x "$TMP/bin/gc"
 
 # gh stub: only zook/gc-toolkit answers, with #521/#522 open (so #520 merged and
-# #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
-# It serves $GH_PRS verbatim, which is how a test ages a PR: the sweep asks for
-# url,updatedAt and reads both, so a stub that answered only url would classify
-# every PR ageless and hide the case these tests are about.
+# #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage,
+# GH_FAIL_REPO = one repository failing alone. Each --repo read is logged to
+# $GH_CALLS. It serves $GH_PRS verbatim, which is how a test ages a PR: the
+# sweep asks for url,updatedAt and reads both, so a stub that answered only url
+# would classify every PR ageless and hide the case these tests are about.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "${GH_CALLS:-}" ] && printf '%s\n' "$repo" >> "$GH_CALLS"
+[ -n "${GH_FAIL_REPO:-}" ] && case "$repo" in *"$GH_FAIL_REPO") exit 1 ;; esac
 case "$repo" in
   */zook/gc-toolkit|zook/gc-toolkit) cat "$GH_PRS" ;;
   *) printf '[]\n' ;;
@@ -172,6 +175,7 @@ chmod +x "$TMP/bin/escalate.sh"
 export PATH="$TMP/bin:$PATH"
 export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
 export ESC_RETRACTS="$TMP/esc-retracts" ESC_RETRACT_BODIES="$TMP/esc-retract-bodies"
+export GH_CALLS="$TMP/gh-calls"
 export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
@@ -287,7 +291,7 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
     : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
-    : > "$ESC_RETRACTS"; : > "$ESC_RETRACT_BODIES"
+    : > "$ESC_RETRACTS"; : > "$ESC_RETRACT_BODIES"; : > "$GH_CALLS"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
     ERR="$(cat "$TMP/err")"
@@ -696,6 +700,39 @@ grep -q 'could not retract the stale-gate visit on c-pr-open' <<< "$ERR" \
     && ok "a retraction that fails is reported" || bad "failed retract warn" "$ERR"
 grep -q 'stale-gate visits: 0 retracted, 0 kept, 1 failed' <<< "$OUT" \
     && ok "…and counted failed, for the next pass to retry" || bad "failed tally" "$OUT"
+
+# The operator parks the anchor on a blocker without engaging the visit, so the
+# anchor leaves the ready set while it stays alive. Here no ready bead names its
+# PR's repository, so only the visit has it read, and the visit is judged like
+# any other: retracted once the PR moves or lands, kept while it is stale.
+jq 'map(select(((.metadata.pr_url // "") | ascii_downcase | test("/zook/gc-toolkit/")) | not))' \
+    "$TMP/ready.json" > "$TMP/ready-parked.json"
+parked_run() { FAKE_READY="$TMP/ready-parked.json" FAKE_LIVE="$TMP/live-stale.json" run_sweep "$EXPECT_SURVIVORS"; }
+gh_prs 0 0; stale_live '{}' '{}'; parked_run
+grep -qx 'github.com/zook/gc-toolkit' "$GH_CALLS" \
+    && ok "a visit whose subject left the ready set has its PR's repository read" \
+    || bad "the parked subject's repository is read" "gh reads: $(tr '\n' ' ' < "$GH_CALLS")"
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "…and once that PR moved, its visit is retracted"
+printf '[{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' "$(iso_ago 0)" > "$TMP/gh-prs.json"
+parked_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "…and once that PR left the open list, it is retracted"
+grep -q 'pull/521 is no longer open (merged or closed)' "$ESC_RETRACT_BODIES" \
+    && ok "…with the reading that it is no longer open" || bad "parked not-open reading" "$(cat "$ESC_RETRACT_BODIES")"
+gh_prs 9 0; parked_run
+eq "$(cat "$ESC_RETRACTS")" "" "…while the PR is still stale, the visit stands"
+# A failed read of a repository only the visit names keeps the visit and leaves
+# the batch visit's open-PR word alone: no ready bead stands behind it.
+gh_prs 0 0
+GH_FAIL_REPO=zook/gc-toolkit parked_run
+eq "$(cat "$ESC_RETRACTS")" "" "an unread repository only the visit names retracts nothing"
+grep -q 'liveness: pr=verified' <<< "$OUT" \
+    && ok "…and leaves the open-PR liveness verified" || bad "visit-only repo read failure flipped pr liveness" "$(grep 'liveness:' <<< "$OUT")"
+grep -q 'open-PR read FAILED for github.com/zook/gc-toolkit — its stale-gate visits are kept' <<< "$ERR" \
+    && ok "…and says the read failed and the visit is kept" || bad "visit-only repo warn" "$ERR"
+GH_FAIL_REPO=zook/gc-toolkit FAKE_LIVE="$TMP/live-stale.json" run_sweep "$EXPECT_SURVIVORS"
+grep -q 'liveness: pr=unverified' <<< "$OUT" \
+    && ok "control: the same failure on a repository a ready bead names reads unverified" \
+    || bad "control: ready repo read failure reads unverified" "$(grep 'liveness:' <<< "$OUT")"
 
 rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"; : > "$ESC_RETRACTS"
 OUT="$(FAKE_LIVE="$TMP/live-stale.json" bash "$SCRIPT" --dry-run 2>/dev/null)"
