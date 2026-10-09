@@ -432,7 +432,7 @@ stale_visit_live() { # stale_visit_live <f-pr-open metadata to add, or null for 
             "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"f-pr-open"}} * $v]' \
         "$TMP/live.bak" > "$FIX/live.json"
 }
-quiet_run() { BASELINE_CSV="f-carried,f-plain,f-pr-open" LAST_PASS_AT="$LAST_AT" run_precheck "$@"; }
+quiet_run() { BASELINE_CSV="f-carried,f-plain,f-pr-open" LAST_PASS_AT="$LAST_AT" run_precheck; }
 HELD="{\"pr_posture\":\"review_required@sha-521@$BEFORE\",\"pr.machine\":\"progressing@sha-521@$BEFORE\"}"
 GONE='{"merge_result":"abandoned"}'
 

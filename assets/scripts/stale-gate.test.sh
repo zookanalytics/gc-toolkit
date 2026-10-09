@@ -31,6 +31,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
 echo "# the definition"
+# shellcheck disable=SC1090  # the same file, followed at the source below
 SOURCED_OUT=$(. "$LIB" 2>&1)
 eq "$SOURCED_OUT" "" "(DEF) sourcing the file prints nothing"
 # shellcheck source=stale-gate.sh

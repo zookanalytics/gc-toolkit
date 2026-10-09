@@ -40,11 +40,11 @@ STALE_GATE_JQ='
     and ((.metadata["gc.session_name"] // "") | tostring) == "";
   # An anchor -> the review posture pr-facts.sh records on it (pr_posture), when
   # the merge cadence settled the anchor (pr.machine) at the head that posture
-  # was read at, and "" otherwise. merge.sh records settled only once every lane
-  # is green and no review, fix or blocker is in flight, and a posture read at
-  # another head says nothing about the live one. That is how the helm board
-  # reads a settled row (prApproval and prOwed in
-  # services/helm/internal/board/derive.go).
+  # was read at, and "" otherwise. merge.sh records settled from a pass that
+  # found every lane green and no review, fix or blocker in flight, so it says
+  # what that pass found, and a posture read at another head says nothing about
+  # the live one. That is how the helm board reads a settled row (prApproval and
+  # prOwed in services/helm/internal/board/derive.go).
   def settled_posture:
     ((.metadata["pr.machine"] // "") | tostring | split("@")) as $m
     | ((.metadata.pr_posture // "") | tostring | split("@")) as $p
