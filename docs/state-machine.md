@@ -698,8 +698,12 @@ review's result set.
   never close work beads. The arm closes it through `bead-rehome.sh --kind
   duplicate` only when the named successor resolves and is closed or shipped
   AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It writes nothing to the
-  successor's branch or PR, and holds on anything it cannot establish.
+  or by carrying no work-product key at all. It also closes an unmarked rework
+  twin, an open rework child that was never dispatched (no dispatch metadata,
+  no convoy tracking it) whose review is closed and whose same-review,
+  same-anchor sibling landed. That twin would otherwise hold its anchor
+  forever. It writes nothing to the successor's branch or PR, and holds on
+  anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -729,7 +733,8 @@ under every kind, because it is the whole of that distinction. The read side
 searches every store before concluding a close was false. Consumers: the
 mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
+cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
+twins), and any patrol judging a closed bead.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is

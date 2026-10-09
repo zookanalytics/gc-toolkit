@@ -958,7 +958,10 @@ keys = [
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
-#   enumerates by `--has-metadata-key duplicate_of`. A bead id. Never cleared.
+#   enumerates by `--has-metadata-key duplicate_of`. Stamped by hand on a
+#   diagnosed duplicate, and by duplicate-sweep.sh on a rework twin it has
+#   already closed, so pr-stack.sh drops that twin from the branch's bead list.
+#   A bead id. Never cleared.
 # duplicate_of_store — the store that survivor lives in, the sibling of
 #   gc.superseded_by_store, set only where the survivor's id prefix is ambiguous.
 #   duplicate-sweep.sh reads it to leave a duplicate alone when its survivor sits
