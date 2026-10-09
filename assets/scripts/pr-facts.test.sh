@@ -3898,7 +3898,7 @@ echo '[]' > "$GH_DIR/reviews_66.json"
 printf '%s\n' '{"reviews":[],"threads":[{"id":"T-66","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-66","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_66.json"
 out=$(run_posture)
 eq "$(meta_pinned UT6 pr_posture)" "commented@sha-66" "the posture pass records the merge-hold before merge.sh runs"
-eq "$(jq '[.[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads"))] | length' "$STUB_STORE")" "0" "…and dispatches no visit — that is the full pass's"
+eq "$(jq '[.[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads"))] | length' "$STUB_STORE")" "0" "…and dispatches no visit — that is a routing pass's"
 eq "$(meta UT6 pr_unengaged_threads)" "<absent>" "…and writes no head watermark yet"
 out=$(run)
 has "$out" "unengaged review-thread finding" "the full pass that follows files the one visit"
@@ -3907,6 +3907,69 @@ mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run_posture)
 eq "$(meta_pinned UT6 pr_posture)" "commented@sha-66" "a standing visit keeps the merge held on the next posture pass"
 hasnt "$(gh_since "$mark")" "graphql" "…without re-reading the threads"
+
+# A conflicting anchor whose `commented` posture stands for unengaged review
+# threads owes feedback exactly as one holding an unanswered batch does. The
+# CONFLICTING arm ends every anchor's visit it acts on, and the unengaged visit
+# is filed behind it, so an arm reading only the unanswered batch as owed either
+# files a merge-in over the threads (approved) or waits for an approval
+# (unapproved), and in both cases the threads are routed nowhere.
+# ut_fixture <num>: one unresolved thread under an unmarked pre-cutover post of
+# the city's login, the shape an operator-run review leaves.
+ut_fixture() {
+  printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_$1.json"
+  printf '{"reviews":[],"threads":[{"id":"T-%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-%s","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}\n' "$1" "$1" > "$GH_DIR/threads_$1.json"
+}
+ut_visits() { jq --arg a "$1" '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | length' "$STUB_STORE"; }
+merge_ins() { jq --arg a "$1" '[ .[] | select((.metadata.anchor_bead // "") == $a) | select((.metadata.rejection_reason // "") | test("stale base")) ] | length' "$STUB_STORE"; }
+
+echo "# an approved CONFLICTING PR with unengaged threads gets their visit first, not a merge-in"
+store "[$(anchor UC1 175 "$UTCUT")]"
+printf '%s' "$(prview 175 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_175.json"
+approve 175
+ut_fixture 175
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "PR#175 has 1 unengaged review-thread finding(s); filed visit" "the conflicting PR's threads are routed to their visit"
+eq "$(ut_visits UC1)" "1" "…exactly one visit"
+eq "$(meta UC1 pr_unengaged_threads)" "sha-175" "…and the head is watermarked"
+eq "$(merge_ins UC1)" "0" "…and no merge-in child is filed over the threads it would not answer"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+eq "$(meta_pinned UC1 pr_posture)" "commented@sha-175" "…while the posture holds the merge"
+
+echo "# …once the visit stands, the next pass brings the approved branch current"
+# The visit covers the threads, so nothing is owed: the conflict is the merge-in's
+# again. The open visit keeps the posture `commented` and the merge held, and no
+# second visit is filed for the same head.
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "PR#175 conflicts with 'main'; filed merge-mode rework" "the merge-in is filed once the threads are routed"
+eq "$(merge_ins UC1)" "1" "…exactly one merge-in child"
+eq "$(ut_visits UC1)" "1" "…and still exactly one visit"
+eq "$(meta_pinned UC1 pr_posture)" "commented@sha-175" "…while the open visit keeps the merge held"
+
+echo "# an unapproved CONFLICTING PR with unengaged threads gets their visit, not a wait for approval"
+store "[$(anchor UC2 176 "$UTCUT")]"
+printf '%s' "$(prview 176 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_176.json"
+echo '[]' > "$GH_DIR/reviews_176.json"
+ut_fixture 176
+out=$(run)
+has "$out" "PR#176 has 1 unengaged review-thread finding(s); filed visit" "the threads are routed while the PR waits for an approval"
+hasnt "$out" "PR#176 conflicts but no external approval stands" "…the approval gate does not end the anchor's visit first"
+eq "$(meta UC2 pr_unengaged_threads)" "sha-176" "…and the head is watermarked"
+eq "$(merge_ins UC2)" "0" "…and no merge-in child is filed for the unapproved PR"
+
+echo "# the early routing pass files the unengaged visit of a CONFLICTING PR"
+# --route-comments-only routes operator feedback ahead of the slow arms, and an
+# operator-run review under the city's login is operator feedback.
+store "[$(anchor UC3 177 "$UTCUT")]"
+printf '%s' "$(prview 177 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_177.json"
+approve 177
+ut_fixture 177
+out=$("$SUT" --route-comments-only --fix-pool "$FIX" 2>&1)
+has "$out" "PR#177 has 1 unengaged review-thread finding(s); filed visit" "the early routing pass files the visit"
+eq "$(meta UC3 pr_unengaged_threads)" "sha-177" "…and watermarks the head"
+eq "$(merge_ins UC3)" "0" "…and files no merge-in child"
 
 echo "# Conversation tab: an operator issue comment files a rework child on its own watermark"
 # The sweep read only reviews and inline comments, so operator direction posted
