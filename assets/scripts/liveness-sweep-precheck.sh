@@ -388,11 +388,11 @@ if [ "$READS_OK" -eq 1 ]; then
 fi
 
 # A third output: the pass retracts a stale-gate visit whose premise is gone,
-# once its PR moved, landed, was approved, or reached the operator's review
-# queue. That judgment needs the pass's gh read, so the pass runs while any
-# stale-gate visit nobody is engaged in is open, the set the pass judges. Without
-# this, a board that is otherwise quiet would leave such a visit open after its
-# PR landed and its anchor left the ready set.
+# once its PR moved or landed, or the merge cadence settled it approved or
+# waiting on the operator's review. That judgment needs the pass's gh read, so
+# the pass runs while any stale-gate visit nobody is engaged in is open, the set
+# the pass judges. Without this, a board that is otherwise quiet would leave such
+# a visit open after its PR landed and its anchor left the ready set.
 STALE_VISITS=""; N_STALE_VISITS=""
 if [ "$READS_OK" -eq 1 ]; then
     STALE_VISITS=$(jq -c --arg key "$STALE_GATE_KEY" '

@@ -9,11 +9,11 @@
 # A PR-gated anchor is a named wait only while its PR MOVES: past
 # LIVENESS_SWEEP_STALE_PR_DAYS since the PR's last update it classifies
 # `stale-gate` and gets its own escalate.sh visit, named per anchor rather
-# than batched, unless the PR is approved or waits on the operator's review.
-# That escalation dedups on the anchor's own stale_escalated_at, so it
-# survives a restart and re-raises once per LIVENESS_SWEEP_STALE_REESCALATE_DAYS
-# instead of once-forever or per-pass. Each pass retracts the visit once its
-# premise is gone.
+# than batched, unless the merge cadence settled the PR approved or waiting on
+# the operator's review. That escalation dedups on the anchor's own
+# stale_escalated_at, so it survives a restart and re-raises once per
+# LIVENESS_SWEEP_STALE_REESCALATE_DAYS instead of once-forever or per-pass. Each
+# pass retracts the visit once its premise is gone.
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
@@ -367,15 +367,22 @@ fi
 # The stale-gate premise as jq definitions, spliced into the classification below
 # and into the retraction pass after it, so a visit is filed and concluded on one
 # rule. pr_age reads each program's own $nowepoch.
-#   pr_approved  the review posture pr-facts.sh records on the anchor
-#                (pr_posture) is approved. That answers the visit's land-it
-#                disposition, and merge.sh lands the PR past an unengaged visit.
-#   review_owed  the PR waits on the operator's review: the merge cadence settled
-#                it (pr.machine) and its posture, read at the same head, still
-#                owes an approval or a re-review. That is the helm board's owed
-#                rule for a settled row (prOwed and prApproval in
-#                services/helm/internal/board/derive.go), so the operator's review
-#                queue already names the wait. Converse's premise re-check closes a
+#   settled_posture  the review posture pr-facts.sh records on the anchor
+#                (pr_posture), when the merge cadence settled the anchor
+#                (pr.machine) at the head that posture was read at, and empty
+#                otherwise. merge.sh records settled only once every lane is
+#                green and no review, fix or blocker is in flight, and a posture
+#                read at another head says nothing about the live one. That is
+#                the helm board's reading of a settled row (prApproval and
+#                prOwed in services/helm/internal/board/derive.go).
+#   pr_approved  the settled posture is approved. That answers the visit's
+#                land-it disposition: nothing else is in flight, and merge.sh
+#                does not hold an approved PR on an unengaged visit. An approved
+#                PR the cadence has not settled still has something in flight
+#                or holding it, so it keeps its visit.
+#   review_owed  the settled posture still owes an approval or a re-review, so
+#                the PR waits on the operator's review and their review queue
+#                already names the wait. Converse's premise re-check closes a
 #                visit raised on it as benign.
 STALE_PREMISE_JQ='
   def pr_key:
@@ -387,14 +394,16 @@ STALE_PREMISE_JQ='
   def pr_age:
     (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
     | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
-  def pr_approved:
-    ((.metadata.pr_posture // "") | tostring | split("@") | .[0]) == "approved";
-  def review_owed:
+  def settled_posture:
     ((.metadata["pr.machine"] // "") | tostring | split("@")) as $m
     | ((.metadata.pr_posture // "") | tostring | split("@")) as $p
-    | ($m | length) == 3 and ($p | length) == 3
-      and $m[0] == "settled" and $m[1] != "" and $m[1] == $p[1]
-      and (["review_required", "changes_requested", "commented", "none"] | index($p[0])) != null;
+    | if ($m | length) == 3 and ($p | length) == 3
+         and $m[0] == "settled" and $m[1] != "" and $m[1] == $p[1]
+      then $p[0] else "" end;
+  def pr_approved: settled_posture == "approved";
+  def review_owed:
+    settled_posture as $s
+    | (["review_required", "changes_requested", "commented", "none"] | index($s)) != null;
 '
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
@@ -488,8 +497,9 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
          elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
-         # A stale PR that is approved, or waits on a review from the operator, is
-         # a wait its approval or the review queue already names (STALE_PREMISE_JQ).
+         # A stale PR the merge cadence settled, approved or waiting on a review
+         # from the operator, is a wait its approval or the review queue already
+         # names (STALE_PREMISE_JQ).
          elif (((.metadata.merge_result // "") == "pull_request")
                and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
               then (if (((.metadata.pr_url // "") | pr_key) as $k | ($stalekeys | index($k)) != null)
@@ -586,9 +596,9 @@ $id <blocker> — the edge IS the park).
 
 Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
 ${id}'s own stale_escalated_at. This visit closes itself, moot, once the PR
-moves, lands, is approved, or reaches the operator's review queue. Closing it
-by hand does not move the PR; the next pass past the floor raises it again
-while the PR is still stale."
+moves or lands, or once the merge cadence settles it approved or waiting on the
+operator's review. Closing it by hand does not move the PR; the next pass past
+the floor raises it again while the PR is still stale."
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $id on $pr [$STALE_GATE_KEY]"
             filed=$((filed + 1))
@@ -621,12 +631,12 @@ stale_escalations
 # --- stale PR gates: retract the visit once its premise is gone ---------------
 # A stale-gate visit asks a person to land, retire, or park an anchor whose PR
 # stopped moving, and its premise can die before anyone engages it. The PR lands
-# or is closed, it moves again inside the threshold, or it is approved or
-# reaches the operator's review queue, the two shapes the classification above
-# never raises on (STALE_PREMISE_JQ). This pass files the visit and owns its
-# premise, so it is the one that judges the premise gone. It retracts through
-# escalate.sh --retract, which closes the visit moot with the reading and leaves
-# a visit someone is engaged in to them.
+# or is closed, it moves again inside the threshold, or the merge cadence
+# settles it approved or waiting on the operator's review, the two shapes the
+# classification above never raises on (STALE_PREMISE_JQ). This pass files the
+# visit and owns its premise, so it is the one that judges the premise gone. It
+# retracts through escalate.sh --retract, which closes the visit moot with the
+# reading and leaves a visit someone is engaged in to them.
 #
 # Only positive evidence retracts. A subject whose PR's repository went unread
 # this pass keeps its visit, and so does a subject missing from the alive census
@@ -668,7 +678,7 @@ stale_retractions() {
                    reading: "PR \($url) moved \($ages[$k]) day(s) ago, inside the \($staledays)-day threshold, so it is no longer stale"}
                 elif ($a | pr_approved) then
                   {subject: $s, verdict: "retract",
-                   reading: "PR \($url) is approved, which answers the stale-PR gate: merge.sh lands it past this visit"}
+                   reading: "PR \($url) is approved with nothing left in flight, which answers the stale-PR gate: merge.sh does not hold it on this visit"}
                 elif ($a | review_owed) then
                   {subject: $s, verdict: "retract",
                    reading: "PR \($url) is green and waits on a review from the operator, which the review queue already names"}

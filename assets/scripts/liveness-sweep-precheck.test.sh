@@ -400,12 +400,12 @@ jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
 BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
 eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
 
-# The pass also retracts a stale-gate visit once its PR moved, landed, was
-# approved, or reached the operator's review queue. It judges that from its own
-# gh read, so the check runs while a visit nobody is engaged in is open, even on
-# a board that is otherwise quiet: its anchor inside the floor, every survivor
-# carried. A landed anchor leaves the ready set, so the stale-due gate alone
-# would never run the pass that retracts its visit.
+# The pass also retracts a stale-gate visit once its PR moved or landed, or the
+# merge cadence settled it approved or waiting on the operator's review. It
+# judges that from its own gh read, so the check runs while a visit nobody is
+# engaged in is open, even on a board that is otherwise quiet: its anchor inside
+# the floor, every survivor carried. A landed anchor leaves the ready set, so the
+# stale-due gate alone would never run the pass that retracts its visit.
 echo "── an open stale-gate visit runs the pass on an otherwise quiet board ──"
 jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
                       | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
