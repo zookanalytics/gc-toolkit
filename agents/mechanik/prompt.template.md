@@ -138,9 +138,9 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
-A convoy child takes its override as `metadata.target` instead: workspace-setup
-holds a convoy child whose base differs from the convoy's target unless the
-bead names a target of its own.
+A convoy child takes its override as `metadata.target` instead, stamped before
+the sling: workspace-setup holds a convoy child whose base differs from its
+own target or, when it names none, from its convoy's target.
 
 **Anti-pattern:** dispatching a shared input artifact to land on main by
 itself, with no convoy above it. Catching this shape is a dispatch judgment

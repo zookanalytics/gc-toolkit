@@ -413,46 +413,75 @@ reports, else the rig default branch. bd reports one parent per bead. A child
 filed under an epic and also linked to an owned convoy can report the epic,
 and then the lookup never reaches the convoy. That child is poured from the
 default branch and would land there, so the convoy's integration branch never
-receives it. This block reads every parent-child edge on the bead. When an
-open convoy among them targets a branch other than `{{base_branch}}`, and the
-bead names neither its own `target` nor a `branch` to resume, the block holds
-the molecule before any worktree exists:
+receives it. This block reads every parent-child edge on the bead, and holds
+the molecule before any worktree exists unless the bead proves that
+`{{base_branch}}` is where its work lands:
 ```bash
 # >>> workspace-setup-convoy-target-guard
 GUARD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
-if ! printf '%s' "$GUARD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "convoy target guard: could not read $WORK_BEAD_ID, so it proceeds unguarded; the hold would write to the store this read just failed on" >&2
-  GUARD_JSON='[{}]'
-fi
-CONVOY_TARGETS=$(printf '%s' "$GUARD_JSON" | jq -r --arg base "{{base_branch}}" '
-  .[0] as $b
-  | (($b.metadata // {}) | [((.target // "") | tostring), ((.branch // "") | tostring)]) as $own
-  | if $own[0] != "" or $own[1] != "" then ""
-    else [ $b.dependencies[]?
-           | select(.dependency_type == "parent-child" and .issue_type == "convoy" and .status != "closed")
-           | (((.metadata // {}).target // "") | tostring) as $t
-           | select($t != "" and $t != $base)
-           | $t + " (convoy " + .id + ")" ]
-         | unique | join(", ")
-    end' 2>/dev/null)
-if [ -n "$CONVOY_TARGETS" ]; then
-  GUARD_POOL=$(printf '%s' "$GUARD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // "<pool>"' 2>/dev/null)
-  GUARD_ROOT=$(gc bd list --metadata-field "gc.input_convoy_id={{convoy_id}}" --json 2>/dev/null | jq -r '
-    if type == "array" then
-      [ .[] | select(.status != "closed")
-        | select((.metadata // {}) | .["gc.kind"] == "workflow" or .["gc.formula_contract"] == "graph.v2")
-        | .id ]
-    else [] end
-    | if length == 1 then .[0] else empty end' 2>/dev/null)
-  [ -n "$GUARD_ROOT" ] || GUARD_ROOT="<the open workflow root whose gc.input_convoy_id is {{convoy_id}}>"
-  GUARD_STAKE="This work would branch from {{base_branch}} and land there, but it belongs to a convoy that lands on $CONVOY_TARGETS, so that branch would never receive it"
-  GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch, or {{base_branch}} if that base was deliberate), retire this molecule (gc convoy delete $GUARD_ROOT --force, which closes its root and steps and leaves the work bead open), and re-sling the bead (gc sling ${GUARD_POOL:-<pool>} $WORK_BEAD_ID), which then branches from its own target"
-  gc bd update "$WORK_BEAD_ID" --append-notes "Convoy target guard: $GUARD_STAKE. Held at workspace-setup before any worktree was poured. To release, $GUARD_RELEASE."
+GUARD=$(printf '%s' "$GUARD_JSON" | jq -c --arg base "{{base_branch}}" '
+  def trimmed: (. // "") | tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "");
+  def meta: if (.metadata | type) == "object" then .metadata else {} end;
+  if type != "array" or length == 0 or (.[0] | type) != "object" then {kind: "unreadable"}
+  else .[0] as $b
+    | ($b | meta) as $m
+    | ($m.target | trimmed) as $own
+    | [ $b.dependencies[]?
+        | select(type == "object" and .dependency_type == "parent-child" and .issue_type == "convoy" and .status != "closed")
+        | {t: (meta.target | trimmed), id: (.id | tostring)}
+        | select(.t != "") ] as $c
+    | ($c | map(.t) | unique) as $targets
+    | {own: $own,
+       convoys: ($c | map(.t + " (convoy " + .id + ")") | unique | join(", ")),
+       kind: (if (($m.branch // "") | tostring) != "" or ($c | length) == 0 then "pass"
+              elif $own != "" then (if $own == $base then "pass" else "stale" end)
+              elif ($targets | length) > 1 then "conflict"
+              elif $targets[0] == $base then "pass"
+              else "mismatch" end)}
+  end' 2>/dev/null)
+GUARD_KIND=$(printf '%s' "$GUARD" | jq -r '.kind // empty' 2>/dev/null)
+case "$GUARD_KIND" in pass|stale|conflict|mismatch) ;; *) GUARD_KIND=unreadable ;; esac
+if [ "$GUARD_KIND" != "pass" ]; then
+  GUARD_KEY=polecat-convoy-target-mismatch
+  if [ "$GUARD_KIND" != "unreadable" ]; then
+    GUARD_OWN=$(printf '%s' "$GUARD" | jq -r '.own // empty' 2>/dev/null)
+    GUARD_CONVOYS=$(printf '%s' "$GUARD" | jq -r '.convoys // empty' 2>/dev/null)
+    GUARD_POOL=$(printf '%s' "$GUARD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // "<pool>"' 2>/dev/null)
+    GUARD_ROOT=$(gc bd list --metadata-field "gc.input_convoy_id={{convoy_id}}" --json 2>/dev/null | jq -r '
+      if type == "array" then
+        [ .[] | select(.status != "closed")
+          | select((.metadata // {}) | .["gc.kind"] == "workflow" or .["gc.formula_contract"] == "graph.v2")
+          | .id ]
+      else [] end
+      | if length == 1 then .[0] else empty end' 2>/dev/null)
+    [ -n "$GUARD_ROOT" ] || GUARD_ROOT="<the open workflow root whose gc.input_convoy_id is {{convoy_id}}>"
+    GUARD_RETIRE="retire this molecule (gc convoy delete $GUARD_ROOT --force, which closes its root and steps and leaves the work bead open), and re-sling the bead (gc sling ${GUARD_POOL:-<pool>} $WORK_BEAD_ID), which then branches from its own target"
+  fi
+  case "$GUARD_KIND" in
+    stale)
+      GUARD_STAKE="This work would branch from {{base_branch}} but land on $GUARD_OWN, the target the bead names, so any {{base_branch}} commit that $GUARD_OWN lacks would land there with it"
+      GUARD_RELEASE="correct the bead's target if $GUARD_OWN is not where it belongs (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>), $GUARD_RETIRE"
+      GUARD_REASON="convoy target guard: the bead's own target $GUARD_OWN differs from base_branch {{base_branch}}, so the target was stamped after the pour or a --var override chose the base; retire this molecule, then re-sling the bead" ;;
+    conflict)
+      GUARD_STAKE="This work belongs to convoys that land on different branches: $GUARD_CONVOYS. It can land on only one of them, so the others would never receive it, and the bead names no target to say which. This molecule was poured from {{base_branch}}"
+      GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch that should receive it), $GUARD_RETIRE"
+      GUARD_REASON="convoy target guard: the bead's convoys target different branches, $GUARD_CONVOYS, and it names no target; stamp the one it lands on, retire this molecule, then re-sling the bead" ;;
+    mismatch)
+      GUARD_STAKE="This work would branch from {{base_branch}} and land there, but it belongs to a convoy that lands on $GUARD_CONVOYS, so that branch would never receive it"
+      GUARD_RELEASE="stamp the landing branch on the bead (gc bd update $WORK_BEAD_ID --set-metadata target=<branch>, naming the convoy branch, or {{base_branch}} if that base was deliberate), $GUARD_RETIRE"
+      GUARD_REASON="convoy target guard: base_branch {{base_branch}} differs from convoy target $GUARD_CONVOYS and the bead names no target; stamp its target, retire this molecule, then re-sling the bead" ;;
+    *)
+      GUARD_KEY=polecat-unreadable-work
+      GUARD_STAKE="Could not read work bead $WORK_BEAD_ID at workspace-setup, so nothing proves that {{base_branch}}, the branch this molecule was poured from, is where its work lands"
+      GUARD_RELEASE="check that the bead exists and its store answers, then re-offer this molecule"
+      GUARD_REASON="unreadable work bead: $WORK_BEAD_ID could not be read at workspace-setup, so the convoy target guard cannot check its base; re-offer this molecule once its store answers" ;;
+  esac
+  gc bd update "$WORK_BEAD_ID" --append-notes "Convoy target guard: $GUARD_STAKE. Held at workspace-setup before any worktree was poured. To release, $GUARD_RELEASE." || echo "The guard's note did not land on $WORK_BEAD_ID; the hold reason on this step still records it." >&2
   SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-convoy-target-mismatch --message "$GUARD_STAKE. Held at workspace-setup; nothing was poured, pushed or closed. To release, $GUARD_RELEASE."; then
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$GUARD_KEY" --message "$GUARD_STAKE. Held at workspace-setup; nothing was poured, pushed or closed. To release, $GUARD_RELEASE."; then
     echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "convoy target guard: base_branch {{base_branch}} differs from convoy target $CONVOY_TARGETS and the bead names no target; stamp its target, retire this molecule, then re-sling the bead"; then
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "$GUARD_REASON"; then
     gc runtime drain-ack
   else
     echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -462,13 +491,41 @@ fi
 # <<< workspace-setup-convoy-target-guard
 ```
 
-A bead with its own `target` passes, because sling took that target before
-any parent. A bead with a recorded `branch` resumes that branch and cuts
-nothing from `{{base_branch}}`. A closed convoy expects no more landings, so
-its target does not count. An unreadable bead passes with a warning, because
-the hold writes to the same store the read just failed on. The visit names the
-release: stamp the landing branch as the bead's `target`, retire this
-molecule, and re-sling the bead, which then pours from its own target.
+The block passes a bead, and writes nothing, when:
+- it records a `branch`, which it resumes, so nothing is cut from
+  `{{base_branch}}`;
+- none of its open convoy parents names a target;
+- its own `target` equals `{{base_branch}}`, whatever its convoys target.
+  Sling took that target before any parent, so it is the landing branch the
+  bead asked for;
+- it names no target, and every convoy target equals `{{base_branch}}`.
+
+A closed convoy expects no more landings, so its target does not count.
+Targets compare with surrounding whitespace trimmed, the way sling reads them.
+
+Every other convoy child holds, in one of three cases:
+- Its own `target` differs from `{{base_branch}}`. Sling pours from a bead's
+  own target, so that target was stamped after this molecule was poured, or a
+  `--var` override chose another base. Submit lands the work on the bead's
+  target, so a branch cut from `{{base_branch}}` would carry that base's
+  history there.
+- It names no target, and its convoys target one branch other than
+  `{{base_branch}}`.
+- It names no target, and its convoys target more than one branch. The work
+  can land on only one of them and nothing says which, so the hold names every
+  convoy and leaves the choice to the reader.
+
+Each of these visits names the release: stamp the landing branch as the
+bead's `target` where it is missing or wrong, retire this molecule, and
+re-sling the bead, which then pours from its own target. Re-offering the held
+molecule instead passes only when the stamped branch is `{{base_branch}}`. A
+stamp names where the work lands, but the molecule's base was fixed when it
+was poured, so any other stamp holds it again.
+
+An unreadable bead holds too, under the situation key load-context uses for
+one, because nothing proves its base. When the store cannot take the
+escalation either, the block neither holds nor drains, so the step stays
+claimable and the next worker retries.
 
 The retire is `gc convoy delete <root> --force`, naming the root this block
 finds through the input convoy that launched the molecule. It closes the root

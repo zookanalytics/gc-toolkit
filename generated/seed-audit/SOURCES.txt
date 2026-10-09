@@ -32,7 +32,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-70456c46becf615b8f4675a50487c02c00d5b09d86aef651217c121fad3d709b
+4af818ca49336ed4baf2d82a7ac84ef93c9decdd752c4c736b8c6d39a298a3e0
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md
@@ -68,7 +68,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 d8626795c7b02f08826c6f388ac830672e49bfc28c03d4ca71fe227677c149a9
 formulas/mol-polecat-work.toml
-0043cc1f3958a3bbaf2d8cd59e940738775b04e5d6a46443f7959fe2445bb62a
+0b70704b36791df2c5ccf73ff8be87bf9de7414421951bcd5696faf089d12d51
 formulas/mol-refinery-patrol.toml
 9e39e5c9999dde4714235615b1e7ad96c11af70aa916288a79a7a9c8ef781b52
 formulas/mol-review-quorum-signoff.toml

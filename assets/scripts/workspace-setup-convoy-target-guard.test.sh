@@ -15,19 +15,27 @@
 #      holds workspace-setup, drain-acks, exits 1. The visit names the stake
 #      and the release, whose retire step names the molecule's root as found
 #      through the input convoy, or says how to find it when the lookup fails.
-#   2. DISCRIMINATION — passes (no writes) when the bead names its own target or
-#      a branch to resume, when the convoy targets base_branch itself, when the
-#      convoy has no target or is closed, and when only a non-convoy parent
-#      carries a target.
+#   2. DISCRIMINATION — passes (no writes) when the bead names a branch to
+#      resume, when its own target equals base_branch, when its convoys target
+#      base_branch itself, when the convoy has no target or is closed, and when
+#      only a non-convoy parent carries a target. Targets compare trimmed, the
+#      way sling reads them.
 #   3. FAIL CLOSED — no release path recorded means no hold and no drain; a hold
-#      that did not land means no drain.
-#   4. UNREADABLE BEAD — passes with a warning and writes nothing: the hold
-#      would write to the store the read just failed on.
+#      that did not land means no drain; a note the store refuses still holds.
+#   4. UNREADABLE BEAD — holds under load-context's unreadable-work key, without
+#      a root lookup, and neither holds nor drains when the escalation cannot
+#      be recorded either.
 #   5. ORDER — the guard runs before the worktree is poured from base_branch.
 #   6. THE RELEASE RETIRES THE MOLECULE — the retire command the visit
 #      publishes, run against a store that matches the way gascity's commands
 #      do, closes the root and every step under it, leaves the work bead open,
 #      and clears the live workflow that would make sling refuse the re-sling.
+#   7. AN OWN TARGET THAT IS NOT THE BASE — a convoy child whose own target
+#      differs from base_branch holds: the target was stamped after the pour
+#      (a re-offer after the visit's stamp) or a --var override chose the base.
+#   8. CONFLICTING CONVOYS — a child of convoys that target different branches
+#      holds with a visit that names every convoy, even when base_branch is one
+#      of them, and passes once its own target names the base.
 #
 # EXECUTES the real snippet extracted verbatim from the formula against fake
 # `gc` and stub scripts, so the test cannot drift from the shipped instruction.
@@ -98,16 +106,17 @@ fi
 
 # --- Fakes. -------------------------------------------------------------------
 # gc : `bd show` answers $FAKE_SHOW (exit $FAKE_SHOW_RC); `bd list` answers
-#      $FAKE_LIST (exit $FAKE_LIST_RC) and captures its argv; `bd update` and
-#      `runtime drain-ack` record into the ordered verb log, and the update argv
-#      is captured where the note assertions can read it.
+#      $FAKE_LIST (exit $FAKE_LIST_RC) and captures its argv; `bd update`
+#      (exit $FAKE_UPDATE_RC) and `runtime drain-ack` record into the ordered
+#      verb log, and the update argv is captured where the note assertions can
+#      read it.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
   "bd show")           printf '%s' "${FAKE_SHOW:-}"; exit "${FAKE_SHOW_RC:-0}" ;;
   "bd list")           shift 2; printf '%s\n' "$*" >> "${FAKE_LISTARGS:-/dev/null}"; printf '%s' "${FAKE_LIST:-}"; exit "${FAKE_LIST_RC:-0}" ;;
-  "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit 0 ;;
+  "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit "${FAKE_UPDATE_RC:-0}" ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
 esac
 exit 0
@@ -153,7 +162,7 @@ run() {
   FAKE_SHOW="$2" FAKE_SHOW_RC="${FAKE_SHOW_RC:-0}" \
   FAKE_LIST="${FAKE_LIST-[$ROOT_ROW]}" FAKE_LIST_RC="${FAKE_LIST_RC:-0}" FAKE_LISTARGS="$TMP/listargs" \
   FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_HOLD="$TMP/hold" FAKE_ESC="$TMP/esc" \
-  FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" \
+  FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_UPDATE_RC="${FAKE_UPDATE_RC:-0}" \
     bash "$TMP/guard.sh" > "$TMP/out" 2> "$TMP/err" || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -248,17 +257,44 @@ eq "$(run main "$(bead "$ROUTED" "[$EPIC]")")" \
    "epic parent only: passes"
 eq "$(cat "$TMP/listargs")" "" "a passing bead costs no root lookup"
 
-eq "$(run main "$(bead '{"target":"integration/tk-cnv"}' "[$EPIC,$CONVOY_INT]")")" \
+eq "$(run integration/tk-cnv "$(bead '{"target":"integration/tk-cnv"}' "[$EPIC,$CONVOY_INT]")")" \
    "0|" \
-   "bead names its own target: passes (sling took it before any parent)"
+   "own target equals base_branch: passes (sling took it before any parent)"
+
+eq "$(run main "$(bead '{"target":"main"}' "[$EPIC,$CONVOY_INT]")")" \
+   "0|" \
+   "own target equals base_branch but not the convoy's branch: passes (the bead's own target is the override)"
+
+eq "$(run main "$(bead '{"target":"integration/tk-other"}' "[$EPIC]")")" \
+   "0|" \
+   "own target differs from base_branch, no convoy parent: passes (not a convoy child)"
 
 eq "$(run main "$(bead '{"branch":"polecat/tk-work"}' "[$EPIC,$CONVOY_INT]")")" \
    "0|" \
    "bead names a branch to resume: passes (nothing is cut from base_branch)"
 
+eq "$(run polecat/tk-anchor "$(bead '{"branch":"polecat/tk-anchor","target":"main"}' "[$EPIC,$CONVOY_INT]")")" \
+   "0|" \
+   "a branch to resume and a target that differs from base_branch: passes (a rework child branches from the branch under review)"
+
 eq "$(run main "$(bead '{"target":""}' "[$EPIC,$CONVOY_INT]")")" \
    "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
    "an EMPTY own target is no target: holds"
+
+# Sling trims the targets it reads, so the guard compares them trimmed too.
+eq "$(run main "$(bead '{"target":"  "}' "[$EPIC,$CONVOY_INT]")")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "a whitespace-only own target is no target: holds"
+has "$(cat "$TMP/esc")" "--message This work would branch from main and land there" "a whitespace-only own target: the no-target visit"
+
+eq "$(run integration/tk-cnv "$(bead '{"target":" integration/tk-cnv "}' "[$EPIC,$CONVOY_INT]")")" \
+   "0|" \
+   "own target padded with whitespace equals base_branch once trimmed: passes"
+
+CONVOY_PADDED='{"id":"tk-cnp","status":"open","issue_type":"convoy","dependency_type":"parent-child","metadata":{"target":" integration/tk-cnv\t"}}'
+eq "$(run integration/tk-cnv "$(bead "$ROUTED" "[$EPIC,$CONVOY_PADDED]")")" \
+   "0|" \
+   "convoy target padded with whitespace equals base_branch once trimmed: passes"
 
 eq "$(run integration/tk-cnv "$TWO_PARENTS")" \
    "0|" \
@@ -301,16 +337,41 @@ out="$(FAKE_HOLD_RC=1 run main "$TWO_PARENTS")"
 eq "$out" "1|UPDATE;ESCALATE;HOLD;" \
    "hold did not land: does not drain"
 
-# --- 4. Unreadable bead: pass with a warning, write nothing. -------------------
+# The note is the bead's own record; the hold reason carries the same facts, so
+# a note the store refuses does not stop the hold.
+out="$(FAKE_UPDATE_RC=1 run main "$TWO_PARENTS")"
+eq "$out" "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "the note is refused: still escalates, holds, drain-acks"
+has "$(cat "$TMP/err")" "the hold reason on this step still records it" "the note is refused: says where the record still lives"
+
+# --- 4. Unreadable bead: hold the way load-context does. -----------------------
+# Nothing proves the base of a bead nobody can read. The hold shares
+# load-context's situation key, so one outage files one visit per bead, and the
+# root lookup is skipped because the release does not need it.
 
 out="$(FAKE_SHOW_RC=1 run main "")"
-eq "$out" "0|" "bd show fails: passes and writes nothing"
-has "$(cat "$TMP/err")" "could not read tk-work" "bd show fails: warns on stderr"
+eq "$out" "1|UPDATE;ESCALATE;HOLD;DRAIN;" "bd show fails: notes, escalates, holds, drain-acks, exits 1"
+has "$(cat "$TMP/esc")" "--key polecat-unreadable-work" "bd show fails: escalates under load-context's unreadable-work key"
+has "$(cat "$TMP/esc")" "--subject tk-work" "bd show fails: the visit's subject is the work bead"
+has "$(cat "$TMP/esc")" "--message Could not read work bead tk-work at workspace-setup" "bd show fails: the visit opens with the stake"
+has "$(cat "$TMP/esc")" "re-offer this molecule" "bd show fails: the visit names the release"
+has "$(cat "$TMP/hold")" "--step mol-polecat-work.workspace-setup" "bd show fails: holds THIS step"
+has "$(cat "$TMP/hold")" "unreadable work bead" "bd show fails: the hold reason says why"
+eq "$(cat "$TMP/listargs")" "" "bd show fails: no root lookup"
 
-eq "$(run main '{"error":"store unavailable"}')" \
-   "0|" \
-   "error object instead of a bead row: passes and writes nothing"
-has "$(cat "$TMP/err")" "could not read tk-work" "error object: warns on stderr"
+out="$(run main '{"error":"store unavailable"}')"
+eq "$out" "1|UPDATE;ESCALATE;HOLD;DRAIN;" "error object instead of a bead row: holds"
+has "$(cat "$TMP/esc")" "--key polecat-unreadable-work" "error object: escalates under the unreadable-work key"
+
+eq "$(run main '[]')" "1|UPDATE;ESCALATE;HOLD;DRAIN;" "an empty array: holds"
+eq "$(run main '[null]')" "1|UPDATE;ESCALATE;HOLD;DRAIN;" "a row that is not an object: holds"
+eq "$(run main 'not json')" "1|UPDATE;ESCALATE;HOLD;DRAIN;" "output that is not JSON: holds"
+
+out="$(FAKE_SHOW_RC=1 FAKE_ESC_RC=1 run main "")"
+eq "$out" "1|UPDATE;ESCALATE;" "unreadable, no release path recorded: does not hold, does not drain"
+
+out="$(FAKE_SHOW_RC=1 FAKE_HOLD_RC=1 run main "")"
+eq "$out" "1|UPDATE;ESCALATE;HOLD;" "unreadable, hold did not land: does not drain"
 
 # --- 6. The release retires the molecule. -------------------------------------
 # The re-sling the visit names succeeds only once the held molecule is retired:
@@ -400,6 +461,69 @@ seed_store
 retire "gc workflow delete-source tk-work --apply"
 has "$(cat "$TMP/retire.out")" "already_clean" "delete-source on the work bead reports already_clean"
 eq "$(live_workflows)" "tk-root" "delete-source leaves the held molecule live, so the re-sling stays refused"
+
+# --- 7. An own target that is not the base. ------------------------------------
+# Sling pours from a bead's own target, so a convoy child whose target differs
+# from base_branch was stamped after the pour, or a --var override chose the
+# base. The visit's own release stamps the target, and a molecule re-offered
+# after that stamp is still the one poured from main: it holds again instead of
+# cutting a branch from main for work that lands on the integration branch.
+STAMPED="$(bead '{"target":"integration/tk-cnv","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}' "[$EPIC,$CONVOY_INT]")"
+eq "$(run main "$STAMPED")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "own target stamped after a pour from main, then re-offered: holds"
+has "$(cat "$TMP/esc")" "--key polecat-convoy-target-mismatch" "stale own target: escalates under the convoy guard's key"
+has "$(cat "$TMP/esc")" "--message This work would branch from main but land on integration/tk-cnv" "stale own target: the visit opens with the stake"
+has "$(cat "$TMP/esc")" "gc sling gc-toolkit/gc-toolkit.polecat tk-work" "stale own target: the visit names the re-sling"
+has "$(cat "$TMP/hold")" "own target integration/tk-cnv differs from base_branch main" "stale own target: the hold reason says why"
+eq "$(sed -n 's/.*retire this molecule (\([^,)]*\).*/\1/p' "$TMP/esc")" \
+   "gc convoy delete tk-root --force" "stale own target: the visit's retire step extracts as one command"
+
+# The other direction: poured from the convoy's branch, but the bead names main,
+# so main would receive the integration branch's unlanded history.
+eq "$(run integration/tk-cnv "$(bead '{"target":"main"}' "[$EPIC,$CONVOY_INT]")")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "own target main on a molecule poured from the convoy's branch: holds"
+has "$(cat "$TMP/esc")" "--message This work would branch from integration/tk-cnv but land on main" "own target main: the visit opens with the stake"
+
+# --- 8. Conflicting convoys. ---------------------------------------------------
+# The work can land on only one of two convoy branches, and nothing on the bead
+# says which. A base_branch that matches one of them is the parent bd happened
+# to report, not a choice, so the child still holds, and the visit does not call
+# that base wrong.
+CONFLICT="$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_B]")"
+eq "$(run integration/tk-cnv "$CONFLICT")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "two convoys on different branches, base_branch is one of them: holds"
+has "$(cat "$TMP/esc")" "--message This work belongs to convoys that land on different branches: integration/tk-cnb (convoy tk-cnb), integration/tk-cnv (convoy tk-cnv)." "conflict: the visit opens with the stake and names every convoy"
+has "$(cat "$TMP/esc")" "This molecule was poured from integration/tk-cnv" "conflict: the visit names the poured base"
+no  "$(cat "$TMP/esc")" "and land there" "conflict: the visit does not call the poured base wrong"
+has "$(cat "$TMP/esc")" "naming the convoy branch that should receive it" "conflict: the release asks which convoy receives it"
+has "$(cat "$TMP/esc")" "gc convoy delete tk-root --force" "conflict: the visit names the retire step"
+has "$(cat "$TMP/hold")" "convoys target different branches" "conflict: the hold reason says why"
+
+eq "$(run main "$CONFLICT")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "two convoys on different branches, base_branch is neither: holds"
+has "$(cat "$TMP/esc")" "land on different branches" "base_branch is neither: the conflict visit"
+
+eq "$(run integration/tk-cnv "$(bead '{"target":"integration/tk-cnv"}' "[$CONVOY_INT,$CONVOY_B]")")" \
+   "0|" \
+   "two convoys, own target names base_branch: passes (the stamp chose one)"
+
+CONVOY_SAME='{"id":"tk-cns","status":"open","issue_type":"convoy","dependency_type":"parent-child","metadata":{"target":"integration/tk-cnv"}}'
+eq "$(run integration/tk-cnv "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_SAME]")")" \
+   "0|" \
+   "two convoys on the same branch, which is base_branch: passes"
+eq "$(run main "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_SAME]")")" \
+   "1|UPDATE;ESCALATE;HOLD;DRAIN;" \
+   "two convoys on the same branch, base_branch differs: holds"
+has "$(cat "$TMP/esc")" "--message This work would branch from main and land there" "two convoys on the same branch: the one-branch visit, not the conflict one"
+
+CONVOY_B_CLOSED='{"id":"tk-cnb","status":"closed","issue_type":"convoy","dependency_type":"parent-child","metadata":{"target":"integration/tk-cnb"}}'
+eq "$(run integration/tk-cnv "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_B_CLOSED]")")" \
+   "0|" \
+   "a second convoy that is closed does not conflict: passes"
 
 # --- Summary. -----------------------------------------------------------------
 echo "----"
