@@ -20,11 +20,19 @@ sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-# Capture the city path at install time. bind-key is server-wide and
-# the binding fires from tmux's env (which doesn't carry Gas City's
-# session env), so the picker can't rely on $GC_CITY_PATH being set
-# when the user later presses the key. Baking the path into the
-# binding makes the API city lookup deterministic.
+# tq <string> — tmux-quote $1 for a command string tmux parses again, the way
+# confirm-before parses the command it runs on y. Wraps in "..." with any
+# internal \, " or $ backslash-escaped, so an sq-quoted body survives that
+# parse intact.
+tq() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/[\\"$]/\\&/g')"
+}
+
+# Capture the city path at install time. bind-key is server-wide, and a
+# bound command runs with the tmux server's environment plus the pressed
+# session's own, so $GC_CITY_PATH is set only when the key is pressed in a
+# Gas City session's pane. Baking the path into the binding makes the API
+# city lookup deterministic.
 CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
@@ -65,6 +73,20 @@ gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt
 # --new-subject` in a NEW window rather than a `run-shell` popup, because engage
 # is a real interactive prompt — rig, subject, model — and tmux's one-line
 # command-prompt cannot carry a subject plus a menu. The city path is baked in
-# for the same reason the pickers bake it: the binding fires from tmux's env,
-# which does not carry Gas City's session env. See tmux-new-subject.sh.
+# for the same reason the pickers bake it: a key pressed outside a Gas City
+# session's pane carries no city in its environment. See tmux-new-subject.sh.
 gcmux bind-key A new-window "$(sq "$CONFIGDIR/assets/scripts/tmux-new-subject.sh") $(sq "$CONFIGDIR") --city-path $(sq "$CITY_PATH")"
+
+# prefix+X — end the converse sitting in view: the keystroke for `gc-helm
+# dismiss`. Capital X, the sibling of tmux's own prefix+x: that key asks before
+# killing the pane, this one asks before ending the sitting the pane holds.
+# confirm-before guards against a stray key, because a dismissed sitting's
+# session is closed once the operator leaves it. The script refuses any pane
+# that is not a converse sitting and never types into the pane. See
+# tmux-dismiss-sitting.sh.
+#
+# confirm-before expands formats in its command and parses it again before
+# running it, so the run-shell body is quoted for both layers, sh by sq and
+# tmux by tq, and names no format. The script reads the pressed session itself.
+gcmux bind-key X confirm-before -p "dismiss this converse sitting? (y/n)" \
+    "run-shell -b $(tq "$(sq "$CONFIGDIR/assets/scripts/tmux-dismiss-sitting.sh") $(sq "$CONFIGDIR") --city-path $(sq "$CITY_PATH")")"
