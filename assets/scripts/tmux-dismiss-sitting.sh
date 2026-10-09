@@ -2,7 +2,8 @@
 # tmux-dismiss-sitting.sh — prefix+X: end the converse sitting in view. It is
 # the keystroke for `gc-helm dismiss`, which, with no bead named, infers the
 # sitting's subject from the caller's session identity and closes the open
-# visit that holds the sitting up.
+# visit that holds the sitting up. While an open gate linked to the sitting is
+# undecided, dismiss holds instead, and the key names the gate.
 #
 # Usage: tmux-dismiss-sitting.sh <config-dir> [--city-path <path>]
 #
