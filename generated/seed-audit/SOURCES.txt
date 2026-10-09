@@ -112,7 +112,7 @@ packs/gascity-keeper/template-fragments/refinery-rebase-handling.template.md
 packs/gascity-keeper/template-fragments/watch-dispatched-work.template.md
 93e2746d83ed21c987b57ffe2ed335f426c693587e35a86018b5ca99e842ad2b
 packs/gascity-keeper/template-fragments/work-quality-base.template.md
-94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
+b7d4c0396c177ae95165806d5101672ff1e8e473127ca49e34c264603a3c4955
 packs/gascity-keeper/template-fragments/work-quality-system.template.md
 21c2744ba65bcade77af7826ccba6d2bb3a8b0fc40475b8c13380f41eed5ce4a
 template-fragments/bead-disposition.template.md
@@ -146,7 +146,7 @@ f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
 93e2746d83ed21c987b57ffe2ed335f426c693587e35a86018b5ca99e842ad2b
 template-fragments/work-quality-base.template.md
-94a12ec830210d88ee03f1f7bd8fe38fb4badafc21d1291ba6fe828feabcd81d
+b7d4c0396c177ae95165806d5101672ff1e8e473127ca49e34c264603a3c4955
 template-fragments/work-quality-human.template.md
 3bb4fb3803006bcb16d387333a8358b584557a5444db61095fd477cd2ad6216d
 template-fragments/work-quality-polecats.template.md

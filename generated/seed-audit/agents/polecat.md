@@ -51,11 +51,14 @@ worktree, pushed branch, refinery handoff), a review bead carries
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
