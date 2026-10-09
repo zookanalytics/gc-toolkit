@@ -132,8 +132,9 @@ git -C <rig-root> worktree remove "$SEED"
 # 3. File each child work bead in the rig's store, link it to the convoy, and
 #    stamp the convoy's target on it before you sling.
 TARGET=$(gc bd --rig <rig> show "$CONVOY" --json | jq -r '.[0].metadata.target // empty')
+[ -n "$TARGET" ] || { echo "convoy $CONVOY has no readable target; file and sling nothing" >&2; exit 1; }
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
-gc bd dep add "$WORK" "$CONVOY" --type=parent-child
+gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
 gc bd --rig <rig> update "$WORK" --set-metadata target="$TARGET"
 gc sling <rig>/gc-toolkit.polecat "$WORK"   # branches from the bead's own target
 ```
