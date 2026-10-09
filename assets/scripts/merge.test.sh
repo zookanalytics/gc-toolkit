@@ -599,6 +599,54 @@ out=$("$SUT" 2>&1)
 has "$out" "a REQUIRED check is not green" "UNSTABLE with a red required check holds"
 rm -f "$GH_DIR/rules_main.json"
 
+echo "# UNSTABLE with a check rollup that cannot be evaluated holds; it never reads as all-green"
+# ci is required, the lane is green and the PR is approved, so the rollup read
+# alone decides each pass. An evaluation that fails names nothing red, and the
+# unreadable-rollup hold is all that keeps the PR unmerged. The first rollup is
+# cut off mid-row and the last is a lone space. Both are queued for the rollup
+# read alone, so the pinned read still parses. The second gives ci a number for
+# a conclusion, beside a state that a reader skipping the conclusion would take
+# as green. The third gives ci a red row and then a row whose state is a
+# number. Every row of a required check is read, so the red row decides nothing.
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}}]' > "$GH_DIR/rules_main.json"
+for n in 35 38; do
+  printf '%s' "$(prview "$n" OPEN UNSTABLE)" > "$GH_DIR/pr_view_$n.json"
+  mkdir -p "$GH_DIR/pr_view_$n.queue/statusCheckRollup"
+done
+printf '%s' '{"statusCheckRollup":[{"name":"ci","conclusion":"FAIL' > "$GH_DIR/pr_view_35.queue/statusCheckRollup/01.json"
+printf '%s' "$(prview 36 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","conclusion":0,"state":"SUCCESS"}]')" > "$GH_DIR/pr_view_36.json"
+printf '%s' "$(prview 37 OPEN UNSTABLE ',"statusCheckRollup":[{"context":"ci","state":"FAILURE"},{"context":"ci","state":0}]')" > "$GH_DIR/pr_view_37.json"
+printf ' ' > "$GH_DIR/pr_view_38.queue/statusCheckRollup/01.json"
+for fx in "U4 35 cut off mid-row" "U5 36 giving ci a numeric conclusion" "U6 37 giving ci a numeric state after a red row" "U7 38 holding only whitespace"; do
+  read -r a n what <<<"$fx"
+  store "[$(anchor "$a" "$n"), $(rev "$a")]"
+  approved "$n"
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "PR#$n is UNSTABLE and the check rollup is unreadable; merge held (anchor $a)" "a rollup $what holds as unreadable"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge $n" "…and PR#$n is not merged"
+  eq "$(bstatus "$a")" "open" "…and anchor $a stays open"
+done
+rm -rf "$GH_DIR/pr_view_35.queue" "$GH_DIR/pr_view_38.queue"
+
+echo "# UNSTABLE reads only a required check's rows, and a pending one is red, not unreadable"
+# The controls for the case above, with the same required ci and the row shapes
+# gh prints. One PR has ci green as a completed check run and as a status
+# context, which carries no conclusion. Beside them sits an advisory check whose
+# conclusion is a number, and the PR merges. The other has ci as a check run
+# still in progress, whose conclusion is an empty string, and it holds as red.
+store "[$(anchor U8 54), $(rev U8)]"
+printf '%s' "$(prview 54 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"},{"context":"ci","state":"SUCCESS"},{"name":"lint","status":"COMPLETED","conclusion":0}]')" > "$GH_DIR/pr_view_54.json"
+approved 54
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded U8" "UNSTABLE with ci green as a check run and a status context merges past an unreadable advisory row"
+store "[$(anchor U9 55), $(rev U9)]"
+printf '%s' "$(prview 55 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]')" > "$GH_DIR/pr_view_55.json"
+approved 55
+out=$("$SUT" 2>&1)
+has "$out" "PR#55 is UNSTABLE and a REQUIRED check is not green at sha-55: ci(RED); merge held (anchor U9)" "a required check still in progress holds as red, not as unreadable"
+rm -f "$GH_DIR/rules_main.json"
+
 echo "# identity refusals"
 store "[$(anchor I1 40)]"
 printf '%s' "$(prview 40 OPEN CLEAN)" | jq -c '.headRepositoryOwner.login = "stranger" | .isCrossRepository = true' > "$GH_DIR/pr_view_40.json"
