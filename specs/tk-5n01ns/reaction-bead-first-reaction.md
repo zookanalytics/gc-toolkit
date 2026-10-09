@@ -56,10 +56,15 @@ re-claimed; nothing is hand-rolled.
 ### Lifecycle
 
 1. **Create (once per S).** `gc-proactive.sh` scan/sling finds a movable-forward
-   subject S, and before creating anything checks that no live owner owns S's
-   reaction (`gc.reaction_owned`), that no open reaction already tracks S (the
-   dedup below), and that no live workflow already drives S. It then creates R,
-   stamps it, and wires the tracks edge. S is untouched.
+   subject S. Before creating anything it proves S present in the store its id
+   prefix names (`bead-store.sh --present`), because R's worker reads S and
+   writes the disposition back to it, so an R whose subject is missing is work
+   nobody can dispose. A subject that is absent, or that its store gives no
+   verdict on, fails the sling with an error, and nothing is filed. The sling
+   then checks that no live owner owns S's reaction (`gc.reaction_owned`), that
+   no open reaction already tracks S (the dedup below), and that no live
+   workflow already drives S. It then creates R, stamps it, and wires the
+   tracks edge. S is untouched.
 2. **Claim.** A proactive pool worker claims R through `gc hook --claim` — the
    substrate CAS. The claim stamps R's lease (`gc.claimed_at`,
    `lease_expires_at`). R, not S, is the claimed work.
@@ -283,8 +288,9 @@ duplicate marker `duplicate-sweep.sh` reads), `gc.blocker_key`.
 ## Implementation surface
 
 - `tools/gc-proactive.sh` — `cmd_sling` creates R and wires the tracks edge
-  instead of pouring a formula; `reaction_absent_guard` refuses a live-owned
-  subject and dedups on `(task_kind=reaction, subject)`;
+  instead of pouring a formula; `subject_present_guard` refuses a subject its
+  own store does not prove present; `reaction_absent_guard` refuses a
+  live-owned subject and dedups on `(task_kind=reaction, subject)`;
   `exclude_graph_structural` drops topology roots and step beads from both scan
   and demand.
 - `agents/proactive/prompt.template.md` — the reaction method: claim R, resolve

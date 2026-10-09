@@ -73,6 +73,10 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # shellcheck source=../assets/scripts/dispatch-path.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/dispatch-path.sh" \
     || { printf '%s: cannot source assets/scripts/dispatch-path.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The one resolver of a bead id to the store that owns it, and of whether that
+# store holds the bead (docs/bead-store-resolution.md). subject_present_guard
+# asks it.
+BEAD_STORE="${GC_BEAD_STORE_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/bead-store.sh}"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -124,6 +128,38 @@ rig_beads_db() {
 rig_store_ref() {
     [ -n "${GC_RIG:-}" ] && printf 'rig:%s' "$GC_RIG"
     return 0
+}
+
+# subject_present_guard — a reaction bead names its subject, and its worker's
+# first act is to read that subject and write the disposition back to it. A
+# reaction filed for a bead that does not exist is routed work nobody can
+# dispose, so nothing is filed until the subject is proven present.
+# bead-store.sh --present is the proof: it asks the store the id's prefix names,
+# and only that store's hit on the exact id counts. Returns 0 when the subject
+# is proven present and 1 when it is not, whether its store proved it absent or
+# gave no verdict (a prefix no rig carries, an unreadable store, a partial or
+# ambiguous id). The two refuse alike, because a worker cannot read an unproven
+# subject either. bead-store.sh states its reasoning on stderr. A refusal relays
+# it and adds what it means for the sling; a pass stays quiet.
+#
+# Under the fixture, beads.json is the store: a bead it does not list is
+# absent. A fixture with no beads.json models no store reads, so the subject
+# passes, as it passes reaction_absent_guard.
+subject_present_guard() {
+    local bead="$1" rc=0 why=""
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || return 0
+        jq -e --arg id "$bead" 'has($id)' "$FIXTURE/beads.json" >/dev/null 2>&1 || rc=1
+    else
+        why="$("$BEAD_STORE" --present "$bead" 2>&1 >/dev/null)" || rc=$?
+    fi
+    [ "$rc" -ne 0 ] || return 0
+    [ -z "$why" ] || log "$why"
+    case "$rc" in
+        1) log "$PROG: sling: $bead is absent from the store its prefix names — not filing a first reaction. Its worker would read the subject and write the disposition back to it, so a reaction to a bead that does not exist is routed work nobody can dispose." ;;
+        *) log "$PROG: sling: cannot prove $bead exists (its store gave no verdict) — not filing a first reaction. A subject the store cannot show is as unreadable to the worker as an absent one. Retry once the store answers, or name the bead by its full id." ;;
+    esac
+    return 1
 }
 
 # reaction_absent_guard — a first reaction happens once AT A TIME, and never
@@ -193,19 +229,19 @@ reaction_absent_guard() {
         # reaction whose stamp landed empty or unreadable. `gc bd dep list
         # --direction up -t tracks` names the beads that track this subject (the
         # read sling_live_workflow_guard takes for its convoys); keep the
-        # open/in-progress reactions. A readable store answers definitively — a
-        # JSON array (the dependents, possibly none), or a "no issue found" error
-        # object when the subject has no bead at all (so nothing tracks it) — and
-        # both let the sling proceed. Anything else (empty output or a non-JSON
-        # error: an unreadable store) is not proof of absence, so fail CLOSED
-        # rather than risk a duplicate.
+        # open/in-progress reactions. Only a JSON array (the dependents, possibly
+        # none) answers it. Anything else is not proof of absence, so fail
+        # CLOSED rather than risk a duplicate. bd's not-found error is no
+        # exception: subject_present_guard has proven the subject present, so a
+        # not-found here is a subject deleted since, and nothing may be filed
+        # for it.
         if [ -z "$existing" ]; then
             local up
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
             up="$(gc bd dep list "$bead" ${db:+--db "$db"} --direction up -t tracks --json 2>/dev/null || true)"
             if printf '%s' "$up" | jq -e 'type=="array"' >/dev/null 2>&1; then
                 existing="$(printf '%s' "$up" | jq -r '[ .[]? | select(((.metadata["task_kind"] // "") == "reaction") and ((.status // "") as $st | ($st == "open" or $st == "in_progress"))) | .id ] | .[0] // ""' 2>/dev/null || printf '')"
-            elif ! printf '%s' "$up" | jq -e 'type=="object" and ((.error // "") | test("no issue"; "i"))' >/dev/null 2>&1; then
+            else
                 log "$PROG: sling: could not read the tracks-edge dedup for $bead (gc bd dep list --direction up returned no usable answer) — refusing to file a possible duplicate. Retry when the store is readable."
                 return 2
             fi
@@ -290,16 +326,11 @@ sling_live_workflow_guard() {
         fi
     else
         db="$(rig_beads_db)"
+        # A failed read leaves the question open, bd's not-found error included:
+        # subject_present_guard has proven the bead present, so a not-found here
+        # is a bead deleted since, and nothing may be filed for it.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        tracks="$(gc bd dep list "$bead" ${db:+--db "$db"} --direction up -t tracks --json 2>/dev/null)" || {
-            # bd's not-found error is an answer: no workflow drives a bead that
-            # does not exist, and gc sling names it missing. Any other failure
-            # leaves the question open.
-            if printf '%s' "$tracks" | jq -e 'type == "object" and ((.error // "") | test("no issues? found"))' >/dev/null 2>&1; then
-                return 0
-            fi
-            tracks=''
-        }
+        tracks="$(gc bd dep list "$bead" ${db:+--db "$db"} --direction up -t tracks --json 2>/dev/null)" || tracks=''
     fi
     convoys="$(printf '%s' "$tracks" | jq -cs "$LIVE_WORKFLOW_JQ"'
         one_array | [ .[] | select(tracks_edge) | .id ]' 2>/dev/null)" || { log "$unreadable"; return 2; }
@@ -363,7 +394,8 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       is already open or a live owner owns it,
                                       $RC_LIVE_WORKFLOW already driven by a live
                                       workflow (both no-ops, nothing filed), 1
-                                      error.
+                                      error, including a <bead> its own store
+                                      does not prove present.
        $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -801,6 +833,11 @@ cmd_sling() {
     done
     [ -n "$bead" ] || { log "$PROG: sling needs <bead-id>"; usage; exit 2; }
 
+    # A reaction is filed only for a subject proven present (see
+    # subject_present_guard), and every read below keys on that subject. A
+    # subject absent from its store, or one its store gives no verdict on, is an
+    # error rather than a skip: it returns 1 and nothing is filed.
+    #
     # A first reaction happens once at a time, and never where a live owner owns
     # it (see reaction_absent_guard), so skip such a subject as an idempotent
     # no-op rather than file a duplicate. A reaction never races a live workflow
@@ -815,6 +852,7 @@ cmd_sling() {
     # as the generic fail-closed error, not the specific no-op. A guard read that
     # fails is that error: it returns 1 and nothing is filed.
     SLING_SKIPPED=""
+    subject_present_guard "$bead" || return 1
     local absent=0
     reaction_absent_guard "$bead" || absent=$?
     case "$absent" in

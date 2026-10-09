@@ -382,9 +382,10 @@ echo "── a first reaction happens once at a time: dedup on (subject + kind) 
 # (task_kind=reaction, gc.reaction_subject) and skips as a no-op if one exists —
 # one open reaction per subject. A COMPLETED reaction has closed its bead, so a
 # subject can be re-reacted later; the dedup keys on OPEN reactions, not history.
-# beads.json feeds the guard the store state the way agents.json feeds the
-# deliverable probe; it lists only these beads, so every other sling test above
-# (px-1) reads as having no open reaction and is unaffected.
+# beads.json feeds the guards the store state the way agents.json feeds the
+# deliverable probe. It is the whole store: a bead it does not list is absent,
+# and the sling files nothing for it. The sling tests above run with no
+# beads.json, which models no store reads, so they are unaffected.
 cat > "$FXDIR/beads.json" <<'JSON'
 {
   "px-hasreaction": {"status":"open","metadata":{}},
@@ -422,8 +423,14 @@ has    "a subject with no open reaction is filed"                  "gc bd create
        "$(P sling px-fresh --dry-run 2>&1 || true)"
 fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
 eq     "…and a fresh sling exits 0"                                "0" "$fec"
-has    "a bead absent from the store reads as un-reacted, files"   "gc bd create -t task" \
-       "$(P sling px-1 --dry-run 2>&1 || true)"
+# A reaction's worker reads its subject and writes the disposition back to it,
+# so a bead the store does not hold gets no reaction: the sling refuses it as an
+# error, not a no-op skip.
+ABSENT_OUT="$(P sling px-1 --dry-run 2>&1 || true)"
+absent "a bead absent from the store is NOT filed (no create emitted)" "gc bd create" "$ABSENT_OUT"
+has    "…and the refusal names the missing bead" "px-1 is absent from the store" "$ABSENT_OUT"
+aec=0; P sling px-1 --dry-run >/dev/null 2>&1 || aec=$?
+eq     "…and fails closed (exit 1), an error rather than a skip" "1" "$aec"
 rm -f "$FXDIR/beads.json"
 
 echo "── the process-scan trigger (movable-forward beads, board-ranked) ──"
@@ -732,16 +739,22 @@ rm -rf "$UFX"
 # ---------------------------------------------------------------------------
 # Best-effort LIVE smoke (skipped cleanly when no city / gc is reachable).
 # ---------------------------------------------------------------------------
-echo "── live (best-effort): sling target resolves rig-qualified ──"
+echo "── live (best-effort): the pool target resolves rig-qualified ──"
 # The reviewer's repro was a LIVE dry-run that emitted a BARE target. With no
-# fixture the tool resolves the REAL rig-qualified target from GC_RIG and
-# prints the reaction bead it would file, its gc.routed_to among the markers.
-# We assert the EMITTED target carries the rig prefix — independent of whether
-# the pool agent is registered in the live city yet, so this stays green on an
-# un-graduated branch (registration is a separate, post-graduation concern).
+# fixture the tool resolves the REAL rig-qualified target from GC_RIG. A sling
+# dry-run files only for a subject its store holds, which a live city does not
+# promise, so the target is read from `deliverable`: it resolves the target
+# through the same resolve_pool_target and names it in every answer. We assert
+# that target carries the rig prefix, independent of whether the pool agent is
+# registered in the live city yet, so this stays green on an un-graduated branch
+# (registration is a separate, post-graduation concern). The probe id itself,
+# slung, names no store at all, so the live sling refuses it and files nothing.
 if [ -n "${GC_RIG:-}" ] && command -v gc >/dev/null 2>&1; then
-    livedry="$("$PROACTIVE" sling __resolution_probe__ --dry-run 2>&1 || true)"
-    has "live sling target carries the rig prefix" "$GC_RIG/gc-toolkit.proactive" "$livedry"
+    livetarget="$("$PROACTIVE" deliverable 2>&1 || true)"
+    has "live pool target carries the rig prefix" "$GC_RIG/gc-toolkit.proactive" "$livetarget"
+    lec=0; livedry="$("$PROACTIVE" sling __resolution_probe__ --dry-run 2>&1)" || lec=$?
+    eq     "live sling of a bead no store holds fails closed (exit 1)" "1" "$lec"
+    absent "…and files nothing"                                        "gc bd create" "$livedry"
 else
     printf '  skip  live target-resolution probe (no GC_RIG / gc)\n'
 fi

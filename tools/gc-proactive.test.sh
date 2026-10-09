@@ -36,6 +36,11 @@
 # fails closed when it cannot read whether one does. The scan's drop and the
 # sling guard read one definition of a live workflow, and AGREE-* holds each
 # caller to it on one store state.
+#
+# A reaction's worker reads its subject and writes the disposition back to it,
+# so the sling files nothing for a subject its own store does not prove present
+# (SUBJECT-ABSENT, SUBJECT-UNPROVEN). A subject deleted after that proof fails
+# the guards' reads closed rather than reading as untracked (SUBJECT-VANISHED).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -125,6 +130,14 @@ set -e
 eq "$RC" 0 "(SLING-GO) sling of an unmarked bead exits 0"
 has "$OUT" "would file a reaction bead tracking tk-plain" "(SLING-GO) …and files a reaction bead (fixture dry line)"
 
+echo "# sling refuses a bead the store does not hold"
+set +e
+OUT="$(bash "$SCRIPT" sling tk-nosuch 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(SUBJECT-ABSENT) sling of a bead beads.json does not list exits 1"
+has "$OUT" "tk-nosuch is absent from the store its prefix names" "(SUBJECT-ABSENT) …saying why"
+hasnt "$OUT" "would file a reaction bead" "(SUBJECT-ABSENT) …nothing dispatched"
+
 # --- a bead with a dispatch path is not a scan candidate --------------------
 # A route or an arm already decides a bead's dispatch. An armed bead is ready,
 # unassigned and unrouted from its own blockers' close until the next
@@ -163,6 +176,10 @@ for k in $PATH_KEYS; do
 done
 hasnt "$IDS" "tk-armed" "(ARMED-DROP) an armed bead is not a scan candidate"
 hasnt "$IDS" "tk-capped" "(ARMED-DROP) …nor an arm the reconcile pass stopped retrying"
+
+# The store holds every bead the scan read, so the sling's subject gate finds
+# each one the sweep reaches.
+jq 'map({key: .id, value: {metadata: .metadata}}) | from_entries' "$TMP/scan.json" > "$TMP/beads.json"
 
 echo "# a scan --sling sweep reacts to raw input and never to a bead with a dispatch path"
 set +e
@@ -492,29 +509,46 @@ set -e
 eq "$RC" 0 "(LIVE-FAILCLOSED) a bead no convoy tracks needs no roots read, so it still proceeds"
 rm -f "$TMP/roots.json" "$TMP/convoys.json"
 
-# The fixture seam replaces every gc read the scan's drop and the sling guard
+# The fixture seam replaces every gc read the scan's drop and the sling guards
 # take, so it cannot catch a wrong flag on them. Drive the live path against a
 # stub gc that answers each read only in its exact shape and fails anything
-# else. bd's not-found error is an answer (no reaction and no workflow tracks a
-# bead that does not exist); any other failed read is not, so the sling fails
-# closed on it. The
+# else. The subject gate runs the real bead-store.sh, which asks the store the
+# id's prefix names by path. The stub's rig list maps tk to a path with no
+# .beads directory, so bead-store.sh asks `gc bd --db <path>/.beads show` while
+# rig_beads_db pins nothing and the tool's own reads keep their unpinned shapes.
+# The gate is the one read that classifies a not-found. Every later read answers
+# only with an array, so a not-found there, a subject deleted after the gate,
+# fails the sling closed like any other failed read. The
 # roots read and the convoy read each carry a raw control byte in a title, as a
 # live store can, so the drop works only when both reads are scrubbed. Setting
 # STUB_CONVOYS=locked fails the convoy read, and STUB_ROOTS=locked the roots
-# read.
+# read. STUB_STATE names a directory the stub keeps call state in.
 STUB="$TMP/stub"
 mkdir -p "$STUB"
 cat > "$STUB/gc" <<'SH'
 #!/bin/sh
 case "$*" in
-  "rig list --json") printf '{"rigs":[]}' ;;
+  "rig list --json") printf '{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent/gc-toolkit"}]}' ;;
+  "bd --db /nonexistent/gc-toolkit/.beads show tk-live-missing --json")
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}'
+      printf 'Issue tk-live-missing not found\n' >&2; exit 1 ;;
+  "bd --db /nonexistent/gc-toolkit/.beads show tk-live-partial --json")
+      printf '[{"id":"tk-live-partial-twin","metadata":{}}]' ;;
+  "bd --db /nonexistent/gc-toolkit/.beads show "*" --json") printf '[{"id":"%s","metadata":{}}]' "$5" ;;
   "bd show "*" --json") printf '[{"id":"%s","metadata":{}}]' "$3" ;;
   "bd list --status open,in_progress --metadata-field gc.reaction_subject="*" --limit 0 --json") printf '[]' ;;
   "bd dep list tk-live-driven --direction up -t tracks --json")
       printf '[{"id":"tk-cv-live","issue_type":"convoy","status":"open","dependency_type":"tracks"}]' ;;
   "bd dep list tk-live-free --direction up -t tracks --json") printf '[]' ;;
-  "bd dep list tk-live-missing --direction up -t tracks --json")
-      printf '{"error":"resolving tk-live-missing: no issue found matching \\"tk-live-missing\\""}'; exit 1 ;;
+  "bd dep list tk-live-partial --direction up -t tracks --json") printf '[]' ;;
+  "bd dep list tk-live-vanished --direction up -t tracks --json")
+      printf '{"error":"resolving tk-live-vanished: no issue found matching \\"tk-live-vanished\\""}'; exit 1 ;;
+  "bd dep list tk-live-gone-late --direction up -t tracks --json")
+      # Present for the dedup's read, deleted before the live-workflow guard's.
+      if [ -f "$STUB_STATE/gone-late" ]; then
+          printf '{"error":"resolving tk-live-gone-late: no issue found matching \\"tk-live-gone-late\\""}'; exit 1
+      fi
+      : > "$STUB_STATE/gone-late"; printf '[]' ;;
   "bd list --has-metadata-key gc.input_convoy_id --include-ephemeral --brief --json --limit 0")
       if [ "${STUB_ROOTS:-}" = locked ]; then printf '{"error":"database is locked"}'; exit 1; fi
       printf '[{"id":"tk-root-live","status":"in_progress","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"tk-cv-live"}},'
@@ -591,11 +625,7 @@ OUT="$(live_sling tk-live-free)"; RC=$?
 set -e
 eq "$RC" 0 "(LIVE-READS) a bead no convoy tracks proceeds"
 has "$OUT" "gc bd create -t task" "(LIVE-READS) …to the dry-run filing"
-set +e
-OUT="$(live_sling tk-live-missing)"; RC=$?
-set -e
-eq "$RC" 0 "(LIVE-READS) a bead bd does not know proceeds: nothing tracks it"
-has "$OUT" "gc bd create -t task" "(LIVE-READS) …to the dry-run filing"
+hasnt "$OUT" "bead-store:" "(SUBJECT-PRESENT) …past a subject gate that stays quiet on a pass"
 set +e
 OUT="$(live_sling tk-live-broken)"; RC=$?
 set -e
@@ -608,6 +638,38 @@ set -e
 eq "$RC" 1 "(LIVE-READS) a roots read that fails for a tracked bead fails the sling closed (exit 1)"
 has "$OUT" "cannot tell whether a live workflow already drives tk-live-driven" "(LIVE-READS) …at the live-workflow guard, saying why"
 hasnt "$OUT" "gc bd create" "(LIVE-READS) …and files no reaction"
+
+echo "# the subject gate: a reaction is filed only for a subject its own store proves present"
+set +e
+OUT="$(live_sling tk-live-missing)"; RC=$?
+set -e
+eq "$RC" 1 "(SUBJECT-ABSENT) a subject its store proves absent fails the sling closed (exit 1)"
+has "$OUT" "tk-live-missing is absent from the store its prefix names" "(SUBJECT-ABSENT) …saying why"
+hasnt "$OUT" "tracks-edge dedup" "(SUBJECT-ABSENT) …before any guard reads the subject"
+hasnt "$OUT" "gc bd create" "(SUBJECT-ABSENT) …and files no reaction"
+# bd answers an id as an exact-or-prefix match, so tk-live-partial reads back as
+# tk-live-partial-twin, and every later read would let it through.
+set +e
+OUT="$(live_sling tk-live-partial)"; RC=$?
+set -e
+eq "$RC" 1 "(SUBJECT-UNPROVEN) an id its store matches only as a prefix of another bead fails the sling closed (exit 1)"
+has "$OUT" "cannot prove tk-live-partial exists" "(SUBJECT-UNPROVEN) …saying why"
+hasnt "$OUT" "gc bd create" "(SUBJECT-UNPROVEN) …and files no reaction"
+
+echo "# a not-found after the gate is a subject deleted since, and fails closed like any failed read"
+set +e
+OUT="$(live_sling tk-live-vanished)"; RC=$?
+set -e
+eq "$RC" 1 "(SUBJECT-VANISHED) a not-found at the dedup fails the sling closed (exit 1)"
+has "$OUT" "could not read the tracks-edge dedup for tk-live-vanished" "(SUBJECT-VANISHED) …at the dedup, saying why"
+hasnt "$OUT" "gc bd create" "(SUBJECT-VANISHED) …and files no reaction"
+mkdir -p "$TMP/stub-state"
+set +e
+OUT="$(live_sling tk-live-gone-late STUB_STATE="$TMP/stub-state")"; RC=$?
+set -e
+eq "$RC" 1 "(SUBJECT-VANISHED) a not-found at the live-workflow guard fails the sling closed (exit 1)"
+has "$OUT" "cannot tell whether a live workflow already drives tk-live-gone-late" "(SUBJECT-VANISHED) …at that guard, saying why"
+hasnt "$OUT" "gc bd create" "(SUBJECT-VANISHED) …and files no reaction"
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"
