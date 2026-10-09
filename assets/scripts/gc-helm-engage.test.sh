@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the gc-helm `engage` verb (tk-4abhrt).
+# Hermetic test for the gc-helm `engage` verb.
 #
 # engage is the spawn-on-engagement entry point that replaces the retired
 # converse routed-pool: it spawns a manual converse-<model> sitting, binds the
@@ -879,7 +879,7 @@ hasnt "$CALLED" "bd update" "(NOCONVERSE) …binding nothing"
 unset NO_CONVERSE
 
 echo "# an importer whose CHECKOUT holds no converse template is still engageable (roster-sourced)"
-# The tk-353e79 regression: capability must come from the import-resolved roster,
+# The regression: capability must come from the import-resolved roster,
 # not a glob of the rig's checkout. Only the pack-source rig keeps agents/converse-*
 # in its tree; every importer obtains converse through the roster. $TMP/rig-bare is
 # a checkout with no converse templates, yet the default roster registers converse

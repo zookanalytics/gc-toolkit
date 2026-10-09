@@ -464,5 +464,86 @@ LIVEF=$("$SUT" upsert --anchor tk-open --lane correctness --locus "assets/script
 eq "$(bstatus "$ORPH")" "closed" "shed-orphaned closes an unvalidated finding on a closed anchor"
 eq "$(bstatus "$LIVEF")" "open" "…and leaves one on a still-open anchor for gate-ensure's per-anchor pass"
 
+# ---------------------------------------------------------------------------
+# upsert files a finding in ONE write, so a failure leaves a fully stamped
+# finding or none. A bead stamped in a second write was left open with no
+# metadata when that write failed: no finding reader selects it, and the retry's
+# dedup, which reads finding.key, filed a stamped twin beside it.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancA","status":"open","assignee":"","title":"ancA","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}}]'
+# The id the stub's next create mints.
+next_id() { printf 'new-%s' "$(( $(jq 'length' "$STUB_STORE") + 1 ))"; }
+# Open beads titled as findings that carry no task_kind, so no finding reader sees them.
+live_unstamped() {
+  jq -r '[ .[] | select((.status // "open") != "closed") | select((.title // "") | startswith("finding["))
+               | select(((.metadata // {}).task_kind // "") == "") ] | length' "$STUB_STORE"
+}
+live_titled() { jq -r --arg t "$1" '[ .[] | select((.status // "open") != "closed") | select(.title == $t) ] | length' "$STUB_STORE"; }
+upsert_a() { "$SUT" upsert --anchor tk-ancA --lane correctness --locus "assets/scripts/atomic.sh:$1()" --message "$2"; }
+key_a() { "$SUT" key --lane correctness --locus "assets/scripts/atomic.sh:$1()" --message "$2"; }
+
+: > "$STUB_GC_LOG"
+FA1=$(upsert_a one "stamp the birth write")
+eq "$(meta "$FA1" 'finding.key')" "$(key_a one "stamp the birth write")" "the create lands the finding's key"
+has "$(cat "$STUB_GC_LOG")" "--metadata {\"task_kind\":\"finding\",\"anchor_bead\":\"tk-ancA\"" "the identity rides the create"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata task_kind=finding" "…and no second write stamps it"
+
+# The incident: the store refuses every write to the bead after its create.
+NX=$(next_id)
+export STUB_UPDATE_FAIL="$NX"
+FA2=$(upsert_a two "survive a refused second write"); rc=$?
+export STUB_UPDATE_FAIL=""
+eq "$rc" "0" "a store that refuses every write after the create still files the finding"
+eq "$FA2" "$NX" "…and upsert returns it"
+eq "$(meta "$NX" 'finding.key')" "$(key_a two "survive a refused second write")" "…carrying its key"
+eq "$(live_unstamped)" "0" "…so no open finding bead is left unstamped"
+eq "$(upsert_a two "survive a refused second write")" "$NX" "the retry re-raises that finding"
+eq "$(live_titled "finding[correctness]: survive a refused second write")" "1" "…and files no twin"
+
+BEFORE=$(jq 'length' "$STUB_STORE")
+export STUB_CREATE_FAIL=1
+FA3=$(upsert_a three "retry a refused create"); rc=$?
+export STUB_CREATE_FAIL=""
+eq "$rc" "2" "a refused create exits 2"
+eq "$FA3" "" "…prints no finding"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and leaves no bead"
+FA3b=$(upsert_a three "retry a refused create")
+eq "$(meta "$FA3b" 'finding.key')" "$(key_a three "retry a refused create")" "the retry files the finding with its key"
+eq "$(live_titled "finding[correctness]: retry a refused create")" "1" "…once"
+
+# The create lands and its reply is lost: the key it was born with finds it.
+NX=$(next_id)
+export STUB_CREATE_GARBAGE=1
+FA4=$(upsert_a four "recover a lost create reply"); rc=$?
+export STUB_CREATE_GARBAGE=""
+eq "$rc" "0" "a create whose reply does not parse is recovered in the same call"
+eq "$FA4" "$NX" "…by the key it was born with"
+eq "$(live_unstamped)" "0" "…and no open finding bead is left unstamped"
+eq "$(upsert_a four "recover a lost create reply")" "$NX" "the retry re-raises the landed finding"
+eq "$(live_titled "finding[correctness]: recover a lost create reply")" "1" "…and files no twin"
+# Inside a reconcile pass bd_list is memoized, and upsert's dedup read has cached
+# the anchor's findings from before the create.
+GC_RECONCILE_BD_CACHE=$(mktemp -d "$TMP/bdcache.XXXXXX"); export GC_RECONCILE_BD_CACHE
+NX=$(next_id)
+export STUB_CREATE_GARBAGE=1
+FA6=$(upsert_a six "recover a lost reply past the pass cache"); rc=$?
+export STUB_CREATE_GARBAGE=""
+unset GC_RECONCILE_BD_CACHE
+eq "$rc/$FA6" "0/$NX" "inside a reconcile pass the recovery reads past the cached pre-create findings"
+
+# The create lands without its payload: the keyless bead is closed, not left open.
+NX=$(next_id)
+export STUB_DROP_KEYS="$NX:task_kind,anchor_bead,finding.lane,finding.key,finding.disposition,finding.source"
+FA5=$(upsert_a five "close a keyless birth"); rc=$?
+export STUB_DROP_KEYS=""
+eq "$rc" "2" "a create whose payload did not land exits 2"
+eq "$FA5" "" "…prints no finding"
+eq "$(bstatus "$NX")" "closed" "…and closes the keyless bead it left"
+eq "$(live_unstamped)" "0" "…so no open finding bead is left unstamped"
+FA5b=$(upsert_a five "close a keyless birth")
+eq "$(meta "$FA5b" 'finding.key')" "$(key_a five "close a keyless birth")" "the retry files the finding with its key"
+eq "$(live_titled "finding[correctness]: close a keyless birth")" "1" "…and it is the only open bead with that title"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

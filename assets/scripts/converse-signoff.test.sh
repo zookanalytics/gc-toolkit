@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # converse-signoff.test.sh — regression test for the converse role's
-# thread-ending contract (bugs tk-bzm86 and tk-mndjz; precedent:
+# thread-ending contract (precedent:
 # gate-visit.test.sh).
 #
 # Two operator complaints, opposite in sign, and the contract has to hold
-# both at once — which is why they are guarded in one file. tk-bzm86: a
+# both at once — which is why they are guarded in one file. One: a
 # sitting ended and said nothing, so the operator was left reading a
-# thread that had already gone. tk-mndjz: a visit that needed no operator
+# thread that had already gone. The other: a visit that needed no operator
 # at all held a sitting anyway, so the operator was asked to decide about
 # a state they already knew and accepted. The first bug's fix — "never end
 # without a sign-off" — is the second bug's cause if it is read as "every
@@ -146,11 +146,11 @@ have "the close goes through the shared guarded close (visit-close.sh), which st
     'visit-close.sh' "$SK_SETTLE"
 have "the guarded close names only the visit" '--visit "$VISIT"' "$SK_SETTLE"
 
-# THE ORDER, not the presence (tk-747cl). Closing the visit removes the
+# THE ORDER, not the presence. Closing the visit removes the
 # session's last wake reason, and the no-wake-reason drain pinned further down
 # takes the pane whole about a minute later without reading anything out of
 # it. So a sign-off written AFTER the close is written into a surface that is
-# already condemned: on tk-z9nln the substantive answer to the operator's
+# already condemned: the substantive answer to the operator's
 # question was posted 15 seconds after the visit closed, and they almost
 # certainly never saw it. Step 7's heading always said "sign off, then close";
 # its procedure did the opposite, and the procedure is the half that runs.
@@ -169,9 +169,9 @@ else
     # immediately before it closes, so the stamp lands after the sign-off
     # whenever the CALL does. A call ahead of the sign-off reopens the original
     # bug — a death between the stamp and the sign-off strands a visit that then
-    # finishes silently, dropping the sign-off it still owed (tk-ayd4c0) — and a
+    # finishes silently, dropping the sign-off it still owed — and a
     # sign-off written after the close lands in a pane the drain is already
-    # taking (tk-747cl).
+    # taking.
     s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF '<subject-id> — <short human label>' | head -1 | cut -d: -f1)
     s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'visit-close.sh' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
@@ -278,8 +278,8 @@ fi
 # That paragraph was necessary and not sufficient. The role's FIRST
 # sentence still read "You hold visits: bounded sittings", so the model was
 # already set — visit == sitting — by the time the earned-sitting rule
-# arrived to qualify it, and the two contradicted each other on page one
-# (tk-flctq). A definition has to be right where it is first given, which
+# arrived to qualify it, and the two contradicted each other on page one.
+# A definition has to be right where it is first given, which
 # means "sitting" naming only the held path from the opening line.
 if printf '%s\n' "$INTRO" | grep -q 'filed request'; then
     ok "the opening defines a visit as a request for a sitting"
@@ -445,7 +445,7 @@ have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE"
 
 # Page one outranks a rule further down here too: the doc opens with the
 # pack's vocabulary, and a definition reading "a visit IS a sitting, held
-# live, closed when the sitting ends" teaches the tk-mndjz behaviour to
+# live, closed when the sitting ends" teaches that equation to
 # every reader who never reaches the section that corrects it. The
 # vocabulary paragraph — not the doc as a whole — has to carry both
 # endings, so it is extracted and checked on its own.
@@ -473,7 +473,7 @@ fi
 # The doc defines a visit TWICE — the vocabulary above, and again in
 # "What upstream does not ship", which announces itself as "a definition
 # first, because everything below uses it". Fixing the first and leaving
-# the second is what happened (tk-flctq): the block still opened "A visit
+# the second is what happened: the block still opened "A visit
 # is one bounded sitting", then contradicted itself a few lines later with
 # the silent close. Both copies are authoritative, so both are pinned, and
 # the stale phrase is barred from the whole file — the next definition
@@ -509,7 +509,7 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
 echo "── the post-sitting ending is documented, not just the held one ──"
-# tk-tufrw: an operator lost an unsubmitted multi-paragraph reply. The
+# An operator lost an unsubmitted multi-paragraph reply. The
 # held-sitting section above reads as the complete account of how the pane
 # goes; it is not. Once a sitting ENDS its manual session stays up until the
 # converse-reap order closes it, on the first pass that finds the visit closed
@@ -582,7 +582,7 @@ have "takeaway usage documents the converse caller" 'host|proactive|converse' "$
 have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group (tk-msfmu)
+# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # THE BUG: the converse design authority, `specs/tk-h9pq5/design-doc.md`, says
@@ -627,7 +627,7 @@ have "step 8 re-claims within the group" "scoped to this thread's group" "$SK_CO
 # mechanism), so a file-wide grep is satisfied by the prose alone: mutating
 # the nudge to "Claim with gc hook --claim --json; work the visit." — the
 # regression this pair exists to catch — left all assertions green while these
-# two read the whole file (tk-mpl1c).
+# two read the whole file.
 NUDGE_VAL="$TMPD/converse-nudge.txt"
 # `tr -d` the newline: sed prints an empty LINE for an empty capture, so
 # without it `nudge = ""` writes one byte and reads as non-empty below.
@@ -664,7 +664,7 @@ if [ -s "$NUDGE_VAL" ]; then
     # pane is a machine work-log, so only here does nudge length cost the operator
     # anything. It ratcheted 21 -> 40 -> 55 words in 13 days because each incident
     # appended a clause and none removed one, and the operator read the result in
-    # their own thread (tk-82epi -> tk-mpl1c). The standing rule is "put the fix in
+    # their own thread. The standing rule is "put the fix in
     # the prompt or a script, not another clause here"; an instruction-dependent
     # rule fails silently, so the cap is the enforcement. It sits just above the
     # longest peer (proactive, 23 words) and well under the 40 that drew the first
@@ -801,7 +801,7 @@ eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked
 eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 
 # --- (EMPTYSTAMP) the stamp is empty; the tracks edge still carries it -------
-# tk-tu5g3. `gc hook --claim` reports the gc.continuation_group STAMP, and the
+# `gc hook --claim` reports the gc.continuation_group STAMP, and the
 # stamp lands empty on a minority of visits. An empty group turns the
 # deliberate (NOGROUP) fallback above from a rare benign case into THE failure
 # case, silently disabling this guard for exactly the turn it was written to
@@ -855,7 +855,7 @@ grep -q -- '--assignee=' <<< "$CUPD" \
 
 # (SPLIT) bd's claim guard refuses --assignee "" on an in_progress bead and
 # rolls the WHOLE update back, so batching the clears loses the ones that
-# needed no claim (tk-z27pw). One call doing both is the shape that fails.
+# needed no claim. One call doing both is the shape that fails.
 if grep -qE -- '--status=open.*--assignee=|--assignee=.*--status=open' <<< "$CUPD"; then
     bad "(SPLIT) the release is split into separate writes" \
         "status and assignee ride one update — the claim guard rolls both back"
@@ -1354,7 +1354,7 @@ have "…and stamps the disposition beside the headline" 'gc.takeaway_settled=$n
 # argument and gc-helm died with `unknown flag '--waiting-on tk-… --waiting-on
 # tk-…'`. The empty case splits to nothing in every shell, so the bug was
 # invisible on sittings that routed nothing and fired reliably on the ones the
-# flag exists for — twice in one day before it was diagnosed (tk-2cy79). It
+# flag exists for — twice in one day before it was diagnosed. It
 # reverts by one pair of quotes coming off, so it is pinned from both sides.
 lacks "…and never as an unquoted string, which zsh does not split" \
       '--by converse $WAIT' "$REPO/assets/scripts/converse-signoff.sh" \
@@ -1366,7 +1366,7 @@ have "the routing rule tells converse to wire the wait" '--waiting-on <work-bead
 # The takeaway is read back on the SUBJECT. The verification the block already
 # shipped checks `gc.outcome` on the VISIT, which is a different bead: a sitting
 # whose takeaway died still passed it and closed clean — the "unstamped closed
-# visit" this same step warns against, one bead over (tk-2cy79, recurrence 2).
+# visit" this same step warns against, one bead over.
 have "the takeaway is read back, not just the visit's outcome stamp" \
      'metadata["gc.takeaway"]' "$REPO/assets/scripts/converse-signoff.sh"
 # The ORDER is the safety property: the stamp is written first, so an edge that

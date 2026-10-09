@@ -743,6 +743,13 @@ reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
 nothing to the subject: the subject's DONE row, once it closes, leaves the board
 only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
 
+`prefix+X` ends a sitting the same way from the keyboard, whether or not
+converse's copyable line is on screen. After a y/n confirm,
+`assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
+`gc session list`, refuses one that is not a converse sitting, and runs the
+argument-free dismiss under that session's identity, so dismiss itself infers
+which subject the sitting is on. Nothing is typed into the pane.
+
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
 stop path, so any stop takes the thread whole. Retiring the session rather than
