@@ -560,7 +560,10 @@ echo "── a stale PR the merge cadence settled waiting on the operator's revi
 # the cadence has not settled, and an approved PR, settled or not. merge.sh
 # records no verdict at many holds an approved PR can reach, so a settled verdict
 # beside an approval can be one recorded before it, and an approved PR still idle
-# past the threshold is held by something the visit surfaces.
+# past the threshold is held by something the visit surfaces. Two settled
+# postures owe the operator nothing either: commented, review comments the city
+# owes answers to, which merge.sh holds on before it records any verdict, and
+# none, which a base with no required-review rule reads approved or not.
 T="$(iso_ago 3)"
 raise_case() { # raise_case <pr_posture> <pr.machine>: c-pr-open's PR idle 9 days
     jq --arg p "$1" --arg m "$2" \
@@ -587,7 +590,9 @@ for c in "review_required@sha-old@$T|settled@sha-521@$T|a review owed at an earl
          "review_required@sha-521@$T|progressing@sha-521@$T|a PR the merge cadence has not settled" \
          "approved@sha-521@$T|progressing@sha-521@$T|an approved PR with a review, fix or blocker still in flight" \
          "approved@sha-521@$T||an approved PR the merge cadence never recorded" \
-         "review_required@sha-521@$T|blocked@sha-521@$T|a PR blocked on something no review clears"; do
+         "review_required@sha-521@$T|blocked@sha-521@$T|a PR blocked on something no review clears" \
+         "commented@sha-521@$T|settled@sha-521@$T|a settled stale PR whose review comments the city owes answers to" \
+         "none@sha-521@$T|settled@sha-521@$T|a settled stale PR whose review decision names no one"; do
     p="${c%%|*}"; rest="${c#*|}"; m="${rest%%|*}"; what="${rest#*|}"
     raise_case "$p" "$m"
     grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
@@ -637,6 +642,15 @@ stale_live "{\"pr_posture\":\"review_required@sha-521@$T\",\"pr.machine\":\"sett
 eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a stale PR now awaiting the operator's review: its visit is retracted"
 grep -q 'waits on a review from the operator' "$ESC_RETRACT_BODIES" \
     && ok "…and the reading names the review queue" || bad "review-owed reading" "$(cat "$ESC_RETRACT_BODIES")"
+stale_live "{\"pr_posture\":\"changes_requested@sha-521@$T\",\"pr.machine\":\"settled@sha-521@$T\"}" '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a stale PR now awaiting the operator's re-review: its visit is retracted"
+
+# Review comments the city owes answers to, and a review decision that names no
+# one, are not a wait on the operator, settled or not: the visit stands.
+for p in commented none; do
+    stale_live "{\"pr_posture\":\"$p@sha-521@$T\",\"pr.machine\":\"settled@sha-521@$T\"}" '{}'; retract_run
+    eq "$(cat "$ESC_RETRACTS")" "" "a stale PR whose settled posture is $p: its visit stands"
+done
 
 stale_live '{"merge_result":"abandoned"}' '{}'; retract_run
 eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "an anchor that left pull_request: its visit is retracted"

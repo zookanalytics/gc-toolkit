@@ -57,12 +57,17 @@ STALE_GATE_JQ='
   # verdict recorded while the approval was still owed can outlive it. An
   # approved PR nothing holds lands within a pass, so one still open past the
   # threshold is held by something, which is what the stale-PR gate surfaces.
-  # The settled posture still owes an approval or a re-review, so the PR waits
-  # on the review of the operator, whose review queue already names the wait.
-  # The premise re-check of converse closes a visit raised on it as benign.
+  # The settled posture still owes the first review or a re-review, so the PR
+  # waits on the review of the operator, whose review queue already names the
+  # wait. The premise re-check of converse closes a visit raised on it as
+  # benign. Two postures are left out. commented is review comments the city
+  # owes answers to, and merge.sh holds that posture before it records any
+  # verdict, so a settled verdict beside it was recorded at an earlier posture.
+  # none is what a base with no required-review rule reads, approved or not, so
+  # it says nothing about whose move is next.
   def review_owed:
     settled_posture as $s
-    | (["review_required", "changes_requested", "commented", "none"] | index($s)) != null;
+    | (["review_required", "changes_requested"] | index($s)) != null;
 '
 
 # Executable entry. A sourced load stops above with the definitions in place.
