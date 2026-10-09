@@ -415,6 +415,7 @@ keys = [
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
+  "bring_current_from",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -553,6 +554,13 @@ keys = [
 #   every pass and stops it ever re-flipping a PR an operator later re-drafted,
 #   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
 #   Absent means the arm has not read it ready. Never cleared. An oid.
+# bring_current_from — the PR head a rejected-branch resume started from,
+#   written by mol-polecat-work.toml's resume block before it merges the target
+#   in. bring-current-guard.sh reads it at submit as the start of what the
+#   bring-current added, so a session that re-runs the handoff after the push
+#   still reads the whole bring-current. Absent, the guard starts from the origin
+#   head it read before the push. Never cleared; the next resume overwrites it.
+#   An oid.
 
 [metadata.gates]
 keys = [

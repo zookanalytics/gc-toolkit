@@ -10,7 +10,9 @@
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (check markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING with no feedback owed -> file ONE
+# nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
+# PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
+# its posture and files nothing) -> file ONE
 # merge-in rework child while none is in flight, to the fix pool that brings the
 # branch current by MERGE (no branch shape is
 # rebased or force-pushed), stamped prepare_mode=merge and counted as
@@ -524,6 +526,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# The approval rule merge.sh lands on, REVIEW_VERDICT_DEF; the conflict arm
+# brings only an approved PR current.
+# shellcheck source=review-verdict.sh
+. "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -2046,8 +2052,8 @@ REAP_EOF
   # guards the anchor is dispatchable, and what it owes decides how: with
   # unanswered feedback it falls through to the feedback arm below (whose
   # prepare_mode=merge child brings the branch current as it answers); otherwise
-  # this arm files the one merge-in child. The gate that splits the two sits just
-  # above the dedup.
+  # this arm files the one merge-in child, once the PR is approved. The gate that
+  # splits the two, and the approval gate after it, sit just above the dedup.
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
@@ -2125,8 +2131,39 @@ REAP_EOF
     # prepare_mode=merge child that brings this same branch current (a MERGE of
     # origin/$base on resume) as it answers, so a merge-in child here would only
     # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child.
+    # conflict with no feedback owed dispatches this arm's own merge-in child,
+    # and only on an approved PR.
     if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      # >>> conflict-arm-approval-gate
+      # The merge-in is filed only for an approved PR: a standing APPROVED review
+      # from an account other than the city's and no standing CHANGES_REQUESTED,
+      # by the same rule merge.sh lands on (review-verdict.sh).
+      # Each bring-current costs a polecat round and a fresh CI run, and it goes
+      # stale again whenever main moves, while a PR nobody approved cannot land
+      # however current its branch is. So its conflict waits for the approval,
+      # with its posture already recorded above. A merge-in child already open on
+      # the branch is left as it is. Reviews that did not read, or an unresolved
+      # acting login, prove no approval: nothing is filed and the next pass
+      # retries.
+      approval=""
+      if [ -n "$SELF_LOGIN" ] && [ -n "$revs_raw" ]; then
+        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
+          review_verdict($self)
+          | if .veto != "" then "veto:" + .veto elif .approver != "" then "approved" else "none" end' 2>/dev/null)
+      fi
+      case "$approval" in
+        approved) : ;;
+        veto:*)
+          echo "$PROG: $id — PR#$num conflicts but '${approval#veto:}' has a standing CHANGES_REQUESTED; no merge-in filed, the branch is brought current once the PR is approved"
+          skipped=$((skipped + 1)); continue ;;
+        none)
+          echo "$PROG: $id — PR#$num conflicts but no external approval stands; no merge-in filed, the branch is brought current once the PR is approved"
+          skipped=$((skipped + 1)); continue ;;
+        *)
+          echo "$PROG: $id — PR#$num conflicts but its reviews could not be read to prove an approval; no merge-in filed (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue ;;
+      esac
+      # <<< conflict-arm-approval-gate
       # Dedup on a LIVE child on this branch, in flight or parked — the child's own
       # metadata, no bookkeeping key on the anchor. A non-closed child owns the
       # branch: a live one is already bringing it current and a second would race

@@ -263,22 +263,13 @@ ANCHOR_HOLDS_DEF='
   def no_check_set: ((. // "") | tostring | gsub("[[:space:],]"; "")) == "";
 '
 
-# The approval rule over a list of reviews in the REST shape: each account
-# other than the city takes its latest APPROVED or CHANGES_REQUESTED review. A
-# dismissed review is in neither state, so it drops out before the latest is
-# taken: a dismissed approval does not count, and a dismissed CHANGES_REQUESTED
-# does not hide its author's older approval. An approval stands across later
-# pushes until it is dismissed, so it counts at whatever commit it was given.
-# Yields {veto, approver}, each the first such login or empty. Shared by the
-# approval gate and the visit order, so the two never disagree on approval.
-REVIEW_VERDICT_DEF='
-  def review_verdict($self):
-    ([ .[] | select((.user.login // "") != $self)
-       | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
-     | group_by(.user.login // "") | map(sort_by((.submitted_at // ""), (.id // 0)) | last)) as $latest
-    | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
-        approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") };
-'
+# The approval rule over a list of reviews in the REST shape, REVIEW_VERDICT_DEF:
+# review_verdict($self) yields {veto, approver}, each the first such login or
+# empty. Shared by the approval gate and the visit order, so the two never
+# disagree on approval, and with pr-facts.sh, whose conflict arm brings only an
+# approved PR current.
+# shellcheck source=review-verdict.sh
+. "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 
 # The first declared lane that does not DERIVE green, through lane-state.sh.
 # Prints that lane; empty stdout with a zero exit means every declared lane is

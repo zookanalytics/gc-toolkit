@@ -207,6 +207,14 @@ prview() { # num state mergeState mergeable extra [headRefName]
   printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"%s","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"},"autoMergeRequest":null%s}' \
     "$2" "${6:-polecat/x$1}" "$1" "$3" "$4" "$1" "$1" "${5:-}"
 }
+# A standing approval on PR <num> from an account other than the city's: what
+# the conflict arm's merge-in waits for (review-verdict.sh). Its id sits far
+# above every review-id watermark the fixtures use, and an APPROVED review is
+# never feedback, so it moves no watermark.
+approve() { # num [login]
+  printf '[{"id":%s,"user":{"login":"%s"},"state":"APPROVED","body":"","commit_id":"sha-%s","submitted_at":"2026-08-20T01:00:00Z"}]' \
+    "$((880000 + $1))" "${2:-human1}" "$1" > "$GH_DIR/reviews_$1.json"
+}
 
 # What `gc-helm.sh demand` files when a sitting holds an anchor: the bead the
 # person owes, gating the anchor. Its liveness — never the gc.takeaway headline
@@ -791,6 +799,7 @@ has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situat
 echo "# CONFLICTING -> one rework child per head"
 store "[$(anchor F4 13)]"
 printf '%s' "$(prview 13 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_13.json"
+approve 13
 out=$(run)
 has "$out" "filed merge-mode rework new-2 routed to $FIX" "a rework child was filed, classified, and routed"
 eq "$(meta new-2 task_kind)" "rework" "child carries the rework role marker"
@@ -812,6 +821,84 @@ echo "# …dedup: second pass files nothing"
 out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
+
+echo "# …an UNAPPROVED conflicting PR files no merge-in: its posture is recorded, and one line says why"
+# A bring-current costs a polecat round and a CI run, and goes stale whenever
+# main moves, while a PR nobody approved cannot land however current it is. So
+# the merge-in waits for an approval, by the rule merge.sh lands on.
+store "[$(anchor NA1 230)]"
+printf '%s' "$(prview 230 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_230.json"
+echo '[]' > "$GH_DIR/reviews_230.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+has "$out" "PR#230 conflicts but no external approval stands; no merge-in filed" "the unapproved conflict files no merge-in"
+eq "$(printf '%s\n' "$out" | grep -c 'PR#230 conflicts')" "1" "…and says so in exactly one line"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…no child of any kind is minted"
+eq "$(meta_pinned NA1 pr_posture)" "none@sha-230" "…while its posture is recorded at the live head"
+eq "$(meta NA1 pr_merge_state)" "DIRTY@sha-230" "…beside the merge state that says it conflicts"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…the fix pool is not woken"
+eq "$(meta NA1 merge_result)" "pull_request" "…and the anchor keeps gating, untouched"
+
+echo "# …the same PR, once approved, gets its merge-in: the approval is what released it"
+approve 230
+out=$(run)
+has "$out" "filed merge-mode rework" "an approval releases the bring-current"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "NA1")] | length' "$STUB_STORE")" "1" "…exactly one merge-in child"
+
+echo "# …a standing CHANGES_REQUESTED vetoes the approval beside it, as it vetoes the merge"
+# An empty-bodied CHANGES_REQUESTED carries no feedback to route, so the anchor
+# reaches this arm rather than the feedback arm.
+store "[$(anchor NA2 231)]"
+printf '%s' "$(prview 231 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_231.json"
+printf '[{"id":880301,"user":{"login":"human1"},"state":"APPROVED","body":"","commit_id":"sha-231","submitted_at":"2026-08-20T01:00:00Z"},{"id":880302,"user":{"login":"human2"},"state":"CHANGES_REQUESTED","body":"","commit_id":"sha-231","submitted_at":"2026-08-21T01:00:00Z"}]' > "$GH_DIR/reviews_231.json"
+out=$(run)
+has "$out" "PR#231 conflicts but 'human2' has a standing CHANGES_REQUESTED; no merge-in filed" "a standing veto holds the merge-in"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted"
+
+echo "# …neither a dismissed approval nor one under the city's own login counts"
+store "[$(anchor NA3 232), $(anchor NA4 233)]"
+printf '%s' "$(prview 232 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_232.json"
+printf '%s' "$(prview 233 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_233.json"
+printf '[{"id":880401,"user":{"login":"human1"},"state":"DISMISSED","body":"","commit_id":"sha-232","submitted_at":"2026-08-20T01:00:00Z"}]' > "$GH_DIR/reviews_232.json"
+approve 233 gc-city-bot
+out=$(run)
+has "$out" "PR#232 conflicts but no external approval stands" "a dismissed approval releases nothing"
+has "$out" "PR#233 conflicts but no external approval stands" "…nor does the city's own approval"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted for either"
+
+echo "# …reviews that do not read, or an unresolved acting login, prove no approval: nothing is filed until a pass reads one"
+store "[$(anchor NA5 234)]"
+printf '%s' "$(prview 234 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_234.json"
+approve 234
+out=$(STUB_GH_LIST_RC=1 run)
+has "$out" "PR#234 conflicts but its reviews could not be read to prove an approval; no merge-in filed (retry next pass)" "an unreadable review list fails closed"
+out=$(STUB_SELF_LOGIN="" run)
+has "$out" "PR#234 conflicts but its reviews could not be read to prove an approval" "…and so does an unresolved acting login, which cannot tell an outside approval from the city's own"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…neither files a child"
+out=$(run)
+has "$out" "filed merge-mode rework" "…and the next pass that reads the approval files the merge-in"
+
+echo "# …a merge-in child already on an UNAPPROVED PR's branch is left as it is"
+# The gate stops new merge-ins, not the ones in flight: a routed child drains
+# through its polecat as before, and an unrouted strand is re-routed only once
+# the PR is approved.
+liv=$(child LV1 polecat/x235 ',"task_kind":"rework","anchor_bead":"NA6","rejection_reason":"stale base at head sha-235: ..."')
+str=$(child ST1 polecat/x236 ',"task_kind":"rework","anchor_bead":"NA7","rejection_reason":"stale base at head sha-236: ...","gc.routed_to":""')
+store "[$(anchor NA6 235), $liv, $(anchor NA7 236), $str]"
+gc bd dep LV1 --blocks NA6 >/dev/null 2>&1
+gc bd dep ST1 --blocks NA7 >/dev/null 2>&1
+printf '%s' "$(prview 235 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_235.json"
+printf '%s' "$(prview 236 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_236.json"
+out=$(run)
+has "$out" "PR#235 conflicts but no external approval stands" "an unapproved PR with a merge-in in flight files nothing new"
+eq "$(bstatus LV1)" "open" "…its routed child is left open"
+eq "$(meta LV1 'gc.routed_to')" "rig/gc-toolkit.polecat" "…and routed, to drain through its polecat"
+eq "$(meta ST1 'gc.routed_to')" "" "…while an unrouted strand stays unrouted"
+hasnt "$out" "re-routing stranded rework ST1" "…and is not reported re-routed"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and nothing is minted"
+approve 236
+out=$(run)
+has "$out" "re-routing stranded rework ST1" "once the PR is approved, the strand is re-routed as before"
 
 echo "# …a hold vetoes the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
@@ -835,6 +922,7 @@ eq "$(meta F5b merge_result)" "pull_request" "…while the anchor keeps gating, 
 echo "# …while a CLOSED demand is a decision already made: the rework is dispatched"
 store "[$(anchor F5c 17),$(demand F5c closed)]"
 printf '%s' "$(prview 17 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_17.json"
+approve 17
 out=$(run)
 has "$out" "filed merge-mode rework new-3 routed to $FIX" "a closed demand holds nothing"
 
@@ -860,6 +948,7 @@ echo "# …but the arm's OWN rework child is the mechanism, not a hold: it block
 store "[$(anchor FBK2 97),$(child CW1 polecat/x97 ',"task_kind":"rework","anchor_bead":"FBK2"')]"
 gc bd dep CW1 --blocks FBK2 >/dev/null 2>&1
 printf '%s' "$(prview 97 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_97.json"
+approve 97
 out=$(run)
 has "$out" "rework CW1 already covers branch 'polecat/x97' at this head, no new child" "the anchor's own rework child is excluded from the guard, so the dedup runs"
 
@@ -870,6 +959,7 @@ echo "# …and that own rework child, parked for a person in the held lifecycle 
 store "[$(anchor FBK3 98),$(child HW1 polecat/x98 ',"task_kind":"rework","anchor_bead":"FBK3","merge_result":"held"' blocked)]"
 gc bd dep HW1 --blocks FBK3 >/dev/null 2>&1
 printf '%s' "$(prview 98 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_98.json"
+approve 98
 out=$(run)
 has "$out" "rework HW1 already covers branch 'polecat/x98' at this head, no new child" "a rework child parked in the held lifecycle state (merge_result=held) still covers the branch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
@@ -896,6 +986,7 @@ echo "# …control: with that child's demand CLOSED the hold lifts, and the own 
 store "[$(anchor FDK2 111),$(child KID2 polecat/x111 ',"task_kind":"rework","anchor_bead":"FDK2"'),$(demand KID2 closed)]"
 gc bd dep KID2 --blocks FDK2 >/dev/null 2>&1
 printf '%s' "$(prview 111 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_111.json"
+approve 111
 out=$(run)
 has "$out" "rework KID2 already covers branch 'polecat/x111' at this head, no new child" "a closed demand holds nothing; the own child dedups"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no new rework child is minted"
@@ -951,6 +1042,7 @@ eq "$(meta FA1 merge_result)" "pull_request" "…while the anchor keeps gating, 
 
 echo "# …and the SAME anchor without the arm dispatches a rework — the arm is the only thing holding it"
 store "[$(anchor FA1 95)]"
+approve 95
 : > "$STUB_SESSION_LOG"
 out=$(run)
 has "$out" "filed merge-mode rework" "with no arm, the conflict dispatches a rework"
@@ -1026,6 +1118,7 @@ eq "$(vpass_id CF3)" "<none>" "…and no validation pass is opened"
 echo "# …a CLOSED rework at the current head is a finished round, NOT a cover: an approved PR gone CONFLICTING after its round, head unchanged, re-dispatches instead of wedging on the closed child"
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"task_kind\":\"rework\",\"anchor_bead\":\"F6\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
+approve 15
 out=$(run)
 has "$out" "filed merge-mode rework" "a closed child no longer suppresses the re-file; the still-dirty branch is re-dispatched"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "exactly one fresh merge-in child is minted"
@@ -1036,6 +1129,7 @@ eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind 
 echo "# …a created-but-unstamped rework orphan is ADOPTED, never twinned"
 store "[$(anchor F4b 19)]"
 printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
+approve 19
 out=$(STUB_DROP_KEYS="new-2:branch,target,rejection_reason,merge_strategy,existing_pr,pr_url,pr_number,gc.routed_to" run)
 eq "$(meta new-2 branch)" "<absent>" "first pass left an unstamped orphan (stamp dropped)"
 out=$(run)
@@ -1054,6 +1148,7 @@ echo "# …atomic birth: a stamp that keeps the branch but drops rejection_reaso
 # never exist — form it fully or unmake it.
 store "[$(anchor AB1 70)]"
 printf '%s' "$(prview 70 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_70.json"
+approve 70
 out=$(STUB_DROP_KEYS="new-2:rejection_reason" run)
 has "$out" "could not form the rework child for PR#70" "the arm refuses to route a child it could not fully form"
 eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
@@ -1064,6 +1159,7 @@ hasnt "$out" "filed merge-mode rework new-2 routed" "the husk is never reported 
 echo "# …a SHARED head branch is classified merge, never rebase"
 store "[$(anchor SB 28 '' 'integration/refinery-fixes')]"
 printf '%s' "$(prview 28 OPEN DIRTY CONFLICTING '' 'integration/refinery-fixes')" > "$GH_DIR/pr_view_28.json"
+approve 28
 out=$(run)
 has "$out" "filed merge-mode rework new-2" "the dispatch names the mode it classified"
 eq "$(meta new-2 prepare_mode)" "merge" "an integration/* head is classified merge"
@@ -1078,6 +1174,7 @@ eq "$(meta new-2 'gc.routed_to')" "$FIX" "the merge-mode child is still dispatch
 echo "# …a graduation on a polecat-shaped branch is brought current by merge, like every shape"
 store "[$(anchor GD 29 ',"graduation":"true"')]"
 printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_29.json"
+approve 29
 out=$(run)
 eq "$(meta new-2 prepare_mode)" "merge" "a graduation is brought current by merge, like every branch shape"
 hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names no force-push"
@@ -1085,6 +1182,7 @@ hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…
 echo "# …a prepare_mode stamp that does not persist leaves the child UNROUTED"
 store "[$(anchor DM 31)]"
 printf '%s' "$(prview 31 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_31.json"
+approve 31
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
 has "$out" "could not form the rework child for PR#31" "the lost stamp is caught by the full-identity read-back"
@@ -1095,6 +1193,7 @@ hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken
 echo "# …a route stamp that does not persist leaves the rework UNDISPATCHED"
 store "[$(anchor RT 32)]"
 printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
+approve 32
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
@@ -1119,6 +1218,7 @@ echo "# …a role-marker stamp that does not persist leaves the child UNROUTED, 
 # a metadata read cannot tell from the anchor — the defect this bead prevents.
 store "[$(anchor RM 35)]"
 printf '%s' "$(prview 35 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_35.json"
+approve 35
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:task_kind,anchor_bead" run)
 has "$out" "could not form the rework child for PR#35" "a dropped role marker is caught by the full-identity read-back, before the route"
@@ -1143,6 +1243,7 @@ echo "# …a merge_strategy stamp that does not persist leaves the child UNROUTE
 # read-back holds the whole identity, it does not lean on that recovery.)
 store "[$(anchor MS 101)]"
 printf '%s' "$(prview 101 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_101.json"
+approve 101
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:merge_strategy" run)
 has "$out" "could not form the rework child for PR#101" "a dropped merge_strategy is caught by the full-identity read-back, before the route"
@@ -1166,6 +1267,7 @@ echo "# …the PR identity (existing_pr/pr_url/pr_number) is verified too, or a 
 # the whole PR identity so that shape is never routed.
 store "[$(anchor PI 102)]"
 printf '%s' "$(prview 102 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_102.json"
+approve 102
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:existing_pr,pr_url,pr_number" run)
 has "$out" "could not form the rework child for PR#102" "a dropped PR identity is caught by the full-identity read-back, before the route"
@@ -1191,6 +1293,7 @@ cov="$cov"'"title":"Rebase PR#36 onto main: base rewritten, PR conflicts",'
 cov="$cov"'"metadata":{"branch":"polecat/x36","gc.routed_to":"'"$FIX"'","rejection_reason":"stale base at head sha-36: x"}}'
 store "[$(anchor CV 36), $cov]"
 printf '%s' "$(prview 36 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_36.json"
+approve 36
 eq "$(meta cov-rw task_kind)" "<absent>" "the covering child starts with no role marker"
 out=$(run)
 has "$out" "re-stamped role marker on covering rework cov-rw" "the dedup re-stamps the marker instead of only vetoing"
@@ -1210,6 +1313,7 @@ covd="$covd"'"title":"Rebase PR#38 onto main: base rewritten, PR conflicts",'
 covd="$covd"'"metadata":{"branch":"polecat/x38","gc.routed_to":"'"$FIX"'","rejection_reason":"stale base at head sha-38: x"}}'
 store "[$(anchor CX 38), $covd]"
 printf '%s' "$(prview 38 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_38.json"
+approve 38
 eq "$(meta cov-drop task_kind)" "<absent>" "the covering child starts with no role marker"
 out=$(STUB_DROP_KEYS="cov-drop:task_kind,anchor_bead" run)
 hasnt "$out" "re-stamped role marker on covering rework cov-drop" "a restamp that half-lands is not reported as done"
@@ -1225,6 +1329,7 @@ cov2="$cov2"'"title":"Rebase PR#37 onto main: base rewritten, PR conflicts",'
 cov2="$cov2"'"metadata":{"branch":"polecat/x37","rejection_reason":"stale base at head sha-37: x"}}'
 store "[$(anchor CW 37), $cov2]"
 printf '%s' "$(prview 37 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_37.json"
+approve 37
 out=$(run)
 hasnt "$out" "re-stamped role marker" "a closed child is read by no live gate, so it is not re-stamped"
 eq "$(meta cov-closed task_kind)" "<absent>" "…and its marker stays absent"
@@ -1236,6 +1341,7 @@ held="$held"'"title":"Rebase PR#33 onto main: base rewritten, PR conflicts",'
 held="$held"'"metadata":{"branch":"polecat/x33","rejection_reason":"stale base at head sha-33: x"}}'
 store "[$(anchor RT2 33), $held]"
 printf '%s' "$(prview 33 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_33.json"
+approve 33
 out=$(run)
 has "$out" "already covers branch" "a claimed child still suppresses the arm"
 eq "$(meta held-rw 'gc.routed_to')" "<absent>" "…and nothing is written under the holder"
@@ -1252,6 +1358,7 @@ livesib="$livesib"'"metadata":{"branch":"polecat/x34","rejection_reason":"stale 
 # would be the one picked as the dup — the veto must not depend on that order.
 store "[$strand, $livesib, $(anchor RT3 34)]"
 printf '%s' "$(prview 34 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_34.json"
+approve 34
 out=$(run)
 has "$out" "rework live-rw already covers branch" "the live sibling still vetoes, strand or no strand"
 has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
@@ -4419,6 +4526,7 @@ eq "$(bstatus RC4)" "closed" "…and closes the anchor"
 echo "# …a CONFLICTING anchor is deferred to the full pass — no conflict-rework early"
 store "[$(anchor RC9 152)]"
 printf '%s' "$(prview 152 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_152.json"
+approve 152
 : > "$STUB_SESSION_LOG"
 out=$(run_route)
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" \
@@ -4537,6 +4645,7 @@ echo "# with GC_RECONCILE_BD_CACHE set, a rework mint invalidates the dedup so a
 # the first mints and clears, the second's probe must see the child.
 store "[$(anchor F9 19)]"
 printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
+approve 19
 export GC_RECONCILE_BD_CACHE="$TMP/pf-cache"; mkdir -p "$GC_RECONCILE_BD_CACHE"
 run >/dev/null 2>&1          # mints the child, invalidates the cache at the create
 run >/dev/null 2>&1          # the branch-dedup probe refetches (invalidated) and sees it

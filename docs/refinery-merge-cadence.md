@@ -372,7 +372,10 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
+   approved PR only, by the approval rule merge.sh lands on; the child's
+   handoff runs `bring-current-guard.sh`, which dismisses the approval and
+   files a visit when bringing the branch current took judgment), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no

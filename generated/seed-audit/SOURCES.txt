@@ -68,7 +68,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 d8626795c7b02f08826c6f388ac830672e49bfc28c03d4ca71fe227677c149a9
 formulas/mol-polecat-work.toml
-00760615cc25037037a1323c77edfc83d435a047eb1739048e9ab011b216cd99
+bc68b63acadbe32c3ec5755bd6f7a307d7b0d7d2ce3a096ba39b9342f92c1c5f
 formulas/mol-refinery-patrol.toml
 9e39e5c9999dde4714235615b1e7ad96c11af70aa916288a79a7a9c8ef781b52
 formulas/mol-review-quorum-signoff.toml
