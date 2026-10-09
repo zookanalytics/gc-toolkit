@@ -54,8 +54,8 @@ gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # conversation on it. Input handling (a `gum write` popup) lives in the
 # script; the key just runs it, which is the shape this binding had before
 # threads were retired. `command-prompt` held it for exactly one commit
-# (tk-bn1oi) and is SINGLE-LINE by construction, so the operator could file a
-# sentence and nothing longer (tk-7z8c6). Restoring the popup restores the
+# and is SINGLE-LINE by construction, so the operator could file a
+# sentence and nothing longer. Restoring the popup restores the
 # input surface without disturbing where the message goes.
 #
 # `-b` is not decoration: the popup is modal and stays open for as long as
@@ -64,7 +64,7 @@ gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # lost by backgrounding it now that the handler reads its message from a
 # per-press draft file instead of one shared paste buffer, so presses never
 # order against each other. That draft is also what
-# survives a failed intake (tk-w4dp4). See tmux-visit-prompt.sh.
+# survives a failed intake. See tmux-visit-prompt.sh.
 gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"
 
 # prefix+A — raise a brand-new topic and converse about it now. Capital A, the

@@ -9,7 +9,7 @@
 # again, attach drops on detach). Single owner of pin-state detection AND
 # the toggle, so the picker cannot drift from it. "up" is the session bead's
 # metadata.pin_awake — the real durable pin, NOT tmux liveness (a keeper
-# materialized by hooked work is up-but-unpinned, tk-oe5bc3/tk-7qczss); the
+# materialized by hooked work is up-but-unpinned); the
 # read is one bounded `gc session list --json` (alias → bead id) plus one
 # bounded `gc bd show`. Invoked with run-shell -b so a slow pin can never
 # freeze tmux. Needs jq; degrades to unbounded reads without timeout(1).

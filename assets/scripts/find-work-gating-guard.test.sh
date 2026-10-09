@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for the find-work gating-anchor selection guard (tk-jcal4,
-# formulas/mol-refinery-patrol.toml find-work step) and for the PRE_OPEN
+# Hermetic test for the find-work gating-anchor selection guard
+# (formulas/mol-refinery-patrol.toml find-work step) and for the PRE_OPEN
 # decision reading every key a PR can be recorded under.
 #
 # The defect: find-work selected work beads on `assignee=$GC_AGENT + open +

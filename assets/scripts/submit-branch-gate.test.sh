@@ -282,7 +282,7 @@ eq "$(run_gate polecat/tk-agent-home '{}')" \
    "1|ESCALATE;HOLD;DRAIN;" \
    "fresh + wrong branch: escalates, halts, drain-acks, records no branch"
 
-# THE REGRESSION (tk-3yj8g). Rework child: metadata.branch names the reviewed
+# THE REGRESSION. Rework child: metadata.branch names the reviewed
 # branch and the polecat is standing on it. Base rejected this; the invariant
 # is satisfied, so it must pass — and metadata.branch already agrees, so
 # nothing is rewritten.
@@ -317,7 +317,7 @@ eq "$(run_gate polecat/tk-work '{"branch":""}')" \
 
 # --- 2. Target resolution. ----------------------------------------------------
 
-# THE REGRESSION (tk-3yj8g). Rework child: base_branch is the reviewed branch
+# THE REGRESSION. Rework child: base_branch is the reviewed branch
 # by design, metadata.target is the real landing branch. Base wrote
 # target=polecat/su-uzy9.5 onto a bead whose branch IS polecat/su-uzy9.5.
 eq "$(run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{"target":"main"}')" \
@@ -840,7 +840,7 @@ eq "$(tr '\n' ';' < "$TMP/log")" \
    "composed rework run: summary to the anchor, handoff to the claimed bead"
 
 # --- 5. Step-chain close. -----------------------------------------------------
-# The husk generator (tk-y389z, tk-zab6q): mol-polecat-work closed no step
+# The husk generator: mol-polecat-work closed no step
 # bead, so every completed run left all seven open. They keep gc.routed_to on
 # the polecat pool, the drain releases their assignee, and `load-context` — the
 # only step nothing blocks — goes ready and claimable. The next polecat is
@@ -1047,7 +1047,7 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
 # The bead write is the halt's whole point: branch and target recorded,
 # branch_ready + halt_reason set so the caller can tell an opt-out halt from a
 # failure, and --append-notes rather than the --notes that erases the dispatch
-# note (tk-6kf6r). It is three writes for the same reason the store-only arm is:
+# note. It is three writes for the same reason the store-only arm is:
 # clearing the assignee while in_progress is refused by the claim guard, so the
 # metadata clears the route first, --status=open lands next, and --assignee last.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
@@ -1072,7 +1072,7 @@ esac
 # arm exits before step 7, and each fenced block is its own shell. So the halt
 # copy is step 7's, indented one level to sit inside the `if` — assert exactly
 # that, not merely that both are present. Two copies of one shell block is how
-# the --notes correction was defeated before (tk-t41dq).
+# the --notes correction was defeated before.
 printf '%s\n' "$HALT_CLOSE" > "$TMP/halt-close.sh"
 sed 's/^/  /' "$TMP/close.sh" > "$TMP/close-indented.sh"
 if diff -q "$TMP/halt-close.sh" "$TMP/close-indented.sh" >/dev/null 2>&1; then

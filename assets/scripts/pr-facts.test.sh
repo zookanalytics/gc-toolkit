@@ -1084,7 +1084,7 @@ echo "# …and with NO fix pool it STILL routes that feedback — to a visit, no
 # feedback, because the feedback arm's own fallback dispositions a missing pool (or
 # an unresolved head branch) as a human visit. Skipping it left operator feedback
 # on a conflicting PR with no visit, no finding, and no validation pass — the very
-# starvation this fix (tk-f9x2nb) was supposed to end.
+# starvation this fix was supposed to end.
 store "[$(anchor CF2 161)]"
 printf '%s' "$(prview 161 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_161.json"
 echo '[]' > "$GH_DIR/reviews_161.json"
@@ -1575,7 +1575,7 @@ eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the he
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
 
 echo "# COMMENTED is representable, and it routes to work"
-# The tk-9heqfh/PR#477 fixture: inline comments that were neither approval nor
+# The fixture: inline comments that were neither approval nor
 # veto, so nothing in the pack could name them.
 store "[$(anchor P1 40)]"
 printf '%s' "$(prview 40 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_40.json"
@@ -1892,7 +1892,7 @@ has "$CB" "a new comment" "the work order carries the new comment"
 hasnt "$CB" "confirmed comment" "…and not the one the mark confirmed"
 
 echo "# a feedback batch past the OS per-argument limit still renders"
-# tk-bqj4lc/PR#793: a busy PR's inline-comment list grew past Linux's
+# A busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
 # --argjson could not exec — the batch never rendered, never watermarked, and
 # the merge held on a forever-retry commented posture. The lists ride stdin now,
@@ -2581,7 +2581,7 @@ out=$(run)
 eq "$(meta_pinned P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
 
 echo "# a human CHANGES_REQUESTED is a veto AND a batch to answer"
-# The tk-zina89/PR#496 fixture: objections that converged to correctness-green
+# The fixture: objections that converged to correctness-green
 # untouched, because nothing read the feedback under a standing
 # CHANGES_REQUESTED. The veto is the posture; what sits under it routes like
 # any other feedback. The review body is empty on purpose — an operator whose

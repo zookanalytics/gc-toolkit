@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # quota-park-nudge — resume agents parked at a provider quota banner
-# (tk-al95k: a quota window closing mid-turn leaves the session state=active,
+# (a quota window closing mid-turn leaves the session state=active,
 # idle under the banner, with nothing to wake it).
 # Job: poll every live session's pane; nudge the ones showing a limit banner.
 # A nudge is the ONLY action — never kill, never file a warrant. Signatures
@@ -245,7 +245,7 @@ detector_class() {
     lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
     if [ -n "${QUOTA_PARK_MATCH:-}" ]; then
         echo "custom-match"
-    # Here-strings, never pipes into grep -q (tk-zfjg9: SIGPIPE + pipefail
+    # Here-strings, never pipes into grep -q (SIGPIPE + pipefail
     # makes a matched line read unmatched).
     elif grep -qEi -- 'your [a-z0-9 -]{0,24}limit' <<< "$lines"; then
         echo "possessive-limit"
@@ -403,7 +403,7 @@ fi
 # that keeps recovery working.
 valid_ere() {
     local rc=0
-    # Empty input by redirect, never a pipe into grep -q (tk-zfjg9): rc 1 =
+    # Empty input by redirect, never a pipe into grep -q: rc 1 =
     # valid ERE, 2 = malformed.
     grep -Eq -- "${1:-}" </dev/null >/dev/null 2>&1 || rc=$?
     [ "$rc" -le 1 ]
@@ -608,7 +608,7 @@ while IFS=$'\t' read -r id alias; do
 
     # Parked = a bare banner in the tail of an idle pane; busy/cited/scrolled-up
     # are not parked, and clearing the state file is what ends an episode.
-    # Process substitutions, never pipes into grep -q (tk-zfjg9): a SIGPIPE'd
+    # Process substitutions, never pipes into grep -q: a SIGPIPE'd
     # writer under pipefail would land on the FAIL-OPEN side here.
     if grep -qEi -- "$BUSY_RE" < <(pane_tail "$pane") \
         || ! grep -qEi -- "$MATCH_RE" < <(banner_candidates "$pane"); then
