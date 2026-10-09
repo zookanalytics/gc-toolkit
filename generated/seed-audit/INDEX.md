@@ -7,7 +7,10 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 17 · formulas: 26
+An agent file is named for the agent, or for its binding-qualified name
+(`<binding>.<name>`) where agents from different packs share one name.
+
+- agents: 18 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -38,7 +41,8 @@ covers that dimension.
 | [`converse-opus`](agents/converse-opus.md) | 34,724 | 8,681 |
 | [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
-| [`dog`](agents/dog.md) | 2,359 | 589 |
+| [`bd.dog`](agents/bd.dog.md) | 2,359 | 589 |
+| [`gc-toolkit.dog`](agents/gc-toolkit.dog.md) | 3,295 | 823 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
 | [`keeper`](agents/keeper.md) | 23,774 | 5,943 |
 | [`mechanik`](agents/mechanik.md) | 29,162 | 7,290 |
