@@ -28,6 +28,11 @@
 #   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
+# A molecule step (gc.step_ref) is issue_type task and tied to its root by a
+# tracks edge, so its step key is all that sets it apart from raw input:
+#   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
+#   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
+#   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -175,6 +180,48 @@ hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
 for k in $PATH_KEYS; do
     hasnt "$OUT" "tk-path-$k" "(ARMED-SWEEP) …nor at the bead carrying $k"
 done
+
+# --- a molecule step is not a scan candidate --------------------------------
+# A graph.v2 step is issue_type task, and its edge to its root is tracks, not
+# parent-child, so the type allowlist and the top-level clause both pass it.
+# tk-step-validate and tk-step-reaction are ordinary steps of two formulas.
+# tk-step-finalize is a control step whose gc.kind is not a topology kind. Each
+# is unrouted, carries the tracks row bd prints for a step, and passes every
+# other clause, so gc.step_ref is all that sets it apart from tk-raw.
+# tk-step-blank carries the key with an empty value, which names no step.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+  {"id":"tk-step-validate", "issue_type":"task", "description":"converge the rules", "title":"rule convergence",
+   "metadata":{"gc.step_ref":"mol-validate.rule-convergence","gc.step_id":"rule-convergence","gc.root_bead_id":"tk-root-validate"},
+   "dependencies":[{"issue_id":"tk-step-validate","depends_on_id":"tk-root-validate","type":"tracks"}]},
+  {"id":"tk-step-reaction", "issue_type":"task", "description":"react to the subject", "title":"first reaction",
+   "metadata":{"gc.step_ref":"mol-first-reaction.first-reaction","gc.step_id":"first-reaction","gc.root_bead_id":"tk-root-reaction"},
+   "dependencies":[{"issue_id":"tk-step-reaction","depends_on_id":"tk-root-reaction","type":"tracks"}]},
+  {"id":"tk-step-finalize", "issue_type":"task", "description":"finalize the workflow", "title":"workflow finalize",
+   "metadata":{"gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize","gc.step_id":"workflow-finalize","gc.root_bead_id":"tk-root-work"},
+   "dependencies":[{"issue_id":"tk-step-finalize","depends_on_id":"tk-root-work","type":"tracks"}]},
+  {"id":"tk-step-blank", "issue_type":"task", "description":"a step key left empty", "title":"blank step key", "metadata":{"gc.step_ref":""}}
+]
+JSON
+
+echo "# scan_precision_filter drops a molecule step, keeps raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(STEP-KEEP) a raw input beside the step beads is still a candidate"
+has "$IDS" "tk-step-blank" "(STEP-KEEP) …and so is a bead whose gc.step_ref is empty"
+hasnt "$IDS" "tk-step-validate" "(STEP-DROP) a mol-validate step is not a scan candidate"
+hasnt "$IDS" "tk-step-reaction" "(STEP-DROP) …nor a mol-first-reaction step"
+hasnt "$IDS" "tk-step-finalize" "(STEP-DROP) …nor a workflow-finalize control step"
+
+echo "# a scan --sling sweep reacts to raw input and never to a molecule step"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(STEP-SWEEP) the sweep exits 0"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(STEP-SWEEP) the sweep slings a first reaction at the raw input"
+hasnt "$OUT" "tk-step-validate" "(STEP-SWEEP) …and none at the mol-validate step"
+hasnt "$OUT" "tk-step-reaction" "(STEP-SWEEP) …nor at the mol-first-reaction step"
+hasnt "$OUT" "tk-step-finalize" "(STEP-SWEEP) …nor at the control step"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route

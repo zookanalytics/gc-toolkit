@@ -50,9 +50,11 @@ RC_ALREADY_REACTED=3
 RC_LIVE_WORKFLOW=4
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
-# rig via GC_PROACTIVE_TYPES without a code change. The default excludes
-# convoy/epic/step/molecule (machinery or work-in-flight), decision (already a
-# surfaced human choice) and spec (an output, not a raw input).
+# rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
+# convoy, epic, step and molecule types (machinery or work-in-flight), decision
+# (already a surfaced human choice) and spec (an output, not a raw input). A
+# graph.v2 workflow root and its steps keep issue_type task, which this list
+# admits, so scan_precision_filter drops them by gc.kind and gc.step_ref.
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # The one definition of the standing kinds, shared with the liveness sweep and
 # the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
@@ -461,10 +463,16 @@ cmd_demand() {
 # scan_precision_filter — from a candidate array on stdin, keep only raw
 # top-level INPUT beads a fresh first reaction may target. Each clause drops a
 # distinct non-input population:
-#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops convoy/epic/
-#     step/molecule/spec/decision by omission.
+#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops the convoy/
+#     epic/step/molecule/spec/decision types by omission.
 #   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
 #     issue_type task, so the allowlist misses it; drop it explicitly.
+#   - molecule steps (gc.step_ref) — a graph.v2 step is issue_type task too,
+#     and its edge to its root is tracks, not parent-child, so neither the
+#     allowlist nor the top-level clause drops it. Every step a pour mints
+#     carries gc.step_ref, control steps such as workflow-finalize included. A
+#     step advances only through its own molecule, so a first reaction has no
+#     disposition to make on it.
 #   - a standing kind (is_standing_kind, assets/scripts/standing-kinds.sh) — a
 #     standing record is open and unrouted by design and never closes, so a
 #     reaction has no disposition to make on it.
@@ -519,6 +527,7 @@ scan_precision_filter() {
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
+            and ((.metadata["gc.step_ref"] // "") == "")
             and (is_standing_kind | not)
             and ((.metadata["task_kind"] // "") != "review")
             and ((.metadata["gc.takeaway"] // "") == "")
