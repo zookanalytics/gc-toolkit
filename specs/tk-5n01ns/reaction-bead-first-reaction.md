@@ -257,6 +257,12 @@ premise no longer held was left to the operator:
 - **Scan and sling guards.** Main's guards — standing kinds, dispatch paths,
   live workflows, `gc.reaction_owned`, a fail-closed rig — gate filing R exactly
   as they gated pouring the formula.
+- **The scan's step clause.** Main later gave the scan a step clause of its
+  own, keyed on `gc.step_ref` alone. The scan keeps this branch's wider clause,
+  which also drops a bead carrying `gc.step_id` or `gc.root_bead_id`, the same
+  keys demand and the pool queries drop on. Main's step cases in
+  `tools/gc-proactive.test.sh` carry over, and its sweep case expects the
+  reaction-bead dry-run line.
 
 ## Metadata
 
@@ -291,8 +297,8 @@ duplicate marker `duplicate-sweep.sh` reads), `gc.blocker_key`.
   instead of pouring a formula; `subject_present_guard` refuses a subject its
   own store does not prove present; `reaction_absent_guard` refuses a
   live-owned subject and dedups on `(task_kind=reaction, subject)`;
-  `exclude_graph_structural` drops topology roots and step beads from both scan
-  and demand.
+  `scan_precision_filter` drops topology roots and step beads from the scan, and
+  `exclude_graph_structural` drops them from demand by the same keys.
 - `agents/proactive/prompt.template.md` — the reaction method: claim R, resolve
   S, stand down on `gc.reacted_by=R` or `gc.reaction_owned`, card, one of five
   exits, close R.
