@@ -58,9 +58,13 @@ RC_ALREADY_REACTED=3
 RC_LIVE_WORKFLOW=4
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
-# rig via GC_PROACTIVE_TYPES without a code change. The default excludes
-# convoy/epic/step/molecule (machinery or work-in-flight), decision (already a
-# surfaced human choice) and spec (an output, not a raw input).
+# rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
+# convoy, epic, step and molecule types (machinery or work-in-flight), decision
+# (already a surfaced human choice) and spec (an output, not a raw input). A
+# graph.v2 pour does not retype its steps as step, so a workflow root and most
+# of its steps are issue_type task, which this list admits.
+# scan_precision_filter drops them by gc.kind and by the step keys gc.step_ref,
+# gc.step_id and gc.root_bead_id.
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # The one definition of the standing kinds, shared with the liveness sweep and
 # the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
@@ -568,12 +572,18 @@ cmd_demand() {
 # scan_precision_filter — from a candidate array on stdin, keep only raw
 # top-level INPUT beads a fresh first reaction may target. Each clause drops a
 # distinct non-input population:
-#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops convoy/epic/
-#     step/molecule/spec/decision by omission.
+#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops the convoy/
+#     epic/step/molecule/spec/decision types by omission.
 #   - graph-structural beads (topology roots gc.kind in workflow/scope/spec,
 #     and formula step beads gc.step_ref/gc.step_id/gc.root_bead_id) — a
-#     workflow root is issue_type task, so the allowlist misses it; a step bead
-#     is a task too. Reacting to either writes over a live molecule.
+#     workflow root is issue_type task, and so are most graph.v2 steps, so the
+#     allowlist misses both. A graph.v2 step has no parent-child edge either: a
+#     tracks edge, or gc.root_bead_id alone, ties it to its root, so the
+#     top-level clause misses it too. Every step a pour mints carries
+#     gc.step_ref, control steps such as workflow-finalize included. A step
+#     advances only through its own molecule, so a first reaction has no
+#     disposition to make on it, and reacting to a root or a step writes over a
+#     live molecule.
 #   - task_kind=reaction — a reaction bead is this tool's own output, not an
 #     input; it is also routed, so the dispatch-path clause drops it too, but
 #     naming it keeps a reaction from ever being a subject.
