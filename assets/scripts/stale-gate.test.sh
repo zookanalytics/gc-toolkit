@@ -84,7 +84,7 @@ echo "# no private copies"
 # A copy is the key spelled out, or a jq def of the premise under one of its
 # names. Specs and generated renders are history and output, not readers, and a
 # test names the key to build its fixtures.
-COPY_RE="$STALE_GATE_KEY|def (unengaged_stale_gate_visit|settled_posture|pr_approved|review_owed)[[:space:]]*:"
+COPY_RE="$STALE_GATE_KEY|def (unengaged_stale_gate_visit|settled_posture|review_owed)[[:space:]]*:"
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

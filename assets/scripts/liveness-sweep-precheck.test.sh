@@ -400,7 +400,7 @@ BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
 eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
 
 # The pass also retracts a stale-gate visit once its PR moved or landed, or the
-# merge cadence settled it approved or waiting on the operator's review. It
+# merge cadence settled it waiting on the operator's review. It
 # judges that from its own gh read, so the check runs while a visit nobody is
 # engaged in is open, even on a board that is otherwise quiet: its anchor inside
 # the floor, every survivor carried. A landed anchor leaves the ready set, so the

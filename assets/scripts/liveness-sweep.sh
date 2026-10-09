@@ -9,8 +9,8 @@
 # A PR-gated anchor is a named wait only while its PR MOVES: past
 # LIVENESS_SWEEP_STALE_PR_DAYS since the PR's last update it classifies
 # `stale-gate` and gets its own escalate.sh visit, named per anchor rather
-# than batched, unless the merge cadence settled the PR approved or waiting on
-# the operator's review. That escalation dedups on the anchor's own
+# than batched, unless the merge cadence settled the PR waiting on the
+# operator's review. That escalation dedups on the anchor's own
 # stale_escalated_at, so it survives a restart and re-raises once per
 # LIVENESS_SWEEP_STALE_REESCALATE_DAYS instead of once-forever or per-pass. Each
 # pass retracts the visit once its premise is gone.
@@ -472,13 +472,14 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
          elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
-         # A stale PR the merge cadence settled, approved or waiting on a review
-         # from the operator, is a wait its approval or the review queue already
-         # names (STALE_GATE_JQ, stale-gate.sh).
+         # A stale PR the merge cadence settled waiting on a review from the
+         # operator is a wait the review queue already names (STALE_GATE_JQ,
+         # stale-gate.sh). An approved one is not: merge.sh lands an approved PR
+         # nothing holds, so one still idle past the threshold is held.
          elif (((.metadata.merge_result // "") == "pull_request")
                and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
               then (if (((.metadata.pr_url // "") | pr_key) as $k | ($stalekeys | index($k)) != null)
-                       and (pr_approved | not) and (review_owed | not)
+                       and (review_owed | not)
                     then "stale-gate" else "gated" end)
          elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
          elif (($gatedparents | index($b.id)) != null) then "gated"
@@ -571,9 +572,9 @@ $id <blocker> — the edge IS the park).
 
 Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
 ${id}'s own stale_escalated_at. This visit closes itself, moot, once the PR
-moves or lands, or once the merge cadence settles it approved or waiting on the
-operator's review. Closing it by hand does not move the PR; the next pass past
-the floor raises it again while the PR is still stale."
+moves or lands, or once the merge cadence settles it waiting on the operator's
+review. Closing it by hand does not move the PR; the next pass past the floor
+raises it again while the PR is still stale."
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $id on $pr [$STALE_GATE_KEY]"
             filed=$((filed + 1))
@@ -607,8 +608,8 @@ stale_escalations
 # A stale-gate visit asks a person to land, retire, or park an anchor whose PR
 # stopped moving, and its premise can die before anyone engages it. The PR lands
 # or is closed, it moves again inside the threshold, or the merge cadence
-# settles it approved or waiting on the operator's review, the two shapes the
-# classification above never raises on (STALE_GATE_JQ). This pass files the
+# settles it waiting on the operator's review, the shape the classification
+# above never raises on (STALE_GATE_JQ). This pass files the
 # visit and owns its premise, so it is the one that judges the premise gone. It
 # retracts through escalate.sh --retract, which closes the visit moot with the
 # reading and leaves a visit someone is engaged in to them.
@@ -647,9 +648,6 @@ stale_retractions() {
                 elif $ages[$k] >= 0 and $ages[$k] < $staledays then
                   {subject: $s, verdict: "retract",
                    reading: "PR \($url) moved \($ages[$k]) day(s) ago, inside the \($staledays)-day threshold, so it is no longer stale"}
-                elif ($a | pr_approved) then
-                  {subject: $s, verdict: "retract",
-                   reading: "PR \($url) is approved with nothing left in flight, which answers the stale-PR gate: merge.sh does not hold it on this visit"}
                 elif ($a | review_owed) then
                   {subject: $s, verdict: "retract",
                    reading: "PR \($url) is green and waits on a review from the operator, which the review queue already names"}

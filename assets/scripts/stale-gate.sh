@@ -51,11 +51,12 @@ STALE_GATE_JQ='
     | if ($m | length) == 3 and ($p | length) == 3
          and $m[0] == "settled" and $m[1] != "" and $m[1] == $p[1]
       then $p[0] else "" end;
-  # The settled posture is approved. That answers the land-it disposition of
-  # the visit: nothing else is in flight, and merge.sh does not hold an approved
-  # PR on an unengaged visit. An approved PR the cadence has not settled still
-  # has something in flight or holding it, so it keeps its visit.
-  def pr_approved: settled_posture == "approved";
+  # No approved posture appears below. merge.sh records no verdict at many of
+  # the holds an approved PR can reach (a visit under another key, a reviews
+  # read that fails, a red required check, a merge that fails), so a settled
+  # verdict recorded while the approval was still owed can outlive it. An
+  # approved PR nothing holds lands within a pass, so one still open past the
+  # threshold is held by something, which is what the stale-PR gate surfaces.
   # The settled posture still owes an approval or a re-review, so the PR waits
   # on the review of the operator, whose review queue already names the wait.
   # The premise re-check of converse closes a visit raised on it as benign.

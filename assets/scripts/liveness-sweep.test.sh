@@ -552,14 +552,15 @@ grep -q stale_escalated "$GC_CALLS" && bad "--dry-run stamps no anchor" "it stam
     || ok "--dry-run stamps no anchor"
 gh_prs 0 0
 
-echo "── a stale PR the merge cadence settled, approved or waiting on the operator's review, is not escalated ──"
-# Both are settled waits something already names. The merge cadence settled the
-# PR at the head its posture was read at, and the posture is either approved,
-# which answers the visit's land-it disposition with nothing left in flight, or
-# still owes a review, which puts the PR on the operator's review queue. Each
-# classifies gated, never stale-gate. The controls fall outside that settled
-# reading: a posture read at another head than the settled verdict, and a PR the
-# cadence has not settled, approved or not.
+echo "── a stale PR the merge cadence settled waiting on the operator's review is not escalated ──"
+# A settled wait the operator's review queue already names. The merge cadence
+# settled the PR at the head its posture was read at, and the posture still owes
+# a review. It classifies gated, never stale-gate. The controls fall outside that
+# settled reading: a posture read at another head than the settled verdict, a PR
+# the cadence has not settled, and an approved PR, settled or not. merge.sh
+# records no verdict at many holds an approved PR can reach, so a settled verdict
+# beside an approval can be one recorded before it, and an approved PR still idle
+# past the threshold is held by something the visit surfaces.
 T="$(iso_ago 3)"
 raise_case() { # raise_case <pr_posture> <pr.machine>: c-pr-open's PR idle 9 days
     jq --arg p "$1" --arg m "$2" \
@@ -569,8 +570,7 @@ raise_case() { # raise_case <pr_posture> <pr.machine>: c-pr-open's PR idle 9 day
     FAKE_READY="$TMP/ready-pr.json" run_sweep "$EXPECT_SURVIVORS"
     FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
 }
-for c in "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR the merge cadence settled" \
-         "review_required@sha-521@$T|settled@sha-521@$T|a settled stale PR awaiting the operator's first review" \
+for c in "review_required@sha-521@$T|settled@sha-521@$T|a settled stale PR awaiting the operator's first review" \
          "changes_requested@sha-521@$T|settled@sha-521@$T|a settled stale PR awaiting the operator's re-review"; do
     p="${c%%|*}"; rest="${c#*|}"; m="${rest%%|*}"; what="${rest#*|}"
     raise_case "$p" "$m"
@@ -582,6 +582,7 @@ for c in "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR the merge 
     esac
 done
 for c in "review_required@sha-old@$T|settled@sha-521@$T|a review owed at an earlier head than the settled verdict" \
+         "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR whose settled verdict may predate the approval" \
          "approved@sha-old@$T|settled@sha-521@$T|an approval read at an earlier head than the settled verdict" \
          "review_required@sha-521@$T|progressing@sha-521@$T|a PR the merge cadence has not settled" \
          "approved@sha-521@$T|progressing@sha-521@$T|an approved PR with a review, fix or blocker still in flight" \
@@ -597,8 +598,8 @@ gh_prs 0 0
 echo "── a stale-gate visit is retracted, moot, once its premise is gone ──"
 # The pass that files the visit owns its premise. A visit nobody is engaged in is
 # retracted through escalate.sh --retract once the PR moves or lands, or the
-# merge cadence settles it approved or waiting on the operator's review, and only
-# on evidence this pass read.
+# merge cadence settles it waiting on the operator's review, and only on evidence
+# this pass read.
 stale_live() { # stale_live <c-pr-open metadata to add> <visit fields to merge> -> $TMP/live-stale.json
     jq --argjson m "$1" --argjson v "$2" '. + [
         {"id":"c-pr-open","status":"open","title":"parked on an open PR",
@@ -623,15 +624,11 @@ eq "$(cat "$ESC_RETRACTS")" "" "a PR still stale, unapproved and not awaiting re
 grep -q 'stale-gate visits: 0 retracted, 1 kept, 0 failed' <<< "$OUT" \
     && ok "…and the pass counts it kept" || bad "kept tally" "$OUT"
 
-stale_live "{\"pr_posture\":\"approved@sha-521@$T\",\"pr.machine\":\"settled@sha-521@$T\"}" '{}'; retract_run
-eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a stale PR the operator approved, which the merge cadence settled: its visit is retracted"
-grep -q 'is approved with nothing left in flight, which answers the stale-PR gate' "$ESC_RETRACT_BODIES" \
-    && ok "…and the reading names the approval" || bad "approved reading" "$(cat "$ESC_RETRACT_BODIES")"
-
-# An approval the cadence has not settled at the head it was read at is not the
-# premise's end: a review, fix or blocker may still hold the PR, and the visit is
-# what surfaces it.
-for m in "progressing@sha-521@$T" "settled@sha-new@$T" ""; do
+# An approval is not the premise's end, settled or not. merge.sh records no
+# verdict at many holds an approved PR can reach, so a settled verdict beside it
+# can predate it, and an approved PR still idle past the threshold is held by
+# something the visit surfaces.
+for m in "settled@sha-521@$T" "progressing@sha-521@$T" "settled@sha-new@$T" ""; do
     stale_live "{\"pr_posture\":\"approved@sha-521@$T\",\"pr.machine\":\"$m\"}" '{}'; retract_run
     eq "$(cat "$ESC_RETRACTS")" "" "an approved PR whose pr.machine is '$m': its visit stands"
 done
