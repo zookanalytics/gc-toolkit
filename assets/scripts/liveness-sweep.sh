@@ -9,9 +9,11 @@
 # A PR-gated anchor is a named wait only while its PR MOVES: past
 # LIVENESS_SWEEP_STALE_PR_DAYS since the PR's last update it classifies
 # `stale-gate` and gets its own escalate.sh visit, named per anchor rather
-# than batched. That escalation dedups on the anchor's own
-# stale_escalated_at, so it survives a restart and re-raises once per
-# LIVENESS_SWEEP_STALE_REESCALATE_DAYS instead of once-forever or per-pass.
+# than batched, unless the PR is approved or waits on the operator's review.
+# That escalation dedups on the anchor's own stale_escalated_at, so it
+# survives a restart and re-raises once per LIVENESS_SWEEP_STALE_REESCALATE_DAYS
+# instead of once-forever or per-pass. Each pass retracts the visit once its
+# premise is gone.
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
@@ -48,16 +50,16 @@ STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
 # but a parse error that aborts the whole classification.
 case "$STALE_PR_DAYS" in ''|*[!0-9]*) STALE_PR_DAYS=2 ;; esac
 case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
-# The situation key the stale-gate visit is filed under. merge.sh and gctk merge
-# except an unengaged visit under this key from the finalize gate, so all three
-# name one key.
+# The situation key the stale-gate visit is filed and retracted under. merge.sh
+# and gctk merge except an unengaged visit under this key from the finalize gate,
+# and the precheck runs the pass while one is open, so all four name one key.
 STALE_GATE_KEY="anchor-stale"
 
 DRY_RUN=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "$PROG: unexpected argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -170,7 +172,11 @@ PASS_EPOCH=$(date -u +%s)
 # updatedAt rides the SAME call the open set already costs, and it is what
 # separates a PR that is being worked from one that stopped: without it every
 # open PR is a named wait forever.
+# Each repository that answered is kept as well: a PR missing from the open set
+# proves it merged or closed only when its own repository was read, and the
+# stale-gate retraction below acts on nothing weaker.
 PRURLS="$TMP/prurls"; : > "$PRURLS"
+PRREAD="$TMP/prrepos-read"; : > "$PRREAD"
 PR_LIVENESS=none
 jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request")
        | [ ((.metadata.pr_url // "") | ascii_downcase) | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]+") ]
@@ -184,6 +190,7 @@ while IFS= read -r R; do
         printf '%s' "$ROWS" \
             | jq -c '.[] | {url: ((.url // "") | tostring), updated: ((.updatedAt // "") | tostring)}
                      | select(.url != "")' >> "$PRURLS"
+        printf '%s\n' "$R" >> "$PRREAD"
     else
         PR_LIVENESS=unverified
         echo "$PROG: WARN: open-PR read FAILED for $R — its PR-parked beads are reported, never hidden" >&2
@@ -191,6 +198,8 @@ while IFS= read -r R; do
 done < "$TMP/prrepos"
 OPEN_PRS=$(jq -sc '.' "$PRURLS" 2>/dev/null)
 printf '%s' "$OPEN_PRS" | jq -e 'type == "array"' >/dev/null 2>&1 || OPEN_PRS='[]'
+READ_REPOS=$(jq -R . < "$PRREAD" 2>/dev/null | jq -sc 'map(select(length > 0)) | unique' 2>/dev/null)
+printf '%s' "$READ_REPOS" | jq -e 'type == "array"' >/dev/null 2>&1 || READ_REPOS='[]'
 
 # --- worked-via-convoy: live molecules resolved FORWARD to their work beads --
 # A slung work bead carries no worker stamp of its own; coverage requires a
@@ -355,11 +364,20 @@ fi
 # and sources it on its own under `set -u`.
 [ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
 [ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
-CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
-      --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
-      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
-      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
+# The stale-gate premise as jq definitions, spliced into the classification below
+# and into the retraction pass after it, so a visit is filed and concluded on one
+# rule. pr_age reads each program's own $nowepoch.
+#   pr_approved  the review posture pr-facts.sh records on the anchor
+#                (pr_posture) is approved. That answers the visit's land-it
+#                disposition, and merge.sh lands the PR past an unengaged visit.
+#   review_owed  the PR waits on the operator's review: the merge cadence settled
+#                it (pr.machine) and its posture, read at the same head, still
+#                owes an approval or a re-review. That is the helm board's owed
+#                rule for a settled row (prOwed and prApproval in
+#                services/helm/internal/board/derive.go), so the operator's review
+#                queue already names the wait. Converse's premise re-check closes a
+#                visit raised on it as benign.
+STALE_PREMISE_JQ='
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
@@ -369,6 +387,20 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   def pr_age:
     (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
     | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
+  def pr_approved:
+    ((.metadata.pr_posture // "") | tostring | split("@") | .[0]) == "approved";
+  def review_owed:
+    ((.metadata["pr.machine"] // "") | tostring | split("@")) as $m
+    | ((.metadata.pr_posture // "") | tostring | split("@")) as $p
+    | ($m | length) == 3 and ($p | length) == 3
+      and $m[0] == "settled" and $m[1] != "" and $m[1] == $p[1]
+      and (["review_required", "changes_requested", "commented", "none"] | index($p[0])) != null;
+'
+CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
+      --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
+      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" \
+      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ$STALE_PREMISE_JQ"'
   # standing_kinds, from standing-kinds.sh:
   '"$STANDING_KINDS_JQ"'
   # A workflow root, a scope latch and a step-spec sidecar carry a route and no
@@ -456,9 +488,12 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
          elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
+         # A stale PR that is approved, or waits on a review from the operator, is
+         # a wait its approval or the review queue already names (STALE_PREMISE_JQ).
          elif (((.metadata.merge_result // "") == "pull_request")
                and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
               then (if (((.metadata.pr_url // "") | pr_key) as $k | ($stalekeys | index($k)) != null)
+                       and (pr_approved | not) and (review_owed | not)
                     then "stale-gate" else "gated" end)
          elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
          elif (($gatedparents | index($b.id)) != null) then "gated"
@@ -541,7 +576,8 @@ nothing else surfaces it: the batch triage visit lists unnamed waits and this
 is not one, and merge.sh re-enumerates the anchor every cadence pass but
 cannot land it while the PR sits.
 
-Dispositions: land it (review and merge the PR) · retire it (pr-dispose.sh
+Dispositions: land it (review and approve the PR; merge.sh lands an approved
+PR past this visit while nobody is engaged in it) · retire it (pr-dispose.sh
 --anchor $id --kind not-needed --successor <this visit> records the close on
 the open anchor and closes the PR; pr-facts then lands the anchor close
 through bead-rehome. A bare gc bd close while the PR is open strands the
@@ -549,8 +585,10 @@ anchor closed-but-unlanded) · park it on a real blocker (gc bd dep add
 $id <blocker> — the edge IS the park).
 
 Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
-${id}'s own stale_escalated_at. Closing this visit does not move the PR; the
-next pass past the floor raises it again while the PR is still stale."
+${id}'s own stale_escalated_at. This visit closes itself, moot, once the PR
+moves, lands, is approved, or reaches the operator's review queue. Closing it
+by hand does not move the PR; the next pass past the floor raises it again
+while the PR is still stale."
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "$PROG: dry-run: would escalate $id on $pr [$STALE_GATE_KEY]"
             filed=$((filed + 1))
@@ -579,6 +617,108 @@ next pass past the floor raises it again while the PR is still stale."
     echo "$PROG: stale gates: $filed raised, $held inside the floor, $failed failed"
 }
 stale_escalations
+
+# --- stale PR gates: retract the visit once its premise is gone ---------------
+# A stale-gate visit asks a person to land, retire, or park an anchor whose PR
+# stopped moving, and its premise can die before anyone engages it. The PR lands
+# or is closed, it moves again inside the threshold, or it is approved or
+# reaches the operator's review queue, the two shapes the classification above
+# never raises on (STALE_PREMISE_JQ). This pass files the visit and owns its
+# premise, so it is the one that judges the premise gone. It retracts through
+# escalate.sh --retract, which closes the visit moot with the reading and leaves
+# a visit someone is engaged in to them.
+#
+# Only positive evidence retracts. A subject whose PR's repository went unread
+# this pass keeps its visit, and so does a subject missing from the alive census
+# whose close does not read back.
+SUBJ_ROW="$TMP/stale-subject.json"
+stale_retractions() {
+    local rows row subject verdict reading mr out retracted=0 kept=0 failed=0
+    rows=$(jq -n --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
+        --argjson openprs "${OPEN_PRS:-[]}" --argjson readrepos "${READ_REPOS:-[]}" \
+        --argjson nowepoch "$PASS_EPOCH" --argjson staledays "$STALE_PR_DAYS" \
+        --arg key "$STALE_GATE_KEY" "$STALE_PREMISE_JQ"'
+      (($alive[0] // []) | map({key: (.id // ""), value: .}) | from_entries) as $byid
+      | ([ ($openprs // [])[] | select(((.url // "") | pr_key) != "")
+           | {key: ((.url // "") | pr_key), value: (pr_age // -1)} ] | from_entries) as $ages
+      | [ ($live[0] // [])[]
+          | select((.metadata.task_kind // "") == "visit")
+          | select(((.status // "open") | tostring) == "open")
+          | select(((.metadata.escalation_key // "") | tostring) == $key)
+          | select(((.assignee // "") | tostring) == ""
+                   and ((.metadata["gc.session_name"] // "") | tostring) == "")
+          | ((.metadata["gc.continuation_group"] // "") | tostring) | select(. != "") ]
+      | unique
+      | map(. as $s | $byid[$s] as $a
+          | if $a == null then {subject: $s, verdict: "absent"}
+            else (($a.metadata // {}) as $m
+              | (($m.pr_url // "") | tostring) as $url
+              | ($url | pr_key) as $k
+              | (if $k == "" then "" else ($k | sub("/pull/[0-9]+$"; "")) end) as $repo
+              | if (($m.merge_result // "") | tostring) != "pull_request" then
+                  {subject: $s, verdict: "retract",
+                   reading: "\($s) no longer gates on a pull request (merge_result=\(($m.merge_result // "none") | tostring)), so its stale-PR gate asks for nothing"}
+                elif $k == "" or ($readrepos | index($repo)) == null then
+                  {subject: $s, verdict: "keep"}
+                elif ($ages | has($k) | not) then
+                  {subject: $s, verdict: "retract",
+                   reading: "PR \($url) is no longer open (merged or closed), so the stale-PR gate on \($s) asks for nothing"}
+                elif $ages[$k] >= 0 and $ages[$k] < $staledays then
+                  {subject: $s, verdict: "retract",
+                   reading: "PR \($url) moved \($ages[$k]) day(s) ago, inside the \($staledays)-day threshold, so it is no longer stale"}
+                elif ($a | pr_approved) then
+                  {subject: $s, verdict: "retract",
+                   reading: "PR \($url) is approved, which answers the stale-PR gate: merge.sh lands it past this visit"}
+                elif ($a | review_owed) then
+                  {subject: $s, verdict: "retract",
+                   reading: "PR \($url) is green and waits on a review from the operator, which the review queue already names"}
+                else {subject: $s, verdict: "keep"} end)
+            end)' 2>/dev/null)
+    if ! printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "$PROG: WARN: the stale-gate visits did not read back as an array — nothing retracted" >&2
+        return 0
+    fi
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        subject=$(printf '%s' "$row" | jq -r '.subject // ""')
+        verdict=$(printf '%s' "$row" | jq -r '.verdict // ""')
+        reading=$(printf '%s' "$row" | jq -r '.reading // ""')
+        [ -n "$subject" ] || continue
+        if [ "$verdict" = "absent" ]; then
+            # Missing from the alive census reads as closed only once a show of
+            # the subject itself says so.
+            verdict=keep
+            if bd_read "$SUBJ_ROW" show "$subject" --json \
+               && [ "$(jq -r '.[0].status // ""' "$SUBJ_ROW" 2>/dev/null)" = "closed" ]; then
+                mr=$(jq -r '(.[0].metadata.merge_result // "none") | tostring' "$SUBJ_ROW" 2>/dev/null)
+                verdict=retract
+                reading="$subject closed (merge_result=${mr:-none}), so its stale-PR gate asks for nothing"
+            else
+                echo "$PROG: $subject: stale-gate visit kept — the subject is not in the alive census and its close did not read back"
+            fi
+        fi
+        if [ "$verdict" != "retract" ]; then
+            kept=$((kept + 1))
+            continue
+        fi
+        if [ "$DRY_RUN" -eq 1 ]; then
+            echo "$PROG: dry-run: would retract the stale-gate visit on $subject: $reading"
+            retracted=$((retracted + 1))
+            continue
+        fi
+        if out=$("$ESCALATE" --retract --subject "$subject" --key "$STALE_GATE_KEY" --message "$reading"); then
+            printf '%s\n' "$out"
+            retracted=$((retracted + 1))
+        else
+            failed=$((failed + 1))
+            echo "$PROG: WARN: could not retract the stale-gate visit on $subject — the next pass retries" >&2
+        fi
+    done <<ROWS
+$(printf '%s' "$rows" | jq -c '.[]' 2>/dev/null)
+ROWS
+    echo "$PROG: stale-gate visits: $retracted retracted, $kept kept, $failed failed"
+}
+stale_retractions
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases

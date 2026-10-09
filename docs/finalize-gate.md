@@ -102,7 +102,8 @@ a squash-merge, a close — cannot be taken back.
   `--match-head-commit` does not catch one raised between validation and the
   merge; the terminal re-assert does. Both checks, in the script and in its
   `gctk merge` port, pass `--except-key anchor-stale`, so an unengaged
-  stale-PR-gate visit does not hold an approved PR.
+  stale-PR-gate visit does not hold an approved PR. `liveness-sweep.sh`, which
+  files that visit, retracts it as moot once its premise is gone.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused

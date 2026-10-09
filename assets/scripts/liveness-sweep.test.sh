@@ -135,19 +135,35 @@ gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
 gh_prs 0 0
 export GH_PRS="$TMP/gh-prs.json"
 
-# escalate.sh stub: records the call, answers like the real tool.
+# escalate.sh stub: records the call, answers like the real tool. A --retract
+# call is recorded apart, in $ESC_RETRACTS and $ESC_RETRACT_BODIES, so every
+# filing assertion reads filings alone. ESC_FAIL fails a filing and
+# ESC_RETRACT_FAIL a retraction.
 cat > "$TMP/bin/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
-[ -n "${ESC_FAIL:-}" ] && { echo "escalate: down" >&2; exit 1; }
-subject=""; key=""
+retract=0
+for a in "$@"; do [ "$a" = "--retract" ] && retract=1; done
+if [ "$retract" = 1 ]; then
+  [ -n "${ESC_RETRACT_FAIL:-}" ] && { echo "escalate: visit-close.sh did not close the visit" >&2; exit 1; }
+else
+  [ -n "${ESC_FAIL:-}" ] && { echo "escalate: down" >&2; exit 1; }
+fi
+subject=""; key=""; message=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) subject="$2"; shift 2 ;;
     --key)     key="$2"; shift 2 ;;
-    --message) printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
+    --message) message="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+if [ "$retract" = 1 ]; then
+  printf '%s %s\n' "$subject" "$key" >> "$ESC_RETRACTS"
+  printf '%s\n---\n' "$message" >> "$ESC_RETRACT_BODIES"
+  echo "escalate: retracted visit v-stale on $subject [$key] as moot"
+  exit 0
+fi
+printf '%s\n---\n' "$message" >> "$ESC_BODIES"
 printf '%s %s\n' "$subject" "$key" >> "$ESC_CALLS"
 echo "escalate: filed visit tk-visit1 on $subject [$key] -> gc-toolkit.converse"
 ESC
@@ -155,6 +171,7 @@ chmod +x "$TMP/bin/escalate.sh"
 
 export PATH="$TMP/bin:$PATH"
 export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
+export ESC_RETRACTS="$TMP/esc-retracts" ESC_RETRACT_BODIES="$TMP/esc-retract-bodies"
 export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
@@ -270,6 +287,7 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
     : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    : > "$ESC_RETRACTS"; : > "$ESC_RETRACT_BODIES"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
     ERR="$(cat "$TMP/err")"
@@ -533,6 +551,133 @@ eq "$(cat "$ESC_CALLS")" "" "--dry-run escalates no stale gate"
 grep -q stale_escalated "$GC_CALLS" && bad "--dry-run stamps no anchor" "it stamped one" \
     || ok "--dry-run stamps no anchor"
 gh_prs 0 0
+
+echo "── a stale PR that is approved, or waits on the operator's review, is not escalated ──"
+# Both are waits something already names. An approval answers the visit's land-it
+# disposition, and merge.sh lands the PR past an unengaged visit. A PR the merge
+# cadence settled whose posture, read at the same head, still owes a review is on
+# the operator's review queue. Each classifies gated, never stale-gate. The
+# controls are the shapes the board cannot read as owed to the operator.
+T="$(iso_ago 3)"
+raise_case() { # raise_case <pr_posture> <pr.machine>: c-pr-open's PR idle 9 days
+    jq --arg p "$1" --arg m "$2" \
+        'map(if .id == "c-pr-open" then .metadata += {"pr_posture": $p, "pr.machine": $m} else . end)' \
+        "$TMP/ready.json" > "$TMP/ready-pr.json"
+    gh_prs 9 0
+    FAKE_READY="$TMP/ready-pr.json" run_sweep "$EXPECT_SURVIVORS"
+    FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
+}
+for c in "approved@sha-521@$T|settled@sha-521@$T|an approved stale PR" \
+         "approved@sha-old@$T|settled@sha-521@$T|a stale PR approved at an earlier head (an approval stands across pushes)" \
+         "review_required@sha-521@$T|settled@sha-521@$T|a settled stale PR awaiting the operator's first review" \
+         "changes_requested@sha-521@$T|settled@sha-521@$T|a settled stale PR awaiting the operator's re-review"; do
+    p="${c%%|*}"; rest="${c#*|}"; m="${rest%%|*}"; what="${rest#*|}"
+    raise_case "$p" "$m"
+    eq "$(grep -c anchor-stale "$ESC_CALLS")" "0" "$what is not escalated"
+    eq "$(funnel_count stale-gate)" "<absent>" "…and classifies gated, not stale-gate"
+    case ",$(cat "$BASELINE_FILE")," in
+        *",c-pr-open,"*) bad "…and is not batched as an unnamed wait" "it entered the baseline" ;;
+        *) ok "…and is not batched as an unnamed wait" ;;
+    esac
+done
+for c in "review_required@sha-old@$T|settled@sha-521@$T|a review owed at an earlier head than the settled verdict" \
+         "review_required@sha-521@$T|progressing@sha-521@$T|a PR the merge cadence has not settled" \
+         "review_required@sha-521@$T|blocked@sha-521@$T|a PR blocked on something no review clears"; do
+    p="${c%%|*}"; rest="${c#*|}"; m="${rest%%|*}"; what="${rest#*|}"
+    raise_case "$p" "$m"
+    grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
+        && ok "control: $what still escalates" || bad "control: $what still escalates" "$(cat "$ESC_CALLS")"
+done
+gh_prs 0 0
+
+echo "── a stale-gate visit is retracted, moot, once its premise is gone ──"
+# The pass that files the visit owns its premise. A visit nobody is engaged in is
+# retracted through escalate.sh --retract once the PR moves, lands, is approved,
+# or reaches the operator's review queue, and only on evidence this pass read.
+stale_live() { # stale_live <c-pr-open metadata to add> <visit fields to merge> -> $TMP/live-stale.json
+    jq --argjson m "$1" --argjson v "$2" '. + [
+        {"id":"c-pr-open","status":"open","title":"parked on an open PR",
+         "metadata":({"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/521"} + $m)},
+        ({"id":"v-stale","status":"open","assignee":"","title":"visit: stale PR gate: c-pr-open",
+          "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"c-pr-open"},
+          "dependencies":[{"issue_id":"v-stale","depends_on_id":"c-pr-open","type":"tracks"}]} * $v)]' \
+        "$TMP/live.json" > "$TMP/live-stale.json"
+}
+retract_run() { FAKE_LIVE="$TMP/live-stale.json" run_sweep "$EXPECT_SURVIVORS"; }
+
+gh_prs 0 0; stale_live '{}' '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a PR that moved again: its visit is retracted, on the anchor, under the filing key"
+grep -q 'moved 0 day(s) ago, inside the 2-day threshold' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading says the PR moved" || bad "moved reading" "$(cat "$ESC_RETRACT_BODIES")"
+grep -q 'stale-gate visits: 1 retracted, 0 kept, 0 failed' <<< "$OUT" \
+    && ok "…and the pass counts it" || bad "retract tally" "$OUT"
+eq "$(cat "$ESC_CALLS" | grep -c anchor-stale)" "0" "…and nothing is filed in the same pass"
+
+gh_prs 9 0; stale_live '{}' '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "" "a PR still stale, unapproved and not awaiting review: its visit stands"
+grep -q 'stale-gate visits: 0 retracted, 1 kept, 0 failed' <<< "$OUT" \
+    && ok "…and the pass counts it kept" || bad "kept tally" "$OUT"
+
+stale_live "{\"pr_posture\":\"approved@sha-521@$T\"}" '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a stale PR the operator approved: its visit is retracted"
+grep -q 'is approved, which answers the stale-PR gate' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading names the approval" || bad "approved reading" "$(cat "$ESC_RETRACT_BODIES")"
+
+stale_live "{\"pr_posture\":\"review_required@sha-521@$T\",\"pr.machine\":\"settled@sha-521@$T\"}" '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a stale PR now awaiting the operator's review: its visit is retracted"
+grep -q 'waits on a review from the operator' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading names the review queue" || bad "review-owed reading" "$(cat "$ESC_RETRACT_BODIES")"
+
+stale_live '{"merge_result":"abandoned"}' '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "an anchor that left pull_request: its visit is retracted"
+grep -q 'no longer gates on a pull request (merge_result=abandoned)' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading names the state it left for" || bad "left-pull_request reading" "$(cat "$ESC_RETRACT_BODIES")"
+
+printf '[{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' "$(iso_ago 0)" > "$TMP/gh-prs.json"
+stale_live '{}' '{}'; retract_run
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "a PR gone from the open list of a repository that answered: its visit is retracted"
+grep -q 'pull/521 is no longer open (merged or closed)' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading says the PR left the open list" || bad "not-open reading" "$(cat "$ESC_RETRACT_BODIES")"
+
+gh_prs 0 0; stale_live '{}' '{}'
+GH_FAIL=1 retract_run
+eq "$(cat "$ESC_RETRACTS")" "" "an unread PR set retracts nothing: absence from it is not evidence"
+
+# The anchor landed: it is gone from the alive census, and a show of it reads closed.
+jq 'map(select(.id != "c-pr-open"))' "$TMP/ready.json" > "$TMP/ready-landed.json"
+jq '. + [{"id":"v-stale","status":"open","assignee":"","title":"visit: stale PR gate: c-pr-open",
+          "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"c-pr-open"}}]' \
+    "$TMP/live.json" > "$TMP/live-landed.json"
+printf '%s\n' '[{"id":"c-pr-open","status":"closed","metadata":{"merge_result":"merged"}}]' > "$TMP/show/c-pr-open.json"
+FAKE_READY="$TMP/ready-landed.json" FAKE_LIVE="$TMP/live-landed.json" run_sweep "$EXPECT_SURVIVORS"
+eq "$(cat "$ESC_RETRACTS")" "c-pr-open anchor-stale" "an anchor that landed and closed: its visit is retracted"
+grep -q 'c-pr-open closed (merge_result=merged)' "$ESC_RETRACT_BODIES" \
+    && ok "…and the reading says it closed, merged" || bad "closed reading" "$(cat "$ESC_RETRACT_BODIES")"
+GC_SHOW_FAIL="c-pr-open" FAKE_READY="$TMP/ready-landed.json" FAKE_LIVE="$TMP/live-landed.json" run_sweep "$EXPECT_SURVIVORS"
+eq "$(cat "$ESC_RETRACTS")" "" "a subject missing from the census whose close does not read back keeps its visit"
+grep -q 'its close did not read back' <<< "$OUT" && ok "…and the pass says why" || bad "unread close" "$OUT"
+rm -f "$TMP/show/c-pr-open.json"
+
+# A visit a person is engaged in is theirs to close, premise or not: here the PR
+# moved, so only the engagement keeps the visit open.
+gh_prs 0 0
+for v in '{"assignee":"human-1"}' '{"metadata":{"gc.session_name":"s-lx-live-1"}}' '{"status":"in_progress"}'; do
+    stale_live '{}' "$v"; retract_run
+    eq "$(cat "$ESC_RETRACTS")" "" "an engaged visit ($v) is never retracted"
+done
+
+stale_live '{}' '{}'
+ESC_RETRACT_FAIL=1 retract_run
+grep -q 'could not retract the stale-gate visit on c-pr-open' <<< "$ERR" \
+    && ok "a retraction that fails is reported" || bad "failed retract warn" "$ERR"
+grep -q 'stale-gate visits: 0 retracted, 0 kept, 1 failed' <<< "$OUT" \
+    && ok "…and counted failed, for the next pass to retry" || bad "failed tally" "$OUT"
+
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"; : > "$ESC_RETRACTS"
+OUT="$(FAKE_LIVE="$TMP/live-stale.json" bash "$SCRIPT" --dry-run 2>/dev/null)"
+eq "$(cat "$ESC_RETRACTS")" "" "--dry-run retracts nothing"
+grep -q 'dry-run: would retract the stale-gate visit on c-pr-open' <<< "$OUT" \
+    && ok "…and says what it would retract" || bad "dry-run retract line" "$OUT"
 
 echo "── the standing subject is created on first run, idempotently ──"
 jq '[.[] | select(.id != "tk-subject")]' "$TMP/live.json" > "$TMP/live-nosubj.json"

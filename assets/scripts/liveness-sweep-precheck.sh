@@ -8,10 +8,11 @@
 # non-monotone ones (worked-via-convoy, the open-PR intersection, the
 # pre-open gate verdicts) are deliberately NOT made — so the local survivor
 # set is a SUPERSET of the sweep's true candidates and "zero new locally"
-# proves "zero new really", but only for the batch triage visit. The pass has a
-# second output — the per-anchor stale-gate escalation — that no unnamed-waits
-# baseline can represent, so the check ALSO runs whenever a PR-gated anchor's
-# re-escalation floor is up (the stale-due gate below). Anything else — any
+# proves "zero new really", but only for the batch triage visit. The pass has
+# two more outputs — the per-anchor stale-gate escalation and its retraction —
+# that no unnamed-waits baseline can represent, so the check ALSO runs whenever
+# a PR-gated anchor's re-escalation floor is up (the stale-due gate below), and
+# while a stale-gate visit is open for the pass to re-judge. Anything else — any
 # unreadable probe, a missing subject, its own abort — RUNS the pass: a probe
 # that cannot be read excludes nothing. It also sets the 6h cadence (a
 # condition trigger has no interval). The per-rig window is spent by whichever
@@ -43,6 +44,10 @@ KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
 # stamp with the same arithmetic the pass does.
 STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
 case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
+# The key the pass files and retracts its stale-gate visit under, mirrored from
+# liveness-sweep.sh so the "may owe a retraction" run-gate below reads the same
+# visits the pass judges.
+STALE_GATE_KEY="anchor-stale"
 
 FORCE=0
 while [ $# -gt 0 ]; do
@@ -382,9 +387,31 @@ if [ "$READS_OK" -eq 1 ]; then
     fi
 fi
 
+# A third output: the pass retracts a stale-gate visit whose premise is gone,
+# once its PR moved, landed, was approved, or reached the operator's review
+# queue. That judgment needs the pass's gh read, so the pass runs while any
+# stale-gate visit nobody is engaged in is open, the set the pass judges. Without
+# this, a board that is otherwise quiet would leave such a visit open after its
+# PR landed and its anchor left the ready set.
+STALE_VISITS=""; N_STALE_VISITS=""
+if [ "$READS_OK" -eq 1 ]; then
+    STALE_VISITS=$(jq -c --arg key "$STALE_GATE_KEY" '
+      [ .[] | select((.metadata.task_kind // "") == "visit")
+        | select(((.status // "open") | tostring) == "open")
+        | select(((.metadata.escalation_key // "") | tostring) == $key)
+        | select(((.assignee // "") | tostring) == ""
+                 and ((.metadata["gc.session_name"] // "") | tostring) == "")
+        | .id ]' "$LIVE" 2>/dev/null)
+    if printf '%s' "$STALE_VISITS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        N_STALE_VISITS=$(printf '%s' "$STALE_VISITS" | jq 'length')
+    fi
+fi
+
 # The ONE place DECISION may become skip — it needs every positive fact at once.
-# N_STALE_DUE empty (its jq failed) defaults to the run side, like every probe.
-if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ] && [ "${N_STALE_DUE:-1}" = "0" ]; then
+# N_STALE_DUE or N_STALE_VISITS empty (its jq failed) defaults to the run side,
+# like every probe.
+if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ] \
+   && [ "${N_STALE_DUE:-1}" = "0" ] && [ "${N_STALE_VISITS:-1}" = "0" ]; then
     DECISION=skip
     REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no live visit on $SUBJECT"
 elif [ "$READS_OK" -ne 1 ]; then
@@ -399,6 +426,8 @@ elif [ -n "$LIVE_VISIT" ]; then
     REASON="a visit is already live on $SUBJECT; $N_NEW new local candidate(s) await it"
 elif [ "$N_NEW" = "0" ] && [ "${N_STALE_DUE:-0}" != "0" ]; then
     REASON="$N_STALE_DUE PR-gated anchor(s) past the re-escalation floor may owe a stale-gate escalation the unnamed baseline cannot represent"
+elif [ "$N_NEW" = "0" ] && [ "${N_STALE_VISITS:-0}" != "0" ]; then
+    REASON="$N_STALE_VISITS open stale-gate visit(s) may owe a retraction the unnamed baseline cannot represent"
 else
     REASON="$N_NEW new local candidate(s) since the last reported pass"
 fi
@@ -422,6 +451,9 @@ if [ "$JQ_OK" -eq 1 ]; then
 fi
 if [ "${N_STALE_DUE:-0}" != "0" ]; then
     say "  PR-gated anchors past the stale re-escalation floor: $N_STALE_DUE -> $(printf '%s' "$STALE_DUE" | jq -r 'join(", ")')"
+fi
+if [ "${N_STALE_VISITS:-0}" != "0" ]; then
+    say "  open stale-gate visits to re-judge: $N_STALE_VISITS -> $(printf '%s' "$STALE_VISITS" | jq -r 'join(", ")')"
 fi
 
 if [ "$DECISION" = "skip" ]; then

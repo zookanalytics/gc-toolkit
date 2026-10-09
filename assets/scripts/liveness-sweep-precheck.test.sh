@@ -400,6 +400,42 @@ jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
 BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
 eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
 
+# The pass also retracts a stale-gate visit once its PR moved, landed, was
+# approved, or reached the operator's review queue. It judges that from its own
+# gh read, so the check runs while a visit nobody is engaged in is open, even on
+# a board that is otherwise quiet: its anchor inside the floor, every survivor
+# carried. A landed anchor leaves the ready set, so the stale-due gate alone
+# would never run the pass that retracts its visit.
+echo "── an open stale-gate visit runs the pass on an otherwise quiet board ──"
+jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
+                      | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+stale_visit_live() { # stale_visit_live <visit fields to merge>
+    jq --argjson v "$1" '. + [{"id":"v-stale","status":"open","assignee":"","title":"visit: stale PR gate: f-pr-open",
+        "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"f-pr-open"}} * $v]' \
+        "$TMP/live.bak" > "$FIX/live.json"
+}
+stale_visit_live '{}'
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "0" "an open, unengaged stale-gate visit runs the pass"
+has "$OUT" "open stale-gate visit(s) may owe a retraction" "…and the RUN names the retraction"
+has "$OUT" "open stale-gate visits to re-judge: 1 -> v-stale" "…and the visit that forced it"
+for v in '{"assignee":"human-1"}' '{"metadata":{"gc.session_name":"s-conv-1"}}' '{"status":"in_progress"}'; do
+    stale_visit_live "$v"
+    BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+    eq "$RC" "1" "a stale-gate visit someone is engaged in ($v) does not run the pass — the pass would leave it to them"
+done
+cp "$TMP/live.bak" "$FIX/live.json"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "1" "control: the same board with no stale-gate visit skips"
+
+echo "── the precheck reads the stale-gate visits under the key the pass files them with ──"
+PRE_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$SCRIPT")
+SWEEP_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$SWEEP")
+[ -n "$SWEEP_KEY" ] && ok "liveness-sweep.sh names its stale-gate key" \
+    || bad "liveness-sweep.sh names its stale-gate key" "no STALE_GATE_KEY= line in $SWEEP"
+eq "$PRE_KEY" "$SWEEP_KEY" "the precheck mirrors the sweep's stale-gate key"
+
 # Restore the canonical fixtures for the sections that follow.
 cp "$TMP/ready.bak" "$FIX/ready.json"
 cp "$TMP/live.bak" "$FIX/live.json"
