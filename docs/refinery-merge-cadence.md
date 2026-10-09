@@ -280,7 +280,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    threads no city post has engaged, on a PR carrying an unmarked post under
    the city's login from before its provenance cutover, which arm 7 reads as
    the city's own. Then it stops — no write-back sweep, no external-fact
-   reconciliation, none of the arms that belong at the tail. A batch it routes is live work on the anchor,
+   reconciliation, none of the
+   arms that belong at the tail. A batch it routes is live work on the anchor,
    which the `status:` label reads, so it re-derives that PR's label as it
    routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
