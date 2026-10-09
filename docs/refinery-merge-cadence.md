@@ -469,7 +469,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    batch routed, or the work answering one closing.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`.
+   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
+   store. The arm lists the rig's open owned convoys first, then reads each
+   candidate's parent-child children and `tracks` targets, so a rig with no
+   owned integration convoy costs one read. A pass that answers every
+   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
+   reads nothing until that stamp is 15 minutes old.
 9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
@@ -667,6 +672,7 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
+| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
