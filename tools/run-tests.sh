@@ -70,9 +70,10 @@
 # one job per core a few suites running at once leave the rest of the host
 # waiting for the CPU. The default is therefore half the cores, at least one.
 # The count is the first one nproc, getconf or sysctl reports; stock macOS has
-# no nproc. Every run of the parallel wave starts at nice 10, and at ionice's
-# lowest best-effort level where ionice can set it; macOS has no ionice. A host
-# with nothing else to serve, such as a CI runner, passes -j to use every core.
+# no nproc. Every run of the parallel wave starts at a niceness 10 above the
+# caller's, and at ionice's lowest best-effort level where ionice can set it;
+# macOS has no ionice. A host with nothing else to serve, such as a CI runner,
+# passes -j to use every core.
 #
 # Isolation still cannot stop a sibling from saturating the host, so a file can
 # fail under -j for a reason that is not its own: an assertion reads a killed

@@ -34,10 +34,10 @@
 #   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
 #     counted by nproc, else getconf, else sysctl, and capped at the run count;
 #     TEST_JOBS and -j each override that default;
-#   - a run of the parallel wave starts at nice 10, and at ionice's lowest
-#     best-effort level where ionice can set it, while a serial re-run keeps
-#     the caller's priority; an ionice that refuses the class is left out and
-#     fails no run;
+#   - a run of the parallel wave starts at a niceness 10 above the caller's,
+#     and at ionice's lowest best-effort level where ionice can set it, while a
+#     serial re-run keeps the caller's priority; an ionice that refuses the
+#     class is left out and fails no run;
 #   - a changed script reaches its sibling, every suite naming it on a line
 #     that is not a comment, and the sibling of every script naming it so, one
 #     hop and no further; no suite naming a longer name that ends in it, and
@@ -467,14 +467,14 @@ reset_state
 PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
 eq "$RC" 0 "the file passes on its serial re-run"
 eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|class 2 level 7" \
-  "the wave's run starts at nice 10 and at ionice's lowest best-effort level"
+  "the wave's run is niced 10 and at ionice's lowest best-effort level"
 eq "$(cat "$STATE/prio.2" 2>/dev/null)" "$OWN_NICE|none" \
   "the serial re-run keeps the caller's niceness and I/O class"
 reset_state
 STUB_IONICE_REFUSE=1 PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
 eq "$RC" 0 "an ionice that refuses the class fails no run"
 eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|none" \
-  "the wave's run still starts at nice 10, without ionice"
+  "the wave's run is still niced 10, without ionice"
 
 # The affected subset is read from what a repo tracks, so its cases get a repo
 # whose tracked files are the fixtures. The runner sits in it as it does in the
