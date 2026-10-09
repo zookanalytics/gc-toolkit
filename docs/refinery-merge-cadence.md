@@ -19,7 +19,8 @@ runtime guarantees the arrangement depends on.
 **Boundaries.** The states the arms move an anchor through are
 [state-machine.md](state-machine.md). The refinery *agent*'s judgment calls
 (rejection, blocked, refused) live in `formulas/mol-refinery-patrol.toml` and
-are not driven by this order.
+are not driven by this order. That patrol's liveness has its own doctor check,
+`check-refinery-patrol-live`.
 
 ## Mechanism
 
