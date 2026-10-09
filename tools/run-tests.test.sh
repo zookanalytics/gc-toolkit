@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # run-tests.test.sh — the serial re-run that tells a parallel-contention false
-# failure from a real one, and the runs a file with parts is split into.
+# failure from a real one, the runs a file with parts is split into, and how
+# many runs the parallel wave holds at once and at what priority.
 #
 # A file can fail under -j for a reason that is not its own: a sibling job
 # saturates the host and a command the file spawned is killed, so an assertion
@@ -30,6 +31,13 @@
 #     /tmp when it is unset, with no symlink and no trailing slash, while the
 #     same file run directly gets the TMPDIR as given; a TMPDIR that names no
 #     directory is a usage error;
+#   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
+#     counted by nproc, else getconf, else sysctl, and capped at the run count;
+#     TEST_JOBS and -j each override that default;
+#   - a run of the parallel wave starts at nice 10, and at ionice's lowest
+#     best-effort level where ionice can set it, while a serial re-run keeps
+#     the caller's priority; an ionice that refuses the class is left out and
+#     fails no run;
 #   - a changed script reaches its sibling, every suite naming it on a line
 #     that is not a comment, and the sibling of every script naming it so, one
 #     hop and no further; no suite naming a longer name that ends in it, and
@@ -51,9 +59,11 @@
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
 # first time, passes the next" stands in for the contention the real flake needs
-# a loaded host to produce. The affected-subset cases run a copy of the runner
-# inside throwaway git repos whose tracked files are the fixtures. No live city,
-# no network.
+# a loaded host to produce. The job-count and priority cases put stub nproc,
+# getconf, sysctl and ionice ahead of the real tools on PATH, so the counts and
+# I/O class they assert are the same on every host. The affected-subset cases
+# run a copy of the runner inside throwaway git repos whose tracked files are
+# the fixtures. No live city, no network.
 
 set -u
 
@@ -362,6 +372,109 @@ TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
 eq "$RC" 2 "a TMPDIR that names no directory is a usage error"
 has "$OUT" "cannot resolve the temp directory '$TMP/no-such-dir'" "…and named"
 if [ -e "$STATE/tmpdir" ]; then bad "and no file runs" "the fixture ran"; else ok "and no file runs"; fi
+
+echo "── jobs: the default is half the cores, at least one ──"
+# The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of
+# the real tools on PATH answer from STUB_NPROC, STUB_GETCONF and STUB_SYSCTL,
+# and fail with no output where theirs is unset, as a missing tool does. The
+# file's twelve parts outnumber every default below but one, so the header line
+# reports the default itself rather than the cap at the run count.
+CORES_BIN="$TMP/cores-bin"
+mkdir -p "$CORES_BIN"
+cat > "$CORES_BIN/nproc" <<'F'
+#!/usr/bin/env bash
+[ -n "${STUB_NPROC:-}" ] || exit 127
+echo "$STUB_NPROC"
+F
+cat > "$CORES_BIN/getconf" <<'F'
+#!/usr/bin/env bash
+{ [ "${1:-}" = _NPROCESSORS_ONLN ] && [ -n "${STUB_GETCONF:-}" ]; } || exit 1
+echo "$STUB_GETCONF"
+F
+cat > "$CORES_BIN/sysctl" <<'F'
+#!/usr/bin/env bash
+{ [ "${1:-}" = -n ] && [ "${2:-}" = hw.ncpu ] && [ -n "${STUB_SYSCTL:-}" ]; } || exit 1
+echo "$STUB_SYSCTL"
+F
+chmod +x "$CORES_BIN"/*
+cat > "$FIX/wide.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12
+F
+# run_cores [VAR=value...] [-- runner-args...] -> sets RC, OUT, and PAR: the
+# parallel count the header line reports for the twelve-part file, run with no
+# -j unless one is given, under the core stubs and the given env.
+run_cores() {
+  local -a vars=()
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done
+  [ "$#" -eq 0 ] || shift
+  OUT="$(env PATH="$CORES_BIN:$PATH" "${vars[@]}" "$RUNNER_COPY" -t 30 "$@" "$FIX/wide.test.sh" 2>&1)"; RC=$?
+  PAR="$(printf '%s\n' "$OUT" | sed -n 's/^run-tests: .* runs, \([0-9]*\) parallel,.*/\1/p')"
+}
+run_cores STUB_NPROC=8
+eq "$RC" 0 "a run on the default job count passes"
+eq "$PAR" 4 "eight cores from nproc give four jobs"
+run_cores STUB_GETCONF=6
+eq "$PAR" 3 "with no nproc, six from getconf give three"
+run_cores STUB_SYSCTL=10
+eq "$PAR" 5 "with neither, ten from sysctl give five"
+run_cores STUB_NPROC=1
+eq "$PAR" 1 "one core gives one job, not none"
+run_cores
+eq "$RC" 0 "a host no tool reports a count for still runs"
+eq "$PAR" 1 "on one job"
+run_cores STUB_NPROC=64
+eq "$PAR" 12 "a default wider than the runs is capped at the run count"
+run_cores STUB_NPROC=8 TEST_JOBS=3
+eq "$PAR" 3 "TEST_JOBS overrides the default"
+run_cores STUB_NPROC=8 -- -j 5
+eq "$PAR" 5 "and so does -j"
+
+echo "── priority: the parallel wave runs niced, a serial re-run at the caller's priority ──"
+# The file fails its first run and passes its second, so run 1 is the parallel
+# wave's and run 2 the serial re-run's. Each records its niceness and the I/O
+# class a stub ionice, ahead of any real one on PATH, exported to it. The stub
+# refuses every class while STUB_IONICE_REFUSE is set. The niceness expected of
+# the wave is what nice -n 10 gives a child of this shell, which the system caps,
+# so the case holds when this suite itself runs niced, as it does in a wave.
+PRIO_BIN="$TMP/prio-bin"
+mkdir -p "$PRIO_BIN"
+cat > "$PRIO_BIN/ionice" <<'F'
+#!/usr/bin/env bash
+[ -z "${STUB_IONICE_REFUSE:-}" ] || exit 1
+class="" level=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -c) class="$2"; shift 2 ;;
+    -n) level="$2"; shift 2 ;;
+    *)  break ;;
+  esac
+done
+export STUB_IONICE="class $class level $level"
+exec "$@"
+F
+chmod +x "$PRIO_BIN/ionice"
+cat > "$FIX/prio.test.sh" <<'F'
+#!/usr/bin/env bash
+c="$RUNTESTS_FIXTURE_STATE/prio.count"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+printf '%s|%s\n' "$(ps -o ni= -p "$$" | tr -d ' ')" "${STUB_IONICE-none}" > "$RUNTESTS_FIXTURE_STATE/prio.$n"
+[ "$n" -ge 2 ]
+F
+OWN_NICE="$(ps -o ni= -p "$$" | tr -d ' ')"
+NICED="$(nice -n 10 sh -c 'ps -o ni= -p "$$"' | tr -d ' ')"
+reset_state
+PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
+eq "$RC" 0 "the file passes on its serial re-run"
+eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|class 2 level 7" \
+  "the wave's run starts at nice 10 and at ionice's lowest best-effort level"
+eq "$(cat "$STATE/prio.2" 2>/dev/null)" "$OWN_NICE|none" \
+  "the serial re-run keeps the caller's niceness and I/O class"
+reset_state
+STUB_IONICE_REFUSE=1 PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
+eq "$RC" 0 "an ionice that refuses the class fails no run"
+eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|none" \
+  "the wave's run still starts at nice 10, without ionice"
 
 # The affected subset is read from what a repo tracks, so its cases get a repo
 # whose tracked files are the fixtures. The runner sits in it as it does in the
