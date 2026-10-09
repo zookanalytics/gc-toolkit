@@ -126,6 +126,9 @@ mk_sut_dir() { # <dir> <file>...
   done
   # review-verdict.sh, the approval rule, is sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
+  # stale-gate.sh, the stale-PR gate, is sourced by sibling path too, and gctk
+  # merge runs it there, so cp keeps its executable bit.
+  [ -f "$here/stale-gate.sh" ] && cp "$here/stale-gate.sh" "$d/"
   return 0
 }
 

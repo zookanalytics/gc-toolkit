@@ -72,10 +72,12 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # tracks edge, never a cascading blocks edge (docs/finalize-gate.md).
 FINALIZE_GATE="$SCRIPTS_DIR/finalize-gate.sh"
 # The one visit the gate excepts here: the stale-PR-gate visit liveness-sweep.sh
-# files under this key on an anchor whose PR stopped moving. Landing the PR is
-# one of the dispositions that visit asks for, so a merge it held would block its
-# own answer. The gate excepts it only while nobody is engaged in it.
-STALE_GATE_KEY="anchor-stale"
+# files on an anchor whose PR stopped moving, under STALE_GATE_KEY from
+# stale-gate.sh, the key's one definition. Landing the PR is one of the
+# dispositions that visit asks for, so a merge it held would block its own
+# answer. The gate excepts it only while nobody is engaged in it.
+# shellcheck source=stale-gate.sh
+. "$SCRIPTS_DIR/stale-gate.sh" || { echo "$PROG: cannot source stale-gate.sh beside this script" >&2; exit 1; }
 
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no

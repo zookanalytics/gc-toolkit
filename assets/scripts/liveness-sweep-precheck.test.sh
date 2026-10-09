@@ -428,12 +428,24 @@ cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
 eq "$RC" "1" "control: the same board with no stale-gate visit skips"
 
-echo "── the precheck reads the stale-gate visits under the key the pass files them with ──"
-PRE_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$SCRIPT")
-SWEEP_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$SWEEP")
-[ -n "$SWEEP_KEY" ] && ok "liveness-sweep.sh names its stale-gate key" \
-    || bad "liveness-sweep.sh names its stale-gate key" "no STALE_GATE_KEY= line in $SWEEP"
-eq "$PRE_KEY" "$SWEEP_KEY" "the precheck mirrors the sweep's stale-gate key"
+echo "── the precheck reads the stale-gate visits under the key stale-gate.sh names ──"
+# The pass files under the same definition, so a rename lands in that one file.
+# Renamed beside a copy of the precheck, the run-gate follows it: a visit under
+# the new key runs the pass, and one under the old key is no longer one it judges.
+STALE_KEY=$("$(dirname "$SCRIPT")/stale-gate.sh" key)
+[ -n "$STALE_KEY" ] && ok "stale-gate.sh names the stale-gate key ('$STALE_KEY')" \
+    || bad "stale-gate.sh names the stale-gate key" "\`stale-gate.sh key\` printed nothing"
+RN="$TMP/renamed"; mkdir -p "$RN"
+cp "$SCRIPT" "$(dirname "$SCRIPT")/visit-identity.sh" "$RN/"
+sed "s/^STALE_GATE_KEY=\"$STALE_KEY\"\$/STALE_GATE_KEY=\"$STALE_KEY-renamed\"/" \
+    "$(dirname "$SCRIPT")/stale-gate.sh" > "$RN/stale-gate.sh"
+eq "$(bash "$RN/stale-gate.sh" key)" "$STALE_KEY-renamed" "precondition: the copy names the renamed key"
+stale_visit_live "{\"metadata\":{\"escalation_key\":\"$STALE_KEY-renamed\"}}"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" SCRIPT="$RN/liveness-sweep-precheck.sh" run_precheck
+eq "$RC" "0" "a visit under the renamed key runs the pass"
+stale_visit_live '{}'
+BASELINE_CSV="f-carried,f-plain,f-pr-open" SCRIPT="$RN/liveness-sweep-precheck.sh" run_precheck
+eq "$RC" "1" "…and one under the old key no longer does"
 
 # Restore the canonical fixtures for the sections that follow.
 cp "$TMP/ready.bak" "$FIX/ready.json"
@@ -506,9 +518,11 @@ echo "── an abort BEFORE the decision runs the pass ──"
 # code actually under test.
 sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$TMP/aborting.sh"
 chmod +x "$TMP/aborting.sh"
-# The copy sources its sibling visit-identity.sh by $0-relative path, so the
-# shared predicate lib has to travel with it into the temp dir.
+# The copy sources its siblings visit-identity.sh and stale-gate.sh by
+# $0-relative path, so the shared definitions have to travel with it into the
+# temp dir.
 cp "$(dirname "$SCRIPT")/visit-identity.sh" "$TMP/visit-identity.sh"
+cp "$(dirname "$SCRIPT")/stale-gate.sh" "$TMP/stale-gate.sh"
 grep -qx 'exit 3' "$TMP/aborting.sh" && ok "abort injection landed" \
     || bad "abort injection landed" "the trap line moved — this test is checking nothing"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -794,14 +808,17 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage and standing records through two
-# shared definitions, which liveness-sweep.sh sources before it. Supply the same
-# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
-# extracted block resolves them and cannot drift.
+# The classify block matches visit coverage, standing records and the stale-PR
+# gate through three shared definitions, which liveness-sweep.sh sources before
+# it. Supply the same defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ,
+# $STALE_GATE_JQ) from the real libs so the extracted block resolves them and
+# cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/standing-kinds.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/stale-gate.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"

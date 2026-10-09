@@ -35,11 +35,11 @@ import (
 // same writer the shell reached through lifecycle.sh. Every other seam is a
 // subprocess exactly as the script's was — gc/bd/gh/git and the sibling shell
 // helpers (escalate.sh, record-failure-cap.sh, lane-state.sh, finalize-gate.sh,
-// review-checks.sh, render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
-// which gctk-resolve.sh exports as merge.sh's directory before it execs this
-// binary. That keeps the stub harness, the observability and the permissions
-// surfaces identical. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass
-// refuses (exit 1) before it reads a PR.
+// review-checks.sh, render-seed-audit.sh, stale-gate.sh), resolved from
+// GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's directory before
+// it execs this binary. That keeps the stub harness, the observability and the
+// permissions surfaces identical. Run any other way, with GCTK_SCRIPTS_DIR
+// unset, the pass refuses (exit 1) before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
@@ -79,6 +79,8 @@ var (
 	reRepoQLower = regexp.MustCompile(`^[a-z][a-z0-9+.-]*://([^/]+)/([^/]+/[^/]+)/pull/[0-9]`)
 	// the /pull/<number> segment a canonical pr_url is cut at.
 	rePullSeg = regexp.MustCompile(`/pull/[0-9]+`)
+	// an escalation key, in the charset escalate.sh and finalize-gate.sh accept.
+	reEscalationKey = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
 // Merge runs the one pass, paced by the --deadline and --cursor in args.
@@ -168,6 +170,10 @@ type merger struct {
 	rereads      int
 	rereadSecs   int
 	rereadsSpent int
+
+	// The stale-PR-gate key stale-gate.sh names, read once per pass.
+	staleKey     string
+	staleKeyRead bool
 
 	merged       int
 	recovered    int
@@ -1008,14 +1014,33 @@ func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok boo
 // staleGateKey is the escalation key liveness-sweep.sh files its stale-PR-gate
 // visit under, on an anchor whose PR stopped moving. Landing the PR is one of the
 // dispositions that visit asks for, so a merge it held would block its own
-// answer. merge.sh's STALE_GATE_KEY names the same key.
-const staleGateKey = "anchor-stale"
+// answer. The key's one definition is stale-gate.sh, which the shell scripts
+// source and this port runs as `stale-gate.sh key`, once per pass. A key that
+// does not read, or reads outside the charset finalize-gate.sh accepts for a
+// key, excepts nothing: every visit then holds its merge, the fail-closed side
+// of the gate.
+func (m *merger) staleGateKey() string {
+	if !m.staleKeyRead {
+		m.staleKeyRead = true
+		out, rc := m.scriptCapture("stale-gate.sh", "key")
+		if k := strings.TrimSpace(out); rc == 0 && reEscalationKey.MatchString(k) {
+			m.staleKey = k
+		} else {
+			fmt.Fprintf(m.stderr, "%s: WARN stale-gate.sh did not name the stale-PR-gate key; no visit is excepted from the finalize gate this pass\n", mergeProg)
+		}
+	}
+	return m.staleKey
+}
 
 // finalizeGate reports whether the gate is open (ok) and, when held, the reason
 // finalize-gate.sh printed. The gate excepts the stale-PR-gate visit only while
 // nobody is engaged in it.
 func (m *merger) finalizeGate(id string) (reason string, ok bool) {
-	out, rc := m.scriptCapture("finalize-gate.sh", "check", id, "--except-key", staleGateKey)
+	args := []string{"check", id}
+	if k := m.staleGateKey(); k != "" {
+		args = append(args, "--except-key", k)
+	}
+	out, rc := m.scriptCapture("finalize-gate.sh", args...)
 	return strings.TrimRight(out, "\n"), rc == 0
 }
 
@@ -1139,12 +1164,13 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // directory missing a helper is not refused here, because merge.sh refuses the
 // pass only for a missing check resolver, which Merge checks next. Every other
 // helper is handled where it is called. A missing lane-state.sh or
-// finalize-gate.sh holds that anchor. A missing escalate.sh,
-// record-failure-cap.sh or render-seed-audit.sh is skipped. The pass still
-// records a PR that has already merged.
+// finalize-gate.sh holds that anchor. A missing stale-gate.sh excepts no visit
+// from the finalize gate, so an open stale-PR-gate visit holds its anchor. A
+// missing escalate.sh, record-failure-cap.sh or render-seed-audit.sh is
+// skipped. The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, stale-gate.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }

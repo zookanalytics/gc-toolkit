@@ -35,6 +35,12 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+# The one definition of the stale-PR gate, shared with liveness-sweep.sh and
+# merge.sh. Exposes STALE_GATE_JQ, which names the visits the pass files and
+# retracts, so the "may owe a retraction" run-gate below reads the visits the
+# pass judges.
+# shellcheck source=stale-gate.sh
+. "$HERE/stale-gate.sh" || { echo "liveness-sweep-precheck: cannot source stale-gate.sh from $HERE" >&2; exit 2; }
 
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
@@ -44,10 +50,6 @@ KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
 # stamp with the same arithmetic the pass does.
 STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
 case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
-# The key the pass files and retracts its stale-gate visit under, mirrored from
-# liveness-sweep.sh so the "may owe a retraction" run-gate below reads the same
-# visits the pass judges.
-STALE_GATE_KEY="anchor-stale"
 
 FORCE=0
 while [ $# -gt 0 ]; do
@@ -395,13 +397,8 @@ fi
 # a visit open after its PR landed and its anchor left the ready set.
 STALE_VISITS=""; N_STALE_VISITS=""
 if [ "$READS_OK" -eq 1 ]; then
-    STALE_VISITS=$(jq -c --arg key "$STALE_GATE_KEY" '
-      [ .[] | select((.metadata.task_kind // "") == "visit")
-        | select(((.status // "open") | tostring) == "open")
-        | select(((.metadata.escalation_key // "") | tostring) == $key)
-        | select(((.assignee // "") | tostring) == ""
-                 and ((.metadata["gc.session_name"] // "") | tostring) == "")
-        | .id ]' "$LIVE" 2>/dev/null)
+    STALE_VISITS=$(jq -c "$STALE_GATE_JQ"'
+      [ .[] | select(unengaged_stale_gate_visit) | .id ]' "$LIVE" 2>/dev/null)
     if printf '%s' "$STALE_VISITS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         N_STALE_VISITS=$(printf '%s' "$STALE_VISITS" | jq 'length')
     fi

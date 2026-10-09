@@ -72,12 +72,13 @@ visit() { # id anchor [status]
     "$1" "${3:-open}" "$2" "$2"
 }
 # The stale-PR-gate visit liveness-sweep.sh files on an anchor whose PR stopped
-# moving, under the key read from the sweep itself, so the merge is tested
-# against the visit the sweep files. [status], [assignee] and [session] say who
-# is engaged in it; all three left at their defaults is a visit nobody engaged.
-STALE_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$HERE/liveness-sweep.sh")
-stale_visit() { # id anchor [status] [assignee] [session]
-  jq -cn --arg id "$1" --arg a "$2" --arg st "${3:-open}" --arg who "${4:-}" --arg sess "${5:-}" --arg key "$STALE_KEY" \
+# moving, under the key stale-gate.sh defines for the sweep and for both merge
+# implementations, so the merge is tested against the visit the sweep files.
+# [status], [assignee] and [session] say who is engaged in it; all three left at
+# their defaults is a visit nobody engaged. [key] files it under another key.
+STALE_KEY=$("$HERE/stale-gate.sh" key)
+stale_visit() { # id anchor [status] [assignee] [session] [key]
+  jq -cn --arg id "$1" --arg a "$2" --arg st "${3:-open}" --arg who "${4:-}" --arg sess "${5:-}" --arg key "${6:-$STALE_KEY}" \
     '{id: $id, status: $st, assignee: $who, notes: "", title: "visit: stale PR gate: \($a)",
       metadata: ({task_kind: "visit", escalation_key: $key, "gc.continuation_group": $a}
                  + (if $sess == "" then {} else {"gc.session_name": $sess} end))}'
@@ -522,6 +523,24 @@ eq "$(jq '[.[] | select(.id == "vis-ms5" and .status == "open")] | length' "$STU
   "the visit was filed during the pass, at the terminal re-read"
 has "$out" "merged + recorded MS5" "the terminal re-read excepts an unengaged stale-gate visit too"
 hasnt "$out" "changed between validation and the merge" "…and reads no change in it"
+: > "$STUB_DEPS"
+
+echo "# merge reads the stale-PR-gate key from stale-gate.sh, the key's one definition"
+# A rename lands in that one file. Renamed in the scripts directory merge runs
+# from, the exception follows it: a visit under the new key no longer holds the
+# merge, and one under the old key holds it like a visit under any other key.
+cp "$SD/stale-gate.sh" "$TMP/stale-gate.sh.keep"
+sed "s/^STALE_GATE_KEY=\"$STALE_KEY\"\$/STALE_GATE_KEY=\"$STALE_KEY-renamed\"/" "$TMP/stale-gate.sh.keep" > "$SD/stale-gate.sh"
+eq "$("$SD/stale-gate.sh" key)" "$STALE_KEY-renamed" "precondition: the scripts directory names the renamed key"
+store "[$(anchor MR1 146), $(rev MR1), $(stale_visit vis-mr1 MR1 open "" "" "$STALE_KEY-renamed"), $(anchor MR2 147), $(rev MR2), $(stale_visit vis-mr2 MR2)]"
+printf 'vis-mr1|tracks|MR1\nvis-mr2|tracks|MR2\n' > "$STUB_DEPS"
+for n in 146 147; do printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"; approved "$n"; done
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MR1" "a visit under the renamed key does not hold the merge"
+has "$out" "held by open visit vis-mr2" "…and one under the old key now holds it"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 147" "…and nothing merged under it"
+cp "$TMP/stale-gate.sh.keep" "$SD/stale-gate.sh"
 : > "$STUB_DEPS"
 
 echo "# approval is a UNIVERSAL merge rule: every PR needs a standing non-city APPROVED"
@@ -1741,17 +1760,12 @@ SENTINEL="$TMP/sentinel-gctk"
 printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
 chmod +x "$SENTINEL"
 
-echo "## merge excepts the key liveness-sweep.sh files its stale-gate visit under"
-# The exception is only as good as the key it names: a sweep that filed under a
-# renamed key would hold every approved PR behind its visit again. Both merge
-# implementations name the sweep's own key, and the suite's stale_visit fixture
-# carries that key too.
-SH_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$HERE/merge.sh")
-GO_KEY=$(sed -n 's/^const staleGateKey = "\(.*\)"$/\1/p' "$HERE/../../services/gctk/internal/cli/merge.go")
-[ -n "$STALE_KEY" ] && ok "liveness-sweep.sh names its stale-gate key ('$STALE_KEY')" \
-  || bad "liveness-sweep.sh names its stale-gate key" "no STALE_GATE_KEY= line in liveness-sweep.sh"
-eq "$SH_KEY" "$STALE_KEY" "merge.sh excepts the key the sweep files under"
-eq "$GO_KEY" "$STALE_KEY" "gctk merge excepts the key the sweep files under"
+echo "## the stale-PR-gate fixtures carry the key stale-gate.sh names"
+# The exception is only as good as the key it names. Each arm runs its rename
+# case in the suite, and stale-gate.test.sh holds every reader to the one
+# definition; an empty key here would leave every stale_visit fixture vacuous.
+[ -n "$STALE_KEY" ] && ok "stale-gate.sh names the stale-gate key ('$STALE_KEY')" \
+  || bad "stale-gate.sh names the stale-gate key" "\`stale-gate.sh key\` printed nothing"
 
 echo
 echo "## arm: shell fallback (GCTK_FALLBACK=merge)"

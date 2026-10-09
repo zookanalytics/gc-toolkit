@@ -147,6 +147,8 @@ has " $(down_blockers tk-kd) " " tk-blk " "dep <blocker> --blocks <blocked> land
 mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/bd-lib.sh" ] && ok "mk_sut_dir copies bd-lib.sh beside the SUT" || bad "mk_sut_dir left bd-lib.sh out"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
+[ -x "$TMP/sut/stale-gate.sh" ] && ok "mk_sut_dir copies stale-gate.sh beside the SUT, executable for gctk merge to run" \
+    || bad "mk_sut_dir left stale-gate.sh out, or not executable"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
 
