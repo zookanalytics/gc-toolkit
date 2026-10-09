@@ -24,13 +24,20 @@ grep -q -- '--key' "$TOML" \
   || bad "patrol-finding.sh calls must carry --key"
 
 # Every per-bead finding shares one key across beads, so --about is what keeps
-# two stuck beads two findings instead of collapsing them into one.
+# two stuck beads two findings instead of collapsing them into one. And
+# --distinct is what files the second: patrol-finding.sh refuses a new bead
+# whose key a live finding in its scope already carries about another subject.
 for k in witness-salvage-refused witness-partial-release \
          witness-crash-loop polecat-help; do
   if grep -A2 -- "--key $k" "$TOML" | grep -q -- '--about'; then
     ok "$k is scoped by --about, so two beads are two findings"
   else
     bad "$k names no --about; every bead with that key would be one finding"
+  fi
+  if grep -A2 -- "--key $k" "$TOML" | grep -q -- '--distinct'; then
+    ok "$k passes --distinct, so a second bead's finding files while the first is live"
+  else
+    bad "$k omits --distinct; patrol-finding.sh refuses its second subject while the first is live"
   fi
 done
 

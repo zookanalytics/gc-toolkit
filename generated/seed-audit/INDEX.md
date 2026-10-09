@@ -46,7 +46,7 @@ covers that dimension.
 | [`polecat-codex`](agents/polecat-codex.md) | 27,441 | 6,860 |
 | [`proactive`](agents/proactive.md) | 12,122 | 3,030 |
 | [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
-| [`witness`](agents/witness.md) | 15,605 | 3,901 |
+| [`witness`](agents/witness.md) | 16,115 | 4,028 |
 
 ## Formula recipes
 

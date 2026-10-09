@@ -118,9 +118,17 @@ done
 "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
-`--about` names the bead the finding is about. It narrows the dedup to that
-bead, so one key over two beads stays two findings rather than collapsing
-into one.
+`--about` names the bead the finding is about, and the dedup matches on it
+together with the key. Leave it off for a finding about the patrol itself. A
+patrol wisp is burned when its pass ends, so patrol-finding.sh drops a wisp
+subject and dedups on the key alone.
+
+patrol-finding.sh files a new bead only when no live witness finding already
+shares its key or its subject. When one does, it files nothing, lists those
+findings, and exits 3. If your finding reports one of those situations, re-run
+with that finding's own `--key` and `--about`, and the report lands on it as an
+occurrence. Add `--distinct` only when your situation differs from every
+finding it listed.
 
 Routine recoveries (pool resize, config change) are logged, not filed. File
 what needs someone to act: repeated recovery of one bead (crash loop),
