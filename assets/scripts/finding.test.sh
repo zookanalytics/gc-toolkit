@@ -463,6 +463,52 @@ eq "$rc/$out" "2/" "a re-raise whose edge onto the must-fix finding will not han
 eq "$(upsert_q ue "edge refused" cfuQ2)" "$QE" "the retry re-adopts the finding"
 has "$(deps)" "cfuQ2|blocks|$QE" "…and hangs the edge"
 
+# A ruling and a later batch's re-adoption can cross on one finding. Each side
+# reads the other's state only after its own write, so whichever order they cross
+# in, one of them hangs the later child. First order: the ruling read the earlier
+# child, then the batch recorded its own child while the disposition still read
+# unvalidated, so the batch hung nothing. The shim lands the batch's write just
+# before the ruling's commit, and the ruling's re-read after the commit hangs it.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"cfuR1","status":"open","assignee":"","title":"Address review comments on PR#13 (through review 0, comment 700)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_review":"700"}},
+        {"id":"cfuR2","status":"open","assignee":"","title":"Address review comments on PR#13 (through review 0, comment 800)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_review":"800"}}]'
+upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "assets/scripts/r.sh:$1()" --message "$2" --fix-unit "$3"; }
+mkdir -p "$TMP/cross"
+FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
+cat > "$TMP/cross/gc" <<SHIM
+#!/usr/bin/env bash
+if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
+  "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
+fi
+exec "$BIN/gc" "\$@"
+SHIM
+chmod +x "$TMP/cross/gc"
+PATH="$TMP/cross:$PATH" "$SUT" set-disposition --finding "$FR" --anchor tk-ancR --disposition must-fix
+has "$(deps)" "cfuR1|blocks|$FR" "a ruling crossed by a re-raise hangs the child it read"
+has "$(deps)" "cfuR2|blocks|$FR" "…and the child the re-raise recorded meanwhile, read back after the commit"
+gc bd update cfuR1 --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancR
+eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it as answered"
+
+# Second order: the ruling commits between the batch's write of its child and its
+# read of the disposition. The shim lands the whole ruling, wired to the earlier
+# child, right after the batch's write. The re-adoption reads the disposition after
+# that write, so it sees must-fix and hangs its child.
+FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
+cat > "$TMP/cross/gc" <<SHIM
+#!/usr/bin/env bash
+"$BIN/gc" "\$@"; rc=\$?
+if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
+  "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null
+  "$BIN/gc" bd dep cfuR1 --blocks "$FS" >/dev/null
+  "$BIN/gc" bd update "$FS" --set-metadata finding.disposition=must-fix >/dev/null
+fi
+exit \$rc
+SHIM
+eq "$(PATH="$TMP/cross:$PATH" upsert_r readopt "crossed by a ruling" cfuR2)" "$FS" "a re-raise crossed by a ruling re-adopts the finding"
+has "$(deps)" "cfuR2|blocks|$FS" "…and hangs its child, reading the disposition only after its own write"
+
 # ---------------------------------------------------------------------------
 # set-disposition must-fix wires the close-ordering edge even when the fix unit
 # has ALREADY LANDED. The dispatch of a fix unit and the validator's must-fix

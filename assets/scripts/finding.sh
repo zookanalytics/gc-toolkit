@@ -281,6 +281,11 @@ cmd_key() {
 # child hung stays, and close-answered closes the finding when every blocker has
 # closed. Fail closed (exit 2): a finding left recording the earlier child closes
 # as answered when that child lands, and the caller's retry re-adopts it.
+#
+# The disposition is read after the record is written, never before. A must-fix
+# ruling can be in flight on the same finding, and it re-reads the record after it
+# commits (set-disposition). Whichever side reads second sees the other's write,
+# so one of them always hangs this child.
 readopt_fix_unit() { # <finding> <fix-unit>
   local f="$1" fu="$2" row got disp wrote=""
   row=$(bd_json show "$f")
@@ -289,7 +294,8 @@ readopt_fix_unit() { # <finding> <fix-unit>
   got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
   if [ "$got" != "$fu" ]; then
     gc bd update "$f" --set-metadata finding.fix_unit="$fu" >/dev/null 2>&1 || true
-    got=$(bd_json show "$f" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
+    row=$(bd_json show "$f")
+    got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
     [ "$got" = "$fu" ] \
       || { warn "re-raised finding $f did not record finding.fix_unit=$fu (got '$got')"; return 2; }
     wrote=1
@@ -419,7 +425,7 @@ cmd_set_disposition() {
       # above is the hold, so a fix unit whose edge cannot be hung costs the close
       # ordering, never the merge hold. The anchor edge is the fix unit's own (hung
       # at dispatch), not re-hung here.
-      local fu flane frow
+      local fu flane frow fu_now
       frow=$(bd_json show "$finding")
       fu=$(printf '%s' "$frow" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
       flane=$(printf '%s' "$frow" | jq -r '(.[0].metadata["finding.lane"] // "") | tostring' 2>/dev/null)
@@ -428,9 +434,20 @@ cmd_set_disposition() {
         gc bd dep "$fu" --blocks "$finding" >/dev/null 2>&1 \
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
       fi
-      # Commit the disposition last, now the anchor-blocking hold is proven wired.
+      # Commit the disposition now the anchor-blocking hold is proven wired.
       gc bd update "$finding" --set-metadata finding.disposition=must-fix >/dev/null 2>&1 \
         || { warn "could not record finding.disposition=must-fix on $finding"; exit 2; }
+      # A later batch can re-raise this finding during the ruling and record its own
+      # child after the read above. Its re-adoption reads the disposition only after
+      # that write, and hangs the child once it reads must-fix. A child recorded
+      # while the disposition still read unvalidated is hung here, from a re-read
+      # after the commit. Best-effort like the edge above, since the ruling is
+      # already committed.
+      fu_now=$(bd_json show "$finding" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
+      if [ -n "$fu_now" ] && [ "$fu_now" != "$fu" ] && ! edge_exists "$fu_now" "$finding"; then
+        gc bd dep "$fu_now" --blocks "$finding" >/dev/null 2>&1 \
+          || warn "could not hang fix unit $fu_now --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
+      fi
       ;;
     deferred)
       # A real objection not fixed in this PR: it becomes tracked later-work. File a
