@@ -77,6 +77,7 @@ harness_init() {
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
+  export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
@@ -373,18 +374,47 @@ case "$verb" in
     echo "updated $id"
     ;;
   create)
+    # Real bd lands a create in one insert: --metadata (a JSON value, stored
+    # with its JSON types), --status and --notes all ride it, and a --metadata
+    # that is not JSON is refused with nothing created. STUB_DROP_KEYS applies
+    # here as on update, keyed by the id this create mints (new-<store length
+    # + 1>), so a birth that half-lands is modelled key by key; `status` in the
+    # list leaves the bead at the default open. STUB_CREATE_FAIL refuses the
+    # create outright. STUB_CREATE_GARBAGE lets it land and answers with a
+    # reply no JSON reader parses, the shape of a create whose id is lost.
     title="${1:-}"; shift || true
-    body=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""
     while [ $# -gt 0 ]; do
-      case "$1" in --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;; esac
+      case "$1" in
+        --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
+        --metadata) shift; cmeta="${1:-}" ;;
+        --metadata=*) cmeta="${1#--metadata=}" ;;
+        -s|--status) shift; cstatus="${1:-}" ;;
+        --status=*) cstatus="${1#--status=}" ;;
+        --notes) shift; cnotes="${1:-}" ;;
+        --notes=*) cnotes="${1#--notes=}" ;;
+      esac
       shift || true
     done
+    [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
+    { [ -n "$cmeta" ] && printf '%s' "$cmeta" | jq empty >/dev/null 2>&1; } \
+      || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     n=$(jq 'length' "$S"); nid="new-$((n + 1))"
+    drops=""
+    for pair in ${STUB_DROP_KEYS:-}; do
+      case "$pair" in "$nid:"*) drops="${pair#*:}" ;; esac
+    done
+    case ",$drops," in *",status,"*) cstatus="open" ;; esac
     tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
-    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" \
-      '. + [{id: $id, status: "open", assignee: "", title: $t, description: $b, notes: "", issue_type: "task", metadata: {}}]' \
+    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --argjson m "$cmeta" --arg dr "$drops" '
+      ($dr | split(",")) as $drop
+      | (if ($m | type) == "object"
+           then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
+           else $m end) as $meta
+      | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
       "$S" > "$tmp" && mv "$tmp" "$S"
-    printf '{"id":"%s"}\n' "$nid"
+    if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else printf '{"id":"%s"}\n' "$nid"; fi
     ;;
   close)
     id="${1:-}"

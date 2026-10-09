@@ -589,8 +589,9 @@ keys = [
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
-#   in the same update that closes the review bead (signoff.sh; review-outcome.sh
-#   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green
+#   in the same write that closes the review bead (signoff.sh's closing update;
+#   review-outcome.sh writes `approve` in the create that files a back-lane
+#   outcome already closed). lane-state.sh derives a lane green
 #   from a closed review carrying `approve` with a non-empty reviewed_oid and a
 #   non-superseded gc.outcome; doctor/check-gate-marker-provenance audits the
 #   same shape. A closed review with no signoff_verdict, such as a legacy review
