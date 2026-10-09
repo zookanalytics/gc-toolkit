@@ -33,9 +33,9 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 34,562 | 8,640 |
-| [`converse-fable`](agents/converse-fable.md) | 34,562 | 8,640 |
-| [`converse-opus`](agents/converse-opus.md) | 34,562 | 8,640 |
+| [`converse-codex`](agents/converse-codex.md) | 34,724 | 8,681 |
+| [`converse-fable`](agents/converse-fable.md) | 34,724 | 8,681 |
+| [`converse-opus`](agents/converse-opus.md) | 34,724 | 8,681 |
 | [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
@@ -83,7 +83,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,466 | 866 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,637 | 909 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not

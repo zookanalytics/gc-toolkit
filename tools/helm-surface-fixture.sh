@@ -97,7 +97,7 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
            GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
     has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
-    # Regression (tk-82g33): react must SELF-SUPPLY GC_RIG so the sling can
+    # Regression: react must SELF-SUPPLY GC_RIG so the sling can
     # rig-qualify its pool target even from a GC_RIG-less shell — the NORMAL
     # operator path (the prefix+b board picker and a bare shell both lack it).
     # The assertions above pre-set GC_RIG=gc-toolkit, which MASKS the bug by
