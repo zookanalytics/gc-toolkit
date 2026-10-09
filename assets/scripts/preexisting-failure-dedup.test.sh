@@ -321,8 +321,9 @@ fi
 # (H) THE STATUS SET. A twin in any live status is the failure's tracker. The
 #     stub lists it only when the --status the snippet passed admits its
 #     status, so each case below pins one member of the set the probe sends.
-#     in_progress (a worker is fixing the red) and blocked (a hold parks it)
-#     are the statuses an open-only probe misses.
+#     An open-only probe misses every case but open. in_progress (a worker is
+#     fixing the red) and blocked (a hold parks it) are the ones a re-observed
+#     red usually meets.
 for st in open in_progress blocked deferred hooked pinned; do
   eq "$(run dup target "$st")" "0" "(H) $st twin -> snippet proceeds (exit 0)"
   if grep -q '^CREATE_RAN$' "$FAKE_META"; then
