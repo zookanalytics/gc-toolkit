@@ -4,11 +4,14 @@
 # result would land a stale artifact, and the artifact's committed shape lets two
 # branches that moved different inputs merge at all. Real git, no stubs: both are
 # questions about trees, and stubbing git would leave the merge itself
-# unexercised. One is about the renderer: the gcq wrapper pins its working
+# unexercised. Three are about the renderer: the gcq wrapper pins its working
 # directory so the render resolves the synthetic city and not one discovered from
-# the cwd it was invoked in. Two are refusals: --install-hook will not shadow a
-# hand-installed hook, and a render fails when an agent the pack owns renders the
-# builtin worker prompt. Only that last case renders, against a stub `gc` on
+# the cwd it was invoked in, the render is one tree however TMPDIR spells the
+# scratch directory, and INDEX.md's byte column holds the bare number whichever
+# wc counted it. Three are refusals: --install-hook will not shadow a
+# hand-installed hook, a render fails when an agent the pack owns renders the
+# builtin worker prompt, and a render fails when the throwaway city's path
+# survives the substitution. The cases that render run against a stub `gc` on
 # PATH, so no real `gc`, no city and no network are involved; the fixture's own
 # copy of the renderer is only ever asked for a manifest, and the hermeticity
 # check reads the renderer's text.
@@ -23,8 +26,11 @@
 # against a control carrying the repo-global line the manifest replaced; the
 # gcq wrapper's cwd pin; the hook install's refusal, for a hand-installed hook
 # and for a listing that fails, against a control holding only a sample hook;
-# and the builtin-fallback guard, which holds the pack's own agents and not a
-# builtin provider's.
+# the builtin-fallback guard, which holds the pack's own agents and not a
+# builtin provider's; a TMPDIR spelled with a trailing slash, by its physical
+# path and through a symlink, each against the tree a plain one renders; a city
+# spelling no needle names, which fails the render; and a wc that pads its
+# count, against the host's.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -304,12 +310,28 @@ case "\$1 \${2:-}" in
     "agent list")   printf '{"agents":[{"name":"alpha"},{"name":"claude"}]}\n' ;;
     "formula list") printf 'mol-fixture\n' ;;
     "formula show") printf '# mol-fixture\n' ;;
-    "prime alpha")  cat "$TMP/stub-gc/alpha.txt" ;;
+    "prime alpha")  "$TMP/stub-gc/spell-city" < "$TMP/stub-gc/alpha.txt" ;;
     "prime claude") printf '%s\n' "$BUILTIN_WORKER" ;;
     *)              exit 1 ;;
 esac
 STUB
 chmod +x "$TMP/stub-gc/gc"
+# alpha's prompt names the city the way a real prime does. @@CITY@@ is gc's
+# spelling of the path --city was given, which is gascity's
+# pathutil.NormalizePathForCompare: cleaned, symlinks resolved, and the darwin
+# /private/tmp and /private/var aliases collapsed. @@FOREIGN@@ is a spelling no
+# rule derives, the city's own directory names under a root the render never
+# saw. gcq runs every call from the city, so the working directory names it.
+cat > "$TMP/stub-gc/spell-city" <<'STUB'
+#!/usr/bin/env bash
+city="$(pwd -P)"
+if [ "$(uname -s)" = Darwin ]; then
+    case "$city" in /private/tmp/*|/private/var/*) city="${city#/private}" ;; esac
+fi
+foreign="/elsewhere/$(basename "$(dirname "$city")")/$(basename "$city")"
+sed -e "s|@@CITY@@|$city|g" -e "s|@@FOREIGN@@|$foreign|g"
+STUB
+chmod +x "$TMP/stub-gc/spell-city"
 render_stub() { PATH="$TMP/stub-gc:$PATH" bash "$SUT" --root "$P" --out "$TMP/render-out" --jobs 1 2>&1; }
 
 printf '# alpha doctrine\n' > "$TMP/stub-gc/alpha.txt"
@@ -320,6 +342,72 @@ out=$(render_stub); rc=$?
 eq "$rc" 2 "the pack agent rendering the builtin worker prompt fails the render"
 has "$out" "FAILED agent alpha (rendered a builtin fallback prompt" "…and names the agent and the reason"
 hasnt "$out" "FAILED agent claude" "…while claude, which the pack does not own, still passes"
+
+# ------------------------------------------------ the throwaway city's spellings
+#
+# The city is built under TMPDIR, and gc prints it under the path it resolves
+# rather than the one it was handed. A TMPDIR ending in a slash (macOS sets one),
+# one spelled by its physical path (/private/var on macOS), and one reached
+# through a symlink must each render the tree a plain TMPDIR renders. Otherwise
+# the random scratch path lands in the render, and --check calls the tree stale
+# straight after the render that wrote it.
+echo "# the city's path is substituted however TMPDIR spells it"
+D="$(cd "$TMP" && pwd)/scratch"
+mkdir -p "$D"
+ln -s "$D" "$TMP/scratch-link"
+render_under() { # <TMPDIR> <out>
+    TMPDIR="$1" PATH="$TMP/stub-gc:$PATH" bash "$SUT" --root "$P" --out "$2" --jobs 1 2>&1
+}
+printf '# alpha doctrine\ncity: @@CITY@@/city.toml\n' > "$TMP/stub-gc/alpha.txt"
+out=$(render_under "$D" "$TMP/city-plain"); rc=$?
+eq "$rc" 0 "control: a render under a plain TMPDIR succeeds"
+has "$(cat "$TMP/city-plain/agents/alpha.md" 2>/dev/null)" "city: [[CITY-ROOT]]/city.toml" \
+    "…and substitutes the city's path"
+for spelling in "a trailing slash|$D/" "its physical path|$(cd "$D" && pwd -P)" \
+        "a symlink|$TMP/scratch-link"; do
+    out=$(render_under "${spelling#*|}" "$TMP/city-other"); rc=$?
+    eq "$rc" 0 "a TMPDIR spelled with ${spelling%%|*} renders"
+    if diff -r "$TMP/city-plain" "$TMP/city-other" > /dev/null 2>&1; then
+        ok "…the same tree as the plain TMPDIR"
+    else
+        bad "…a tree that differs from the plain TMPDIR's: $(diff -r "$TMP/city-plain" "$TMP/city-other" 2>&1 | head -4)"
+    fi
+    rm -rf "$TMP/city-other"
+done
+
+echo "# a spelling of the city that no needle names fails the render"
+printf '# alpha doctrine\ncity: @@FOREIGN@@/city.toml\n' > "$TMP/stub-gc/alpha.txt"
+out=$(render_under "$D" "$TMP/city-foreign"); rc=$?
+eq "$rc" 2 "a city path that survives the substitution fails the render"
+has "$out" "FAILED agent alpha (the throwaway city path survived normalization)" "…naming the agent"
+has "$out" "city: /elsewhere/" "…and quoting the line that carries the path"
+if [ -e "$TMP/city-foreign" ]; then bad "…but it wrote a tree anyway"; else ok "…and writes no tree"; fi
+
+# ------------------------------------------------ the INDEX.md byte column
+#
+# BSD wc pads its count with leading blanks and GNU wc prints it bare. The
+# stand-in pads on either host, so the case exercises the BSD shape under GNU
+# too, and the row assertion holds on a host whose own wc pads.
+echo "# a padded wc count reaches INDEX.md as the bare number"
+mkdir -p "$TMP/padding-wc"
+cat > "$TMP/padding-wc/wc" <<STUB
+#!/usr/bin/env bash
+printf '%8s\n' "\$("$(command -v wc)" "\$@" | tr -d ' ')"
+STUB
+chmod +x "$TMP/padding-wc/wc"
+printf '# alpha doctrine\n' > "$TMP/stub-gc/alpha.txt"
+out=$(render_under "$D" "$TMP/wc-host"); rc=$?
+eq "$rc" 0 "control: a render with the host's wc succeeds"
+out=$(TMPDIR="$D" PATH="$TMP/padding-wc:$TMP/stub-gc:$PATH" \
+    bash "$SUT" --root "$P" --out "$TMP/wc-padded" --jobs 1 2>&1); rc=$?
+eq "$rc" 0 "a render with a padding wc succeeds"
+has "$(cat "$TMP/wc-padded/INDEX.md" 2>/dev/null)" '| [`alpha`](agents/alpha.md) | 17 | 4 |' \
+    "…and its INDEX.md row carries the bare byte count"
+if diff -r "$TMP/wc-host" "$TMP/wc-padded" > /dev/null 2>&1; then
+    ok "…the same tree as the render with the host's wc"
+else
+    bad "…a tree that differs from the host wc's: $(diff -r "$TMP/wc-host" "$TMP/wc-padded" 2>&1 | head -4)"
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"
