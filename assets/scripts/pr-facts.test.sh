@@ -3970,6 +3970,7 @@ out=$("$SUT" --route-comments-only --fix-pool "$FIX" 2>&1)
 has "$out" "PR#177 has 1 unengaged review-thread finding(s); filed visit" "the early routing pass files the visit"
 eq "$(meta UC3 pr_unengaged_threads)" "sha-177" "…and watermarks the head"
 eq "$(merge_ins UC3)" "0" "…and files no merge-in child"
+has "$out" "route-comments-only — 1 postures recorded, 0 comment batches routed, 1 flagged-to-human" "…and its summary counts the visit"
 
 echo "# Conversation tab: an operator issue comment files a rework child on its own watermark"
 # The sweep read only reviews and inline comments, so operator direction posted

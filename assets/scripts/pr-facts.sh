@@ -4132,7 +4132,7 @@ elif [ "$ROUTE_ONLY" = 1 ]; then
   # instead of waiting for the full pass at the tail. Its rc holds nothing:
   # routing is best-effort and the full pass re-runs it idempotently, so
   # refinery-reconcile reports a non-zero but never holds merge on it.
-  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
+  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $flagged flagged-to-human, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $posted conversation answers posted, $swapped comments marked resolved, $skipped skipped"
 fi
