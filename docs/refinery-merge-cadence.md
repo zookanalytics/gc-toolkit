@@ -140,7 +140,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    (`docs/finalize-gate.md`), re-asserted in the terminal re-read because a visit
    filed mid-pass does not move the head. The stale-PR-gate visit
    `liveness-sweep.sh` files on an idle PR is excepted while nobody is engaged in
-   it, because landing the PR is one of the answers it asks for.
+   it, because landing the PR is one of the answers it asks for, and once the
+   landing records, the arm retracts that visit as moot.
 
    GitHub computes a PR's mergeability lazily. The first read after the PR's
    base moves answers `UNKNOWN` and starts the computation, which finishes in a

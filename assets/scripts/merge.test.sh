@@ -36,7 +36,13 @@ harness_init
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
+# escalate.sh stub: logs each call's arguments. STUB_ESC_RC, when set, is the
+# exit code it answers with, after the log line.
+cat > "$SD/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
+[ -z "${STUB_ESC_RC:-}" ] || exit "$STUB_ESC_RC"
+ESC
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/merge.sh"
@@ -542,6 +548,54 @@ has "$out" "held by open visit vis-mr2" "…and one under the old key now holds 
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 147" "…and nothing merged under it"
 cp "$TMP/stale-gate.sh.keep" "$SD/stale-gate.sh"
 : > "$STUB_DEPS"
+
+echo "# merge retracts the stale-PR-gate visit once the anchor records the landing"
+# The visit asked for the landing, so merge retracts it as moot at the source,
+# under the key and naming the landing, rather than leave it open on a merged PR
+# until the sweep's next pass. Only an anchor the sweep stamped
+# stale_escalated_at on is asked. The arm that records a PR already merged
+# retracts the same way, and a landing whose record fails retracts nothing: the
+# next pass records it and retracts then.
+STAMPED=',"stale_escalated_at":"2026-10-01T00:00:00Z"'
+store "[$(anchor MT1 148 "$STAMPED"), $(rev MT1), $(stale_visit vis-mt1 MT1)]"
+printf 'vis-mt1|tracks|MT1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 148 OPEN CLEAN)" > "$GH_DIR/pr_view_148.json"
+approved 148
+: > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MT1" "an approved PR the sweep escalated lands past its stale-gate visit"
+eq "$(cat "$STUB_ESC_LOG")" "--retract --subject MT1 --key $STALE_KEY --message PR#148 landed on main at merged-s, so the stale-PR gate on MT1 asks for nothing" \
+  "…and merge retracts that visit once the landing records, under the key, naming the landing"
+: > "$STUB_DEPS"
+store "[$(anchor MT2 149), $(rev MT2)]"
+printf '%s' "$(prview 149 OPEN CLEAN)" > "$GH_DIR/pr_view_149.json"
+approved 149
+: > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MT2" "control: an anchor the sweep never escalated lands"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and asks for no retraction"
+store "[$(anchor MT3 164 "$STAMPED")]"
+printf '%s' "$(prview 164 MERGED CLEAN)" > "$GH_DIR/pr_view_164.json"
+: > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "recovered MT3" "a stamped anchor whose PR already merged has its record recovered"
+eq "$(cat "$STUB_ESC_LOG")" "--retract --subject MT3 --key $STALE_KEY --message PR#164 merged to main at merged-s, so the stale-PR gate on MT3 asks for nothing" \
+  "…and its stale-gate visit retracted the same way"
+store "[$(anchor MT4 165 "$STAMPED"), $(rev MT4)]"
+printf '%s' "$(prview 165 OPEN CLEAN)" > "$GH_DIR/pr_view_165.json"
+approved 165
+: > "$STUB_ESC_LOG"
+out=$(STUB_CLOSE_FAIL="MT4" "$SUT" 2>&1)
+has "$out" "MERGED but the lifecycle record FAILED for MT4" "a stamped landing whose record fails is reported"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…and retracts nothing until the record lands"
+store "[$(anchor MT5 166 "$STAMPED"), $(rev MT5)]"
+printf '%s' "$(prview 166 OPEN CLEAN)" > "$GH_DIR/pr_view_166.json"
+approved 166
+: > "$STUB_ESC_LOG"
+out=$(STUB_ESC_RC=1 "$SUT" 2>&1); rc=$?
+has "$out" "merged + recorded MT5" "a stamped landing whose retraction fails still records"
+has "$out" "could not retract the stale-PR-gate visit on MT5" "…says the retraction failed, leaving it to the sweep"
+eq "$rc" "0" "…and does not fail the pass"
 
 echo "# approval is a UNIVERSAL merge rule: every PR needs a standing non-city APPROVED"
 store "[$(anchor A1 20), $(rev A1)]"

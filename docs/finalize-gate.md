@@ -104,8 +104,9 @@ a squash-merge, a close — cannot be taken back.
   `gctk merge` port, pass `--except-key` with the key `stale-gate.sh` defines
   (`anchor-stale`), the one `liveness-sweep.sh` files that visit under, so an
   unengaged stale-PR-gate visit does not hold an approved PR. The script sources
-  the definition and the port runs it as `stale-gate.sh key`.
-  `liveness-sweep.sh` retracts the visit as moot once its premise is gone.
+  the definition and the port runs it as `stale-gate.sh key`. Once the anchor
+  records the landing, merge retracts that visit as moot, and
+  `liveness-sweep.sh` retracts one whose premise died any other way.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused

@@ -234,6 +234,25 @@ record_blocked() { # <anchor-id> <head-oid> <current-route> <reason>
   echo "$PROG: WARN $1 machine axis 'blocked@$2' did not record; the board reads it as unknown until the next pass" >&2
 }
 
+# Retract the stale-PR-gate visit on an anchor that has just recorded its PR
+# merged. The visit asked for that landing, so its premise is gone, and closing
+# it here, at the source, keeps it off the board instead of leaving it open on a
+# merged PR until liveness-sweep.sh's next pass, where a person could engage it
+# and make it theirs to close. Only an anchor the sweep stamped
+# stale_escalated_at on is asked, because the sweep stamps every anchor it files
+# a visit on or finds one open on. escalate.sh leaves a visit someone is engaged
+# in to them, and a retraction that fails leaves the visit to the sweep.
+retract_stale_gate() { # <anchor-id> <stale_escalated_at> <reading>
+  [ -n "${2:-}" ] || return 0
+  [ -x "$ESCALATE" ] || return 0
+  local out
+  if out=$("$ESCALATE" --retract --subject "$1" --key "$STALE_GATE_KEY" --message "$3" </dev/null); then
+    [ -z "$out" ] || printf '%s\n' "$out"
+  else
+    echo "$PROG: WARN could not retract the stale-PR-gate visit on $1; liveness-sweep.sh retracts it on a later pass" >&2
+  fi
+}
+
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -518,6 +537,8 @@ while IFS= read -r tagged; do
          --append-notes "Merged to $base at $short (record recovered by merge)"; then
       recovered=$((recovered + 1))
       echo "$PROG: recovered $id — PR#$num was already merged to $base at $short; the record had not landed"
+      retract_stale_gate "$id" "$(printf '%s' "$fresh" | jq -r '.meta.stale_escalated_at // ""' 2>/dev/null)" \
+        "PR#$num merged to $base at $short, so the stale-PR gate on $id asks for nothing"
     else
       echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
       record_failed=$((record_failed + 1))
@@ -1025,6 +1046,8 @@ $sa_out" >/dev/null 2>&1 || true
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
     merged=$((merged + 1))
     echo "$PROG: merged + recorded $id — PR#$num squashed to ${target:-$base} at ${short:-?}"
+    retract_stale_gate "$id" "$(printf '%s' "$final" | jq -r '.meta.stale_escalated_at // ""' 2>/dev/null)" \
+      "PR#$num landed on ${target:-$base} at ${short:-?}, so the stale-PR gate on $id asks for nothing"
   else
     # The PR HAS landed; a silent record failure is the false-durable-record
     # class. Exit non-zero at the end; pr-facts records it next pass, and

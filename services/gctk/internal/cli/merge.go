@@ -486,6 +486,8 @@ func (m *merger) handle(row *gcbd.Bead) {
 			"--append-notes", "Merged to "+base+" at "+short+" (record recovered by merge)") {
 			m.recovered++
 			fmt.Fprintf(m.stdout, "%s: recovered %s — PR#%s was already merged to %s at %s; the record had not landed\n", mergeProg, id, num, base, short)
+			m.retractStaleGate(id, fresh.Meta("stale_escalated_at"),
+				"PR#"+num+" merged to "+base+" at "+short+", so the stale-PR gate on "+id+" asks for nothing")
 		} else {
 			fmt.Fprintf(m.stderr, "%s: PR#%s is MERGED but the record failed for %s; retry next pass\n", mergeProg, num, id)
 			m.recordFailed++
@@ -811,6 +813,8 @@ func (m *merger) handle(row *gcbd.Bead) {
 			echoShort = "?"
 		}
 		fmt.Fprintf(m.stdout, "%s: merged + recorded %s — PR#%s squashed to %s at %s\n", mergeProg, id, num, landTarget, echoShort)
+		m.retractStaleGate(id, final.Meta("stale_escalated_at"),
+			"PR#"+num+" landed on "+landTarget+" at "+echoShort+", so the stale-PR gate on "+id+" asks for nothing")
 	} else {
 		fmt.Fprintf(m.stderr, "%s: PR#%s MERGED but the lifecycle record FAILED for %s; pr-facts records it next pass\n", mergeProg, num, id)
 		m.recordFailed++
@@ -1186,6 +1190,40 @@ func (m *merger) escalate(args ...string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	_ = cmd.Run()
+}
+
+// retractStaleGate retracts the stale-PR-gate visit on an anchor that has just
+// recorded its PR merged. The visit asked for that landing, so its premise is
+// gone, and closing it here, at the source, keeps it off the board instead of
+// leaving it open on a merged PR until liveness-sweep.sh's next pass, where a
+// person could engage it and make it theirs to close. Only an anchor the sweep
+// stamped stale_escalated_at on is asked, because the sweep stamps every anchor
+// it files a visit on or finds one open on. escalate.sh leaves a visit someone
+// is engaged in to them, and a retraction that fails leaves the visit to the
+// sweep. A missing escalate.sh, or a key stale-gate.sh did not name, is skipped.
+func (m *merger) retractStaleGate(id, stampedAt, reading string) {
+	if stampedAt == "" {
+		return
+	}
+	p := m.scriptPath("escalate.sh")
+	if !isExecutable(p) {
+		return
+	}
+	key := m.staleGateKey()
+	if key == "" {
+		return
+	}
+	cmd := exec.Command(p, "--retract", "--subject", id, "--key", key, "--message", reading)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = m.stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(m.stderr, "%s: WARN could not retract the stale-PR-gate visit on %s; liveness-sweep.sh retracts it on a later pass\n", mergeProg, id)
+		return
+	}
+	if out := strings.TrimRight(buf.String(), "\n"); out != "" {
+		fmt.Fprintln(m.stdout, out)
+	}
 }
 
 func (m *merger) recordCap(id, num, mergeOid, base string) {
