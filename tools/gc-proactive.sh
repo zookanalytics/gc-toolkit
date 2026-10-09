@@ -60,6 +60,11 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # shellcheck source=../assets/scripts/standing-kinds.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
     || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The one definition of a dispatch path, shared with the doctor checks. Exposes
+# $DISPATCH_PATH_JQ, which scan_precision_filter applies.
+# shellcheck source=../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/dispatch-path.sh" \
+    || { printf '%s: cannot source assets/scripts/dispatch-path.sh from the pack\n' "$PROG" >&2; exit 1; }
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -447,8 +452,8 @@ cmd_demand() {
 # ---------------------------------------------------------------------------
 # scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
 # open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
-# top-level, and not already reacted-to / routed / machinery (so we never
-# re-react and never react to work-in-flight). Unions the explicit per-bead
+# top-level, and not already reacted-to / routed or armed / machinery (so we
+# never re-react and never react to work-in-flight). Unions the explicit per-bead
 # opt-in (gc.proactive=1) with the broader movable-forward scan, deduped and
 # precision-filtered (see scan_candidates). Read-only unless --sling.
 # ---------------------------------------------------------------------------
@@ -475,11 +480,12 @@ cmd_demand() {
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
-# Plus a state predicate: not already reacted, not routed, has a description;
-# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
-# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
-# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
-# is dropped here and never reaches the sling loop to spend a cap slot.
+# Plus a state predicate: not already reacted, no dispatch path, has a
+# description; deduped by id. "Not already reacted" drops EITHER marker a
+# completed reaction leaves — gc.proactive_reaction (the release) and
+# gc.first_reaction (the dispose) — the same pair sling_first_reaction_guard
+# refuses, so a reacted bead is dropped here and never reaches the sling loop
+# to spend a cap slot.
 #   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
 #     autonomous first reaction would duplicate it. An operator engage (gc-helm
 #     engage --new-subject) is the setter today: it creates the subject marked,
@@ -488,6 +494,15 @@ cmd_demand() {
 #     here keeps a sweep from filing a SECOND visit for a conversation that
 #     already has one. sling_first_reaction_guard refuses it too, and
 #     mol-first-reaction consumes it if a direct pour reaches one.
+#   - a dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh) — a
+#     gc.routed_to a pool queue serves, or a gc.dispatch_when_ready arm the
+#     deferred-dispatch order slings once the bead's own blockers close.
+#     Whoever routed or armed the bead already decided its dispatch. The
+#     reconcile pass reads no reaction marker and no route before it slings, so
+#     a reaction to an armed bead only second-guesses the arm and can leave the
+#     bead dispatched twice. An arm reconcile has stopped retrying at its
+#     failure cap is dropped too: that bead waits on the visit the cap
+#     escalated, not on a first reaction.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -495,12 +510,12 @@ scan_precision_filter() {
     # than raw input. Kept as one list so the review-lane keys and the
     # implementation-anchor keys share a single source of truth.
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
-    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ"'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
             and ((.metadata["gc.first_reaction"] // "") == "")
             and ((.metadata["gc.reaction_owned"] // "") == "")
-            and ((.metadata["gc.routed_to"] // "") == "")
+            and (has_dispatch_path | not)
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
@@ -517,7 +532,8 @@ scan_precision_filter() {
 
 # scan_drop_inflight — from a candidate array on stdin, drop each bead a live
 # workflow already drives (LIVE_WORKFLOW_JQ). A pour moves the bead's route to
-# gc.execution_routed_to, so the "not routed" clause above cannot see one.
+# gc.execution_routed_to, which is not a dispatch path, so the dispatch-path
+# clause above cannot see one.
 # sling_live_workflow_guard refuses to sling such a bead, and a refusal spends
 # none of SLING_CAP, so a page that offers these beads holds fewer beads a sweep
 # can sling, and the sweep spends its time on the guard's reads before it
