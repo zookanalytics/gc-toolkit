@@ -2799,8 +2799,11 @@ $CBODY"
   # The merge-hold itself is the `commented` posture the posture section records
   # in the pre-merge pass: merge.sh reads posture off the bead and never reads
   # threads. This is the routing that hold stands for, so it runs beside the
-  # feedback arm on both routing passes, ahead of every arm that can end the
-  # anchor's visit, a conflicting anchor's included. When this pass's posture
+  # feedback arm on both routing passes, ahead of the --route-comments-only stop
+  # and every full-pass arm below it. A conflicting anchor reaches it the way it
+  # reaches the feedback arm: the CONFLICTING arm stands down while the threads
+  # are owed, so only the retarget arm and that arm's operator gates end such an
+  # anchor's visit before here. When this pass's posture
   # read found threads no visit covers, it set UT_COUNT, so file ONE visit and
   # watermark the head, then end the anchor's visit the way the feedback arm
   # does once it routes. The hold then stands off that open visit until it

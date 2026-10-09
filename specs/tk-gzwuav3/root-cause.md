@@ -127,9 +127,12 @@ found none).
   dispatch, and the guard on a missing branch or fix pool. A conflicting PR
   that owes either kind of feedback falls through to the arm that routes it.
 - The unengaged visit arm moved up to sit beside the feedback arm, ahead of
-  the `--route-comments-only` stop. Both routing passes file it before any arm
-  can end the anchor's visit. It ends the visit once it routes, the way the
-  feedback arm does.
+  the `--route-comments-only` stop. Both routing passes reach it for an
+  anchor that owes the threads, a conflicting one included. Only the retarget
+  arm and the conflict arm's operator gates (a hold, a live demand, an armed
+  re-dispatch, a foreign blocker) end such an anchor's visit first, as they do
+  for the feedback arm. It ends the visit once it routes, the way the feedback
+  arm does.
 - Once the visit stands, `UT_COUNT` stays empty, so nothing is owed. The next
   pass brings an approved branch current while the open visit holds the merge.
 
