@@ -71,6 +71,11 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # tracking the anchor holds its merge — subject-scoped via the anchor's incoming
 # tracks edge, never a cascading blocks edge (docs/finalize-gate.md).
 FINALIZE_GATE="$SCRIPTS_DIR/finalize-gate.sh"
+# The one visit the gate excepts here: the stale-PR-gate visit liveness-sweep.sh
+# files under this key on an anchor whose PR stopped moving. Landing the PR is
+# one of the dispositions that visit asks for, so a merge it held would block its
+# own answer. The gate excepts it only while nobody is engaged in it.
+STALE_GATE_KEY="anchor-stale"
 
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # The merged-record retry cap. Both record arms below retry every pass with no
@@ -695,8 +700,9 @@ while IFS= read -r tagged; do
   # --- open visit on this anchor: a person owes a conversation before finalize ---
   # Subject-scoped via the anchor's incoming tracks edge; a visit is non-blocking,
   # so this holds THIS anchor's merge without touching its children or readiness.
+  # An unengaged stale-PR-gate visit is excepted (STALE_GATE_KEY above).
   # Fail-closed: an unreadable probe holds, like every probe above.
-  if ! fg_reason=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+  if ! fg_reason=$("$FINALIZE_GATE" check "$id" --except-key "$STALE_GATE_KEY" 2>/dev/null); then
     echo "$PROG: PR#$num ${fg_reason:-finalize gate refused (fail-closed)}; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
@@ -992,8 +998,9 @@ $sa_out" >/dev/null 2>&1 || true
   fi
   # A visit is a subject-local bead filed without moving the PR head, so
   # --match-head-commit does not catch one raised between validation and here.
-  # Re-assert the finalize gate in the terminal window, same fail-closed terms.
-  if [ "$freason" = "OK" ] && ! fg_final=$("$FINALIZE_GATE" check "$id" 2>/dev/null); then
+  # Re-assert the finalize gate in the terminal window, on the same exception and
+  # the same fail-closed terms.
+  if [ "$freason" = "OK" ] && ! fg_final=$("$FINALIZE_GATE" check "$id" --except-key "$STALE_GATE_KEY" 2>/dev/null); then
     freason="${fg_final:-open visit or unreadable visit probe (fail-closed)}"
   fi
   if [ "$freason" != "OK" ]; then

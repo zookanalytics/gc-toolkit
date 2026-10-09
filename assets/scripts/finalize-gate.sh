@@ -30,11 +30,14 @@
 # non-blocking, so the gate holds only THIS bead's finalization and touches
 # neither the bead's readiness nor its children (docs/finalize-gate.md).
 #
-# One exception, named by the caller: --except-key <escalation-key> is the
-# situation key under which that caller files, through escalate.sh, its report of
-# a refused finalization of this bead. That report asks for the retry, so holding
-# the retry on it would keep the bead from ever finalizing once the obstruction
-# it reported cleared. A visit is excepted only when it carries that
+# One exception, named by the caller: --except-key <escalation-key> names a
+# situation whose visit asks for this very finalization, so holding the
+# finalization on that visit would keep its own ask from being met. A caller's
+# report of a refused finalization of this bead is one: it asks for the retry,
+# and holding the retry on it would keep the bead from ever finalizing once the
+# obstruction it reported cleared. The stale-PR-gate visit is another: landing
+# the PR is one of its dispositions (docs/finalize-gate.md names the callers).
+# A visit is excepted only when it carries that
 # escalation_key, is stamped for this bead (gc.continuation_group), and nobody is
 # engaged in it: it is open, with no assignee and no bound session
 # (gc.session_name). That is the helm board's engagement test (engagedVisit in

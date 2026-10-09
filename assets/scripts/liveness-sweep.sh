@@ -48,6 +48,10 @@ STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
 # but a parse error that aborts the whole classification.
 case "$STALE_PR_DAYS" in ''|*[!0-9]*) STALE_PR_DAYS=2 ;; esac
 case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
+# The situation key the stale-gate visit is filed under. merge.sh and gctk merge
+# except an unengaged visit under this key from the finalize gate, so all three
+# name one key.
+STALE_GATE_KEY="anchor-stale"
 
 DRY_RUN=0
 while [ $# -gt 0 ]; do
@@ -548,11 +552,11 @@ Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
 ${id}'s own stale_escalated_at. Closing this visit does not move the PR; the
 next pass past the floor raises it again while the PR is still stale."
         if [ "$DRY_RUN" -eq 1 ]; then
-            echo "$PROG: dry-run: would escalate $id on $pr [anchor-stale]"
+            echo "$PROG: dry-run: would escalate $id on $pr [$STALE_GATE_KEY]"
             filed=$((filed + 1))
             continue
         fi
-        if ! out=$("$ESCALATE" --subject "$id" --key anchor-stale --message "$body"); then
+        if ! out=$("$ESCALATE" --subject "$id" --key "$STALE_GATE_KEY" --message "$body"); then
             failed=$((failed + 1))
             echo "$PROG: WARN: escalate.sh failed for $id — NOT stamped, the next pass retries" >&2
             continue

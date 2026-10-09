@@ -55,13 +55,22 @@ A `tracks` edge is non-blocking. So the gate holds only this bead's finalization
 it never consults the bead's readiness, and it never reaches the bead's children.
 A visit on an epic holds the epic's own close and leaves every child free to move.
 
-### The caller's own escalation
+### A visit that asks for the finalization
 
-`finalize-gate.sh check <bead-id> --except-key <escalation-key>` names the
-situation key under which the caller files, through `escalate.sh`, its report of
-a refused finalization of this bead. That report asks for the retry, so holding
-the retry on it would keep the bead from ever finalizing once the obstruction it
-reported had cleared. A visit is excepted only when all of these hold:
+`finalize-gate.sh check <bead-id> --except-key <escalation-key>` names a
+situation whose visit asks for this very finalization. Holding the finalization
+on that visit would keep its own ask from being met. Two situations are named
+today:
+
+- the caller's report of a refused finalization of this bead, which it files
+  through `escalate.sh`. That report asks for the retry, so holding the retry on
+  it would keep the bead from ever finalizing once the obstruction it reported
+  had cleared;
+- the stale-PR-gate visit (`anchor-stale`) that `liveness-sweep.sh` files on an
+  anchor whose PR stopped moving. Landing the PR is one of the dispositions it
+  asks for, and an operator who approves the PR has given that answer.
+
+A visit is excepted only when all of these hold:
 
 - it carries that `escalation_key`;
 - it is stamped for this bead (`gc.continuation_group`);
@@ -91,7 +100,9 @@ a squash-merge, a close — cannot be taken back.
   validation before the squash-merge, and re-asserts it at the terminal re-read
   immediately before the merge. A visit is filed without moving the PR head, so
   `--match-head-commit` does not catch one raised between validation and the
-  merge; the terminal re-assert does.
+  merge; the terminal re-assert does. Both checks, in the script and in its
+  `gctk merge` port, pass `--except-key anchor-stale`, so an unengaged
+  stale-PR-gate visit does not hold an approved PR.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused

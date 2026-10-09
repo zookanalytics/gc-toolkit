@@ -8,7 +8,9 @@
 # reviewThreads + reviewDecision, an UNKNOWN merge state read again within one
 # budget per pass so one pass lands every approved clean PR); the check
 # resolver, whose crash holds the merge and whose absence holds the pass; a
-# broken lane or finalize helper, which holds only its own anchor; the recorded
+# broken lane or finalize helper, which holds only its own anchor; an open visit,
+# which holds the merge, except the stale-PR-gate visit nobody is engaged in,
+# under the key liveness-sweep.sh files it with; the recorded
 # pr_posture hold, read off the anchor; identity refusals (fork, url/branch
 # mismatch); the record for a PR already merged and the live anchor identity
 # both it and the merge stand on;
@@ -68,6 +70,17 @@ prview() { # num state mergeState extra-json
 visit() { # id anchor [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"visit: %s","metadata":{"task_kind":"visit","gc.continuation_group":"%s"}}' \
     "$1" "${3:-open}" "$2" "$2"
+}
+# The stale-PR-gate visit liveness-sweep.sh files on an anchor whose PR stopped
+# moving, under the key read from the sweep itself, so the merge is tested
+# against the visit the sweep files. [status], [assignee] and [session] say who
+# is engaged in it; all three left at their defaults is a visit nobody engaged.
+STALE_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$HERE/liveness-sweep.sh")
+stale_visit() { # id anchor [status] [assignee] [session]
+  jq -cn --arg id "$1" --arg a "$2" --arg st "${3:-open}" --arg who "${4:-}" --arg sess "${5:-}" --arg key "$STALE_KEY" \
+    '{id: $id, status: $st, assignee: $who, notes: "", title: "visit: stale PR gate: \($a)",
+      metadata: ({task_kind: "visit", escalation_key: $key, "gc.continuation_group": $a}
+                 + (if $sess == "" then {} else {"gc.session_name": $sess} end))}'
 }
 # A non-city APPROVED review, given at the live head (sha-<num>) unless [oid]
 # names another commit. The UNIVERSAL approval merge rule requires one standing
@@ -442,6 +455,73 @@ out=$(STUB_SHOW_HOOK="$TMP/hook_mv3.sh" "$SUT" 2>&1)
 has "$out" "changed between validation and the merge" "the terminal re-read holds on a mid-pass visit"
 has "$out" "held by open visit vis-mv3" "…and names the mid-pass visit"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 49" "…and nothing merged"
+: > "$STUB_DEPS"
+
+echo "# an unengaged stale-PR-gate visit does not hold an approved, mergeable PR"
+# liveness-sweep.sh files it on an anchor whose PR stopped moving, and landing the
+# PR is one of the dispositions it asks for. The approval is that answer, so the
+# merge lands past the visit while nobody is engaged in it. A visit filed under
+# any other key still holds (MV1 above).
+store "[$(anchor MS1 141), $(rev MS1), $(stale_visit vis-ms1 MS1)]"
+printf 'vis-ms1|tracks|MS1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 141 OPEN CLEAN)" > "$GH_DIR/pr_view_141.json"
+approved 141
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MS1" "an approved PR lands past an unengaged stale-gate visit"
+has "$(cat "$STUB_GH_LOG")" "pr merge 141 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-141" "…squash-merged at its head"
+eq "$(bstatus MS1)" "closed" "…and the anchor closed"
+: > "$STUB_DEPS"
+
+echo "# a stale-PR-gate visit someone is engaged in still holds the merge"
+# Claimed (in_progress), bound by an assignee while still open, or bound to a
+# session: each is a person in the conversation, so the merge waits on it.
+n=142
+for shape in claimed assigned session; do
+  case "$shape" in
+    claimed)  v=$(stale_visit "vis-ms-$shape" "MS-$shape" in_progress); how="claimed (in_progress)" ;;
+    assigned) v=$(stale_visit "vis-ms-$shape" "MS-$shape" open human-1); how="open with an assignee" ;;
+    session)  v=$(stale_visit "vis-ms-$shape" "MS-$shape" open "" s-conv-1); how="open and bound to a session" ;;
+  esac
+  store "[$(anchor "MS-$shape" "$n"), $(rev "MS-$shape"), $v]"
+  printf 'vis-ms-%s|tracks|MS-%s\n' "$shape" "$shape" > "$STUB_DEPS"
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  approved "$n"
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "held by open visit vis-ms-$shape" "a stale-gate visit $how holds the merge, naming the visit"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge $n" "…and nothing merged under it"
+  eq "$(bstatus "MS-$shape")" "open" "…and the anchor stays open"
+  n=$((n + 1))
+done
+: > "$STUB_DEPS"
+
+echo "# the terminal re-read excepts the same unengaged stale-PR-gate visit"
+# Filed between validation and the merge, the visit is read only by the terminal
+# re-assert of the gate (MV3 above), which excepts it on the same terms.
+store "[$(anchor MS5 145), $(rev MS5)]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 145 OPEN CLEAN)" > "$GH_DIR/pr_view_145.json"
+approved 145
+MS5_HOOK_COUNT="$TMP/hookcount_ms5"; : > "$MS5_HOOK_COUNT"
+MS5_VISIT=$(stale_visit vis-ms5 MS5)
+cat > "$TMP/hook_ms5.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "MS5" ] || exit 0
+n=\$(cat "$MS5_HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$MS5_HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
+  jq -c --argjson v '$MS5_VISIT' '. + [\$v]' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+  printf 'vis-ms5|tracks|MS5\n' >> "\$STUB_DEPS"
+fi
+HOOK
+chmod +x "$TMP/hook_ms5.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hook_ms5.sh" "$SUT" 2>&1)
+eq "$(jq '[.[] | select(.id == "vis-ms5" and .status == "open")] | length' "$STUB_STORE")" "1" \
+  "the visit was filed during the pass, at the terminal re-read"
+has "$out" "merged + recorded MS5" "the terminal re-read excepts an unengaged stale-gate visit too"
+hasnt "$out" "changed between validation and the merge" "…and reads no change in it"
 : > "$STUB_DEPS"
 
 echo "# approval is a UNIVERSAL merge rule: every PR needs a standing non-city APPROVED"
@@ -1661,6 +1741,19 @@ SENTINEL="$TMP/sentinel-gctk"
 printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
 chmod +x "$SENTINEL"
 
+echo "## merge excepts the key liveness-sweep.sh files its stale-gate visit under"
+# The exception is only as good as the key it names: a sweep that filed under a
+# renamed key would hold every approved PR behind its visit again. Both merge
+# implementations name the sweep's own key, and the suite's stale_visit fixture
+# carries that key too.
+SH_KEY=$(sed -n 's/^STALE_GATE_KEY="\(.*\)"$/\1/p' "$HERE/merge.sh")
+GO_KEY=$(sed -n 's/^const staleGateKey = "\(.*\)"$/\1/p' "$HERE/../../services/gctk/internal/cli/merge.go")
+[ -n "$STALE_KEY" ] && ok "liveness-sweep.sh names its stale-gate key ('$STALE_KEY')" \
+  || bad "liveness-sweep.sh names its stale-gate key" "no STALE_GATE_KEY= line in liveness-sweep.sh"
+eq "$SH_KEY" "$STALE_KEY" "merge.sh excepts the key the sweep files under"
+eq "$GO_KEY" "$STALE_KEY" "gctk merge excepts the key the sweep files under"
+
+echo
 echo "## arm: shell fallback (GCTK_FALLBACK=merge)"
 export GCTK_FALLBACK=merge
 suite

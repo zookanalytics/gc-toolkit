@@ -1005,10 +1005,17 @@ func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok boo
 	return "", true
 }
 
+// staleGateKey is the escalation key liveness-sweep.sh files its stale-PR-gate
+// visit under, on an anchor whose PR stopped moving. Landing the PR is one of the
+// dispositions that visit asks for, so a merge it held would block its own
+// answer. merge.sh's STALE_GATE_KEY names the same key.
+const staleGateKey = "anchor-stale"
+
 // finalizeGate reports whether the gate is open (ok) and, when held, the reason
-// finalize-gate.sh printed.
+// finalize-gate.sh printed. The gate excepts the stale-PR-gate visit only while
+// nobody is engaged in it.
 func (m *merger) finalizeGate(id string) (reason string, ok bool) {
-	out, rc := m.scriptCapture("finalize-gate.sh", "check", id)
+	out, rc := m.scriptCapture("finalize-gate.sh", "check", id, "--except-key", staleGateKey)
 	return strings.TrimRight(out, "\n"), rc == 0
 }
 
