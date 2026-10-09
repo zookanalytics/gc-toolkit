@@ -50,10 +50,13 @@ BACKOFF_CAP="${QUOTA_PARK_BACKOFF_CAP:-900}"
 ESCALATE_AFTER="${QUOTA_PARK_ESCALATE_AFTER:-7200}"
 ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
-# How long this order's findings stay authoritative for `--status`. The sweep
-# runs every 5m, and fifteen minutes is three cycles, so one late or missed
-# pass does not expire a verdict.
-STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-900}"
+# How long this order's findings stay authoritative for `--status`. The
+# controller fires a bounded number of clock-driven orders per tick
+# (orders.max_dispatches_per_tick), so on a loaded host passes of a 5m order
+# can land more than fifteen minutes apart. Past this window a parked session's
+# `yes` becomes `unknown`, which puts it back on the patrols' normal warrant
+# path, so thirty minutes leaves room for one slow gap and a missed pass.
+STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-1800}"
 
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
@@ -275,7 +278,7 @@ num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
 num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
-num_min "$STALE_AFTER"    1 || STALE_AFTER=900
+num_min "$STALE_AFTER"    1 || STALE_AFTER=1800
 
 # --- The status surface: quota-park-nudge.sh --status [<session-id>] ---------
 # What the patrols read INSTEAD of peeking a pane (pane text is agent output;

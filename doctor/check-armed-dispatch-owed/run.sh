@@ -35,10 +35,11 @@
 
 set -u
 
-# A dispatch owed longer than this has missed multiple reconcile passes. Mirrors
-# check-cadence-live's I10 window, max(3×interval, 15m): the deferred-dispatch
-# order runs every 5m, so 900s is three passes, past any normal window between
-# a blocker closing and the next reconcile slinging.
+# A dispatch owed longer than this has waited out three reconcile intervals.
+# Mirrors check-cadence-live's I10 window, max(3×interval, 15m), which is 900s
+# for the 5m deferred-dispatch order. On a loaded host the controller's per-tick
+# dispatch budget can stretch one gap between passes past it, and I10 reads that
+# same gap as a stopped order.
 OWED_WINDOW_SECONDS=900
 
 K_ARM="gc.dispatch_when_ready"

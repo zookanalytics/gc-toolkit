@@ -1433,12 +1433,12 @@ grep -q '^session=lx-codex quota_park=unknown .*reason=no-recent-sweep$' "$TMP/s
 
 # --- Run 28: ending an episode removes only this order's OWN state file. ----
 # The week-old prune (run 15) is careful about ownership. The paths that run
-# every three minutes were not: a clean pane and an excluded alias each ended
+# every five minutes were not: a clean pane and an excluded alias each ended
 # their episode with a bare `rm -f "$STATE_DIR/<id>"`, which is not "end the
 # episode" but "delete whatever is at that name" — in a directory this order
 # does not own, since STATE_DIR defaults inside the shared city runtime dir and
 # is an override besides. A session id is not a rare shape for a filename. That
-# is the prune's blast radius on a fuse 3360× shorter, and it was reproduced
+# is the prune's blast radius on a fuse 2016× shorter, and it was reproduced
 # during review: an unrelated regular file at $STATE_DIR/lx-clean, destroyed by
 # one clean sweep. Same ownership test as the prune, now shared by all three.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
@@ -1690,7 +1690,7 @@ grep -q '^session=lx-foreign ' "$TMP/status32-all" \
     && bad "a foreign file must not be enumerated as an episode this order tracks" \
     || ok "a foreign file is not enumerated as an episode this order tracks"
 
-# The delete direction. `lx-clean`'s pane is clean, so the every-3-minutes
+# The delete direction. `lx-clean`'s pane is clean, so the every-5-minutes
 # removal path runs against its state path on every pass; the week-old prune runs
 # on every pass too, and this file's record claims 1970.
 printf 'first_seen=1\nlast_seen=1\nattempts=1\n' > "$TMP/state/lx-clean"

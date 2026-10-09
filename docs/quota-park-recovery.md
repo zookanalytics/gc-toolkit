@@ -248,7 +248,7 @@ patrols read it through a closed-field surface:
 $ quota-park-nudge.sh --status lx-gsnfk
 heartbeat_age=48
 heartbeat_fresh=1
-stale_after=900
+stale_after=1800
 session=lx-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48 reason=-
 ```
 
@@ -443,7 +443,7 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call, a fraction allowed (e.g. `0.5`), rounded up to a whole second where `timeout(1)` parses only whole seconds; `0` disables the bound |
 | `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM, a fraction allowed (rounded up like `CALL_TIMEOUT` where `timeout(1)` is integer-only); must be > 0 (`timeout -k 0` is accepted and would silently restore the soft bound) |
 | `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers, a fraction allowed and honored on any host (it runs on the sweep clock, not `timeout(1)`); `0` disables |
-| `QUOTA_PARK_STALE_AFTER` | `900` | how long `--status` treats a sweep and a sighting as evidence: three cycles of the 5m order, so one missed pass does not expire a verdict; must be ≥ 1 |
+| `QUOTA_PARK_STALE_AFTER` | `1800` | how long `--status` treats a sweep and a sighting as evidence: room for one slow gap and a missed pass, since the controller's per-tick dispatch budget can hold a 5m order's passes more than fifteen minutes apart; must be ≥ 1 |
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |
 
 Every numeric knob above is validated once, up front, and falls back to its
