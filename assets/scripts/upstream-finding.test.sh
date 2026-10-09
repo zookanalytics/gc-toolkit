@@ -53,18 +53,22 @@ case "${1:-}" in
     jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE" ;;
   create)
     shift
-    title=""; body=""
+    title=""; body=""; meta="{}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --title) shift; title="${1:-}" ;;
         -d) shift; body="${1:-}" ;;
+        --metadata) shift; meta="${1:-}"; [ -n "$meta" ] || meta="{}" ;;
       esac
       shift || true
     done
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     tmp=$(mktemp)
-    jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" \
-      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":{},"notes":""}]' \
+    # The real `gc bd create` stamps --metadata (a JSON object) atomically; model
+    # it so the visit carries the identity the create sets, not only what a
+    # follow-up update writes.
+    jq -c --arg id "up-$n" --arg t "$title" --arg d "$body" --argjson m "$meta" \
+      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":$m,"notes":""}]' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     printf '{"id":"up-%s"}\n' "$n" ;;
   update)
@@ -144,7 +148,7 @@ has "$OUT" "nothing sent" "says out loud that nothing was sent"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "gh_target_repo is the target"
 eq "$(meta up-1 gh_verb)" "issue create" "gh_verb is the two-word verb"
 eq "$(meta up-1 task_kind)" "upstream-send" "task_kind marks the bead"
-eq "$(< "$STUB_GH_LOG" wc -l)" "0" "gh is never invoked"
+eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh is never invoked"
 
 # The parked command must reassemble into the exact argv, body and all.
 PARKED=$(meta up-1 gh_command)
@@ -183,7 +187,7 @@ OUT=$("$SUT" --message "third pass, after the operator answered" \
 eq "$?" "0" "a run against a closed ask exits 0"
 eq "$(count)" "1" "a closed ask is not re-filed"
 has "$OUT" "a human has answered it" "it says the ask was already answered"
-eq "$(< "$STUB_ESC_LOG" wc -l)" "0" "no visit is filed for an answered ask"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no visit is filed for an answered ask"
 
 # ── a reused key with a different command is a divergence ─────────────────
 reset_state
@@ -454,7 +458,7 @@ export STUB_DROP_KEYS="gh_command"
 OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
 eq "$?" "1" "a command stamp that did not land fails the run"
 has "$OUT" "did not read back" "the failure names the unverified stamp"
-eq "$(< "$STUB_ESC_LOG" wc -l)" "0" "no human is asked to paste a command that is not on the bead"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no human is asked to paste a command that is not on the bead"
 unset STUB_DROP_KEYS
 
 reset_state
@@ -496,7 +500,7 @@ has "$(cat "$STUB_DEPS")" "$VISIT|up-1|tracks" "the visit tracks the bead by edg
 has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
   "$(meta up-1 gh_command)" "the visit a human reads carries the pasteable command"
 
-eq "$(< "$STUB_GH_LOG" wc -l)" "0" "gh was never invoked by any case"
+eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for the two witness-patrol blocks that stamp an address:
-# warrant-file (the dog pool) and bug-dispatch (the polecat pool).
+# warrant-file (the dog pool) and bug-dispatch (the polecat pool). It also holds
+# every step of the formula to the rule that no address is built without the
+# resolver; refinery-stuck-escalate.test.sh runs the queue read that resolves.
 #
 # The witness files to agents at two different scopes, and the qualifier one
 # needs is exactly the qualifier the other must not carry. Both blocks are run
@@ -50,11 +52,21 @@ for pair in "warrant-file:$WARRANT" "bug-dispatch:$BUG"; do
   eq "$(stray "$body")" "" "$name renders no address it does not resolve"
 done
 
+echo "# no step anywhere in the formula builds an address it does not resolve"
+# The same rule holds for every step, the stamps above and the refinery queue
+# read alike: a query by an address no agent holds returns a valid empty array.
+# Outside the resolver and a diagnostic, the token appears only where a pour
+# forwards the variable to the next patrol wisp.
+FORMULA_STRAY=$(grep -n '{{binding_prefix}}' "$TOML" \
+  | sed "s/--var binding_prefix='{{binding_prefix}}'//g" \
+  | grep '{{binding_prefix}}' | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true)
+eq "$FORMULA_STRAY" "" "every {{binding_prefix}} in the formula is resolved, a diagnostic, or forwarded to the next pour"
+
 # The rig root the blocks probe first, holding a copy of the real resolver so
 # $SCRIPTS resolution is exercised without reaching the live tree.
 RIGROOT="$TMP/rig"; mkdir -p "$RIGROOT/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/"
-chmod +x "$RIGROOT/assets/scripts/resolve-route.sh"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/file-warrant.sh" "$RIGROOT/assets/scripts/"
+chmod +x "$RIGROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/file-warrant.sh"
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
@@ -65,6 +77,9 @@ case "${1:-} ${2:-}" in
   "agent list")
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_AGENTS:-}" ;;
+  "session list")
+    [ -n "${STUB_SESSIONS_FAIL:-}" ] && { echo "gc: session list unavailable" >&2; exit 1; }
+    printf '%s\n' "${STUB_SESSIONS:-{\"sessions\":[]}}" ;;
   "bd list")   printf '%s\n' "${STUB_OPEN:-[]}" ;;
   "bd create")
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: bd create failed" >&2; exit 1; }
@@ -81,6 +96,12 @@ chmod +x "$BIN/gc" "$BIN/git"
 export PATH="$BIN:$PATH"
 export GC_RIG_ROOT="$RIGROOT" GC_RIG=gc-toolkit
 export STUB_GC_LOG="$TMP/gc.log"
+# The roster file-warrant.sh resolves the wedged OWNER against. The witness owner
+# is a /-bearing agent address (an assignee); its session id is what the warrant
+# must carry, since dance-probe.sh refuses the slash form.
+export STUB_SESSIONS='{"sessions":[
+  {"id":"lx-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
+  {"id":"sess-1","alias":"gc-toolkit/gc-toolkit.thing","session_name":"s-sess-1","state":"active"}]}'
 
 # run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG
 run() {
@@ -93,17 +114,19 @@ render "$BUG" > "$TMP/bug.sh"
 bash -n "$TMP/warrant.sh" && ok "rendered warrant-file is valid bash" || bad "warrant-file failed bash -n"
 bash -n "$TMP/bug.sh" && ok "rendered bug-dispatch is valid bash" || bad "bug-dispatch failed bash -n"
 
-WARRANT_PRELUDE='TARGET=gc-toolkit--gc-toolkit__converse-2-pool; REASON="No progress on tk-a for 6h"'
+WARRANT_PRELUDE='OWNER=gc-toolkit/gc-toolkit.converse-2; REASON="No progress on tk-a for 6h"'
 BUG_PRELUDE='TITLE="submit-and-exit strands pushed work"; BODY="the branch-shape gate re-runs against a detached HEAD"'
 
-echo "# the dog is city-scoped here: the bare identity the template renders is the live one"
+echo "# the dog is city-scoped here (the bare rendered identity is live), and the"
+echo "# owner is a /-bearing agent address that must resolve to a session id"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
 export STUB_OPEN='[]'
 run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" 'bd create' "a wedged session with no open warrant files one"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "routed at the city-scoped dog, unqualified"
-has "$LOG" '"warrant.target":"gc-toolkit--gc-toolkit__converse-2-pool"' "carrying the dedup key"
+has "$LOG" '"warrant.target":"lx-wisp-conv2"' "the /-bearing owner is resolved to its session id"
+hasnt "$LOG" '"warrant.target":"gc-toolkit/gc-toolkit.converse-2"' "the agent address never lands as a target dance-probe.sh would refuse"
 has "$LOG" '"warrant.reason":"No progress on tk-a for 6h"' "and the reason as given"
 
 echo "# the same block, a city whose dog is rig-scoped: the rendered form is now wrong"
@@ -113,7 +136,7 @@ has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.dog"' "the warrant is routed a
 hasnt "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "not at the one the template rendered"
 
 echo "# a reason carrying a double quote cannot break the metadata payload"
-run "$TMP/warrant.sh" 'TARGET=sess-1; REASON="bead \"tk-a\" stale 6h"'
+run "$TMP/warrant.sh" 'OWNER=sess-1; REASON="bead \"tk-a\" stale 6h"'
 has "$LOG" 'bd create' "the warrant is still filed"
 printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //' | jq -e . >/dev/null 2>&1 \
   && ok "and its metadata is still parseable JSON" || bad "the metadata payload did not survive the quote"

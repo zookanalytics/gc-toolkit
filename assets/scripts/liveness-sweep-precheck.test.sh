@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # liveness-sweep-precheck.test.sh — the sweep's mechanical half decides without
-# an agent session, and can only ever decide "nothing" from good reads
-# (bead tk-7h51d).
+# an agent session, and can only ever decide "nothing" from good reads.
 #
 # The script under test is the `check` of a condition-triggered order, so its
 # whole contract is its EXIT CODE: 0 runs the agent pass, non-zero does not.
@@ -84,6 +83,14 @@ bash -n "$SCRIPT" && ok "liveness-sweep-precheck.sh: valid bash" \
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+# The holder-liveness read, served before the bd guard so it is not recorded to
+# $FIXDIR/reads (the store-pin assertion counts bd reads only). GC_SESSION_FAIL =
+# an outage; default (no FAKE_SESSIONS) is a readable, empty session set.
+if [ "${1:-}" = "session" ] && [ "${2:-}" = "list" ]; then
+    [ -n "${GC_SESSION_FAIL:-}" ] && exit 1
+    if [ -n "${FAKE_SESSIONS:-}" ] && [ -f "${FAKE_SESSIONS:-}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi
+    exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 sub="$2"; shift 2
 status=""; db=""
@@ -149,7 +156,14 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
+  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-sling-convoy","title":"sling-tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-synthetic-convoy","title":"a convoy a sling minted","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"f-titled-not-convoy","title":"input convoy for tk-yyyyy: why the walk never fires","issue_type":"bug","metadata":{}},
+  {"id":"o-wisp-aaaaa","title":"order: liveness-sweep (testrig)","issue_type":"task","metadata":{}},
+  {"id":"f-order-human","title":"order: tidy the convoy helpers","issue_type":"task","metadata":{}},
+  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}}
 ]
 JSON
 
@@ -170,7 +184,7 @@ cat > "$FIX/live.json" <<'JSON'
 JSON
 
 # WIDEN is every OTHER non-closed status. f-blocked-child is the live case
-# tk-dhue in miniature: a blocked child still names its parent's wait, and it is
+# in miniature: a blocked child still names its parent's wait, and it is
 # absent from LIVE, so an edge check resolved against LIVE alone would misfile
 # the parent as unnamed.
 cat > "$FIX/widen.json" <<'JSON'
@@ -233,7 +247,7 @@ hasnt ",$SURV," ",f-routed," "gc.routed_to non-empty is excluded (class 1)"
 hasnt ",$SURV," ",f-visit," "task_kind=visit is excluded (class 3)"
 hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
 hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
-# bead tk-d6ddn: the same class-3 exclusion, on a visit that named its subject
+# the same class-3 exclusion, on a visit that named its subject
 # ONLY through the tracks edge because the gc.continuation_group stamp landed
 # empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
@@ -250,6 +264,19 @@ hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not ne
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
 hasnt ",$SURV," ",f-convoy," "a convoy tracking a live member is excluded (class 2i-b)"
 hasnt ",$SURV," ",f-spec," "a bead tracking a live root is excluded (class 2i-c)"
+# class 0: the per-sling machine convoys and order-tracking wisps a sling mints
+# are machinery, not work. The sweep drops them first; the precheck must too, or
+# every pass after any sling re-arms the very session it just ran to conclude
+# "nothing new".
+hasnt ",$SURV," ",f-input-convoy," "a convoy titled 'input convoy for ...' is excluded (class 0)"
+hasnt ",$SURV," ",f-sling-convoy," "a convoy titled 'sling-...' is excluded (class 0)"
+hasnt ",$SURV," ",f-synthetic-convoy," "a gc.synthetic convoy is excluded (class 0)"
+hasnt ",$SURV," ",o-wisp-aaaaa," "an order-tracking wisp is excluded (class 0)"
+# The guards that keep class 0 from hiding real work. issue_type is load-bearing
+# for the convoy arm; order_wisp requires BOTH the wisp id and the order: title.
+has ",$SURV," ",f-titled-not-convoy," "a non-convoy whose TITLE names a convoy survives — the issue_type guard"
+has ",$SURV," ",f-order-human," "a human bead titled 'order:' with no wisp id survives — order_wisp needs both"
+has ",$SURV," ",n-wisp-bbbbb," "a wisp that is not an order survives — order_wisp needs both"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.
@@ -259,7 +286,7 @@ has ",$SURV," ",f-worked," "a convoy-worked bead is NOT excluded locally — tha
 
 # 2i-a resolves against the NOT-CLOSED set, not the open one. Re-run with the
 # only live child BLOCKED (it lives in WIDEN, absent from LIVE): the parent must
-# still be excluded, or the live case tk-dhue returns.
+# still be excluded, or the live case returns.
 echo "── 'still alive' means NOT CLOSED, never 'present in the open listing' ──"
 cp "$FIX/live.json" "$TMP/live.bak"
 cp "$FIX/ready.json" "$TMP/ready.bak"
@@ -300,7 +327,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
+# The su-ab9je shape at the SUBJECT level. The sitting is live
 # and held, but its gc.continuation_group stamp landed empty, so only the tracks
 # edge names f-subject. Read on the stamp alone this is "no visit", and the
 # precheck greenlights a pass that files a SECOND visit on a subject converse is
@@ -443,6 +470,9 @@ echo "── an abort BEFORE the decision runs the pass ──"
 # code actually under test.
 sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$TMP/aborting.sh"
 chmod +x "$TMP/aborting.sh"
+# The copy sources its sibling visit-identity.sh by $0-relative path, so the
+# shared predicate lib has to travel with it into the temp dir.
+cp "$(dirname "$SCRIPT")/visit-identity.sh" "$TMP/visit-identity.sh"
 grep -qx 'exit 3' "$TMP/aborting.sh" && ok "abort injection landed" \
     || bad "abort injection landed" "the trap line moved — this test is checking nothing"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -728,6 +758,14 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
+# The classify block matches visit coverage and standing records through two
+# shared definitions, which liveness-sweep.sh sources before it. Supply the same
+# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
+# extracted block resolves them and cannot drift.
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/visit-identity.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
@@ -754,6 +792,109 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
 [ "$PRE_N" -gt "$CLASSIFY_N" ] \
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
+
+echo "── the no-resolver census reads each lane's marker under its token's own case ──"
+# The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes
+# the gates from the check_set itself. A mixed-case token reads check.<Token> —
+# the key signoff stamps — so an all-green anchor is gated, while the same anchor
+# missing that marker is still a candidate (the positive control).
+MFIX="$TMP/mfix"; mkdir -p "$MFIX"
+cat > "$MFIX/ready.json" <<'JSON'
+[
+  {"id":"f-mixed-green","title":"pre-open, mixed-case lanes green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}},
+  {"id":"f-mixed-red","title":"pre-open, mixed-case lane not green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green"}}
+]
+JSON
+READY="$MFIX/ready.json"; export READY
+# shellcheck disable=SC1090
+. "$TMP/classify.sh"
+MIXED_IDS=",$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")'),"
+case "$MIXED_IDS" in
+  *",f-mixed-green,"*) bad "an all-green mixed-case anchor is gated, not a candidate" "candidates: $MIXED_IDS" ;;
+  *) ok "an all-green mixed-case anchor is gated, not a candidate" ;;
+esac
+case "$MIXED_IDS" in
+  *",f-mixed-red,"*) ok "…while one missing its check.Arch marker is still a candidate" ;;
+  *) bad "…while one missing its check.Arch marker is still a candidate" "candidates: $MIXED_IDS" ;;
+esac
+
+echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
+# A live-held visit excludes its subject (the pass can skip it); a dead-held
+# visit does not, so its subject survives and the pass runs. A visit bead left
+# ready by a dead session is likewise no longer dropped as a visit.
+HLFIX="$TMP/hlfix"; mkdir -p "$HLFIX"
+cat > "$HLFIX/ready.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+]
+JSON
+cat > "$HLFIX/live.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-live","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$HLFIX/widen.json"
+cat > "$TMP/hl-sessions.json" <<'JSON'
+{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.tk-livevisit"}]}
+JSON
+FIXDIR="$HLFIX"; export FIXDIR
+FAKE_SESSIONS="$TMP/hl-sessions.json"; export FAKE_SESSIONS
+BASELINE_CSV="" run_precheck
+SURV="$(survivors_of "$OUT")"
+hasnt ",$SURV," ",hl-live-subj," "a live-held visit's subject stays excluded (holder alive)"
+has   ",$SURV," ",hl-dead-subj," "a dead-held visit's subject survives → the pass runs"
+has   ",$SURV," ",hl-ready-deadvisit," "a visit stranded ready by a dead session survives (not dropped as a visit)"
+
+echo "── precheck fails CLOSED on an unreadable session list (never under-excludes) ──"
+export GC_SESSION_FAIL=1
+BASELINE_CSV="" run_precheck
+unset GC_SESSION_FAIL
+SURV="$(survivors_of "$OUT")"
+has ",$SURV," ",hl-dead-subj," "unreadable session list → the subject still survives (run the pass)"
+has ",$SURV," ",hl-ready-deadvisit," "unreadable session list → the stranded visit still survives"
+
+echo "── a holder listed in a TERMINAL state (archived/closed) is dead here too ──"
+# Mirrors liveness-sweep.sh: a closed/archived holder that lingers in the list
+# is dead, so its visit no longer excludes the subject — the subject survives and
+# the pass runs. An asleep (non-terminal) holder is live and still excludes, so
+# the gate drops the terminal states only, not everything that is not "active".
+HLTERM="$TMP/hlterm"; mkdir -p "$HLTERM"
+cat > "$HLTERM/ready.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+]
+JSON
+cat > "$HLTERM/live.json" <<'JSON'
+[
+  {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
+  {"id":"hl-v-closed","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+]
+JSON
+printf '[]\n' > "$HLTERM/widen.json"
+cat > "$TMP/hlterm-sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+]}
+JSON
+FIXDIR="$HLTERM"; export FIXDIR
+FAKE_SESSIONS="$TMP/hlterm-sessions.json"; export FAKE_SESSIONS
+BASELINE_CSV="" run_precheck
+SURV="$(survivors_of "$OUT")"
+has   ",$SURV," ",hl-closed-subj," "a CLOSED but still-listed holder → its subject survives (run the pass)"
+has   ",$SURV," ",hl-arch-subj," "an ARCHIVED but still-listed holder → its subject survives (run the pass)"
+hasnt ",$SURV," ",hl-asleep-subj," "a non-terminal (asleep) holder still excludes its subject"
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

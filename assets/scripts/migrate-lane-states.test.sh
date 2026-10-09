@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/migrate-lane-states.sh.
 # Covers: dry-run reports and writes nothing; green@/fixable@ rewrite to bare
-# lane states (including a multi-gate check_set); a park clears the legacy
-# marker and writes merge_hold=signoff_cap + signoff_cap=<gate> (never plain
-# merge_hold=true), with escalate.sh invoked with GC_RIG pinned to the rig
-# being iterated (never an inherited GC_RIG) and a rig-qualified --pool; a
+# lane states (including a multi-check check_set); a park clears the legacy
+# marker and any blocked_reason and writes plain merge_hold=true (never the
+# retired signoff_cap, and its visit never advertises the retired signoff.sh
+# reset verb), with
+# escalate.sh invoked with GC_RIG pinned to the rig being iterated (never an
+# inherited GC_RIG); a
 # park write that does not land leaves the legacy marker standing for a
 # retry, with the visit already filed; a second --apply run is a true no-op
 # once everything has landed; a listing that is unparseable (non-array, or a
@@ -13,8 +15,8 @@
 # as attention; and a city-scope (no rig name) park is refused rather than
 # guessed at, since no rig-qualified pool exists to route its visit through.
 # No live city, Dolt, network, gc, bd, gh or escalate.sh — stubs from
-# test-harness.sh plus a thin `gc rig list` / `gc bd list` shim (the
-# cutover-2026-08.test.sh pattern) and a recording escalate.sh stub.
+# test-harness.sh plus a thin `gc rig list` / `gc bd list` shim and a
+# recording escalate.sh stub.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,14 +79,14 @@ anchor() { # id merge_result check_set extra-metadata-json-fragment(starts with 
     "$1" "$1" "$2" "$3" "${4:-}"
 }
 
-# Fixture: two verdicts that survive as lane states (one under a multi-gate
+# Fixture: two verdicts that survive as lane states (one under a multi-check
 # check_set, proving the comma-split match), one park, and one legacy marker
-# on a gate the anchor's check_set does not declare.
-rows_json="$(anchor G1 pull_request codex ',"check.codex":"green@1111111111111111111111111111111111111111"'),\
-$(anchor G2 pull_request "codex,lint" ',"check.lint":"green@2222222222222222222222222222222222222222"'),\
-$(anchor F1 pull_request codex ',"check.codex":"fixable@3333333333333333333333333333333333333333"'),\
-$(anchor P1 pull_request codex ',"check.codex":"exception@4444444444444444444444444444444444444444","blocked_reason":"legal review needed"'),\
-$(anchor U1 pull_request codex ',"check.other":"exception@5555555555555555555555555555555555555555"')"
+# on a check the anchor's check_set does not declare.
+rows_json="$(anchor G1 pull_request correctness ',"check.correctness":"green@1111111111111111111111111111111111111111"'),\
+$(anchor G2 pull_request "correctness,lint" ',"check.lint":"green@2222222222222222222222222222222222222222"'),\
+$(anchor F1 pull_request correctness ',"check.correctness":"fixable@3333333333333333333333333333333333333333"'),\
+$(anchor P1 pull_request correctness ',"check.correctness":"exception@4444444444444444444444444444444444444444","blocked_reason":"legal review needed"'),\
+$(anchor U1 pull_request correctness ',"check.other":"exception@5555555555555555555555555555555555555555"')"
 store "[$rows_json]"
 
 echo "# dry-run (the default) reports everything and writes NOTHING"
@@ -92,29 +94,30 @@ cp "$STUB_STORE" "$TMP/store.before"
 out=$("$SUT" --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "dry-run exits 0 (nothing here needs an operator yet)"
 has "$out" "DRY-RUN" "dry-run announces itself"
-has "$out" 'would rewrite check.codex="green@1111111111111111111111111111111111111111" -> green' "G1 dry-run line"
-has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-gate check_set) dry-run line"
-has "$out" 'would rewrite check.codex="fixable@3333333333333333333333333333333333333333" -> fixing' "F1 dry-run line"
-has "$out" 'would file visit [gate-park-migrated], then clear check.codex="exception@4444444444444444444444444444444444444444"' "P1 dry-run park line"
-has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a gate outside check_set' "U1 reported as an undeclared marker"
+has "$out" 'would rewrite check.correctness="green@1111111111111111111111111111111111111111" -> green' "G1 dry-run line"
+has "$out" 'would rewrite check.lint="green@2222222222222222222222222222222222222222" -> green' "G2 (multi-check check_set) dry-run line"
+has "$out" 'would rewrite check.correctness="fixable@3333333333333333333333333333333333333333" -> fixing' "F1 dry-run line"
+has "$out" 'would file visit [gate-park-migrated], then clear check.correctness="exception@4444444444444444444444444444444444444444" and any blocked_reason, and set merge_hold=true' "P1 dry-run park line"
+has "$out" 'check.other="exception@5555555555555555555555555555555555555555" names a check outside check_set' "U1 reported as an undeclared marker"
 cmp -s "$STUB_STORE" "$TMP/store.before"; eq "$?" 0 "dry-run left the store byte-identical"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "dry-run issued zero bd updates"
 eq "$(wc -l < "$STUB_ESCALATE_LOG" | tr -d ' ')" "0" "dry-run filed no visits"
 
 echo
-echo "# --apply: lane-state rewrites, and a park writes merge_hold=signoff_cap"
-echo "#   + signoff_cap=<gate>, with the visit filed under the ITERATED rig's"
-echo "#   GC_RIG, never one inherited from the caller's shell"
+echo "# --apply: lane-state rewrites, and a park writes plain merge_hold=true"
+echo "#   (never the retired signoff_cap), with the visit filed under the"
+echo "#   ITERATED rig's GC_RIG, never one inherited from the caller's shell"
 : > "$STUB_GC_LOG"
 export GC_RIG="some-other-rig"   # what a gc-helm shell or agent session exports
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "apply run exits 0"
-eq "$(meta G1 check.codex)" "green" "G1 rewritten to green"
-eq "$(meta G2 check.lint)" "green" "G2 (multi-gate check_set) rewritten to green"
-eq "$(meta F1 check.codex)" "fixing" "F1 rewritten to fixing"
-eq "$(meta P1 check.codex)" "<absent>" "P1 legacy marker cleared"
-eq "$(meta P1 merge_hold)" "signoff_cap" "P1 parked under merge_hold=signoff_cap, never plain true"
-eq "$(meta P1 signoff_cap)" "codex" "P1 signoff_cap names the gate that parked it"
+eq "$(meta G1 check.correctness)" "green" "G1 rewritten to green"
+eq "$(meta G2 check.lint)" "green" "G2 (multi-check check_set) rewritten to green"
+eq "$(meta F1 check.correctness)" "fixing" "F1 rewritten to fixing"
+eq "$(meta P1 check.correctness)" "<absent>" "P1 legacy marker cleared"
+eq "$(meta P1 merge_hold)" "true" "P1 parked under plain merge_hold=true"
+eq "$(meta P1 blocked_reason)" "<absent>" "P1's legacy blocked_reason is cleared — the visit carries the question, no marker-only hold remains"
+eq "$(meta P1 signoff_cap)" "<absent>" "P1 carries no signoff_cap — the retired cap park is not written"
 eq "$(meta U1 check.other)" "exception@5555555555555555555555555555555555555555" "U1's undeclared marker is untouched"
 esc="$(cat "$STUB_ESCALATE_LOG")"
 has "$esc" "GC_RIG=gc-toolkit" "escalate.sh ran with GC_RIG pinned to the rig this pass is walking"
@@ -122,6 +125,8 @@ hasnt "$esc" "GC_RIG=some-other-rig" "…never the GC_RIG inherited from the cal
 has "$esc" "--subject P1" "the visit names the anchor"
 has "$esc" "--key gate-park-migrated" "the visit uses the migration's dedup key"
 hasnt "$esc" "--pool" "the visit parks on the board (escalate's default human route; the retired converse pool is not named)"
+hasnt "$esc" "signoff.sh reset" "the visit never advertises the retired signoff.sh reset verb"
+hasnt "$esc" "signoff_cap" "the visit never names the retired signoff_cap park"
 unset GC_RIG
 
 echo
@@ -140,13 +145,13 @@ echo "# --apply: a park write that does NOT land leaves the legacy marker"
 echo "#   standing for a retry — the visit is filed BEFORE the write, so a"
 echo "#   retry recovers instead of stranding a hold with nothing on the board"
 tmpf=$(mktemp "${TMPDIR:-/tmp}/gctk-migrate-lane-states-test.XXXXXX")
-jq -c '. + [{"id":"P2","status":"open","assignee":"","title":"t-P2","metadata":{"merge_result":"pull_request","check_set":"codex","check.codex":"exception@6666666666666666666666666666666666666666","blocked_reason":"needs licensing review"}}]' \
+jq -c '. + [{"id":"P2","status":"open","assignee":"","title":"t-P2","metadata":{"merge_result":"pull_request","check_set":"correctness","check.correctness":"exception@6666666666666666666666666666666666666666","blocked_reason":"needs licensing review"}}]' \
   "$STUB_STORE" > "$tmpf" && mv "$tmpf" "$STUB_STORE"
 export STUB_UPDATE_FAIL="P2"   # models a write that is lost/timed out: reports nothing, changes nothing
 : > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 1 "a park whose write does not land exits 1"
-eq "$(meta P2 check.codex)" "exception@6666666666666666666666666666666666666666" "P2's legacy marker stands, untouched"
+eq "$(meta P2 check.correctness)" "exception@6666666666666666666666666666666666666666" "P2's legacy marker stands, untouched"
 eq "$(meta P2 merge_hold)" "<absent>" "P2 is not parked"
 eq "$(grep -c -- '--subject P2' "$STUB_ESCALATE_LOG" || true)" "1" "the visit was filed once even though the park did not land"
 has "$out" "legacy marker left in place" "the failure is reported as recoverable, not a stuck hold"
@@ -155,9 +160,10 @@ echo "# …and a re-run recovers: the same row is picked up again and parks clea
 export STUB_UPDATE_FAIL=""
 out=$("$SUT" --apply --rig gc-toolkit 2>&1); rc=$?
 eq "$rc" 0 "the retry exits 0"
-eq "$(meta P2 check.codex)" "<absent>" "P2's legacy marker is cleared on retry"
-eq "$(meta P2 merge_hold)" "signoff_cap" "P2 is parked on retry"
-eq "$(meta P2 signoff_cap)" "codex" "P2 signoff_cap on retry"
+eq "$(meta P2 check.correctness)" "<absent>" "P2's legacy marker is cleared on retry"
+eq "$(meta P2 merge_hold)" "true" "P2 is parked under merge_hold=true on retry"
+eq "$(meta P2 blocked_reason)" "<absent>" "P2's legacy blocked_reason is cleared on retry"
+eq "$(meta P2 signoff_cap)" "<absent>" "P2 carries no signoff_cap on retry"
 eq "$(grep -c -- '--subject P2' "$STUB_ESCALATE_LOG" || true)" "2" "escalate.sh was asked again on retry (its own --key dedup keeps this from duplicating on the board — exercised in escalate.test.sh, not here)"
 
 echo
@@ -183,12 +189,12 @@ echo "# city scope (no rig name): no rig-qualified pool exists, so a park is"
 echo "#   refused loudly rather than guessed at"
 mkdir -p "$TMP/city"
 printf '{"rigs":[{"name":"","path":"%s","suspended":false}]}\n' "$TMP/city" > "$STUB_RIGS"
-store '[{"id":"C1","status":"open","assignee":"","title":"t-C1","metadata":{"merge_result":"pull_request","check_set":"codex","check.codex":"exception@7777777777777777777777777777777777777777","blocked_reason":"city scope park"}}]'
+store '[{"id":"C1","status":"open","assignee":"","title":"t-C1","metadata":{"merge_result":"pull_request","check_set":"correctness","check.correctness":"exception@7777777777777777777777777777777777777777","blocked_reason":"city scope park"}}]'
 : > "$STUB_ESCALATE_LOG"
 out=$("$SUT" --apply 2>&1); rc=$?
 eq "$rc" 1 "a city-scope park needs an operator"
 has "$out" "city-scope park needs an operator" "the reason is reported"
-eq "$(meta C1 check.codex)" "exception@7777777777777777777777777777777777777777" "C1's legacy marker is left untouched"
+eq "$(meta C1 check.correctness)" "exception@7777777777777777777777777777777777777777" "C1's legacy marker is left untouched"
 eq "$(meta C1 merge_hold)" "<absent>" "C1 is not parked"
 eq "$(wc -l < "$STUB_ESCALATE_LOG" | tr -d ' ')" "0" "no visit filed at city scope — nothing to route it through"
 

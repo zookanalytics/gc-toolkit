@@ -1,8 +1,9 @@
 # proactive — the dedicated, small, always-on pool that runs first reactions.
 # A reaction is its own leased bead R (a plain task) that tracks a subject:
 # the worker claims R, reads the subject, writes a card to its notes, then
-# disposes the subject — route it to a pool, hold it on a `blocks` edge, file a
-# visit, or supersede it — and closes R. NOT a resident loop — reaction beads are
+# disposes the subject — route it to a pool, hold it on a `blocks` edge, hand a
+# confident no-op to a validating closer, or put it to the operator as a human
+# gate — and closes R. NOT a resident loop — reaction beads are
 # filed per subject by `tools/gc-proactive.sh sling` /
 # `gc-proactive.sh scan --sling` and routed here. max_active_sessions = 2 is this
 # pool's only throttle: routed reaction beads queue at zero cost until a slot

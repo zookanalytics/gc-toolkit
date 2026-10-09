@@ -86,6 +86,15 @@ that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
 is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
+An arm is a dispatch path, as a route is. Both are defined once, in
+`assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
+dispatch is already decided sources that file: the proactive scan,
+`doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
+also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
+looks for raw input to react to, and it drops a bead that has a dispatch path.
+Otherwise a sweep that ran between a blocker closing and the next reconcile
+pass would sling a first reaction at a bead the arm is about to dispatch.
+
 To see what is owed, in this rig's store:
 
 ```bash
@@ -100,10 +109,12 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 and the dispatcher's open-tracking gate gives each rig its own
 single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed bead that `bd` now reports ready — stamping
-  its own `gc.dispatch_when_ready_slung` marker in its unproven `slinging@`
-  state, running the recorded sling, promoting the marker to `slung@` on
-  success, then clearing the record;
+- **dispatches** every armed open bead whose own `blocks` edges have all
+  closed — the ones `bd` reports ready, and also the ones bd holds unready
+  only through a blocked or deferred ancestor (see below) — stamping its own
+  `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
+  running the recorded sling, promoting the marker to `slung@` on success,
+  then clearing the record;
 - **retires** the record on an armed bead that has closed, or whose sling
   reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
   `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
@@ -127,12 +138,23 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   gated one dispatches when its blocker closes, the held one never
   dispatches at all.
 
-Dispatchability is not re-implemented here. `bd list --ready` applies
-beads' own predicate — open, no active blocker of a blocking type
-(`blocks` / `waits-for` / `conditional-blocks`), not `in_progress`,
-`blocked`, `deferred` or `hooked`, parent-child blocked-flag cascade
-included. Asking `bd` is what keeps this from drifting away from the
-predicate every other reader uses.
+The arm waits on the bead's OWN blockers, which is narrower than `bd list
+--ready`. `--ready` applies beads' own claimability predicate — open, no
+active blocker of a blocking type (`blocks` / `waits-for` /
+`conditional-blocks`), not `in_progress`, `blocked`, `deferred` or `hooked` —
+and it ALSO excludes a bead held only by a blocked or deferred ANCESTOR,
+because the is_blocked flag cascades DOWN parent-child edges. An armed epic
+child whose own blockers have all closed is ready to run, but sits under a
+container the operator holds on a human demand gate, so it never enters
+`bd --ready` while that gate is open and its arm would never fire. So the
+pass reads `bd --ready` as the fast path, then asks any open bead bd holds
+unready one direct question — are all of its own `blocks` edges closed? — and
+dispatches on a yes. The status gate still holds (a non-`open` bead is a
+deliberate hold and is never dispatched), and an assignee still HELDs the
+bead. The one question reconcile answers itself is the arm's own: whether the
+thing the arm waits on has landed. `bd blocked` and `bd ready` cannot answer
+it under this bead's id, because the cascade attributes the block to the
+ancestor.
 
 The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
 **first**, slings **second**, promotes the marker to `slung@<ts>` on
@@ -151,7 +173,7 @@ zero-count summary — for a dispatcher, "I could not see the queue" and
 "nothing was owed" reading alike is the same disappearing hold this
 machinery exists to remove.
 
-Two checks keep the halves together. The positive control closing
+Three checks keep the halves together. The positive control closing
 `assets/scripts/deferred-dispatch.test.sh` asserts the order file ships,
 is a rig-scoped cooldown, does not opt out of the single-flight gate, and
 still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
@@ -159,6 +181,12 @@ still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
 has fired within `max(3×interval, 15m)`. Ship the arm without the cadence
 and `arm` still succeeds, still writes a well-formed record, and nothing
 ever performs it — the same invisible hold, one layer down.
+`doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
+cadence can be live and the pass still leave a dispatch unmade, so it flags an
+arm whose own `blocks` edges have all closed but that has stayed open and
+armed past the reconcile window, or one armed at a non-open status the pass can
+never dispatch — a dispatch silently not firing, surfaced before a human has to
+notice it days later.
 
 ## What this does not do
 

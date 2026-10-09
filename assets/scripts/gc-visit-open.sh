@@ -1,6 +1,6 @@
 #!/bin/sh
 # gc-visit-open.sh — operator-origin visit intake: turn "I need an agent on
-# topic X" into a routed, durable conversation in one command (tk-4ojka).
+# topic X" into a routed, durable conversation in one command.
 # The argument (grammar and flags in usage()) is either a topic string, which
 # becomes a NEW subject bead, or a reference to an EXISTING one (a bead id, a
 # PR number or URL, or a superseded id) resolved through gc-helm to the live
@@ -8,15 +8,17 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED files a first reaction (framing card, reaction files the
-# visit); FALLBACK files the visit directly — taken on --no-react, whenever
+# PREFERRED files a first reaction (framing card; a reaction that puts the
+# topic to the operator files a human gate, and gate-visit-sweep files that
+# gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
-# a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction so the sling is a no-op
-# that dispatches nothing (gc-helm react exit 5): nothing would file the visit,
-# so this does.
+# a reaction routed into a downed pool waits invisibly; today's tool always says
+# yes), and when the subject already has an open first reaction or a live owner
+# owns it (gc-helm react exit 5) or a live workflow already drives it (exit 6),
+# so react is a no-op that files nothing: nothing would file the visit, so this
+# does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
-# matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
+# matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
 
 # >>> control-char-scrub
@@ -31,6 +33,12 @@ PROG="gc-visit-open"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# The one definition of whether a rig carries converse, shared with gc-helm.sh's
+# engage so this intake and that spawn read the capability the same way. Exposes
+# rig_carries_converse / converse_roster.
+# shellcheck source=converse-capability.sh
+. "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
+    || { printf '%s: cannot source converse-capability.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
@@ -50,20 +58,23 @@ operator draws it off the board and `gc-helm engage` spawns a converse sitting
 on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
-                 override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —
-                 an existing bead's own rig is authoritative.
+                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 a bead id, a PR number, or a PR URL, because an existing
+                 bead's own rig is authoritative.
   --no-react     Skip the proactive first reaction and file the visit now.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
-                 reads as a question).
+                 reads as a question). Refused with exit 2 for a bead id, a PR
+                 number, or a PR URL, because an existing bead keeps its type.
   --topic        Treat the argument as a topic even if it looks like a bead id,
                  a PR number, or a PR URL.
   -h, --help     This help.
 
 Without --no-react the topic is handed to a proactive first reaction, which
-writes a framing card and files the visit itself — but ONLY when that pool can
-actually run. When it cannot (auto-spawn disabled, or the city is at the
-session cap) this falls back to filing the visit directly and says so.
+writes a framing card and, when it puts the topic back to you, files a human
+gate whose visit gate-visit-sweep files — but ONLY when that pool can actually
+run. When it cannot (auto-spawn disabled, or the city is at the session cap)
+this falls back to filing the visit directly and says so.
 EOF
 }
 
@@ -74,13 +85,18 @@ note()  { printf '%s\n' "$*" >&2; }
 
 # ── The subject's title ──────────────────────────────────────────────
 # `bd create` refuses a title over 500 BYTES, and the popup invites a
-# paragraph (tk-wp50s). The topic lives verbatim in the BODY; the title is a
+# paragraph. The topic lives verbatim in the BODY; the title is a
 # derived label, capped well under 500 in bytes (what ${#var} measures here).
 TITLE_MAX=200
 
 # derive_title <text> — one-line board label: whitespace collapsed, over-long
 # topics cut at a WORD boundary (an offset cut can slice a multi-byte char).
-derive_title() {
+# The body is a subshell under LC_ALL=C so that ${#var} counts bytes in every
+# shell. dash counts bytes in any locale, but bash, ksh and zsh count
+# characters under a UTF-8 locale, and /bin/sh is dash on Debian and bash on
+# macOS.
+derive_title() (
+    LC_ALL=C
     _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
     _dt="${_dt# }"; _dt="${_dt% }"
     [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
@@ -100,7 +116,7 @@ derive_title() {
         [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
     fi
     printf '%s…' "${_dt% }"
-}
+)
 
 # ── Argument parsing ─────────────────────────────────────────────────
 ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""
@@ -139,7 +155,7 @@ RIGS=""
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
     # >>> rig-enumeration-taxonomy
-    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences, tk-lzdty); no
+    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences); no
     # timeout arm because this script does not bound the call.
     # The stderr capture outlives nothing: it is read and removed a few lines
     # down, and the traps that cover the signal landing while `gc rig list`
@@ -179,6 +195,45 @@ enumerate_rigs() {
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
         || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
     # <<< rig-enumeration-taxonomy
+}
+
+# require_reaction_agent <rig> — refuse (die, nothing filed) when <rig> has no
+# reaction agent registered, so an operator topic filed there would park on the
+# board with no session able to engage it. Two agent kinds engage a topic: the
+# proactive first-reaction pool, and converse (gc-helm engage spawns it on
+# demand). Registration, not liveness, is the bar: a suspended or zero-cap agent
+# still engages once its rig resumes or its cap lifts, and the topic path below
+# deliberately files-and-waits into a suspended rig rather than refusing it. A
+# rig with neither agent registered — the running, agent-less city workspace
+# this backstops — is the one with no resume. An unreadable roster refuses
+# nothing; a dead zone is a positive finding only.
+require_reaction_agent() {
+    # Converse is one of the two reaction agents; its capability is the shared
+    # predicate (converse-capability.sh), so this intake and gc-helm engage read
+    # it the same way and cannot drift. Serviceable the moment it is registered.
+    if rig_carries_converse "$1"; then
+        return 0
+    fi
+    # The other reaction agent is the proactive first-reaction pool. Read the one
+    # roster converse_roster already fetched and validated well-formed (into
+    # $_CONVERSE_ROSTER), for it and for the alt-rig suggestion. Empty means
+    # unreadable or malformed — a degraded data plane, not a dead zone — so fail
+    # open (per the header) rather than strand a legitimate intake on a roster gc
+    # could not answer.
+    converse_roster
+    [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
+    # Serviceable when a proactive pool is registered for the rig, in any cap or
+    # suspension state. (Converse was handled by the shared predicate above.)
+    if printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$1" \
+            '[ .agents[]? | (.qualified_name // "")
+               | select(. == ($r + "/gc-toolkit.proactive")) ] | length > 0' >/dev/null 2>&1; then
+        return 0
+    fi
+    _rra_alt=$(printf '%s' "$_CONVERSE_ROSTER" | jq -r '
+        [ .agents[]? | (.qualified_name // "")
+          | select(test("/gc-toolkit[.](proactive|converse)"))
+          | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)
+    die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
 }
 
 # derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
@@ -251,6 +306,10 @@ else
     [ -n "$RIG_PATH" ] || die "unknown rig '$RIG' (try one of: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null))" 2
     [ -d "$RIG_PATH/.beads" ] || die "rig '$RIG' has no .beads ledger at $RIG_PATH/.beads" 3
 
+    # Refuse a dead-zone target before minting the subject bead, so nothing is
+    # filed where no agent could engage it.
+    require_reaction_agent "$RIG"
+
     # ── Filing into a paused rig is allowed; say the report will wait ────
     # A suspended rig has its agents skipped by the reconciler, and a rig with
     # no agents running has nothing to triage yet — but `gc rig suspend` leaves
@@ -293,9 +352,9 @@ board; this body is the record. Ask before assuming scope."
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
-    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
+    SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
-        # A refused create STATES its reason in .error — surface it (tk-wp50s).
+        # A refused create STATES its reason in .error — surface it.
         SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
         [ -n "$SUBJ_ERR" ] || SUBJ_ERR="bd create returned no id and no error (exit $SUBJ_RC)"
         die "could not create the subject bead in rig '$RIG': $SUBJ_ERR — nothing filed" 4
@@ -305,10 +364,17 @@ board; this body is the record. Ask before assuming scope."
     note "$PROG: subject $SUBJECT created in rig $RIG_NAME ($SUBJ_TYPE)"
 fi
 
+# The topic path guarded before it minted the subject; the existing-bead and
+# PR-reference paths resolve a subject in another rig, so guard here before a
+# visit is filed against a target that could never engage it.
+if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
+    require_reaction_agent "$RIG_NAME"
+fi
+
 # ── Record the origin as a KEY, not only as prose ────────────────────
 # gc.origin=operator is the machine-readable fact ("operator commissioned
 # this") a sweep can select on where the body sentence cannot be (prose
-# drifts and gets quoted, tk-2cyxo). BOTH intake paths stamp it; gc-helm.sh
+# drifts and gets quoted). BOTH intake paths stamp it; gc-helm.sh
 # open deliberately does not (a board pick is a glance, not a commission).
 # Only when absent, and never fatal: the deliverable is the conversation.
 ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
@@ -320,7 +386,7 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a slung first reaction actually be picked up? ─
+# ── Path selection: can a filed first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
@@ -330,7 +396,7 @@ elif [ ! -x "$PROACTIVE_TOOL" ]; then
     REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
 else
     # Ask under the SUBJECT's rig (the pool and its clamps are rig-scoped;
-    # helm-svc has no GC_RIG of its own — tk-hscs0). Set for this ONE command,
+    # helm-svc has no GC_RIG of its own). Set for this ONE command,
     # not exported: later gc calls resolve their own scope.
     REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
     [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"
@@ -341,8 +407,8 @@ if [ -n "$REACT" ]; then
     # The reaction owns visit creation from here; a second visit would split
     # the conversation.
     if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
-        printf '%s: subject %s — first reaction slung (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
-        printf '       The reaction writes a framing card and files the visit; it is not filed yet.\n'
+        printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+        printf '       The reaction writes a framing card, and when it puts the topic to you the visit is filed for it; it is not filed yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
     else
@@ -350,16 +416,21 @@ if [ -n "$REACT" ]; then
     fi
     # No reaction was dispatched, so nothing downstream will file the visit —
     # fall through and file it directly; a conversation beats a bead nobody is
-    # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
-    # slung nothing because a first reaction happens once), distinct from a real
-    # sling failure: name the actual cause so the visit body the converse
+    # coming to. gc-helm react exit 5 is the already-reacting no-op (the guard
+    # filed nothing because a first reaction happens once at a time, or a live
+    # owner owns it) and exit 6 the live-workflow no-op (the guard filed nothing
+    # because a reaction never races work in flight), both distinct from a real
+    # failure to file: name the actual cause so the visit body the converse
     # session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
-        REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the visit directly"
+        REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
+    elif [ "$REACT_RC" -eq 6 ]; then
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the visit directly"
+        REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     else
-        note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
-        REACT_WHY="no: the first-reaction sling failed"
+        note "$PROG: filing the first reaction FAILED — falling back to filing the visit directly"
+        REACT_WHY="no: filing the first reaction failed"
     fi
 fi
 

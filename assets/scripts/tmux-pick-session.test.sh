@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for tmux-pick-session.sh — the `prefix + S` session picker (tk-5xy1wp).
+# Test for tmux-pick-session.sh — the `prefix + S` session picker.
 #
 # HERMETIC only. The picker's classification block is pure data-in, data-out:
 # a tmux session roster goes in, a display-menu argv comes out. The suite
@@ -63,6 +63,13 @@
 #              carries the character address in GC_AGENT, so neither field
 #              names its role. The template does, and it folds into the
 #              count like any other polecat.
+#   (WISP)     a wisp-cycle pool polecat carries the rig in neither its
+#              GC_AGENT (the bare wisp id, slashless) nor its session name
+#              (no "<rig>--"), so only the template can group it. It folds
+#              into its rig's count and never into a city one; without the
+#              template rig it would land under "city".
+#   (CITYNAMED live) a slashless template names a city-scoped agent and sets
+#              no rig, so the template path leaves it under "city".
 #   (CONVERSE) a converse runs on a pool slot, and a slot is a scheduling
 #              fact. It holds a conversation an operator goes to, so it is
 #              never folded away. The same assertion pins the null title:
@@ -170,6 +177,7 @@ gc-toolkit--gc-toolkit__converse-1-pool|0|1|gc-toolkit--gc-toolkit__converse-1-p
 gc-toolkit--gc-toolkit__hicks|0|1|gc-toolkit/gc-toolkit.hicks
 gc-toolkit--gc-toolkit__polecat-1-pool|0|1|gc-toolkit--gc-toolkit__polecat-1-pool
 gc-toolkit--gc-toolkit__polecat-2-pool|0|1|gc-toolkit--gc-toolkit__polecat-2-pool
+gc-toolkit__polecat-lx-wisp-k7jiy|0|1|lx-wisp-k7jiy
 gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
 gc-toolkit--gc-toolkit__ripley|0|1|gc-toolkit/gc-toolkit.ripley
 gc-toolkit__deacon|0|1|gc-toolkit.deacon
@@ -200,6 +208,7 @@ cat > "$TMP/api.json" <<'API'
   {"session_name": "gc-toolkit--gc-toolkit__hicks",            "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__polecat-1-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__polecat-2-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
+  {"session_name": "gc-toolkit__polecat-lx-wisp-k7jiy",        "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__refinery",         "template": "gc-toolkit/gc-toolkit.refinery",      "title": "landing PR #497"},
   {"session_name": "gc-toolkit--gc-toolkit__ripley",           "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
   {"session_name": "gc-toolkit__deacon",                       "template": "gc-toolkit.deacon",                   "title": ""},
@@ -336,10 +345,23 @@ hasnt "$APIMENU" 'gc-toolkit.ripley' \
     "CODEX: ...and so is the second one"
 eq "$(derives "$APIALL" 'gc-toolkit--gc-toolkit__hicks')" 'gc-toolkit|gc-toolkit.hicks' \
     "CODEX: --all still reaches it, derived from the character address"
-# gc-toolkit runs polecat-1-pool + polecat-2-pool + hicks + ripley = 4, and
-# the converse that the suffix rule counted is gone from the total.
-has "$APIMENU" '── gc-toolkit • 4 polecats ──' \
+# gc-toolkit runs polecat-1-pool + polecat-2-pool + hicks + ripley + the
+# wisp-cycle pool polecat = 5, and the converse that the suffix rule counted
+# is gone from the total.
+has "$APIMENU" '── gc-toolkit • 5 polecats ──' \
     "CODEX: the count is the polecat family, and only the polecat family"
+
+# A wisp-cycle pool polecat carries the rig in neither its GC_AGENT (the bare
+# wisp id) nor its session name (no "<rig>--"), so only the template groups
+# it. Without that it lands in the city group and inflates a city count.
+hasnt "$APIMENU" '── city • ' \
+    "WISP: a wisp pool polecat is not counted under a city group"
+hasnt "$APIMENU" 'lx-wisp-k7jiy' \
+    "WISP: it folds into its rig's count, hidden by the default filter"
+eq "$(derives "$APIALL" 'gc-toolkit__polecat-lx-wisp-k7jiy')" 'gc-toolkit|lx-wisp-k7jiy' \
+    "WISP: --all reaches it under gc-toolkit; display is the wisp id"
+eq "$(derives "$APIALL" 'gc-toolkit__deacon')" 'city|gc-toolkit.deacon' \
+    "CITYNAMED: a slashless template sets no rig, so it stays city on the live path"
 
 eq "$(derives "$APIMENU" 'gc-toolkit--gc-toolkit__converse-1-pool')" \
    'gc-toolkit|gc-toolkit.converse-1-pool' \
@@ -388,11 +410,13 @@ hasnt "$APIMENU" '▫' \
 
 # Backdate the file the picker reads: staleness is the cache's mtime, and
 # nothing else in the run has to move to make the map old.
-touch -d "@$(( $(date +%s) - 3700 ))" "$ROLES_CACHE"
+old_epoch=$(( $(date +%s) - 3700 ))
+old_stamp=$(date -d "@$old_epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$old_epoch" +%Y%m%d%H%M.%S)
+touch -t "$old_stamp" "$ROLES_CACHE"
 STALEMENU="$(run_picker_api)"
 has "$STALEMENU" ' Sessions ▫ roles 1h old ' \
     "STALE: an old map is marked, with its age"
-has "$STALEMENU" '── gc-toolkit • 4 polecats ──' \
+has "$STALEMENU" '── gc-toolkit • 5 polecats ──' \
     "STALE: ...and is still what the menu groups by, marker or not"
 
 # A refresh that cannot reach the API must not blank the map it has.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for gc-visit-open.sh — the operator-origin visit intake
-# (tk-4ojka). Runs the REAL script (via `sh`, as shipped) with `gc`,
+# Hermetic test for gc-visit-open.sh — the operator-origin visit intake.
+# Runs the REAL script (via `sh`, as shipped) with `gc`,
 # `gc-helm.sh` and `gc-proactive.sh` stubbed on PATH — no live city, Dolt,
 # network, or sessions.
 #
@@ -8,13 +8,13 @@
 #
 #   (DIRECT)    --no-react files the visit NOW, through gc-helm.sh open —
 #               the script must never hand-roll a gate-visit block of its own.
-#   (SINGLE)    the react path files NO visit: the reaction bead it slings
-#               owns visit creation (its gate-visit block, on the ruling
-#               disposition), and a second one here would split the
+#   (SINGLE)    the react path files NO visit: a reaction that puts the
+#               subject to the operator files a human gate, gate-visit-sweep
+#               files that gate's visit, and a second one would split the
 #               conversation into two sittings of the same subject.
-#   (SHED)      the whole reason the fallback exists. `gc sling` is
-#               fire-and-forget and returns 0 whether or not anything will
-#               ever pick the bead up, so an unguarded react path leaves the
+#   (SHED)      the whole reason the fallback exists. Filing a reaction bead
+#               is fire-and-forget and returns 0 whether or not anything will
+#               ever claim it, so an unguarded react path leaves the
 #               topic routed, unclaimed, and WITHOUT a visit — filed-looking
 #               and silently forgotten. The script asks `deliverable` up
 #               front, and a "no" must divert to the direct path. (The
@@ -27,9 +27,16 @@
 #               cwd: this is fired from wherever the operator is sitting, and
 #               a silently varying destination is the worst failure mode an
 #               intake path can have. An unknown --rig files nothing.
+#   (DEADZONE)  a topic filed into a store with no reaction agent — no
+#               proactive pool and no registered converse — parks on the board
+#               with nobody to engage it. The intake refuses such a target
+#               before minting anything, keying on registration so a merely
+#               suspended rig (agents paused, see LIVENESS) still files.
 #   (SUBJECT)   an existing bead is its own subject — no second bead is
 #               minted — and a contradictory --rig/--type is refused rather
-#               than ignored.
+#               than ignored, for a bead id and a PR reference alike. The
+#               --help text is held to the same refusal, since it is where the
+#               operator learns the contract.
 #   (SHAPE)     "dolt-latency" is a topic, "tk-abc12" is a bead id, and the
 #               difference is the RIG PREFIX, not the hyphen. A prefix-shaped
 #               string no ledger answers for must not become a bead literally
@@ -42,7 +49,7 @@
 #               the DESIGNED input, not an edge case. Passing it through as the
 #               title made it the one input guaranteed to fail: `bd create`
 #               refuses a title over 500 bytes, so a 579-character topic filed
-#               nothing at all (tk-wp50s, hit live). The title is a derived
+#               nothing at all (hit live). The title is a derived
 #               label; the BODY is where the operator's words have to survive.
 #   (WHY)       a create refused for a stated reason must relay that reason.
 #               Keeping only .id off the response reported every refusal as
@@ -56,7 +63,7 @@
 #               matches beads that merely quote it. That key is what
 #               a parked-disposition sweep selects on to decide whether a
 #               parked subject is owed a visit back once its routed work
-#               lands (tk-2cyxo), so a missing stamp costs the return trip.
+#               lands, so a missing stamp costs the return trip.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,6 +108,18 @@ case "$1 ${2:-}" in
               ({name:"gascity",    path:$g, prefix:"gc"}
                + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
                + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "agent list")
+    # A reaction roster: proactive + converse for each rig named in
+    # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
+    # this list has no reaction agent — the dead zone require_reaction_agent
+    # refuses. FAKE_AGENT_LIST_EMPTY models an empty (unreadable) roster and
+    # FAKE_AGENT_LIST_INVALID a nonempty-but-unparseable one — both fail open.
+    [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
+    [ -n "${FAKE_AGENT_LIST_INVALID:-}" ] && { printf '%s\n' "$FAKE_AGENT_LIST_INVALID"; exit 0; }
+    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
+      '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
+                  | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
+                    {qualified_name:($r+"/gc-toolkit.converse"),  suspended:false, pool:{max:2}} ]}' ;;
   "bd show")
     # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
     # bead, so the "never overrule an existing origin" case is a real read of a
@@ -114,7 +133,7 @@ case "$1 ${2:-}" in
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
     # The argv line above flattens the title and body into one blob. Record
-    # each as its own exact value too: the title is precisely what tk-wp50s is
+    # each as its own exact value too: the title is precisely what this case is
     # about, and "the paragraph survived verbatim" is an assertion about the
     # body alone.
     prev=""; title=""
@@ -175,8 +194,8 @@ cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
 #!/usr/bin/env bash
 printf 'proactive %s\n' "$*" >> "$FAKE_CALLS"
 case "${FAKE_DELIVERABLE:-yes}" in
-  yes) echo "yes: the proactive pool is always on — its cap only queues a slung reaction"; exit 0 ;;
-  no)  echo "no: this pool cannot run it (stub-stated reason) — a slung reaction would sit routed and unclaimed"; exit 1 ;;
+  yes) echo "yes: the proactive pool is always on — its cap only queues a routed reaction"; exit 0 ;;
+  no)  echo "no: this pool cannot run it (stub-stated reason) — a routed reaction would sit unclaimed"; exit 1 ;;
 esac
 PRO
 
@@ -192,11 +211,12 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
+# RUN_SH names the shell that runs the script; the default is sh, as shipped.
 run() {
     : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
-    OUT="$(sh "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
+    OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -211,7 +231,7 @@ has "$CALLS" "bd create -t task --title why is dolt wedging under load" "(DIRECT
 has "$CALLS" "helm open tk-newsub" "(DIRECT) the visit is filed through gc-helm.sh open"
 has "$CALLS" "--reason operator-origin topic intake" "(DIRECT) the visit says what it is actually for"
 has "$CALLS" "--body" "(DIRECT) the claim-time brief is supplied"
-hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is slung"
+hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is filed"
 has "$OUT" "visit filed" "(DIRECT) the summary reports a filed visit"
 has "$OUT" "tk-newsub" "(DIRECT) the summary names the subject id"
 
@@ -222,7 +242,7 @@ has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subj
 # --- (SINGLE) the react path files NO visit ----------------------------------
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
-has "$CALLS" "helm react tk-newsub" "(SINGLE) the first reaction is slung at the new subject"
+has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
 hasnt "$CALLS" "helm open" "(SINGLE) no visit is filed — the reaction files it"
 has "$OUT" "not filed yet" "(SINGLE) the operator is told the visit does not exist yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
@@ -230,7 +250,7 @@ has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
 # --- (SHED) an undeliverable proactive surface diverts to the direct path ----
 run no "what should the deacon do about quota parks"
 eq "$RC" "0" "(SHED) exits 0"
-hasnt "$CALLS" "helm react" "(SHED) nothing is slung at a pool that cannot run it"
+hasnt "$CALLS" "helm react" "(SHED) nothing is filed for a pool that cannot run it"
 has "$CALLS" "helm open tk-newsub" "(SHED) the visit is filed directly instead"
 has "$OUT" "visit filed" "(SHED) the summary reports a filed visit"
 run no "a topic"
@@ -246,9 +266,9 @@ CALLS="$(cat "$FAKE_CALLS")"
 eq "$RC" "0" "(SHED/missing) a missing gc-proactive.sh still exits 0"
 has "$CALLS" "helm open tk-newsub" "(SHED/missing) the visit is filed directly"
 
-# --- (RECOVER) a failed sling still ends in a conversation --------------------
-run yes "a topic that fails to sling"
-FAKE_HELM_RC=4 run yes "a topic that fails to sling"
+# --- (RECOVER) a reaction that fails to file still ends in a conversation -----
+run yes "a topic whose reaction fails to file"
+FAKE_HELM_RC=4 run yes "a topic whose reaction fails to file"
 # helm is stubbed to fail for BOTH verbs here, so the run ends in the die() —
 # what matters is that it TRIED the direct path after react failed.
 has "$CALLS" "helm react tk-newsub" "(RECOVER) react was attempted"
@@ -257,19 +277,35 @@ has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
 eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
 
-# --- (REACTED) an already-reacted subject files the visit directly ------------
-# react returns its no-op code (5) when the subject already carries a first
-# reaction: the guard slung nothing, so no reaction will file the visit.
-# gc-visit-open must NOT trust the skip as a dispatch (the bug this fixes) — it
+# --- (REACTED) an already-reacting subject files the visit directly -----------
+# react returns its no-op code (5) when the subject already has an open first
+# reaction or a live owner owns it: the guard filed nothing, so no new reaction
+# will file the visit. gc-visit-open must NOT trust the skip as a dispatch — it
 # falls through and files the visit itself, naming the real cause so the visit
-# body is accurate rather than reporting a sling failure that did not happen.
+# body is accurate rather than reporting a failure to file that did not happen.
 FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
 eq "$RC" "0" "(REACTED) exits 0 — the visit is filed"
 has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the visit"
 has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
-has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
-hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
+has "$ERR" "already has an open first reaction" "(REACTED) the reason names the no-op skip"
+hasnt "$ERR" "FAILED" "(REACTED) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
+# --- (DRIVEN) a subject a live workflow drives files the visit directly -------
+# react returns its other no-op code (6) when a live workflow already drives the
+# subject: the guard filed nothing because a reaction never races work in
+# flight, so no reaction will file the visit either. The visit body the converse
+# session reads must name that cause, not the already-reacting one and not a
+# failure to file.
+FAKE_HELM_REACT_RC=6 run yes "a topic on a subject a polecat is building"
+eq "$RC" "0" "(DRIVEN) exits 0 — the visit is filed"
+has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the visit"
+has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the visit body names the live workflow"
+has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
+hasnt "$ERR" "already has an open first reaction" "(DRIVEN) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "FAILED" "(DRIVEN) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
@@ -332,6 +368,61 @@ eq "$RC" "0" "(LIVENESS) an unknown (null) liveness files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
 
+# --- (DEADZONE) a target with no reaction agent is refused, not filed ---------
+# The reported bug: a topic filed into a store with no proactive pool AND no
+# registered converse parks on the board and no session ever engages it. The
+# intake now refuses such a target before minting anything. Registration is the
+# bar, not liveness — a suspended rig (agents registered, paused) still files,
+# per the (LIVENESS) block above.
+export FAKE_REACTION_RIGS="gc-toolkit"      # gascity now has no reaction agent
+run no "a topic for an agentless rig" --rig gascity
+eq "$RC" "3" "(DEADZONE) a rig with no reaction agent is refused (exit 3)"
+eq "$CALLS" "" "(DEADZONE) and nothing is created or filed"
+has "$ERR" "no reaction agent" "(DEADZONE) the message names the problem"
+has "$ERR" "Nothing filed" "(DEADZONE) and states that nothing was filed"
+has "$ERR" "gc-toolkit" "(DEADZONE) and points at a rig that has one"
+
+# The same store reached through an existing bead id (its own rig authoritative)
+# is refused the same way, before any visit is filed or origin stamped on it.
+run no gc-deadzn1
+eq "$RC" "3" "(DEADZONE) an existing bead in an agentless rig is refused"
+hasnt "$CALLS" "helm open" "(DEADZONE) and no visit is filed on it"
+hasnt "$CALLS" "bd update" "(DEADZONE) and its origin is not stamped"
+unset FAKE_REACTION_RIGS
+
+# Control: the SAME rig, now with a reaction agent registered, files exactly as
+# before — the refusal keys on the missing agent, not on the rig name.
+run no "a topic for a served rig" --rig gascity
+eq "$RC" "0" "(DEADZONE control) a rig WITH a reaction agent files as today"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE control) and the visit is filed"
+
+# An unreadable roster refuses nothing: a dead zone is a positive finding only,
+# so a roster gc cannot answer must not strand the operator at a refusal.
+export FAKE_AGENT_LIST_EMPTY=1
+run no "a topic when the roster is unreadable" --rig gascity
+eq "$RC" "0" "(DEADZONE) an unreadable roster files rather than refusing"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed"
+unset FAKE_AGENT_LIST_EMPTY
+
+# The same fail-open must cover a NONEMPTY roster gc cannot parse: malformed
+# JSON, a stray preface line before the JSON, a truncated payload, or valid JSON
+# of the wrong shape all leave the dead-zone finding unprovable, so the intake
+# files rather than refusing. Empty output was the only unreadable case covered
+# before; nonempty-invalid is the reachable degraded-data-plane one.
+for _bad in unparseable preface truncated wrongshape; do
+    case "$_bad" in
+        unparseable) _bad_roster='not json at all' ;;
+        preface)     _bad_roster="$(printf 'gc: reading rig store\n{"agents":[]}')" ;;
+        truncated)   _bad_roster='{"agents":[' ;;
+        wrongshape)  _bad_roster='{"unexpected":true}' ;;
+    esac
+    export FAKE_AGENT_LIST_INVALID="$_bad_roster"
+    run no "a topic when the roster is nonempty-invalid ($_bad)" --rig gascity
+    eq "$RC" "0" "(DEADZONE) a nonempty invalid roster ($_bad) files rather than refusing"
+    has "$CALLS" "helm open tk-newsub" "(DEADZONE) and the visit is filed ($_bad)"
+    unset FAKE_AGENT_LIST_INVALID
+done
+
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12
 eq "$RC" "0" "(SUBJECT) an existing bead id exits 0"
@@ -342,6 +433,25 @@ eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
 eq "$CALLS" "" "(SUBJECT) and files nothing"
 run no tk-abc12 --type decision
 eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
+run no 615 --rig gascity
+eq "$RC" "2" "(SUBJECT) --rig on a PR reference is refused, not ignored"
+eq "$CALLS" "" "(SUBJECT) and files nothing"
+run no 615 --type decision
+eq "$RC" "2" "(SUBJECT) --type on a PR reference is refused"
+
+# --help is where the operator learns this contract, so each flag's entry is
+# held to the refusals above. help_entry prints a flag's line and the
+# deeper-indented lines that continue it, lowercased so the checks ignore case.
+help_entry() {
+    awk -v f="$1" '$1 == f { on = 1; print; next } on && /^   / { print; next } { on = 0 }' <<< "$2" \
+        | tr '[:upper:]' '[:lower:]'
+}
+run no --help
+for flag in --rig --type; do
+    entry="$(help_entry "$flag" "$ERR")"
+    has "$entry" "refused" "(SUBJECT) --help says $flag is refused for an existing bead"
+    hasnt "$entry" "ignored" "(SUBJECT) --help never says $flag is ignored"
+done
 
 # --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
 # The description sentence ("Operator-origin intake, filed by …") is for a human
@@ -350,7 +460,7 @@ eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
 # matches beads that merely QUOTE it. gc.origin=operator is the key a
 # parked-disposition sweep selects on to decide whether a parked subject is
 # owed a visit back once its routed work lands — without it such a sweep
-# cannot see the subject at all (tk-2cyxo).
+# cannot see the subject at all.
 run no "why is dolt wedging under load"
 has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
   "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"
@@ -503,14 +613,34 @@ esac
 # token would silently retarget this case at the one shape it is not about.
 CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
 eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
-run no -- "$CJK_TOPIC"
-TITLE="$(cat "$FAKE_TITLE")"
-[ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
-    && ok "(PARAGRAPH) an unbroken 600-character token is cut to fit ($(bytes "$TITLE") bytes)" \
-    || bad "(PARAGRAPH) an unbroken token was not cut ($(bytes "$TITLE") bytes)"
-printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
-    && ok "(PARAGRAPH) and is still valid UTF-8 — no half character at the cut" \
-    || bad "(PARAGRAPH) the cut left an incomplete multi-byte character"
+
+# The shell decides what the cap counts. dash counts ${#var} in bytes, but bash
+# counts characters under a UTF-8 locale, and /bin/sh is dash on Debian and
+# bash on macOS. So the cut runs under each of sh, bash and dash that is
+# installed, in a locale where bash is seen to count characters, rather than
+# only under whichever shell sh is on this host.
+CUT_LOCALE=""
+for l in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+    # shellcheck disable=SC2016  # the $(...) and ${#v} are the inner bash's
+    if [ "$(LC_ALL="$l" bash -c 'v=$(printf "\344\270\255"); printf %s "${#v}"' 2>/dev/null)" = 1 ]; then
+        CUT_LOCALE="$l"; break
+    fi
+done
+[ -n "$CUT_LOCALE" ] \
+    && ok "(PARAGRAPH) control: bash counts characters under $CUT_LOCALE" \
+    || bad "(PARAGRAPH) control: no candidate locale makes bash count characters, so the cuts below cannot fail"
+for cut_sh in sh bash dash; do
+    command -v "$cut_sh" >/dev/null 2>&1 || continue
+    LC_ALL="$CUT_LOCALE" RUN_SH="$cut_sh" run no -- "$CJK_TOPIC"
+    TITLE="$(cat "$FAKE_TITLE")"
+    eq "$RC" "0" "(PARAGRAPH) under $cut_sh an unbroken 600-character token files"
+    [ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
+        && ok "(PARAGRAPH) under $cut_sh the token is cut to fit ($(bytes "$TITLE") bytes)" \
+        || bad "(PARAGRAPH) under $cut_sh the token was not cut ($(bytes "$TITLE") bytes)"
+    printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+        && ok "(PARAGRAPH) under $cut_sh it is still valid UTF-8, with no half character at the cut" \
+        || bad "(PARAGRAPH) under $cut_sh the cut left an incomplete multi-byte character"
+done
 
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"
@@ -527,7 +657,7 @@ has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
 # response threw all of it away and reported every refusal as "returned no id",
 # so the operator was told the ledger returned nothing when in fact it had
 # refused for a stated, fixable reason — and went looking for a broken data
-# plane instead of a long title (tk-wp50s).
+# plane instead of a long title.
 : > "$FAKE_CALLS"
 set +e
 LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
@@ -562,7 +692,7 @@ eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
 eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 
 # --- (RIGWHY) this script's own enumerate_rigs names WHICH failure it hit -----
-# The same defect as gc-helm.sh's (tk-lzdty half 2), in this script's hand-rolled
+# The same defect as gc-helm.sh's, in this script's hand-rolled
 # copy — and worse here, because it piped `gc rig list` STRAIGHT into jq. A
 # pipeline reports the LAST command's status, so gc's exit code was discarded
 # structurally, not just by a `|| true`, and its stderr went to /dev/null. A

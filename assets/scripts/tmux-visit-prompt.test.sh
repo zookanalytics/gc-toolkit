@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test for tmux-visit-prompt.sh — the `prefix + a` operator-origin visit
-# intake (tk-bn1oi, input surface restored in tk-7z8c6), and for the binding
+# intake, and for the binding
 # tmux-bindings.sh installs for it.
 #
 # Two halves, because the defect classes are different:
@@ -22,13 +22,13 @@
 #               that shape is what cost the operator multi-line input, and
 #               `-b` is load-bearing now that the handler holds a modal popup
 #               open for as long as the operator is typing.
-#   (MULTILINE) THE acceptance criterion (tk-7z8c6). `command-prompt` is
+#   (MULTILINE) THE acceptance criterion. `command-prompt` is
 #               single-line by construction, so the operator could file a
 #               sentence and nothing longer. A message with embedded newlines
 #               must reach gc-visit-open's argv with every line intact — which
 #               is what reaches the bead, since gc-visit-open writes the topic
 #               verbatim into the subject bead's body as well as its title.
-#   (ROUNDTRIP) the OTHER acceptance criterion, and the reason tk-02v4g moved
+#   (ROUNDTRIP) the OTHER acceptance criterion, and the reason this moved
 #               to a popup in the first place. `command-prompt` substitutes the
 #               response as TEXT and then PARSES the result as a tmux command,
 #               so a message containing `;` or `"` spliced into a command line
@@ -47,7 +47,7 @@
 #               what press N had not read yet — the foreground read existed
 #               only to sequence around that. A file per press removes the
 #               collision instead, and this is what pins it.
-#   (DRAFTKEEP) tk-w4dp4, and the reason the rest of this group exists: the
+#   (DRAFTKEEP) the reason the rest of this group exists: the
 #               handler used to arm `trap 'rm -f' EXIT` over the draft, so
 #               EVERY exit destroyed the only copy of what was typed. An
 #               operator lost a paragraph to it with zero trace — no subject,
@@ -155,6 +155,8 @@
 #               was filed and was not.
 #   (GONE)      tmux-spawn-thread.sh is deleted and nothing live still points
 #               at it (specs/ is a historical record and is exempt).
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -182,6 +184,37 @@ eq()   { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 # message below is full of glob characters.
 has()  { [[ "$1" == *"$2"* ]] && ok "$3" || bad "$3 (in: $1)"; }
 hasnt() { [[ "$1" == *"$2"* ]] && bad "$3 (in: $1)" || ok "$3"; }
+
+# Everything the intake does runs on the tmux server, backgrounded (run-shell
+# -b): the calls log and the outcome say are written AFTER the driver returns.
+# Under the full parallel suite the host is oversubscribed, so that write can
+# lag any fixed post-press sleep — an immediate read then sees an empty log and
+# the assertion fails with an empty "(in: )" and a count of 0. So every
+# assertion on a backgrounded observable polls for that exact observable first,
+# through this one wall-clock-bounded helper. One budget in one place, so no
+# site re-derives the loop and drifts to one too short for the load. A genuinely
+# lost write still fails — after the wait, not racing it. The budget is generous
+# because the only cost of waiting too long is how late a real failure reports.
+WAIT_SECS="${GC_TMUX_TEST_WAIT_SECS:-30}"
+wait_for() {            # wait_for <predicate> [args…] — poll until it exits 0, or WAIT_SECS elapse
+    local _deadline=$(( SECONDS + WAIT_SECS ))
+    while :; do
+        "$@" && return 0
+        [ "$SECONDS" -ge "$_deadline" ] && return 1
+        sleep 0.1
+    done
+}
+# Predicates for wait_for; each re-reads its observable on every poll. A say is
+# a `display-message -d` (the handler's only operator channel); a call is one
+# gc-visit-open invocation the stub logs. msg_has reads the live server through
+# process substitution, never a pipe into grep -q, so a match is not lost to
+# SIGPIPE under `set -o pipefail`.
+calls_ge() { local n; n=$(grep -c '=== call ===' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }         # calls_ge N FILE
+says_ge()  { local n; n=$(grep -c 'display-message .*-d ' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; } # says_ge N FILE
+lines_ge() { local n; n=$(grep -c '' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }                      # lines_ge N FILE
+has_file() { [ -f "$1" ]; }
+no_file()  { [ ! -f "$1" ]; }
+msg_has()  { grep -q "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); }
 
 [ -f "$SCRIPT" ] && ok "tmux-visit-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
 [ -x "$SCRIPT" ] && ok "tmux-visit-prompt.sh executable" || bad "tmux-visit-prompt.sh not executable"
@@ -337,7 +370,10 @@ chmod +x "$TMP/bin/gc"
 # the handler, wait for the backgrounded half to report. Returns the handler's
 # exit code; the tmux, gum and gc-visit-open call logs are left in
 # $TMUX_CALLS / $GUM_CALLS / $CALLS. Set EXPECT_SAY=0 for the paths that
-# deliberately say nothing, so the poll below does not burn its full budget.
+# deliberately say nothing, so the wait below does not burn its full budget; set
+# PREPOPUP_SAYS=N for a path that says N times in the foreground before the popup
+# (the draft-dir fallback warning), so the wait skips past them to the intake's
+# own outcome say.
 run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     local cfg="$1" topic="$2" rc=0
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" GUM_CALLS="$TMP/gum.log"
@@ -345,19 +381,24 @@ run_handler() {           # [VAR=val ...] run_handler <cfg-dir> <topic>
     # Drafts are durable by design now, so the test must own the directory or
     # a run would write into the operator's real XDG state.
     export GC_VISIT_DRAFT_DIR="${DRAFT_DIR_OVERRIDE:-$TMP/drafts}"
+    # The rig cache is OFF by default so each case fetches the FAKE_RIGS_JSON it
+    # set — a shared cache would serve one case's rigs to the next. The dedicated
+    # CACHE case sets RIG_CACHE_TTL_OVERRIDE to exercise the cache path.
+    export GC_VISIT_RIG_CACHE_TTL="${RIG_CACHE_TTL_OVERRIDE:-0}"
     : > "$CALLS"; : > "$TMUX_CALLS"; : > "$GUM_CALLS"
     # The stubs are prepended for THIS call only: the live half below needs the
     # real tmux and the real gum, and a global override would hand it the stubs.
     # HANDLER_PATH replaces that prefix outright for the one case that needs a
     # PATH with no gum on it at all.
     PATH="${HANDLER_PATH:-$TMP/gumbin:$TMP/bin:$PATH}" sh "$SCRIPT" "$cfg" || rc=$?
-    # The outcome is reported from a background subshell; poll for it rather
-    # than sleeping a guessed interval.
+    # The outcome say comes from the background subshell, AFTER it writes the
+    # calls log, so waiting for it is what lets a caller read a complete calls
+    # log. A path that emits a foreground say BEFORE the popup (the draft-dir
+    # fallback warning) sets PREPOPUP_SAYS to its count, so the wait lands on the
+    # intake's OWN say and not that warning — otherwise the warning satisfies the
+    # wait and the caller's read races the still-pending intake.
     if [ "${EXPECT_SAY:-1}" = 1 ]; then
-        for _ in $(seq 1 100); do
-            grep -q 'display-message .*-d ' "$TMUX_CALLS" && break
-            sleep 0.05
-        done
+        wait_for says_ge "$(( 1 + ${PREPOPUP_SAYS:-0} ))" "$TMUX_CALLS"
     fi
     return "$rc"
 }
@@ -401,9 +442,9 @@ eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as 
 CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
                {"name":"gascity","prefix":"gc","suspended":true,"running":true},
                {"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
-# The cancel case below keeps a draft on purpose; isolate these cases in their
-# own draft dir so that kept draft does not inflate the DRAFTOK/CANCEL counts of
-# the shared $TMP/drafts further down.
+# Isolate the chooser cases in their own draft dir so their draft bookkeeping
+# cannot inflate the DRAFTOK/CANCEL counts of the shared $TMP/drafts further
+# down.
 export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
 
 # Default: the board-context rig (from the <rig>__<agent> session) leads the
@@ -454,13 +495,19 @@ has "$ccalls" "argv=[gascity]" "CHOOSERSUSP: the intake receives the bare rig na
 hasnt "$ccalls" "argv=[gascity (suspended)]" "CHOOSERSUSP: the display tag never reaches the intake"
 unset FAKE_CHOSEN_RIG
 
-# Cancel at the picker keeps the draft (the message is already typed) and files
-# nothing — the same contract as a cancel at the message popup.
+# Cancel at the picker — now the FIRST popup — cancels the whole press: nothing
+# is typed yet, so nothing is filed, no draft is left, and the message popup
+# never opens. (Cancelling the message popup after a rig is picked keeps a draft;
+# that is the message-popup cancel contract, covered by CANCEL/CANCELPTY below.)
 export FAKE_CHOOSE_RC=1
 run_handler "$CFG_OK" "a report abandoned at rig selection"
-ccalls=$(cat "$TMP/calls.log"); ctmux=$(cat "$TMP/tmux.log")
+ccalls=$(cat "$TMP/calls.log"); ctmux=$(cat "$TMP/tmux.log"); cgum=$(cat "$TMP/gum.log")
 eq "$ccalls" "" "CHOOSER: a cancelled picker files nothing"
-has "$ctmux" "DRAFT KEPT" "CHOOSER: ...and the typed message is kept as a draft"
+has "$ctmux" "cancelled at rig selection" "CHOOSER: ...and says the press was cancelled"
+hasnt "$ctmux" "DRAFT KEPT" "CHOOSER: ...with no draft kept, because nothing was typed yet"
+hasnt "$cgum" "gum write" "CHOOSER: ...and the message popup never opens"
+eq "$(find "$TMP/chooser-drafts" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "CHOOSER: ...and no draft file is left behind"
 unset FAKE_CHOOSE_RC
 unset FAKE_RIGS_JSON FAKE_FORMAT
 
@@ -474,10 +521,11 @@ hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, leaving the i
 has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still filed"
 
 # A WEDGED `gc rig list` must degrade to that same no-chooser path, not hang. The
-# enumeration runs in the foreground before the message is filed and outside the
-# intake timeout, so an unbounded hang strands the operator at a chooser-less
-# prompt with the report already typed. FAKE_RIGS_JSON is set, so a picker WOULD
-# appear if the call returned — the bound is the only reason it does not.
+# enumeration runs in the foreground and outside the intake timeout, and now runs
+# before the message popup even opens, so an unbounded hang would strand the
+# operator with nothing on screen at all. FAKE_RIGS_JSON is set, so a picker
+# WOULD appear if the call returned — the bound is the only reason it does not,
+# and the press falls through to the message popup and the intake default.
 if command -v timeout >/dev/null 2>&1; then
     export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1" FAKE_RIG_LIST_SLEEP=60
     GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
@@ -492,32 +540,79 @@ fi
 
 # A bead id typed at prefix+a is an existing-bead request, not a new report.
 # gc-visit-open.sh resolves it against the bead's own rig and REFUSES --rig for
-# it (exit 2), so the chooser must be WITHHELD — otherwise a bead id filed
-# through this key fails whenever the city has live rigs. `tk` is gc-toolkit's
-# prefix in CHOOSER_RIGS; `gc` is suspended gascity's, and a suspended rig's ids
-# are still beads — the gate reads every rig, not just the live ones offered.
-# argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes neither the flag
-# nor a value when the chooser is withheld, which is exactly what the intake
-# accepts for a bead id.
+# it (exit 2), so a rig must not reach the intake for one — otherwise a bead id
+# filed through this key fails whenever the city has live rigs. With the rig
+# chosen BEFORE the message, the picker cannot know the text is a bead id, so it
+# is shown; but once the bead id is typed, the chosen rig is DROPPED, and the
+# intake receives the id with no --rig, which is exactly what it accepts. `tk` is
+# gc-toolkit's prefix in CHOOSER_RIGS; `gc` is suspended gascity's, and a
+# suspended rig's ids are still beads — the gate reads every rig, not just the
+# live ones offered. argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes
+# neither the flag nor a value once the chosen rig is dropped.
 export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
 for beadid in tk-abc12 gc-9f8e7; do
     run_handler "$CFG_OK" "$beadid"
     ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
-    hasnt "$cgum" "gum choose" "CHOOSER: a bead id ($beadid) shows no rig picker"
-    hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, so the intake resolves the bead's own rig"
+    has "$cgum" "gum choose" "CHOOSER: the picker is shown ($beadid is not yet known to be a bead id when the rig is chosen)"
+    hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...but a bead id drops the chosen rig, so the intake resolves the bead's own rig"
     has "$ccalls" "argv=[$beadid]" "CHOOSER: ...and the bead id still reaches the intake behind --"
 done
 
 # An id-SHAPED topic whose prefix names no rig is a new topic, not a bead: the
-# picker still runs and --rig is still forwarded, so a terse hyphenated report
-# ("ci-flaky") keeps rig selection — the picker is withheld for beads, not for
-# every hyphenated string.
+# chosen rig is FORWARDED, not dropped, so a terse hyphenated report ("ci-flaky")
+# keeps its rig selection — the rig is dropped for bead ids, not for every
+# hyphenated string.
 run_handler "$CFG_OK" "ci-flaky-again"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
 has "$cgum" "gum choose" "CHOOSER: an id-shaped topic with no matching rig prefix still shows the picker"
 has "$ccalls" "argv=[--rig]" "CHOOSER: ...and still forwards the chosen rig"
 has "$ccalls" "argv=[ci-flaky-again]" "CHOOSER: ...and files the report"
 unset FAKE_RIGS_JSON FAKE_FORMAT
+
+# The hq store (the city-level workspace) is never offered as a topic target: it
+# runs no reaction pool, so a topic filed there would strand — and it is dropped
+# from the picker even though it is a live rig. Its prefix still marks its own
+# ids as bead refs, so an existing hq-store bead stays a valid subject.
+HQ_RIGS='[{"name":"loomington","prefix":"lx","hq":true,"suspended":false,"running":true},
+          {"name":"gc-toolkit","prefix":"tk","hq":false,"suspended":false,"running":true},
+          {"name":"signal-loom","prefix":"sl","hq":false,"suspended":false,"running":true}]'
+export FAKE_RIGS_JSON="$HQ_RIGS" FAKE_FORMAT="gc-toolkit__polecat-1"
+run_handler "$CFG_OK" "a topic that must not target the workspace"
+cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
+has "$cgum" "gum choose" "CHOOSERHQ: the picker is shown for a topic"
+hasnt "$cgum" "loomington" "CHOOSERHQ: the hq/city-workspace rig is withheld from the picker"
+has "$cgum" "gc-toolkit" "CHOOSERHQ: ...while non-hq rigs are still offered"
+has "$ccalls" "argv=[--rig]" "CHOOSERHQ: ...and a non-hq rig is forwarded"
+# An hq-store bead id is still a bead ref: its prefix (lx) names the hq rig, and
+# the gate reads every rig including hq, so the chosen rig is dropped (the bead's
+# own rig is authoritative) and the id reaches the intake. Excluding the hq store
+# from the PICKER never strands an existing hq-store subject.
+run_handler "$CFG_OK" "lx-abc12"
+cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
+hasnt "$ccalls" "argv=[--rig]" "CHOOSERHQ: an hq-store bead id drops the chosen rig (its own rig is authoritative)"
+has "$ccalls" "argv=[lx-abc12]" "CHOOSERHQ: ...and the hq-store bead id still reaches the intake"
+unset FAKE_RIGS_JSON FAKE_FORMAT
+
+# (CACHE) The rig set is cached so a burst of presses opens the picker without
+# re-paying the per-rig liveness probe `gc rig list --json` costs — the whole
+# point of picking the rig first without a wait each time. Prime the cache with a
+# live list, then press again with the live list now EMPTY: a cache hit still
+# offers the primed rigs, which an un-cached press (which would see the empty
+# list) could not. Its own draft dir isolates the cache file from every other
+# case, which run with the cache OFF.
+export RIG_CACHE_TTL_OVERRIDE=3600
+export DRAFT_DIR_OVERRIDE="$TMP/cache-drafts"
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+run_handler "$CFG_OK" "prime the rig cache"
+has "$(cat "$TMP/gum.log")" "gum choose" "CACHE: the first press fetches the rig set and shows the picker"
+export FAKE_RIGS_JSON=""
+run_handler "$CFG_OK" "served from the rig cache"
+ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+has "$cgum" "gum choose" "CACHE: a second press within the TTL shows the picker from cache, though the live list is now empty"
+has "$ccalls" "argv=[--rig]" "CACHE: ...and still forwards a rig from the cached set"
+unset FAKE_RIGS_JSON FAKE_FORMAT RIG_CACHE_TTL_OVERRIDE
+rm -rf "$TMP/cache-drafts"
+export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
 
 unset DRAFT_DIR_OVERRIDE
 
@@ -633,7 +728,9 @@ if [ "$(id -u)" -eq 0 ]; then
 else
     UNWRITABLE="$TMP/nodraft"
     mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
-    DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
+    # The fallback warning says once before the popup, so declare it: the wait
+    # then lands on the intake's own say, past which the calls log is written.
+    PREPOPUP_SAYS=1 DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
     tcalls=$(cat "$TMP/tmux.log")
     has "$tcalls" "not writable" "DRAFTDIRFAIL: an unwritable draft dir is reported"
     has "$(cat "$TMP/calls.log")" "argv=[a topic whose dir is read-only]" \
@@ -661,7 +758,7 @@ FAKE_HOME="$TMP/fakehome"; mkdir -p "$FAKE_HOME"
     unset GC_VISIT_DRAFT_DIR GC_PACK_STATE_DIR XDG_STATE_HOME
     : > "$TMUX_CALLS"
     PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
-    for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+    wait_for says_ge 1 "$TMUX_CALLS"
 )
 ddpath=$(sed -n "s/.*> '\([^']*\)'.*/\1/p" "$TMP/tmux-dd.log" | head -1)
 case "$ddpath" in "$FAKE_HOME"/.local/state/gc/visit-drafts/draft-*)
@@ -698,7 +795,10 @@ else
         export GC_VISIT_DRAFT_DIR="$NOWRITE"
         : > "$TMUX_CALLS"; : > "$CALLS"
         PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
-        for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+        # The unwritable dir says once in the foreground (the fallback warning)
+        # before the intake backgrounds, so wait for its own say — the second —
+        # or the calls-log read below races the still-pending intake.
+        wait_for says_ge 2 "$TMUX_CALLS"
     )
     chmod 700 "$NOWRITE"
     [ -e "$SHAREDTMP/draft-unrelated" ] \
@@ -731,21 +831,12 @@ rm -f "$INDICATOR_PATH"
     : > "$TMUX_CALLS"
     PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_SLOW"
 )
-seen=0
-for _ in $(seq 1 40); do
-    [ -f "$INDICATOR_PATH" ] && { seen=1; break; }
-    sleep 0.05
-done
-[ "$seen" -eq 1 ] \
+wait_for has_file "$INDICATOR_PATH" \
     && ok "INDICATOR: the in-flight slot is written while the intake runs" \
     || bad "INDICATOR: no indicator at $INDICATOR_PATH while the intake ran"
-for _ in $(seq 1 100); do
-    [ -f "$INDICATOR_PATH" ] || break
-    sleep 0.05
-done
-[ -f "$INDICATOR_PATH" ] \
-    && { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; } \
-    || ok "INDICATOR: the slot is cleared when the intake finishes"
+wait_for no_file "$INDICATOR_PATH" \
+    && ok "INDICATOR: the slot is cleared when the intake finishes" \
+    || { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; }
 
 # (TIMEOUT)
 CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
@@ -885,30 +976,16 @@ if [ -n "$LIVE_TERM" ]; then
 
     : > "$LIVE_CALLS"
     press "$HOSTILE" "$MULTI" "third one's here; yes"
-    # Each press backgrounds its intake on the tmux server (run-shell -b), so
-    # the calls log is written AFTER press() returns. The full parallel suite
-    # loads the host, so those intakes are starved and the last one is still
-    # mid-write when a fixed post-press sleep expires. An immediate read then
-    # sees an empty log, and every assertion below fails with an empty
-    # "(in: )" and a count of 0. Wait for the three calls to land before
-    # reading. A genuinely lost press still fails, now after the wait rather
-    # than racing it.
-    for _ in $(seq 1 100); do
-        [ "$(grep -c '=== call ===' "$LIVE_CALLS" 2>/dev/null)" -ge 3 ] && break
-        sleep 0.1
-    done
+    # Three presses, so wait for three calls to land before reading them.
+    wait_for calls_ge 3 "$LIVE_CALLS"
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
 
     has "$live" "argv=[$HOSTILE]" "ROUNDTRIP: apostrophe, semicolon and quotes survive a real key press"
     has "$live" "argv=[$MULTI]" "MULTILINE: a paragraph typed into the popup arrives whole"
     has "$live" "argv=[third one's here; yes]" "THREE: the third press lands"
     eq "$(grep -c '=== call ===' <<< "$live")" "3" "THREE: three presses, three independent invocations"
-    # The outcome say is emitted by the same backgrounded intake, after its
-    # calls-log write, so it reaches show-messages later still. Poll for it too.
-    for _ in $(seq 1 100); do
-        grep -q 'visit tk-vis01 filed' < <(tmux -L "$SOCKET" show-messages 2>/dev/null) && break
-        sleep 0.1
-    done
+    # The outcome say lands after the calls-log write, so wait for it separately.
+    wait_for msg_has 'visit tk-vis01 filed'
     msgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
     has "$msgs" "visit tk-vis01 filed" "ROUNDTRIP: the outcome reaches the operator's client"
 
@@ -997,6 +1074,10 @@ sleep 5'
     GC_TMUX_SOCKET="$SOCKET" sh "$BINDINGS" "$NOFREEZE_CFG" >/dev/null 2>&1
     : > "$TMP/nofreeze.log"
     press "first slow topic" "second while first runs"
+    # Each intake appends its start timestamp as its first action, backgrounded
+    # on the tmux server, so the second append can lag this read under load.
+    # Wait for both lines before counting them.
+    wait_for lines_ge 2 "$TMP/nofreeze.log"
     mapfile -t starts < "$TMP/nofreeze.log"
     if [ "${#starts[@]}" -eq 2 ]; then
         gap=$(( starts[1] - starts[0] ))

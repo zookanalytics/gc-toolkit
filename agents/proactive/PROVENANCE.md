@@ -12,8 +12,10 @@ Components 5-6), in the reaction-bead model
 (specs/tk-5n01ns/reaction-bead-first-reaction.md). A proactive worker claims one
 reaction bead R, gives its subject a cheap first reaction (read the body, write a
 first-reaction card to the notes, then dispose the subject: route it to the pool
-that does that work, hold it on the bead it waits for, file a visit, or supersede
-it), closes R, and drains. It is the city's first-level triage:
+that does that work, recommend an action for the operator to trigger, hold it on
+the bead it waits for, route a confident no-op to a validating closer, or put it
+to the operator as a human gate), closes R, and drains. It is the city's
+first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue
 entirely.
@@ -58,10 +60,10 @@ design record.
 
 3. **mr-only for code.** A first reaction is notes-only by default. The
    security invariant — any code-producing proactive output takes the
-   codex-gated `mr` path, never `direct` — is enforced three ways: the city
-   default (`default_merge_strategy = "mr"`), this agent's `GC_DEFAULT_MERGE_
-   STRATEGY = "mr"`, and `tools/gc-proactive.sh sling`, which hard-refuses a
-   `--merge direct` override.
+   correctness-gated `mr` path, never `direct` — is enforced by the city default
+   (`default_merge_strategy = "mr"`) and this agent's `GC_DEFAULT_MERGE_
+   STRATEGY = "mr"`. A reaction bead is a plain task with no merge path of its
+   own: work a reaction routes goes to the polecat pool, whose default is `mr`.
 
 ## Notes
 
@@ -70,24 +72,31 @@ Triggered by `tools/gc-proactive.sh sling <bead>` (operator/board one-shot, via
 `gc-helm react`) or `scan --sling` (process-scan), both of which file a reaction
 bead routed here. NOT a resident loop either way.
 
-The first reaction never closes its subject except through the evidence-gated
-`bead-rehome.sh` (the `superseded` exit); the other three exits advance the
-subject and leave it open. `assets/scripts/first-reaction-dispose.sh` performs
-all four, stamps `gc.reacted_by=<R>` on the subject as the completion marker, and
-closes the reaction bead R — exactly-once is the substrate's, keyed on R's
-identity, not a done-marker on the subject. The card shape (Understanding · Found
-· Proposal · Decision needed · Disposition) is the same one a converse session
-opens with and the board's pick-a-row visit lands the human on.
+The first reaction NEVER closes its subject — every disposition advances it
+and leaves it open, the `close` disposition included: it routes the subject to a
+validating closer (mol-validate-close), which re-checks the no-work call and
+closes the subject on its own confident check or escalates.
+`assets/scripts/first-reaction-dispose.sh` performs the five, stamps
+`gc.reacted_by=<R>` on the subject as the completion marker, and closes the
+reaction bead R — exactly-once is the substrate's, keyed on R's identity, not a
+done-marker on the subject. The card in the subject's notes records which
+disposition was chosen and why, so a wrong call is visible rather than silent.
+The card shape (Understanding · Found · Proposal · Decision needed · Disposition)
+is the same one a converse session opens with and the board's pick-a-row visit
+lands the human on.
 
-One bead is never triaged on its merits: a subject carrying `gc.origin=operator`
-came from `gc-visit-open`, where a human typed a topic and is waiting to talk
-about it, so the visit is the only disposition the script will perform on it.
+Every bead is triaged on its merits, whatever its origin. A subject carrying
+`gc.origin=operator` is weighed like any other: a clear, reversible action
+routes or holds, a determinable action that warrants the operator's trigger is a
+recommend, and only a genuine fork, an irreversible or destructive action, or a
+policy call with no action to offer is a ruling. The guardrail lives in the
+reacting agent's rubric (`agents/proactive/prompt.template.md`), not in an
+origin gate on the script.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — `sling` files a
 reaction bead tracking the subject and routes it here; the create-R-once dedup
 skips a subject that already has an open reaction; scan/demand drop graph-structural
 beads; one `scan --sling` sweep is capped; the slice tool fences reached content.
-`assets/scripts/first-reaction-dispose.test.sh` covers the four exits themselves,
-and `assets/scripts/bead-rehome.test.sh` the evidence-gated close. Design refs:
-specs/tk-5n01ns/reaction-bead-first-reaction.md; design-doc.md Key Components 5-6,
-Phase 4.
+`assets/scripts/first-reaction-dispose.test.sh` covers the five exits themselves.
+Design refs: specs/tk-5n01ns/reaction-bead-first-reaction.md; design-doc.md Key
+Components 5-6, Phase 4.

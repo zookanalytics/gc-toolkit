@@ -157,10 +157,6 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -175,6 +171,24 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
 
 
 

@@ -6,19 +6,18 @@
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
 # close/terminal pairing guards (--close only into a closed state, closed states
-# must --close); --set-dated's compare-and-preserve rule for the @<since>
-# component; the reopen repair verb; the park-route takeaway guard and its
-# --takeaway writer, capped and mirrored from gc-helm.sh; and the drift
-# assertion against lifecycle/lifecycle.toml.
+# must --close); the non-empty merged_sha that --to merged must carry;
+# --set-dated's compare-and-preserve rule for the @<since> component; the reopen
+# repair verb; the park-route takeaway guard and its --takeaway writer, capped
+# and mirrored from gc-helm.sh; the drift assertion against
+# lifecycle/lifecycle.toml; and the refusal when no gctk binary resolves.
 #
-# TWO ARMS, ONE BODY. The lifecycle writer exists twice during the gctk
-# migration — `gctk lifecycle` (services/gctk) and the shell fallback in
-# lifecycle.sh — and a caller cannot tell which answered. So every assertion
-# below runs against both: arm "shell" forces the fallback with GCTK_BIN=none,
-# arm "gctk" points GCTK_BIN at a freshly built binary and reaches it through
-# lifecycle.sh, which also proves the preference wiring. Each arm holds its own
-# mirror of the state table against lifecycle.toml — the embedded shell block
-# for one, `gctk lifecycle --dump-machine` for the other.
+# ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
+# `gctk lifecycle` (services/gctk) and has no other implementation. The suite
+# builds the port from this checkout and drives every assertion through
+# lifecycle.sh, so it is the port's acceptance bar and also proves the exec
+# wiring. The port's state table, printed by `gctk lifecycle --dump-machine`, is
+# held against lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,26 +27,19 @@ TOML="$ROOT/lifecycle/lifecycle.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lifecycle-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# Build the port BEFORE the harness puts stub binaries on PATH: the stub git
-# answers nothing, and a toolchain that consults it for a VCS stamp would be
-# reading a fixture. -buildvcs=false keeps the build off that path entirely; no
-# assertion here reads a version.
-GCTK_BUILT=""
-GCTK_BUILD_LOG="$TMP/gctk-build.log"
-GO_PRESENT=0
-if command -v go >/dev/null 2>&1; then
-    GO_PRESENT=1
-    if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
-        GCTK_BUILT="$TMP/gctk"
-    fi
-fi
-
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+harness_build_gctk
 harness_init
 [ -x "$SUT" ] || chmod +x "$SUT"
+# harness_init has recorded why there is no binary. Every assertion below goes
+# through it, so running them would only repeat that one failure.
+if [ -z "$GCTK_BUILT" ]; then
+    echo "passed: $PASS  failed: $FAIL"
+    exit 1
+fi
 
-# --- lifecycle.toml, read the same way for both arms ---------------------------
+# --- lifecycle.toml, read without a TOML parser ----------------------------------
 toml_states() { awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");print}' "$TOML" | tr '\n' ' ' | sed 's/ $//'; }
 toml_human()  { sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
 toml_detached() { sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
@@ -60,40 +52,22 @@ toml_edges()  {
     /^to = /    { gsub(/to = |"/,""); to=$0; print from ">" to }' "$TOML" | sort
 }
 
-# The shell fallback carries the table as constants in a marked block.
-drift_shell() {
-  echo "# drift against lifecycle.toml (embedded shell table)"
-  BLOCK="$(awk '/# >>> lifecycle-state-table/{f=1;next} /# <<< lifecycle-state-table/{f=0} f' "$SUT")"
-  [ -n "$BLOCK" ] && ok "state-table block extracted" || bad "state-table markers missing"
-  eval "$BLOCK"
-  eq "$LIFECYCLE_STATES" "$(toml_states)" "states match lifecycle.toml"
-  eq "$(printf '%s' "$LIFECYCLE_HUMAN_STATES" | tr -s ' ')" "$(toml_human)" "human states match lifecycle.toml"
-  eq "$(printf '%s' "$LIFECYCLE_DETACHED_STATES" | tr -s ' ')" "$(toml_detached)" "detached states match lifecycle.toml"
-  eq "$LIFECYCLE_PARK_ROUTE" "$(toml_park)" "park route matches lifecycle.toml"
-  eq "$LIFECYCLE_CLOSED_STATES" "$(toml_closed)" "closed states match lifecycle.toml"
-  eq "$(printf '%s\n' "$LIFECYCLE_TRANSITIONS" | sed '/^$/d' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
-}
-
-# The port carries it in a typed package and prints it on demand.
-drift_gctk() {
-  echo "# drift against lifecycle.toml (gctk lifecycle --dump-machine)"
-  DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
-  [ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^human_states //p')" "$(toml_human)" "human states match lifecycle.toml"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
-  # The cap is not in lifecycle.toml: it is a rendering bound the two takeaway
-  # writers share, and the shell arm holds lifecycle.sh's copy against
-  # gc-helm.sh. Chaining the port to lifecycle.sh completes that line.
-  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
-     "$(sed -n 's/^LIFECYCLE_TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$SUT" | head -1)" \
-     "takeaway cap matches lifecycle.sh"
-}
-
-suite() {
+# --- drift: the port's table against lifecycle.toml ------------------------------
+# The port carries the table in a typed package and prints it on demand.
+echo "# drift against lifecycle.toml (gctk lifecycle --dump-machine)"
+DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
+[ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^human_states //p')" "$(toml_human)" "human states match lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
+# The cap is not in lifecycle.toml. It is a rendering bound that the board's two
+# takeaway writers share, so the port's copy is held against gc-helm.sh's.
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
+   "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" \
+   "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"
 
 # The machine axis is declared here and spent by the helm board, which mirrors
 # it as Go constants. One meaning, two lists: a value added on one side only
@@ -155,6 +129,29 @@ hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the close never uses the \`bd close\` 
 has "$out" '"ok":true' "--json reports the transition"
 has "$out" '"from":"pull_request"' "--json names the from state"
 
+# --- a closed-state transition sheds every live objection ------------------------
+# A merged (closed) bead carries no live objection: a rejection_reason or a
+# blocked_reason still on it contradicts the record. The close clears both at
+# this one writer, so a caller that lists NEITHER still lands a clean terminal
+# record — the divergence the per-caller --unset enumeration used to allow.
+echo "# transition closed-state sheds live objections"
+store '[{"id":"obj-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","rejection_reason":"bounced for X","blocked_reason":"merge_hold: do not merge until Y"}}]'
+out="$("$SUT" transition obj-1 --to merged --expect pull_request --close \
+  --set merged_sha=def456 2>&1)"; rc=$?
+eq "$rc" 0 "merged-close exits 0 though neither reason is listed"
+eq "$(meta obj-1 merge_result)" "merged" "merge_result written"
+eq "$(meta obj-1 rejection_reason)" "<absent>" "rejection_reason cleared by the close, unlisted"
+eq "$(meta obj-1 blocked_reason)" "<absent>" "blocked_reason cleared by the close, unlisted"
+eq "$(bstatus obj-1)" "closed" "--close landed"
+
+# The clear is scoped to the terminal land: a non-closed transition keeps a
+# pre-existing blocked_reason (the mirror of the rejection_reason control in the
+# unanchored case below).
+store '[{"id":"obj-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","blocked_reason":"merge_hold: still blocked"}}]'
+out="$("$SUT" transition obj-2 --to unanchored --route rig/polecat 2>&1)"; rc=$?
+eq "$rc" 0 "non-closed transition exits 0"
+eq "$(meta obj-2 blocked_reason)" "merge_hold: still blocked" "blocked_reason survives a non-closed transition"
+
 # --- --set-dated: the @<since> compare-and-preserve rule ------------------------
 # The operator's queue is ordered by how long a row has been owed, so the instant
 # a turn began has to survive every pass that re-reaches the same verdict at the
@@ -214,7 +211,7 @@ esac
 # update rather than adding a second one.
 store '[{"id":"d-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
-"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=codex >/dev/null 2>&1
+"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=correctness >/dev/null 2>&1
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "a dated key rides the ONE atomic update"
 
 # Shape refusals: the writer supplies value and oid, this script supplies the
@@ -266,7 +263,16 @@ writes_when() { # <label> <bead-json> <args...>
   "$SUT" transition "$@" >/dev/null 2>&1
   eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "$label"
 }
-BASE='"id":"n-2","status":"open","assignee":"rig/refinery","notes":""'
+# BASE carries no assignee, the resting shape n-1 models. Every case built on
+# it enters a detached state at status=open, which clears a stale assignee, and
+# that clear writes by itself. With a stale assignee, a case writes no matter
+# what its own field does, so it passes without testing that field. BASE must
+# therefore be idle on its own: re-asserted unchanged, it writes nothing.
+BASE='"id":"n-2","status":"open","assignee":"","notes":""'
+store "[{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}]"
+: > "$STUB_GC_LOG"
+"$SUT" transition n-2 --to pull_request >/dev/null 2>&1
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "BASE re-asserted unchanged writes nothing"
 writes_when "a moved head writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
   n-2 --to pull_request --set-dated "pr.machine=settled@$OID2"
@@ -274,11 +280,11 @@ writes_when "a changed verdict writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
   n-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID"
 writes_when "a changed --set writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"codex\"}}" \
-  n-2 --to pull_request --set check_set=codex,ci
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\"}}" \
+  n-2 --to pull_request --set check_set=correctness,ci
 writes_when "a --set of an absent key writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
-  n-2 --to pull_request --set check_set=codex
+  n-2 --to pull_request --set check_set=correctness
 writes_when "a --unset of a present key writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"rejection_reason\":\"old\"}}" \
   n-2 --to pull_request --unset rejection_reason
@@ -296,8 +302,11 @@ writes_when "--append-notes always writes" \
 writes_when "--takeaway always writes (it stamps a fresh instant)" \
   '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
   n-2 --to pull_request --route human --takeaway "same text"
+# An explicit --assignee skips the detached clear, so this bead can carry the
+# assignee the flag names. The value does not change, and only the flag can
+# force the write.
 writes_when "--assignee always writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
+  '{"id":"n-2","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}' \
   n-2 --to pull_request --assignee rig/refinery
 store '[{"id":"n-3","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc123"}}]'
 : > "$STUB_GC_LOG"
@@ -403,7 +412,7 @@ eq "$(meta a-8 'gc.takeaway_settled')" "" "…leaving the park's own disposition
 echo "# detached states"
 store '[{"id":"d-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=codex 2>&1)"; rc=$?
+out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=correctness 2>&1)"; rc=$?
 eq "$rc" 0 "transition to pre_open_gate exits 0"
 eq "$(meta d-1 'gc.routed_to')" "" "pre_open_gate clears the route automatically"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update"
@@ -437,7 +446,7 @@ has "$out" "gc.routed_to" "the unverified route is named"
 echo "# detached states clear the assignee"
 store '[{"id":"h-1","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
+out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=correctness 2>&1)"; rc=$?
 eq "$rc" 0 "entry to pre_open_gate exits 0"
 eq "$(bassignee h-1)" "" "the handoff assignee is cleared without the caller asking"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update as the state"
@@ -474,6 +483,54 @@ store '[{"id":"h-6","status":"open","assignee":"rig/gc-toolkit.refinery","notes"
 "$SUT" transition h-6 --to retargeted --route rig/mechanik >/dev/null 2>&1
 eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assignee alone"
 
+# --- unassigning takes the executor identity with it ----------------------------
+# gc.session_id and gc.session_name name the session that claimed the bead, so
+# they are the third field of the same let-go as the route and the assignee. The
+# mr-aware-rejection repool hands a rejected rework back to the pool with
+# --assignee ""; a stamp that survives is doctor/executor-identity-residue's
+# report the moment the bead next carries a route, and the runtime's stale
+# orphan-recovery pin. So the clear rides the same atomic update as the unassign.
+echo "# unassigning clears the executor identity"
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition x-1 --to unanchored --assignee "" --route gc-toolkit/gc-toolkit.polecat --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
+eq "$rc" 0 "the mr-aware-rejection repool shape exits 0"
+eq "$(bassignee x-1)" "" "the repool cleared the assignee"
+eq "$(meta x-1 'gc.session_id')" "<absent>" "gc.session_id went with the assignee"
+eq "$(meta x-1 'gc.session_name')" "<absent>" "gc.session_name went with the assignee"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the identity clear rides the ONE atomic update"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "gc.session_id is unset in that call"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_name" "gc.session_name is unset in that call"
+
+# The detached auto-clear reaches the same arm: no --assignee is passed, the
+# handoff assignee is cleared without the caller asking, and the pins follow it.
+store '[{"id":"x-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"gc.session_id":"lx-dead2","gc.session_name":"rig--rig__polecat-2-pool"}}]'
+out="$("$SUT" transition x-2 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
+eq "$rc" 0 "entry to pre_open_gate exits 0"
+eq "$(bassignee x-2)" "" "the detached clear cleared the assignee"
+eq "$(meta x-2 'gc.session_id')" "<absent>" "…and the pins followed: gc.session_id"
+eq "$(meta x-2 'gc.session_name')" "<absent>" "…and gc.session_name"
+
+# The pins are the assignee's: a live claim keeps them. On an in_progress bead
+# the assignee clear is refused (bd's anti-steal guard), so no --assignee reaches
+# bd, the arm never fires, and the identity stays with the session that holds it.
+store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition x-3 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "a transition on an in_progress anchor still lands"
+eq "$(meta x-3 'gc.session_id')" "lx-live" "a live claim keeps gc.session_id"
+eq "$(meta x-3 'gc.session_name')" "rig--rig__polecat-1-pool" "a live claim keeps gc.session_name"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when the assignee is not cleared"
+
+# An explicit new assignee wins over the clear, and its identity is not stripped:
+# the field is the assignee's, and this names one.
+store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate","gc.session_id":"lx-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
+: > "$STUB_GC_LOG"
+"$SUT" transition x-4 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
+eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
+eq "$(meta x-4 'gc.session_id')" "lx-keep" "a named assignee keeps gc.session_id"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when an assignee is named"
+
 store '[{"id":"h-7","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
 out="$(STUB_DROP_KEYS="h-7:assignee" "$SUT" transition h-7 --to pull_request 2>&1)"; rc=$?
 eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
@@ -497,13 +554,35 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 # The tk-9heqfh shape: a sitting ended holding and left its subject waiting on
 # nobody — no state, empty route, the hold recorded only as takeaway prose.
 # Through this writer that attempt is refused rather than recorded.
-store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is codex-green and one approval from landing; needs a ruling"}}]'
+store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is correctness-green and one approval from landing; needs a ruling"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition tk-9heqfh --to held --route "" 2>&1)"; rc=$?
 eq "$rc" 1 "the found tk-9heqfh state is unreachable through the writer"
 has "$out" "requires a route" "the refusal names the missing route"
 eq "$(meta tk-9heqfh merge_result)" "<absent>" "no state was recorded"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no write was attempted"
+
+# --- a route names a pool by its qualified address, or the park sentinel ---------
+# gc.routed_to is matched as an exact string by every pool claim, so a bare
+# token like "pool" reaches no pool: the bead stays ready and is offered to
+# nobody. This one writer, shared by every --route caller, refuses it before the
+# write rather than stranding the bead ready-but-unclaimable.
+echo "# a route is rig-qualified or the park sentinel"
+store '[{"id":"r-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition r-1 --to unanchored --route pool 2>&1)"; rc=$?
+eq "$rc" 1 "a bare --route that names no pool exits 1"
+has "$out" "not rig-qualified" "the refusal says the route is unqualified"
+has "$out" "exact string" "…and why a bare name reaches nobody"
+eq "$(meta r-1 merge_result)" "pull_request" "the refused transition wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+# A rig-qualified target is exactly what a pool claims, so it passes and is
+# stamped verbatim.
+store '[{"id":"r-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition r-2 --to unanchored --route gc-toolkit/gc-toolkit.polecat 2>&1)"; rc=$?
+eq "$rc" 0 "a <rig>/<agent> route is accepted"
+eq "$(meta r-2 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "…and stamped verbatim"
 
 # --- a park must NAME what it waits for ------------------------------------------
 # The helm board spends gc.takeaway as a row's NEEDS sentence and, on a row
@@ -637,12 +716,6 @@ out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
 eq "$rc" 2 "a dropped gc.takeaway exits 2"
 has "$out" "gc.takeaway=" "the refusal names the missing text"
 
-# --- the cap mirrors gc-helm.sh, the other takeaway writer ------------------------
-echo "# takeaway cap drift"
-HELM_MAX=$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)
-SUT_MAX=$(sed -n 's/^LIFECYCLE_TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$SUT" | head -1)
-eq "$SUT_MAX" "$HELM_MAX" "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"
-
 # --- held: a sitting's hold is a state, entered only from unanchored ------------
 echo "# held"
 store '[{"id":"h-1","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling"}}]'
@@ -700,6 +773,23 @@ has "$out" "requires --close" "the missing flag is named"
 eq "$(meta c-1 merge_result)" "pull_request" "a refused terminal transition writes nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refusal attempted a bd update"
 
+# `merged` carries the evidence its own definition names: it means "landed;
+# merged_sha recorded", so a close with no sha is the false landing claim (I5),
+# refused at the write instead of by the doctor after the fact. A bead that never
+# had a PR is no merge anchor, and the refusal names its close: a plain gc bd close.
+store '[{"id":"c-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-2 --to merged --close 2>&1)"; rc=$?
+eq "$rc" 1 "--to merged --close without merged_sha exits 1"
+has "$out" "merged_sha" "the missing evidence is named"
+has "$out" "gc bd close c-2" "the non-anchor close is named"
+eq "$(meta c-2 merge_result)" "pull_request" "a refused merged close writes nothing"
+eq "$(bstatus c-2)" "open" "and closes nothing"
+out="$("$SUT" transition c-2 --to merged --close --set merged_sha= 2>&1)"; rc=$?
+eq "$rc" 1 "an explicitly empty merged_sha is no evidence either"
+has "$out" "requires --set merged_sha" "the empty sha is refused by the same rule"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged close attempted a bd update"
+
 # --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
 echo "# reopen"
 store '[{"id":"r-1","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_url":"https://x/pr/4"}}]'
@@ -747,50 +837,87 @@ has "$out" "status" "the unverified field is named"
 out="$("$SUT" reopen r-nope 2>&1)"; rc=$?
 eq "$rc" 2 "reopen on an unreadable bead exits 2"
 
-}
+# --- the exec ------------------------------------------------------------------
+# gctk's usage text names itself, so it is the proof that lifecycle.sh handed
+# the call to the binary rather than answering it some other way.
+echo "# lifecycle.sh execs gctk"
+has "$("$SUT" 2>&1)" "gctk lifecycle" "lifecycle.sh execs the binary GCTK_BIN names"
 
-echo "## arm: shell fallback (GCTK_BIN=none)"
-export GCTK_BIN=none
-drift_shell
-suite
-
-echo
-echo "## arm: gctk lifecycle (reached through lifecycle.sh)"
-if [ -n "$GCTK_BUILT" ]; then
-    export GCTK_BIN="$GCTK_BUILT"
-    drift_gctk
-    suite
-    # The arm proves nothing unless lifecycle.sh actually handed off. gctk's
-    # usage text names itself; the fallback's does not.
-    has "$("$SUT" 2>&1)" "gctk lifecycle" "lifecycle.sh execs the binary when GCTK_BIN resolves"
-elif [ "$GO_PRESENT" -eq 0 ]; then
-    bad "no Go toolchain: the gctk lifecycle port was NOT exercised, and this suite is its acceptance bar"
-else
-    bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
-fi
-
-echo
-echo "## arm: the city chain, with no GCTK_BIN to shortcut it"
+# --- the city chain, with no GCTK_BIN to shortcut it -----------------------------
 # GC_CITY_PATH is the city root a supervisor puts in an agent session; GC_CITY
-# and GC_CITY_ROOT are absent there. A resolver blind to it leaves every agent
-# on the fallback, so the port ships and never runs in the shape most callers
-# have. Reached with GCTK_BIN unset, which is how a real caller reaches it.
-if [ -n "$GCTK_BUILT" ]; then
-    CITY="$TMP/city"
-    mkdir -p "$CITY/.gc/services/gctk/bin"
-    cp "$GCTK_BUILT" "$CITY/.gc/services/gctk/bin/gctk"
-    # gctk's usage names itself; the fallback's does not. Same discriminator the
-    # gctk arm uses for the handoff.
-    for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
-        out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
-        has "$out" "gctk lifecycle" "$VAR alone resolves the deployed binary"
-    done
-    # The control: the same binary on disk, named by nothing.
-    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" 2>&1)
-    hasnt "$out" "gctk lifecycle" "no city named: the shell fallback answers"
-else
-    bad "gctk did not build; the city resolution chain was NOT exercised"
-fi
+# and GC_CITY_ROOT are absent there. A resolver blind to it refuses every
+# transition an agent makes. Reached with GCTK_BIN unset, which is how a real
+# caller reaches it.
+echo "# the city chain"
+CITY="$TMP/city"
+mkdir -p "$CITY/.gc/services/gctk/bin"
+cp "$GCTK_BUILT" "$CITY/.gc/services/gctk/bin/gctk"
+for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
+    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
+    has "$out" "gctk lifecycle" "$VAR alone resolves the deployed binary"
+done
+
+# The order runner that execs the merge cadence carries no city variable at all,
+# so the city `gc service list --json` reports is the only route its transitions
+# have.
+SVC="$TMP/svc-bin"
+mkdir -p "$SVC"
+cat > "$SVC/gc" <<EOF
+#!/usr/bin/env bash
+[ "\${1:-} \${2:-}" = "service list" ] && { printf '{"city_path":"%s"}\n' "$CITY"; exit 0; }
+exec "$BIN/gc" "\$@"
+EOF
+chmod +x "$SVC/gc"
+out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT PATH="$SVC:$PATH" "$SUT" 2>&1)
+has "$out" "gctk lifecycle" "with no city variable, the city \`gc service list --json\` names resolves the deployed binary"
+
+# A build that fails after a good one leaves that binary in place, and its record
+# says so. lifecycle.sh does not consult the record: the last good binary answers.
+printf '{"component":"gctk","last_build_rc":1,"binary_rev":"aaaa","source_rev":"bbbb"}\n' \
+  > "$CITY/.gc/services/gctk/build-status.json"
+out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$CITY" "$SUT" 2>&1)
+has "$out" "gctk lifecycle" "a city whose latest build failed still runs its last good binary"
+
+# --- no binary: refused, named, and nothing read or written ----------------------
+# lifecycle.sh has no other implementation, so a call it cannot hand to a binary
+# is refused with exit 1 — the code every caller reads as a refused transition —
+# and a message that names what is missing. The bead is left exactly as it was.
+echo "# no binary to exec"
+store '[{"id":"z-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+
+: > "$STUB_GC_LOG"
+out=$(GCTK_BIN=none "$SUT" transition z-1 --to pull_request --set pr_number=9 2>&1); rc=$?
+eq "$rc" 1 "GCTK_BIN=none refuses the transition (exit 1)"
+has "$out" "GCTK_BIN=none names no binary" "…and says why"
+eq "$(meta z-1 merge_result)" "pre_open_gate" "…writing nothing"
+eq "$(grep -c '' "$STUB_GC_LOG" || true)" "0" "…and making no gc call at all"
+
+out=$(GCTK_BIN="$TMP/no-such-gctk" "$SUT" transition z-1 --to pull_request 2>&1); rc=$?
+eq "$rc" 1 "a GCTK_BIN that is not an executable refuses the transition"
+has "$out" "$TMP/no-such-gctk is not an executable gctk binary" "…naming the path it was given"
+
+# A fresh city: the gctk-build order has not published a binary yet. The same
+# refusal covers a city whose builds have never succeeded.
+FRESH="$TMP/fresh-city"
+mkdir -p "$FRESH"
+: > "$STUB_GC_LOG"
+out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$FRESH" \
+  "$SUT" transition z-1 --to pull_request --set pr_number=9 2>&1); rc=$?
+eq "$rc" 1 "a city with no binary yet refuses the transition (exit 1)"
+has "$out" "no gctk binary at $FRESH/.gc/services/gctk/bin/gctk" "…naming where the binary belongs"
+has "$out" "gctk-build order" "…and the order that publishes it"
+has "$out" "$FRESH/.gc/services/gctk/build-status.json" "…and the record of that order's last build"
+eq "$(meta z-1 merge_result)" "pre_open_gate" "…writing nothing"
+eq "$(grep -c '' "$STUB_GC_LOG" || true)" "0" "…and making no gc call at all"
+
+# The control for the city chain: the binary is on disk at $CITY, and nothing
+# names that city.
+: > "$STUB_GC_LOG"
+out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" transition z-1 --to pull_request 2>&1); rc=$?
+eq "$rc" 1 "no city named anywhere refuses the transition"
+has "$out" "no city to find the gctk binary in" "…naming what is missing"
+eq "$(grep -c '^bd ' "$STUB_GC_LOG" || true)" "0" "…and reading or writing no bead"
+eq "$(meta z-1 merge_result)" "pre_open_gate" "…so the bead is untouched"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -56,8 +56,9 @@ usage: gc-deacon-ledger.sh append <category> <one-line> [artifact-ref]
           [artifact-ref] points at the durable thing the action produced
           (mail:<id>, bead:<id>, memory:<path>, event:<seq>), default "-".
   current prints the current ledger bead id, creating one if none is open.
-  show    prints entries oldest first. --since <dur> (30m, 48h, 7d, 900s)
-          bounds the window and follows `continues:` back through rotations.
+  show    prints entries oldest first, folding a run of consecutive boots to
+          one line. --since <dur> (30m, 48h, 7d, 900s) bounds the window and
+          follows `continues:` back through rotations.
 U
 }
 
@@ -78,7 +79,9 @@ else
 fi
 unset GC_RIG
 
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 now_epoch() { date -u +%s; }
 now_utc()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -255,6 +258,25 @@ predecessor_of() {
     | sed -n 's/^continues:\([A-Za-z0-9._-]*\).*/\1/p' | sed -n '1p'
 }
 
+# A maximal run of adjacent boot entries folds to its first entry plus a count,
+# so a run of restarts reads as one line instead of burying the shift's real
+# actions under near-identical boots. Any other category between two boots
+# breaks the run, and a lone boot prints unchanged. Reads and preserves only
+# the timestamp ($1) and category ($2), so the folded line keeps its full text.
+collapse_boots() {
+  awk '
+    function flush() {
+      if (n == 0) return
+      if (n == 1) print first
+      else printf "%s  (+%d more boots through %s)\n", first, n - 1, last_ts
+      n = 0
+    }
+    $2 == "[boot]" { if (n == 0) first = $0; last_ts = $1; n++; next }
+    { flush(); print }
+    END { flush() }
+  '
+}
+
 cmd_show() {
   local since="" cutoff="" secs id hops seen chain
   while [ $# -gt 0 ]; do
@@ -295,7 +317,7 @@ cmd_show() {
     out=$(entries_of "$b")
     [ -n "$cutoff" ] && out=$(printf '%s\n' "$out" | awk -v c="$cutoff" 'NF && $1 >= c')
     printf '# %s%s\n' "$b" "${cutoff:+ — entries since $cutoff}"
-    if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "  (no entries in window)"; fi
+    if [ -n "$out" ]; then printf '%s\n' "$out" | collapse_boots; else echo "  (no entries in window)"; fi
   done
 }
 

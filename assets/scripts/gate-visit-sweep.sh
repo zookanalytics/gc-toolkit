@@ -28,9 +28,14 @@
 #     names such a gate on stderr every pass until it is resolved by hand.
 #
 # A visit already standing for the gated bead — the sitting that filed the
-# demand mid-hold, matched by continuation_group, tracks edge OR stall_root
-# (the union liveness-sweep reads; `open` alone reads only the first two) —
-# is recorded on the gate as its visit without filing a second one.
+# demand mid-hold, matched by the shared visit identity (visit-identity.sh: the
+# tracks edge, the gc.continuation_group stamp as fallback) — is recorded on
+# the gate as its visit without filing a second one. A gate whose
+# gated bead is ITSELF a visit (an anchored hold files the conversation demand on
+# the VISIT) is self-covering the same way: that visit is the sitting that
+# resolves the gate, so it is recorded as the gate's visit and no second one is
+# filed — a visit never covers itself, so without this the sweep would file a
+# visit on a visit.
 #
 # Rig-scoped (orders/gate-visit-sweep.toml): each importing rig sweeps its own
 # store, and the gate and its gated bead live in the same store. Per-gate
@@ -49,6 +54,10 @@ scrub() { tr -d '\000-\037'; }
 PROG="gate-visit-sweep"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
+# The one definition of what subject a visit covers, shared with gc-helm.sh,
+# converse-fold.sh and liveness-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
+# shellcheck source=visit-identity.sh
+. "$SCRIPT_DIR/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $SCRIPT_DIR" >&2; exit 1; }
 
 command -v jq >/dev/null 2>&1 \
     || { echo "$PROG: jq is required but not found in PATH" >&2; exit 1; }
@@ -120,16 +129,25 @@ while IFS=$'\t' read -r gate_id gated title; do
         STALE=$((STALE + 1)); continue
     fi
 
-    # A visit already standing for the gated bead: the same union of stamp,
-    # tracks edge and stall_root that liveness-sweep reads as "conversing".
-    visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" '
+    # A visit already standing for the gated bead. visit_covers is the shared
+    # identity test (tracks edge, gc.continuation_group fallback).
+    visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" "$VISIT_IDENTITY_JQ"'
       [ .[] | select((.metadata.task_kind // "") == "visit")
-        | select(((.metadata["gc.continuation_group"] // "") == $s)
-                 or ((.metadata.stall_root // "") == $s)
-                 or ([ .dependencies[]?
-                       | select((.type // "") == "tracks")
-                       | select((.depends_on_id // "") == $s) ] | length > 0))
+        | select(visit_covers($s))
         | .id ] | first // empty' 2>/dev/null || true)
+
+    # A gate whose gated bead is itself a visit is self-covering: an anchored hold
+    # files its conversation demand on the VISIT, and that visit IS the sitting
+    # that resolves the gate. visit_covers never matches a visit against itself, so
+    # without this the sweep would `helm open` a visit on a visit. Record the gated
+    # visit as its own cover; the stamp below keys the gate on it. converse-hold.sh
+    # already stamps gc.gate_visit at filing time, so this is the backstop for when
+    # that best-effort write did not land.
+    if [ -z "$visit" ]; then
+        gated_kind=$(printf '%s' "$LIVE_RAW" | jq -r --arg b "$gated" \
+            '[ .[] | select((.id // "") == $b) | (.metadata.task_kind // "") ] | first // ""' 2>/dev/null || echo "")
+        [ "$gated_kind" = "visit" ] && visit="$gated"
+    fi
 
     if [ -n "$visit" ]; then
         HELD=$((HELD + 1))
@@ -143,8 +161,10 @@ Settle it in this sitting, then resolve the gate: gc bd gate resolve $gate_id"
         if out=$("$HELM" open "$gated" --reason "$reason" --body "$body" 2>&1); then
             # `open` names the visit either way: "visit <id> filed on" for a
             # fresh one, "visit <id> is already open for" when one stands.
+            # The alternation needs -E: in a basic regex `\|` is a GNU
+            # extension, and BSD sed reads it as a literal bar.
             visit=$(printf '%s\n' "$out" \
-                | sed -n 's/^.*: visit \([^ ]*\) \(filed on\|is already open for\) .*$/\1/p' | head -n 1)
+                | sed -n -E 's/^.*: visit ([^ ]*) (filed on|is already open for) .*$/\1/p' | head -n 1)
             FILED=$((FILED + 1))
         else
             echo "$PROG: FAILED to file a visit on $gated for gate $gate_id (will retry next sweep)" >&2

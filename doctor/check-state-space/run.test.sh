@@ -61,6 +61,9 @@ for a in "$@"; do
 done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+# BD_FAIL_KEY fails only the listing narrowed to that metadata key, so one probe
+# can be made unreadable while the others still read.
+[ -n "${BD_FAIL_KEY:-}" ] && [ "$haskey" = "$BD_FAIL_KEY" ] && exit 3
 f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
 # scrub first: a fixture may carry raw control bytes (the check's own guard),
 # and real bd filters structured rows in the store, so its filter never sees
@@ -225,6 +228,54 @@ eq "$RC" "0" "an open detached anchor at rest is not re-flagged by the non-open 
 store '[{"id":"a-20","status":"in_progress","assignee":"","metadata":{"branch":"polecat/x"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an in_progress bead with no merge_result is ordinary work, not a finding"
+
+# --- 14. disk pressure must not forge an all-clear ------------------------
+# bash backs a `<<<` here-string with a temp file; under disk pressure that file
+# cannot be staged, the redirection fails silently (the check is set -u, not
+# set -e), and the loop runs zero times — so the pre-fix check read a non-empty
+# store as empty and printed the OK line. The fix stages every enumeration
+# through a checked `mktemp -d`, so a failing `mktemp` aborts the run non-clean.
+# A failing `mktemp` command is a NO-OP on the pre-fix `<<<` (bash's here-string
+# temp is internal, never the mktemp command), which is exactly what makes this
+# case fail against the pre-fix script and so proves it discriminates.
+store '[{"id":"a-dp","status":"open","metadata":{"merge_result":"exploded"}}]'
+# Mirror: with a working mktemp the fixture yields its finding, so the
+# disk-pressure assertions below are not vacuously satisfied by an empty store.
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "mirror: the fixture reports its finding when mktemp works"
+has "$OUT" "a-dp" "mirror: the finding names the bead"
+# Now fail every mktemp — the hermetic stand-in for a full /tmp — and re-run.
+cat > "$TMP/bin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: stubbed disk-pressure failure" >&2
+exit 1
+MK
+chmod +x "$TMP/bin/mktemp"
+OUT=$(run_check); RC=$?
+rm -f "$TMP/bin/mktemp"
+eq "$RC" "1" "a temp-file failure warns (1) — it neither passes (0) nor errors (2)"
+has "$OUT" "not an all-clear" "it says the run could not scan, not that the state space holds"
+hasnt "$OUT" "OK:" "it does not forge the clean all-clear line"
+hasnt "$OUT" "a-dp" "the store is not reported clean — the run is non-clean, not a false pass"
+
+# --- 15. a live bead still carrying a retired key ------------------------
+# stall_root was retired with every reader. A visit carrying it is in_progress
+# while a sitting holds it, so the probe reads every live status, not only the
+# open ones the healer-key scan reads.
+store '[{"id":"a-r1","status":"in_progress","metadata":{"task_kind":"visit","stall_root":"root-x"}},
+        {"id":"a-r2","status":"closed","metadata":{"task_kind":"visit","stall_root":"root-y"}},
+        {"id":"a-r3","status":"open","metadata":{"task_kind":"visit","stall_root":""}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live bead carrying the retired stall_root key is an ERROR"
+has "$OUT" "a-r1" "it names the in_progress visit, which an open-only scan would miss"
+has "$OUT" "gc.demand_for=root-x" "it names the bead a hold under the key would have gated"
+has "$OUT" "gc bd update a-r1 --unset-metadata stall_root" "it gives the clearing command"
+hasnt "$OUT" "a-r2" "a closed bead carrying it is history, not a finding"
+hasnt "$OUT" "a-r3" "an empty value is a cleared key, not a finding"
+store '[{"id":"a-r4","status":"open","metadata":{}}]'
+OUT=$(BD_FAIL_KEY=stall_root run_check); RC=$?
+eq "$RC" "1" "an unreadable retired-key probe warns, never passes"
+has "$OUT" "retired-key check did NOT run" "the warning says the probe did not run"
 
 echo
 echo "check-state-space: $PASS passed, $FAIL failed"

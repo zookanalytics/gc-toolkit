@@ -73,7 +73,21 @@ gc prime
 gc bd prime
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
+# >>> validate-malformed-convoy-refuse
+if [ -z "$VALIDATION_PASS" ]; then
+  echo "mol-validate needs an input convoy with exactly one tracked member" >&2
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< validate-malformed-convoy-refuse
 gc bd show "$VALIDATION_PASS"
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ```
@@ -82,13 +96,37 @@ M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 lane's batch on one anchor at the head the batch was produced at:
 ```bash
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-[ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
+# >>> validate-no-anchor-refuse
+if [ -z "$ANCHOR" ]; then
+  echo "validation pass carries no anchor_bead; nothing to rule" >&2
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass carries no anchor_bead; the dispatch is malformed and must be redone"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< validate-no-anchor-refuse
 echo "validating lane $LANE on anchor $ANCHOR at ${REVIEWED_OID:-<unpinned>}"
 ```
-An absent `check_name` resolves to `codex`, the same default lane-state.sh and
-gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
+An absent `check_name` resolves to `correctness`, the same default lane-state.sh and
+gate-ensure.sh use, so a pass dispatched without one rules the correctness lane.
+
+A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
+no single tracked member, or that member carries no `anchor_bead`. So each refusal
+above files a visit through `escalate.sh` and holds this step `blocked`
+(not-closed, not-claimable) only if that visit landed, then drains. A bare
+`exit 1` would leave the step `open` and routed, and the pool would re-offer the
+same unrulable pass to a fresh validator every cycle. The store-read guards
+further down are the opposite case: an unreadable or non-array finding ledger is
+transient, so those DO fail closed to a plain `exit 1` and a later claim retries
+once the store recovers. Do not convert them to a hold.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
@@ -135,7 +173,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "triage-findings"
-title = "Decisions 1 and 2: rule each finding must-fix, deferred, or declined"
+title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, or needs-you"
 needs = ["load-dispatch"]
 description = """
 Each block is its own shell, so re-derive the pins AND re-read the batch first.
@@ -150,7 +188,7 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 [ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
@@ -186,18 +224,55 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition must-fix
   ```
 - **deferred** — a real objection, but fixing it now introduces risk or might
-  break something, so it lands as a tracked bead and needs fresh work once the
-  PR merges. `finding.sh` wires `--discovered-from`, which records provenance
-  and holds nothing, and appends your `--reason` to the finding — a deferred
-  finding blocks nothing, so that note is the only place whoever picks it up
-  after the merge can read why it was left. Always give one.
+  break something, so it becomes tracked later-work. `finding.sh` files a
+  follow-up bead carrying the objection and your `--reason`, gates it behind the
+  anchor so it dispatches once the anchor merges, records the follow-up id as the
+  reply the raiser's PR thread receives, and closes the finding. The follow-up is
+  the claimable later-work; once the finding closes it holds neither the merge
+  nor the review. Always give a `--reason` — it is the whole justification for
+  deferring, and it rides into both the follow-up and the raiser's thread.
   ```bash
-  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring>"
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring, and what the follow-up must do>"
   ```
 - **declined** — not a real objection: cosmetic, already handled on this branch,
-  or mistaken. `finding.sh` closes it with the reason and no edge.
+  or mistaken. The finding closes with the reason and takes no edge, and one
+  primitive rules a machine and a human finding alike:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined --reason "<why this is not an objection>"
+  ```
+  A HUMAN finding — `finding.source` begins `human:` — you may decline on its
+  merits exactly as you decline a machine one. The operator is a highly informed
+  peer whose objection you weigh, not an authority you may never overrule; the old
+  rule that only the raiser could withdraw their objection made their word gospel,
+  which is the deference this pass now ends. What a human decline owes that a
+  machine decline does not is an answer: they read the diff and objected, so a
+  decline they never hear is a silent overrule. Pass the answer with `--reply`;
+  finding.sh records it and pr-facts.sh's write-back posts it into their PR thread:
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined \
+    --reason "<why this is not an objection>" \
+    --reply "<the answer to post to the operator: what you found, and why the objection does not hold>"
+  ```
+  Declining closes the finding, which is what lets a re-raise re-block: if the
+  operator still disagrees they re-review, the content key re-adopts the closed
+  finding as a fresh one, and the next reconcile re-opens the human validation
+  pass on the anchor. A re-raise is theirs to make; nothing here forecloses it.
+
+  A human comment that states no objection at all — an acknowledgement, praise, or
+  a question the diff already answers — is declined like a machine finding, with
+  no `--reply`: there is no objection to overrule, so none is owed an answer.
+
+- **needs-you** — a human comment this pass genuinely cannot judge: it turns on
+  product intent, a business fact, or a call that is the operator's to make, not
+  one you can weigh against the diff. `finding.sh` files a visit (board-visible,
+  routed to the operator), records its id as the reply the raiser's PR thread
+  receives, and leaves the finding OPEN. An open finding holds the review
+  changes-requested until the operator rules the visit, so the decision is visible
+  — a visit plus a PR comment — never a silent park; their ruling then
+  re-dispositions this finding. Reserve it for what you cannot judge: a comment
+  you can weigh is must-fix or declined, and one you can defer is deferred.
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```
 
 **Check every exit status.** `finding.sh set-disposition` stamps the
@@ -207,18 +282,28 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume.
+leave the chain open for the next claim to resume. The rulings that owe an answer
+ride the same guard: a declined finding's `--reply`, a deferred finding's
+follow-up and its reply, and a needs-you finding's visit and its reply are all
+recorded BEFORE the finding is closed or left open, and `set-disposition` exits
+non-zero if any does not stick — so an answer the raiser would never hear leaves
+the finding unruled and the pass open to retry rather than closing over a silent
+overrule or a deferral with no tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
-to the merge predicate, so an objection you neither must-fixed nor declined is
-silently dropped. An empty batch means only that nothing is left to rule — the
-reviewer found nothing, or an earlier pass already ruled it all. It settles
-nothing about decision 3: carry on to `rule-convergence` and judge convergence
-there on the batch's own evidence, never on the emptiness of this read.
+to the merge predicate, so an objection you leave unruled is silently dropped. An
+empty batch means only that nothing is left to rule — the reviewer found nothing,
+or an earlier pass already ruled it all. It settles nothing about decision 3:
+carry on to `rule-convergence` and judge convergence there on the batch's own
+evidence, never on the emptiness of this read.
 
-A deferred finding needs a bead someone can pick up later; filing that follow-up
-work is the fix-unit dispatch the gate authority owns (tk-o1bzbm), not this pass.
-This pass rules the disposition; it does not create or route fix units.
+A deferred finding's follow-up is filed by `finding.sh` as the ruling runs — a
+bead armed to its fix pool and gated behind the anchor, so it dispatches once
+the merge lands — so a deferral never leaves an unclaimable orphan.
+The must-fix set is answered by a separate fix-unit dispatch the check authority
+owns (tk-o1bzbm), not this pass: this pass rules dispositions and lets the
+primitive file a deferral's follow-up; it does not create or route must-fix fix
+units.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `rule-convergence`:
@@ -230,7 +315,7 @@ done
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
-(must-fix, deferred, or declined), none left unvalidated, this step closed.
+(must-fix, deferred, declined, or needs-you), none left unvalidated, this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -246,7 +331,7 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 [ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=correctness
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -264,25 +349,49 @@ handful of localized must-fixes has converged. A batch that overturns an
 assumption the diff rests on, touches many files, or shows the reviewer and the
 diff still disagree about intent has not.
 
-**If it HAS converged — no further review needed.** Back the lane: file the
-closed approve outcome lane-state.sh reads to derive green. The lane still holds
-at `fixing` until its must-fix findings close; it derives green when they do,
-with no re-review — that is the whole point of judged convergence.
+This pass rules one of two shapes, and `$LANE` names which: a `check_set` lane
+(`correctness`) for a reviewer's batch, or `human` for an operator feedback batch. A
+human batch is anchor-wide — it is input the whole diff has never been answered
+against, so its ruling moves every lane the anchor's `check_set` declares, not
+the `human` pseudo-lane no check reader derives green from
+(specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
+Record the ruling with the line matching this pass's shape and your judgement;
+the `$LANE` guard on each makes the wrong line a no-op.
+
+**If it HAS converged — no further review needed.**
+
+A reviewer's lane batch backs its lane: file the closed approve outcome
+lane-state.sh reads to derive green. The lane holds at `fixing` until its
+must-fix findings close, then derives green with no re-review.
 ```bash
-"$SCRIPTS/review-outcome.sh" back-lane --anchor "$ANCHOR" --lane "$LANE" --oid "${REVIEWED_OID:?reviewed_oid required to back a lane}" --reason "<one line: why the batch converged>"
+[ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" back-lane --anchor "$ANCHOR" --lane "$LANE" --oid "${REVIEWED_OID:?reviewed_oid required to back a lane}" --reason "<one line: why the batch converged>"
+```
+A human batch writes no approve outcome: every declared lane keeps the green it
+already held when the batch arrived, and the must-fix findings `triage-findings`
+wrote hold the merge until they close. Backing a lane here would green it on a
+comment its reviewer never read, so a converged human batch runs neither line.
+
+**If it has NOT converged — a fresh whole-diff review is warranted.**
+
+A reviewer's lane batch supersedes its own lane, returning it to `unreviewed` so
+the check authority pours a fresh review at the live head. supersede-lane retires
+the lane's standing verdict whether or not it is an approve backing: on a
+request-changes batch there is no backing, so it retires the recorded
+request-changes review itself, which is what lifts gate-ensure's per-head bar and
+lets the fresh review pour at the unmoved head.
+```bash
+[ "$LANE" != human ] && "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
+```
+A human batch supersedes EVERY declared lane, since the whole diff owes a fresh
+look. Superseding only the `human` pseudo-lane would leave the real checks green
+and let the anchor merge without the review this ruling requires.
+```bash
+[ "$LANE" = human ] && "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "<one line: what the operator's input overturns>"
 ```
 
-**If it has NOT converged — a fresh whole-diff review is warranted.** Supersede
-any approve outcome backing this lane, returning it to `unreviewed` so the gate
-authority pours a fresh review at the live head. On a batch the reviewer raised
-with request-changes there is no approve backing yet; supersede-lane is then a
-no-op success and the lane already owes its review.
-```bash
-"$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "<one line: what still needs a whole-diff look>"
-```
-
-Write exactly one of the two. Neither leaves the lane in a state a reader can
-resolve, and both leave the anchor untouched.
+Record exactly one outcome: back-lane or supersede-lane on a reviewer's lane
+batch, supersede-anchor on a human batch that has not converged, and nothing on a
+human batch that has. Every path leaves the anchor untouched.
 
 **Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `finalize-and-drain`:
@@ -293,9 +402,10 @@ done
 "${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --outcome pass
 ```
 
-**Exit criteria:** convergence ruled and recorded through review-outcome.sh
-(back-lane on converged, supersede-lane on not), the anchor untouched, this step
-closed.
+**Exit criteria:** convergence ruled and recorded through review-outcome.sh — a
+reviewer's batch backs (converged) or supersedes (not) its lane; a human batch
+supersedes every lane (not converged) or writes nothing (converged) — the anchor
+untouched, this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 

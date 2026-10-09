@@ -137,7 +137,9 @@ cycle-recycle Stop hook's job — never something you ask about.
 
 {{ template "operator-profile" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
 

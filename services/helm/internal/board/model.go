@@ -16,7 +16,7 @@
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
-// sentence, the stranded/empty/complete/progress_mismatch booleans, the `held`
+// sentence, the stranded/empty/complete booleans, the `held`
 // visit fact, and the in-flight/dead-owner join that distinguishes a slung
 // bead being worked from one nobody has touched.
 //
@@ -118,11 +118,6 @@ type Anchor struct {
 	// is what keeps the wire field null rather than a misleading false.
 	Owned *bool `json:"owned,omitempty"`
 
-	// Progress is the convoy's OWN closed/total claim, as `gc convoy list`
-	// reports it. It is compared against the rolled-up child counts to derive
-	// progress_mismatch; nothing renders it directly.
-	Progress *Progress `json:"progress,omitempty"`
-
 	// The takeaway triple: the LLM-authored headline a converse sitting leaves
 	// on a bead, plus its provenance. Read from gc.takeaway / gc.takeaway_at /
 	// gc.takeaway_by. An anchor with a takeaway spends it as its NEEDS
@@ -130,6 +125,15 @@ type Anchor struct {
 	Takeaway   string `json:"takeaway,omitempty"`
 	TakeawayAt string `json:"takeaway_at,omitempty"`
 	TakeawayBy string `json:"takeaway_by,omitempty"`
+
+	// Notes carries the bead's notes field so a recommendation row can spend the
+	// first-reaction card (Understanding / Found / Proposal / Decision needed)
+	// the disposition wrote there. The takeaway is one frozen line; the card is
+	// the reasoning and the options behind it, which is what an operator needs to
+	// Accept or redirect. It reaches the wire only as Tile.Recommendation, and
+	// only on an acceptable row — computeTile reads it beside the accept
+	// affordance.
+	Notes string `json:"notes,omitempty"`
 
 	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
 	// WaitingOnClosed the subset of those the source found already closed.
@@ -155,30 +159,42 @@ type Anchor struct {
 	// `asking`; the title, which is the demand's authored headline; and the
 	// creation instant, which is when an unanswered demand's turn began.
 	//
-	// It is the SAME read as WaitingOn, not a second one — [source.waitingEdges]
-	// produces both from one dependency query — so an anchor whose edges could
-	// not be read reports the empty set here and WaitingUnknown below, exactly
-	// as it does for the id slices.
+	// It is the SAME read as WaitingOn, not a second one —
+	// [source.waitingFromEdges] produces both from one dependency query — so an
+	// anchor whose edges could not be read reports the empty set here and
+	// WaitingUnknown below, exactly as it does for the id slices.
 	Blockers []Blocker `json:"blockers,omitempty"`
 
-	// WaitingUnknown says the source could not READ this anchor's edges at
-	// all: the per-anchor dependency query itself failed, so the empty
-	// WaitingOn above is an absence of knowledge rather than a proof that
-	// nothing is outstanding.
+	// WaitingUnknown says the source could not establish this anchor's waits,
+	// so the empty WaitingOn above is an absence of knowledge rather than a
+	// proof that nothing is outstanding.
 	//
-	// The two are not interchangeable, and only one consumer can tell them
-	// apart. An unresolved BLOCKER is already handled — it is absent from
+	// The beads source sets it when its dependency read fails, or when the
+	// hydration that resolves the blockers does. That read is one batched query
+	// per rig and status pass ([source.BeadsSource.attachEdges]), so a single
+	// failure marks every anchor of the pass whose kind reads waits
+	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
+	// read their `blocks` edges for the dependency-family grouping, so a failed
+	// read flags them too. The supervisor backend sets it on every
+	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// status ([source.SupervisorSource.metadataAnchorFor]).
+	//
+	// An unread wait set and an empty one are not interchangeable. A blocker
+	// that was read but has not closed is already handled — it is absent from
 	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
 	// unreadable EDGE SET has no such fallback: it looks exactly like a row
 	// with no waits, which is the state [ruled] reads as "every recorded wait
-	// has landed". Without this flag a per-anchor Dolt timeout would satisfy
-	// that clause vacuously and stand an answered human-gated row down,
-	// telling the operator to close or extend a question whose routed work may
-	// still be open (tk-fhd705).
+	// has landed". Without this flag a Dolt timeout on that read would satisfy
+	// that clause vacuously and stand an answered human-gated row down, telling
+	// the operator to close or extend a question whose routed work may still
+	// be open.
 	//
-	// Only the kinds that spend the edges pay the read, so this stays false
-	// for an epic or a convoy: they never asked, so nothing about them is
-	// unknown.
+	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
+	// that carries it, so the row falls through to the un-ruled arm. The family
+	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
+	// the flag matters only when the row is routed to the operator. Both
+	// readers apply only to rows [humanGated] accepts, and for an epic or a
+	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 }
 
@@ -205,13 +221,6 @@ type Blocker struct {
 	// healthy hold rather than a stall.
 	Assignee  string    `json:"assignee,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
-}
-
-// Progress is a convoy's self-reported roll-up, mirroring the `progress` object
-// on `gc convoy list --json`.
-type Progress struct {
-	Closed int `json:"closed"`
-	Total  int `json:"total"`
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
@@ -243,13 +252,28 @@ type Tile struct {
 	// never stranded — the conversation IS the attention it would be flagged
 	// for lacking.
 	Held bool `json:"held"`
+	// VisitState refines Held into the visit's engagement: VisitEngaged when a
+	// live sitting is in the conversation right now, VisitParked when the visit
+	// stands open and un-engaged — filed and waiting for a person to pick it up.
+	// Empty on a row no open visit holds (Held is false), the same
+	// not-applicable empty a closed row's Phase carries.
+	//
+	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
+	// disagree: a parked visit is the one Accept is offered on, an engaged one
+	// suppresses it. It is derived here rather than in the browser because the
+	// rule reads the visit's assignee — the pending-engagement window — which
+	// [Sitting.Assignee] deliberately keeps off the wire.
+	VisitState string `json:"visit_state"`
 
 	NClosed int `json:"n_closed"`
 	MTotal  int `json:"m_total"`
 	Open    int `json:"open"`
 	// InProgress is the RAW status count — honestly 0 for a slung bead, whose
 	// work never leaves status=open. InProgressLive is the count that answers
-	// "is anything actually moving", under both mechanisms.
+	// "is anything actually moving": a child the city is working (claimed by a
+	// live owner, or covered by a live workflow) PLUS a live workflow over the
+	// anchor's OWN bead — the common sling shape, where the work bead is the
+	// anchor and its molecule stands over it rather than under a child.
 	InProgress int `json:"in_progress"`
 	Assigned   int `json:"assigned"`
 
@@ -258,17 +282,17 @@ type Tile struct {
 	DeadOwner      bool `json:"dead_owner"`
 
 	// InFlight is the part of InProgressLive attributable to a live graph.v2
-	// workflow rather than to a claimed child, surfaced so the join can be
-	// audited without re-deriving it.
+	// workflow rather than to a claimed child — a child the workflow carries, or
+	// the anchor's own bead when a workflow stands over it — surfaced so the join
+	// can be audited without re-deriving it. Equal to len(InFlightHeads).
 	InFlight      int      `json:"in_flight"`
 	InFlightHeads []string `json:"in_flight_heads"`
 
 	Owned *bool `json:"owned"`
 
-	Stranded         bool `json:"stranded"`
-	Empty            bool `json:"empty"`
-	Complete         bool `json:"complete"`
-	ProgressMismatch bool `json:"progress_mismatch"`
+	Stranded bool `json:"stranded"`
+	Empty    bool `json:"empty"`
+	Complete bool `json:"complete"`
 
 	// StaleDays is whole days since the anchor was last updated, and UpdatedAt
 	// is the timestamp it came from. Both are 0/zero when the source cannot read
@@ -351,7 +375,12 @@ type Tile struct {
 	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
-	// pass: progressing, settled, wedged-exception, wedged-veto, or unknown.
+	// pass: progressing, settled, wedged-exception, blocked, or unknown.
+	//
+	// `blocked` is a hold no automated actor will clear and no review verdict is
+	// owed on — an unresolved required review thread, a base gone BEHIND, or an
+	// unrouted blocker. The operator is owed it, distinct from `settled`, and its
+	// cause rides `pr.machine_reason`, surfaced in the row's `needs`.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An
@@ -369,12 +398,13 @@ type Tile struct {
 	// change shape when the watermarks land.
 	PRConversation string `json:"pr_conversation"`
 
-	// PRApproval is whether GitHub is withholding the merge for a human review:
-	// required, met, not_required, or unknown. Read from the recorded posture,
-	// which is GitHub's own requirement rather than the city's gate set — a
-	// repository can require a review that check_set never declared, and keyed
-	// on the gate set a green pull request nobody has approved reads as settled
-	// and nobody's move.
+	// PRApproval is whether this pull request still owes an external approval
+	// before it can merge: required, met, or unknown. Approval is a universal
+	// merge rule (merge.sh holds every open PR until a non-city APPROVED review
+	// stands, and one given at any commit stands until dismissed), so only
+	// `approved` is met and every other posture owes one — the field is the
+	// city's rule, not GitHub's protection set, so a PR on an integration/* base
+	// or in a rule-less repo still reads `required`.
 	//
 	// A separate field rather than a fourth machine value, because a PR can
 	// need an approval while the cadence is still progressing, and folding the
@@ -414,6 +444,86 @@ type Tile struct {
 	// Empty is the common case — a row with an LLM-authored takeaway is unique
 	// and never clusters — so the field is omitted when it does not apply.
 	ClusterKey string `json:"cluster_key,omitempty"`
+
+	// GroupRoot is the id of the family this row belongs to — the top-most anchor
+	// its parent-child and blocked edges climb to, equal to the row's OWN id when
+	// it climbs to nothing. Every tile carries one, so a surface buckets families
+	// the way both renderers already bucket [Section]. Dependency structure is the
+	// board's primary grouping axis and the attention band orders and highlights
+	// WITHIN a family; [GroupByFamily] is that partition.
+	GroupRoot string `json:"group_root"`
+
+	// GroupParent is the id of this row's IMMEDIATE parent — the one anchor its
+	// edges climb to a single level up, empty when it climbs to nothing. GroupRoot
+	// names the top of the family tree; GroupParent names the next step toward it,
+	// so a surface renders the family as the nested containment tree it is — a
+	// sub-epic beneath its parent, that sub-epic's own children beneath it —
+	// instead of one flat member list under the top root. Both come from the same
+	// per-tile parent walk in [assignGroupRoots]: GroupRoot follows it to the top,
+	// GroupParent reports its first step.
+	GroupParent string `json:"group_parent"`
+
+	// Acceptable marks a recommendation row: the subject carries a
+	// gc.recommended_formula AND its visit is un-engaged, so a person can Accept
+	// it — dispatch that formula at the subject and dismiss the visit in one
+	// procedural order, no sitting required. A live sitting suppresses it (the
+	// operator is deciding by hand) and leaving without a ruling restores it;
+	// [unengagedVisit] is that derivation. It rides beside Held, which cannot
+	// carry it: Held is true for any visit, engaged or not. Discuss (engage) is
+	// always available; Accept is the extra move a recommendation row offers.
+	Acceptable bool `json:"acceptable"`
+
+	// AcceptFormula is the gc.recommended_formula Accept would dispatch, named on
+	// the wire so a surface can say WHAT accepting does without re-reading the
+	// subject bead. Empty exactly when Acceptable is false.
+	AcceptFormula string `json:"accept_formula"`
+
+	// PRBranchURL is the GitHub tree-view link for [PRBranch], or empty when the
+	// row has no branch or the rig's repository could not be resolved. The render
+	// path makes no GitHub call, so the repository is learned from a pr_url the
+	// board already holds: every anchor in one rig targets that rig's repository,
+	// so any row carrying a pull request URL names it for the rig's pre-PR rows
+	// too. A rig the board holds no pull request URL for keeps the bare branch.
+	PRBranchURL string `json:"pr_branch_url"`
+
+	// PRPhase is this merge anchor's PR status. On a live anchor it is who must act
+	// next — `working`, `needs-review`, or `needs-attention` — the same status:
+	// taxonomy pr-status-label.sh projects to the GitHub PR list, so the board and
+	// the label read one vocabulary rather than two. On a closed anchor it is the
+	// PR's resolved state, `merged` or `closed`, so a done row names how its PR
+	// ended rather than freezing on its last live value. Empty on a non-merge row.
+	PRPhase string `json:"pr_phase"`
+
+	// Phase is this bead's liveness in the shared tri-state vocabulary —
+	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
+	// leads with on every live row. It begins as the per-bead value
+	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
+	// and for a merge anchor its open rework/review children, or for any other
+	// bead the live-workflow signal standing over it. A bead's board liveness and
+	// its GitHub `status:` label come from that one core. A row WITH child tiles
+	// then takes their rolled-up state in place of that per-bead value
+	// ([aggregatePhases]): an epic's frontier is its children's frontier.
+	//
+	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
+	// round-trip value and is never rolled up. Phase equals it on a merge anchor
+	// with no child tiles — the common case, because a merge anchor's rework and
+	// review children hang off it by a blocked/anchor_bead edge the roll-up does
+	// not climb — and diverges from it on a merge anchor that ALSO has
+	// parent-child child tiles, whose Phase becomes their roll-up. The one place
+	// the two cannot disagree is a blocked machine verdict, which lifts both to
+	// needs-attention together.
+	//
+	// Empty on a terminal (closed) row, where the live vocabulary has no answer,
+	// the same not-applicable empty PRPhase leaves off a non-merge row.
+	Phase string `json:"phase"`
+
+	// Recommendation is the first-reaction card from the subject bead's notes —
+	// the Proposal and Decision-needed sections an operator weighs to Accept or
+	// redirect — carried verbatim so the decision point shows WHY, not only the
+	// one-line takeaway that reaches Needs. Null-when-absent like the takeaway
+	// triple, and non-null exactly on an acceptable row (see computeTile): the
+	// accept affordance and the reasoning behind it ride the wire together.
+	Recommendation *string `json:"recommendation"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -447,9 +557,26 @@ type Sitting struct {
 	// close leaves an open visit reading "dismissed" until it is closed or the
 	// sitting signs off over it.
 	Outcome string `json:"outcome"`
+	// OutcomeReason is gc.outcome_reason, the one-line human-readable sentence
+	// naming WHY this visit closed — "moot: premise died, subject already
+	// closed", "folded into <holder>", or what a held sitting signed off on.
+	// Outcome is the word a reader groups by; OutcomeReason is the sentence a
+	// reader reads. It is stamped per VISIT beside Outcome, which is what lets a
+	// dedup close read on the board as a decision rather than a dropped need.
+	// Empty on a running sitting and on a closed one whose writer stamped only
+	// the word.
+	OutcomeReason string `json:"outcome_reason"`
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while it is still open.
 	Session string `json:"session"`
+
+	// Assignee is the visit bead's assignee. engage binds the visit by assignee
+	// while it is still open, before the hook claim promotes it to in_progress
+	// and stamps Session; an open visit with an assignee is therefore a pending
+	// engagement a sitting is about to hold, which [unengagedVisit] treats as
+	// engaged so it suppresses Accept in that window. It is a derivation input,
+	// not part of the record the web renders, so it carries no wire tag.
+	Assignee string `json:"-"`
 
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
 	// to the bead's creation time for a visit that was never claimed. ClosedAt
@@ -469,6 +596,47 @@ type Sitting struct {
 	// serializes them in practice, and the failure is a duplicated headline
 	// rather than a wrong one.
 	Takeaway string `json:"takeaway"`
+
+	// SubjectTitle is the title of the SUBJECT bead — the row's topic, what the
+	// conversation is about. It is read in the same batch as the takeaway
+	// (source.attributeTakeaways), so a row can say what it concerns even when
+	// nothing was concluded on it. Empty when the subject could not be read,
+	// which the [Topic] and [Headline] helpers fall back on the id or the visit
+	// title for. It carries the whole title; a renderer clips it to its column.
+	SubjectTitle string `json:"subject_title"`
+}
+
+// Topic is what a sitting is about, for a surface that shows one cell of it: the
+// subject bead's title, falling back to the subject id when the gather could not
+// read the title. Never empty on a real sitting — the row always says at least
+// the id it stands on, so a bare id is the floor rather than the whole of it.
+func (s Sitting) Topic() string {
+	if s.SubjectTitle != "" {
+		return s.SubjectTitle
+	}
+	return s.Subject
+}
+
+// Headline is what a sitting CONCLUDED, or failing that what it is ABOUT. The
+// takeaway is the conversation's own one-line conclusion and wins whenever one
+// was attributed. A closed sitting that left no takeaway — a moot, benign or
+// folded dedup close — shows its outcome reason next, the sentence naming why it
+// closed, so the row reads as a decision rather than a blank. Without either the
+// row shows the subject's title — the topic — rather than the visit bead's own
+// title, which on an old-path first reaction is the generic pool-offer line
+// "first reaction ready: accept or redirect" and says nothing. The visit title
+// is the last resort, for a subject the gather could not read at all.
+func (s Sitting) Headline() string {
+	if s.Takeaway != "" {
+		return s.Takeaway
+	}
+	if s.OutcomeReason != "" {
+		return s.OutcomeReason
+	}
+	if s.SubjectTitle != "" {
+		return s.SubjectTitle
+	}
+	return s.Title
 }
 
 // Facts are the CROSS-ANCHOR joins one gather pass produces alongside the
@@ -479,10 +647,17 @@ type Sitting struct {
 type Facts struct {
 	// Visits holds the ids of anchors an open visit bead names.
 	Visits map[string]bool
-	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
-	// session names of the live graph.v2 workflows standing over it. The gather
-	// resolves each live workflow root through its input convoy to that
-	// convoy's single tracked member, and that member is the key.
+	// Inflight maps a work-bead id to the session names of the live graph.v2
+	// workflows standing over it. The gather resolves each live workflow root
+	// through its input convoy, and the key is that convoy's single tracked
+	// member. The gather does not know which beads are anchors, so a key is
+	// whatever bead the sling tracked. The board looks up three kinds of id:
+	// an anchor's child ([rollUp]), a review or rework bead blocking a merge
+	// anchor ([liveReviewOrRework]), and the anchor's own bead
+	// ([Facts.anchorInFlight]). The anchor's own bead is the key when the anchor
+	// is itself the slung work bead and its molecule stands over it rather than
+	// under a child. [Facts.wfLive] re-checks each session's liveness at derive
+	// time.
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee can be resolved whichever form it was written in.

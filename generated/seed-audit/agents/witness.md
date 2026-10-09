@@ -171,10 +171,14 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv, bead:tk-qdt0cc, bead:tk-ixpfau, bead:tk-sfdrzg, bead:tk-kz9i3y (operator) adopted:2026-08-26 updated:2026-10-02 -->
+- State an operator-facing decision, brief, or sign-off so it is
+  answerable in about a minute: lead with the plain-language stake and
+  what each option costs, keep it to one screen, and let the operator
+  accept or reject without looking anything up. An identifier — a bead
+  id, title, path, or queue pointer — is a parenthetical reference for
+  looking something up or cross-referencing it. It carries no weight on
+  its own and is never the noun that carries the decision's meaning.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -207,10 +211,6 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -225,6 +225,24 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
 
 
 

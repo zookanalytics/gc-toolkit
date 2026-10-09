@@ -8,7 +8,7 @@
 # error: the committed audit describes a seed no agent receives. An ABSENT
 # audit is a WARNING, not an error — a fresh clone before the first render
 # is expected, and it re-renders on first install (--install-hook).
-# A gc-version-only drift and an unwired pre-commit hook are warnings too.
+# An unwired pre-commit hook is a warning too.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, "  - detail" lines.
 
 set -u
@@ -38,8 +38,6 @@ if [ ! -f "$index" ]; then
     detail ${warnings[@]+"${warnings[@]}"}
     exit 1
 fi
-
-recorded_gcver=$(sed -n 's/^- `gc` version: `\(.*\)`$/\1/p' "$index" | head -1)
 
 if [ ! -f "$sources" ]; then
     echo "seed audit records no input manifest — staleness is UNVERIFIABLE"
@@ -79,15 +77,6 @@ if [ "$actual_sources" != "$(cat "$sources")" ]; then
     detail "The committed audit describes a seed no agent receives — and every file in it still reads as a valid prompt, which is why this is a check and not a review."
     detail "Fix: assets/scripts/render-seed-audit.sh && git add generated/seed-audit"
     exit 2
-fi
-
-# Version drift is a warning, not an error: prompt composition lives in the gc
-# binary, and a host upgrade moves the artifact with no commit here.
-if command -v gc >/dev/null 2>&1; then
-    actual_gcver=$(gc version 2>/dev/null | head -1)
-    if [ -n "$actual_gcver" ] && [ -n "$recorded_gcver" ] && [ "$actual_gcver" != "$recorded_gcver" ]; then
-        warnings+=("gc version drift: artifact rendered with \"$recorded_gcver\", host runs \"$actual_gcver\" — the rendered text may have moved with no change in this repo; re-render: assets/scripts/render-seed-audit.sh")
-    fi
 fi
 
 # The pre-commit hook is what keeps the artifact current between doctor runs.

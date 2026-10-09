@@ -13,12 +13,21 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+	"golang.org/x/sync/errgroup"
 )
 
 // defaultSupervisorPort is the supervisor's documented default loopback port
 // (internal/supervisor/config.go PortOrDefault). Used when supervisor.toml is
 // unreadable and no override env is set.
 const defaultSupervisorPort = 8372
+
+// maxGatherFanout bounds how many per-epic and per-convoy child roll-ups the
+// gather fetches at once. Each roll-up is an independent GET, and fetching them
+// concurrently keeps the fan-out from serializing into an N+1 that costs tens
+// of seconds on a wide store. The bound keeps a store with hundreds of convoys
+// from opening an unbounded number of connections to the supervisor in a single
+// burst.
+const maxGatherFanout = 8
 
 // SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
@@ -346,9 +355,30 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 	}
 	g.note(epics.Partial, epics.PartialErrors)
 	g.ok()
-	for _, e := range epics.Items {
+
+	// One GET /beads/graph/{id} per epic, fetched concurrently under the fan-out
+	// bound. Each fetch is independent and writes only its own slot, so the
+	// shared gatherState is not touched here — its anchors and warnings are
+	// merged back in the serial loop below, which also keeps anchor order
+	// stable regardless of which fetch finished first.
+	children := make([][]board.Child, len(epics.Items))
+	warns := make([][]string, len(epics.Items))
+	eg := new(errgroup.Group)
+	eg.SetLimit(maxGatherFanout)
+	for i, e := range epics.Items {
+		i, id := i, e.ID
+		eg.Go(func() error {
+			children[i], warns[i] = s.epicChildren(ctx, id)
+			return nil
+		})
+	}
+	_ = eg.Wait() // a child fetch reports its failure as a warning, never a hard error
+
+	for i, e := range epics.Items {
+		if len(warns[i]) > 0 {
+			g.note(true, warns[i])
+		}
 		rig, prefix := g.rigOf(e.ID)
-		children := s.epicChildren(ctx, g, e.ID)
 		g.anchors = append(g.anchors, board.Anchor{
 			ID:       e.ID,
 			Title:    e.Title,
@@ -357,25 +387,25 @@ func (s *SupervisorSource) gatherEpics(ctx context.Context, g *gatherState) {
 			Rig:      rig,
 			Prefix:   prefix,
 			Priority: e.Priority,
-			Children: children,
+			Children: children[i],
 		})
 	}
 }
 
 // epicChildren returns the epic's DIRECT children (matching gc-helm.sh's
 // `bd list --parent`), reading the all-status graph roll-up so closed children
-// are counted. Direct children are the parent-child edges out of the root.
-func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epicID string) []board.Child {
+// are counted. Direct children are the parent-child edges out of the root. A
+// fetch failure is returned as a partial-error warning rather than mutating the
+// shared gatherState, so the caller can run this concurrently across epics.
+func (s *SupervisorSource) epicChildren(ctx context.Context, epicID string) (children []board.Child, warn []string) {
 	var graph graphResponse
 	if err := s.getJSON(ctx, "/beads/graph/"+url.PathEscape(epicID), &graph); err != nil {
-		g.note(true, []string{"graph " + epicID + ": " + err.Error()})
-		return nil
+		return nil, []string{"graph " + epicID + ": " + err.Error()}
 	}
 	byID := make(map[string]apiBead, len(graph.Beads))
 	for _, b := range graph.Beads {
 		byID[b.ID] = b
 	}
-	var children []board.Child
 	for _, d := range graph.Deps {
 		if d.From == epicID && d.Kind == "parent-child" {
 			if b, ok := byID[d.To]; ok {
@@ -383,7 +413,7 @@ func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epi
 			}
 		}
 	}
-	return children
+	return children, nil
 }
 
 // childOf projects one payload bead onto a board child. Assignee and metadata
@@ -434,18 +464,43 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 	}
 	g.note(convoys.Partial, convoys.PartialErrors)
 	g.ok()
+
+	// Filter FIRST, then fan out: the per-convoy child fetch is the expensive
+	// call, and a skipped convoy must not make one. Skip parented (non-floating)
+	// convoys and the transient MACHINE convoys — "sling-*" and "input convoy
+	// for ..." — mirroring the gc-helm.sh filter. The live API omits `parent`,
+	// so the two title prefixes do the real exclusion work.
+	var admitted []apiBead
 	for _, c := range convoys.Items {
-		// Skip parented (non-floating) convoys and the transient MACHINE
-		// convoys — "sling-*" and "input convoy for ..." — mirroring the
-		// gc-helm.sh filter. The live API omits `parent`, so the two
-		// title prefixes do the real exclusion work.
 		if c.Parent != "" ||
 			strings.HasPrefix(c.Title, "sling-") ||
 			strings.HasPrefix(c.Title, "input convoy for") {
 			continue
 		}
+		admitted = append(admitted, c)
+	}
+
+	// One GET /convoy/{id} per admitted convoy, fetched concurrently under the
+	// fan-out bound — the convoy half of the N+1. Each fetch writes only its own
+	// slot; the shared gatherState is merged serially below, in admitted order.
+	children := make([][]board.Child, len(admitted))
+	warns := make([][]string, len(admitted))
+	eg := new(errgroup.Group)
+	eg.SetLimit(maxGatherFanout)
+	for i, c := range admitted {
+		i, id := i, c.ID
+		eg.Go(func() error {
+			children[i], warns[i] = s.convoyChildren(ctx, id)
+			return nil
+		})
+	}
+	_ = eg.Wait() // a child fetch reports its failure as a warning, never a hard error
+
+	for i, c := range admitted {
+		if len(warns[i]) > 0 {
+			g.note(true, warns[i])
+		}
 		rig, prefix := g.rigOf(c.ID)
-		children := s.convoyChildren(ctx, g, c.ID)
 		g.anchors = append(g.anchors, board.Anchor{
 			ID:       c.ID,
 			Title:    c.Title,
@@ -454,22 +509,24 @@ func (s *SupervisorSource) gatherConvoys(ctx context.Context, g *gatherState) {
 			Rig:      rig,
 			Prefix:   prefix,
 			Priority: c.Priority,
-			Children: children,
+			Children: children[i],
 		})
 	}
 }
 
-func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, convoyID string) []board.Child {
+// convoyChildren returns a floating convoy's members. A fetch failure is
+// returned as a partial-error warning rather than mutating the shared
+// gatherState, so the caller can run this concurrently across convoys.
+func (s *SupervisorSource) convoyChildren(ctx context.Context, convoyID string) (children []board.Child, warn []string) {
 	var detail convoyResponse
 	if err := s.getJSON(ctx, "/convoy/"+url.PathEscape(convoyID), &detail); err != nil {
-		g.note(true, []string{"convoy " + convoyID + ": " + err.Error()})
-		return nil
+		return nil, []string{"convoy " + convoyID + ": " + err.Error()}
 	}
-	children := make([]board.Child, 0, len(detail.Children))
+	children = make([]board.Child, 0, len(detail.Children))
 	for _, c := range detail.Children {
 		children = append(children, childOf(c))
 	}
-	return children
+	return children, nil
 }
 
 // beadPageSize is the supervisor's own maximum for `GET /beads?limit=`; asking
@@ -655,19 +712,23 @@ func anchorCandidate(b apiBead) bool {
 func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[string]string, kind string, children []board.Child) board.Anchor {
 	rig, prefix := g.rigOf(b.ID)
 	return board.Anchor{
-		ID:             b.ID,
-		Title:          b.Title,
-		Kind:           kind,
-		Source:         kind,
-		Rig:            rig,
-		Prefix:         prefix,
-		Priority:       b.Priority,
-		Description:    b.Description,
-		Metadata:       md,
-		Children:       children,
-		Takeaway:       md["gc.takeaway"],
-		TakeawayAt:     md["gc.takeaway_at"],
-		TakeawayBy:     md["gc.takeaway_by"],
+		ID:          b.ID,
+		Title:       b.Title,
+		Kind:        kind,
+		Source:      kind,
+		Rig:         rig,
+		Prefix:      prefix,
+		Priority:    b.Priority,
+		Description: b.Description,
+		Metadata:    md,
+		Children:    children,
+		Takeaway:    md["gc.takeaway"],
+		TakeawayAt:  md["gc.takeaway_at"],
+		TakeawayBy:  md["gc.takeaway_by"],
+		// Notes is absent: this backend's apiBead does not decode it, so a
+		// recommendation row served from the supervisor fallback carries no card.
+		// The primary BeadsSource reads it; this is the same degraded-read shape
+		// as WaitingUnknown below.
 		WaitingUnknown: true,
 	}
 }

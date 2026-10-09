@@ -50,18 +50,36 @@ func TestRenderSittingsShowsBothHalves(t *testing.T) {
 	}
 }
 
-// TestRenderSittingsFallsBackToTheTitle: a sitting that left no attributable
-// takeaway still has to say what it was about.
-func TestRenderSittingsFallsBackToTheTitle(t *testing.T) {
+// TestRenderSittingsFallsBackToTheSubjectTitle: a sitting that left no
+// attributable takeaway shows the subject's title — the topic — as its
+// headline, never the visit bead's own generic name. Only a subject the gather
+// could not read at all drops to the visit title.
+func TestRenderSittingsFallsBackToTheSubjectTitle(t *testing.T) {
 	var buf bytes.Buffer
 	renderSittings(&buf, []board.Sitting{{
 		ID: "tk-bare", Rig: "gc-toolkit", Subject: "tk-anchor",
+		SubjectTitle: "helm returns the raw script path",
+		Title:        "visit: tk-anchor — first reaction ready: accept or redirect",
+		Status:       "closed", Outcome: "folded", OpenedAt: minsAgo(60), ClosedAt: minsAgo(30),
+	}}, renderNow)
+	out := buf.String()
+
+	if !strings.Contains(out, "helm returns the raw script path") {
+		t.Errorf("no takeaway falls back to the subject title (the topic):\n%s", out)
+	}
+	if strings.Contains(out, "first reaction ready") {
+		t.Errorf("the generic visit title must not be the headline once the subject has one:\n%s", out)
+	}
+
+	// Only an unreadable subject — no title at all — drops to the visit title.
+	var last bytes.Buffer
+	renderSittings(&last, []board.Sitting{{
+		ID: "tk-none", Rig: "gc-toolkit", Subject: "tk-anchor",
 		Title: "visit: tk-anchor — first reaction ready", Status: "closed",
 		Outcome: "folded", OpenedAt: minsAgo(60), ClosedAt: minsAgo(30),
 	}}, renderNow)
-
-	if !strings.Contains(buf.String(), "first reaction ready") {
-		t.Errorf("no takeaway falls back to the title:\n%s", buf.String())
+	if !strings.Contains(last.String(), "first reaction ready") {
+		t.Errorf("an unread subject still says what it was called, via the visit title:\n%s", last.String())
 	}
 }
 

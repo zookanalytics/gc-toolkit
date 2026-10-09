@@ -29,7 +29,7 @@ feedback *says*, not how loud it is.
   (`obs.endorsed=operator`). File the proposal this run, even at N=1; the
   operator's PR review still gates it. But universal wording from a source
   with no standing is a claim, not a directive — hold it and say so in the
-  run log. And even a genuine directive must clear the two promotion gates
+  run log. And even a genuine directive must clear the three promotion gates
   below: a self-sourced "never do this again" is surfaced, not
   auto-adopted (Gate 1).
 - **Diff-scoped feedback is evidence, not a rule.** "This comment is
@@ -72,7 +72,7 @@ Two decisions, in that order. **Which carrier** the learning belongs in is
 different shapes of learning need different carriers, and a prose bullet is
 one of five, not the default.
 
-Then adjudicate the edit within that carrier. The two promotion gates decide
+Then adjudicate the edit within that carrier. The three promotion gates decide
 whether it may be adopted at all. Read the target surface's current entries
 and the pattern-bead set, then pick exactly one:
 
@@ -119,7 +119,7 @@ target file, the budget, and what the adoption costs to keep.
 |---|---|---|---|
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
-| `work-quality` | `template-fragments/work-quality.template.md` | `work_quality_entry_cap` entries | every turn of every role that renders it |
+| `work-quality` | `template-fragments/work-quality-base.template.md` + one `work-quality-<class>` | `work_quality_entry_cap` entries per fragment | every turn of every role that renders it |
 | `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
 | `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
 
@@ -136,7 +136,10 @@ Choose by what the learning *is*:
   being written rather than while a person is being addressed, so it
   reaches roles that never talk to the operator. Prefer `review-rubric`
   when a reader catches the failure in the diff; use this carrier when the
-  author must hold the standard as they write.
+  author must hold the standard as they write. Route a universal standard to
+  the shared base (`work-quality-base`) and a class-specific one to the
+  fragment(s) of the class(es) it impacts — polecats, human, or system; a
+  standard about changing a repo does not reach the human converse class.
 - **`review-rubric`** when the failure is **visible in a diff**. Prefer this
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
@@ -178,17 +181,18 @@ The trigger line only says when to look; the pair does the teaching. Draw
 both halves from what actually happened, with identifiers scrubbed to the
 role.
 
-## Two gates on promotion into a paid carrier
+## Three gates on promotion into a paid carrier
 
-The five judgments decide whether feedback is a standing rule. These two
+The five judgments decide whether feedback is a standing rule. These three
 gates decide whether that rule may be **auto-adopted into content every
 future agent pays for** — a `convention` bullet, a `profile` entry, a
-`work-quality` entry, or a `review-rubric` dimension. Check both **before**
+`work-quality` entry, or a `review-rubric` dimension. Check all three **before**
 any ADD / UPDATE / SUPERSEDE in those four carriers. **A gate failure never
 discards the pattern — it redirects it** (gate 1 surfaces it to the
-operator; gate 2 files an engineering bead, or routes to `exemplar`). The
-gates do not apply to `learning-rubric` proposals against this skill, to
-retirements, or to hardens — those remove weight, not add it.
+operator; gate 2 files an engineering bead, or routes to `exemplar`; gate 3
+routes to the mechanism or holds). The gates do not apply to `learning-rubric`
+proposals against this skill, to retirements, or to hardens — those remove
+weight, not add it.
 
 ### Gate 1 — external check: one voice does not bind everyone
 
@@ -196,6 +200,13 @@ A cluster promotes into a paid carrier only when something outside the
 promoting agent has corroborated it. Two things clear the gate: it carries
 `obs.endorsed=operator`, or its evidence is not entirely self-reported and
 spans two or more distinct `obs.provenance` events.
+
+Endorsement clears this gate for the **direction** the operator endorsed, not
+for the conventions-list mechanism. Agreeing a behavior matters is not
+agreeing that a static bullet every agent pays for is how to secure it, so
+read an endorsement for what it actually endorsed: it satisfies the external
+check and nothing more. An endorsed cluster still faces the carrier choice and
+gate 3 — the direction can be right while a static entry is the wrong lever.
 
 A cluster that is **entirely `obs.source=self`** is the loop this gate
 exists to break — self-report, self-promote, self-inject, with no external
@@ -263,12 +274,43 @@ intending to be thorough still trips. The fix is a mechanical done-gate →
 **engineering bead**, not prose — and no before/after pair shows a
 verification gap, so the exemplar route is not open to it either.
 
+### Gate 3 — lever fit: a static entry cannot act at the moment of the call
+
+A candidate that clears gate 2 is a concrete behavior keyed to a trigger, but
+that does not yet make a static entry the right **lever** for it. A
+`convention` bullet or a `work-quality` entry states an outcome and waits to
+be read: it can bind a behavior an agent carries into the turn from having
+read it, but it cannot make a decision when the decision arrives. So ask what
+the entry would do at the moment of the call. When the target is a live
+judgment call — the agent weighing particulars that differ every time — a
+static entry names the outcome it wants and leaves the agent to judge exactly
+as they would have without it.
+
+The tell for the wrong lever is a candidate that **hardcodes the easy half of
+a discrimination and leaves the hard half to judgment anyway**: it states the
+part that was never in doubt and falls silent on the part the failure turned
+on, so it reads as guidance and changes nothing.
+
+When the lever is wrong, **hold rather than file the static bullet** and route
+to where the call is made: a decision-point mechanism (an engineering bead, a
+gate), a `review-rubric` dimension a reader applies to the diff, or the
+author's own discrimination in the moment. This is why clearing gate 1 on an
+endorsed direction is not enough — the operator can be right that a behavior
+matters while a static entry remains unable to act on it.
+
+*Worked example.* A candidate of the form "choose the right X for the
+situation" states the outcome (the right X) but leaves the choosing — the
+whole difficulty — to the judgment that already erred, so it passes gate 2 as
+a concrete-sounding behavior yet acts on nothing. The lever that acts is a
+reviewer applying a `review-rubric` dimension to the choice, or the author's
+discrimination in the moment, not a paid bullet that restates the goal.
+
 ## Retirement questions — every run, for every adopted rule
 
 Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
 one row per anchored entry across all five — the conventions fragments, the
-profile, the work-quality fragment, the exemplar corpus, and the
+profile, the work-quality fragments, the exemplar corpus, and the
 `review-rubric` ledger in `formulas/mol-review.toml`. Of each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose

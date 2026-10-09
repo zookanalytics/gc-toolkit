@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/steveyegge/beads"
@@ -104,6 +103,7 @@ func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g
 		}
 	}
 
+	s.resolveEdgeSubjects(ctx, st, r, g, out)
 	s.attributeTakeaways(ctx, st, r, g, out, now)
 	return out
 }
@@ -112,19 +112,22 @@ func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g
 func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 	md := decodeMetadata(iss.Metadata)
 	st := board.Sitting{
-		ID:       iss.ID,
-		Rig:      r.name,
-		Subject:  md["gc.continuation_group"],
-		Title:    iss.Title,
-		Status:   string(iss.Status),
-		Outcome:  md["gc.outcome"],
-		Session:  md["gc.session_name"],
-		OpenedAt: iss.CreatedAt,
+		ID:            iss.ID,
+		Rig:           r.name,
+		Subject:       md["gc.continuation_group"],
+		Title:         iss.Title,
+		Status:        string(iss.Status),
+		Outcome:       md["gc.outcome"],
+		OutcomeReason: md["gc.outcome_reason"],
+		Session:       md["gc.session_name"],
+		Assignee:      iss.Assignee,
+		OpenedAt:      iss.CreatedAt,
 	}
 	// A visit exists from the moment it is filed, but the CONVERSATION starts
-	// when a converse session claims it, and a visit can wait in the pool for
-	// as long as the pool is busy. The claim stamp is the truer start; the
-	// creation time is the fallback for a sitting that has not been claimed.
+	// when a converse session claims it, and a visit can wait on the board for
+	// as long as the operator leaves it there. The claim stamp is the truer
+	// start; the creation time is the fallback for a sitting that has not been
+	// claimed.
 	if claimed, ok := parseStamp(md["gc.claimed_at"]); ok {
 		st.OpenedAt = claimed
 	}
@@ -134,16 +137,73 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 	return st
 }
 
-// attributeTakeaways fills in the headline each sitting left, reading the
-// SUBJECT beads in one batch and keeping a takeaway only for the sitting whose
-// span contains its timestamp (see board.Sitting.Takeaway for why the span test
-// is the whole point).
+// resolveEdgeSubjects fills the Subject of any sitting whose gc.continuation_group
+// stamp is empty from the visit's tracks edge. A visit records its subject twice —
+// the stamp and a `tracks` edge to the subject — and gate-visit can leave the stamp
+// empty while the edge stands, so the projection reads the stamp first and the edge
+// when it is empty, the way gc-helm.sh accept and dismiss resolve the same subject.
+// An unresolved Subject would never match its recommendation subject in the board's
+// unengagedVisit test, so the row would render without the Accept affordance.
+//
+// One batched read over only the stamp-less visits: a board whose visits all carry
+// the stamp spends nothing here. A failed read narrows the join and is noted
+// partial, the same best-effort direction as every other join in this file.
+func (s *BeadsSource) resolveEdgeSubjects(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting) {
+	var ids []string
+	for i := range sittings {
+		if sittings[i].Subject == "" {
+			ids = append(ids, sittings[i].ID)
+		}
+	}
+	if ids = uniqueStrings(ids); len(ids) == 0 {
+		return
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, ids)
+	if err != nil {
+		g.note(true, []string{"visit-subjects@" + r.name + ": " + err.Error()})
+		return
+	}
+	for i := range sittings {
+		if sittings[i].Subject != "" {
+			continue
+		}
+		if subj := trackedSubject(recs[sittings[i].ID]); subj != "" {
+			sittings[i].Subject = subj
+		}
+	}
+}
+
+// trackedSubject returns the one subject a visit's tracks edge names, or "" when the
+// edge is absent or names more than one. gate-visit files exactly one tracks edge
+// from a visit to its subject, so a second target is a malformed visit the board
+// declines to guess about — the fail-closed rule convoyMembers applies to a convoy's
+// members.
+func trackedSubject(ds []*beads.Dependency) string {
+	var subjects []string
+	for _, d := range ds {
+		if d != nil && string(d.Type) == "tracks" {
+			subjects = append(subjects, d.DependsOnID)
+		}
+	}
+	if subjects = uniqueStrings(subjects); len(subjects) == 1 {
+		return subjects[0]
+	}
+	return ""
+}
+
+// attributeTakeaways fills in the two things a row reads off its SUBJECT bead,
+// from one batch read of those beads: the subject's TITLE, which is the row's
+// topic and is carried onto every sitting whose subject was read; and the
+// TAKEAWAY, which is kept only for the sitting whose span contains its timestamp
+// (see board.Sitting.Takeaway for why the span test is the whole point). The
+// title has no such span test — a subject's title is what it is about whenever
+// the sitting ran, not a thing one sitting authored — so it rides every row.
 //
 // Failure is silent in the board's usual direction: a subject that cannot be
-// read leaves its sittings showing an outcome and no headline, which is a
-// narrower row rather than a wrong one. It is still recorded as partial, since
-// a store that will not answer this read is a store the rest of the gather
-// should be doubted on too.
+// read leaves its sittings showing an outcome and neither a topic nor a
+// headline, which is a narrower row rather than a wrong one. It is still
+// recorded as partial, since a store that will not answer this read is a store
+// the rest of the gather should be doubted on too.
 func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting, now time.Time) {
 	var ids []string
 	for _, sit := range sittings {
@@ -169,10 +229,12 @@ func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r ri
 		at   time.Time
 	}
 	byID := make(map[string]stamped, len(subjects))
+	titleByID := make(map[string]string, len(subjects))
 	for _, iss := range subjects {
 		if iss == nil {
 			continue
 		}
+		titleByID[iss.ID] = iss.Title
 		md := decodeMetadata(iss.Metadata)
 		text := md["gc.takeaway"]
 		if text == "" {
@@ -191,6 +253,10 @@ func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r ri
 
 	for i := range sittings {
 		s := &sittings[i]
+		// The topic rides every row whose subject was read, before the span
+		// test the takeaway must pass: a row with no attributable takeaway still
+		// says what it is about.
+		s.SubjectTitle = titleByID[s.Subject]
 		got, ok := byID[s.Subject]
 		if !ok {
 			continue
@@ -236,10 +302,12 @@ func visitSubjects(sittings []board.Sitting) []string {
 }
 
 // workflowRoot is one graph.v2 molecule root as the in-flight join needs it:
-// the convoy that names its work bead, plus every session stamped on the root
-// or on its steps.
+// the work bead its input convoy tracks, plus every session stamped on the root
+// or on its steps. The member is resolved in-process during the rig gather (see
+// convoyMembers); the convoy id is kept as the key that resolution reads.
 type workflowRoot struct {
 	convoyID string
+	member   string // the convoy's single tracked member, "" if not exactly one
 	sessions []string
 }
 
@@ -287,6 +355,7 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 	}
 
 	var out []workflowRoot
+	var convoyIDs []string
 	for _, iss := range roots {
 		if iss == nil {
 			continue
@@ -301,6 +370,49 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 			continue
 		}
 		out = append(out, workflowRoot{convoyID: convoy, sessions: names})
+		convoyIDs = append(convoyIDs, convoy)
+	}
+
+	// Resolve each convoy to its single tracked member from THIS rig's store,
+	// in one batched read. The input convoy is minted by the sling in its
+	// root's own rig, so its `tracks` edge is always local — no cross-rig read
+	// and no `gc convoy status` subprocess.
+	members := convoyMembers(ctx, st, r, convoyIDs, g)
+	for i := range out {
+		out[i].member = members[out[i].convoyID]
+	}
+	return out
+}
+
+// convoyMembers resolves each convoy to its SINGLE tracked member from the rig
+// store, keyed by convoy id. The one-member rule is a fail-closed gate: a convoy
+// that tracks any other number resolves to no entry, which resolveInflight reads
+// as "no claim about movement" rather than a guess. One batched
+// GetDependencyRecordsForIssues — the read this gather already spends on convoy
+// anchors — serves the whole set, so the in-flight join costs no per-root
+// subprocess. A failed read narrows the join and is noted partial, the same
+// best-effort direction as every other join in this file.
+func convoyMembers(ctx context.Context, st beadStore, r rigRef, convoyIDs []string, g *gatherState) map[string]string {
+	convoyIDs = uniqueStrings(convoyIDs)
+	if len(convoyIDs) == 0 {
+		return nil
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, convoyIDs)
+	if err != nil {
+		g.note(true, []string{"convoy-members@" + r.name + ": " + err.Error()})
+		return nil
+	}
+	out := make(map[string]string, len(convoyIDs))
+	for id, ds := range recs {
+		var members []string
+		for _, d := range ds {
+			if d != nil && string(d.Type) == "tracks" {
+				members = append(members, d.DependsOnID)
+			}
+		}
+		if members = uniqueStrings(members); len(members) == 1 {
+			out[id] = members[0]
+		}
 	}
 	return out
 }
@@ -329,60 +441,30 @@ func uniqueStrings(in []string) []string {
 // Joining on root existence alone would flip every husk to "in flight" and
 // trade a false stall for a false all-clear — strictly the worse failure on a
 // board whose job is to say what needs a human. So a root is resolved only when
-// one of its stamped sessions is live, which also bounds the convoy reads by
-// the number of live polecats rather than by the size of the husk pile.
-func resolveInflight(ctx context.Context, gc gcClient, roots []workflowRoot, ownerState map[string]string, g *gatherState) map[string][]string {
-	type job struct {
-		convoyID string
-		sessions []string
-	}
-	var live []job
+// one of its stamped sessions is live.
+//
+// The work bead each convoy tracks is resolved in-process by convoyMembers
+// during the rig gather, so this join reads it off the root rather than spawning
+// a `gc convoy status` per live root. A root whose convoy did not resolve to
+// exactly one member carries no member and makes no claim about movement,
+// exactly as the one-member rule required before.
+func resolveInflight(roots []workflowRoot, ownerState map[string]string) map[string][]string {
+	out := map[string][]string{}
 	for _, r := range roots {
+		if r.member == "" {
+			continue // not a one-member convoy: no claim about movement
+		}
 		var alive []string
 		for _, n := range r.sessions {
 			if st, ok := ownerState[n]; ok && st != "archived" && st != "closed" {
 				alive = append(alive, n)
 			}
 		}
-		if len(alive) > 0 {
-			live = append(live, job{convoyID: r.convoyID, sessions: alive})
+		if len(alive) == 0 {
+			continue
 		}
+		out[r.member] = uniqueStrings(append(out[r.member], alive...))
 	}
-	if len(live) == 0 {
-		return nil
-	}
-
-	// One `gc convoy status` per live root. They are independent, so run them
-	// concurrently under a small bound: this is the only per-item subprocess in
-	// the gather and it is what a cold CLI run would otherwise serialize.
-	const maxParallel = 8
-	sem := make(chan struct{}, maxParallel)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	out := map[string][]string{}
-
-	for _, j := range live {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			member, err := gc.ConvoyMember(ctx, j.convoyID)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				g.note(true, []string{"convoy status " + j.convoyID + ": " + err.Error()})
-				return
-			}
-			if member == "" {
-				return // not a one-member convoy: no claim about movement
-			}
-			out[member] = uniqueStrings(append(out[member], j.sessions...))
-		}(j)
-	}
-	wg.Wait()
-
 	if len(out) == 0 {
 		return nil
 	}

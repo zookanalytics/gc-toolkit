@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the deacon patrol's backup-restorability check (tk-hef7t).
+# Hermetic test for the deacon patrol's backup-restorability check.
 #
 # The bug this guards: the dolt-health step used to key its backup verdict off
 # `backups.dolt_stale` from `gc dolt health --json`. That field renders ABSENT
@@ -230,7 +230,7 @@ mkdb nomanifest_inflight
 : > "$BACKUP_ROOT/nomanifest_inflight/iiii.darc"   # written now — no stamp
 
 # tie_chunk_first / tie_manifest_first: the manifest and the newest chunk share
-# an mtime SECOND (tk-40mlc). `stat -c %Y` / `-f %m` return whole seconds, so
+# an mtime SECOND. `stat -c %Y` / `-f %m` return whole seconds, so
 # sub-second ordering is invisible — the real lx case had the manifest 33 ms
 # NEWER than the last chunk and the check still saw a tie. Dolt commits the
 # manifest LAST, so a same-second tie means the commit landed in the same
@@ -257,7 +257,7 @@ mkdb tie_manifest_first
 # tie_uncommitted: the tightest form of the rule the tie must NOT weaken — a
 # chunk STRICTLY newer than the manifest, by a single second. A fix that let
 # the manifest win unconditionally, or that compared with any tolerance, would
-# read this as healthy. It is the torn-backup signature (tk-hef7t) and must
+# read this as healthy. It is the torn-backup signature and must
 # still FLAG. The manifest is 2 h old, well inside the 12 h staleness arm, so
 # only the trap arm can catch it.
 mkdb tie_uncommitted
@@ -576,6 +576,123 @@ strict_expect() {
 strict_expect scan_fresh RECHECK
 strict_expect scan_stale FLAG
 strict_expect scan_empty RECHECK
+
+# --- A failed scan BUFFER is never OK ---------------------------------------
+# The scan arm above fails `find` itself. This arm fails the step BETWEEN a
+# successful find and the newest-file loop: the buffering of the file list.
+# The loop used to read it with `done <<< "$scan_out"`, and bash backs a
+# here-string with a temp file it creates silently — so under disk pressure
+# that redirect fails, the loop runs zero times, `newest` keeps its seeded
+# manifest, and a fresh-manifest directory walks straight to "OK: manifest is
+# newest" while a newer chunk sits unseen. The fix buffers the scan through a
+# CHECKED mktemp, so this shims the mktemp COMMAND to fail only the scan
+# buffer (never the $DB_LIST temp) and pins the verdicts. A here-string does
+# not call the mktemp command, so against pre-fix code the shim is a no-op and
+# every fixture below reads OK — which is exactly what these assertions reject.
+REAL_MKTEMP="$(command -v mktemp || true)"
+[ -n "$REAL_MKTEMP" ] || { echo "FAIL - no mktemp(1) on PATH; cannot force a buffer failure"; exit 1; }
+
+BUF_ROOT="$TMP/bufferfail"
+BUF_FIRED="$BUF_ROOT/mktemp-shim-calls"
+mkdir -p "$BUF_ROOT/.dolt-backup" "$TMP/mktempbin"
+for d in scanbuf_fresh scanbuf_stale; do
+    mkdir -p "$BUF_ROOT/.dolt-backup/$d"
+done
+# scanbuf_fresh: a healthy shape — a chunk, then the manifest committed last
+# and only 1 h old. A pre-fix `<<<` loop buffers this fine and reads it OK;
+# with the buffer temp denied, the fix cannot see the directory at all, so it
+# must refuse to certify it rather than trust the seeded manifest.
+: > "$BUF_ROOT/.dolt-backup/scanbuf_fresh/pppp.darc"
+: > "$BUF_ROOT/.dolt-backup/scanbuf_fresh/manifest"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 2 * 3600 ))")" "$BUF_ROOT/.dolt-backup/scanbuf_fresh/pppp.darc"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 3600 ))")"     "$BUF_ROOT/.dolt-backup/scanbuf_fresh/manifest"
+# scanbuf_stale: manifest newest but 40 h old — the other scan_fail arm, a
+# finding now rather than an indeterminate the patrol could sit on.
+: > "$BUF_ROOT/.dolt-backup/scanbuf_stale/qqqq.darc"
+: > "$BUF_ROOT/.dolt-backup/scanbuf_stale/manifest"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 41 * 3600 ))")" "$BUF_ROOT/.dolt-backup/scanbuf_stale/qqqq.darc"
+touch -t "$(epoch_stamp "$(( $(date +%s) - 40 * 3600 ))")" "$BUF_ROOT/.dolt-backup/scanbuf_stale/manifest"
+
+# Fail only the scan-buffer mktemp (its template names it); delegate the
+# $DB_LIST temp and every other call to the real mktemp. Paths baked in at
+# write time, `\$` kept literal for the shim's own parameters.
+cat > "$TMP/mktempbin/mktemp" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    case "\$arg" in
+        *gctk-deacon-backup-scan*)
+            printf '%s\n' "\$arg" >> "$BUF_FIRED"
+            echo "mktemp: failed to create file via template '\$arg': No space left on device" >&2
+            exit 1 ;;
+    esac
+done
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$TMP/mktempbin/mktemp"
+
+BUF_OUT="$(PATH="$TMP/mktempbin:$PATH" GC_CITY_PATH="$BUF_ROOT" GC_CITY="$BUF_ROOT" \
+    EXPECTED_DBS="scanbuf_fresh scanbuf_stale" bash "$TMP/check.sh" 2>&1)"
+
+# Vacuity guard: if the snippet stopped buffering through the mktemp command,
+# the shim never fires and the fixtures enumerate for real — asserting nothing.
+if [ -s "$BUF_FIRED" ]; then
+    ok "mktemp buffer shim was exercised (scan buffering really was forced to fail)"
+else
+    bad "mktemp buffer shim never fired — buffering was NOT forced to fail; got: $BUF_OUT"
+fi
+
+buf_expect() {
+    local db="$1" want="$2" line
+    line="$(printf '%s\n' "$BUF_OUT" | grep -E "^(OK|FLAG|RECHECK|INFO) $db:" | head -1 || true)"
+    case "$line" in
+        "$want "*) ok "$db -> $want ($line)" ;;
+        "")        bad "$db -> no verdict emitted; got: $BUF_OUT" ;;
+        *)         bad "$db -> expected $want, got: $line" ;;
+    esac
+}
+buf_expect scanbuf_fresh RECHECK  # buffer denied + fresh manifest = unproven, not OK
+buf_expect scanbuf_stale FLAG     # buffer denied + 40 h manifest = a finding now
+
+# The headline invariant, as for a failed find: a directory the patrol could
+# not buffer must never read OK. This is the assertion that fails against
+# pre-fix code — a `<<<` loop buffers scanbuf_fresh and emits `OK scanbuf_fresh`.
+if grep -qE '^OK ' <<< "$BUF_OUT"; then
+    bad "a backup directory whose scan could not be buffered read as OK: $(printf '%s\n' "$BUF_OUT" | grep -E '^OK ')"
+else
+    ok "no unbufferable backup directory read as OK"
+fi
+
+# Step 3 quotes the verdict verbatim, so it has to name the buffering failure —
+# "the host is out of scratch space" is a different action from "re-run the dog".
+if grep -qiE 'buffer|temp file' < <(grep -E '^RECHECK scanbuf_fresh:' <<< "$BUF_OUT"); then
+    ok "buffer-failure verdict names the buffering/temp failure as the cause"
+else
+    bad "buffer-failure verdict does not name the cause: $(printf '%s\n' "$BUF_OUT" | grep -E '^RECHECK scanbuf_fresh:' || true)"
+fi
+
+# ...and the buffer-failure arm must survive a strict shell too. The fix reads
+# the mktemp status with `|| scan_buf=""`, the same `|| rc=$?` shape the find
+# arm uses; written as a bare `scan_buf=$(mktemp ...)` it would abort the whole
+# step under `set -e` the instant the buffer could not be made, and the
+# unreadable-directory verdict would vanish into a silent exit.
+BUF_STRICT_RC=0
+BUF_STRICT_OUT="$(PATH="$TMP/mktempbin:$PATH" GC_CITY_PATH="$BUF_ROOT" GC_CITY="$BUF_ROOT" \
+    EXPECTED_DBS="scanbuf_fresh scanbuf_stale" \
+    bash -euo pipefail "$TMP/check.sh" 2>&1)" || BUF_STRICT_RC=$?
+if [ "$BUF_STRICT_RC" -eq 0 ]; then
+    ok "snippet exits clean under 'bash -euo pipefail' with a failing buffer mktemp"
+else
+    bad "snippet aborted under 'bash -euo pipefail' (rc=$BUF_STRICT_RC); got: $BUF_STRICT_OUT"
+fi
+for pair in "scanbuf_fresh:RECHECK" "scanbuf_stale:FLAG"; do
+    bdb="${pair%%:*}"; bwant="${pair##*:}"
+    bline="$(grep -E "^(OK|FLAG|RECHECK|INFO) $bdb:" <<< "$BUF_STRICT_OUT" | head -1 || true)"
+    case "$bline" in
+        "$bwant "*) ok "strict shell: $bdb -> $bwant ($bline)" ;;
+        "")         bad "strict shell: $bdb emitted no verdict; got: $BUF_STRICT_OUT" ;;
+        *)          bad "strict shell: $bdb expected $bwant, got: $bline" ;;
+    esac
+done
 
 # --- Root-level terminal findings -------------------------------------------
 # A missing or empty backup root means NO database has a restorable backup. It

@@ -1,24 +1,38 @@
 #!/usr/bin/env bash
-# Tests for the two properties generated/seed-audit has to hold at a merge:
-# --check-merge refuses a merge whose result would land a stale artifact, and
-# the artifact's committed shape lets two branches that moved different inputs
-# merge at all. Real git, no stubs: both are questions about trees, and stubbing
-# git would leave the merge itself unexercised. Nothing here renders, so no
-# `gc`, no city and no network are involved; the fixture's own copy of the
-# renderer is only ever asked for a manifest.
+# Tests for the properties generated/seed-audit and its renderer have to hold.
+# Two are about the artifact at a merge: --check-merge refuses a merge whose
+# result would land a stale artifact, and the artifact's committed shape lets two
+# branches that moved different inputs merge at all. Real git, no stubs: both are
+# questions about trees, and stubbing git would leave the merge itself
+# unexercised. One is about the renderer: the gcq wrapper pins its working
+# directory so the render resolves the synthetic city and not one discovered from
+# the cwd it was invoked in. Two are refusals: --install-hook will not shadow a
+# hand-installed hook, and a render fails when an agent the pack owns renders the
+# builtin worker prompt. Only that last case renders, against a stub `gc` on
+# PATH, so no real `gc`, no city and no network are involved; the fixture's own
+# copy of the renderer is only ever asked for a manifest, and the hermeticity
+# check reads the renderer's text.
 #
 # Covers: the clobber (a base that moved an input against a head whose render
 # predates it) with the offending input named; the current case; a merge result
 # carrying no audit; a head that widens the input set, which must be read under
-# ITS definition and not this checkout's; the delegation itself, asserted on the
+# ITS definition and not this checkout's; a symlinked input, recorded under its
+# own path and hashed through the link; the delegation itself, asserted on the
 # argv the merged tree's renderer receives; the three cannot-tell exits
-# (unresolvable rev, missing manifest, conflicting merge); and the merge shape,
-# against a control carrying the repo-global line the manifest replaced.
+# (unresolvable rev, missing manifest, conflicting merge); the merge shape,
+# against a control carrying the repo-global line the manifest replaced; the
+# gcq wrapper's cwd pin; the hook install's refusal, for a hand-installed hook
+# and for a listing that fails, against a control holding only a sample hook;
+# and the builtin-fallback guard, which holds the pack's own agents and not a
+# builtin provider's.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-render-seed-audit-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # assertions only; harness_init would stub out git
 PASS=0; FAIL=0
@@ -116,6 +130,17 @@ ours=$(bash "$SUT" --root "$TMP/mt" --print-sources)
 if [ "$ours" != "$theirs" ]; then ok "control: this checkout's renderer disagrees, so the delegation is load-bearing"
 else bad "control: both renderers agree, so this case proves nothing"; fi
 
+echo "# a symlinked input is recorded under its own path, hashed through the link"
+on base; git -C "$R" checkout -q -b linked
+mkdir -p "$R/packs/p/template-fragments"
+ln -s ../../../template-fragments/x.md "$R/packs/p/template-fragments/x.md"
+record_of() { sources_of "$R" | grep -A1 -xF "$1" | sed -n 2p; }
+eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/x.md" | cut -d' ' -f1)" \
+    "the link is an input, hashed as the file it resolves to"
+ln -sfn ../../../template-fragments/y.md "$R/packs/p/template-fragments/x.md"
+eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/y.md" | cut -d' ' -f1)" \
+    "…and a link moved to another file moves its record"
+
 echo "# the merged tree's renderer is asked for a manifest, never a render"
 on base; git -C "$R" checkout -q -b stubbed
 LOG="$TMP/renderer.log"; : > "$LOG"
@@ -205,6 +230,96 @@ else bad "adjacent inputs still collide — the artifact re-serializes the merge
 if two_branches control add_global_line; then
     bad "control: a repo-global digest line merged, so the case above proves nothing"
 else ok "control: the repo-global digest line these two never touched conflicts"; fi
+
+# ------------------------------------------------ the renderer's cwd hermeticity
+#
+# gcq is the one chokepoint every gc call passes through. `env -i` scrubs the
+# environment but not the working directory, and `gc` discovers a city by walking
+# up from cwd, so a render invoked from a worktree nested inside the live city
+# could resolve that city rather than the synthetic one. The wrapper pins cwd to
+# the synthetic city to close that path. This reads the wrapper's text rather than
+# rendering: proving the behavior needs a gc binary and a city this suite does
+# without, and a dropped pin is a text change the read catches.
+echo "# gcq pins cwd so the render cannot inherit a city from the caller's cwd"
+gcq_body="$(sed -n '/^gcq() {/,/^}/p' "$SUT")"
+has "$gcq_body" 'cd "$CITY"' "gcq runs gc from the synthetic city, not the invoking cwd"
+has "$gcq_body" 'env -i' "gcq still scrubs the environment"
+has "$gcq_body" 'gc --city "$CITY"' "gcq still names the synthetic city explicitly"
+
+# ------------------------------------------------ the hook install's refusal
+#
+# core.hooksPath replaces .git/hooks rather than layering onto it, so the install
+# refuses while a hand-installed hook sits there. The listing that finds one has
+# to work under BSD find as well as GNU find: a listing that comes back empty
+# reads as "no hooks" and shadows the hook it was meant to protect. Run from the
+# repo root, the way the install is run.
+echo "# --install-hook refuses to shadow a hand-installed hook"
+H="$TMP/hooked"
+mkdir -p "$H"
+printf 'name = "fixture"\n' > "$H/pack.toml"
+git -C "$H" init -q
+mkdir -p "$H/.git/hooks"
+printf '#!/bin/sh\n' > "$H/.git/hooks/pre-commit.sample"
+printf '#!/bin/sh\nexit 0\n' > "$H/.git/hooks/pre-push"
+chmod +x "$H/.git/hooks/pre-push"
+out=$(cd "$H" && bash "$SUT" --root "$H" --install-hook 2>&1); rc=$?
+eq "$rc" 2 "a hand-installed hook refuses the install"
+has "$out" "pre-push" "…and the refusal names it"
+hasnt "$out" "pre-commit.sample" "…but not a sample git ships"
+eq "$(git -C "$H" config --get core.hooksPath)" "" "…and core.hooksPath is left unset"
+rm "$H/.git/hooks/pre-push"
+# A find that fails stands in for any listing that cannot see the directory.
+mkdir -p "$TMP/failing-find"
+printf '#!/bin/sh\necho "find: listing refused" >&2\nexit 1\n' > "$TMP/failing-find/find"
+chmod +x "$TMP/failing-find/find"
+out=$(cd "$H" && PATH="$TMP/failing-find:$PATH" bash "$SUT" --root "$H" --install-hook 2>&1); rc=$?
+eq "$rc" 2 "a hook listing that fails refuses the install"
+has "$out" "hand-installed hooks there cannot be ruled out" "…and says why"
+eq "$(git -C "$H" config --get core.hooksPath)" "" "…and core.hooksPath is still unset"
+out=$(cd "$H" && bash "$SUT" --root "$H" --install-hook 2>&1); rc=$?
+eq "$rc" 0 "control: with only a sample hook left, the install proceeds"
+eq "$(git -C "$H" config --get core.hooksPath)" "assets/hooks" "…and points core.hooksPath at assets/hooks"
+
+# ------------------------------------------------ the builtin-fallback guard
+#
+# An agent this pack owns that renders the builtin worker prompt fails the render,
+# while a builtin-provider agent may render it. Which agents the pack owns comes
+# from its agent.toml files, and that list has to come out the same under BSD and
+# GNU find: an empty list holds no agent to the rule. A stub gc on PATH answers
+# the render's calls, so this needs no real gc, no city and no network. The stub
+# receives no environment through the render's env -i, so it reads what each
+# agent primes to from files.
+echo "# a pack agent that renders the builtin worker prompt fails the render"
+P="$TMP/render-pack"
+mkdir -p "$P/agents/alpha" "$TMP/stub-gc"
+printf 'name = "fixture"\n' > "$P/pack.toml"
+printf 'name = "alpha"\n' > "$P/agents/alpha/agent.toml"
+printf '# alpha doctrine\n' > "$P/agents/alpha/prompt.template.md"
+BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-first workflow'
+cat > "$TMP/stub-gc/gc" <<STUB
+#!/usr/bin/env bash
+[ "\${1:-}" = --city ] && shift 2
+case "\$1 \${2:-}" in
+    "config show")  printf '[[agent]]\nname = "alpha"\n' ;;
+    "agent list")   printf '{"agents":[{"name":"alpha"},{"name":"claude"}]}\n' ;;
+    "formula list") printf 'mol-fixture\n' ;;
+    "formula show") printf '# mol-fixture\n' ;;
+    "prime alpha")  cat "$TMP/stub-gc/alpha.txt" ;;
+    "prime claude") printf '%s\n' "$BUILTIN_WORKER" ;;
+    *)              exit 1 ;;
+esac
+STUB
+chmod +x "$TMP/stub-gc/gc"
+render_stub() { PATH="$TMP/stub-gc:$PATH" bash "$SUT" --root "$P" --out "$TMP/render-out" --jobs 1 2>&1; }
+
+printf '# alpha doctrine\n' > "$TMP/stub-gc/alpha.txt"
+out=$(render_stub); rc=$?
+eq "$rc" 0 "control: the pack agent renders its own doctrine and the builtin claude its builtin prompt"
+printf '%s\n' "$BUILTIN_WORKER" > "$TMP/stub-gc/alpha.txt"
+out=$(render_stub); rc=$?
+eq "$rc" 2 "the pack agent rendering the builtin worker prompt fails the render"
+has "$out" "FAILED agent alpha (rendered a builtin fallback prompt" "…and names the agent and the reason"
+hasnt "$out" "FAILED agent claude" "…while claude, which the pack does not own, still passes"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -8,7 +8,7 @@
 #
 # The regression this suite pins: a demand is filed by gc-helm as a NATIVE
 # human gate (issue_type=gate), which `bd list` hides unless --include-gates.
-# A visit with no gc.hold_demand whose item still carries such a gate-demand is
+# A visit with no gc.hold_demand whose subject still carries such a gate-demand is
 # a live wait (RECHECK); reading the demand list without --include-gates makes
 # the gate invisible and misjudges it NO. The stub below hides gate rows unless
 # --include-gates is present, so the shipped reader must pass the flag to see
@@ -49,13 +49,13 @@ bash -n "$SUT" && ok "converse-claim.sh: valid bash" \
 # A stub gc dialed entirely from the environment:
 #   hook  --claim --json -> a claim for v-x; CLAIM_MODE=nowork drops bead_id,
 #         CLAIM_REASON/CLAIM_GROUP set the reason and continuation group.
-#   bd show <id> --json  -> the visit v-x with STALL_ROOT (default item-x),
-#         optional gc.hold_demand (HOLD_DEMAND) and gc.outcome (OUTCOME) and
-#         status (SHOW_STATUS); SHOW_MODE=unreadable returns [] for the
-#         cannot-read-the-visit arm.
-#   bd list ... --json   -> a gate-demand on DEMAND_ITEM (default item-x), but
-#         ONLY when --include-gates is present; a flagless list returns []. An
-#         empty DEMAND_ITEM means no demand exists on any read.
+#   bd show <id> --json  -> the visit v-x with optional gc.hold_demand
+#         (HOLD_DEMAND) and gc.outcome (OUTCOME) and status (SHOW_STATUS);
+#         SHOW_MODE=unreadable returns [] for the cannot-read-the-visit arm.
+#   bd list ... --json   -> a gate-demand on DEMAND_FOR (default g, the claim's
+#         group, which is the subject), but ONLY when --include-gates is present;
+#         a flagless list returns []. An empty DEMAND_FOR means no demand
+#         exists on any read.
 #   bd close <id>        -> exits CLOSE_RC (default 0).
 # Any other call exits 2, so a script that grows one fails here, not live.
 cat >"$BIN/gc" <<'STUB'
@@ -70,24 +70,23 @@ case "${1:-}" in
         case "${2:-}" in
             show)
                 if [ "${SHOW_MODE-}" = unreadable ]; then printf '[]\n'; exit 0; fi
-                jq -nc --arg sr "${STALL_ROOT-item-x}" --arg hd "${HOLD_DEMAND-}" \
+                jq -nc --arg hd "${HOLD_DEMAND-}" \
                        --arg oc "${OUTCOME-}" --arg st "${SHOW_STATUS-}" \
                     '{id:"v-x",
                       status:(if $st == "" then "open" else $st end),
                       metadata:({"task_kind":"visit"}
-                        + (if $sr == "" then {} else {stall_root:$sr} end)
                         + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
                         + (if $oc == "" then {} else {"gc.outcome":$oc} end))}
                       | [.]'
                 exit 0 ;;
             list)
                 want=0; for a in "$@"; do [ "$a" = "--include-gates" ] && want=1; done
-                di="${DEMAND_ITEM-item-x}"
-                if [ -n "$di" ] && [ "$want" = 1 ]; then
-                    jq -nc --arg i "$di" '[{id:"d-x", metadata:{"gc.demand_for":$i}}]'
-                else
-                    printf '[]\n'
-                fi
+                di="${DEMAND_FOR-g}"
+                # LIST_ORDINARY adds an open bead that is no demand at all (no
+                # gc.demand_for), the row every live store is full of.
+                jq -nc --arg i "$di" --arg w "$want" --arg o "${LIST_ORDINARY-}" '
+                    (if $i != "" and $w == "1" then [{id:"d-x", metadata:{"gc.demand_for":$i}}] else [] end)
+                    + (if $o != "" then [{id:"t-ordinary", metadata:{}}] else [] end)'
                 exit 0 ;;
             close) exit "${CLOSE_RC:-0}" ;;
             *) exit 2 ;;
@@ -107,14 +106,14 @@ run() {
 }
 began() { printf '%s\n' "$OUT" | grep -m1 '^premise-gate: BEGAN=' | sed 's/^premise-gate: BEGAN=//'; }
 
-echo "── REGRESSION: a gate-only demand on the item is a live wait, not a dead claim ──"
+echo "── REGRESSION: a gate-only demand on the subject is a live wait, not a dead claim ──"
 run
 is   "a gate-demand hidden from a flagless list still reads BEGAN=recheck" "$(began)" "recheck"
 has  "the hold verdict is unchanged on stdout" "action=hold bead=v-x group=g reason=already-underway" "$OUT"
 is   "…and the hold exit code is 3" "$RC" "3"
 
 # Why the flag is load-bearing, shown against the very stub the script drives.
-seen() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=item-x bash -c "gc bd list --status=open,in_progress $1 --json --limit=0" ); }
+seen() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=g bash -c "gc bd list --status=open,in_progress $1 --json --limit=0" ); }
 is   "the fixture hides the gate-demand from a flagless bd list" "$(seen '' | jq -c .)" "[]"
 has  "…and reveals it only with --include-gates" "d-x" "$(seen --include-gates)"
 
@@ -134,7 +133,7 @@ else
 fi
 OLD
 chmod +x "$TMPD/oldread"
-oldbegan() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_ITEM=item-x bash "$TMPD/oldread" item-x ); }
+oldbegan() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=g bash "$TMPD/oldread" g ); }
 is   "the pre-fix flagless reader reads the live gate-demand as NO" "$(oldbegan)" "no"
 
 echo "── the rest of the BEGAN state machine ──"
@@ -142,10 +141,32 @@ run HOLD_DEMAND=d-x
 is   "a visit already carrying gc.hold_demand is BEGAN=yes" "$(began)" "yes"
 run SHOW_MODE=unreadable
 is   "a visit bead that will not read is BEGAN=unknown (never licenses a close)" "$(began)" "unknown"
-run DEMAND_ITEM=
-is   "no open demand on the item at all is BEGAN=no" "$(began)" "no"
-run STALL_ROOT= DEMAND_ITEM=g
-is   "with no stall_root the item falls back to the group, and its gate still rechecks" "$(began)" "recheck"
+run DEMAND_FOR=
+is   "no open demand on the subject at all is BEGAN=no" "$(began)" "no"
+run DEMAND_FOR=item-x
+is   "an open demand on a bead that is neither the group nor the visit is BEGAN=no" "$(began)" "no"
+# A visit whose group did not resolve (an empty stamp and no tracks edge) leaves
+# $GROUP empty. An open bead that names no gc.demand_for is not a demand on
+# anything, so it must not read as one; matched against the empty group it did,
+# and a claim that never began read RECHECK forever.
+run CLAIM_GROUP= DEMAND_FOR= LIST_ORDINARY=1
+is   "with no group, an ordinary open bead is not a demand: BEGAN=no" "$(began)" "no"
+run CLAIM_GROUP= DEMAND_FOR=v-x LIST_ORDINARY=1
+is   "…while a demand gating the visit still reads BEGAN=recheck" "$(began)" "recheck"
+
+echo "── an anchored hold files its demand on the VISIT: still BEGAN=recheck ──"
+# A PR-anchor conversation files its demand on the visit, not the subject. A hold
+# whose gc.hold_demand stamp did not persist must still read as a live wait off
+# that visit demand — else the caller closes an engaged sitting as a dead premise
+# and orphans the demand on the visit it just closed.
+run DEMAND_FOR=v-x
+is   "a demand gating the visit reads BEGAN=recheck, not no" "$(began)" "recheck"
+has  "…and the hold verdict stands" "action=hold bead=v-x group=g reason=already-underway" "$OUT"
+# The pre-fix reader keyed only on the subject, so a visit-gating demand read as a
+# dead claim — the same regression the subject-gating control above proves, on the
+# anchored path the Phase A change introduced.
+oldbegan_visit() { ( cd "$BARE" && env PATH="$BIN:$PATH" DEMAND_FOR=v-x bash "$TMPD/oldread" g ); }
+is   "the pre-fix reader misjudges a visit-gating demand as NO" "$(oldbegan_visit)" "no"
 
 echo "── the other top-level verdicts still hold ──"
 run CLAIM_MODE=nowork
@@ -157,6 +178,78 @@ is   "…exit 0" "$RC" "0"
 run OUTCOME=settled SHOW_STATUS=closed
 has  "an existing_assignment visit carrying gc.outcome FINISHes" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
 is   "…exit 4" "$RC" "4"
+
+echo "── the stranded finish also closes the visit's PR reminder ──"
+# A recorder at a candidate root stands in for pr-visit-comment.sh. The finish
+# arm redirects the tool's stdout so it cannot disturb the action=finish line, so
+# the recorder logs to a file, not stdout.
+PVCRIG="$TMPD/pvcrig"; mkdir -p "$PVCRIG/assets/scripts"
+cat >"$PVCRIG/assets/scripts/pr-visit-comment.sh" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${REC_PVC_LOG:?}"
+REC
+chmod +x "$PVCRIG/assets/scripts/pr-visit-comment.sh"
+REC_PVC_LOG="$TMPD/finish.pvc"; : >"$REC_PVC_LOG"
+run OUTCOME=settled SHOW_STATUS=closed GC_RIG_ROOT="$PVCRIG" REC_PVC_LOG="$REC_PVC_LOG"
+has  "the finish verdict is unchanged" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
+if grep -qF -- 'close --visit v-x --subject g' "$REC_PVC_LOG"; then
+    ok "the finish closes the visit's PR reminder, on the subject GROUP names"
+else
+    bad "the finish closes the visit's PR reminder, on the subject GROUP names" "recorder log: $(cat "$REC_PVC_LOG")"
+fi
+
+echo "── --sh: the same verdict as eval-able shell assignments ──"
+# The converse prompt runs `eval "$(converse-claim.sh --sh "$SUBJECT")"`, so the
+# stdout must be assignments only (nothing to execute), the verdict must still
+# show on stderr, and the exit status must match the default mode.
+SH_OUT=""; SH_ERR=""; SH_RC=0
+runsh() {
+    SH_OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" "$@" bash "$SUT" --sh "${SH_GROUP-}" 2>"$TMPD/sh.err")"
+    SH_RC=$?
+    SH_ERR="$(cat "$TMPD/sh.err")"
+}
+# Read a field the way the prompt does — eval the assignments, echo the var —
+# so the test asserts the value the caller ends up with, not the raw quoted text.
+shval() { SH_OUT="$SH_OUT" bash -c "eval \"\$SH_OUT\"; printf '%s' \"\${$1-}\""; }
+
+SH_GROUP="" runsh CLAIM_REASON=claimed
+is    "--sh WORK sets ACTION=work"  "$(shval ACTION)"  "work"
+is    "--sh WORK sets VISIT"        "$(shval VISIT)"   "v-x"
+is    "--sh WORK sets SUBJECT=group" "$(shval SUBJECT)" "g"
+is    "--sh WORK exits 0"           "$SH_RC"           "0"
+has   "--sh echoes the verdict to stderr"        "bead=v-x" "$SH_ERR"
+hasnt "--sh keeps the raw key=value OFF stdout"  "bead="    "$SH_OUT"
+EVAL_VISIT="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${VISIT-}"')"
+is    "--sh stdout evals cleanly (VISIT resolves)" "$EVAL_VISIT" "v-x"
+
+SH_GROUP="mine" runsh OUTCOME=settled SHOW_STATUS=closed
+is    "--sh FINISH sets ACTION=finish" "$(shval ACTION)" "finish"
+is    "--sh FINISH keeps the caller's group, not the child's" "$(shval SUBJECT)" "mine"
+is    "--sh FINISH exits 4" "$SH_RC" "4"
+
+SH_GROUP="g" runsh
+is    "--sh HOLD sets ACTION=hold" "$(shval ACTION)" "hold"
+is    "--sh HOLD exits 3"          "$SH_RC"          "3"
+has   "--sh HOLD still prints BEGAN on stderr" "premise-gate: BEGAN=" "$SH_ERR"
+
+SH_GROUP="" runsh CLAIM_MODE=nowork
+is    "--sh DRAIN sets ACTION=drain" "$(shval ACTION)" "drain"
+is    "--sh DRAIN exits 1"           "$SH_RC"          "1"
+
+# eval-safety: SUBJECT is a continuation group from `gc hook --claim` and bead
+# metadata, and the prompt runs `eval "$(converse-claim.sh --sh ...)"`. A group
+# carrying shell metacharacters must reach the caller as one literal string, not
+# as syntax the eval executes. `;` would end the assignment and start a command;
+# `$(...)` would substitute — both are inert once the value is single-quoted.
+# (Space-free by construction: the default verdict line is space-delimited, so a
+# group with a space is already truncated before the quote; injection does not
+# need one, as `g;INJECTED=$(whoami)` shows.)
+INJ='g;INJECTED=$(whoami)'
+SH_GROUP="" runsh CLAIM_REASON=claimed CLAIM_GROUP="$INJ"
+is    "--sh passes a metacharacter group through as one literal" "$(shval SUBJECT)" "$INJ"
+INJ_VAR="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${INJECTED-}"')"
+is    "--sh eval neither splits the assignment nor substitutes" "$INJ_VAR"         ""
+has   "--sh emits SUBJECT single-quoted"                         "SUBJECT='"       "$SH_OUT"
 
 echo
 echo "converse-claim: $PASS passed, $FAIL failed"

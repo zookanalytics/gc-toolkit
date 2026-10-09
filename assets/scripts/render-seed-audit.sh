@@ -5,7 +5,7 @@
 # Today that question is re-derived ad hoc from fragments every time somebody
 # asks, and the largest part of the answer is invisible after the fact: a
 # polecat transcript stores neither the skills appendix nor the standing prompt,
-# so ~26k tokens per spawn have no post-hoc audit trail at all (tk-yhwfv.3).
+# so ~26k tokens per spawn have no post-hoc audit trail at all.
 # Rendering is the only way to see it. Committing the render is what makes it
 # reviewable as ONE thing and diffable across time.
 #
@@ -24,8 +24,8 @@
 # check would fail for reasons nobody here controls. So the harness builds its
 # own throwaway city from a scenario pinned BELOW (see synth_city), renders
 # against that, and normalizes machine paths out of the result. The artifact is
-# then a pure function of this repo plus the `gc` binary version, which is what
-# a committed golden file has to be.
+# then a pure function of this repo, which is what a committed golden file has
+# to be.
 #
 # Fidelity is not assumed, it is measured. Against `gc prime` in the live
 # loomington city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
@@ -126,8 +126,8 @@ PH_HOME="[[HOME]]"
 # it holds the per-agent inject_fragments_append lists AND the `sha:` pin for
 # the imported gastown pack, so an upstream prompt change moves it too.
 #
-# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate
-# (tk-wchab, pre-open signoff P1). The synthetic city below is not a wrapper
+# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate.
+# The synthetic city below is not a wrapper
 # around the render — it is a variable the rendered prompts depend on, and the
 # scenario comment says so. Edit one line of its [agent_defaults] and 13 agent
 # prompts move; with only the content directories hashed, `--check` reported the
@@ -141,12 +141,12 @@ PH_HOME="[[HOME]]"
 # and doctor/check-seed-audit-current/run.test.sh asserts a renderer-only change
 # is seen by both.
 #
-# The `gc` version is deliberately NOT folded in. Prompt composition lives in
-# the binary, so an upgrade really can move every byte of the artifact — but with
-# no commit in this repo to explain it. INDEX.md records the version on its own
-# line instead, which lets doctor/check-seed-audit-current call a content
-# mismatch an error and a version-only mismatch a warning, and lets the manifest
-# be recomputed on a host with no `gc` at all.
+# The `gc` version is deliberately not recorded. Prompt composition lives in the
+# binary, so an upgrade really can move every byte of the artifact with no commit
+# in this repo to explain it — but the version is not a function of the repo, so
+# recording it drifts with the host binary and drags host state into commits that
+# change nothing else. The commit that renders the artifact is the record of which
+# `gc` built it, and the manifest is recomputable on a host with no `gc` at all.
 #
 # The manifest is committed as generated/seed-audit/SOURCES.txt, one record per
 # input, sorted by path. Per-input records rather than one digest over all of
@@ -166,10 +166,15 @@ PH_HOME="[[HOME]]"
 # against agents/dog/agent.toml, adjacent in sort order, which conflicted. With
 # the path on its own line only the hash moves, and the next record's path line
 # is the separation.
+#
+# A symlinked input is an input of its own, recorded under the link's path and
+# hashed through the link. A sub-pack links root fragments its prompts compose
+# (packs/gascity-keeper/template-fragments/), and the render reads whatever the
+# link resolves to, so a link moved to another file has to move a record.
 digest_inputs() {
     local root="$1"
     find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \
-        -type f \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
+        \( -type f -o -type l \) \( -name '*.md' -o -name '*.toml' \) -print 2>/dev/null | LC_ALL=C sort
     printf '%s\n' "$root/pack.toml"
     printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }
@@ -313,10 +318,13 @@ if [ "$MODE" = "install-hook" ]; then
     top="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repo: $ROOT"
     hookdir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)/hooks"
     # Refuse to shadow hooks somebody already installed by hand: core.hooksPath
-    # replaces .git/hooks wholesale rather than layering on top of it.
+    # replaces .git/hooks wholesale rather than layering on top of it. A listing
+    # that fails refuses too, because a hook it could not see is a hook it could
+    # shadow. BSD find has no -printf, so basename names the files.
     existing=""
     if [ -d "$hookdir" ]; then
-        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -printf '%f\n' 2>/dev/null)"
+        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -exec basename {} \;)" \
+            || die "could not list $hookdir, so hand-installed hooks there cannot be ruled out"
     fi
     if [ -n "$existing" ]; then
         printf 'refusing to set core.hooksPath: %s already holds hand-installed hook(s):\n' "$hookdir" >&2
@@ -437,19 +445,31 @@ open(sys.argv[2], "w", encoding="utf-8").write(src.replace("@@ROOT@@", os.enviro
     rm -f "$CITY/city.toml.in"
 }
 
-# Every gc call runs through here. `env -i` is not tidiness: an inherited
-# GC_CITY would point the render at the operator's live city, and inherited
+# Every gc call runs through here, and the render has to be hermetic against two
+# ambient inputs: the environment and the working directory.
+#
+# `env -i` handles the environment. It is not tidiness: an inherited GC_CITY
+# would point the render at the operator's live city, and inherited
 # GC_RIG/GC_AGENT/GC_SESSION_* leak the CALLER's identity into the rendered
 # prompt (a polecat running this by hand renders its own agent name and worktree
-# path into the artifact). Scrubbing is what makes the output depend on the
-# scenario alone.
+# path into the artifact).
+#
+# `cd "$CITY"` handles the working directory, which `env -i` does not scrub. `gc`
+# discovers a city by walking up from cwd, and this script runs from whatever
+# worktree invoked it, which for every polecat is one nested inside the live
+# city. The explicit `--city "$CITY"` is meant to settle which city is in scope,
+# but whether an explicit flag beats cwd discovery is the running binary's call,
+# and the synthetic city exists precisely so the render depends on nothing
+# outside this repo. Running from "$CITY" makes the upward walk resolve the
+# synthetic city under either precedence, so scrubbing the environment and
+# pinning the cwd are together what make the output depend on the scenario alone.
 gcq() {
-    env -i \
+    ( cd "$CITY" && env -i \
         PATH="$PATH" \
         HOME="$HOME" \
         TERM=dumb \
         NO_COLOR=1 \
-        gc --city "$CITY" "$@"
+        gc --city "$CITY" "$@" )
 }
 
 synth_city
@@ -502,9 +522,9 @@ fi
 # fallback" rule below: claude, codex, gemini and control-dispatcher legitimately
 # ARE the builtin worker prompt, and banning it outright would fail them.
 PACK_AGENTS=""
-while IFS= read -r adir; do
-    PACK_AGENTS="${PACK_AGENTS} $(basename "$adir")"
-done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -printf '%h\n' 2>/dev/null | LC_ALL=C sort)
+while IFS= read -r atoml; do
+    PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
+done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
 # ------------------------------------------------------------------ inventory
 #
@@ -659,7 +679,6 @@ report_totals() {
 }
 
 DIGEST="$(source_digest "$ROOT")"
-GCVER="$(gc version 2>/dev/null | head -1)"
 
 # Resolved per-rig fragment composition, straight out of the composed config.
 # This is the one place the per-rig dimension is visible at all: `gc prime`
@@ -729,7 +748,6 @@ Every file under \`agents/\` is the complete standing prompt one agent receives
 at spawn. Every file under \`formulas/\` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- \`gc\` version: \`$GCVER\`
 - agents: ${#AGENTS[@]} · formulas: ${#FORMULAS[@]}
 - input manifest: \`SOURCES.txt\`
 

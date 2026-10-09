@@ -25,6 +25,15 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
+# The pre-spawn Dolt health probe. Answer from the fixture the case set (default
+# healthy), and do NOT log it: the sweep-count assertions below count doctor
+# runs by log line, and the probe is not a sweep.
+if [ "${1:-}" = "dolt" ] && [ "${2:-}" = "health" ]; then
+  [ -n "${STUB_DOLT_SLEEP:-}" ] && sleep "$STUB_DOLT_SLEEP"
+  if [ -n "${STUB_DOLT_HEALTH:-}" ]; then printf '%s' "$STUB_DOLT_HEALTH"
+  else printf '%s' '{"server":{"reachable":true,"latency_ms":120}}'; fi
+  exit "${STUB_DOLT_RC:-0}"
+fi
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
 [ "${1:-}" = "doctor" ] || exit 0
 [ -n "${STUB_CHECK:-}" ] && "$STUB_CHECK" &
@@ -33,6 +42,7 @@ printf '%s\n' "$*" >> "${STUB_LOG:?}"
 exit "${STUB_RC:-0}"
 STUB
 chmod +x "$BIN/gc"
+
 export PATH="$BIN:$PATH"
 
 # A pack check the sweep can be caught inside. Its PATH is what names it.
@@ -45,8 +55,15 @@ chmod +x "$TMP/rig/doctor/check-fixture-slow/run.sh"
 
 export STUB_LOG="$TMP/gc.log"; : > "$STUB_LOG"
 export STUB_SLEEP="" STUB_RC=0 STUB_PAYLOAD="" STUB_CHECK=""
+# Pre-spawn gate control: the Dolt health probe answer (empty = healthy default).
+export STUB_DOLT_HEALTH="" STUB_DOLT_RC=0 STUB_DOLT_SLEEP=""
 # The ambient city must never be an input; every case names its own state dir.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
+# The cadence floor defaults to a per-user runtime path; pin it into TMP so no
+# case reads or writes the real one, and give each case its own dir below so none
+# inherits another's last-start stamp. XDG_RUNTIME_DIR is left as the host set it,
+# so the systemd-launch cases still run where a user manager is reachable.
+export GC_DOCTOR_SWEEP_CADENCE_DIR="$TMP/cadence.default"; mkdir -p "$GC_DOCTOR_SWEEP_CADENCE_DIR"
 
 payload_ok() { # <file>
   cat > "$1" <<'JSON'
@@ -59,8 +76,10 @@ payload_ok() { # <file>
 JSON
 }
 
-# STATE is per-case so no case inherits another's stamp.
-new_state() { STATE="$TMP/state.$1"; mkdir -p "$STATE"; export GC_DOCTOR_SWEEP_STATE_DIR="$STATE"; }
+# STATE and CADENCE are per-case so no case inherits another's stamp. The
+# cadence floor lives outside STATE_DIR, so it gets its own per-case dir too.
+new_state() { STATE="$TMP/state.$1"; mkdir -p "$STATE"; export GC_DOCTOR_SWEEP_STATE_DIR="$STATE";
+              CADENCE="$TMP/cadence.$1"; mkdir -p "$CADENCE"; export GC_DOCTOR_SWEEP_CADENCE_DIR="$CADENCE"; }
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 field() { sed -n "s/^$2=//p" <<< "$1"; }
 # The sweep is DETACHED, so the script returns state=started before its child
@@ -113,6 +132,11 @@ hasnt "$OUT" "state=started" "  ... the run dir is the start guard"
 await_run
 run
 has "$OUT" "state=complete" "the pass after it finishes collects the payload"
+eq "$(field "$OUT" finished_at)" "$(cat "$STATE/current/finished_at")" \
+  "  ... carrying the second the sweep finished"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -ge 0 ] && [ "$AGE" -le 60 ]; then ok "  ... and the payload's age, counted from that second"
+else bad "  ... and the payload's age, counted from that second (got '$AGE')"; fi
 eq "$(field "$OUT" rc)" "1" "  ... rc 1 is doctor's normal findings-exist exit, not a failure"
 eq "$(field "$OUT" checks)" "3" "  ... counts the checks"
 eq "$(field "$OUT" findings)" "2" "  ... counts what is not ok"
@@ -127,9 +151,12 @@ if [ "$NEXT" -gt 3400 ] && [ "$NEXT" -le 3600 ]; then ok "  ... and the wait is 
 else bad "  ... and the wait is the hour, not the patrol cycle (got '$NEXT')"; fi
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... still exactly one sweep run"
 
-# An elapsed interval is an aged window-start now; last-start ages with it.
+# An elapsed interval is an aged window-start now; last-start ages with it, and
+# so does the cadence floor's own stamp — otherwise the floor would hold this
+# second start back seconds after the first, which is exactly its job.
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/window-start"
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/last-start"
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$CADENCE/last-start"
 run
 has "$OUT" "state=started" "once the interval has passed it sweeps again"
 await_sweeps 2
@@ -159,6 +186,100 @@ if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ 
   else bad "the transient user service records a numeric pid (got '$PID')"; fi
   await_run
 fi
+export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
+
+# --- a finished sweep is collected only while its payload is current --------
+# A payload describes the city at the second its sweep finished, and a patrol
+# that stopped for hours reaches it late. Each run here is written by hand the
+# way the wrapper leaves a finished one: an rc, a finished_at second, and a
+# whole payload with findings in it, so a collect that ignored the age would
+# report them as complete.
+seed_finished() { # <started_at> <finished_at> <rc>
+  mkdir -p "$STATE/current"
+  printf '%s' "$1" > "$STATE/current/started_at"
+  printf '%s' "$2" > "$STATE/current/finished_at"
+  payload_ok "$STATE/current/payload.json"
+  printf '%s' "$3" > "$STATE/current/rc"
+}
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+new_state stale
+: > "$STUB_LOG"
+FIN=$(( $(date +%s) - 3601 ))
+# The window and cadence stamps the run's own start left behind.
+printf '%s' "$(( FIN - 600 ))" > "$STATE/window-start"
+printf '%s' "$(( FIN - 600 ))" > "$STATE/last-start"
+printf '1'                     > "$STATE/attempts"
+printf '%s' "$(( FIN - 600 ))" > "$CADENCE/last-start"
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run
+has "$OUT" "state=stale" "a sweep that finished more than an interval ago is stale, never complete"
+hasnt "$OUT" "payload=" "  ... it names no payload, so no filter reads its findings"
+hasnt "$OUT" "findings=" "  ... and counts none"
+eq "$(field "$OUT" finished_at)" "$FIN" "  ... it says when the sweep finished"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -gt 3600 ]; then ok "  ... and how long ago, past the interval"
+else bad "  ... and how long ago, past the interval (got '$AGE')"; fi
+eq "$(field "$OUT" interval)" "3600" "  ... and the interval it was held to"
+eq "$(cat "$STATE/last-outcome")" "stale" "  ... recording last-outcome=stale"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starting nothing in the same pass"
+printf '%s\n' "$OUT" > "$TMP/report-stale"
+run
+has "$OUT" "state=started" "the next pass starts a fresh sweep in its place"
+await_run
+run
+has "$OUT" "state=complete" "  ... which is collected as current"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... from one real sweep, not the stale run read again"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -le 60 ]; then ok "  ... its age counted from its own finish"
+else bad "  ... its age counted from its own finish (got '$AGE')"; fi
+
+# A failed run that old is stale too: its failure is not a current one.
+new_state stale_failed
+FIN=$(( $(date +%s) - 3601 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 2
+run
+has "$OUT" "state=stale" "a failed run that finished more than an interval ago is stale, not a current failure"
+hasnt "$OUT" "rc=" "  ... and carries no exit code to file"
+
+# Just inside the interval the same run is current.
+new_state fresh_finish
+FIN=$(( $(date +%s) - 3500 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run
+has "$OUT" "state=complete" "a sweep that finished inside the interval is collected complete"
+eq "$(field "$OUT" finished_at)" "$FIN" "  ... carrying when it finished"
+eq "$(field "$OUT" findings)" "2" "  ... and its findings"
+
+# The bound is the configured interval, not a fixed hour: 2000s is current at
+# the default and stale at 1800.
+new_state stale_knob
+FIN=$(( $(date +%s) - 2000 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+OUT=$(GC_DOCTOR_SWEEP_INTERVAL=1800 "$SUT")
+has "$OUT" "state=stale" "at a 1800s interval a sweep that finished 2000s ago is stale"
+eq "$(field "$OUT" interval)" "1800" "  ... held to the configured interval"
+
+# An unreadable finished_at is aged from started_at, which is never later, so
+# the fallback can only overstate the age.
+new_state stale_nofinish
+seed_finished "$(( $(date +%s) - 4000 ))" "not-a-time" 1
+run
+has "$OUT" "state=stale" "an unreadable finished_at is aged from an old started_at, so the run is stale"
+eq "$(field "$OUT" finished_at)" "unknown" "  ... and the report says the finish is unknown"
+new_state fresh_nofinish
+seed_finished "$(( $(date +%s) - 100 ))" "not-a-time" 1
+run
+has "$OUT" "state=complete" "  ... while a recent start with an unreadable finish still collects"
+
+# --status reports a stale run and leaves it for the pass that advances.
+new_state stale_status
+FIN=$(( $(date +%s) - 3601 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run --status
+has "$OUT" "state=stale" "--status reports a stale run as stale"
+if [ -e "$STATE/current/collected" ]; then bad "  ... without collecting it"; else ok "  ... without collecting it"; fi
+if [ -e "$STATE/last-outcome" ]; then bad "  ... or recording an outcome"; else ok "  ... or recording an outcome"; fi
 export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
 
 # --- a malformed interval still sweeps hourly -------------------------------
@@ -474,6 +595,166 @@ has "$OUT" "state=idle" "  ... and the floor of 1 arms no retry, never a hot loo
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... only the single start the clamped minimum allows"
 unset GC_DOCTOR_SWEEP_MAX_ATTEMPTS
 
+# --- the pre-spawn Dolt health gate: a degraded data plane defers the start --
+# A sweep queries every store's Dolt, so starting one while the data plane is
+# unreachable or overloaded is the amplifier that turned a slowdown into a
+# collapse. The gate stands the sweep down instead — and because it sits past
+# the start decision, it brakes both the ordinary hourly start and the retry a
+# failed run arms, without spending either's state.
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+new_state dolt_unreachable
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "an unreachable Dolt defers the start instead of sweeping"
+has "$OUT" "reason=dolt-degraded" "  ... naming why"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts no sweep"
+if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  ... and creates no run dir"; fi
+
+new_state dolt_overloaded
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":9999}}'
+run
+has "$OUT" "state=deferred" "a Dolt server past the latency ceiling defers too"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+
+# The deferred start is held, not spent: window-start and attempts are left
+# untouched, so the SAME due start fires once Dolt recovers.
+new_state dolt_recover
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "degraded: the due start defers"
+if [ -e "$STATE/window-start" ]; then bad "  ... and stamps no window-start while deferred"; else ok "  ... and stamps no window-start while deferred"; fi
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":80}}'
+run
+has "$OUT" "state=started" "once Dolt recovers the held start fires"
+await_run
+
+# A Dolt-caused failure arms no retry while Dolt stays degraded: seed the state
+# a failed run leaves (window open, a retry due), hold it degraded, and prove no
+# sweep starts and no attempt is burned — then recovery lets the retry run.
+new_state dolt_retry_held
+: > "$STUB_LOG"
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf '1'            > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "a failed run's retry defers while Dolt is degraded"
+eq "$(cat "$STATE/attempts")" "1" "  ... burning no attempt on a sweep that never ran"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starting no retry"
+export STUB_DOLT_HEALTH='{"server":{"reachable":true,"latency_ms":80}}'
+run
+has "$OUT" "state=started" "  ... and the retry fires once Dolt recovers"
+eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the same window"
+await_run
+
+# An unprovable probe must NOT disable sweeping: a health check that returns an
+# unreadable answer is treated as healthy-enough to proceed, so a broken probe
+# can never silence the patrol.
+new_state dolt_unprovable
+: > "$STUB_LOG"
+export STUB_DOLT_RC=0 STUB_DOLT_HEALTH='not json'
+run
+has "$OUT" "state=started" "an unreadable health probe proceeds, never blocks the sweep"
+await_run
+export STUB_DOLT_RC=0 STUB_DOLT_HEALTH=""
+
+# A probe that outruns its own bound is itself the overload signal.
+new_state dolt_probe_timeout
+: > "$STUB_LOG"
+export STUB_DOLT_SLEEP=2 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1
+run
+has "$OUT" "state=deferred" "a health probe past its bound defers the start"
+has "$OUT" "reason=dolt-degraded" "  ... as a degraded data plane"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+unset GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
+export STUB_DOLT_SLEEP=""
+
+# --- the pre-spawn cadence floor: the one cross-session gate -----------------
+# STATE_DIR can go blind — a per-session fallback a recycled session does not
+# inherit — and that is what let one incident start a burst of sweeps at once.
+# The cadence floor is the STATE_DIR-independent gate: a last-start stamp every
+# session shares, taken under flock, that holds the interval even when two
+# sessions cannot see each other's STATE_DIR. It rests on a file lock, not on a
+# query a loaded host cannot answer.
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+# Two sessions, two blind STATE_DIRs, one shared cadence dir: only the first
+# sweeps; the second is throttled though its own STATE_DIR shows nothing. This
+# is the incident, reproduced — the burst the floor collapses to a single sweep.
+SHARED_CADENCE="$TMP/cadence.shared"; mkdir -p "$SHARED_CADENCE"
+: > "$STUB_LOG"
+OUT=$(GC_DOCTOR_SWEEP_STATE_DIR="$TMP/state.burst-a" GC_DOCTOR_SWEEP_CADENCE_DIR="$SHARED_CADENCE" "$SUT" 2>/dev/null)
+has "$OUT" "state=started" "cadence: the first session's sweep starts"
+await_sweeps 1
+OUT=$(GC_DOCTOR_SWEEP_STATE_DIR="$TMP/state.burst-b" GC_DOCTOR_SWEEP_CADENCE_DIR="$SHARED_CADENCE" "$SUT" 2>/dev/null)
+has "$OUT" "state=throttled" "cadence: a second session with a blind STATE_DIR is throttled, not a second start"
+has "$OUT" "reason=cadence-floor" "  ... named as the floor, not STATE_DIR, that caught it"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... so exactly one sweep ran across both sessions"
+if [ -d "$TMP/state.burst-b/current" ]; then bad "  ... and the throttled session creates no run dir"; else ok "  ... and the throttled session creates no run dir"; fi
+
+# A start due by STATE_DIR is throttled while the floor's own stamp is recent.
+new_state cadence_recent
+: > "$STUB_LOG"
+printf '%s' "$(( $(date +%s) - 100 ))" > "$CADENCE/last-start"
+run
+has "$OUT" "state=throttled" "cadence: a due start is throttled while the floor's stamp is inside the interval"
+has "$OUT" "floor=3600" "  ... reporting the floor it enforced"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts nothing"
+
+# Once the floor has elapsed the same start proceeds, and refreshes the stamp.
+new_state cadence_old
+: > "$STUB_LOG"
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$CADENCE/last-start"
+run
+has "$OUT" "state=started" "cadence: once the floor has elapsed the start proceeds"
+NEWSTAMP=$(cat "$CADENCE/last-start")
+if [ "$NEWSTAMP" -gt "$(( $(date +%s) - 60 ))" ]; then ok "  ... and refreshes the floor's stamp, at the cadence dir not STATE_DIR"
+else bad "  ... and refreshes the floor's stamp (got '$NEWSTAMP')"; fi
+await_run
+
+# The retry a failed run armed is exempt from the floor: it was authorized by a
+# STATE_DIR this session could read, where the burst cannot arise. A recent
+# floor stamp that would throttle a FRESH start does not hold the retry back.
+new_state cadence_retry_exempt
+: > "$STUB_LOG"; export STUB_RC=2
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf '1'            > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+printf '%s' "$RECENT" > "$CADENCE/last-start"
+run
+has "$OUT" "state=started" "cadence: the retry a failed run armed is exempt from the floor"
+eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the window"
+await_run
+export STUB_RC=1
+
+# --status takes no floor: it reports without starting, so it writes no stamp.
+new_state cadence_status
+: > "$STUB_LOG"
+run --status
+has "$OUT" "state=idle" "cadence: --status reports without taking the floor"
+if [ -e "$CADENCE/last-start" ]; then bad "  ... and writes no cadence stamp"; else ok "  ... and writes no cadence stamp"; fi
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starts nothing"
+
+# A cadence dir it cannot write fails OPEN — the patrol is never silenced by a
+# broken guard — and the report says the cross-session guard was skipped.
+new_state cadence_failopen
+: > "$STUB_LOG"
+mkdir -p "$TMP/cad-nowrite"; chmod 500 "$TMP/cad-nowrite"
+OUT=$(GC_DOCTOR_SWEEP_CADENCE_DIR="$TMP/cad-nowrite/sub" "$SUT" 2>/dev/null)
+has "$OUT" "state=started" "cadence: an unwritable cadence dir fails open, never silences the sweep"
+has "$OUT" "cadence floor unavailable" "  ... and the note says the guard was skipped"
+chmod 700 "$TMP/cad-nowrite"
+await_run
+export STUB_DOLT_HEALTH="" STUB_PAYLOAD="" STUB_RC=0
+
 # --- the shipped patrol step must handle every state this script reports -----
 # The step is prose plus one snippet, read by an agent, and both halves can go
 # wrong on their own: the snippet has to survive a runner that exits non-zero,
@@ -532,6 +813,12 @@ has "$SNIP_OUT" "read-state=complete" "  ... state=complete is readable"
 has "$SNIP_OUT" "read-payload=$TMP/payload.json" "  ... and the payload path survives"
 has "$SNIP_OUT" "read-rc=0" "  ... with rc 0"
 
+# The runner's own stale report, read through the shipped snippet: it names no
+# payload, so the filter after the table has nothing to read.
+snippet_run "$TMP/report-stale" 0
+has "$SNIP_OUT" "read-state=stale" "the runner's stale report reads through the snippet as state=stale"
+eq "$(sed -n 's/^read-payload=//p' <<< "$SNIP_OUT")" "" "  ... with no payload path for the filter"
+
 # The decision table is asserted against the states the RUNNER can emit, not a
 # list copied here: a state added to the script fails this until the step says
 # what the deacon owes for it.
@@ -557,6 +844,13 @@ if grep -qE '^- .*`blocked`.*FAILED scan' <<< "$STEP"; then
   ok "  ... and routes blocked to the failed-scan arm"
 else
   bad "  ... but blocked is not routed to the failed-scan arm"
+fi
+# `stale` is a finished sweep whose payload is too old to file, so it belongs
+# with the states that carry nothing to filter.
+if grep -qE '^- `stale`: there is no payload' <<< "$STEP"; then
+  ok "  ... and routes stale to a no-payload arm, so an old sweep files nothing"
+else
+  bad "  ... but stale is not routed to a no-payload arm"
 fi
 if grep -qE '^- Any other state.*FAILED scan' <<< "$STEP"; then
   ok "  ... with a catch-all for a state it does not name"

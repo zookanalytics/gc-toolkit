@@ -10,10 +10,11 @@
 # exactly — and against a ROOT it offers the root itself to a pool as work.
 #
 # What is exercised here:
-#   * CLASSIFICATION on the four shapes that reach the disposal, including the
-#     order dependencies: a visit is the source bead of its own molecule and
-#     must be read as a visit, and a root carries gc.kind/gc.formula_contract
-#     where a step carries gc.step_ref;
+#   * CLASSIFICATION of the shapes that reach the disposal, including the
+#     order dependencies: a visit and a review are each the source bead of their
+#     own molecule and must be recognised by task_kind before the source arm,
+#     and a root carries gc.kind/gc.formula_contract where a step carries
+#     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
 #     open+unassigned+routed shape a pool can claim;
 #   * the STEP arm releasing the dead session's pin while the chain survives:
@@ -106,6 +107,15 @@ store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit
                      "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
 OUT=$("$SCRIPT" tk-v2 2>&1); has "$OUT" "class=visit" "task_kind=visit outranks a step_ref"
 
+# A review bead is the source bead of its own mol-review molecule, so like a visit
+# it is classified by task_kind before the source arm — and before the step/root
+# checks, so a review that also carried a step_ref still reads review.
+store '[{"id":"tk-rv","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review","check_name":"codex",
+                     "anchor_bead":"tk-anc","review_branch":"polecat/tk-anc",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}}]'
+OUT=$("$SCRIPT" tk-rv 2>&1); has "$OUT" "class=review" "task_kind=review outranks a step_ref"
+
 echo "--- preview is the default ---"
 fixture
 OUT=$("$SCRIPT" tk-step 2>&1); rc=$?
@@ -113,7 +123,7 @@ eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
 eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
-eq "$(wc -l < "$STUB_GC_LOG")" "2" "preview reads the step and its root, nothing more"
+eq "$(wc -l < "$STUB_GC_LOG" | tr -d ' ')" "2" "preview reads the step and its root, nothing more"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
 echo "--- root arm: never returns a root to a pool ---"
@@ -345,6 +355,82 @@ has "$OUT" "result=disposed" "source disposal reports disposed"
 has "$OUT" "pins" "source arm reports the pin clear in landed"
 eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
 eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
+
+echo "--- review arm: a review orphan is reopened to its pool by the source contract ---"
+# A review bead is the source of its own mol-review molecule: no worktree, so the
+# witness scope gate skips its salvage/verify, but its disposal IS the source
+# contract — delete-source (a no-op on the input-convoy root) + reopen-source,
+# then the dead session's pins cleared and the route restored from the durable
+# execution stamp so another reviewer is offered it. It reports class=review only
+# so the scope gate and this classifier agree that it takes no salvage path.
+store '[{"id":"tk-rev","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+         "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
+                     "review_branch":"polecat/tk-anc","review_base":"main","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-rev --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "review disposal exits 0"
+has "$OUT" "class=review" "a review orphan is classed review, not source"
+has "$OUT" "action=delegate-source-workflow" "the review arm delegates to the source contract"
+has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-rev" "reopen-source invoked for the review"
+eq "$(bstatus tk-rev)" "open" "the review bead is returned to the pool"
+eq "$(meta tk-rev gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "review route restored from the execution stamp"
+eq "$(meta tk-rev gc.session_id)" "<absent>" "the dead session id is cleared"
+eq "$(meta tk-rev gc.session_name)" "<absent>" "the dead session name is cleared"
+has "$OUT" "result=disposed" "review disposal reports disposed"
+
+echo "--- source arm: a claimed-then-orphaned source bead has its route restored ---"
+# The bug this arm exists to close: a source bead (a rework, say) is dispatched
+# to a pool, its own claim empties gc.routed_to and stamps the assignee, then the
+# claiming session dies. reopen-source reopens it but preserves the emptied route,
+# so it lands open, unassigned and unrouted — bd-ready yet never offered to a pool
+# again. The durable gc.execution_routed_to stamp survived the claim, so the route
+# is restored from it and the bead becomes offerable once more.
+store '[{"id":"tk-strand","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-anchor: address pre-open signoff findings",
+         "metadata":{"branch":"polecat/tk-anchor","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
+                     "gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-4-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-strand --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "a restored source disposal exits 0"
+has "$OUT" "class=source" "the stranded rework is a source bead"
+has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-strand" "reopen-source invoked"
+eq "$(bstatus tk-strand)" "open" "the bead is returned to the pool"
+eq "$(meta tk-strand gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "gc.routed_to restored from the execution stamp"
+has "$OUT" "result=disposed" "a restored disposal reports disposed"
+has "$OUT" "route" "the route restore is reported in landed"
+eq "$(meta tk-strand gc.session_id)" "<absent>" "the dead session id is still cleared"
+
+echo "--- source arm: a route already present is never clobbered ---"
+# reopen-source (or a source-id workflow) may leave a route in place. A bead that
+# still carries gc.routed_to keeps it, rather than having it overwritten from the
+# execution stamp, so a restore never fights a live route.
+store '[{"id":"tk-liveroute","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+         "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-liveroute --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "a preserved-route disposal exits 0"
+eq "$(meta tk-liveroute gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "an existing route is left untouched"
+hasnt "$OUT" "route-unrecoverable" "a live route is not flagged unrecoverable"
+
+echo "--- source arm: a reopened bead with no recoverable route is surfaced, not stranded ---"
+# When the claim emptied gc.routed_to and no gc.execution_routed_to was ever
+# stamped, the reopened bead cannot be offered and there is nothing to restore it
+# from. Leaving it silent recreates the strand, so the release is reported partial
+# (exit 3) for the patrol to surface, rather than passed off as a clean disposal.
+store '[{"id":"tk-noroute","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-old: address findings",
+         "metadata":{"branch":"polecat/tk-old","gc.routed_to":"",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-noroute --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "3" "an unrecoverable-route release exits 3"
+has "$OUT" "result=partial" "it reports partial, not disposed"
+has "$OUT" "route-unrecoverable" "the missing route is named"
+eq "$(bstatus tk-noroute)" "open" "the bead was still reopened and unassigned"
+eq "$(meta tk-noroute gc.routed_to)" "" "gc.routed_to stays empty when nothing can restore it"
 
 echo "--- source arm: an in-flight-PR source bead is NOT returned to the pool ---"
 # A work bead handed off with its branch pushed and its PR in flight (merge_result

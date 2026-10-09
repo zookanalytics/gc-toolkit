@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic tests for the helm build/start split (tk-9tbbk.2) and the
-# build-scratch bounding that came before it (tk-m18ml).
+# Hermetic tests for the helm build/start split and the
+# build-scratch bounding that came before it.
 #
 # THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
 # supervisor allows a proxy_process 5s to answer its health probe
@@ -15,13 +15,13 @@
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
 #
-# THE READABILITY GATE (tk-00o34c). `find -newer` cannot see a binary going
+# THE READABILITY GATE. `find -newer` cannot see a binary going
 # stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
 # library it embedded, and the store's schema moves under it on a `bd` upgrade.
 # The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
 # refuses to rebuild a binary whose library a rebuild would not move.
 #
-# THE SCRATCH BOUNDING (inherited, tk-m18ml). The build pointed TMPDIR/GOTMPDIR
+# THE SCRATCH BOUNDING (inherited). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
 # storm stranded 222 dirs (33G) and filled the root fs. Each invocation now
 # builds in $GOTMP/run.<pid> and deletes it on every exit path, and sweeps both
@@ -29,8 +29,9 @@
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
 # derive the Go module from their own path — with a stub toolchain on GC_GO_BIN,
-# a stub gc on GC_HELM_GC_BIN, and GC_HELM_GOTMP pointed at scratch under
-# $TMPDIR. No live city, no network, no real /var/tmp/gotmp. Covered:
+# a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH, and
+# GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network, no
+# real /var/tmp/gotmp. Covered:
 #
 #   launcher (gc-helm-svc.sh)
 #   (EXEC)        an existing binary is exec'd, with its arguments
@@ -43,9 +44,15 @@
 #   (BUILD)       builds and publishes when the binary is missing
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
-#   (GOMOD)       a go.mod-only change still counts as newer (tk-ohdex)
+#   (GOMOD)       a go.mod-only change still counts as newer
+#   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
+#   (ICU)         on macOS the build's cgo is pointed at Homebrew's keg-only icu4c
+#   (ICUKEEP)     CGO flags already set are kept, with the keg's appended
+#   (NOICU)       a prefix with no icu4c installed under it adds nothing, and says so
+#   (ICUOFF)      off macOS brew is never asked and CGO flags pass through
+#   (ICUTICK)     a tick with nothing to build never asks brew
 #
-#   readability — the second staleness axis (tk-00o34c)
+#   readability — the second staleness axis
 #   (READABLE)    a current binary that can read the stores reports ok, builds nothing
 #   (SKEW)        sources unchanged + store schema moved -> it REBUILDS
 #   (STUCK)       a rebuild that cannot fix it never writes ok, and exits non-zero
@@ -97,8 +104,16 @@
 #   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
 #                 input that no longer exists, and the record must never name a
 #                 revision the binary was not built from
+#   (DEPREV)      a sibling-subtree revision change rebuilds when mtime is blind;
+#                 SOURCE_REV spans every local replace-dep, not just services/helm
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
+#   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
+#                 the gap (behind_main) and is NEVER rebuilt for it — report-only
+#   (ONMAIN)      a checkout level with origin/main records no drift
+#   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
+#                 so an unreachable origin costs one attempt per TTL, not one per
+#                 tick, and the gap is still reported off the last origin ref
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -163,39 +178,63 @@ hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;
 [ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
-# this one is dead by construction and no case can flake on pid reuse.
-DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 32768) + 7 ))
+# this one is dead by construction and no case can flake on pid reuse. Linux
+# reads pid_max from /proc; macOS has no /proc and never allocates a pid above
+# 99999 (XNU's PID_MAX).
+DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
 
+# The host is a fixture too. The builder adds Homebrew's icu4c to cgo only on
+# macOS, so every case runs against a stub uname and a stub brew placed ahead of
+# the real ones on PATH, and sees the same host on any platform. STUB_HOST_OS
+# names the host (Linux when unset), STUB_ICU_PREFIX is what
+# `brew --prefix icu4c` prints (nothing when unset), and STUB_BREW_LOG records
+# every brew call.
+HOST_BIN="$TMP/host-bin"
+mkdir -p "$HOST_BIN"
+cat > "$HOST_BIN/uname" <<'STUB'
+#!/usr/bin/env bash
+echo "${STUB_HOST_OS:-Linux}"
+STUB
+cat > "$HOST_BIN/brew" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${STUB_BREW_LOG:-}" ]; then printf '%s\n' "$*" >> "$STUB_BREW_LOG"; fi
+if [ "$*" = "--prefix icu4c" ] && [ -n "${STUB_ICU_PREFIX:-}" ]; then
+    printf '%s\n' "$STUB_ICU_PREFIX"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "$HOST_BIN/uname" "$HOST_BIN/brew"
+export PATH="$HOST_BIN:$PATH"
+
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
-# directory mtime and un-ages it.
-age_days() { # <path> <days>
-    local when
-    when="$(date -u -d "$2 days ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"d +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
+# directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
+# stamp as UTC, whatever the local time zone.
+age_secs() { # <path> <seconds>
+    touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')" "$1"
 }
-age_mins() { # <path> <minutes>
-    local when
-    when="$(date -u -d "$2 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -u -v-"$2"M +%Y%m%d%H%M)"
-    touch -t "$when" "$1"
-}
+age_days() { age_secs "$1" $(( $2 * 86400 )); }  # <path> <days>
+age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     CASE=$((CASE + 1))
     # Reset per case so one case's skew cannot leak into the next. CITY empty
-    # means "no city to probe".
+    # means "no city to probe"; HOST_OS empty means the stub uname's Linux.
     CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
+    HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     STATE_CITY="$base/city"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     GCBIN="$base/bin/gc"; GCLOG="$base/gc-calls"; SERVICES="$base/services.json"
+    BREWLOG="$base/brew-calls"
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
@@ -210,10 +249,10 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
         "$STATE_CITY" > "$SERVICES"
 
-    # Stub toolchain: records the scratch env it was handed, leaks a go-link dir
-    # into it the way a killed linker does, then fails or writes a stand-in
-    # binary. `go build -o` produces an executable; mktemp staged $BIN_TMP 0600,
-    # so the chmod is what keeps the -x check downstream honest.
+    # Stub toolchain: records the scratch and cgo env it was handed, leaks a
+    # go-link dir into it the way a killed linker does, then fails or writes a
+    # stand-in binary. `go build -o` produces an executable; mktemp staged
+    # $BIN_TMP 0600, so the chmod is what keeps the -x check downstream honest.
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -225,7 +264,8 @@ if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
         "${STUB_BEADS_VERSION:-v0.0.0-stub}"
     exit 0
 fi
-printf 'TMPDIR=%s\nGOTMPDIR=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" > "$STUB_RECORD"
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" \
+    "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
@@ -308,6 +348,19 @@ commit_fixture() { # <dir> -> the new revision on stdout
     git -C "$1/services/helm" rev-parse 'HEAD:./' 2>/dev/null
 }
 
+# Wire a local replace-dependency into the fixture the way services/helm wires
+# the real prstatus core: a sibling services/gctk module reached through a
+# `=> ../gctk` replace in helm's go.mod. The stub toolchain never compiles it;
+# what matters is that the builder resolves the replace and folds the sibling's
+# sources into both its staleness identity and its mtime scan.
+add_gctk_dep() {
+    mkdir -p "$ROOT/services/gctk"
+    printf 'module gctk\n\ngo 1.26.5\n'   > "$ROOT/services/gctk/go.mod"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus.go"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/extra.go"
+    printf 'require gctk v0.0.0\n\nreplace gctk => ../gctk\n' >> "$ROOT/services/helm/go.mod"
+}
+
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
 # `// ""` reader would report restart_pending=false as an empty string and the
 # cleared case would pass against the wrong value.
@@ -322,6 +375,9 @@ run_build() { # -> OUT ERR RC
            STUB_PROBE_FAIL_BUILT="${PROBE_FAIL_BUILT:-}" \
            STUB_PROBE_FAIL_CACHED="${PROBE_FAIL_CACHED:-}" \
            STUB_BEADS_VERSION="${BEADS_VERSION:-v0.0.0-stub}" \
+           STUB_HOST_OS="${HOST_OS:-}" STUB_ICU_PREFIX="${ICU_PREFIX:-}" \
+           STUB_BREW_LOG="$BREWLOG" \
+           CGO_CPPFLAGS="${CGO_CPPFLAGS_IN:-}" CGO_LDFLAGS="${CGO_LDFLAGS_IN:-}" \
            GC_HELM_CITY_PATH="${CITY:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
@@ -343,6 +399,8 @@ run_svc() { # -> OUT ERR RC
 }
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
+# CGO_CPPFLAGS or CGO_LDFLAGS, as the toolchain saw it.
+cgo_of() { sed -n "s/^$1=//p" "$RECORD"; }
 
 # ==============================================================================
 # LAUNCHER — gc-helm-svc.sh must exec and never build
@@ -368,7 +426,7 @@ run_svc --socket /run/helm.sock
 eq "$RC" 0 "(NOSTALE) a stale binary is still served"
 has "$OUT" "cached-binary ran:" "(NOSTALE) the stale binary is the one exec'd"
 absent "$RECORD" "(NOBUILD) the launcher does not build even when sources are newer"
-eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l)" "0" \
+eq "$(find "$GOTMP" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" "0" \
    "(NOBUILD) the launcher creates no build scratch at all"
 
 # --- no binary at all ---------------------------------------------------------
@@ -424,7 +482,7 @@ case "$BUILT_TO" in
     "$STATE/bin/".helm-svc.build.*) ok "(ATOMIC) staging sits beside the binary, so the rename is atomic" ;;
     *) bad "(ATOMIC) staging was '$BUILT_TO', not a .helm-svc.build.* beside the binary" ;;
 esac
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) no staging file survives a successful build"
 
 # --- case: rebuilds when a source is newer ------------------------------------
@@ -437,7 +495,7 @@ present "$RECORD" "(REBUILD) the toolchain WAS invoked for a newer source"
 run_svc --socket /run/helm.sock
 has "$OUT" "helm-svc-stub ran:" "(REBUILD) the freshly built binary replaced the cached one"
 
-# --- case: go.mod-only change still counts (tk-ohdex) -------------------------
+# --- case: go.mod-only change still counts -------------------------
 fixture
 cache_binary
 touch "$ROOT/services/helm/go.mod"
@@ -457,8 +515,90 @@ has "$OUT" "up to date" "(CURRENT) says so"
 absent "$RECORD" "(CURRENT) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
 
+# --- case: a change in a local replace-dep (services/gctk) rebuilds -----------
+# helm-svc embeds services/gctk — the shared prstatus core the PR label writer
+# also derives from — through a `=> ../gctk` replace. A change confined to that
+# sibling touches no file under services/helm, so unless the mtime scan spans the
+# replace-deps the builder reports the binary current while the label path has
+# already moved, and the board and the label diverge again.
+fixture
+add_gctk_dep
+cache_binary
+touch "$ROOT/services/gctk/prstatus.go"
+[ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPMOD) the change is confined to services/gctk — nothing under services/helm is newer" \
+    || bad "(DEPMOD) something under services/helm is newer; the case would not isolate the sibling"
+run_build
+eq "$RC" 0 "(DEPMOD) exits 0"
+present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
+
+# --- case: on macOS, cgo is pointed at Homebrew's keg-only icu4c --------------
+# helm-svc links ICU through Dolt's go-icu-regex. Homebrew installs icu4c
+# keg-only, on no default search path, and the order's environment carries no
+# CGO flags, so without this every macOS build stops at 'unicode/regex.h' and no
+# binary is ever published.
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+run_build
+eq "$RC" 0 "(ICU) exits 0"
+eq "$(cgo_of CGO_CPPFLAGS)" "-I$ICU_PREFIX/include" "(ICU) cgo is handed the keg's headers"
+eq "$(cgo_of CGO_LDFLAGS)" "-L$ICU_PREFIX/lib" "(ICU) and its libraries"
+eq "$(cat "$BREWLOG" 2>/dev/null)" "--prefix icu4c" "(ICU) brew is asked for icu4c's prefix, once"
+has "$OUT" "icu4c at $ICU_PREFIX" "(ICU) the log names the icu4c the build used"
+
+# --- case: CGO flags already set are kept -------------------------------------
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+CGO_CPPFLAGS_IN="-DFROM_ENV"
+CGO_LDFLAGS_IN="-L/from/env"
+run_build
+eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$ICU_PREFIX/include" \
+   "(ICUKEEP) CGO_CPPFLAGS keeps its value, with the keg's headers after it"
+eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$ICU_PREFIX/lib" \
+   "(ICUKEEP) and CGO_LDFLAGS keeps its value, with the keg's libraries after it"
+
+# --- case: brew names a prefix, but icu4c is not installed under it -----------
+# brew prints a formula's prefix whether or not the formula is installed, so the
+# prefix alone proves nothing; an include/ under it is what does.
+fixture
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+run_build
+eq "$(cgo_of CGO_CPPFLAGS)" "" "(NOICU) no include path is added for a keg that is not there"
+eq "$(cgo_of CGO_LDFLAGS)" "" "(NOICU) nor a library path"
+has "$ERR" "brew install icu4c" "(NOICU) the log names the missing prerequisite"
+
+# --- case: off macOS nothing is added, and brew is never asked ----------------
+# The system libicu is on the default search path there, so a Homebrew icu4c on
+# the host must not displace it.
+fixture
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+CGO_CPPFLAGS_IN="-DFROM_ENV"
+run_build
+eq "$RC" 0 "(ICUOFF) exits 0"
+present "$RECORD" "(ICUOFF) setup: the build ran"
+eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "(ICUOFF) CGO_CPPFLAGS passes through untouched"
+eq "$(cgo_of CGO_LDFLAGS)" "" "(ICUOFF) and no library path is added"
+absent "$BREWLOG" "(ICUOFF) brew is never asked"
+
+# --- case: a tick with nothing to build never asks brew -----------------------
+fixture
+cache_binary                                        # newer than main.go -> current
+HOST_OS=Darwin
+ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
+mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
+run_build
+eq "$RC" 0 "(ICUTICK) exits 0"
+absent "$RECORD" "(ICUTICK) setup: the binary is current, so nothing builds"
+absent "$BREWLOG" "(ICUTICK) and brew is never asked"
+
 # ==============================================================================
-# READABILITY — the second staleness axis (tk-00o34c)
+# READABILITY — the second staleness axis
 # ==============================================================================
 SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
 
@@ -588,7 +728,7 @@ has "$ERR" "BUILD FAILED" "(FAILKEEP) reports the failure"
 run_svc --socket /run/helm.sock
 has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untouched and still serves"
 absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
-eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l)" "0" \
+eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) the failed build's staging file does not survive either"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
@@ -945,6 +1085,33 @@ eq "$RC" 0 "(STATUSDEL) the next tick exits 0"
 present "$RECORD" "(STATUSDEL) the deleted input forces a rebuild"
 eq "$(status_field binary_rev)" "$REV_E" "(STATUSDEL) so binary_rev names a revision the binary was really built from"
 
+# --- case: a sibling-subtree revision change rebuilds when mtime is blind -----
+# The revision identity catches what `find -newer` cannot see — a deletion. It
+# must span the replace-deps too: a file removed from services/gctk leaves
+# nothing newer than the binary, so only a SOURCE_REV that covers the sibling's
+# subtree forces the rebuild. Without it the record names a revision the binary
+# was never built from, exactly the STATUSDEL failure but one module over.
+fixture
+add_gctk_dep
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+GCTK_REV1="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+run_build
+eq "$RC" 0 "(DEPREV) the first build exits 0"
+has "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev spans the replaced sibling's subtree"
+rm -f "$RECORD"
+git -C "$ROOT" rm -q "services/gctk/extra.go" >/dev/null 2>&1 || true
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+GCTK_REV2="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+[ -n "$GCTK_REV2" ] && [ "$GCTK_REV2" != "$GCTK_REV1" ] \
+    && ok "(DEPREV) the sibling deletion advanced its subtree" \
+    || bad "(DEPREV) the sibling subtree did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPREV) the deletion leaves nothing newer — the mtime test is blind here" \
+    || bad "(DEPREV) something is newer than the binary; the case would not reach the revision path"
+run_build
+eq "$RC" 0 "(DEPREV) the next tick exits 0"
+present "$RECORD" "(DEPREV) a sibling-subtree revision change forces a rebuild"
+
 # --- case: published but not serving -----------------------------------------
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
@@ -974,11 +1141,97 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     && ok "(STATUSTMP) the record is published by rename, never written in place" \
     || bad "(STATUSTMP) the record is no longer published by rename"
 
+# --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
+# The board read "helm: ok" while the served binary was three PRs behind main:
+# every staleness axis above keys on the LOCAL checkout, so a checkout parked
+# off-main keeps its binary current with THAT branch and reports a clean row.
+# behind_main is the axis that sees the gap against main — and it must NOT feed
+# the rebuild decision, because a checkout may be off-main on purpose and the
+# SOURCE_REV subtree-hash identity is what decides a build.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+# One more helm-source commit, parked on origin/main only; HEAD stays at A, so
+# HEAD is one helm-source commit behind origin/main.
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# reconcile-rig-checkouts keeps origin fresh; pin the fetch marker so the case
+# reuses it (the common path) and never reaches the network.
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the first build exits 0"
+BEHIND1="$(status_field behind_main)"
+[ "${BEHIND1:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the record counts the checkout as behind origin/main" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND1', want >= 1"
+# Now current with its own sources: being behind main must not force a rebuild.
+rm -f "$RECORD" "$RECORD.out"
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
+absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the subtree-hash identity still decides"
+has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
+BEHIND2="$(status_field behind_main)"
+[ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(BEHINDMAIN) the drift is still recorded on the no-op tick" \
+    || bad "(BEHINDMAIN) behind_main is '$BEHIND2' on the no-op tick, want >= 1"
+
+# --- case: a checkout level with origin/main records no drift -----------------
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+date +%s > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(ONMAIN) exits 0"
+eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
+
+# --- case: a FAILED origin fetch still advances the fetch cadence -------------
+# The behind_main fetch is bounded to one attempt per GC_HELM_ORIGIN_FETCH_TTL so
+# a 5-minute build tick does not fetch every time. The marker that bounds it used
+# to advance only after a SUCCESSFUL fetch, so an unreachable or unauthenticated
+# origin left it absent and every later tick re-attempted the fetch — the
+# report-only check spending network on every tick instead of degrading quietly
+# until the TTL expired. The marker must advance on the ATTEMPT.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+# Behind main under the helm sources, so the block runs and reaches the fetch.
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+# The fixture configures no `origin` remote, so the fetch this tick attempts
+# FAILS. Clear the marker so the cadence gate is open and the tick attempts it.
+rm -f "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) a failed origin fetch does not fail the build"
+present "$STATE/origin-fetch-at" \
+    "(FETCHFAIL) a failed fetch still records the attempt, so the cadence advances"
+BEHIND_FF="$(status_field behind_main)"
+[ "${BEHIND_FF:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(FETCHFAIL) the drift is still reported off the last origin ref despite the failed fetch" \
+    || bad "(FETCHFAIL) behind_main is '$BEHIND_FF' after a failed fetch, want >= 1"
+# The next tick within the TTL must SKIP the fetch. Hold the marker fresh but a
+# few seconds in the past: a re-fetch would restamp it to the current second, so
+# an unchanged value proves the tick did not re-attempt before the TTL expired.
+SENTINEL="$(( $(date +%s) - 5 ))"
+printf '%s\n' "$SENTINEL" > "$STATE/origin-fetch-at"
+run_build
+eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
+eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
+    "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
+
 # ==============================================================================
 # STATIC GUARDS
 # ==============================================================================
 
-# The regression that caused the tk-m18ml incident is pointing the toolchain
+# The regression this guards against is pointing the toolchain
 # straight at the shared, unbounded $GOTMP. Whatever else the build line grows,
 # it must hand the toolchain a dir this invocation owns and deletes.
 if grep -qE '(TMPDIR|GOTMPDIR)="\$GOTMP"' "$BUILD"; then

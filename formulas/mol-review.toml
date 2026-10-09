@@ -1,7 +1,7 @@
 description = """
 Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
-metadata.task_kind=review, check_name (the gate the verdict satisfies),
+metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
 review_base pre-open, or pr_url / pr_number once a PR exists — plus the
 dispatch-pinned reviewed_oid. The steps carry the whole method; the agent
@@ -26,9 +26,12 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- One agent, single pass. Read the diff yourself, run the tests yourself,
-  write the verdict yourself. No subagents, no persona reviewers, no
-  parallel review pass.
+- Single honest pass. Read the diff yourself, run the tests yourself, write
+  your findings yourself. No subagents doing the review, no persona
+  reviewers. The review may run as a two-provider quorum instead: two lanes
+  each do one honest pass, and one synthesizer combines their findings into
+  the single verdict (the mol-review-quorum-signoff formula). One verdict per
+  claim holds either way, because the synthesizer makes the one signoff call.
 
 Mechanics the steps are written around: the review bead arrives as the input
 convoy (each step re-derives REVIEW_BEAD in its own shell), and each step
@@ -132,9 +135,12 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 # reads through learning-recurrence.sh --inventory. Anchors live here, not
 # beside the dimension: the step description below renders into a step bead,
 # where an HTML comment is noise in the text the reviewer reads. One line per
-# adopted dimension, naming the "What to check" bullet it amended:
+# adopted entry, naming the "What to check" bullet it amended:
 # <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
 # <!-- rule:tk-wamr3 src:pr:#105 (operator feedback) adopted:2026-09-03 --> Comments
+# <!-- rule:tk-v32d2u src:pr:#1015:comment:4180705562, pr:#1025:comment:4180671214, visit:tk-cm64ub1 (operator feedback) adopted:2026-10-06 --> Comments
+# <!-- rule:tk-0rhvews src:pr:#964:comment:4171895604, pr:#1117:comment:4198995344 (operator feedback) adopted:2026-10-07 --> Testing
+# <!-- rule:tk-prvea src:pr:#1045:comment:4212283737, pr:#1075:comment:4211952314, pr:#1067:review:5423601195 (operator feedback) adopted:2026-10-08 --> Contract
 
 [[steps]]
 id = "review"
@@ -162,27 +168,35 @@ Three dots — compare against the merge-base, so you review what the branch
 changed rather than what the base moved on underneath it. A large diff gets
 read in chunks, not sampled.
 
-**2. Run the tests at the pinned commit** in a throwaway detached worktree,
-so they run against exactly what you reviewed:
-Run it as ONE shell: the trap is what removes the worktree, and it fires
-when that shell exits.
+**2. Run the tests at the pinned commit** in a detached worktree inside this
+review's workspace, so they run against exactly what you reviewed. The
+workspace is a directory named for the review bead, and it belongs to the
+review rather than to any one shell: `add` returns the same worktree each time
+it runs, so a later block gets it back by running these lines again.
 ```bash
-REPO=$(git rev-parse --show-toplevel)
-REVIEW_WT=$(mktemp -d "${TMPDIR:-/tmp}/gc-review-$REVIEW_BEAD.XXXXXX")
-# The trap owns the teardown, so every exit reaches it — a failing suite, a
-# timeout, an interrupt. A worktree left behind keeps its registration too,
-# and a registration whose directory still exists is one `git worktree prune`
-# cannot reclaim: it needs the removal to have run.
-review_wt_rm() {
-  cd "$REPO" 2>/dev/null || true
-  git -C "$REPO" worktree remove --force "$REVIEW_WT" 2>/dev/null || rm -rf "$REVIEW_WT"
-  git -C "$REPO" worktree prune
-}
-trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
+# >>> review-workspace-add
+# The worktree is made in the rig's repository, named by path, so the
+# session's cwd cannot pick the repo. Without --repo, add uses the current
+# directory's repository, and an empty --repo does the same, so an
+# unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
+# <<< review-workspace-add
 # run the suites the diff touches; record real pass/fail counts
 ```
+Anything else the review writes to disk, such as a log, probe output, or a
+second worktree at the base, goes in the workspace beside `wt`
+(`dirname "$REVIEW_WT"`), never loose in `/tmp`. The verdict step removes the
+workspace when the review ends there, and the hourly review-workspace-reap
+order removes any workspace whose review bead has closed
+(docs/review-workspace.md).
+
 A failing suite is not automatically a finding: check whether it fails on the
 base too. A pre-existing failure belongs in the verdict as context, not as
 this branch's defect.
@@ -199,9 +213,17 @@ finding this diff carries, not the first one that appears.
 - **Contract** — does it break a caller, a stored format, a metadata key, or
   a script that greps for the old shape? Find the other call sites of
   anything it changed; the recurring defect class is a predicate fixed in
-  one copy and left stale in two.
+  one copy and left stale in two. Search the same way for what it adds: a
+  rule the diff writes where existing code already defines it, or one edit
+  repeated across copies of a code path, is a finding until one definition
+  serves every site, and a follow-up to fold the copies later does not
+  answer it. Where the surface has no include mechanism, that definition is
+  a marker-fenced block a test holds every copy to.
 - **Testing** — do the tests exercise real behavior, is the new path
-  covered, does a regression pin the bug that was fixed?
+  covered, does a regression pin the bug that was fixed? A new case pins its
+  change only if it fails when the change is reverted, so run each new case
+  against the pre-change code, and confirm that a failure-path case's stub
+  can produce the failure it names.
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
 - **Comments** — a comment carries the code's non-obvious why. Narration of
@@ -212,25 +234,39 @@ finding this diff carries, not the first one that appears.
   code is complex or the comment is making a simple thing look complex. A
   comment that explains a real why earns its place, so this is not a case for
   stripping comments. Tests and fixtures matter less here than the code they
-  exercise.
-- **The PR as published** — post-open, the page is what a human reads to
-  decide the merge, so read its title and body against the diff you just
-  read. Re-derive `PR` and `PR_REPO_Q` here the way load-dispatch did, then
-  read the page through that pin and never from a bare number against
-  ambient gh context:
-  `gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`. A `## Summary`
-  that does not state what the diff does is a finding, whether it is a
-  placeholder, a restatement of the dispatch, or an account of other work;
-  so is a title that understates the scope. When the body looks wrong, read
+  exercise. A docs/ page is held to the same rule: a section that restates a
+  component's usage, commands, flags, environment or tests from its header,
+  skill or formula is duplicated prose, so a component's page carries its
+  rationale and the invariants other components rely on. A page with nothing
+  else left is not warranted.
+- **The PR as published** — the `## Summary` is the human-facing
+  merge-decision surface, so it must holistically and currently account for
+  the ENTIRE branch diff you just read, not one contributor's share of it. A
+  summary that does not state what the whole diff does is a finding — a
+  placeholder, a restatement of the dispatch, and an account of other work
+  each qualify — and so is a title that understates the scope. Where the
+  summary lives depends on the state. Post-open, read the page through the
+  pin load-dispatch set, never a bare number against ambient gh context:
+  `gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`. Pre-open there is
+  no page, but `pr-open.sh` will publish the anchor's `metadata.pr_summary`
+  verbatim as `## Summary` once the check goes green, falling back to the
+  dispatch description and then a placeholder when it is absent
+  (`assets/scripts/pr-open.sh`); read that pending summary and hold it to the
+  same standard —
+  `ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead')` then
+  `gc bd show "$ANCHOR" --json | jq -r '.[0].metadata.pr_summary // empty'`.
+  An absent or empty pre-open summary ships the dispatch description in its
+  place — what the work was asked to do, not what the diff did — so it is a
+  finding unless that text already accounts for the whole diff; its locus is
+  `anchor <id> / pr_summary`. When the published body looks wrong, read
   `assets/scripts/pr-open.sh` for the shape this pack's opener emits, and
   `assets/scripts/pr-stack.sh` for the delimited beads-on-this-branch section
-  the cadence keeps current below it. A page carrying neither is an observed
-  fact worth recording, and it still does not tell you what opened the PR. A
-  section naming more than the anchor means the branch carries work from more
-  than one bead, and your verdict covers every one of them. Pre-open there is
-  no page — your verdict becomes its opening comment instead.
-- **Work-quality standards** — resolve the work-quality fragment from the
-  pack checkout and hold the diff's output (code, comments, docs) to its
+  the cadence keeps current below it. A section naming more than the anchor
+  means the branch carries work from more than one bead, and your verdict
+  covers every one of them. Pre-open, your verdict becomes the PR's opening
+  comment.
+- **Work-quality standards** — resolve the work-quality fragments from the
+  pack checkout and hold the diff's output (code, comments, docs) to their
   "Standards for what you produce" entries. A violation is a blocking
   (request-changes) finding. The operator profile is not read here: its
   entries govern how a role addresses the operator at runtime, which is a
@@ -240,21 +276,23 @@ finding this diff carries, not the first one that appears.
 ```bash
 # Resolve on the directory, not on one fragment: a checkout lagging the commit
 # that added a fragment still resolves the pack, so a miss costs that fragment
-# and not the whole read.
+# and not the whole read. The carrier is a set of fragments — the shared base
+# plus one per role class — so glob them all: work-quality-base holds the
+# universal standards and each work-quality-<class> holds its class's.
 PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -d "$c/template-fragments" ] && { PACK="$c"; break; }
 done
-if [ -n "$PACK" ] && [ -r "$PACK/template-fragments/work-quality.template.md" ]; then
-  cat "$PACK/template-fragments/work-quality.template.md"
+if [ -n "$PACK" ] && ls "$PACK"/template-fragments/work-quality-*.template.md >/dev/null 2>&1; then
+  cat "$PACK"/template-fragments/work-quality-*.template.md
 else
-  echo "work-quality fragment not found in this checkout; note that in the verdict's coverage line"
+  echo "work-quality fragments not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.
 [ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
 ```
 
 **4. Calibrate severity.** P0 — broken or unsafe as merged: data loss, a
-merge that bypasses a gate, a crash on the normal path. P1 — a real defect
+merge that bypasses a check, a crash on the normal path. P1 — a real defect
 that will bite: wrong behavior on a reachable input, a fail-open where
 fail-closed was intended. P2 — worth fixing, not worth blocking: a narrow
 hazard, a test gap, a clarity problem. Grade honestly: a P2 inflated to P1
@@ -298,12 +336,20 @@ if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   FILED="unfiled — duplicate probe unreadable"
 else
   FILED=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
-  [ -n "$FILED" ] || FILED=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json | jq -r '.id // .[0].id')
+  if [ -z "$FILED" ]; then
+    FILED_JSON=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json)
+    FILED=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    if [ -z "$FILED" ]; then
+      CREATE_ERR=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+      FILED="unfiled — bd create returned no id${CREATE_ERR:+: $CREATE_ERR}"
+    fi
+  fi
 fi
 echo "$FILED"
 ```
-An unreadable probe files nothing. Say so in the verdict rather than filing
-blind, and the next round re-probes.
+An unreadable probe files nothing, and neither does a create that returns no
+id. Say so in the verdict rather than filing blind, and the next round
+re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step:
@@ -380,8 +426,7 @@ required fix.
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
 read-back, filing the finding set from `findings.json` beside one slung rework
-child on request-changes, enforcing the round cap, and refusing a pin the
-branch no longer carries:
+child on request-changes, and refusing a pin the branch no longer carries:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -397,6 +442,12 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads or finding beads (signoff.sh files the findings from your
 `findings.json`), and never run `gh pr review --approve`.
+
+Pass on this same call any flag the check section of this bead's dispatch note
+names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+When signoff.sh refuses a verdict for a missing or invalid flag, it has written
+nothing, so re-run the call with the flag corrected; that is still the one
+verdict.
 
 **2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and
@@ -423,16 +474,20 @@ The pour retired gc.routed_to and this workflow's steps are now closed, so no
 second authority remains; restoring the route returns the bead to the pool's
 routed tier as a formula-less review bead whose body carries the method note
 (the documented recovery shape), so the next claim genuinely resumes — an
-unrecorded verdict is recoverable; a hand-rolled one is not.
+unrecorded verdict is recoverable; a hand-rolled one is not. The review's
+workspace stays where it is, and the reviewer who claims the bead next gets
+the same worktree back from `review-workspace.sh add`.
 
-**3. Close this workflow's step chain, then drain.** Terminal step: it still
-closes its own bead — that is how a graph.v2 step advances, and skipping it
-leaves an open assigned step bead that re-pools a fresh worker every cycle,
-indefinitely. Forward order is mandatory (each step blocks the next); close
-only through step-close.sh, which resolves by (gc.root_bead_id,
-gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead after a claim.
-Never close `workflow-finalize` (the control-dispatcher's):
+**3. Close this workflow's step chain, remove the workspace, then drain.**
+Terminal step: it still closes its own bead — that is how a graph.v2 step
+advances, and skipping it leaves an open assigned step bead that re-pools a
+fresh worker every cycle, indefinitely. Forward order is mandatory (each step
+blocks the next); close only through step-close.sh, which resolves by
+(gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
+after a claim. Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
@@ -440,6 +495,9 @@ done
 for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
 done
+# >>> review-workspace-remove
+[ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"
+# <<< review-workspace-remove
 gc runtime drain-ack
 ```
 
@@ -448,6 +506,7 @@ touch the anchor. Done means gone.
 
 **Exit criteria:** exactly one signoff.sh call succeeded (or findings are
 appended and, after the chain closed, the bead's route is restored so the
-pool can re-claim it), step chain closed forward, drain acknowledged.
+pool can re-claim it), step chain closed forward, the workspace removed unless
+the bead went back to the pool, drain acknowledged.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

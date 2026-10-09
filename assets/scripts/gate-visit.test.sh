@@ -15,8 +15,11 @@
 #     pool-route.sh against the live agent set; either way the conditional rig
 #     prefix that renders bare for a rig-less caller is gone (a pool offer is
 #     read by exact string equality, so a bare address sits silently forever)
-#   - the three metadata stamps ride one --set-metadata flag each
-#     (comma-joined pairs become one garbage value)
+#   - the three metadata stamps are each present and load-bearing, riding
+#     either their own --set-metadata flag (comma-joined pairs become one
+#     garbage value, so each rides its own) or a key in the create's jq-built
+#     --metadata JSON (which stamps the identity atomically with the create, so
+#     an interrupted stamp cannot leave a visit its dedup can never match)
 #   - the visit is wired to its subject with a tracks edge (parent-child
 #     would transmit the subject's blocked state to the visit)
 #   - the visit title carries the "visit: " brand
@@ -24,6 +27,8 @@
 #     cascades into stamping nothing, and the silent failure is what
 #     tempts agents to rewrite the block instead of re-running it)
 # Hermetic: reads the repo only; no gc, no city.
+#
+# run-tests-scope: tree
 
 set -u
 
@@ -36,6 +41,17 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 have() { if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi; }
+
+# A load-bearing stamp rides EITHER its own --set-metadata flag (the own-flag
+# form guards the comma-joined-pairs trap) OR a key in the create's jq-built
+# --metadata JSON, which cannot hit that trap and stamps the identity atomically
+# with the create. Accept both. $2 is the --set-metadata ERE, $3 the JSON key ERE.
+stamped() { # <block> <set-metadata-ERE> <json-key-ERE>
+    printf '%s' "$1" | grep -qE -- "$2" && return 0
+    printf '%s' "$1" | grep -qF -- '--metadata "' \
+        && printf '%s' "$1" | grep -qE -- "\"$3\"[[:space:]]*:" && return 0
+    return 1
+}
 
 extract() { # extract marked blocks from one file to stdout, blocks separated by \x1e
     awk '/# >>> gate-visit/{inb=1; next} /# <<< gate-visit/{inb=0; printf "\x1e"; next} inb' "$1"
@@ -50,7 +66,7 @@ echo "── every consumer copy carries the invariants ──"
 # SCRIPT_CONSUMERS split that by surface so each census can assert its own
 # floor (a formula copy going missing must not be masked by a script copy
 # appearing, or the reverse).
-CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0; PROMPT_CONSUMERS=0
+CONSUMERS=0; FORMULA_CONSUMERS=0; SCRIPT_CONSUMERS=0
 # check_file <path> — assert the invariants on every marked copy in one file.
 # Fed by a heredoc, NOT a pipe: a pipe would run the loop in a subshell and
 # the counters would come back zero.
@@ -62,9 +78,8 @@ check_file() {
     while IFS= read -r -d $'\x1e' block; do
         [ -n "$(printf '%s' "$block" | tr -d '[:space:]')" ] || continue
         n=$((n + 1)); CONSUMERS=$((CONSUMERS + 1))
-        case "$f" in *.toml)              FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
-                     *prompt.template.md) PROMPT_CONSUMERS=$((PROMPT_CONSUMERS + 1)) ;;
-                     *)                   SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
+        case "$f" in *.toml) FORMULA_CONSUMERS=$((FORMULA_CONSUMERS + 1)) ;;
+                     *)       SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
         name="$(basename "$f") block $n"
         tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
         # neutralize template placeholders so bash can parse the copy
@@ -113,14 +128,23 @@ check_file() {
         fi
         printf '%s' "$block" | grep -qE 'gc bd create -t task --title "visit: ' \
             && ok "$name: visit title brand" || bad "$name: visit title brand" 'no `--title "visit: …"` create'
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.routed_to=$POOL"' \
-            && ok "$name: routed_to stamp, own flag" || bad "$name: routed_to stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qE -- '--set-metadata "gc\.continuation_group=' \
-            && ok "$name: continuation_group stamp, own flag" || bad "$name: continuation_group stamp, own flag" "stamp absent or malformed"
-        printf '%s' "$block" | grep -qF -- '--set-metadata "task_kind=visit"' \
-            && ok "$name: task_kind stamp, own flag" || bad "$name: task_kind stamp, own flag" "stamp absent or malformed"
+        stamped "$block" '--set-metadata "gc\.routed_to=\$POOL"' 'gc\.routed_to' \
+            && ok "$name: routed_to stamped (own flag or create --metadata)" \
+            || bad "$name: routed_to stamped" "no gc.routed_to via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "gc\.continuation_group=' 'gc\.continuation_group' \
+            && ok "$name: continuation_group stamped (own flag or create --metadata)" \
+            || bad "$name: continuation_group stamped" "no gc.continuation_group via --set-metadata or the create's --metadata"
+        stamped "$block" '--set-metadata "task_kind=visit"' 'task_kind' \
+            && ok "$name: task_kind stamped (own flag or create --metadata)" \
+            || bad "$name: task_kind stamped" "no task_kind via --set-metadata or the create's --metadata"
         printf '%s' "$block" | grep -qF -- '[ -n "$VISIT" ] && [ "$VISIT" != "null" ]' \
             && ok "$name: create id guarded before use" || bad "$name: create id guarded before use" 'no `[ -n "$VISIT" ] && [ "$VISIT" != "null" ]` guard after the create'
+        # bd states why it refused a create in the {"error": ...} object it
+        # answers on stdout, so a copy that finds no id reads that reason out;
+        # without it the operator learns only that no id came back.
+        printf '%s' "$block" | grep -qF -- '(.error // empty)' \
+            && ok "$name: a refused create reports bd's own reason" \
+            || bad "$name: a refused create reports bd's own reason" "no read of the refusal's .error in the copy"
         printf '%s' "$block" | grep -q -- '--type=tracks' \
             && ok "$name: tracks edge (non-blocking lineage)" || bad "$name: tracks edge (non-blocking lineage)" "dep add --type=tracks missing"
         printf '%s' "$block" | grep -q -- '--type=parent-child' \
@@ -140,8 +164,11 @@ check_file() {
         fi
         # ...and the read-back must REPAIR, not refuse: this block files the
         # one visit for its scope, so exiting on a lost stamp trades a quiet
-        # degradation for an outage of the same surface.
-        printf '%s' "$block" | grep -qF -- '--set-metadata "gc.continuation_group=' \
+        # degradation for an outage of the same surface. The re-stamp grep is
+        # scoped to the read-back arm (GROUP_GOT onward): the block's initial
+        # stamp carries the same '--set-metadata "gc.continuation_group="', so a
+        # block-wide grep stays green with the read-back's re-stamp deleted.
+        printf '%s' "$block" | sed -n '/GROUP_GOT=/,$p' | grep -qF -- '--set-metadata "gc.continuation_group=' \
             && printf '%s' "$block" | grep -qE 'warning: gc\.continuation_group .* — repairing"' \
             && ok "$name: the read-back repairs and warns" \
             || bad "$name: the read-back repairs and warns" 'the read-back must re-stamp the group and warn, never exit'
@@ -166,13 +193,10 @@ for f in "$SDIR"/*.sh; do
     case "$f" in *.test.sh) continue ;; esac    # tests quote the block; they do not ship it
     check_file "$f"
 done
-# ...and the PROMPT surface: agents/proactive ships a marked copy to an agent
-# the same way a formula copy ships to a molecule, and an unswept copy is
-# where a fix lands everywhere and still misses one.
-for f in "$REPO"/agents/*/prompt.template.md; do
-    [ -r "$f" ] || continue
-    check_file "$f"
-done
+# Worker prompts carry no gate-visit copy: the proactive prompt's ruling and
+# recommend exits file a human gate through first-reaction-dispose.sh, and
+# gate-visit-sweep files that gate's visit, so the formula and script sweeps
+# above cover every shipped copy.
 
 echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
@@ -190,7 +214,23 @@ cat > "$EXTMP/bin/gc" <<'GVSTUB'
 # the whole route check out of this suite.
 case "$1 ${2:-}" in
   "agent list") printf '%s\n' "${AGENTS:-}" ;;
-  "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"; echo '{"id":"v-1"}' ;;
+  "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"
+               # The title and body as bd received them, for the bound checks.
+               while [ $# -gt 0 ]; do
+                 case "$1" in
+                   --title) printf '%s' "${2:-}" > "$STATE/title"; shift ;;
+                   -d)      printf '%s' "${2:-}" > "$STATE/body"; shift ;;
+                 esac
+                 shift
+               done
+               # CREATE answers the ways bd does: the bead as an object (the
+               # default) or as an array holding it, or a refusal, which is an
+               # {"error": ...} object on stdout and exit 1.
+               case "${CREATE:-object}" in
+                 array)   echo '[{"id":"v-1"}]' ;;
+                 refused) printf '{\n  "error": "%s",\n  "schema_version": 1\n}\n' "$REFUSAL"; exit 1 ;;
+                 *)       echo '{"id":"v-1"}' ;;
+               esac ;;
   "bd update") printf 'UPDATE %s\n' "$*" >> "$LOG"
                case "$*" in *gc.continuation_group=*)
                  if [ -f "$STATE/stamped" ]; then touch "$STATE/repaired"; else touch "$STATE/stamped"; fi ;;
@@ -254,21 +294,103 @@ else
     bad "a lost stamp does not cost the pass" "the tracks edge was never added; the block aborted on a recoverable write loss"
 fi
 
+# The canonical copy bound to subject sub-A and a given visit text, in
+# $EXTMP/block-v.sh. Bash substitution rather than sed, because the text
+# carries newlines and multi-byte characters.
+render_gv() { # <visit-text>
+    local raw
+    raw="$(awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$FDIR/mol-visit.toml")"
+    raw="${raw//\{\{subject\}\}/sub-A}"
+    raw="${raw//\{\{visit\}\}/"$1"}"
+    printf '%s\n' "$raw" > "$EXTMP/block-v.sh"
+}
+run_gv() { # <CREATE answer: object|array|refused> -> OUT, RC; title/body in $EXTMP/state
+    rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
+    OUT="$(PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST=0 CREATE="$1" \
+        REFUSAL='validation failed: validation failed for issue : title must be 500 characters or less (got 544)' \
+        bash "$EXTMP/block-v.sh" 2>&1)"; RC=$?
+}
+
+echo "── the create's answer is read whatever its shape (executed) ──"
+render_gv "why"
+run_gv object
+if [ "$RC" = 0 ] && [ "$(cat "$EXTMP/state/title")" = "visit: sub-A — why" ]; then
+    ok "a short visit is the title tail verbatim"
+else
+    bad "a short visit is the title tail verbatim" "rc=$RC, title: $(cat "$EXTMP/state/title" 2>/dev/null)"
+fi
+run_gv array
+if [ "$RC" = 0 ] && grep -q 'DEP .* add v-1 sub-A --type=tracks' "$EXTMP/log"; then
+    ok "an array answer yields the id, and the visit is wired"
+else
+    bad "an array answer yields the id, and the visit is wired" "rc=$RC, out: $OUT"
+fi
+run_gv refused
+if [ "$RC" != 0 ]; then ok "a refused create stops the block"; else bad "a refused create stops the block" "exited 0: $OUT"; fi
+case "$OUT" in
+    *"title must be 500 characters or less"*) ok "…and reports bd's own reason" ;;
+    *) bad "…and reports bd's own reason" "the refusal's .error is not in: $OUT" ;;
+esac
+case "$OUT" in
+    *"Cannot index"* | *"jq: error"*) bad "…and no jq error stands in for it" "jq leaked: $OUT" ;;
+    *) ok "…and no jq error stands in for it" ;;
+esac
+if grep -qE '^(UPDATE|DEP) ' "$EXTMP/log"; then
+    bad "…and nothing is stamped or wired" "wrote to a bead that does not exist: $(cat "$EXTMP/log")"
+else
+    ok "…and nothing is stamped or wired"
+fi
+
+echo "── a long visit is bounded in the title and whole in the body (executed) ──"
+# Over bd's 500-byte title cap on its own, with a newline and a tab to collapse.
+LONG_VISIT="$(printf 'word%.0s ' $(seq 1 150))
+second	line   here"
+render_gv "$LONG_VISIT"
+run_gv object
+TITLE="$(cat "$EXTMP/state/title" 2>/dev/null)"
+TAIL="${TITLE#visit: sub-A — }"
+if [ "$RC" = 0 ] && [ "$(wc -c < "$EXTMP/state/title")" -le 500 ]; then
+    ok "the title fits bd's 500-byte cap ($(wc -c < "$EXTMP/state/title") bytes)"
+else
+    bad "the title fits bd's 500-byte cap" "rc=$RC, $(wc -c < "$EXTMP/state/title" 2>/dev/null) bytes: $OUT"
+fi
+case "$TITLE" in
+    *$'\n'* | *$'\t'*) bad "…on one line" "the title kept a newline or tab: $TITLE" ;;
+    *) ok "…on one line" ;;
+esac
+if [ "$TAIL" != "$TITLE" ] && [ "$(printf '%s' "$TAIL" | jq -Rsr length)" -le 140 ]; then
+    ok "…with the board headline cap on its tail"
+else
+    bad "…with the board headline cap on its tail" "tail: $TAIL"
+fi
+case "$TAIL" in
+    *…) ok "…marking the cut with an ellipsis" ;;
+    *) bad "…marking the cut with an ellipsis" "tail: $TAIL" ;;
+esac
+if cmp -s <(printf '%s' "$LONG_VISIT") "$EXTMP/state/body"; then
+    ok "the body keeps the full visit text"
+else
+    bad "the body keeps the full visit text" "body: $(cat "$EXTMP/state/body" 2>/dev/null)"
+fi
+# bd counts bytes, so 140 characters of 4-byte text would overrun the cap.
+render_gv "$(printf '\360\237\230\200%.0s' $(seq 1 200))"
+run_gv object
+if [ "$RC" = 0 ] && [ "$(wc -c < "$EXTMP/state/title")" -le 500 ]; then
+    ok "a tail in 4-byte characters fits the byte cap too ($(wc -c < "$EXTMP/state/title") bytes)"
+else
+    bad "a tail in 4-byte characters fits the byte cap too" "rc=$RC, $(wc -c < "$EXTMP/state/title" 2>/dev/null) bytes"
+fi
+
 echo "── consumer census ──"
-if [ "$FORMULA_CONSUMERS" -ge 2 ]; then
+if [ "$FORMULA_CONSUMERS" -ge 3 ]; then
     ok "the known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
 else
-    bad "the known formula consumers carry marked copies" "expected >=2 (mol-visit, mol-feedback-distiller); found $FORMULA_CONSUMERS"
+    bad "the known formula consumers carry marked copies" "expected >=3 (mol-visit, mol-feedback-distiller, mol-validate-close); found $FORMULA_CONSUMERS"
 fi
 if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"
 else
     bad "the script surface carries marked copies" "expected >=1 (gc-helm.sh open files the operator's visit); found $SCRIPT_CONSUMERS — did a copy get unmarked or hand-rolled?"
-fi
-if [ "$PROMPT_CONSUMERS" -ge 1 ]; then
-    ok "the prompt surface carries marked copies ($PROMPT_CONSUMERS found)"
-else
-    bad "the prompt surface carries marked copies" "expected >=1 (agents/proactive files a first-reaction visit); found $PROMPT_CONSUMERS — an unswept copy is where a fix lands everywhere and still misses one"
 fi
 
 echo

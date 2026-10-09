@@ -7,9 +7,9 @@
 # so nothing in the runtime cycles it. Both endings the config names — the
 # agent's sign-off and the operator's `gc-helm dismiss` — close the VISIT on the
 # belief that closing the visit ends the sitting. It does not: the manual session
-# outlives its closed visit, holding a max_active_sessions slot (default 2) and,
-# when the operator has walked away, leaving a closed visit beside a live pane.
-# This pass is the reap those two endings assume.
+# outlives its closed visit as a live provider process and, when the operator has
+# walked away, a closed visit beside a live pane. This pass is the reap those two
+# endings assume.
 #
 # A converse session whose visit is CLOSED (or gone) is settled: the hold it
 # protected is over, so there is nothing left to protect. Close the session.
@@ -21,9 +21,9 @@
 # standing ruling is that draining a pane with typed text is a hard no. Attachment
 # is the only signal the pack has for "someone is at this pane", so an attached
 # sitting is left for its own sign-off or a dismiss even when its visit already
-# reads closed. The unattached settled sittings — the leaked slots — are what this
-# reaps. Ending a sitting whose visit is still OPEN (the operator walked away
-# before any sign-off) is the harder, separate case; this pass never touches it.
+# reads closed. The unattached settled sittings, the leaked sessions, are what
+# this reaps. A sitting whose visit is still OPEN (the operator walked away
+# before any sign-off) is the harder, separate case; this pass leaves it alone.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per converse session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
@@ -35,7 +35,8 @@
 # Usage:
 #   converse-reap.sh            reap settled sittings, print one summary line
 #   converse-reap.sh --dry-run  report the plan, close nothing
-# Exit: 0 reaped or nothing to do · 1 the session listing was unreadable · 2 usage
+# Exit: 0 reaped or nothing to do · 1 the session list could not be read or the
+#       candidate set could not be enumerated · 2 usage
 # Caller: the converse-reap cooldown order. See specs/tk-2i4bde/converse-reap.md.
 set -uo pipefail
 
@@ -80,8 +81,29 @@ candidates="$(printf '%s' "$sessions_json" | jq -r '
 reaped=0; kept=0; skipped=0
 reaped_lines=""
 
+# Drive the loop from a checked, producer-named temp file rather than a `<<<`
+# here-string. bash backs `<<<` with an implicit temp file; under disk pressure
+# that file cannot be created, the redirection fails with no `set -e` to catch
+# it, the loop runs zero times, and the summary below prints a reaped-nothing
+# all-clear byte-identical to a healthy empty queue. A checked mktemp, a checked
+# write, and a processed-equals-expected assertion each abort non-zero instead,
+# so the order wrapper retries next pass rather than trusting a forged all-clear.
+# Reading from the file keeps the loop in this shell, so the counters survive.
+ROWS="$(mktemp "${TMPDIR:-/tmp}/gctk-converse-reap.XXXXXX" 2>/dev/null)" || {
+    echo "$PROG: could not create a temp file to enumerate converse sittings — reaping nothing" >&2
+    exit 1
+}
+trap 'rm -f "$ROWS" 2>/dev/null' EXIT
+printf '%s\n' "$candidates" > "$ROWS" || {
+    echo "$PROG: could not write the converse-sitting enumeration — reaping nothing" >&2
+    exit 1
+}
+expected="$(grep -c . "$ROWS" 2>/dev/null || true)"; case "$expected" in ''|*[!0-9]*) expected=0 ;; esac
+processed=0
+
 while IFS=$'\t' read -r sid vid; do
     [ -n "$sid" ] || continue
+    processed=$((processed + 1))
 
     # The alias' final segment must look like a bead id, or the alias is not a
     # visit reference this pass can resolve.
@@ -136,9 +158,9 @@ while IFS=$'\t' read -r sid vid; do
 
     # Record the per-session line only once the sitting is actually gone. A close
     # that FAILS is reported on stderr and counted skipped; it must NOT land in the
-    # reaped list, which is the summary's account of the slots this pass freed, and
-    # the close is the one operation this order performs. A dry run frees nothing,
-    # so there the line is the plan.
+    # reaped list, which is the summary's account of the sittings this pass closed,
+    # and the close is the one operation this order performs. A dry run closes
+    # nothing, so there the line is the plan.
     if [ "$DRY_RUN" -eq 1 ]; then
         reaped=$((reaped + 1))
     elif "$GC" session close "$sid" >/dev/null 2>&1; then
@@ -150,7 +172,16 @@ while IFS=$'\t' read -r sid vid; do
     fi
     reaped_lines="${reaped_lines}  ${sid} (visit ${vid} ${verdict})
 "
-done <<< "$candidates"
+done < "$ROWS"
+rm -f "$ROWS"
+
+# A loop that read fewer rows than were enumerated did not see the whole queue.
+# Treat a short read like a failed enumeration: reap nothing, abort non-zero,
+# retry next pass; never print the all-clear on a partial pass.
+[ "$processed" -eq "$expected" ] || {
+    echo "$PROG: read $processed of $expected candidate rows — reaping nothing" >&2
+    exit 1
+}
 
 verb="closed"; [ "$DRY_RUN" -eq 1 ] && verb="would close"
 echo "$PROG: $verb $reaped settled converse sittings (visit closed or gone), kept $kept held, skipped $skipped"

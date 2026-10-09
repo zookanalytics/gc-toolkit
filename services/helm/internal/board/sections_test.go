@@ -106,6 +106,206 @@ func TestVisitFoldsIntoSubjectTile(t *testing.T) {
 	}
 }
 
+// recommendationSubject is a subject a reaction has stamped with a recommended
+// execution formula — the key that makes its visit a recommendation (Accept +
+// Discuss) rather than a plain one (Discuss only).
+func recommendationSubject(id, formula string) Anchor {
+	return Anchor{
+		ID: id, Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Title: "t " + id,
+		Metadata: map[string]string{
+			"gc.routed_to":           "human",
+			"gc.recommended_formula": formula,
+		},
+	}
+}
+
+// openSitting / engagedSitting are a visit's sitting as facts carries it: open
+// is parked and un-engaged, in_progress is a converse holding it.
+func openSitting(subject string) Sitting { return Sitting{Subject: subject, Status: "open"} }
+func engagedSitting(subject string) Sitting {
+	return Sitting{Subject: subject, Status: "in_progress", Session: "converse-1"}
+}
+
+// pendingSitting is the window between engage binding the visit and the hook
+// claim promoting it: still open, no session stamped yet, but bound by assignee.
+func pendingSitting(subject string) Sitting {
+	return Sitting{Subject: subject, Status: "open", Assignee: "converse-1"}
+}
+
+// TestRecommendationSubjectIsAcceptable: a subject carrying a recommended
+// formula whose visit stands un-engaged is Acceptable, and names the formula
+// Accept would dispatch. The visit wrapper folds away and never carries it.
+func TestRecommendationSubjectIsAcceptable(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "retire the wedged PR"),
+		recommendationSubject("tk-subj", "mol-dispose-pr"),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{openSitting("tk-subj")}})
+
+	subj, ok := tileByID(b, "tk-subj")
+	if !ok {
+		t.Fatalf("the subject row must survive the fold")
+	}
+	if !subj.Acceptable {
+		t.Errorf("a recommendation subject with an un-engaged visit is acceptable: got Acceptable=%v", subj.Acceptable)
+	}
+	if subj.AcceptFormula != "mol-dispose-pr" {
+		t.Errorf("the accept formula names what accepting dispatches: got %q", subj.AcceptFormula)
+	}
+	if v, ok := tileByID(b, "tk-vis"); ok {
+		t.Errorf("the visit wrapper should fold away, never carry Accept itself; got a tile Acceptable=%v", v.Acceptable)
+	}
+}
+
+// TestRecommendationWithLiveSittingIsNotAcceptable: a converse engaging the
+// visit (in_progress) suppresses Accept while the operator is deciding by hand.
+// An engaged visit is not gathered as an anchor, so only the subject row and its
+// live sitting are on the board.
+func TestRecommendationWithLiveSittingIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{engagedSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("a live sitting suppresses Accept: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestRecommendationWithPendingEngagementIsNotAcceptable: engage binds the visit
+// by assignee while it is still open, before the hook claim promotes it to
+// in_progress and stamps the session. In that window the sitting reads open with
+// no session but a bound assignee, and Accept must already be suppressed —
+// otherwise the board offers Accept on a visit a converse is about to hold, and
+// the recommendation is actuated twice.
+func TestRecommendationWithPendingEngagementIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{pendingSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("a pending engagement (open + assigned) suppresses Accept: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestSubjectWithoutRecommendedFormulaIsDiscussOnly: a visit with no
+// gc.recommended_formula on its subject is discuss-only, exactly as today —
+// Accept is absent whether or not the visit is un-engaged.
+func TestSubjectWithoutRecommendedFormulaIsDiscussOnly(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "let's talk it through"),
+		humanKid("tk-subj"),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{openSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("no gc.recommended_formula is discuss-only: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestRecommendationWithNoVisitIsNotAcceptable: the recommendation key is
+// present but no visit stands open on the subject (none filed, or it was
+// dismissed), so there is nothing to accept-and-dismiss.
+func TestRecommendationWithNoVisitIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable {
+		t.Errorf("a recommendation with no open visit is not acceptable: got Acceptable=%v", subj.Acceptable)
+	}
+}
+
+// heldSubject is a plain live anchor, held by a visit through Facts.Visits — the
+// path an engaged (in_progress) visit takes, which is not itself gathered as an
+// open anchor and so never folds.
+func heldSubject(id string) Anchor {
+	return Anchor{
+		ID: id, Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+		Children: []Child{{ID: id + ".c", Status: "open"}},
+	}
+}
+
+// TestVisitStateSplitsHeldIntoParkedAndEngaged: VisitState refines Held into the
+// two states the operator distinguishes on the board — a parked visit waiting for
+// them, and an engaged one a live sitting is in right now. A row no visit holds
+// carries the empty string. The pending-engagement window (open, bound by
+// assignee, not yet claimed) reads engaged, the same window that suppresses Accept.
+func TestVisitStateSplitsHeldIntoParkedAndEngaged(t *testing.T) {
+	anchors := []Anchor{
+		heldSubject("tk-engaged"), heldSubject("tk-parked"),
+		heldSubject("tk-pending"), heldSubject("tk-novisit"),
+	}
+	facts := Facts{
+		Visits: map[string]bool{"tk-engaged": true, "tk-parked": true, "tk-pending": true},
+		Sittings: []Sitting{
+			engagedSitting("tk-engaged"),
+			openSitting("tk-parked"),
+			pendingSitting("tk-pending"),
+		},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+
+	want := map[string]string{
+		"tk-engaged": VisitEngaged,
+		"tk-parked":  VisitParked,
+		"tk-pending": VisitEngaged,
+		"tk-novisit": "",
+	}
+	for id, state := range want {
+		tl := mustTile(t, b, id)
+		if (id != "tk-novisit") != tl.Held {
+			t.Fatalf("%s: Held = %v; the fixture holds every row but tk-novisit", id, tl.Held)
+		}
+		if tl.VisitState != state {
+			t.Errorf("%s: VisitState = %q, want %q", id, tl.VisitState, state)
+		}
+	}
+}
+
+// TestFoldedVisitWithNoSittingReadsParked: a visit wrapper folds Held onto its
+// subject even when its sitting has aged out of the window, so classifyVisits has
+// no sitting to read. The fallback is parked — an open visit no session is on is
+// waiting for the operator, never reported as being worked.
+func TestFoldedVisitWithNoSittingReadsParked(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "please review the plan"),
+		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: "tk-c1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj := mustTile(t, b, "tk-subj")
+	if !subj.Held {
+		t.Fatalf("the folded subject must be held")
+	}
+	if subj.VisitState != VisitParked {
+		t.Errorf("a held row with no readable sitting falls back to parked: got %q", subj.VisitState)
+	}
+}
+
+// TestVisitStateAgreesWithAcceptable: engaged and Accept read one predicate
+// (engagedVisit), so a recommendation subject cannot read "parked" while Accept
+// is suppressed, or "engaged" while Accept is offered.
+func TestVisitStateAgreesWithAcceptable(t *testing.T) {
+	build := func(s Sitting) Board {
+		return BuildBoard(
+			[]Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")},
+			fixtureNow, false, nil,
+			Facts{Visits: map[string]bool{"tk-subj": true}, Sittings: []Sitting{s}},
+		)
+	}
+	p := mustTile(t, build(openSitting("tk-subj")), "tk-subj")
+	if p.VisitState != VisitParked || !p.Acceptable {
+		t.Errorf("an open un-engaged recommendation is parked and acceptable: state=%q acceptable=%v", p.VisitState, p.Acceptable)
+	}
+	e := mustTile(t, build(engagedSitting("tk-subj")), "tk-subj")
+	if e.VisitState != VisitEngaged || e.Acceptable {
+		t.Errorf("a live-sitting recommendation is engaged and not acceptable: state=%q acceptable=%v", e.VisitState, e.Acceptable)
+	}
+}
+
 // TestVisitKeptWhenSubjectHasNoTile: a visit whose subject is no anchor keeps
 // its row — dropping it would erase the attention — stating the ask in NEEDS.
 // Its TITLE names the visit and its subject, not the ask, so a surface that
@@ -268,6 +468,63 @@ func TestClusterTagging(t *testing.T) {
 		tile, _ := tileByID(b, id)
 		if tile.ClusterKey != "" {
 			t.Errorf("%s should NOT cluster (only 2 share the needs), got %q", id, tile.ClusterKey)
+		}
+	}
+}
+
+// TestParkedParentBandsGateNotActive: a roll-up whose every open child is parked
+// for the operator is waiting on the operator to rule those child rows, not
+// active work — so it bands gate rather than masquerading as in-flight, even
+// when its own route markers are empty.
+func TestParkedParentBandsGateNotActive(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-parent", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
+			Children: []Child{{ID: "tk-child", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	tile, ok := tileByID(b, "tk-parent")
+	if !ok {
+		t.Fatal("tk-parent missing")
+	}
+	if tile.Section != SectionGate {
+		t.Errorf("a parent whose only open child is parked for the operator bands gate, got %q", tile.Section)
+	}
+}
+
+// TestTakeawayRowsDoNotCluster: a row carrying a takeaway never clusters, however
+// many share its needs — a deterministic signoff-cap headline templated across
+// anchors does not fold into a count-plus-id soup that loses the per-bead
+// content. A deterministic STATE phrase, which no bead authored,
+// still clusters.
+func TestTakeawayRowsDoNotCluster(t *testing.T) {
+	tmpl := "signoff did not converge after 3 rework rounds (cap 3)"
+	anchors := []Anchor{
+		// Three parked beads with the SAME templated takeaway → must not cluster.
+		{ID: "tk-t1", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		{ID: "tk-t2", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		{ID: "tk-t3", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		// Three human beads with no takeaway and one shared state phrase → cluster.
+		{ID: "tk-c1", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "tk-c2", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "tk-c3", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	for _, id := range []string{"tk-t1", "tk-t2", "tk-t3"} {
+		tile, _ := tileByID(b, id)
+		if tile.ClusterKey != "" {
+			t.Errorf("%s carries a takeaway and must not cluster, got key %q", id, tile.ClusterKey)
+		}
+	}
+	for _, id := range []string{"tk-c1", "tk-c2", "tk-c3"} {
+		tile, _ := tileByID(b, id)
+		if tile.ClusterKey == "" {
+			t.Errorf("%s is a takeaway-less state phrase shared by 3 and must still cluster", id)
 		}
 	}
 }

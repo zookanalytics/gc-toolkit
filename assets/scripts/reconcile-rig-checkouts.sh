@@ -9,7 +9,38 @@
 # --ff-only is safe by construction: it advances only on a clean fast-forward,
 # preserves a non-conflicting dirty file for free, and REFUSES (mutates
 # nothing) on any divergence or conflicting dirty file. So this ships enabled —
-# it cannot clobber work. The refusal is the exception signal: the checkout is
+# it cannot clobber work.
+#
+# The rig root must also stay ON the default branch: it is a deploy mirror, and a
+# HEAD parked elsewhere (detached, or a feature/integration branch an agent
+# checked out and left) never fast-forwards and serves an off-default build to
+# directory-imported packs. ff-only cannot see that — a checkout ahead of the
+# default reports "Already up to date" and looks advanced — so this checks the
+# local branch first and surfaces a parked checkout through the same subject bead
+# and escalation, mutating nothing.
+#
+# When --ff-only refuses, the divergence is almost always SHA churn from an
+# upstream rebase/squash/force-push: the live rigs/* checkout is a pure
+# deployment mirror (commits are authored in worktrees and the refinery clone,
+# never here), so its tracked content is already fully represented in origin.
+# That case is provably lossless to reset, so the refusal branch first tries to
+# auto-heal. The reset runs only when every check holds, and fails closed
+# (escalates, mutates nothing) on anything it cannot prove:
+#   - git cherry (patch-id) finds no unique local commit, so a rebased or
+#     squashed commit with a new SHA still matches;
+#   - git rev-list --merges finds no merge commit unique to local — git cherry
+#     ignores merges, so a local merge's tree content is not provably upstream
+#     and the guard refuses rather than reset it away;
+#   - git status --porcelain is readable (a failed read is not proof of a clean
+#     tree), and no dirty tracked path carries local-only content: its working
+#     tree differs from the remote, or its staged index matches neither the
+#     remote nor the committed HEAD.
+# It then resets --hard to the remote (untracked files are preserved) and closes
+# the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
+# every divergence instead.
+#
+# A genuine divergence — a unique local commit, or a tracked change not yet
+# upstream — fails that guard and takes the exception path: the checkout is
 # left untouched, one idempotent bead per blocked rig records the divergence,
 # and escalate.sh raises it so someone actually acts.
 #
@@ -63,29 +94,140 @@ escalate_divergence() {
         --subject "$subject" --key "$key" --message "$message"
 }
 
-advanced=0; blocked=0
+# Retract the tracking visit for a subject whose divergence has resolved. The
+# subject bead auto-closes on a clean sync, but escalate.sh filed a board-visible
+# visit routed to a human, and a human-routed visit is not auto-claimed — so a
+# self-heal before the operator engages it leaves a moot visit lingering on the
+# board. The subject tracks exactly this one divergence and clears only on a
+# clean sync, so subject-resolved is premise-moot here: close the open visit as
+# moot through the same escalate.sh that filed it (--retract folds the reading
+# onto the subject and stamps gc.outcome=moot via visit-close.sh). Only an
+# unengaged (open) visit is touched; one a human already claimed is theirs. A
+# failure returns non-zero so the caller skips the subject close: bd list defaults
+# away from closed beads and open_bead does not pass --all, so a subject closed
+# after a failed retract cannot be rediscovered to retry, and its human-routed
+# visit would linger. Leaving the subject open on failure is the retry handle —
+# the next patrol re-finds it and retries. Called BEFORE the subject close so the
+# reading folds onto the subject while it is still open.
+retract_visit() {
+    local subject="$1" key="$2" message="$3"
+    if GC_RIG="$RECONCILE_RIG" "$ESCALATE_SH" --retract \
+        --subject "$subject" --key "$key" --message "$message"; then
+        return 0
+    fi
+    warn "could not retract the tracking visit for $subject — leaving its subject open so the next patrol retries"
+    return 1
+}
+
+advanced=0; healed=0; blocked=0
 rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
 
 while IFS=$'\t' read -r name path; do
     [ -n "${name:-}" ] && [ -d "$path/.git" ] || continue
     git -C "$path" fetch origin --quiet 2>/dev/null || continue
     remote=$(git -C "$path" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+    default_branch="${remote#origin/}"
 
-    if git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
-        # Advanced or already up to date — clear any lingering escalation.
+    # The rig root is a deploy mirror: it sits ON the default branch and only
+    # fast-forwards. A HEAD parked elsewhere — detached, or a feature/integration
+    # branch an agent checked out and left — never advances, and its working tree
+    # serves an off-default build a directory-imported pack then compiles. ff-only
+    # cannot see this: a checkout ahead of the default reports "Already up to
+    # date" and counts as advanced. Detect the parked state before the ff attempt
+    # and route it through the same subject bead; skip the ff and the auto-heal,
+    # which would act on the wrong branch.
+    local_branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || true)
+    parked=""
+    [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
+
+    if [ -z "$parked" ] && git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
+        # Advanced or already up to date — clear any lingering escalation: retract
+        # the tracking visit as moot, then close the subject.
         advanced=$((advanced + 1))
         bead=$(open_bead "$name")
-        [ -n "$bead" ] && gc bd --rig "$RECONCILE_RIG" close "$bead" \
-            --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+        if [ -n "$bead" ]; then
+            # Close the subject only once its visit is retracted or proven absent
+            # (retract_visit exit 0). On a failed retract, leave the subject open
+            # as the retry handle — closing it strands the visit unretractable.
+            if retract_visit "$bead" "reconcile-diverged-$name" \
+                "rigs/$name fast-forwarded cleanly to $remote; the divergence this visit tracked is resolved."; then
+                gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                    --reason "rigs/$name fast-forwarded cleanly to $remote" >/dev/null 2>&1 || true
+            fi
+        fi
         continue
     fi
 
-    # ff-only refused: the checkout diverged. Do NOT touch it — escalate.
+    # ff-only refused. Almost always this is SHA churn from an upstream
+    # rebase/squash/force-push and the checkout's content is already upstream, so
+    # try to auto-heal before escalating. reset --hard is lossless only when the
+    # guard proves it: git cherry (patch-id) finds no unique local commit, no
+    # merge commit is unique to local (git cherry ignores merges, so a local
+    # merge's tree content is not provably upstream), the status read succeeds,
+    # and no dirty tracked path carries local-only content (a working tree that
+    # differs from the remote, or a staged index matching neither remote nor
+    # HEAD). Untracked files are
+    # never touched by reset --hard. Anything the guard cannot prove — a real
+    # divergence, an unreadable status, a local merge — falls through to the
+    # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
+    if [ -z "$parked" ] \
+       && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+       && cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) \
+       && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] \
+       && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
+       && [ -z "$merges" ] \
+       && status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null); then
+        unique_tracked=0
+        while IFS= read -r changed; do
+            [ -n "$changed" ] || continue
+            # reset --hard overwrites both the working tree and the staged index
+            # for this path, so neither may carry content the reset would lose.
+            # Working tree: safe only when it already equals the remote (the
+            # regenerated-to-upstream case). Index: safe when it equals the remote,
+            # or equals HEAD — committed content, proven upstream by the cherry
+            # check above. Content staged but never committed (differs from both
+            # HEAD and the remote) is discarded with no way back, even when an
+            # upstream-matching worktree copy hides it from a diff against remote.
+            if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null \
+                 && ! git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
+                unique_tracked=$((unique_tracked + 1))
+            fi
+        done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
+        if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
+            healed=$((healed + 1))
+            bead=$(open_bead "$name")
+            if [ -n "$bead" ]; then
+                # Same gate as the fast-forward path: close the subject only when
+                # its visit is retracted or proven absent, else keep it open as the
+                # retry handle.
+                if retract_visit "$bead" "reconcile-diverged-$name" \
+                    "rigs/$name auto-healed (already-upstream, reset --hard to $remote); the divergence this visit tracked is resolved."; then
+                    gc bd --rig "$RECONCILE_RIG" close "$bead" \
+                        --reason "rigs/$name auto-healed: already-upstream, reset --hard to $remote" >/dev/null 2>&1 || true
+                fi
+            fi
+            continue
+        fi
+    fi
+
+    # Reached two ways: the HEAD is parked off the default branch, or ff-only
+    # refused on a genuine divergence. Either way do NOT touch the checkout —
+    # file the subject bead and escalate.
     blocked=$((blocked + 1))
-    body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
-        "$name" "$remote" "$path" "$path" "$remote" \
-        "$(git -C "$path" status --porcelain 2>/dev/null)" \
-        "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    if [ -n "$parked" ]; then
+        body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nIt auto-closes when the rig next fast-forwards cleanly.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$path" \
+            "$default_branch" "$path" "$default_branch" \
+            "$(git -C "$path" status --porcelain 2>/dev/null)" \
+            "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    else
+        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$remote" "$path" "$path" "$remote" \
+            "$(git -C "$path" status --porcelain 2>/dev/null)" \
+            "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    fi
 
     bead=$(open_bead "$name")
     if [ -n "$bead" ]; then
@@ -99,11 +241,16 @@ while IFS=$'\t' read -r name path; do
 
     # Make someone hear about it. A failure here is reported, never swallowed —
     # an unescalated divergence is the exact silent rot this script prevents.
-    msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nalready-upstream -> git -C %s reset --hard %s; machine-local config -> leave it; real work -> handle it.' \
-        "$name" "$remote" "$path" "$bead" "$name" "$path" "$remote")
+    if [ -n "$parked" ]; then
+        msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
+            "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch")
+    else
+        msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nalready-upstream -> git -C %s reset --hard %s; machine-local config -> leave it; real work -> handle it.' \
+            "$name" "$remote" "$path" "$bead" "$name" "$path" "$remote")
+    fi
     if ! escalate_divergence "$bead" "reconcile-diverged-$name" "$msg"; then
         warn "rigs/$name divergence could NOT be escalated (escalate.sh failed) — subject bead $bead"
     fi
 done <<< "$rigs"
 
-echo "reconcile-rig-checkouts: $advanced advanced, $blocked blocked"
+echo "reconcile-rig-checkouts: $advanced advanced, $healed auto-healed, $blocked blocked"

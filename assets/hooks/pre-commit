@@ -19,7 +19,7 @@ set -uo pipefail
 
 # Inputs the artifact is a function of — kept in step with digest_inputs()
 # in render-seed-audit.sh. The renderer itself is on the list: it CARRIES
-# the synthetic city the prompts render against (tk-wchab).
+# the synthetic city the prompts render against.
 INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$|assets/scripts/render-seed-audit\.sh$)'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"

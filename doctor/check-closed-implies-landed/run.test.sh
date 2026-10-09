@@ -18,7 +18,18 @@ EOF
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  "rig list")
+    # RIGS_FAIL_TIMES>0 fails the first N calls of a run, then succeeds — a
+    # transient blip the check must retry past. RIGS_RC (persistent) applies to
+    # every call. RIGS_ATTEMPT_FILE counts calls within one run so the transient
+    # window is per-run, not global.
+    ft="${RIGS_FAIL_TIMES:-0}"
+    if [ "$ft" -gt 0 ] && [ -n "${RIGS_ATTEMPT_FILE:-}" ]; then
+      n=0; [ -f "$RIGS_ATTEMPT_FILE" ] && n=$(cat "$RIGS_ATTEMPT_FILE")
+      n=$((n + 1)); printf '%s' "$n" > "$RIGS_ATTEMPT_FILE"
+      [ "$n" -le "$ft" ] && exit 1
+    fi
+    rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -40,8 +51,8 @@ name=$(basename "$(dirname "$db")")
 f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
-export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" BD_ARGS="$TMP/bd-args.log"
-run_check() { : > "$BD_ARGS"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
+export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" BD_ARGS="$TMP/bd-args.log" RIGS_ATTEMPT_FILE="$TMP/rigs-attempts.log"
+run_check() { : > "$BD_ARGS"; : > "$RIGS_ATTEMPT_FILE"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 bead() { printf '{"id":"%s","status":"closed","parent":null,"metadata":%s}' "$1" "$2"; }
 # The full shape: a bead's status and parent decide whether it is the anchor.
 beadx() { printf '{"id":"%s","status":"%s","parent":%s,"metadata":%s}' "$1" "$2" \
@@ -155,7 +166,15 @@ hasnt "$OUT" "merged_sha" "and so is offered no record-the-landing repair"
 
 # --- 8. fail-CLOSED ------------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?
-eq "$RC" "1" "a failed \`gc rig list\` warns, never passes"
+eq "$RC" "1" "a PERSISTENTLY failing \`gc rig list\` warns, never passes (retries exhausted)"
+# A transient failure — the enumeration fails a few times, then succeeds — is
+# retried, not filed as a blocking all-rigs finding: the scan recovers and
+# reports the real verdict.
+store "$(bead c-13 '{"merge_result":"merged","merged_sha":"abc123"}')"
+OUT=$(RIGS_FAIL_TIMES=2 run_check); RC=$?
+eq "$RC" "0" "a transient \`gc rig list\` failure is retried, then the scan runs"
+has "$OUT" "OK:" "the recovered run reports the landing verdict, not the enumeration abort"
+hasnt "$OUT" "cannot determine" "a transient blip is not filed as an all-rigs finding"
 OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable store warns"
 has "$OUT" "NOT checked" "the warning says the store was skipped"
@@ -169,6 +188,35 @@ if grep -qE '(^|[^a-z])gh[[:space:]]' < <(grep -vE '^[[:space:]]*#' "$CHECK"); t
 else
     ok "the check is ledger-only (no gh calls)"
 fi
+
+# --- disk pressure must not forge an all-clear --------------------------------
+# bash backs a `<<<` here-string with a temp file; under disk pressure that file
+# cannot be staged, the redirection fails silently (the check is set -u, not
+# set -e), and the loop runs zero times — so the pre-fix check read a non-empty
+# store as empty and printed the OK line. The fix stages every enumeration
+# through a checked `mktemp -d`, so a failing `mktemp` aborts the run non-clean.
+# A failing `mktemp` command is a NO-OP on the pre-fix `<<<` (bash's here-string
+# temp is internal, never the mktemp command), which is exactly what makes this
+# case fail against the pre-fix script and so proves it discriminates.
+store "$(bead c-dp '{"merge_result":"pull_request","pr_url":"https://x/pr/dp"}')"
+# Mirror: with a working mktemp the fixture yields its finding, so the
+# disk-pressure assertions below are not vacuously satisfied by an empty store.
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "mirror: the fixture reports its finding when mktemp works"
+has "$OUT" "c-dp" "mirror: the finding names the bead"
+# Now fail every mktemp — the hermetic stand-in for a full /tmp — and re-run.
+cat > "$TMP/bin/mktemp" <<'MK'
+#!/usr/bin/env bash
+echo "mktemp: stubbed disk-pressure failure" >&2
+exit 1
+MK
+chmod +x "$TMP/bin/mktemp"
+OUT=$(run_check); RC=$?
+rm -f "$TMP/bin/mktemp"
+eq "$RC" "1" "a temp-file failure warns (1) — it neither passes (0) nor errors (2)"
+has "$OUT" "not an all-clear" "it says the run could not scan, not that the invariant holds"
+hasnt "$OUT" "OK:" "it does not forge the clean all-clear line"
+hasnt "$OUT" "c-dp" "the store is not reported clean — the run is non-clean, not a false pass"
 
 echo
 echo "check-closed-implies-landed: $PASS passed, $FAIL failed"

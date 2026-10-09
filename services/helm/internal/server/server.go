@@ -17,6 +17,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
+	"golang.org/x/sync/singleflight"
 )
 
 // Server computes and serves the Helm board, caching the computed board for
@@ -27,14 +28,33 @@ type Server struct {
 	now func() time.Time
 	spa http.Handler
 
-	// opener files visits for POST /helm/open; nil disables the route (it
-	// then answers 503 rather than 404 — see handleOpen).
-	opener   Opener
-	openGate *openGate
+	// cityPath is the city root pack health is read from, resolved once at
+	// startup and passed via WithCityPath. Empty when unset (tests, or a city
+	// gc could not resolve), which GatherPackHealth reads as "no pack health".
+	// Discovery is a subprocess (gc), so it is NOT re-run on every board build.
+	cityPath string
 
+	// actuator runs the board's write verbs (open, accept, engage, dismiss) by
+	// shelling out to gc-helm.sh; nil disables all four routes (they then answer
+	// 503 rather than 404 — see runActuation).
+	actuator Actuator
+	gate     *actuationGate
+
+	// mu guards cached, expiry, and gen. It is never held across a gather: the
+	// gather builds a board outside the lock and swaps it in under it, so a slow
+	// build cannot block a request a fresh cache could answer.
 	mu     sync.Mutex
 	cached *board.Board
 	expiry time.Time
+	// gen counts cache invalidations. A gather snapshots it before it reads and
+	// publishes its board only if the count still matches, so an invalidate that
+	// lands mid-gather — a write verb busting the cache after it mutates — is
+	// not undone by the in-flight gather re-caching the pre-invalidate board.
+	gen uint64
+
+	// flight coalesces concurrent cache misses into one gather, so a burst of
+	// board requests drives a single gather rather than one per request.
+	flight singleflight.Group
 }
 
 // An Option configures a Server at construction.
@@ -53,25 +73,35 @@ func WithSPA(h http.Handler) Option {
 	}
 }
 
-// WithOpener enables the board's one write route, POST /helm/open, which files
-// a visit on a bead by shelling out to `gc-helm.sh open` (see open.go).
+// WithActuator enables the board's write routes, POST /helm/{open,accept,engage,
+// dismiss}, each of which shells out to the matching gc-helm.sh verb (see
+// actuate.go).
 //
-// It is an Option rather than a constructor argument because the write surface
-// is genuinely optional: a helm-svc that cannot locate the script still serves
-// the whole board, and says so honestly when the route is called. A nil opener
-// is ignored, which keeps the read-only behaviour this service had before the
-// route existed.
-func WithOpener(o Opener) Option {
+// It is an Option rather than a constructor argument because the write surface is
+// genuinely optional: a helm-svc that cannot locate the script still serves the
+// whole board, and says so honestly when a route is called. A nil actuator is
+// ignored, which keeps the read-only behaviour this service had before the routes
+// existed.
+func WithActuator(a Actuator) Option {
 	return func(s *Server) {
-		if o != nil {
-			s.opener = o
+		if a != nil {
+			s.actuator = a
 		}
 	}
 }
 
+// WithCityPath supplies the city root the board reads pack health from. The
+// entrypoint resolves it once (discovery shells out to gc) and passes it here, so
+// build() reuses that answer instead of re-discovering on every cache refresh. An
+// empty path yields no pack-health section, which is the right answer for a city
+// gc could not resolve.
+func WithCityPath(p string) Option {
+	return func(s *Server) { s.cityPath = p }
+}
+
 // New builds a Server. ttl<=0 disables caching (every request recomputes).
 func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
-	s := &Server{src: src, ttl: ttl, now: time.Now, openGate: newOpenGate()}
+	s := &Server{src: src, ttl: ttl, now: time.Now, gate: newActuationGate()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -79,18 +109,21 @@ func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
 }
 
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
-// GET /healthz is the liveness probe (no gather); POST /helm/open files a visit
-// on a bead. With [WithSPA] the bare mount also serves the app shell to
-// browsers, and its assets beneath.
+// GET /healthz is the liveness probe (no gather); POST /helm/{open,accept,engage,
+// dismiss} are the write routes (see actuate.go). With [WithSPA] the bare mount
+// also serves the app shell to browsers, and its assets beneath.
 //
-// /helm/open is registered as its own exact pattern, which ServeMux prefers
-// over the "/" catch-all — so it reaches [Server.handleOpen] rather than the
-// SPA handler, whatever the bundle does with unknown paths.
+// Each write route is registered as its own exact pattern, which ServeMux prefers
+// over the "/" catch-all — so it reaches its handler rather than the SPA handler,
+// whatever the bundle does with unknown paths.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/helm", s.handleBoard)
 	mux.HandleFunc("/helm/open", s.handleOpen)
+	mux.HandleFunc("/helm/accept", s.handleAccept)
+	mux.HandleFunc("/helm/engage", s.handleEngage)
+	mux.HandleFunc("/helm/dismiss", s.handleDismiss)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
 }
@@ -181,18 +214,70 @@ func (s *Server) invalidateBoard() {
 	defer s.mu.Unlock()
 	s.cached = nil
 	s.expiry = time.Time{}
+	s.gen++
+	// Forget the in-flight gather's single-flight key, so a board request that
+	// arrives after this invalidate drives its own gather rather than joining a
+	// gather that began before it. A joined waiter is handed the leader's
+	// pre-write board; the generation guard on publish keeps that board out of
+	// the cache but not out of a joined waiter's hands, so forgetting the key is
+	// what makes the post-write read re-gather. Safe under s.mu: singleflight
+	// releases its own lock before running a flight's function, so its Forget
+	// and Do never hold that lock while a gather takes s.mu.
+	s.flight.Forget("board")
 }
 
-// Board returns the cached board when fresh, otherwise gathers and computes a new
-// one. The lock is held across the gather so concurrent misses do not stampede
-// the supervisor; a follow-up can add stale-while-revalidate.
+// gatherTimeout bounds one gather. A healthy gather is a few seconds; this is
+// generous slack that still cuts off a supervisor that has begun timing out
+// every call, so a coalesced flight cannot run unbounded. The gather runs on a
+// context detached from the caller's (below) precisely so that one client
+// disconnecting mid-build does not cancel the shared gather the cache and the
+// other coalesced waiters depend on.
+const gatherTimeout = 30 * time.Second
+
+// Board returns the cached board when fresh, otherwise gathers and computes a
+// new one. The gather runs OUTSIDE the cache lock — the lock is taken only to
+// read the cache and to swap the finished board in — so a slow gather never
+// blocks a request a fresh cache could answer. Concurrent misses are coalesced
+// by a single-flight group, so a burst of board requests drives one gather
+// rather than one per request.
 func (s *Server) Board(ctx context.Context) (*board.Board, error) {
+	if b, ok := s.cachedFresh(); ok {
+		return b, nil
+	}
+	v, err, _ := s.flight.Do("board", func() (any, error) {
+		// A flight that queued behind another leader may find the cache already
+		// refilled; serve it rather than gathering a second time.
+		if b, ok := s.cachedFresh(); ok {
+			return b, nil
+		}
+		gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gatherTimeout)
+		defer cancel()
+		return s.gather(gctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*board.Board), nil
+}
+
+// cachedFresh returns the cached board when it exists and is within the TTL
+// window. It holds the lock only for the read.
+func (s *Server) cachedFresh() (*board.Board, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if s.cached != nil && s.ttl > 0 && s.now().Before(s.expiry) {
-		return s.cached, nil
+		return s.cached, true
 	}
+	return nil, false
+}
+
+// gather drives one supervisor gather, builds the board, and swaps it into the
+// cache under the lock — which it takes only for the swap, never across
+// s.src.Gather.
+func (s *Server) gather(ctx context.Context) (*board.Board, error) {
+	s.mu.Lock()
+	startGen := s.gen
+	s.mu.Unlock()
 
 	res, err := s.src.Gather(ctx)
 	if err != nil {
@@ -202,8 +287,20 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
 	// Read after the gather, not inside it: pack health is a handful of small
 	// local files and belongs to no Source backend, so making it part of the
-	// Source interface would oblige every backend to reimplement it.
-	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
+	// Source interface would oblige every backend to reimplement it. The city
+	// root is the one resolved at startup (WithCityPath), never re-discovered
+	// here — discovery is a gc subprocess and this runs on every cache refresh.
+	b.PackHealth = source.GatherPackHealth(s.cityPath, now)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Publish only if no invalidate landed while the gather was in flight. A
+	// write verb busts the cache after it mutates, so a gather that started
+	// before that write holds pre-write state, and caching it would serve the
+	// stale board for the whole TTL. On a bump, hand the build to this caller
+	// but leave the cache empty so the next read re-gathers.
+	if s.gen != startGen {
+		return &b, nil
+	}
 	s.cached = &b
 	s.expiry = now.Add(s.ttl)
 	return &b, nil

@@ -305,7 +305,9 @@ if [ "$(eval "set -- $PASTE"; sig "$@")" != "$(sig "${CMD[@]}")" ]; then
   exit 1
 fi
 
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # One bead per situation, whatever its status. An open one is the same ask
 # still waiting; a closed one is an ask a human already answered, and re-filing
@@ -370,7 +372,7 @@ Nothing has been sent. A write to a repo the rig does not own is the operator's
 to make, so an agent prepares the command and stops (docs/outbound-sends.md).
 Closing this bead answers the ask either way: sent, or declined."
 
-  BEAD=$(gc bd create -t task --title "$TITLE" -d "$BODY" --json | scrub | jq -r '.id // .[0].id' 2>/dev/null)
+  BEAD=$(gc bd create -t task --title "$TITLE" -d "$BODY" --json | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$BEAD" ] && [ "$BEAD" != "null" ] \
     || { warn "gc bd create returned no id — nothing parked; re-run rather than improvising another create form"; exit 1; }
   gc bd update "$BEAD" \

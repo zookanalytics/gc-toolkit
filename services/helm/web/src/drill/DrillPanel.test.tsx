@@ -241,22 +241,32 @@ describe('DrillPanel', () => {
   // the case that matters most: an anchor with nobody on it is exactly when the
   // operator wants to start a conversation, so hiding the action there would
   // remove it from the row it is most needed on.
-  it('offers the start-a-conversation action when no session is working the anchor', async () => {
+  it('offers the file-a-visit action when no session is working the anchor', async () => {
     render(
       <DrillProvider origin={ORIGIN}>
         <DrillPanel beadId="tk-unworked" onClose={() => {}} />
       </DrillProvider>,
     );
-    expect(await screen.findByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /file a visit/i })).toBeTruthy();
   });
 
-  it('offers the start-a-conversation action alongside a running session', async () => {
+  it('offers the file-a-visit action alongside a running session', async () => {
     sessionItems = [SESSION];
     renderPanel();
     // An agent working the anchor is not the same as a conversation the
     // operator can have about it, so the action stands beside the session.
-    expect(await screen.findByRole('button', { name: /start a conversation/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /file a visit/i })).toBeTruthy();
     expect(await screen.findByText(/gc-toolkit__polecat-lx-8y6j/)).toBeTruthy();
+  });
+
+  // Discuss (engage) and Dismiss are the drill panel's home for the two verbs the
+  // board row does not carry — the board row offers only Accept — so all three
+  // conversation actions are reachable per bead, in both session states.
+  it('offers Discuss and Dismiss alongside file-a-visit', async () => {
+    renderPanel();
+    expect(await screen.findByRole('button', { name: /file a visit/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /discuss/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^dismiss$/i })).toBeTruthy();
   });
 
   // Partial data is first-class on this surface, and the failure mode it

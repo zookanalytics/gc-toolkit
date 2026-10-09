@@ -6,7 +6,7 @@
 # ARM B (outcome graph — the derivation merge.sh and pr-open.sh read). lane-state.sh
 # stands a lane green on a CLOSED task_kind=review bead whose signoff_verdict is
 # approve, whose reviewed_oid is non-empty, and whose gc.outcome is not
-# superseded (or a legacy bead: no signoff_verdict, gc.outcome=recorded). It
+# superseded. It
 # trusts those stamps; nothing else sweeps the store to prove them coherent. So
 # per store, for every OPEN gating anchor (merge_result = pre_open_gate|pull_request),
 # every closed approve review bead naming it (anchor_bead) that carries a
@@ -18,8 +18,9 @@
 # with the approve; a supersede rewrites it to superseded; no writer pairs approve
 # with a third value. The reviewed_oid clause matches lane-state.sh — a backing
 # with no reviewed_oid derives no green there, so it is not a candidate here; the
-# oid is required present, never compared to a head. A legacy no-verdict recorded
-# bead carries no signoff_verdict, so this arm never fetches it.
+# oid is required present, never compared to a head. A close with no
+# signoff_verdict names no verdict — recorded is stamped on every close — so it
+# backs no lane, and this arm, keyed on signoff_verdict, never fetches it.
 #
 # ARM A (marker — transition). gate-ensure.sh still reads check.<lane> off the
 # anchor and treats green as settled, skipping a fresh dispatch. So a green marker
@@ -29,8 +30,8 @@
 # marker consumer reads lane-state.sh instead (check-gate-integrity's
 # marker-writer retirement, a sibling bead), this arm keeps the missing-backing
 # audit: every check.<lane>=green on an open gating anchor must resolve to a
-# backing — resolver A (local, no network) a CLOSED approve, or legacy recorded,
-# review bead naming this anchor and lane, carrying a reviewed_oid; resolver B
+# backing — resolver A (local, no network) a CLOSED approve review bead naming
+# this anchor and lane, carrying a reviewed_oid; resolver B
 # (network, residue only) an APPROVED GitHub review on the anchor's pr_number, the
 # operator-approval path that files no bead. Neither found: error. A found nothing
 # and B could not run (no pr_number, no gh, unresolvable origin, failed query):
@@ -133,17 +134,17 @@ arm_a_marker() {
         | select(((($m.task_kind // "") | tostring)) == "review")
         | ((($m.anchor_bead // "") | tostring)) as $a
         | ((($m.reviewed_oid // "") | tostring)) as $o
-        | (((($m.check_name // "") | tostring)) | if . == "" then "codex" else . end) as $g
+        | (((($m.check_name // "") | tostring)) | if . == "" then "correctness" else . end) as $g
         | (((.status // "") | tostring | ascii_downcase)) as $st
         | (($m.signoff_verdict // "") | tostring) as $sv
-        | ((($m["gc.outcome"] // "") | tostring)) as $oc
         # A verdict backs a lane only once it is judged AND closed: an open
-        # bead never counts. A closed bead counts when signoff_verdict reads
-        # approve, or, for a legacy bead written before that stamp existed,
-        # when it carries no signoff_verdict at all and gc.outcome=recorded
-        # is the only sign left that it closed on a verdict.
+        # bead never counts, and a closed bead counts only when signoff_verdict
+        # reads approve. signoff stamps gc.outcome=recorded on every close,
+        # request-changes included, so recorded names no verdict; a close with
+        # no signoff_verdict backs no lane here, and its green marker must
+        # resolve against the PR reviews (resolver B) instead.
         | select($a != "" and $o != "" and $st == "closed")
-        | select($sv == "approve" or ($sv == "" and $oc == "recorded"))
+        | select($sv == "approve")
         | {key: ($a + "" + $g), value: ((.id // "?") | tostring)} ] | from_entries' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ] || [ -z "$idx" ]; then
         warnings+=("$label: review-bead index from $rig_path/.beads could not be parsed — this store was NOT checked")
@@ -232,8 +233,8 @@ arm_b_outcome() {
 
     # Every closed review bead carrying a verdict. An approve backing always
     # carries signoff_verdict (both writers stamp it), so this key is the tight
-    # candidate set; a legacy no-verdict backing lacks it and is well-formed, so
-    # it is correctly never fetched. --status closed: only a closed bead backs a
+    # candidate set; a close with no signoff_verdict lacks it and backs no lane,
+    # so it is correctly never fetched. --status closed: only a closed bead backs a
     # lane, so an open one cannot be a malformed backing.
     vraw=$(run_bounded gc bd list --db "$rig_path/.beads" --status closed \
         --has-metadata-key signoff_verdict --json --limit 0 2>/dev/null); vrc=$?
@@ -255,7 +256,7 @@ arm_b_outcome() {
         | select(($set[$a] // false) == true)
         | [ ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             ($a | gsub("[[:cntrl:]]"; " ")),
-            (((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) | gsub("[[:cntrl:]]"; " ")),
+            (((($m.check_name // "") | tostring) | if . == "" then "correctness" else . end) | gsub("[[:cntrl:]]"; " ")),
             ($oc | gsub("[[:cntrl:]]"; " ")) ]
         | join("")' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ]; then

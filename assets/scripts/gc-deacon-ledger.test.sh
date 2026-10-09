@@ -106,10 +106,10 @@ ecount()   { entries "$1" | grep -c . ; }
 desc()     { jq -r --arg id "$1" '.[] | select(.id == $id) | .description' "$STUB_STORE"; }
 bstatus()  { jq -r --arg id "$1" '.[] | select(.id == $id) | .status' "$STUB_STORE"; }
 # Rewrite a bead's created_at to N days ago, for the age bound.
-age_days() { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 * 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
+age_days() { local d; d=$(jq -nr --argjson t "$(( $(date -u +%s) - $2 * 86400 ))" '$t | todate')
              local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg c "$d" 'map(if .id == $id then .created_at = $c else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 # Plant a ledger entry at a chosen age, bypassing append.
-plant()    { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 ))" +%Y-%m-%dT%H:%M:%SZ)
+plant()    { local d; d=$(jq -nr --argjson t "$(( $(date -u +%s) - $2 ))" '$t | todate')
              local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg x "$d $3" 'map(if .id == $id then .comments = ((.comments // []) + [{text: $x}]) else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 
 echo "# find-or-create is idempotent"
@@ -221,6 +221,25 @@ hasnt "$out" "four days back" "without dragging in what the window excludes"
 eq "$(printf '%s\n' "$out" | grep -n '^# led-1' | cut -d: -f1)" "1" "the older ledger prints first"
 out=$("$SUT" show --since 5m 2>/dev/null)
 hasnt "$out" "three hours back" "a shorter window stops the walk sooner"
+
+echo
+echo "# show folds a run of consecutive boot entries"
+reset
+"$SUT" current >/dev/null 2>&1
+plant led-1 500 "[boot] deacon started (a) -> -"
+plant led-1 440 "[boot] deacon started (b) -> -"
+plant led-1 380 "[boot] deacon started (c) -> -"
+plant led-1 320 "[cleanup] killed an orphan -> bead:tk-1"
+plant led-1 260 "[boot] deacon started (d) -> -"
+out=$("$SUT" show 2>/dev/null)
+has "$out" "deacon started (a)" "the first boot of a run is kept"
+has "$out" "(+2 more boots through" "a run of three boots folds to the first plus a count"
+hasnt "$out" "deacon started (b)" "the folded boots are dropped from the render"
+hasnt "$out" "deacon started (c)" "including the last of the run"
+has "$out" "killed an orphan" "a non-boot entry breaks the run and prints"
+has "$out" "deacon started (d)" "a lone boot after the break prints unchanged"
+hasnt "$out" "(+0 more" "a lone boot is never annotated as a run"
+eq "$(printf '%s\n' "$out" | grep -c 'deacon started')" "2" "only the run's first boot and the lone boot survive the fold"
 
 echo
 echo "# show refuses a duration it cannot read, and is quiet on an empty city"

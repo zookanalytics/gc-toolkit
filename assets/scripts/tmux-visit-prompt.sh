@@ -1,17 +1,24 @@
 #!/bin/sh
-# tmux-visit-prompt.sh — `prefix + a`: type a message, get a durable
-# conversation. Usage: tmux-visit-prompt.sh <config-dir>
-# Bound by tmux-bindings.sh (run-shell -b). Opens a tmux popup running
-# `gum write` (multi-line by design — command-prompt is single-line and its
-# response is re-parsed as a tmux command, tk-7z8c6); the submitted text goes
-# through a per-press DRAFT FILE to gc-visit-open.sh, which mints the subject
-# and queues the conversation. A second popup then picks the target rig —
-# defaulted to the pane's own rig, offering every rig and marking any that is
-# paused — and passes it as --rig. A suspended rig keeps its beads store, so a
-# report filed there is recorded and triaged on resume. The draft is removed at
+# tmux-visit-prompt.sh — `prefix + a`: pick a rig, type a message, get a
+# durable conversation. Usage: tmux-visit-prompt.sh <config-dir>
+# Bound by tmux-bindings.sh (run-shell -b). A first popup picks the target rig,
+# because the rig is the scope the report is filed against — defaulted to the
+# pane's own rig, offering the non-hq rigs and tagging any that is suspended or
+# not running. A suspended rig keeps its beads store, so a report filed there is
+# recorded and triaged on resume; the hq store is withheld because it runs no
+# reaction pool, though its bead ids stay valid subjects. The rig set is read
+# from `gc rig list --json`, whose cost is the per-rig liveness probe, and is
+# cached for GC_VISIT_RIG_CACHE_TTL seconds so a burst of presses opens the
+# picker without re-paying that wait. A second popup then runs `gum write`
+# (multi-line by design — command-prompt is single-line and its response is
+# re-parsed as a tmux command); the submitted text goes through a
+# per-press DRAFT FILE to gc-visit-open.sh, which mints the subject and queues
+# the conversation, and the chosen rig reaches it as --rig. A bare bead id is an
+# existing-bead request whose own rig is authoritative, so the chosen rig is
+# dropped for one — the intake refuses --rig there. The draft is removed at
 # exactly two moments —
 # the intake CONFIRMS an id, or the file is provably empty — and every other
-# path keeps it and names its path (tk-w4dp4: this key's whole purpose is
+# path keeps it and names its path (this key's whole purpose is
 # that a thought is never lost). Esc cannot be recovered: gum never emits an
 # unsubmitted buffer, so every cancel says that it discarded. Drafts live
 # outside /tmp by default and are reaped after GC_VISIT_DRAFT_KEEP_DAYS.
@@ -25,6 +32,14 @@ VISIT_OPEN="${GC_VISIT_OPEN_TOOL:-$CONFIGDIR/assets/scripts/gc-visit-open.sh}"
 
 # Seconds to let the intake run before calling it stuck. See the bound below.
 INTAKE_TIMEOUT="${GC_VISIT_INTAKE_TIMEOUT:-300}"
+
+# Seconds to cache the rig set. `gc rig list --json` costs a per-rig liveness
+# probe, and asking the operator to pick a rig FIRST would pay it before the
+# popup opens; caching it lets a burst of presses reuse one lookup. running and
+# suspended can go stale within the window, but the intake validates the actual
+# target, so the staleness is bounded and benign. 0 disables the cache.
+RIG_CACHE_TTL="${GC_VISIT_RIG_CACHE_TTL:-900}"
+case "$RIG_CACHE_TTL" in ''|*[!0-9]*) RIG_CACHE_TTL=900 ;; esac
 
 # Draft dir precedence: override/test seam, pack state dir, XDG state (real
 # disk, not the shared tmpfs), /tmp last and announced.
@@ -110,7 +125,97 @@ if ! command -v gum >/dev/null 2>&1; then
     exit 1
 fi
 
-# 3. Read the message. One file per press (see the header), kept unless it is
+# 3. Pick the target rig FIRST — the rig is the scope the report is filed
+# against, so it is chosen before the message is typed. Default the
+# board-context rig, override to any non-hq rig (Enter confirms the highlighted
+# default). The hq/city-workspace store is dropped from the offer (see below):
+# it runs no reaction pool, so a topic filed there would park with no session to
+# engage it. A suspended or not-running rig is tagged, not withheld: gc rig
+# suspend keeps its beads store, so a report filed there is recorded and triaged
+# on resume, and the intake allows it. A broken or empty `gc rig list` skips the
+# chooser and lets the intake apply its own default; an Esc cancels the whole
+# press, and nothing is typed yet to keep.
+#
+# The rig set comes from `gc rig list --json`, whose cost is the per-rig
+# liveness probe. It runs in the foreground before the message popup and outside
+# the intake timeout below, so it is BOUNDED — a `gc rig list` wedged against a
+# dead data plane falls to an empty list (chooser skipped) rather than stranding
+# the operator at a rig-less prompt — and CACHED, so a burst of presses opens the
+# picker without re-paying the probe. Only a valid, non-empty rig set is cached;
+# a wedged or empty answer is never stored as the answer. The temp write uses
+# $$ (not mktemp) so a concurrent press never reads a half-written cache.
+RIG_LIST_JSON=""
+RIG_CACHE_FILE="$DRAFT_DIR/rig-list.cache"
+mkdir -p "$DRAFT_DIR" 2>/dev/null || true
+if [ "$RIG_CACHE_TTL" -gt 0 ] && [ -f "$RIG_CACHE_FILE" ] \
+   && [ -z "$(find "$RIG_CACHE_FILE" -mmin +"$(( (RIG_CACHE_TTL + 59) / 60 ))" 2>/dev/null)" ]; then
+    RIG_LIST_JSON=$(cat "$RIG_CACHE_FILE" 2>/dev/null || true)
+fi
+if [ -z "$RIG_LIST_JSON" ]; then
+    if command -v timeout >/dev/null 2>&1; then
+        RIG_LIST_JSON=$(timeout "$INTAKE_TIMEOUT" gc rig list --json 2>/dev/null || true)
+    else
+        RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
+    fi
+    if [ "$RIG_CACHE_TTL" -gt 0 ] \
+       && printf '%s' "$RIG_LIST_JSON" | jq -e '(.rigs | length) > 0' >/dev/null 2>&1; then
+        if printf '%s' "$RIG_LIST_JSON" > "$RIG_CACHE_FILE.$$" 2>/dev/null; then
+            mv -f "$RIG_CACHE_FILE.$$" "$RIG_CACHE_FILE" 2>/dev/null \
+                || rm -f "$RIG_CACHE_FILE.$$" 2>/dev/null || true
+        fi
+    fi
+fi
+# The hq store is the city-level workspace, not a topic target: it runs no
+# reaction pool, so a prefix+a topic filed there parks on the board with no
+# session to engage it. Drop it from the chooser so it cannot be picked. Its
+# prefix still marks its ids as bead refs below — an existing hq-store bead is a
+# valid subject — and the intake backstops any other pool-less rig.
+RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
+    | jq -r '.rigs[]? | select((.hq // false) | not) | .name' 2>/dev/null || true)
+CHOSEN_RIG=""
+if [ -n "$RIG_LIST" ]; then
+    # The context rig leads the list so gum highlights it and Enter confirms it,
+    # then the rest follow. When it is the only rig the tail is empty and grep
+    # exits 1 — a legitimate result that must not trip set -e and kill the
+    # script before the operator can type the report.
+    RIG_CHOICES="$RIG_LIST"
+    if [ -n "$CONTEXT_RIG" ] && printf '%s\n' "$RIG_LIST" | grep -qxF -- "$CONTEXT_RIG"; then
+        RIG_CHOICES=$(printf '%s\n' "$CONTEXT_RIG"; printf '%s\n' "$RIG_LIST" | grep -vxF -- "$CONTEXT_RIG" || true)
+    fi
+    # A paused rig stays in the list, tagged so the choice is informed; the tag
+    # is a display suffix stripped off the selection before it reaches --rig.
+    RIG_ARGS=""
+    for _r in $RIG_CHOICES; do
+        _tag=$(printf '%s' "$RIG_LIST_JSON" | jq -r --arg n "$_r" \
+            '.rigs[]? | select(.name==$n) | if .suspended==true then " (suspended)" elif .running==false then " (not running)" else "" end' 2>/dev/null | head -n1)
+        RIG_ARGS="$RIG_ARGS $(sq "$_r$_tag")"
+    done
+    # A dedicated temp file: the rig is chosen before the draft exists, so the
+    # popup body writes the selection where the parent reads it back. A refused
+    # mktemp skips the chooser (the intake keeps its default) rather than aborting
+    # the press — the draft-file guard below is the one that reports and exits.
+    RIG_FILE=$(mktemp "${TMPDIR:-/tmp}/gc-visit-rig-XXXXXX" 2>/dev/null || printf '')
+    if [ -n "$RIG_FILE" ]; then
+        CHOOSE_RC=0
+        # shellcheck disable=SC2086 # ${CLIENT:+…} and the pre-quoted $RIG_ARGS both expand deliberately
+        CHOOSE_ERR=$(gcmux display-popup -E ${CLIENT:+-c "$CLIENT"} -w "$POPUP_W" -h "$POPUP_H" \
+            "gum choose --header $(sq 'File this report into which rig? (Enter confirms the highlighted default)')$RIG_ARGS > $(sq "$RIG_FILE")" \
+            2>&1) || CHOOSE_RC=$?
+        if [ "$CHOOSE_RC" -ne 0 ]; then
+            # Esc/cancel, or a popup that never opened: nothing is typed yet, so
+            # the whole press is cancelled cleanly and there is no draft to keep.
+            rm -f "$RIG_FILE"
+            say 4000 "gc visit: cancelled at rig selection${CHOOSE_ERR:+ ($CHOOSE_ERR)} — nothing filed (nothing was typed yet)"
+            exit 0
+        fi
+        # The label carried a tag for a paused rig; a rig name has no spaces, so
+        # the first field is the name the intake wants.
+        CHOSEN_RIG=$(cut -d' ' -f1 "$RIG_FILE" 2>/dev/null | tr -d '[:space:]' || true)
+        rm -f "$RIG_FILE"
+    fi
+fi
+
+# 4. Read the message. One file per press (see the header), kept unless it is
 #    empty or the intake confirms an id.
 
 # short <path> — ~-abbreviated; draft messages LEAD with the path because
@@ -201,7 +306,7 @@ fi
 
 TOPIC=$(cat "$TOPIC_FILE" 2>/dev/null || true)
 
-# 4. A blank submit is not an error and not a topic. A truncated write (full
+# 5. A blank submit is not an error and not a topic. A truncated write (full
 #    filesystem) lands here too and cannot be told apart, so the message says
 #    which of the two it might have been.
 if [ -z "$(printf '%s' "$TOPIC" | tr -d '[:space:]')" ]; then
@@ -210,81 +315,27 @@ if [ -z "$(printf '%s' "$TOPIC" | tr -d '[:space:]')" ]; then
     exit 0
 fi
 
-# 4b. Pick the target rig — default the board-context rig, override to any rig
-# (prefix+a → confirm). Every rig is offered; a suspended or not-running one is
-# tagged, not withheld: gc rig suspend keeps its beads store, so a report filed
-# there is recorded and triaged on resume, and the intake allows it. A broken or
-# empty `gc rig list` skips the chooser and lets the intake apply its own
-# default; an Esc keeps the draft, like the message popup.
-# Withheld entirely for a bead id: gc-visit-open.sh treats an id-shaped argument
-# whose prefix names a rig as an existing bead — the bead's own rig is
-# authoritative and the intake refuses --rig for it — so offering a rig here
-# would fail the bare-bead-id request this key supports (the `--` note below).
-CHOSEN_RIG=""
-# Bounded: this enumeration runs in the foreground before the message is filed
-# and outside the intake timeout below, so a `gc rig list` wedged against a dead
-# data plane would strand the operator at a chooser-less prompt — report typed,
-# no indicator lit, no message. A timeout, a non-zero exit, or unparseable output
-# all fall to an empty list, which skips the chooser and leaves the intake on its
-# own default, the same as a genuinely empty list.
-if command -v timeout >/dev/null 2>&1; then
-    RIG_LIST_JSON=$(timeout "$INTAKE_TIMEOUT" gc rig list --json 2>/dev/null || true)
-else
-    RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
-fi
-# Bead id or new topic? Mirror gc-visit-open.sh's bead-vs-topic gate: id-shaped
-# (nothing outside [A-Za-z0-9_-], no leading '-', at least one '-') AND the
-# prefix before the first '-' names a rig in this enumeration. Match every rig,
-# not just the live ones the picker offers — the intake resolves an id against
-# all rigs, so a suspended rig's prefix still marks its ids as beads.
-TOPIC_IS_BEADREF=""
+# 6. A bare bead id is an existing-bead request, not a new report, and the rig
+# was already chosen above without knowing that. gc-visit-open.sh resolves a
+# bead id against the bead's OWN rig and REFUSES --rig for it (exit 2), so the
+# chosen rig must be DROPPED — otherwise a bead id filed through this key fails
+# whenever the city has live rigs. Mirror the intake's bead-vs-topic gate:
+# id-shaped (nothing outside [A-Za-z0-9_-], no leading '-', at least one '-')
+# AND the prefix before the first '-' names a rig in this enumeration. Match
+# every rig, not just the non-hq ones the picker offered — the intake resolves
+# an id against all rigs, so a suspended or hq rig's prefix still marks its ids
+# as beads. An id-shaped topic whose prefix names no rig stays a topic and keeps
+# the chosen rig.
 case "$TOPIC" in
     *[!a-zA-Z0-9_-]*|-*) : ;;
     *-*)
         if printf '%s' "$RIG_LIST_JSON" \
             | jq -e --arg p "${TOPIC%%-*}" 'any(.rigs[]?; .prefix == $p)' >/dev/null 2>&1; then
-            TOPIC_IS_BEADREF=1
+            CHOSEN_RIG=""
         fi ;;
 esac
-RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
-    | jq -r '.rigs[]? | .name' 2>/dev/null || true)
-if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
-    # The context rig leads the list so gum highlights it and Enter confirms it,
-    # then the rest follow. When it is the only rig the tail is empty and grep
-    # exits 1 — a legitimate result that must not trip set -e and kill the
-    # script after the operator already typed the report.
-    RIG_CHOICES="$RIG_LIST"
-    if [ -n "$CONTEXT_RIG" ] && printf '%s\n' "$RIG_LIST" | grep -qxF -- "$CONTEXT_RIG"; then
-        RIG_CHOICES=$(printf '%s\n' "$CONTEXT_RIG"; printf '%s\n' "$RIG_LIST" | grep -vxF -- "$CONTEXT_RIG" || true)
-    fi
-    # A paused rig stays in the list, tagged so the choice is informed; the tag
-    # is a display suffix stripped off the selection before it reaches --rig.
-    RIG_ARGS=""
-    for _r in $RIG_CHOICES; do
-        _tag=$(printf '%s' "$RIG_LIST_JSON" | jq -r --arg n "$_r" \
-            '.rigs[]? | select(.name==$n) | if .suspended==true then " (suspended)" elif .running==false then " (not running)" else "" end' 2>/dev/null | head -n1)
-        RIG_ARGS="$RIG_ARGS $(sq "$_r$_tag")"
-    done
-    RIG_FILE="$DRAFT_FILE.rig"
-    CHOOSE_RC=0
-    # shellcheck disable=SC2086 # ${CLIENT:+…} and the pre-quoted $RIG_ARGS both expand deliberately
-    CHOOSE_ERR=$(gcmux display-popup -E ${CLIENT:+-c "$CLIENT"} -w "$POPUP_W" -h "$POPUP_H" \
-        "gum choose --header $(sq 'File this report into which rig? (Enter confirms the highlighted default)')$RIG_ARGS > $(sq "$RIG_FILE")" \
-        2>&1) || CHOOSE_RC=$?
-    if [ "$CHOOSE_RC" -ne 0 ]; then
-        # Esc/cancel, or a popup that never opened: the message is already typed,
-        # so keep the draft and name it — the same contract as the message popup.
-        rm -f "$RIG_FILE"
-        keep_draft 10000 "gc visit: rig not chosen${CHOOSE_ERR:+ ($CHOOSE_ERR)} — nothing filed"
-        exit 0
-    fi
-    # The label carried a tag for a paused rig; a rig name has no spaces, so the
-    # first field is the name the intake wants.
-    CHOSEN_RIG=$(cut -d' ' -f1 "$RIG_FILE" 2>/dev/null | tr -d '[:space:]' || true)
-    rm -f "$RIG_FILE"
-fi
 
-# 5. Background the slow half (seconds, up to GC_HELM_RIG_TIMEOUT). stdout/
+# 7. Background the slow half (seconds, up to GC_HELM_RIG_TIMEOUT). stdout/
 #    stderr closed so run-shell sees EOF at once (it waits on pipes, not the
 #    process tree). Only this half may remove the draft — the parent exits
 #    immediately.

@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,6 +117,187 @@ func TestCacheServesWithinTTL(t *testing.T) {
 	}
 	if got := f.calls.Load(); got != 2 {
 		t.Errorf("past TTL: gather called %d times, want 2 (recompute)", got)
+	}
+}
+
+// blockingSource holds each Gather open until released, so a burst of
+// concurrent misses can be observed piling up against the single-flight.
+type blockingSource struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+	result  *source.Result
+}
+
+func (b *blockingSource) Gather(context.Context) (*source.Result, error) {
+	b.calls.Add(1)
+	b.entered <- struct{}{}
+	<-b.release
+	return b.result, nil
+}
+
+// TestConcurrentMissesCoalesceIntoOneGather is the anti-stampede guard: a burst
+// of concurrent cache misses must drive ONE gather, not one per request.
+func TestConcurrentMissesCoalesceIntoOneGather(t *testing.T) {
+	const n = 8
+	src := &blockingSource{
+		entered: make(chan struct{}, n), // never blocks, even if coalescing regresses
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range [n]struct{}{} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b, err := s.Board(context.Background())
+			switch {
+			case err != nil:
+				errs <- err
+			case b == nil || b.Total != 2:
+				errs <- fmt.Errorf("board total = %v, want 2", b)
+			}
+		}()
+	}
+
+	// A gather is in flight; let the rest of the herd coalesce onto it before
+	// releasing, so a per-request gather would have to fire here to be counted.
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(src.release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if got := src.calls.Load(); got != 1 {
+		t.Errorf("gather ran %d times for %d concurrent misses, want 1 (single-flight coalescing)", got, n)
+	}
+}
+
+// TestCacheLockNotHeldDuringGather is the discriminating guard for building the
+// board OUTSIDE the cache lock. While a gather is in flight, another lock-taker
+// — here invalidateBoard, the write-verb path — must not block on it; a build
+// that held the lock across the whole gather would block it until the gather
+// returned, and this test fails on the deadline.
+func TestCacheLockNotHeldDuringGather(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	go func() { _, _ = s.Board(context.Background()) }()
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// The gather is in flight. A lock-taker must return without waiting for it.
+	done := make(chan struct{})
+	go func() { s.invalidateBoard(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("invalidateBoard blocked while a gather was in flight — the cache lock is held across the build")
+	}
+
+	close(src.release) // let the in-flight gather finish so its goroutine exits
+}
+
+// TestInvalidateDuringGatherIsNotRepublished pins the invalidation-generation
+// guard: an invalidate that lands while a gather is in flight must win, so the
+// in-flight gather may not publish its pre-invalidate board into the cache.
+// This mirrors a GET /helm gather racing a POST /helm/open — the write busts
+// the cache after it mutates, and a gather that started earlier holds pre-write
+// state. Without the guard the gather re-caches that stale board with a fresh
+// TTL and the next read serves pre-write state for the whole window; with it,
+// the cache stays empty so the next read re-gathers.
+func TestInvalidateDuringGatherIsNotRepublished(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	done := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done) }()
+
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// A write verb completes and invalidates while the gather is still in flight.
+	s.invalidateBoard()
+	close(src.release)
+	<-done
+
+	if b, ok := s.cachedFresh(); ok {
+		t.Fatalf("stale board republished after an invalidate during the gather: %+v", b)
+	}
+}
+
+// TestInvalidateBreaksTheInFlightGather pins that an invalidate forgets the
+// in-flight gather's single-flight key, so a board request arriving after the
+// invalidate drives its OWN gather instead of joining the pre-invalidate one
+// and being handed its stale board. It mirrors GET /helm starting a slow
+// gather, POST /helm/open completing and invalidating, then a second GET /helm
+// arriving before the first gather returns. Without the forget, the second
+// request coalesces onto the first flight, no second gather runs, and the
+// post-write refresh is served the pre-write board — the stale-action feedback
+// the invalidate exists to prevent. The generation guard alone does not close
+// this: it keeps the pre-write board out of the cache, not out of a joined
+// waiter's hands.
+func TestInvalidateBreaksTheInFlightGather(t *testing.T) {
+	src := &blockingSource{
+		entered: make(chan struct{}, 2), // both gathers can signal without blocking
+		release: make(chan struct{}),
+		result:  newFake().result,
+	}
+	s := New(src, time.Minute)
+
+	done1 := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done1) }()
+
+	// The first gather is in flight and blocked.
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no gather started within 2s")
+	}
+
+	// A write verb completes and invalidates while that gather is still in flight.
+	s.invalidateBoard()
+
+	// A board request arriving after the invalidate must drive its own gather,
+	// not join the pre-invalidate one still in flight.
+	done2 := make(chan struct{})
+	go func() { _, _ = s.Board(context.Background()); close(done2) }()
+
+	select {
+	case <-src.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Board after invalidate joined the pre-invalidate gather instead of starting its own (invalidate did not forget the flight key)")
+	}
+
+	close(src.release)
+	<-done1
+	<-done2
+
+	if got := src.calls.Load(); got != 2 {
+		t.Errorf("gather ran %d times, want 2 (the post-invalidate request must drive its own gather)", got)
 	}
 }
 

@@ -4,7 +4,7 @@
 # converse-reap ends a converse sitting once its visit has closed: converse is
 # spawn-on-engagement, the manual session is exempt from every pool backstop, and
 # closing the visit (sign-off or dismiss) does not close the session, so a settled
-# sitting leaks a max_active_sessions slot until this pass closes it.
+# sitting leaks a live session until this pass closes it.
 #
 # Runs the REAL converse-reap.sh with a stubbed `gc` (CONVERSE_REAP_GC) — no live
 # city, sessions, or store. The stub answers `session list` from a fixture file,
@@ -30,10 +30,14 @@
 #   (UNREADABLE-VISIT) a visit read that is not JSON is skipped, never reaped
 #   (OTHERERR) a visit read that fails with a non not-found error is skipped
 #   (CLOSEFAIL) a session that will not close is reported and left for next pass
+#   (DISKPRESSURE) a failed temp-file enumeration aborts non-zero, forges no
+#             all-clear summary, and closes nothing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SUT="$HERE/converse-reap.sh"
+# CONVERSE_REAP_SUT overrides the script under test, so the disk-pressure case
+# below can be replayed against a pre-fix copy to confirm it discriminates.
+SUT="${CONVERSE_REAP_SUT:-$HERE/converse-reap.sh}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-reap-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -178,7 +182,8 @@ has "$CLOSED" "close s-gone" "UNREADABLE-VISIT: other settled sittings are still
 # --- a session that will not close -------------------------------------------
 # The close is the one operation this order performs, so a session that fails to
 # close is reported on stderr and counted skipped, and must NOT appear among the
-# reaped list on stdout — otherwise the summary would claim a slot it never freed.
+# reaped list on stdout — otherwise the summary would claim a sitting it never
+# closed.
 # stdout and stderr are captured apart: the failure line names the sitting on
 # stderr too, so a combined capture could not tell it from a reaped-list entry.
 build_world
@@ -212,6 +217,33 @@ printf '{"sessions":[%s]}' "$(sess s-only gc-toolkit/gc-toolkit.tk-open active f
 OUT="$(bash "$SUT" 2>&1)"; RC=$?
 eq "$RC" "0" "EMPTY: a city with no converse candidates exits 0"
 has "$OUT" "closed 0 settled converse sittings" "EMPTY: reports nothing reaped"
+
+# --- disk pressure: a failed temp-file enumeration must NOT forge an all-clear -
+# The candidate loop reads a producer-named temp file created with mktemp. Under
+# disk pressure mktemp fails with ENOSPC; the pre-fix form drove the loop from a
+# `<<<` here-string, whose implicit temp file failed the same way but silently,
+# running the loop zero times and still printing the summary and exiting 0 — an
+# all-clear byte-identical to a healthy empty queue. A failing `mktemp` shim first
+# on PATH reproduces ENOSPC hermetically. The fixed script aborts non-zero with no
+# summary and closes nothing; the pre-fix `<<<` form does not call mktemp, so this
+# case run against it (CONVERSE_REAP_SUT=<old copy>) fails every assertion below,
+# which is what proves the case discriminates.
+build_world
+MKTEMP_SHIM="$TMP/mkbin"; mkdir -p "$MKTEMP_SHIM"
+cat > "$MKTEMP_SHIM/mktemp" <<'MT'
+#!/usr/bin/env bash
+echo "mktemp: No space left on device" >&2
+exit 1
+MT
+chmod +x "$MKTEMP_SHIM/mktemp"
+PATH="$MKTEMP_SHIM:$PATH" bash "$SUT" >"$TMP/dp.out" 2>"$TMP/dp.err"; RC=$?
+DP_OUT="$(cat "$TMP/dp.out")"; DP_ERR="$(cat "$TMP/dp.err")"
+CLOSED="$(cat "$CALLS" 2>/dev/null)"
+[ "$RC" -ne 0 ] && ok "DISKPRESSURE: a failed temp-file enumeration aborts non-zero" \
+  || bad "DISKPRESSURE: must abort non-zero on a failed mktemp (got rc=$RC)"
+hasnt "$DP_OUT" "settled converse sittings" "DISKPRESSURE: the forged all-clear summary is ABSENT from stdout"
+eq "$CLOSED" "" "DISKPRESSURE: no session is closed when enumeration fails"
+has "$DP_ERR" "reaping nothing" "DISKPRESSURE: the blackout is announced on stderr"
 
 echo ""
 echo "converse-reap.test.sh: $PASS passed, $FAIL failed"

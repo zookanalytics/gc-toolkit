@@ -37,7 +37,7 @@ var shellVars = strings.NewReplacer(
 	"$existing", "tk-old99",
 	"$VISIT", "tk-new11",
 	"$bead", "tk-abc12",
-	"$POOL", "gc-toolkit/gc-toolkit.converse",
+	"$POOL", "human",
 )
 
 func TestParseOpenStdoutMatchesTheScriptsRealSentences(t *testing.T) {

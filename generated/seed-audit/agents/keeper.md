@@ -138,7 +138,8 @@ BRANCH_NAME="<branch-name>"   # from `as <branch>`, else empty
 META=$(jq -n --arg shas "$SHAS" --arg keeper "$GC_AGENT" --arg branch "$BRANCH_NAME" \
   '{commit_sha:$shas, requesting_keeper:$keeper}
    + (if $branch == "" then {} else {branch_name:$branch} end)')
-BEAD=$(gc bd create "Prep upstream PR ($(printf '%s' "$SHAS" | wc -w | tr -d ' ') commits)" \
+SHA_COUNT=$(printf '%s' "$SHAS" | wc -w | tr -d ' ')
+BEAD=$(gc bd create "Prep upstream PR ($SHA_COUNT commits)" \
   -t task --metadata "$META" --json | jq -r '.id')
 gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
   --var commit_sha="$SHAS" \
@@ -307,9 +308,11 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 `gc sling` stamps `gc.routed_to` and nothing else, whatever the target.
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
-proactive, converse — because pool members run the routed tier of the
-work query, and the bead has to stay unassigned for their claim filter
-to offer it.
+proactive — because pool members run the routed tier of the work query,
+and the bead has to stay unassigned for their claim filter to offer it.
+A converse sitting is neither a pool nor a named agent: a visit parks on
+the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
+sitting when the operator draws it off the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a
@@ -427,10 +430,6 @@ worktree.
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -445,3 +444,21 @@ worktree.
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+- Express a wait or a gated hand-off as a graph edge — a blocked-by
+  dependency on the prerequisites, plus a deferred-dispatch arm where a
+  successor must auto-sling on the blocker's close — not a passive gc.hold
+  note or a manual sling a later session must run. A gc.hold note still
+  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
+  edge excludes it until the blocker lands, then self-clears.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the system-class roles: deacon,
+     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
+     standards for that class only; universal standards live in
+     work-quality-base. -->
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.

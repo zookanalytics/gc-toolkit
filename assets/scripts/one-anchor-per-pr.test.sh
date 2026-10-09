@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Hermetic test for the one-anchor-per-PR rework hand-back arm (tk-ynz4b,
-# formulas/mol-refinery-patrol.toml merge-push step 4).
+# Hermetic test for the one-anchor-per-PR rework hand-back arm
+# (formulas/mol-refinery-patrol.toml merge-push step 4).
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating
 # anchor for the same PR. Because merge.sh validates each anchor
 # independently, the PR's effective gate became its WEAKEST anchor — the
 # rework anchor carried no check_set, so a CLEAN PR merged with the real
-# anchor's codex gate red. And because the in-flight-rework hold excludes
+# anchor's correctness check red. And because the in-flight-rework hold excludes
 # merge_result-carrying beads, the rework bead's openness held nothing.
 #
 # The fix under test: before dispatching the signoff and transitioning to a
@@ -187,9 +187,9 @@ eq "$(resolve work-1 polecat/work-1)" "|work-1" \
 #     The fixture is adversarial to the two ways this can silently degrade, so
 #     the assertion actually tests the sort key rather than luck:
 #       - id ordering  — the newer duplicate's id sorts FIRST lexicographically,
-#         so a resolver reading a non-existent timestamp field (the tk-52mrh
+#         so a resolver reading a non-existent timestamp field (the
 #         defect: `.created` on a row that only has `created_at`) collapses to
-#         `.id` and elects the gateless duplicate;
+#         `.id` and elects the checkless duplicate;
 #       - no ordering  — the newer duplicate is also the FIRST input row, so a
 #         missing/stable-no-op sort picks it too.
 #     Only sorting on the real `created_at` yields tk-zzzz9.
@@ -284,7 +284,7 @@ chmod +x "$TMP/bin/lc-stub"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
 run_terminal() { # <pre_open> <pr_url> <pr_number>
   : > "$LCLOG"
-  EXISTING_ANCHOR="" WORK=w1 BRANCH=polecat/w1 TARGET=main CHECK_SET=codex \
+  EXISTING_ANCHOR="" WORK=w1 BRANCH=polecat/w1 TARGET=main CHECK_SET=correctness \
     LC="$TMP/bin/lc-stub" PRE_OPEN="$1" PR_URL="$2" PR_NUMBER="$3" \
     bash "$TMP/terminal.sh" >/dev/null 2>&1
   cat "$LCLOG"
@@ -314,7 +314,7 @@ run_rework() { # <lc-rc> -> "<lifecycle calls>#<gc bd calls>"
   : > "$LCLOG"; : > "$TMP/gc.log"
   # origin holds exactly the prepared head, so the read-back gate passes and the
   # arm proceeds to record + close (10f/10g cover the mismatch).
-  EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+  EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
     LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" \
     LCRC="$1" GCLOG="$TMP/gc.log" \
     STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
@@ -342,7 +342,7 @@ esac
 # the child sits unanchored, open and assigned — the shape that reads as work
 # still in flight, and the one a silent close leaves behind every pass.
 : > "$LCLOG"; : > "$TMP/gc.log"
-refused_out=$(EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+refused_out=$(EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
   LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 \
   STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
   GCLOG="$TMP/gc.log" GCUPDRC=1 bash "$TMP/terminal.sh" 2>&1 >/dev/null)
@@ -383,7 +383,7 @@ esac
 # tip.
 run_gate() { # <prepared-head> <remote-head> [fetch-rc] -> "<rc>#<lifecycle>;<gc>"
   : > "$LCLOG"; : > "$TMP/gc.log"; local rc
-  if EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+  if EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
        LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
        STUB_PREPARED_HEAD="$1" STUB_REMOTE_HEAD="$2" STUB_FETCH_RC="${3:-0}" \
        bash "$TMP/terminal.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi

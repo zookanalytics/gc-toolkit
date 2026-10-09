@@ -1,12 +1,12 @@
 ---
 name: reaction-bead first-reaction dispatch
-description: The design of the reaction-bead model — a first reaction is its own leased task bead R that tracks the subject S — and how it replaces the mol-first-reaction / subject-metadata dispatch. Read this to understand why a reaction is a bead, how exactly-once rides the substrate, and what each disposition writes back to S.
+description: The design of the reaction-bead model — a first reaction is its own leased task bead R that tracks the subject S — and how it replaces the mol-first-reaction / subject-metadata dispatch. Read this to understand why a reaction is a bead, how exactly-once rides the substrate, what each of the five dispositions writes back to S, and how the model composed with the first-reaction work that landed on main while it was in review.
 ---
 
 # Reaction-bead first-reaction dispatch
 
 A first reaction is inbox triage: read a freshly-filed bead S once, sort it into
-one of four dispositions, and dispatch accordingly. This document describes the
+one of five dispositions, and dispatch accordingly. This document describes the
 model in which the triage is itself a work bead.
 
 ## The problem this removes
@@ -14,11 +14,11 @@ model in which the triage is itself a work bead.
 The substrate already runs work exactly-once: a bead is claimed under a lease,
 worked, and closed, and the claim CAS plus the lease make a second worker
 impossible. A first reaction could not use that guarantee, because triage ends
-by handing the subject S *back* alive — routed to a pool, held on an edge, or
-put to a human — not by closing it. A disposition that leaves its subject
-open cannot lean on close-means-done, so the prior model hand-rolled a
-done-marker on S instead: a metadata stamp written around the disposition act,
-whose presence a guard read to refuse a second reaction.
+by handing the subject S *back* alive — routed to a pool, held on an edge, handed
+to a validating closer, or put to a human — not by closing it. A disposition that
+leaves its subject open cannot lean on close-means-done, so the prior model
+hand-rolled a done-marker on S instead: a metadata stamp written around the
+disposition act, whose presence a guard read to refuse a second reaction.
 
 Getting that marker's timing right across a crash was the entire bug class. The
 marker written *before* the act records only an attempt, so a guard keyed on it
@@ -56,17 +56,20 @@ re-claimed; nothing is hand-rolled.
 ### Lifecycle
 
 1. **Create (once per S).** `gc-proactive.sh` scan/sling finds a movable-forward
-   subject S, and before creating anything checks that no open reaction already
-   tracks S (the dedup below). It then creates R, stamps it, and wires the
-   tracks edge. S is untouched.
+   subject S, and before creating anything checks that no live owner owns S's
+   reaction (`gc.reaction_owned`), that no open reaction already tracks S (the
+   dedup below), and that no live workflow already drives S. It then creates R,
+   stamps it, and wires the tracks edge. S is untouched.
 2. **Claim.** A proactive pool worker claims R through `gc hook --claim` — the
    substrate CAS. The claim stamps R's lease (`gc.claimed_at`,
    `lease_expires_at`). R, not S, is the claimed work.
 3. **React.** The worker resolves S from R, reads S and its universe slice,
-   writes the first-reaction card, and takes exactly one of four dispositions —
-   the write-back to S.
-4. **Close R.** After the write-back lands, the worker closes R. The reaction is
-   complete; the substrate records it done.
+   writes the first-reaction card into S's notes, and takes exactly one of five
+   dispositions — the write-back to S.
+4. **Close R.** After the write-back lands, `first-reaction-dispose.sh` closes R
+   (`gc.outcome=reacted`, `gc.work_outcome=no-op`: R's work is a card and a
+   disposition, never a commit). The reaction is complete; the substrate records
+   it done.
 
 ### Create-R-once (the dedup)
 
@@ -76,43 +79,45 @@ dedup is at create time, keyed on **subject + kind**: before creating R for S,
 `gc-proactive.sh` refuses if an open or in-progress bead with
 `task_kind=reaction` already tracks S (matched by either `gc.reaction_subject=S`
 or a `tracks` edge to S, since a visit records its subject twice and only the
-edge has proved reliable). One open reaction per subject.
+edge has proved reliable). One open reaction per subject. A store that cannot
+answer the edge lookup is not proof of absence: the sling fails closed with an
+error, not a skip.
 
 The dedup keys on `task_kind=reaction`, not on any marker on S, so it holds
 while S is still scan-eligible — which S remains until the reaction's write-back
 lands (S is unchanged between R's creation and R's disposition). Once the
 write-back lands, S is no longer scan-eligible on its own terms (routed, held on
-an edge, awaiting a visit, or closed — see each exit below), so no further
-reaction is minted. A deliberate re-reaction ("it has been a week, look again")
-is simply a new R filed against an S that has become eligible again; the dedup
-does not forbid it, because it keys on *open* reactions, not on history.
+an edge or a gate, driven by a closer, and carrying the reaction's takeaway), so
+no further reaction is minted. A deliberate re-reaction ("it has been a week,
+look again") is simply a new R filed against an S that has become eligible
+again; the dedup does not forbid it, because it keys on *open* reactions, not on
+history.
 
-## The four dispositions: the write-back to S
+## The five dispositions: the write-back to S
 
 Each disposition is R's write-back to S, performed by
-`assets/scripts/first-reaction-dispose.sh`. The reaction never closes S except
-through the one evidence-gated writer (the superseded exit). The write-back
-carries the reaction card into S's notes as the dispatch record
-(`--append-notes`, never `--notes`).
+`assets/scripts/first-reaction-dispose.sh`. No disposition closes S: a first
+reaction runs on a cheap model and never has the last word on a close. The card
+in S's notes is the record of what was chosen and why.
 
 | Disposition | S becomes | Act |
 |---|---|---|
-| **actionable** | routed to a pool | route S (`gc.routed_to`), the card is the dispatch note |
+| **actionable** | routed to a pool | release S to the pool (`gc.routed_to`); the card is the dispatch note |
+| **recommend** | held on a human gate, with an action to Accept | stamp `gc.recommended_formula`, file the gate (`gc-helm.sh demand`, topic `first-reaction`), hold S on it |
 | **blocked** | held on a `blocks` edge | wire the edge to the blocker; optionally arm a deferred dispatch for when it clears |
-| **ruling** | awaiting an operator visit | file the visit (tracks S), hold S on it |
-| **superseded** | closed with a successor | `bead-rehome.sh --check`, then close through `bead-rehome.sh` |
+| **close** | driven by the validating closer | append the close brief to S's notes, sling `mol-validate-close` at S |
+| **ruling** | held on a human gate, Discuss-only | file the gate, hold S on it |
 
-`gc.origin=operator` forces the ruling exit; the other three are refused, so a
-bead the operator filed for a person always reaches one.
+`gc.origin=operator` does not decide the exit: an operator capture is triaged on
+its merits, and the guardrail that a fork, an irreversible action, or a policy
+call reaches a human lives in the reacting agent's rubric. The gate is the
+escalation's state; `orders/gate-visit-sweep` files the visit that resolves it.
 
-`superseded` is the reaction's own close-with-successor, and it is the narrow
-one: it takes only `fixed-upstream` or `duplicate`, the two kinds whose evidence
-a reaction can establish (the successor exists, is closed or shipped, in the same
-store, and S did no work). The judgment kinds — `re-homed`, `folded`,
-`not-needed` — are a person's call and reach the operator through the ruling
-exit. Every close-with-successor, from any actor, goes through
-`bead-rehome.sh`, the single writer that re-establishes the evidence itself
-(§ bead-rehome).
+A confident "nothing to do" — already fixed, a duplicate, fixed upstream, or a
+bead that should not exist — is the **close** disposition. The validating closer
+re-checks the close brief against live state and closes S on its own confident
+check, or leaves S open and files a visit. A close that needs a successor
+pointer is the operator's, through `bead-rehome.sh`.
 
 ### The completion marker and the residual window
 
@@ -122,45 +127,49 @@ close of R persists. In this model that window is a self-healing no-op, not a
 deadlock.
 
 The last write of each disposition stamps `gc.reacted_by=<R-id>` on S — after
-the edge on the blocked exit, so it stays completion-marker-last. On re-claim
-(the worker died in the window, R's lease lapsed, R is re-offered), the worker
-reads S: if `gc.reacted_by` names this R, the write-back already landed, so it
-closes R and touches S no further. S is never re-dispatched, and never yanked
-from a downstream worker that has since claimed a routed S.
+the edge or the arm, so it stays completion-marker-last. On re-claim (the worker
+died in the window, R's lease lapsed, R is re-offered), the worker reads S: if
+`gc.reacted_by` names this R, the write-back already landed, so it closes R and
+touches S no further. S is never re-dispatched, and never yanked from a
+downstream worker that has since claimed a routed S.
 
 `gc.reacted_by` is not the old machinery reborn. Correctness does not rest on
 it: the write-backs are idempotent (routing S to the same pool is a no-op, an
-edge is deduplicated, a visit is deduped by its situation key, a superseded
-close takes `bead-rehome.sh`'s already-closed repair path), so a re-run without
-the marker is safe — the marker only spares the redundant work and protects a
-claimed S. No guard refuses progress on its presence, so no partial state can
-deadlock. And it is keyed to R's identity, so a marker left by a closed R does
-not suppress a later, deliberate re-reaction by a different R.
+edge is deduplicated, the gate is refreshed under its topic rather than filed
+twice, and a closer slung again is refused by `gc sling` as a live-workflow
+conflict, which the close exit reads as the closer already slung), so a re-run
+without the marker is safe — the marker only spares the redundant work and
+protects a claimed S. No guard refuses progress on its presence, so no partial
+state can deadlock. And it is keyed to R's identity, so a marker left by a closed
+R does not suppress a later, deliberate re-reaction by a different R.
 
 ## bead-rehome.sh: the one close-with-successor writer
 
 `bead-rehome.sh` closes a bead with a legible successor pointer
 (`gc.superseded_by` + `gc.superseded_by_store`), and it is the single writer for
-that act across every actor: reactions (superseded), converse dispositions, and
-operator re-homes. It gates its own evidence rather than trusting the caller.
+that act across every actor: converse dispositions, operator re-homes,
+`pr-facts.sh` consummating a pre-recorded PR-close disposition, and
+`duplicate-sweep.sh` closing a marked duplicate or a never-dispatched rework
+twin. It gates its own evidence rather than trusting the caller.
 
 - `--check` evaluates the gates and writes nothing (exit 0 eligible, non-zero
-  refused). The reaction's superseded exit runs `--check` first and falls back
-  to the ruling exit on a refusal, so a reaction never half-closes a bead.
-- The gates, re-established by the script for every kind: the origin is not a
-  review bead, not a step bead or workflow root, carries no unlanded work
-  (`merge_result` empty or `merged`), and is not held in progress by another
-  session. For `fixed-upstream` / `duplicate`: the successor is in the same
-  store and is closed or `work_outcome=shipped`, and the origin did no work
-  (`work_outcome=no-op`, or no work-product key set at all).
+  refused).
+- Every kind: the origin is not a review bead, not a step bead or workflow root,
+  and is not held in progress by another session.
+- `fixed-upstream` / `duplicate`, the kinds that claim the origin's work is
+  already delivered elsewhere: the successor is in the same store and is closed
+  or `work_outcome=shipped`, and the origin did no work (`work_outcome=no-op`, or
+  no work-product key set at all, so an origin with unlanded work is refused). An
+  origin carrying the operator's pre-recorded PR-close disposition for that kind
+  and successor (`pr-dispose.sh`) is a ruling already made, read from the store,
+  and these gates do not re-judge it.
+- `re-homed`, `folded`, `not-needed` are a person's call: a non-closed
+  `merge_result` does not bar them, because the converse retire path disposes an
+  in-flight anchor through this writer on the operator's ruling.
 - The pointer is stamped and read back before the close; a close is gated on the
   read-back, not the write's exit status. The close is deliberately not
   `--force`, so a refusal leaves an open, pointed, findable bead rather than a
   silent drop.
-
-These are the gates the retired duplicate sweep used to enforce as a separate
-arm; folding them into `bead-rehome.sh` gives every close-with-successor caller
-one contract.
 
 ## What this replaces
 
@@ -168,17 +177,17 @@ one contract.
   poured graph.v2 workflow with an input convoy and per-step closes; it is a
   plain bead R. In-flight molecules poured before the cutover complete on their
   frozen step descriptions (§ Cutover).
-- **The subject-metadata dispatch** — `gc.first_reaction`,
+- **The subject-metadata attempt record** — `gc.first_reaction`,
   `gc.first_reaction_reason`, `gc.first_reaction_target`, `gc.first_reaction_at`
-  — is retired. `first-reaction-dispose.sh` no longer writes the attempt record
-  before the act, and `gc-helm.sh`'s `takeaway --release` no longer stamps or
-  reads back `gc.proactive_reaction`. The reaction-bead path replaces the
-  completion proof with `gc.reacted_by`; `gc.proactive_reaction` survives only on
-  the frozen no-`--reaction-bead` path, where `first-reaction-dispose.sh` stamps
-  it as the legacy landed proof until pre-cutover molecules drain (§ Cutover).
-- **`assets/scripts/duplicate-sweep.sh`** (merge-cadence arm) and the
-  `duplicate_of` / `duplicate_of_store` markers are retired. Its evidence gates
-  live in `bead-rehome.sh`; its backlog was zero.
+  — is retired. `first-reaction-dispose.sh` no longer writes it, and
+  `gc-helm.sh`'s `takeaway --release` no longer stamps or reads back
+  `gc.proactive_reaction`. The reaction-bead path's completion proof is
+  `gc.reacted_by`; `gc.proactive_reaction` survives only on the frozen
+  no-`--reaction-bead` path (§ Cutover). The validating closer reads its brief
+  from S's notes, and falls back to `gc.first_reaction_reason` for a reaction that
+  ran before reaction beads. The retired keys stay registered in
+  `lifecycle/lifecycle.toml` so residue on an older bead reads as known, and
+  `bead-context.sh` still shows an older subject's `gc.first_reaction*` record.
 
 ## Cutover
 
@@ -189,21 +198,60 @@ The cutover is one PR, not a two-phase interim. Two facts keep it safe:
   strand a molecule already running; its `advance-and-drain` step still calls
   `first-reaction-dispose.sh`.
 - **`first-reaction-dispose.sh` stays backward-compatible.** Called without
-  `--reaction-bead` (the frozen invocation), it performs the same four-exit
-  write-back on the claimed subject and skips the close-R step. With no R to key
-  exactly-once on, it stamps the legacy landed proof `gc.proactive_reaction=1`
-  after the act, in place of `gc.reacted_by`. The frozen `advance-and-drain`
-  molecule reads that proof two ways — its own `load-bead` REACTED check and this
-  script's re-offer guard — so a re-offered frozen step stops before the act
-  rather than re-releasing (reopening, unassigning, re-routing) a subject a
+  `--reaction-bead` (the frozen invocation), it performs the same write-back on
+  the claimed subject, the close exit's `--after-workflow` deferral included, and
+  closes no R. With no R to key exactly-once on, it stamps the legacy landed proof
+  `gc.proactive_reaction=1` after the act, in place of `gc.reacted_by`. The frozen
+  `advance-and-drain` molecule reads that proof two ways — its own REACTED checks
+  and this script's re-offer guard — so a re-offered frozen step stops before the
+  act rather than re-releasing (reopening, unassigning, re-routing) a subject a
   downstream worker has already claimed. That release is not idempotent, which is
   why the frozen path keeps a landed proof rather than relying on the step chain
   alone; the proof is retained until pre-cutover molecules drain.
 
-Newly-scanned subjects take the reaction-bead path from the moment the PR lands;
-the scheduler that runs `scan --sling` on a cadence is a separate, downstream
-change (tk-cbwtkb), which waits on this model and then wires the same
-`scan --sling` entry point.
+Newly-scanned subjects take the reaction-bead path from the moment the PR lands.
+The scheduled `scan --sling` order (`orders/proactive-scan-sling.toml`) calls the
+same entry point, so it files reaction beads too.
+
+## Composition with the first-reaction work that landed on main
+
+This branch was ruled on 2026-09-18 and stayed in review while main's
+first-reaction work kept landing. Bringing it current composed the two. Each
+clash was decided by the later, more specific ruling, and a retirement whose
+premise no longer held was left to the operator:
+
+- **Five exits, not four.** Main added `recommend` (Accept/Discuss), `close`
+  (the validating closer), and a native human gate for `ruling` and `recommend`
+  (gate adoption Part A). They change what a reaction decides, an axis this
+  branch does not touch, so they carry over as R's write-back.
+- **No `superseded` exit.** The operator's 2026-09-19 ruling (tk-mw3bso) is that
+  a first reaction must not itself resolve or close a bead. The branch's
+  `superseded` exit closed S through `bead-rehome.sh`, so it gave way to
+  `close`, which hands S to the validating closer.
+- **Operator-origin triage on merits.** The same ruling removed the
+  `gc.origin=operator` gate; the branch's copy of it went.
+- **`bead-rehome.sh`'s gates scoped by kind.** The branch's every-kind
+  unlanded-work gate refused three callers that act on an operator's ruling:
+  `pr-facts.sh` consummating a pre-recorded PR-close disposition (an anchor at
+  `merge_result=pull_request`, under any kind, `duplicate` included), the
+  converse retire path, and an abandoned anchor, for which `pr-dispose.sh` names
+  `bead-rehome.sh` as the verb. The evidence gates now apply to the kinds that
+  claim delivered work, and a recorded PR-close disposition satisfies them.
+- **`duplicate-sweep.sh` and the `duplicate_of` marker stay.** The 2026-09-18
+  ruling folded their retirement into this branch on the premise that no bead
+  carried the marker. That premise no longer held when the branch was brought
+  current: five open beads carried `duplicate_of`, each parked on a successor
+  still open and each waiting on the sweep's marker pass to close it once that
+  successor lands. Retiring the pass would strand them, so both passes stay, and
+  retiring the marker is left to the operator. Main's never-dispatched
+  rework-twin pass (tk-p2frq5) now stamps `gc.work_outcome=no-op` on the twin
+  before the close. `bead-rehome.sh`'s duplicate evidence accepts that stamp
+  beside the work-order branch the twin carries, and `pr-stack.sh` reads it to
+  keep the twin off the branch's bead list, so the twin pass no longer stamps
+  `duplicate_of` after the close.
+- **Scan and sling guards.** Main's guards — standing kinds, dispatch paths,
+  live workflows, `gc.reaction_owned`, a fail-closed rig — gate filing R exactly
+  as they gated pouring the formula.
 
 ## Metadata
 
@@ -215,46 +263,51 @@ On R (the reaction bead):
 | `gc.reaction_subject` (+ `_store`) | the subject S this reaction tracks |
 | `gc.reaction_kind` | the reaction sub-type, `first-reaction` |
 | `gc.routed_to` | the proactive pool that claims R |
+| `gc.outcome=reacted`, `gc.work_outcome=no-op` | stamped as R closes |
 
 On S (written by the write-back):
 
 | Key | Meaning |
 |---|---|
 | `gc.reacted_by` | the reaction R whose write-back landed — the residual-window self-heal |
+| `gc.recommended_formula` | the mol a `recommend` names for the operator's Accept |
 | `gc.proactive_reaction` | `1`, the legacy landed proof the frozen no-R path stamps in place of `gc.reacted_by` |
 
-Retired everywhere (writers, readers, and the `lifecycle.toml` registry):
-`gc.first_reaction`, `gc.first_reaction_reason`, `gc.first_reaction_target`,
-`gc.first_reaction_at`, `duplicate_of`, `duplicate_of_store`. Kept:
-`gc.proactive` (the standing scan opt-in), `gc.reacted_by` (the reaction-bead
-landed proof), `gc.proactive_reaction` (the legacy landed proof the frozen
-no-`--reaction-bead` path stamps, until pre-cutover molecules drain),
-`gc.superseded_by` / `_store` and `gc.supersedes` / `_store` (the rehome
-pointers), `gc.blocker_key`.
+Retired (no writer; registered as residue): `gc.first_reaction`,
+`gc.first_reaction_reason`, `gc.first_reaction_target`, `gc.first_reaction_at`.
+Kept: `gc.proactive` (the standing scan opt-in), `gc.reaction_owned` (a live
+owner's stand-down marker), `gc.superseded_by` / `_store` and `gc.supersedes` /
+`_store` (the rehome pointers), `duplicate_of` / `_store` (the hand-stamped
+duplicate marker `duplicate-sweep.sh` reads), `gc.blocker_key`.
 
 ## Implementation surface
 
 - `tools/gc-proactive.sh` — `cmd_sling` creates R and wires the tracks edge
-  instead of pouring a formula; the dedup guard keys on
-  `(task_kind=reaction, subject)`; `exclude_graph_structural` drops topology
-  roots and step beads from both scan and demand.
+  instead of pouring a formula; `reaction_absent_guard` refuses a live-owned
+  subject and dedups on `(task_kind=reaction, subject)`;
+  `exclude_graph_structural` drops topology roots and step beads from both scan
+  and demand.
 - `agents/proactive/prompt.template.md` — the reaction method: claim R, resolve
-  S, re-offer recovery on `gc.reacted_by`, card, one of four exits, close R.
+  S, stand down on `gc.reacted_by=R` or `gc.reaction_owned`, card, one of five
+  exits, close R.
 - `agents/proactive/agent.toml` — the pool `work_query` / `scale_check` claim
   routed reaction beads and exclude graph-structural beads.
-- `assets/scripts/first-reaction-dispose.sh` — the four-exit write-back, the
+- `assets/scripts/first-reaction-dispose.sh` — the five-exit write-back, the
   `gc.reacted_by` marker, the close-R step, and the backward-compatible
   no-`--reaction-bead` arm that stamps and guards on the legacy
   `gc.proactive_reaction` landed proof for frozen molecules.
 - `assets/scripts/bead-rehome.sh` — the single evidence-gated
-  close-with-successor writer with `--check` and the folded-in gates.
+  close-with-successor writer with `--check` and the kind-scoped gates.
+- `assets/scripts/duplicate-sweep.sh` — the rework-twin pass records
+  `gc.work_outcome=no-op` on a twin before its close; the marker pass is
+  unchanged.
+- `formulas/mol-validate-close.toml` — reads the close brief from S's notes.
 - `assets/scripts/gc-helm.sh` — `takeaway --release` no longer stamps or reads
   back `gc.proactive_reaction`.
-- Retired: `formulas/mol-first-reaction.toml`, `assets/scripts/duplicate-sweep.sh`
-  (+ test), the `duplicate_of` predicate in `pr-stack.sh`, and the duplicate-sweep
-  arm in `refinery-reconcile.sh`.
+- Retired: `formulas/mol-first-reaction.toml` and the tests of its step text.
 - `lifecycle/lifecycle.toml` — the metadata registry gains the reaction keys and
-  drops the retired ones.
+  marks the retired ones.
 - Docs reconciled: `docs/authority-map.md`, `docs/component-model.md`,
   `docs/state-machine.md`, `docs/gascity-human-engagement.md`,
-  `agents/proactive/PROVENANCE.md`, and the converse prompt.
+  `docs/refinery-merge-cadence.md`, `agents/proactive/PROVENANCE.md`, and the
+  converse prompt.

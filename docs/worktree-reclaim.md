@@ -19,9 +19,11 @@ presents as a city with no work rather than as a disk alarm.
 `scope = "city"`, no LLM and no agent. It enumerates `git worktree list` over
 every rig repo and the town repo, because a worktree living under one rig's
 tree can be registered in another repo's git dir and only the registry knows
-which. It runs two passes in one budget: it removes the worktrees of closed
-beads, then drops the `polecat/<bead-id>` branches those worktrees leave
-behind.
+which. It reads the bead store of every repo it enumerates, opening each by
+path as `gc bd --db <repo>/.beads`. `gc bd --rig` resolves only the rigs
+`city.toml` declares, so the town's store answers to no rig name. It runs two
+passes in one budget: it removes the worktrees of closed beads, then drops the
+`polecat/<bead-id>` branches those worktrees leave behind.
 
 A worktree is removed when all of these hold:
 
@@ -59,7 +61,7 @@ pass is the exception — it has no `work_dir` and keys on the ref's bead id, as
 Both branch questions are asked, for the same reason. The branch the checkout
 is on and the branch its beads recorded are not always the same ref, and
 either being live holds the tree. Asking the ledger for live beads on the
-branch is what covers a branch in the pre-open codex gate, which is live work
+branch is what covers a branch in the pre-open codex check, which is live work
 carrying no pull request at all.
 
 ## Dropping the branch
@@ -146,14 +148,12 @@ which becomes an anchored regex whose substitutions widen to one path
 under a home, and the reaper would protect the whole population it exists to
 take.
 
-Live processes are read with `find /proc -maxdepth 2 -name cwd -type l
--printf '%l\n'`, and a live cwd protects every worktree containing it, not
-only an exact path match. A shell glob over `/proc` is not an acceptable
-substitute: it stats every candidate and drops what it cannot read, and
-passing the survivors to `readlink` in bulk drops more still. Measured here,
-`find` reported around 360 cwds on every sample while the pair returned
-between 27 and 180, and the pair missed a process started a moment earlier in
-3 of 15 trials where `find` missed none in 42.
+Live processes are read with `lsof -w -n -P -F n -d cwd`, which lists the cwd
+of every process this user can see on Linux and on macOS, and a live cwd
+protects every worktree containing it, not only an exact path match. A listing
+that fails, or that names no cwd at all, refuses the pass. A protection that
+finds none of the live processes still reads as a check, so it is worse than
+none.
 
 A repo whose open-pull-request listing fails is held whole for the next pass
 rather than reaped without the check. That gate is the backstop for a ledger
@@ -187,8 +187,9 @@ approve.
 bead's close. `WORKTREE_REAP_BUDGET` (default 420s) bounds the pass; what it
 yields is reported as untaken and the next pass takes it.
 `WORKTREE_REAP_TAG_PREFIX` (default `archive/worktree`) names the pin
-namespace, and `WORKTREE_REAP_REPOS` overrides the rig list with explicit repo
-paths.
+namespace. `WORKTREE_REAP_REPOS` overrides the rig list with explicit repo
+paths, and then reads the ledger with no store selector, from whatever store
+`gc bd` resolves on its own.
 
 To restore a reaped worktree, read the tag and run the command in it:
 

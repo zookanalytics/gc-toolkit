@@ -4,7 +4,7 @@
 # Fakes `gc rig list --json` and `bd` (a file-per-bead ledger under each fake
 # rig's .beads/) on PATH. No dependency on the live city, Dolt, or the network.
 #
-# The invariants under test are the ones the incident turned on (tk-isyz0):
+# The invariants under test are the ones the incident turned on:
 #   (a) a re-home stamps the forward pointer AND closes with a populated reason
 #       naming kind + successor + store — never a bare `[Closed]`;
 #   (b) the successor must exist in the named store, or nothing is written at
@@ -29,16 +29,30 @@
 #   (p) every repair command the script hands back runs through `gc bd`;
 #   (q) the successor is required under EVERY kind, `not-needed` included —
 #       the kind where nothing carries the work forward is where dropping the
-#       pointer looks reasonable, and it is exactly as unreadable there.
-# The evidence gates this writer now enforces for every caller:
-#   (r) EVERY kind — no close over unlanded work (a non-`merged` merge_result),
-#       nor over a review, step, or workflow bead;
-#   (s) EVERY kind — no close over a bead another session holds in_progress,
-#       while a bead this session holds is fine;
-#   (t) fixed-upstream|duplicate — the successor is in the same store and is
-#       closed or shipped, and the origin did no work (no-op stamp, or no
-#       work-product key), the no-op stamp overriding a twin's leftover branch;
-#   (u) --check evaluates all of the above and writes nothing, exit 0/1.
+#       pointer looks reasonable, and it is exactly as unreadable there;
+#   (r) a task_kind=visit origin also records gc.outcome (= the kind) and
+#       gc.outcome_reason (= the close reason), so the board can report it;
+#   (s) a non-visit origin records NO gc.outcome — the field is a sitting's;
+#   (t) an outcome the visit already carries is the sitting's own word and is
+#       never overwritten;
+#   (u) an already-closed visit missing the outcome is repaired with it;
+#   (v) an outcome that does not read back refuses the close, the same way a
+#       dropped pointer does — a closed outcome-less visit is unreachable;
+#   (w) a dropped gc.outcome_reason refuses the close too — the board shows the
+#       reason as the sitting's headline, so an outcome without it is unreadable;
+#   (x) an open visit on the origin holds the close at the finalize gate;
+#   (y) --except-key reaches that gate, and nothing is excepted without it.
+# The evidence gates this writer enforces for every caller:
+#   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
+#   (gate-held) EVERY kind — no close over a bead another session holds
+#       in_progress, while a bead this session holds is fine;
+#   (gate-b) fixed-upstream|duplicate — the successor is in the same store and
+#       is closed or shipped, and the origin did no work (no-op stamp, or no
+#       work-product key, so unlanded work is refused), the no-op stamp
+#       overriding a twin's leftover branch; a judgment kind is not held to it,
+#       and an origin carrying the operator's pre-recorded PR-close disposition
+#       for that kind and successor satisfies it;
+#   (check) --check evaluates all of the above and writes nothing, exit 0/1.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -166,7 +180,15 @@ case "$sub" in
         --set-metadata)
           # FAKE_BD_DROP_META simulates a write that reports success and does
           # not persist — the case the read-back guard exists for.
-          [ -n "${FAKE_BD_DROP_META:-}" ] || printf 'm.%s\n' "$2" >> "$f"
+          # FAKE_BD_DROP_OUTCOME drops ONLY the gc.outcome key and
+          # FAKE_BD_DROP_OUTCOME_REASON drops ONLY the gc.outcome_reason key
+          # (each leaving the other) to exercise either half of the
+          # visit-outcome read-back gate on its own.
+          drop=""
+          [ -z "${FAKE_BD_DROP_META:-}" ] || drop=1
+          case "$2" in gc.outcome=*) [ -z "${FAKE_BD_DROP_OUTCOME:-}" ] || drop=1 ;; esac
+          case "$2" in gc.outcome_reason=*) [ -z "${FAKE_BD_DROP_OUTCOME_REASON:-}" ] || drop=1 ;; esac
+          [ -n "$drop" ] || printf 'm.%s\n' "$2" >> "$f"
           shift 2 ;;
         --append-notes)
           printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
@@ -203,6 +225,17 @@ export FAKE_ACTOR_LOG="$TMP/actors.log"
 : > "$FAKE_ACTOR_LOG"
 export BEADS_ACTOR="test__rehome-lx-0000"
 
+# The finalize gate is a sibling bead-rehome forks before the close. Stub it so
+# this suite tests the WIRING (a refusal holds the close, leaving an open pointed
+# bead) without a live tracks-edge probe — the gate's own logic is covered by
+# finalize-gate.test.sh. Default: allow; FG_VERDICT=hold makes it refuse. Each
+# call's argv is appended to FG_LOG.
+FG_STUB="$TMP/bin/finalize-gate-stub.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${FG_LOG:?}"\ncase "${FG_VERDICT:-pass}" in\n  hold) echo "held by open visit vis-x — its subject ${2:-?} owes a conversation before finalize"; exit 1 ;;\n  *) exit 0 ;;\nesac\n' > "$FG_STUB"
+chmod +x "$FG_STUB"
+export GC_FINALIZE_GATE_TOOL="$FG_STUB"
+export FG_LOG="$TMP/finalize-gate.log"; : > "$FG_LOG"
+
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 
 # --- (a) happy path: pointer + populated reason + back-pointer --------------
@@ -220,6 +253,35 @@ eq "$(field beta m.gc.supersedes bt-succ1)" al-origin1 "back-pointer names the o
 eq "$(field beta m.gc.supersedes_store bt-succ1)" rig:alpha "back-pointer names the origin's store"
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
 has "$(cat "$FAKE_ACTOR_LOG")" "test__rehome-lx-0000" "the actor is passed through for the audit trail"
+
+# --- (x) an OPEN visit on the origin holds the close (finalize gate) ---------
+# The gate refuses while a visit tracks the origin. bead-rehome stamps the
+# successor pointer, then leaves the bead OPEN — the same shape a refused close
+# leaves — so the disposition stays legible and the visit can be concluded first.
+mkbead alpha open al-vhold
+mkbead beta  open bt-vsucc
+rc=0; FG_VERDICT=hold run --origin al-vhold --successor bt-vsucc --kind re-homed --note "ruling" || rc=$?
+eq "$rc" 5 "an open visit holds the close (exit 5)"
+eq "$(field alpha status al-vhold)" open "…the origin stays OPEN under the hold"
+eq "$(field alpha m.gc.superseded_by al-vhold)" bt-vsucc "…the pointer is still stamped, so the disposition is findable"
+has "$(cat "$TMP/err")" "the close is held" "…stderr says the close is held"
+has "$(cat "$TMP/err")" "held by open visit" "…and carries the gate's reason"
+
+# --- (y) --except-key reaches the finalize gate, and only when given -------
+# The caller's own reports of an earlier refused close ask for this retry, so
+# their escalation key is named to the gate, which owns what an exception may
+# pass.
+mkbead alpha open al-except
+mkbead beta  open bt-except
+: > "$FG_LOG"
+rc=0; run --origin al-except --successor bt-except --kind not-needed --except-key pr-dispose-failed.7 || rc=$?
+eq "$rc" 0 "a close naming an excepted key lands when the gate passes"
+eq "$(cat "$FG_LOG")" "check al-except --except-key pr-dispose-failed.7" "the gate is asked with the caller's excepted key"
+mkbead alpha open al-noexcept
+mkbead beta  open bt-noexcept
+: > "$FG_LOG"
+rc=0; run --origin al-noexcept --successor bt-noexcept --kind not-needed || rc=$?
+eq "$(cat "$FG_LOG")" "check al-noexcept" "without the flag the gate is asked with no exception"
 
 # --- (b) missing successor: nothing written at all --------------------------
 mkbead alpha open al-origin2
@@ -353,7 +415,7 @@ eq "$(field alpha status al-origin12)" open "the bead is not closed over it"
 # A converse sitting that BOTH routes work and disposes of its subject writes
 # `--waiting-on <successor>` onto the subject — a real `blocks` edge — and then
 # closes it. `bd close` refuses a blocked issue, so the wait refused the ruling
-# it was written beside (tk-hs5rz, live at visit tk-e9ffv). A disposed bead is
+# it was written beside. A disposed bead is
 # not waiting to proceed, and gc.superseded_by already records the relationship,
 # so the edge to THIS successor goes. Same store: a `blocks` edge can only join
 # two beads in one.
@@ -418,17 +480,115 @@ eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
 eq "$(grep -c '^dep\.al-succ15=' "$TMP/rigs/alpha/.beads/al-origin15")" 1 "--dry-run does not drop it"
 
-# --- (r) the (a) gates: no unlanded work; not a review/step/workflow bead --
-# The evidence lives in this writer now, so every close is refused unless the
-# origin is a plain, landed, unheld work bead. merge_result names in-flight work.
+# --- (r) a visit origin also records the outcome the board reads -----------
+# doctor/check-visit-outcome-recorded flags a closed task_kind=visit with no
+# gc.outcome — a sitting the board cannot report. bead-rehome is a visit-close
+# path (converse dispositions re-home visits), so it stamps the outcome beside
+# the pointer: gc.outcome = the kind, gc.outcome_reason = the close reason.
+mkbead alpha open al-visit1
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit1"
+mkbead beta open bt-vsucc1
+rc=0; run --origin al-visit1 --successor bt-vsucc1 --kind not-needed --note "premise fixed by bt-vsucc1" || rc=$?
+eq "$rc" 0 "a visit re-home succeeds"
+eq "$(field alpha status al-visit1)" closed "the visit is closed"
+eq "$(field alpha m.gc.outcome al-visit1)" not-needed "gc.outcome records the kind as the sitting's outcome"
+has "$(field alpha m.gc.outcome_reason al-visit1)" "not needed, per bt-vsucc1 in rig:beta" "gc.outcome_reason carries the close reason as the headline"
+has "$(field alpha m.gc.outcome_reason al-visit1)" "premise fixed by bt-vsucc1" "the headline carries the note too"
+
+# --- (s) a non-visit origin records NO outcome (the field is visit-only) ---
+# gc.outcome is a sitting's column; a work bead or task carries its disposition
+# elsewhere, so re-homing one must not invent one.
+mkbead alpha open al-task1
+mkbead beta open bt-tsucc1
+rc=0; run --origin al-task1 --successor bt-tsucc1 --kind re-homed || rc=$?
+eq "$rc" 0 "a non-visit re-home succeeds"
+eq "$(field alpha m.gc.outcome al-task1)" "" "a non-visit origin gets no gc.outcome"
+
+# --- (t) an outcome the visit already records is the sitting's own word -----
+# A visit closed through visit-close.sh and later re-homed already carries the
+# word the sitting signed off with; the re-home must not overwrite it.
+mkbead alpha open al-visit2
+printf 'm.task_kind=visit\nm.gc.outcome=dismissed\n' >> "$TMP/rigs/alpha/.beads/al-visit2"
+mkbead beta open bt-vsucc2
+rc=0; run --origin al-visit2 --successor bt-vsucc2 --kind folded || rc=$?
+eq "$rc" 0 "a visit that already has an outcome still re-homes"
+eq "$(field alpha m.gc.outcome al-visit2)" dismissed "the sitting's own outcome word is not overwritten"
+
+# --- (u) an already-closed visit missing the outcome is repaired -----------
+# This is the shape where bead-rehome closed the visit before this guard, so
+# the repair path stamps the outcome the same as the live close does.
+mkbead alpha closed al-visit3
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit3"
+mkbead beta open bt-vsucc3
+rc=0; run --origin al-visit3 --successor bt-vsucc3 --kind duplicate || rc=$?
+eq "$rc" 0 "an already-closed visit missing the outcome is repaired"
+eq "$(field alpha status al-visit3)" closed "it stays closed"
+eq "$(field alpha m.gc.outcome al-visit3)" duplicate "the missing outcome is stamped on the closed visit"
+
+# --- (v) an outcome that does not read back refuses the close --------------
+# The same permanence as the pointer: once the visit closes no re-run reaches
+# it, so a dropped outcome stamp leaves the visit OPEN, not silently closed.
+mkbead alpha open al-visit4
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit4"
+mkbead beta open bt-vsucc4
+rc=0; FAKE_BD_DROP_OUTCOME=1 run --origin al-visit4 --successor bt-vsucc4 --kind folded || rc=$?
+eq "$rc" 4 "a visit outcome that does not read back refuses the close"
+eq "$(field alpha status al-visit4)" open "the visit stays OPEN when the outcome did not stick"
+has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome"
+eq "$(field alpha m.gc.superseded_by al-visit4)" bt-vsucc4 "the pointer is still recorded, so the bead is findable"
+
+# --- (w) a dropped gc.outcome_reason refuses the close too -----------------
+# gc.outcome_reason is the sitting's board headline, so the read-back gate must
+# cover the reason as well as the word: dropping only the reason must leave the
+# visit OPEN, not close it into a headline-less row that no re-run can repair
+# (PRIOR_OUTCOME is nonempty once gc.outcome lands, so a re-run never re-arms).
+mkbead alpha open al-visit5
+printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit5"
+mkbead beta open bt-vsucc5
+rc=0; FAKE_BD_DROP_OUTCOME_REASON=1 run --origin al-visit5 --successor bt-vsucc5 --kind folded || rc=$?
+eq "$rc" 4 "a visit outcome_reason that does not read back refuses the close"
+eq "$(field alpha status al-visit5)" open "the visit stays OPEN when the reason did not stick"
+has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome stamp"
+eq "$(field alpha m.gc.outcome_reason al-visit5)" "" "the reason really was dropped by the fake"
+eq "$(field alpha m.gc.superseded_by al-visit5)" bt-vsucc5 "the pointer is still recorded, so the bead is findable"
+
+# --- (gate-b) unlanded work: refused under an evidence kind ---------------
+# merge_result names in-flight work, so an evidence kind (which claims the origin
+# did no work) is refused over it.
 mkbead alpha open al-unlanded
-mkbead beta  open bt-usucc
+mkbead alpha closed al-usucc
 printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-unlanded"
-rc=0; run --origin al-unlanded --successor bt-usucc --kind re-homed || rc=$?
-eq "$rc" 7 "unlanded work (merge_result set) refuses the close under any kind"
+rc=0; run --origin al-unlanded --successor al-usucc --kind duplicate || rc=$?
+eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
 eq "$(field alpha status al-unlanded)" open "the origin is left open"
 eq "$(field alpha m.gc.superseded_by al-unlanded)" "" "and nothing is stamped"
-has "$(cat "$TMP/err")" "unlanded work" "the refusal names the reason"
+has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
+# A judgment kind is a person's call: the converse retire path disposes an
+# in-flight anchor through this writer on the operator's ruling.
+mkbead alpha open al-retire
+mkbead beta  open bt-rtsucc
+printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
+rc=0; run --origin al-retire --successor bt-rtsucc --kind re-homed || rc=$?
+eq "$rc" 0 "a judgment kind (re-homed) disposes an in-flight anchor"
+eq "$(field alpha status al-retire)" closed "…and closes it"
+# The operator's pre-recorded PR-close disposition (pr-dispose.sh) is a ruling
+# already made: pr-facts.sh consummates it under whatever kind was recorded, so an
+# evidence kind recorded for this successor is not re-judged.
+mkbead alpha open al-ruled
+mkbead alpha open al-rsucc
+printf 'm.merge_result=pull_request\nm.branch=polecat/al-ruled\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-rsucc\n' >> "$TMP/rigs/alpha/.beads/al-ruled"
+rc=0; run --origin al-ruled --successor al-rsucc --kind duplicate || rc=$?
+eq "$rc" 0 "a pre-recorded PR-close disposition consummates under the recorded evidence kind"
+eq "$(field alpha status al-ruled)" closed "…and closes the anchor"
+# …but only the disposition it records: another successor is judged afresh.
+mkbead alpha open al-ruledx
+mkbead alpha closed al-rxsucc
+printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-other\n' >> "$TMP/rigs/alpha/.beads/al-ruledx"
+rc=0; run --origin al-ruledx --successor al-rxsucc --kind duplicate || rc=$?
+eq "$rc" 7 "a disposition record naming another successor is no ruling for this one"
+eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
+
+# --- (gate-a) not a review/step/workflow bead ------------------------------
 # merge_result=merged is landed work, not in-flight: it may be disposed.
 mkbead alpha open al-merged
 mkbead beta  open bt-msucc
@@ -452,21 +612,21 @@ printf 'm.gc.kind=workflow\n' >> "$TMP/rigs/alpha/.beads/al-wf"
 rc=0; run --origin al-wf --successor bt-wsucc --kind re-homed || rc=$?
 eq "$rc" 7 "a workflow root is refused"
 
-# --- (s) the (a) in_progress gate: another actor holds it, but self may -----
+# --- (gate-held) another actor holds it, but self may ---------------------
 mkbead alpha in_progress al-held
 mkbead beta  open bt-hsucc
 printf 'assignee=someone-else-lx-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
 rc=0; run --origin al-held --successor bt-hsucc --kind re-homed || rc=$?
 eq "$rc" 7 "an origin in_progress under another actor is refused"
 has "$(cat "$TMP/err")" "in_progress under someone-else-lx-9999" "the refusal names the holder"
-# The superseded exit --checks while its own session still holds the subject.
+# A worker re-homing the bead it holds is the holder.
 mkbead alpha in_progress al-mine
 mkbead beta  open bt-msucc2
 printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-mine"
 rc=0; run --origin al-mine --successor bt-msucc2 --kind re-homed || rc=$?
 eq "$rc" 0 "an origin this session holds is not treated as someone else's"
 
-# --- (t) the (b) evidence gates for fixed-upstream|duplicate ---------------
+# --- (gate-b) the evidence gates for fixed-upstream|duplicate -------------
 # Same store required.
 mkbead alpha open al-xstore; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-xstore"
 mkbead beta closed bt-xsucc
@@ -499,7 +659,7 @@ rc=0; run --origin al-twin --successor al-twinSucc --kind duplicate || rc=$?
 eq "$rc" 0 "work_outcome=no-op is accepted even with a work-product key present"
 eq "$(field alpha status al-twin)" closed "and the duplicate is closed"
 
-# --- (u) --check evaluates the gates and writes nothing --------------------
+# --- (check) --check evaluates the gates and writes nothing --------------
 mkbead alpha open al-chkok
 mkbead beta  open bt-chkok
 rc=0; run --origin al-chkok --successor bt-chkok --kind re-homed --check || rc=$?
