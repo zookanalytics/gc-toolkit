@@ -12,7 +12,8 @@
 # two more outputs — the per-anchor stale-gate escalation and its retraction —
 # that no unnamed-waits baseline can represent, so the check ALSO runs whenever
 # a PR-gated anchor's re-escalation floor is up (the stale-due gate below), and
-# while a stale-gate visit is open for the pass to re-judge. Anything else — any
+# while an open stale-gate visit may owe a retraction (the stale-visit gate
+# below). Anything else — any
 # unreadable probe, a missing subject, its own abort — RUNS the pass: a probe
 # that cannot be read excludes nothing. It also sets the 6h cadence (a
 # condition trigger has no interval). The per-rig window is spent by whichever
@@ -389,16 +390,47 @@ if [ "$READS_OK" -eq 1 ]; then
     fi
 fi
 
-# A third output: the pass retracts a stale-gate visit whose premise is gone,
-# once its PR moved or landed, or the merge cadence settled it waiting on the
-# operator's review. That judgment needs the pass's gh read, so
-# the pass runs while any stale-gate visit nobody is engaged in is open, the set
-# the pass judges. Without this, a board that is otherwise quiet would leave such
-# a visit open after its PR landed and its anchor left the ready set.
+# A third output: the pass retracts a stale-gate visit once its premise is gone,
+# when its PR moved or landed, or the merge cadence settled it waiting on the
+# operator's review. A visit whose premise still holds is one the pass would only
+# keep, so the check runs the pass for the visits local state says may owe a
+# retraction, never for every open one. A visit nobody is engaged in counts when
+# its subject:
+#   - is missing from the not-closed census, or no longer gates on a PR, which
+#     is where a PR that merged or closed shows once the merge cadence records
+#     it;
+#   - reads settled and waiting on the operator's review (review_owed, the rule
+#     the pass retracts on, from stale-gate.sh);
+#   - carries a review posture or merge verdict first recorded at or after the
+#     last pass, the trace a PR that moved leaves on its anchor. lifecycle.sh
+#     keeps the instant each one was first recorded while its value and head
+#     hold, so an unchanged PR keeps an old one. With no last pass on record,
+#     every recorded one counts.
+# A PR that moved without leaving such a trace waits for a pass something else
+# runs. Without this gate, a board that is otherwise quiet would leave a visit
+# open after its anchor landed.
+LAST_PASS=$(cat "$STAMP" 2>/dev/null)
+case "$LAST_PASS" in ''|*[!0-9]*) LAST_PASS=0 ;; esac
 STALE_VISITS=""; N_STALE_VISITS=""
 if [ "$READS_OK" -eq 1 ]; then
-    STALE_VISITS=$(jq -c "$STALE_GATE_JQ"'
-      [ .[] | select(unengaged_stale_gate_visit) | .id ]' "$LIVE" 2>/dev/null)
+    STALE_VISITS=$(jq -cn --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
+        --argjson lastpass "$LAST_PASS" "$STALE_GATE_JQ"'
+      # A dated value <value>@<oid>@<since> first recorded at or after $t.
+      def recorded_since($t):
+        ((. // "") | tostring | split("@")) as $v
+        | ($v | length) == 3
+          and ((try ($v[2] | fromdateiso8601) catch null) as $e | $e != null and $e >= $t);
+      (($alive[0] // []) | map({key: (.id // ""), value: .}) | from_entries) as $byid
+      | [ ($live[0] // [])[] | select(unengaged_stale_gate_visit)
+          | ((.metadata["gc.continuation_group"] // "") | tostring) as $s
+          | select($s != "")
+          | $byid[$s] as $a
+          | select($a == null
+                   or ((($a.metadata // {}).merge_result // "") | tostring) != "pull_request"
+                   or ($a | review_owed)
+                   or (($a.metadata // {}).pr_posture | recorded_since($lastpass))
+                   or (($a.metadata // {})["pr.machine"] | recorded_since($lastpass)))
+          | .id ]' 2>/dev/null)
     if printf '%s' "$STALE_VISITS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         N_STALE_VISITS=$(printf '%s' "$STALE_VISITS" | jq 'length')
     fi

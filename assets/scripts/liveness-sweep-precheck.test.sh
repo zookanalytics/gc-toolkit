@@ -219,6 +219,12 @@ run_precheck() { # run_precheck [args...] -> sets OUT and RC
         mkdir -p "$STATE"
         printf '%s\n' "$BASELINE_CSV" > "$STATE/reported"
     fi
+    # LAST_PASS_AT, when set, is the epoch the last pass started at: the window
+    # stamp, which a case puts past the window to classify with a pass on record.
+    if [ -n "${LAST_PASS_AT:-}" ]; then
+        mkdir -p "$STATE"
+        printf '%s\n' "$LAST_PASS_AT" > "$STATE/last-pass"
+    fi
     : > "$FIXDIR/reads"
     OUT="$("$SCRIPT" "$@" 2>&1)"; RC=$?
 }
@@ -400,32 +406,62 @@ BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
 eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
 
 # The pass also retracts a stale-gate visit once its PR moved or landed, or the
-# merge cadence settled it waiting on the operator's review. It
-# judges that from its own gh read, so the check runs while a visit nobody is
-# engaged in is open, even on a board that is otherwise quiet: its anchor inside
-# the floor, every survivor carried. A landed anchor leaves the ready set, so the
-# stale-due gate alone would never run the pass that retracts its visit.
-echo "── an open stale-gate visit runs the pass on an otherwise quiet board ──"
+# merge cadence settled it waiting on the operator's review, judged from its own
+# gh read. A visit whose premise still holds is one the pass would only keep, so
+# on a board that is otherwise quiet (its anchor inside the floor, every survivor
+# carried) the check runs the pass only for a visit local state says may owe a
+# retraction: its subject left the census or the pull_request state, reads
+# settled and waiting on the operator's review, or carries a review posture or
+# merge verdict first recorded at or after the last pass. A landed anchor leaves
+# the ready set, so the stale-due gate alone would never run the pass that
+# retracts its visit.
+echo "── an open stale-gate visit runs the pass only when its premise may be gone ──"
 jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
                       | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
    "$TMP/ready.bak" > "$FIX/ready.json"
-stale_visit_live() { # stale_visit_live <visit fields to merge>
-    jq --argjson v "$1" '. + [{"id":"v-stale","status":"open","assignee":"","title":"visit: stale PR gate: f-pr-open",
-        "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"f-pr-open"}} * $v]' \
+# The last pass started 7h back, past the 6h window. A stamp recorded 2 days back
+# predates it, and one recorded 1h back follows it.
+LAST_AT=$(( $(date -u +%s) - 7 * 3600 ))
+BEFORE="$(iso_ago 2)"
+AFTER="$(jq -nr --argjson t "$(( $(date -u +%s) - 3600 ))" '$t | todate')"
+stale_visit_live() { # stale_visit_live <f-pr-open metadata to add, or null for none> <visit fields to merge>
+    jq --argjson m "$1" --argjson v "$2" '. + (if $m == null then [] else [
+          {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval",
+           "metadata":({"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"} + $m)}] end)
+        + [{"id":"v-stale","status":"open","assignee":"","title":"visit: stale PR gate: f-pr-open",
+            "metadata":{"task_kind":"visit","escalation_key":"anchor-stale","gc.continuation_group":"f-pr-open"}} * $v]' \
         "$TMP/live.bak" > "$FIX/live.json"
 }
-stale_visit_live '{}'
-BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "0" "an open, unengaged stale-gate visit runs the pass"
+quiet_run() { BASELINE_CSV="f-carried,f-plain,f-pr-open" LAST_PASS_AT="$LAST_AT" run_precheck "$@"; }
+HELD="{\"pr_posture\":\"review_required@sha-521@$BEFORE\",\"pr.machine\":\"progressing@sha-521@$BEFORE\"}"
+GONE='{"merge_result":"abandoned"}'
+
+stale_visit_live "$HELD" '{}'; quiet_run
+eq "$RC" "1" "a stale-gate visit whose premise holds, its PR unchanged since the last pass, runs no pass"
+has "$OUT" "SKIP:" "…the verdict is SKIP"
+hasnt "$OUT" "open stale-gate visits to re-judge" "…and names no visit to re-judge"
+
+stale_visit_live null '{}'; quiet_run
+eq "$RC" "0" "a visit whose subject is missing from the not-closed census runs the pass"
 has "$OUT" "open stale-gate visit(s) may owe a retraction" "…and the RUN names the retraction"
 has "$OUT" "open stale-gate visits to re-judge: 1 -> v-stale" "…and the visit that forced it"
+stale_visit_live "$GONE" '{}'; quiet_run
+eq "$RC" "0" "a visit whose subject no longer gates on a PR runs the pass"
+stale_visit_live "{\"pr_posture\":\"review_required@sha-521@$BEFORE\",\"pr.machine\":\"settled@sha-521@$BEFORE\"}" '{}'; quiet_run
+eq "$RC" "0" "a visit whose PR settled waiting on the operator's review runs the pass"
+stale_visit_live "{\"pr_posture\":\"commented@sha-521@$AFTER\",\"pr.machine\":\"progressing@sha-521@$BEFORE\"}" '{}'; quiet_run
+eq "$RC" "0" "a visit whose PR's review posture was recorded since the last pass runs the pass"
+stale_visit_live "{\"pr_posture\":\"review_required@sha-521@$BEFORE\",\"pr.machine\":\"progressing@sha-522@$AFTER\"}" '{}'; quiet_run
+eq "$RC" "0" "a visit whose PR's merge verdict was recorded since the last pass runs the pass"
+stale_visit_live "$HELD" '{}'
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "0" "with no last pass on record, a recorded posture or verdict counts as new and runs the pass"
 for v in '{"assignee":"human-1"}' '{"metadata":{"gc.session_name":"s-conv-1"}}' '{"status":"in_progress"}'; do
-    stale_visit_live "$v"
-    BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+    stale_visit_live "$GONE" "$v"; quiet_run
     eq "$RC" "1" "a stale-gate visit someone is engaged in ($v) does not run the pass — the pass would leave it to them"
 done
 cp "$TMP/live.bak" "$FIX/live.json"
-BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+quiet_run
 eq "$RC" "1" "control: the same board with no stale-gate visit skips"
 
 echo "── the precheck reads the stale-gate visits under the key stale-gate.sh names ──"
@@ -440,11 +476,11 @@ cp "$SCRIPT" "$(dirname "$SCRIPT")/visit-identity.sh" "$RN/"
 sed "s/^STALE_GATE_KEY=\"$STALE_KEY\"\$/STALE_GATE_KEY=\"$STALE_KEY-renamed\"/" \
     "$(dirname "$SCRIPT")/stale-gate.sh" > "$RN/stale-gate.sh"
 eq "$(bash "$RN/stale-gate.sh" key)" "$STALE_KEY-renamed" "precondition: the copy names the renamed key"
-stale_visit_live "{\"metadata\":{\"escalation_key\":\"$STALE_KEY-renamed\"}}"
-BASELINE_CSV="f-carried,f-plain,f-pr-open" SCRIPT="$RN/liveness-sweep-precheck.sh" run_precheck
+stale_visit_live "$GONE" "{\"metadata\":{\"escalation_key\":\"$STALE_KEY-renamed\"}}"
+SCRIPT="$RN/liveness-sweep-precheck.sh" quiet_run
 eq "$RC" "0" "a visit under the renamed key runs the pass"
-stale_visit_live '{}'
-BASELINE_CSV="f-carried,f-plain,f-pr-open" SCRIPT="$RN/liveness-sweep-precheck.sh" run_precheck
+stale_visit_live "$GONE" '{}'
+SCRIPT="$RN/liveness-sweep-precheck.sh" quiet_run
 eq "$RC" "1" "…and one under the old key no longer does"
 
 # Restore the canonical fixtures for the sections that follow.
