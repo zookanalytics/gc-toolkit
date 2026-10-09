@@ -15,7 +15,7 @@
 # converse and the proactive worker (takeaway), converse (demand), operators
 # by hand.
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
-# unenumerable — each failure names its own operator move, tk-lzdty),
+# unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route or a takeaway disposition that will not stamp),
 # 5 react no-op: the subject already carries a first reaction, so nothing was
@@ -274,7 +274,7 @@ sitting_is_gone() {
 # Sets RIGS (JSON array of {name,path,prefix,suspended,running}); exits 3 with a per-cause
 # sentence otherwise. Each failure names its own operator move because for a
 # non-CLI caller (the web board's open button) the code plus the sentence is
-# the whole signal (tk-lzdty).
+# the whole signal.
 RIGS=""
 rigs_count() {
     # jq emits nothing on empty input; normalize so arithmetic never throws.
@@ -1717,7 +1717,7 @@ verify_subject() {
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
 # canonical gate-visit lines, formulas/mol-visit.toml). One open visit per
 # subject; the subject must RESOLVE first so a typo cannot manufacture a
-# visit (tk-ujwvt). --reason is the short title tail, --body the brief the
+# visit. --reason is the short title tail, --body the brief the
 # converse session reads at claim time — callers with their own origin
 # (gc-visit-open.sh) pass both rather than misreporting the board wording.
 cmd_open() {
@@ -3631,6 +3631,19 @@ cmd_engage() {
     # a multi-session template's stored alias is a qualified form, so the visit
     # id is not assumed to equal it.
     #
+    # The spawn is also the visit's reservation, which is why it comes before
+    # the bind. gascity checks an alias and creates the session that holds it
+    # inside one city-wide lock on that alias, and every engage of one visit
+    # spawns under the same alias (the visit id, or its v- form below), so of two
+    # engages of one visit exactly one creates a sitting. The other is refused at
+    # `gc session new` having spawned nothing, and engage_alias_held reports who
+    # holds the visit. Reserving the visit's assignee before the spawn would
+    # instead hold the visit under a name no session carries until the spawn
+    # returns. The reclaim above reads such an assignee as a gone sitting
+    # (sitting_is_gone) and clears it, the board reads any assigned visit as
+    # engaged, and an engage that stopped after reserving would leave the visit
+    # off the parked backlog with nothing bound to it.
+    #
     # `gc session new` resolves a bare template through currentRigContext, which
     # reads GC_DIR (or cwd), NOT the GC_RIG exported above. The converse
     # templates are rig-scoped, with no city-scoped bare converse-<model>, so
@@ -3657,6 +3670,69 @@ cmd_engage() {
         swork_dir=$(printf '%s' "$spawn" | jq -r '.work_dir // ""' 2>/dev/null || true)
     }
 
+    # The spawn was refused because a session already holds the alias, so this
+    # engage spawned nothing and must point the operator at what holds the
+    # visit, never at a sitting to close that may be the one that won. The holder
+    # is either a concurrent engage that spawned first and is about to bind the
+    # visit, or a sitting left by an engage that stopped between its spawn and
+    # its bind. Only the visit tells them apart: a concurrent engage binds it
+    # within one store write of its spawn returning. So wait up to
+    # GC_HELM_ENGAGE_BIND_WAIT seconds for the visit to change, and name the
+    # holder as left over only when it stayed unbound for the whole wait. Exits 4
+    # on every path.
+    engage_alias_held() {
+        _ah_wait="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
+        case "$_ah_wait" in ''|*[!0-9]*) _ah_wait=20 ;; esac
+        _ah_waited=0
+        while :; do
+            _ah_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub \
+                | jq -c 'if type == "array" then (.[0] // {}) else {} end' 2>/dev/null || true)
+            _ah_status=$(printf '%s' "$_ah_row" | jq -r '.status // ""' 2>/dev/null || true)
+            _ah_owner=$(printf '%s' "$_ah_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+            # An unread visit proves nothing either way, so it keeps the wait going.
+            if [ -n "$_ah_status" ] && { [ "$_ah_status" != "open" ] || [ -n "$_ah_owner" ]; }; then
+                break
+            fi
+            [ "$_ah_waited" -lt "$_ah_wait" ] || break
+            sleep 1
+            _ah_waited=$((_ah_waited + 1))
+        done
+        if [ -n "$_ah_owner" ]; then
+            echo "$PROG: engage: visit $VISIT is engaged by '$_ah_owner', bound while this engage was spawning, so nothing was spawned here. Attach to it instead: gc session attach $_ah_owner" >&2
+            exit 4
+        fi
+        if [ -n "$_ah_status" ] && [ "$_ah_status" != "open" ]; then
+            echo "$PROG: engage: visit $VISIT is '$_ah_status', not open — a spawned sitting adopts only ready (open, unblocked) assigned work, so nothing was spawned." >&2
+            exit 4
+        fi
+        # engage's alias is stored qualified as <rig>/<pack>.<alias>, so the
+        # alias it asked for is the final dot-segment, the same read
+        # converse-reap.sh makes. A listing that does not answer with a sessions
+        # array names no holder and proves none gone.
+        _ah_list_ok=1
+        _ah_holder=$(gc session list --state all --json 2>/dev/null | scrub | jq -er --arg a "$session_alias" '
+            if (type == "object" and ((.sessions // null) | type) == "array")
+            then ([ .sessions[]
+                    | select((.closed // false) == false)
+                    | select(((.alias // "") | sub("^.*\\."; "")) == $a)
+                    | (.id // "") | select(. != "") ] | first // "")
+            else error("sessions array unreadable") end' 2>/dev/null) || { _ah_list_ok=0; _ah_holder=""; }
+        if [ -z "$_ah_status" ]; then
+            echo "$PROG: engage: a session${_ah_holder:+ ($_ah_holder)} holds the alias '$session_alias' of visit $VISIT, and the visit could not be read to tell whether that session bound it. Nothing spawned. Check it with 'gc bd show $VISIT', then re-run: $PROG engage $bead" >&2
+            exit 4
+        fi
+        if [ "$_ah_list_ok" = 0 ]; then
+            echo "$PROG: engage: a session holds the alias '$session_alias' of visit $VISIT and did not bind the visit within ${_ah_wait}s, but 'gc session list' could not be read to name it. Nothing spawned; re-run once the session list answers: $PROG engage $bead" >&2
+            exit 4
+        fi
+        if [ -z "$_ah_holder" ]; then
+            echo "$PROG: engage: a session held the alias '$session_alias' of visit $VISIT when this engage spawned, and no open session holds it now. Nothing spawned; re-run: $PROG engage $bead" >&2
+            exit 4
+        fi
+        echo "$PROG: engage: session $_ah_holder holds the alias '$session_alias' of visit $VISIT but did not bind the visit within ${_ah_wait}s, so it is not an engage finishing its bind. It was left by an engage that stopped between spawning it and binding the visit, and it holds nothing. Nothing spawned. If no other engage of $VISIT is still running, close it and re-run: gc session close $_ah_holder && $PROG engage $bead" >&2
+        exit 4
+    }
+
     # Spawn under the bare visit id first — it is the alias other engages read
     # back as a display hint. gascity's ValidateAlias runs before any session is
     # created and refuses an alias matching the session-id syntax `^gc-[0-9]+$`,
@@ -3677,10 +3753,12 @@ cmd_engage() {
         esac
     fi
     if [ -z "$sname" ] || [ -z "$sid" ]; then
+        case "$spawn_why" in
+            *"session alias already exists"*) engage_alias_held ;;
+        esac
         spawn_hint=""
         case "$spawn_why" in
             *"not found"*) spawn_hint=" The converse templates are rig-scoped: rig '${rig:-?}' ($path) does not carry $template, so a visit on a bead there cannot be engaged from that rig." ;;
-            *"alias already"*) spawn_hint=" A session still holds the alias '$session_alias' — a sitting from an earlier engage that never bound; close it (gc session close <id>) and re-run." ;;
         esac
         echo "$PROG: engage: 'gc session new $template' did not return a session identity — nothing assigned.${spawn_why:+ gc said: $spawn_why.}$spawn_hint Output: ${spawn:-<empty>}" >&2
         exit 4
@@ -3689,14 +3767,13 @@ cmd_engage() {
     # Bind the visit to the sitting: its assignee is the session's runtime name,
     # the identity a pool claim would have stamped, so the session's own
     # `gc hook --claim` adopts it with no pool routing. The bind is CONDITIONAL
-    # on the open+unassigned state the guards above read. `gc session new` takes
-    # real time, so a second engage of the same row can pass those same guards
-    # and spawn its own sitting in the window before this write — an
-    # unconditional update would let the later engage overwrite the first
-    # sitting's binding, stranding it. --if-assignee "" --if-status
-    # open writes only while the visit is still the one the guards saw; a mismatch
-    # writes nothing and exits 13. This engage is then the loser: it must not
-    # overwrite the owner that won.
+    # on the open+unassigned state the guards above read. Another engage of this
+    # visit never reaches this write, because the alias refused it, but `gc
+    # session new` takes real time and other writers can change the visit in
+    # that window: a dismiss closes it, and any writer can assign it.
+    # --if-assignee "" --if-status open writes only while the visit is still the
+    # one the guards saw; a mismatch writes nothing and exits 13, and this
+    # engage must not overwrite whoever holds the visit now.
     #
     # Every post-spawn failure CLOSES the sitting it just spawned before it
     # exits: a converse slot sets nudge="" and idle_timeout=0, so a sitting that
@@ -3712,8 +3789,16 @@ cmd_engage() {
     bind_rc=0
     gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
     if [ "$bind_rc" -eq 13 ]; then
-        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
-        engage_abort "$sid" "visit $VISIT was engaged by '${winner:-another sitting}' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was closed; attach to the one that won: gc session attach ${winner:-<owner>}"
+        taken_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -c 'if type=="array" then (.[0] // {}) else {} end' 2>/dev/null || true)
+        winner=$(printf '%s' "$taken_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+        taken_status=$(printf '%s' "$taken_row" | jq -r '.status // ""' 2>/dev/null || true)
+        if [ -n "$winner" ]; then
+            engage_abort "$sid" "visit $VISIT was taken by '$winner' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was closed; attach to the holder: gc session attach $winner"
+        fi
+        if [ -n "$taken_status" ] && [ "$taken_status" != "open" ]; then
+            engage_abort "$sid" "visit $VISIT became '$taken_status' while this sitting spawned, so there is nothing to bind. The sitting $sname this engage spawned holds nothing and was closed."
+        fi
+        engage_abort "$sid" "visit $VISIT changed while this sitting spawned, so the bind wrote nothing. The sitting $sname this engage spawned holds nothing and was closed; re-run: $PROG engage $bead"
     fi
     if [ "$bind_rc" -ne 0 ]; then
         engage_abort "$sid" "spawned $sname but the bind of visit $VISIT failed (rc $bind_rc). The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"

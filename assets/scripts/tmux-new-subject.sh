@@ -8,9 +8,9 @@
 #
 # Usage: tmux-new-subject.sh <config-dir> [--city-path <path>]
 #
-# --city-path is baked in by tmux-bindings.sh at install time: the binding fires
-# from tmux's own env, which does not carry Gas City's session env, so `gc` would
-# otherwise have no city to resolve rigs against or file the subject in.
+# --city-path is baked in by tmux-bindings.sh at install time: a key pressed
+# outside a Gas City session's pane carries no city in its environment, so `gc`
+# would otherwise have no city to resolve rigs against or file the subject in.
 set -e
 
 CONFIGDIR="${1:-}"

@@ -6,7 +6,7 @@
 agents/_converse/PROVENANCE.md
 1af991e9ca79182636678088a28f7cba74286989e6938f4e476f1bd914c2f07f
 agents/_converse/prompt.template.md
-20f2ecb2b4e2a85563c14865cf3ab20dab0552453d328cf82f1428a60e0b389e
+1a3f367c7e45e8f7bd2ba5cae459867b74c2327259dd9da51b410f0422d8dd37
 agents/converse-codex/agent.toml
 dae441330d0703750192ddfeb4a42e5a5bc71a2d9cb9a7af4c2cc8556e78408c
 agents/converse-fable/agent.toml
@@ -56,7 +56,7 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 6dc57aa4811ae551eff65cada2f74fa65eb68eba355e83d59473315b652691ce
 assets/scripts/render-seed-audit.sh
-c220c7d3f81d50ad9e37e9f4463cc9949ca9a992b74fba8ef28a618b5c364132
+1e807a24357b51b91ae12b518b64b4ff864ecb24fd1f510fcd6cb82acb285734
 formulas/mol-deacon-patrol.toml
 07d6f0db15dab10e9d25e5fcb6e403d5289291cd321e3ef08d6df671d4e136d3
 formulas/mol-dog-shutdown-dance.toml
@@ -68,13 +68,13 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 d8626795c7b02f08826c6f388ac830672e49bfc28c03d4ca71fe227677c149a9
 formulas/mol-polecat-work.toml
-00760615cc25037037a1323c77edfc83d435a047eb1739048e9ab011b216cd99
+bc68b63acadbe32c3ec5755bd6f7a307d7b0d7d2ce3a096ba39b9342f92c1c5f
 formulas/mol-refinery-patrol.toml
 9e39e5c9999dde4714235615b1e7ad96c11af70aa916288a79a7a9c8ef781b52
 formulas/mol-review-quorum-signoff.toml
 676c9a30f559480daebcadd857f6c94b0dfc9989015be76e6b470753b75ccbd7
 formulas/mol-review.toml
-38f74d6f2a069d69bf02e676b3d899a688a76779425019f3b4cce144ab805bf7
+cbdfceb8f7c80328517ea18687c337f9b167ba2c8abd6634cce9863c2c458246
 formulas/mol-rig-demo.toml
 7b0d2e31477622b900151c69c299b71668830163c28fec19d6bbaa7884684711
 formulas/mol-validate-close.toml
@@ -84,7 +84,7 @@ formulas/mol-validate.toml
 formulas/mol-visit.toml
 0279f28992dc140d1ce95477287a0ee543c34660e5039de491bad5d4bb2ead84
 formulas/mol-witness-patrol.toml
-0b312874e97b03ebb6b6666ba77ead336778e83b15bac41bd2d286a8295a0b50
+403c3030ad752b51c936f75f7e7851071fef927d4022e98d9c9557f3471d2483
 pack.toml
 3dbc4a505331607d7997aef0210cbdf4349ac52f219dadec9d0a690813072db4
 packs/gascity-keeper/agents/keeper/PROVENANCE.md

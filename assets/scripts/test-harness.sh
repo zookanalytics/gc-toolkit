@@ -77,6 +77,7 @@ harness_init() {
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
+  export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
@@ -123,6 +124,8 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
+  # review-verdict.sh, the approval rule, is sourced by sibling path the same way.
+  [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   return 0
 }
 
@@ -371,18 +374,47 @@ case "$verb" in
     echo "updated $id"
     ;;
   create)
+    # Real bd lands a create in one insert: --metadata (a JSON value, stored
+    # with its JSON types), --status and --notes all ride it, and a --metadata
+    # that is not JSON is refused with nothing created. STUB_DROP_KEYS applies
+    # here as on update, keyed by the id this create mints (new-<store length
+    # + 1>), so a birth that half-lands is modelled key by key; `status` in the
+    # list leaves the bead at the default open. STUB_CREATE_FAIL refuses the
+    # create outright. STUB_CREATE_GARBAGE lets it land and answers with a
+    # reply no JSON reader parses, the shape of a create whose id is lost.
     title="${1:-}"; shift || true
-    body=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""
     while [ $# -gt 0 ]; do
-      case "$1" in --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;; esac
+      case "$1" in
+        --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
+        --metadata) shift; cmeta="${1:-}" ;;
+        --metadata=*) cmeta="${1#--metadata=}" ;;
+        -s|--status) shift; cstatus="${1:-}" ;;
+        --status=*) cstatus="${1#--status=}" ;;
+        --notes) shift; cnotes="${1:-}" ;;
+        --notes=*) cnotes="${1#--notes=}" ;;
+      esac
       shift || true
     done
+    [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
+    { [ -n "$cmeta" ] && printf '%s' "$cmeta" | jq empty >/dev/null 2>&1; } \
+      || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     n=$(jq 'length' "$S"); nid="new-$((n + 1))"
+    drops=""
+    for pair in ${STUB_DROP_KEYS:-}; do
+      case "$pair" in "$nid:"*) drops="${pair#*:}" ;; esac
+    done
+    case ",$drops," in *",status,"*) cstatus="open" ;; esac
     tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
-    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" \
-      '. + [{id: $id, status: "open", assignee: "", title: $t, description: $b, notes: "", issue_type: "task", metadata: {}}]' \
+    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --argjson m "$cmeta" --arg dr "$drops" '
+      ($dr | split(",")) as $drop
+      | (if ($m | type) == "object"
+           then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
+           else $m end) as $meta
+      | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
       "$S" > "$tmp" && mv "$tmp" "$S"
-    printf '{"id":"%s"}\n' "$nid"
+    if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else printf '{"id":"%s"}\n' "$nid"; fi
     ;;
   close)
     id="${1:-}"
@@ -562,7 +594,29 @@ case "$sub" in
         f="$G/pr_list_$(san "$br").json"
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
-      comment) exit 0 ;;
+      comment)
+        # The post lands in the PR's write-back fixture as a Conversation comment
+        # under the acting login, when that fixture exists, so a caller that reads
+        # its own posts back is idempotent because it found its write. databaseId
+        # 0 keeps it out of every react filter, as the thread-reply stub's does.
+        # STUB_PR_COMMENT_RC models a post the API refuses.
+        [ "${STUB_PR_COMMENT_RC:-0}" = "0" ] || exit "${STUB_PR_COMMENT_RC:-0}"
+        n="${1:-}"; shift || true
+        cb=""
+        while [ $# -gt 0 ]; do
+          case "$1" in --body) shift; cb="${1:-}" ;; --body=*) cb="${1#--body=}" ;; esac
+          shift || true
+        done
+        f="$G/threads_$n.json"
+        if [ -s "$f" ]; then
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          jq --arg b "$cb" --arg self "${STUB_SELF_LOGIN:-}" '
+            .issue_comments = ((.issue_comments // []) + [{
+              id: ("IC-post-" + ((.issue_comments // []) | length | tostring)), databaseId: 0,
+              author: {login: $self}, body: $b, reactionGroups: []}])' "$f" > "$t" && mv "$t" "$f"
+        fi
+        printf 'PRCOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
+        exit 0 ;;
       ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
         # The edit MUTATES the fixture the next `pr view` serves, so a second
@@ -644,7 +698,7 @@ case "$sub" in
       shift || true
     done
     if [ "$path" = "graphql" ]; then
-      # The write-back surface: three reads plus three mutations, over a fixture
+      # The write-back surface: three reads plus four mutations, over a fixture
       # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
       num=$(printf '%s' "$gqvars" | jq -r '.num // ""')
@@ -672,6 +726,22 @@ case "$sub" in
           printf '%s' "$nodes" | jq -c '{data: {repository: {pullRequests: {
               pageInfo: {hasNextPage: false, endCursor: null}, nodes: .}}}}' || exit 1
           exit 0 ;;
+        *removeReaction*)
+          # Drops the viewer's reaction of that content from the node, so the next
+          # read shows it gone. STUB_UNREACT_RC models a removal the API refuses.
+          [ "${STUB_UNREACT_RC:-0}" = "0" ] || exit "${STUB_UNREACT_RC:-0}"
+          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
+          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          jq --arg id "$sid" --arg c "$c" '
+            def unmark: if (.id == $id) then .reactionGroups = ((.reactionGroups // []) | map(select(.content != $c))) else . end;
+            .reviews = ((.reviews // []) | map(unmark))
+            | .threads = ((.threads // []) | map(.comments.nodes = ((.comments.nodes // []) | map(unmark))))
+            | .issue_comments = ((.issue_comments // []) | map(unmark))
+          ' "$f" > "$t" && mv "$t" "$f"
+          printf 'UNREACT %s %s\n' "$sid" "$c" >> "${STUB_GH_LOG:?}"
+          echo '{"data":{"removeReaction":{"clientMutationId":null}}}'; exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
           sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')

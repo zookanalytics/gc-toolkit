@@ -773,6 +773,17 @@ is that person's task, and dismiss leaves it alone. A gate that still slips
 through, stranded by another path, is caught by finalize-gate's orphan-gate
 clause, which refuses to finalize the gated bead while the orphan stands.
 
+`prefix+X` ends a sitting the same way from the keyboard, whether or not
+converse's copyable line is on screen. After a y/n confirm,
+`assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
+`gc session list`, refuses one that is not a converse sitting, and runs the
+argument-free dismiss under that session's identity, so dismiss itself infers
+which subject the sitting is on. Nothing is typed into the pane. A keystroke
+carries no ruling, so when dismiss holds for an open linked gate the key
+closes nothing and decides nothing. Its message names each gate, the bead it
+blocks and its question, and says how to decide it: re-run dismiss with
+`--resolve-gate` and a ruling, or with `--leave-gate`.
+
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
 stop path, so any stop takes the thread whole. Retiring the session rather than

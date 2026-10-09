@@ -5,7 +5,7 @@
 # Today that question is re-derived ad hoc from fragments every time somebody
 # asks, and the largest part of the answer is invisible after the fact: a
 # polecat transcript stores neither the skills appendix nor the standing prompt,
-# so ~26k tokens per spawn have no post-hoc audit trail at all (tk-yhwfv.3).
+# so ~26k tokens per spawn have no post-hoc audit trail at all.
 # Rendering is the only way to see it. Committing the render is what makes it
 # reviewable as ONE thing and diffable across time.
 #
@@ -126,8 +126,8 @@ PH_HOME="[[HOME]]"
 # it holds the per-agent inject_fragments_append lists AND the `sha:` pin for
 # the imported gastown pack, so an upstream prompt change moves it too.
 #
-# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate
-# (tk-wchab, pre-open signoff P1). The synthetic city below is not a wrapper
+# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate.
+# The synthetic city below is not a wrapper
 # around the render — it is a variable the rendered prompts depend on, and the
 # scenario comment says so. Edit one line of its [agent_defaults] and 13 agent
 # prompts move; with only the content directories hashed, `--check` reported the
