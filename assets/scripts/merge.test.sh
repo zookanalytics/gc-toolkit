@@ -1650,6 +1650,186 @@ has "$out" "open-PR list unreadable" "a list that does not parse is reported the
 has "$out" "visited 2 landing-first and 0 of 0 other anchors" "…and leaves the pass unpaced"
 rm -f "$GH_DIR/open_prs.json"
 
+# --- the test suite at the merge result ----------------------------------------
+# The base carries the test-merged workflow only while its contents fixture
+# exists, so every case above merges with the gate off: the read 404s, as it does
+# on a repository without the workflow. MT_TIP is main's current tip and MT_OLD
+# an earlier one; a status names the tip it tested at the end of its description.
+MT_WF="$GH_DIR/contents_.github_workflows_test-merged.yml.json"
+MT_TIP=1111111111111111111111111111111111111111
+MT_OLD=2222222222222222222222222222222222222222
+MT_NEW=3333333333333333333333333333333333333333
+mt_on() {
+  printf '{"type":"file","path":".github/workflows/test-merged.yml"}' > "$MT_WF"
+  printf '{"name":"main","commit":{"sha":"%s"}}' "$MT_TIP" > "$GH_DIR/branch_main.json"
+}
+mt_off() { rm -f "$MT_WF" "$GH_DIR/branch_main.json" "$GH_DIR"/statuses_sha-4[0-9][0-9].json; }
+mt_status() { # state tip [created_at] [target_url] — one status object
+  jq -cn --arg s "$1" --arg t "$2" --arg c "${3:-2026-08-20T01:00:00Z}" --arg u "${4:-}" \
+    '{state: $s, context: "test-merged", description: "\($s) when merged into main at \($t)",
+      target_url: $u, created_at: $c}'
+}
+mt_ready() { # id num — an anchor whose every other gate passes
+  store "[$(anchor "$1" "$2"), $(rev "$1")]"
+  printf '%s' "$(prview "$2" OPEN CLEAN)" > "$GH_DIR/pr_view_$2.json"
+  approved "$2"
+}
+mt_runs() { grep -c '^workflow run ' "$STUB_GH_LOG" || true; }
+
+echo "# test-merged: a base without the workflow owes no merged test"
+mt_off
+mt_ready MT0 400
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$(cat "$STUB_GH_LOG")" "api --hostname github.com repos/zook/gc-toolkit/contents/.github/workflows/test-merged.yml?ref=main --jq .type // \"\"" "the gate asks whether the base carries the workflow"
+has "$out" "merged + recorded MT0" "a 404 there leaves the merge as it was"
+eq "$(mt_runs)" "0" "…and dispatches nothing"
+
+echo "# test-merged: a pass at the base's current tip lands"
+mt_on
+mt_ready MT1 401
+printf '[%s]' "$(mt_status success "$MT_TIP")" > "$GH_DIR/statuses_sha-401.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#401 passed test-merged, its tests merged into 'main' at 11111111 (anchor MT1)" "a passing status naming the tip is reported"
+has "$out" "merged + recorded MT1" "…and the PR lands"
+eq "$(mt_runs)" "0" "…with no dispatch"
+
+echo "# test-merged: a pass at an older tip dispatches the run and holds"
+# The incident shape: the PR passed against a main that has since moved, so its
+# result says nothing about a check main gained in between.
+mt_ready MT2 402
+printf '[%s]' "$(mt_status success "$MT_OLD")" > "$GH_DIR/statuses_sha-402.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#402 has no test-merged result for 'main' at 11111111; dispatched test-merged; merge held (anchor MT2)" "a pass at an older tip is no result for this one"
+has "$(cat "$STUB_GH_LOG")" "workflow run test-merged.yml --repo github.com/zook/gc-toolkit --ref main -f pr=402 -f head=sha-402" "…the run is dispatched on the base with the PR and its head"
+has "$(cat "$STUB_GH_LOG")" "STATUS sha-402 pending running when merged into main at $MT_TIP" "…and a pending status records the dispatch"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 402" "…and nothing merged"
+eq "$(pinned MT2)" "progressing@sha-402" "the machine axis says CI will move it"
+
+echo "# test-merged: its own pending status holds the next pass without a second dispatch"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#402 is waiting on test-merged, its tests merged into 'main' at 11111111; merge held (anchor MT2)" "the pending status names the tip, so the pass waits"
+eq "$(mt_runs)" "0" "…and dispatches nothing more"
+eq "$(pinned MT2)" "progressing@sha-402" "…still progressing"
+
+echo "# test-merged: a pending status past the bound is a run that never reported"
+mt_ready MT3 403
+printf '[%s]' "$(mt_status pending "$MT_TIP" 2020-01-01T00:00:00Z)" > "$GH_DIR/statuses_sha-403.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#403 has no test-merged result for 'main' at 11111111; dispatched test-merged" "an old pending status is dispatched again"
+eq "$(mt_runs)" "1" "…once"
+: > "$STUB_GH_LOG"
+printf '[%s]' "$(mt_status pending "$MT_TIP" 2020-01-01T00:00:00Z)" > "$GH_DIR/statuses_sha-403.json"
+out=$(MERGED_TEST_STALE_SECS=999999999999 "$SUT" 2>&1)
+has "$out" "merge: PR#403 is waiting on test-merged" "MERGED_TEST_STALE_SECS sets the bound"
+
+echo "# test-merged: a failing run at the tip holds, records blocked, and files one visit"
+for st in failure error; do
+  mt_ready MT4 404
+  printf '[%s]' "$(mt_status "$st" "$MT_TIP" "" https://github.com/zook/gc-toolkit/actions/runs/9)" > "$GH_DIR/statuses_sha-404.json"
+  : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "merge: PR#404 fails test-merged, its tests merged into 'main' at 11111111 (https://github.com/zook/gc-toolkit/actions/runs/9); merge held (anchor MT4)" "a $st status at the tip holds, linking the run"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge 404" "…nothing merged"
+  eq "$(mt_runs)" "0" "…and nothing is dispatched, so the failure is not run again unasked"
+  eq "$(pinned MT4)" "blocked@sha-404" "…the machine axis says a person must act"
+  eq "$(reason MT4)" "its tests fail merged into 'main' at $MT_TIP; bring 'polecat/x404' current with 'main', fix what fails, and push" "…and names what"
+  has "$(cat "$STUB_ESC_LOG")" "--subject MT4 --key merged-test-gate.404" "…one visit per PR"
+  has "$(cat "$STUB_ESC_LOG")" "it did not pass: https://github.com/zook/gc-toolkit/actions/runs/9." "…linking the failing run"
+done
+
+echo "# test-merged: a failure at an older tip does not hold the current one"
+mt_ready MT5 405
+printf '[%s]' "$(mt_status failure "$MT_OLD")" > "$GH_DIR/statuses_sha-405.json"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#405 has no test-merged result for 'main' at 11111111; dispatched test-merged" "an older tip's failure says nothing of this tip, which is tested"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed for it"
+
+echo "# test-merged: the newest status naming the tip is its verdict"
+mt_ready MT6 406
+printf '[%s,%s]' "$(mt_status success "$MT_TIP")" "$(mt_status failure "$MT_TIP")" > "$GH_DIR/statuses_sha-406.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded MT6" "a pass posted after a failure (a re-run) lands"
+mt_ready MT7 407
+printf '[%s,%s]' "$(mt_status failure "$MT_TIP")" "$(mt_status success "$MT_TIP")" > "$GH_DIR/statuses_sha-407.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#407 fails test-merged" "a failure posted after a pass holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 407" "…and nothing merged"
+
+echo "# test-merged: a status of another context, or naming no tip, is not a verdict"
+mt_ready MT8 408
+printf '[%s,%s]' "$(mt_status success "$MT_TIP" | jq -c '.context = "test"')" \
+  "$(mt_status success "$MT_TIP" | jq -c '.description = "passed"')" > "$GH_DIR/statuses_sha-408.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#408 has no test-merged result for 'main' at 11111111; dispatched test-merged" "neither stands for test-merged at the tip"
+
+echo "# test-merged: every read that does not answer holds, and dispatches nothing"
+mt_ready MT9 409
+: > "$STUB_GH_LOG"
+out=$(STUB_CONTENTS_RC=1 "$SUT" 2>&1)
+has "$out" "merge: PR#409 cannot tell whether its tests pass merged into 'main': the workflow file on 'main' could not be read; merge held (anchor MT9)" "a contents read that fails is not a base without the workflow"
+printf '{"name":"main"}' > "$GH_DIR/branch_main.json"
+out=$("$SUT" 2>&1)
+has "$out" "merge: PR#409 cannot tell whether its tests pass merged into 'main': the tip of 'main' could not be read; merge held (anchor MT9)" "a branch read with no tip holds"
+mt_on
+out=$(STUB_STATUSES_RC=1 "$SUT" 2>&1)
+has "$out" "merge: PR#409 cannot tell whether its tests pass merged into 'main': the statuses on sha-409 could not be read; merge held (anchor MT9)" "a statuses read that fails holds"
+for body in '{"message":"Server Error"}' "[$(mt_status success "$MT_TIP")] trailing" "[$(mt_status success "$MT_TIP")][]" "[$(mt_status cancelled "$MT_TIP")]"; do
+  printf '%s' "$body" > "$GH_DIR/statuses_sha-409.json"
+  out=$("$SUT" 2>&1)
+  has "$out" "merge: PR#409 cannot tell whether its tests pass merged into 'main': the statuses on sha-409 could not be read" "statuses read as '${body:0:40}…' hold"
+done
+eq "$(mt_runs)" "0" "no failed read dispatched a run"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 409" "…or merged"
+
+echo "# test-merged: a dispatch the API refuses holds and records no dispatch"
+mt_ready MT10 410
+: > "$STUB_GH_LOG"
+out=$(STUB_WORKFLOW_RUN_RC=1 "$SUT" 2>&1)
+has "$out" "merge: PR#410 has no test-merged result for 'main' at 11111111, and dispatching test-merged failed: could not create workflow dispatch event: HTTP 422: Unexpected inputs provided; merge held (anchor MT10)" "the refusal is reported"
+hasnt "$(cat "$STUB_GH_LOG")" "STATUS sha-410" "…and no pending status claims a run that does not exist"
+
+echo "# test-merged: a pending status that does not post warns, and the next pass dispatches again"
+mt_ready MT11 411
+: > "$STUB_GH_LOG"
+out=$(STUB_STATUS_POST_RC=1 "$SUT" 2>&1)
+has "$out" "merge: WARN PR#411 test-merged was dispatched but its pending status did not post; the next pass dispatches again" "the lost record is reported"
+has "$out" "merge: PR#411 has no test-merged result for 'main' at 11111111; dispatched test-merged; merge held (anchor MT11)" "…beside the dispatch"
+out=$("$SUT" 2>&1)
+eq "$(mt_runs)" "2" "…which the next pass makes again"
+
+echo "# test-merged: a PR held earlier never dispatches a run"
+mt_ready MT12 412
+echo '[]' > "$GH_DIR/reviews_412.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+hasnt "$out" "test-merged" "an unapproved PR stops before the merged test"
+eq "$(mt_runs)" "0" "…and costs no run"
+
+echo "# test-merged: a merge moves the tip, so the next candidate is tested against the new one"
+# Both passed at the tip this pass starts on. The first landing moves main, and
+# the second PR's pass names the old tip, so it is tested again rather than
+# landing on a result that never saw the first.
+store "[$(anchor MT13 413), $(rev MT13), $(anchor MT14 414), $(rev MT14)]"
+for n in 413 414; do
+  printf '%s' "$(prview "$n" OPEN CLEAN)" > "$GH_DIR/pr_view_$n.json"
+  approved "$n"
+  printf '[%s]' "$(mt_status success "$MT_TIP")" > "$GH_DIR/statuses_sha-$n.json"
+done
+: > "$STUB_GH_LOG"
+out=$(STUB_MERGE_MOVES_TIP="$MT_NEW" "$SUT" 2>&1)
+has "$out" "merged + recorded MT13" "the first candidate lands on its pass at the tip"
+has "$out" "merge: PR#414 has no test-merged result for 'main' at 33333333; dispatched test-merged" "the second is tested against the tip the first landing made"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 414" "…and does not land on its pass at the old tip"
+mt_off
+
 }
 
 # An arm proves nothing about which implementation answered unless the hand-off

@@ -83,6 +83,8 @@ harness_init() {
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
+  export STUB_CONTENTS_RC="" STUB_STATUSES_RC="" STUB_STATUS_POST_RC="" STUB_WORKFLOW_RUN_RC=""
+  export STUB_MERGE_MOVES_TIP=""
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -593,7 +595,13 @@ case "$sub" in
         done
         f="$G/pr_list_$(san "$br").json"
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
-      merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
+      merge)
+        # STUB_MERGE_MOVES_TIP: a landing moves main's tip to this commit, as a
+        # real squash merge does, so the next read of the branch sees it.
+        if [ "${STUB_PR_MERGE_RC:-0}" = "0" ] && [ -n "${STUB_MERGE_MOVES_TIP:-}" ]; then
+          printf '{"name":"main","commit":{"sha":"%s"}}' "$STUB_MERGE_MOVES_TIP" > "$G/branch_main.json"
+        fi
+        exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment)
         # The post lands in the PR's write-back fixture as a Conversation comment
         # under the acting login, when that fixture exists, so a caller that reads
@@ -832,6 +840,43 @@ case "$sub" in
     out=""
     case "$path" in
       user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
+      */commits/*/statuses*)
+        # A commit's statuses, newest first as the real list is. An absent
+        # fixture is a commit with none; STUB_STATUSES_RC models a read that fails.
+        h="${path##*/commits/}"; h="${h%%/*}"
+        [ -z "${STUB_STATUSES_RC:-}" ] || exit "$STUB_STATUSES_RC"
+        f="$G/statuses_$h.json"
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */statuses/*)
+        # Post a commit status. It goes to the front of the commit's list, as the
+        # newest, so the next read finds this write. The -f fields are the status,
+        # stamped with the time of the post. STUB_STATUS_POST_RC models a post the
+        # API refuses.
+        h="${path##*/statuses/}"
+        [ "${STUB_STATUS_POST_RC:-0}" = "0" ] || exit "${STUB_STATUS_POST_RC:-0}"
+        f="$G/statuses_$h.json"; [ -s "$f" ] || echo '[]' > "$f"
+        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        jq --argjson v "$gqvars" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          '[$v + {created_at: $at}] + .' "$f" > "$t" && mv "$t" "$f"
+        printf 'STATUS %s %s %s\n' "$h" "$(printf '%s' "$gqvars" | jq -r '.state // ""')" \
+          "$(printf '%s' "$gqvars" | jq -r '.description // ""')" >> "${STUB_GH_LOG:?}"
+        out="$(jq -c '.[0]' "$f")" ;;
+      */contents/*)
+        # A file at a ref: contents_<its path, slashes flattened>.json, whatever
+        # the ref. With none, the real 404: the error body on STDOUT, --jq
+        # ignored, a non-zero exit. STUB_CONTENTS_RC models any other failure,
+        # whose body names another status.
+        cp="${path##*/contents/}"; cp="${cp%%\?*}"
+        if [ -n "${STUB_CONTENTS_RC:-}" ]; then
+          printf '{"message":"Server Error","status":"502"}'
+          exit "$STUB_CONTENTS_RC"
+        fi
+        f="$G/contents_$(san "$cp").json"
+        if [ ! -s "$f" ]; then
+          printf '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/contents#get-repository-content","status":"404"}'
+          exit 1
+        fi
+        out="$(cat "$f")" ;;
       */commits/*)
         br="${path##*/commits/}"
         f="$G/head_$(san "$br")"
@@ -926,6 +971,19 @@ case "$sub" in
         fi
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
+    esac ;;
+  workflow)
+    # `gh workflow run`: the dispatch is the argv logged above. STUB_WORKFLOW_RUN_RC
+    # models a dispatch the API refuses, which real gh reports on stderr.
+    v="${1:-}"; shift || true
+    case "$v" in
+      run)
+        if [ "${STUB_WORKFLOW_RUN_RC:-0}" != "0" ]; then
+          echo "could not create workflow dispatch event: HTTP 422: Unexpected inputs provided" >&2
+          exit "$STUB_WORKFLOW_RUN_RC"
+        fi
+        exit 0 ;;
+      *) echo "gh workflow stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
   *) echo "gh stub: unsupported '$sub'" >&2; exit 2 ;;
 esac

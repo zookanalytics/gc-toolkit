@@ -27,7 +27,10 @@
 # which is GitHub still computing it, read again within one budget per pass);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
-# and escalates rather than landing). The FULL
+# and escalates rather than landing); the test suite passing at the MERGE RESULT
+# where the base carries the test-merged workflow (its commit status for the
+# base's current tip, dispatched when absent, so a check landed on the base after
+# the PR's own run is run before the PR lands). The FULL
 # anchor-local authorization set is re-read immediately before the merge; any
 # mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
@@ -328,6 +331,79 @@ required_contexts_for() { # <branch>
   REQ_STATE="known"
 }
 # <<< required-contexts-for
+
+# The merged test: the suite run on a PR's head merged into its base's current
+# tip by .github/workflows/test-merged.yml, which reports it as a commit status
+# on the head whose description ends with " at <the base commit it tested>". A
+# pending status is this arm's record of a dispatch. One older than
+# MERGED_TEST_STALE_SECS is a run that never reported (cancelled, or lost), and
+# the arm dispatches again. The bound covers the workflow's 30-minute job
+# timeout plus its time queued.
+MERGED_TEST_WORKFLOW="test-merged.yml"
+MERGED_TEST_CONTEXT="test-merged"
+MERGED_TEST_STALE_SECS="${MERGED_TEST_STALE_SECS:-3600}"
+case "$MERGED_TEST_STALE_SECS" in ''|*[!0-9]*) MERGED_TEST_STALE_SECS=3600 ;; esac
+# The merged-test verdict for <head-oid> on <branch>. Sets MT_TIP to the branch's
+# current tip, MT_URL to the run a failing status links, and MT_STATE to one of:
+#   off      the branch carries no test-merged workflow, so the merge owes none
+#   passed   a passing status names the tip
+#   failed   a failing status names the tip
+#   running  a pending status names the tip and is younger than the bound
+#   missing  no status names the tip, or only a pending one past the bound
+#   unknown  a read did not answer; MT_WHY says which, and the caller holds
+# Statuses come newest first, so the first one naming the tip is its verdict.
+merged_test_state() { # <branch> <head-oid>
+  local b="$1" h="$2" probe prc tip raw
+  MT_STATE="unknown"; MT_TIP=""; MT_URL=""; MT_WHY=""
+  # gh answers a 404 with the error body on stdout, ignoring --jq, and a
+  # non-zero exit. Only that body tells a branch without the workflow from a
+  # read that failed, which holds.
+  probe=$(gh_api_origin "repos/$ORIGIN_REPO/contents/.github/workflows/$MERGED_TEST_WORKFLOW?ref=$b" \
+    --jq '.type // ""' 2>/dev/null); prc=$?
+  if [ "$prc" -ne 0 ]; then
+    if printf '%s' "$probe" | jq -e '(.status // "" | tostring) == "404"' >/dev/null 2>&1; then
+      MT_STATE="off"
+    else
+      MT_WHY="the workflow file on '$b' could not be read"
+    fi
+    return 0
+  fi
+  if [ "$probe" != "file" ]; then
+    MT_WHY="the workflow file on '$b' could not be read"; return 0
+  fi
+  tip=$(gh_api_origin "repos/$ORIGIN_REPO/branches/$b" --jq '.commit.sha // ""' 2>/dev/null) || tip=""
+  case "$tip" in *[!0-9a-f]*) tip="" ;; esac
+  if [ "${#tip}" -ne 40 ]; then
+    MT_WHY="the tip of '$b' could not be read"; return 0
+  fi
+  MT_TIP="$tip"
+  if ! raw=$(gh_api_origin "repos/$ORIGIN_REPO/commits/$h/statuses?per_page=100" 2>/dev/null); then
+    MT_WHY="the statuses on $h could not be read"; return 0
+  fi
+  # Slurped, so a body that is not exactly one array is unreadable rather than
+  # read in part.
+  if ! raw=$(printf '%s' "$raw" | scrub | jq -rs --arg ctx "$MERGED_TEST_CONTEXT" --arg tip "$tip" \
+      --argjson stale "$MERGED_TEST_STALE_SECS" '
+      if length != 1 or (.[0] | type) != "array" then error("not one array") else .[0] end
+      | [ .[] | select(type == "object") | select((.context // "") == $ctx)
+          | select((.description // "") | tostring | endswith(" at " + $tip)) ][0] as $s
+      | if $s == null then "missing"
+        elif $s.state == "success" then "passed"
+        elif $s.state == "failure" or $s.state == "error" then "failed\t" + ($s.target_url // "" | tostring)
+        elif $s.state == "pending" then
+          (try (($s.created_at // "" | tostring | fromdateiso8601) as $t
+                | if now - $t > $stale then "missing" else "running" end)
+           catch "missing")
+        else error("unknown state") end' 2>/dev/null); then
+    MT_WHY="the statuses on $h could not be read"; return 0
+  fi
+  case "$raw" in
+    passed|missing|running) MT_STATE="$raw" ;;
+    failed$'\t'*) MT_STATE="failed"; MT_URL="${raw#*$'\t'}" ;;
+    *) MT_WHY="the statuses on $h could not be read" ;;
+  esac
+  return 0
+}
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than merging on a partial view" >&2
@@ -935,6 +1011,65 @@ $sa_out" >/dev/null 2>&1 || true
       held=$((held + 1)); continue
     fi
   fi
+
+  # --- the test suite AT THE MERGE RESULT ----------------------------------------
+  # The required checks ran on this PR merged into its base as the base stood at
+  # the PR's last push: a pull_request run tests the merge commit GitHub computed
+  # at its event, and a re-run reuses that commit. Branch protection that does
+  # not require branches to be up to date lets the PR merge on that result after
+  # the base has moved, so a check that scans the whole tree, landed on the base
+  # after the run, and a PR that violates it both arrive green and leave the
+  # base red. Where the base branch carries the test-merged workflow, the merge
+  # therefore waits on that workflow's status for the base's current tip. With
+  # none, this arm dispatches the workflow and posts a pending status recording
+  # the dispatch, so later passes wait rather than dispatch again. A failing
+  # status holds the merge and files one visit per PR. Every merge moves the
+  # tip, so each later candidate on the base is tested again before it lands.
+  # The base can still move between this read and the merge, in the few calls
+  # between them, and nothing here closes that window.
+  merged_test_state "$base" "$head_oid"
+  mt_at="'$base' at ${MT_TIP:0:8}"
+  case "$MT_STATE" in
+    off) : ;;
+    passed)
+      echo "$PROG: PR#$num passed test-merged, its tests merged into $mt_at (anchor $id)" ;;
+    running)
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
+      echo "$PROG: PR#$num is waiting on test-merged, its tests merged into $mt_at; merge held (anchor $id)"
+      held=$((held + 1)); continue ;;
+    missing)
+      if mt_err=$(gh workflow run "$MERGED_TEST_WORKFLOW" --repo "$ORIGIN_REPO_Q" --ref "$base" \
+           -f "pr=$num" -f "head=$head_oid" 2>&1); then
+        gh_api_origin -X POST "repos/$ORIGIN_REPO/statuses/$head_oid" -f state=pending \
+          -f "context=$MERGED_TEST_CONTEXT" -f "description=running when merged into $base at $MT_TIP" \
+          -f "target_url=https://$ORIGIN_HOST/$ORIGIN_REPO/actions/workflows/$MERGED_TEST_WORKFLOW" >/dev/null 2>&1 \
+          || echo "$PROG: WARN PR#$num test-merged was dispatched but its pending status did not post; the next pass dispatches again" >&2
+        record_machine "$id" "progressing" "$head_oid" "$aroute"
+        echo "$PROG: PR#$num has no test-merged result for $mt_at; dispatched test-merged; merge held (anchor $id)"
+      else
+        echo "$PROG: PR#$num has no test-merged result for $mt_at, and dispatching test-merged failed: $(printf '%s' "$mt_err" | tr '\n' ' '); merge held (anchor $id)"
+      fi
+      held=$((held + 1)); continue ;;
+    failed)
+      record_blocked "$id" "$head_oid" "$aroute" "its tests fail merged into '$base' at $MT_TIP; bring '$head_ref' current with '$base', fix what fails, and push"
+      echo "$PROG: PR#$num fails test-merged, its tests merged into $mt_at (${MT_URL:-no run linked}); merge held (anchor $id)"
+      # Held, not routed, as the seed-audit hold is: the door out is a visit a
+      # human claims. First line is the visit headline.
+      [ -x "$ESCALATE" ] && "$ESCALATE" --subject "$id" --key "merged-test-gate.$num" \
+        --message "PR#$num fails its tests merged into '$base' at $MT_TIP; the merge is held.
+
+The required test check ran on this pull request merged into '$base' as it
+stood at the pull request's last push, and '$base' has moved since. The
+test-merged workflow ran the suite on the head merged into the current tip, and
+it did not pass: ${MT_URL:-the status links no run}. Bring '$head_ref' current
+with '$base', fix what fails, and push; the new head is tested again before it
+lands. If the run failed for a reason outside this pull request, re-run it: a
+re-run reports for the same base commit." >/dev/null 2>&1 || true
+      held=$((held + 1)); continue ;;
+    *)
+      echo "$PROG: PR#$num cannot tell whether its tests pass merged into '$base': $MT_WHY; merge held (anchor $id)"
+      held=$((held + 1)); continue ;;
+  esac
 
   # --- terminal re-read: the FULL anchor-local authorization set ----------------
   # --match-head-commit binds the commit; none of these fields move the head, so
