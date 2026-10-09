@@ -501,12 +501,12 @@ The floor is why `0` is not simply "an integer, therefore fine". Zero is the
 documented off switch for exactly four knobs — `CALL_TIMEOUT` (unbounded
 calls), `SWEEP_BUDGET` (no per-pass budget), `ESCALATE_AFTER` (never escalate)
 and `REPEEK_AFTER` (peek every pane every pass) — and those keep a floor of `0`.
-Everywhere else zero is a typo that disables recovery while looking deliberate: `TAIL_LINES=0` makes `tail -n 0`
-print nothing, so nothing is ever detected as parked; `PEEK_LINES=0` empties
-every capture, which reads as an unreadable pane; `BACKOFF_BASE=0` or
-`BACKOFF_CAP=0` collapses the retry window and nudges every parked pane on every
-sweep, forever. Those knobs have a floor of `1` and fall back exactly as they do
-for `oops`.
+Everywhere else zero is a typo that disables recovery while looking
+deliberate: `TAIL_LINES=0` makes `tail -n 0` print nothing, so nothing is ever
+detected as parked; `PEEK_LINES=0` empties every capture, which reads as an
+unreadable pane; `BACKOFF_BASE=0` or `BACKOFF_CAP=0` collapses the retry window
+and nudges every parked pane on every sweep, forever. Those knobs have a floor
+of `1` and fall back exactly as they do for `oops`.
 
 The three pattern knobs are validated the same way and for a sharper reason:
 `grep` answers a malformed ERE with rc 2, and every test in the sweep reads a
