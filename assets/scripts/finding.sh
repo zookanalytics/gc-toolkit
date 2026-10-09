@@ -25,6 +25,9 @@
 #   finding.follow_up    the deferred finding's later-work bead, armed to its fix
 #                        pool (deferred-dispatch) to dispatch once the anchor merges
 #   finding.visit        the open visit a needs-you finding filed for the operator
+#   finding.fix_unit     the rework child dispatched with the batch that raised it
+#                        (`upsert --fix-unit`, from pr-facts.sh for a human batch);
+#                        a later batch re-raising the finding records its own child
 #
 # What a ruled finding holds, and how it ends (component-model I1: no wait lives
 # only in a metadata string):
@@ -59,11 +62,22 @@
 # must-fix, never at dispatch: a fix unit wired to a still-unvalidated finding
 # would block the very close a later declined ruling needs, and bd refuses to
 # close a blocked issue. Routing a finding would make each its own claim and
-# break that cardinality.
+# break that cardinality. upsert hangs one such edge outside a ruling: a later
+# batch's child onto a finding already ruled must-fix that the batch re-raised.
+# The ruling is never re-run, and that child was dispatched to answer it too.
+#
+# Which fix unit answers a finding is recorded on the finding as it is filed
+# (finding.fix_unit), because only the filer knows which child carries its batch:
+# pr-facts.sh records the child it dispatched with a human feedback batch. An
+# anchor can carry other rework children beside that one: earlier batches'
+# children, a stale-base merge-in, a red-check rework. A finding wired to one of
+# those closes as answered the moment that child lands, before the work answering
+# it does. The lane-level match (anchor_fix_unit) is the fallback for a finding
+# filed without one.
 #
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
-#   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S]
+#   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S] [--fix-unit FU]
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
@@ -72,7 +86,8 @@
 #   finding.sh shed-orphaned [--reason R]
 #   finding.sh close-answered --anchor A [--reason R]
 #
-# Callers: signoff.sh (upsert on request-changes), the validator through
+# Callers: signoff.sh (upsert on request-changes), pr-facts.sh (upsert
+# --fix-unit for each item of a human feedback batch), the validator through
 # set-disposition — which hangs the fix unit's edge onto a finding only as it
 # rules that finding must-fix, so the fix unit blocks only the findings it must
 # answer — pr-open.sh (open-must-fix holds a publish while the city has ruled the
@@ -104,7 +119,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
-  finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>]
+  finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>] [--fix-unit <id>]
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>] [--fix-pool <pool>]
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
@@ -167,12 +182,13 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
 
 # The rework fix units answering <finding-lane>'s objections on <anchor>, one
 # "<id> <status>" per line, across ALL statuses. A fix unit carries
-# task_kind=rework. Two paths file one: signoff stamps source_review_bead on the
-# child it files for a machine review's findings; pr-facts files one child per
-# human batch, carrying the batch's review ids in source_review and no
-# source_review_bead. A finding is answered by the child of its own lane, so match
-# on the lane — a human finding takes the child with no source_review_bead, a
-# machine finding the child that carries one — and no lane's finding is wired to
+# task_kind=rework. signoff stamps source_review_bead on the child it files for a
+# machine review's findings; pr-facts files one child per human batch, carrying
+# the batch's review ids in source_review and no source_review_bead. pr-facts'
+# stale-base merge-in and red-check children carry no source_review_bead either,
+# so they share the human set. A finding is answered by the child of its own lane,
+# so match on the lane — a human finding takes a child with no source_review_bead,
+# a machine finding one that carries it — and no lane's finding is wired to
 # another lane's child.
 #
 # Read by metadata (anchor_bead + task_kind=rework), not by the anchor's blocks
@@ -194,14 +210,17 @@ _anchor_reworks() { # <anchor-id> <finding-lane>
     | "\(.id) \((.status // "open") | ascii_downcase)"' 2>/dev/null
 }
 
-# The fix unit to hang a must-fix finding's close-ordering edge onto, or empty: a
-# still-live one if any, else one that has already LANDED. The landed fallback is
-# what makes the wiring reliable — the dispatch of a fix unit and the validator's
-# must-fix ruling race, so a fix unit can close before its finding is ruled, and
-# hanging the edge only to a live fix unit (the old behavior) then left the finding
-# edge-less and wedged the re-gate. A landed fix unit still blocking the finding is
-# closeable (bd refuses a close only on an OPEN blocker), so close-answered closes
-# the finding on the next pass. Non-zero rc = the ledger would not read.
+# The fix unit to hang a must-fix finding's close-ordering edge onto when the
+# finding records none, or empty: a still-live one if any, else one that has
+# already LANDED. The lane cannot tell the batch's own child from another child
+# on the same lane, which is why a recorded finding.fix_unit wins. The landed
+# fallback is what makes the wiring reliable — the dispatch of a fix unit and the
+# validator's must-fix ruling race, so a fix unit can close before its finding is
+# ruled, and hanging the edge only to a live fix unit (the old behavior) then left
+# the finding edge-less and wedged the re-gate. A landed fix unit still blocking
+# the finding is closeable (bd refuses a close only on an OPEN blocker), so
+# close-answered closes the finding on the next pass. Non-zero rc = the ledger
+# would not read.
 anchor_fix_unit() { # <anchor-id> <finding-lane>
   local rw id
   rw=$(_anchor_reworks "$1" "${2:-}") || return 2
@@ -254,14 +273,47 @@ cmd_key() {
   compute_key "$lane" "$locus" "$msg"
 }
 
+# A re-raised finding answers the child of the latest batch that raised it: that
+# batch re-raised the objection after the earlier child was dispatched, and its
+# child carries the objection in its own work order. Record that child, and when
+# the finding is already ruled must-fix also hang its close-ordering edge, so the
+# finding closes only once the latest child carrying it lands. The edge an earlier
+# child hung stays, and close-answered closes the finding when every blocker has
+# closed. Fail closed (exit 2): a finding left recording the earlier child closes
+# as answered when that child lands, and the caller's retry re-adopts it.
+readopt_fix_unit() { # <finding> <fix-unit>
+  local f="$1" fu="$2" row got disp wrote=""
+  row=$(bd_json show "$f")
+  printf '%s' "$row" | jq -e --arg id "$f" '.[0].id == $id' >/dev/null 2>&1 \
+    || { warn "could not read re-raised finding $f to record fix unit $fu"; return 2; }
+  got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
+  if [ "$got" != "$fu" ]; then
+    gc bd update "$f" --set-metadata finding.fix_unit="$fu" >/dev/null 2>&1 || true
+    got=$(bd_json show "$f" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
+    [ "$got" = "$fu" ] \
+      || { warn "re-raised finding $f did not record finding.fix_unit=$fu (got '$got')"; return 2; }
+    wrote=1
+  fi
+  disp=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.disposition"] // "") | tostring' 2>/dev/null)
+  if [ "$disp" = "must-fix" ] && ! edge_exists "$fu" "$f"; then
+    gc bd dep "$fu" --blocks "$f" >/dev/null 2>&1 || true
+    edge_exists "$fu" "$f" \
+      || { warn "could not hang fix unit $fu --blocks re-raised must-fix finding $f"; return 2; }
+    wrote=1
+  fi
+  [ -z "$wrote" ] || bd_cache_clear
+  return 0
+}
+
 cmd_upsert() {
-  local anchor="" lane="" locus="" msg="" source=""
+  local anchor="" lane="" locus="" msg="" source="" fix_unit=""
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --lane) lane="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --locus) locus="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --message) msg="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --source) source="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --fix-unit) fix_unit="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] && [ -n "$lane" ] && [ -n "$locus" ] && [ -n "$msg" ] \
@@ -275,7 +327,9 @@ cmd_upsert() {
     exit 2
   fi
   if [ -n "$existing" ]; then
-    printf '%s\n' "$existing"   # re-raise: the existing finding, nothing created
+    # re-raise: the existing finding, nothing created
+    if [ -n "$fix_unit" ]; then readopt_fix_unit "$existing" "$fix_unit" || exit 2; fi
+    printf '%s\n' "$existing"
     return 0
   fi
   # The title carries the human-readable objection; the locus and full message
@@ -286,10 +340,12 @@ cmd_upsert() {
   # The identity rides the create, one insert, so a finding bead exists fully
   # stamped or not at all. A bead stamped in a second write is left with no
   # metadata when that write fails: no finding reader selects it, and with no
-  # finding.key the next pass's dedup misses it and files a stamped twin.
-  meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg k "$key" --arg src "$source" \
+  # finding.key the next pass's dedup misses it and files a stamped twin. The
+  # fix unit rides it too, so no ruling can find the finding without its record.
+  meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg k "$key" --arg src "$source" --arg fu "$fix_unit" \
     '{task_kind: "finding", anchor_bead: $ab, "finding.lane": $ln, "finding.key": $k,
-      "finding.disposition": "unvalidated", "finding.source": $src}' 2>/dev/null)
+      "finding.disposition": "unvalidated", "finding.source": $src}
+     + (if $fu == "" then {} else {"finding.fix_unit": $fu} end)' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not build finding metadata for key $key on $anchor; nothing filed"; exit 2; }
   id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   # A new finding changes this anchor's findings list; drop the per-pass bd_list
@@ -353,17 +409,21 @@ cmd_set_disposition() {
       # The fix unit answers only the findings ruled must-fix, so its close-ordering
       # edge onto this finding is hung HERE, from the ruling — never at dispatch,
       # when the finding was still unvalidated and a later declined ruling could not
-      # close it past that block. anchor_fix_unit returns a live fix unit, or the
-      # one that already LANDED when the dispatch won the race with this ruling: a
-      # landed fix unit still blocks the finding (bd refuses a close only on an OPEN
-      # blocker), so close-answered closes the finding on the next pass rather than
-      # leaving it edge-less and wedging the re-gate. Best-effort: the finding's own
-      # anchor edge above is the hold, so a fix unit whose edge cannot be hung costs
-      # the close ordering, never the merge hold. The anchor edge is the fix unit's
-      # own (hung at dispatch), not re-hung here.
-      local fu flane
-      flane=$(bd_json show "$finding" | jq -r '(.[0].metadata["finding.lane"] // "") | tostring' 2>/dev/null)
-      fu=$(anchor_fix_unit "$anchor" "$flane") || fu=""
+      # close it past that block. The fix unit is the one the finding records
+      # (finding.fix_unit), live or already landed. A finding filed without one
+      # takes anchor_fix_unit's lane match: a live fix unit, or the one that already
+      # LANDED when the dispatch won the race with this ruling. A landed fix unit
+      # still blocks the finding (bd refuses a close only on an OPEN blocker), so
+      # close-answered closes the finding on the next pass rather than leaving it
+      # edge-less and wedging the re-gate. Best-effort: the finding's own anchor edge
+      # above is the hold, so a fix unit whose edge cannot be hung costs the close
+      # ordering, never the merge hold. The anchor edge is the fix unit's own (hung
+      # at dispatch), not re-hung here.
+      local fu flane frow
+      frow=$(bd_json show "$finding")
+      fu=$(printf '%s' "$frow" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
+      flane=$(printf '%s' "$frow" | jq -r '(.[0].metadata["finding.lane"] // "") | tostring' 2>/dev/null)
+      [ -n "$fu" ] || fu=$(anchor_fix_unit "$anchor" "$flane") || fu=""
       if [ -n "$fu" ] && ! edge_exists "$fu" "$finding"; then
         gc bd dep "$fu" --blocks "$finding" >/dev/null 2>&1 \
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"

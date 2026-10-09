@@ -726,6 +726,15 @@ keys = [
   # raised has closed the write-back dismisses THAT review and re-requests its
   # author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
+  # The rework child dispatched with the batch that raised a finding, recorded by
+  # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
+  # work. A must-fix ruling hangs its close-ordering edge from this child, never
+  # from another rework child on the anchor: an earlier batch's, a stale-base
+  # merge-in, a red-check rework. A later batch re-raising the open finding
+  # records its own child, and on a finding already ruled must-fix hangs that
+  # child's edge too. A finding filed without one falls back to the lane-level
+  # match. A bead id.
+  "finding.fix_unit",
 ]
 
 [metadata.review_quorum]

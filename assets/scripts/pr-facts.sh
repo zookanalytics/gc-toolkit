@@ -2686,7 +2686,13 @@ $CBODY"
     # behaviour: neither the findings nor the watermark land unless every item
     # filed. finding.sh dedups on lane plus a normalized locus and message, so a
     # retry after a mid-batch failure re-adopts the findings already filed rather
-    # than twinning them.
+    # than twinning them. A batch routed to a rework child records that child on
+    # each finding (finding.fix_unit), the one fix unit a must-fix ruling may hang
+    # the finding's close-ordering edge on. The anchor's other rework children —
+    # an earlier batch's, a stale-base merge-in, a red-check rework — never carried
+    # this batch, and a finding wired to one closes as answered when it lands. A
+    # finding a later batch re-raises records that batch's child instead.
+    FFU=(); case "$DISP" in rework:?*) FFU=(--fix-unit "${DISP#rework:}") ;; esac
     if [ ! -x "$FINDING" ]; then
       echo "$PROG: WARN $id — PR#$num finding tool not found ($FINDING); NOT watermarking (the batch has no findings for the validator to rule)" >&2
       skipped=$((skipped + 1)); continue
@@ -2705,7 +2711,7 @@ $CBODY"
       fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
       frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
-      if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
+      if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" ${FFU[@]+"${FFU[@]}"} 2>/dev/null) && [ -n "$fid" ]; then
         # Record which GitHub row and review raised it. finding.comment_id lets the
         # write-back post a declined finding's owed reply into that thread;
         # finding.review_id groups the finding under its review, so the write-back
@@ -2723,15 +2729,18 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not file every feedback finding; NOT watermarking (retry next pass; finding.sh re-adopts the ones already filed)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # The rework child's edges onto the findings it answers are NOT hung here.
-    # Every finding is still unvalidated, and a fix unit that blocked one the
-    # validator later declines would refuse that finding's close (bd will not close
-    # a blocked issue) and stall the validator's triage. The close-ordering edge
+    # The rework child's edge onto a newly filed finding is NOT hung here. The
+    # finding is still unvalidated, and a fix unit that blocked one the validator
+    # later declines would refuse that finding's close (bd will not close a
+    # blocked issue) and stall the validator's triage. The close-ordering edge
     # onto a finding is hung as the validator rules it must-fix (finding.sh
-    # set-disposition), so the fix unit blocks only the findings it must answer; a
-    # visit-routed batch has no fix unit and a human answers it. The child's own
-    # blocks edge onto the anchor, wired at dispatch, is what holds the merge in the
-    # meantime (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
+    # set-disposition, from the finding.fix_unit recorded above), so the fix unit
+    # blocks only the findings it must answer. A re-raised finding already ruled
+    # must-fix is not ruled again, so upsert hangs this batch's child onto it as
+    # it re-adopts it. A visit-routed batch has no fix unit and a human answers
+    # it. The child's own blocks edge onto the anchor, wired at dispatch, is what
+    # holds the merge in the meantime
+    # (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
     # The batch boundary goes down WITH the disposition that names it. Derived
     # later, off the disposition, it can be lost: a pass that exits after this

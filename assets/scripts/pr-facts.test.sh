@@ -2311,6 +2311,37 @@ hasnt "$FIDW" "<none>" "the comment is filed as a finding"
 grep -qxF "new-2|blocks|$FIDW" "$STUB_DEPS" && bad "the rework child must not block the unvalidated finding" || ok "…which the rework child does not block at dispatch"
 eq "$(meta Vw pr_comment_disposition)" "rework:new-2" "…and the batch watermarks its rework disposition"
 
+echo "# each finding records its own batch's rework child, so a must-fix ruling hangs no other child on the anchor"
+# The anchor already carries a stale-base merge-in child and an earlier batch's
+# child. Both are task_kind=rework with no source_review_bead, the shape this
+# batch's child has, so a lane-level match cannot tell them apart. The real
+# finding.sh rules each finding below, as the validator would.
+store "[$(anchor Vf 89),$(printf '{"id":"mrg-89","status":"open","assignee":"","title":"Rework PR#89: base rewritten, PR conflicts","notes":"","metadata":{"task_kind":"rework","anchor_bead":"Vf","prepare_mode":"merge"}}'),$(printf '{"id":"cfu-89","status":"open","assignee":"","title":"Address review comments on PR#89 (through review 0, comment 8800)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"Vf","source_review":"8800"}}')]"
+printf '%s' "$(prview 89 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_89.json"
+echo '[]' > "$GH_DIR/reviews_89.json"
+printf '[{"id":8890,"user":{"login":"human1"},"body":"handle the empty list"}]' > "$GH_DIR/comments_89.json"
+out=$(run)
+VFD="$(meta Vf pr_comment_disposition)"
+has "$VFD" "rework:" "the batch routes to its own rework child"
+VFC="${VFD#rework:}"
+FIDF=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vf") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+eq "$(meta "$FIDF" 'finding.fix_unit')" "$VFC" "…and its finding records that child"
+"$SD/finding.sh" set-disposition --finding "$FIDF" --anchor Vf --disposition must-fix
+grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "a must-fix ruling hangs the close-ordering edge from the batch's child" || bad "the batch's child does not block its must-fix finding"
+grep -qF "mrg-89|blocks|$FIDF" "$STUB_DEPS" && bad "the merge-in child must not answer the finding" || ok "…not from the merge-in child"
+grep -qF "cfu-89|blocks|$FIDF" "$STUB_DEPS" && bad "the earlier batch's child must not answer the finding" || ok "…nor from the earlier batch's child"
+# A later batch re-raises the same comment: its own child is the latest that
+# carries the objection, and the finding, already ruled, is never ruled again.
+printf '[{"id":8890,"user":{"login":"human1"},"body":"handle the empty list"},{"id":8895,"user":{"login":"human1"},"body":"handle the empty list"}]' > "$GH_DIR/comments_89.json"
+out=$(run)
+VFD2="$(meta Vf pr_comment_disposition)"
+VFC2="${VFD2#rework:}"
+if [ -n "$VFC2" ] && [ "$VFC2" != "$VFC" ]; then ok "the later batch routes to a child of its own"; else bad "the later batch did not route to a new child (got '$VFD2')"; fi
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vf")] | length' "$STUB_STORE")" "1" "…and re-adopts the open finding rather than twinning it"
+eq "$(meta "$FIDF" 'finding.fix_unit')" "$VFC2" "…which records the later child"
+grep -qxF "$VFC2|blocks|$FIDF" "$STUB_DEPS" && ok "…and that child blocks the already-ruled finding, so it closes only once the later child lands" || bad "the later child does not block the re-raised must-fix finding"
+grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "…beside the first batch's child, which stays" || bad "the first batch's edge was dropped"
+
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
 # finding.lane == check_name and a human batch's findings are finding.lane=human,

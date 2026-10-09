@@ -351,6 +351,119 @@ eq "$(bstatus "$FHM")" "closed" "close-answered closes the human finding once it
 has "$(notes "$FHM")" "fix unit landed" "the close records why the human finding was resolved"
 
 # ---------------------------------------------------------------------------
+# A human finding records the rework child of the batch that raised it, and a
+# must-fix ruling hangs THAT child, never another human-lane child on the anchor.
+# The anchor here carries three: a stale-base merge-in child, an earlier batch's
+# child, and this batch's child. All three carry task_kind=rework and no
+# source_review_bead, so the lane match cannot tell them apart, and it would take
+# the merge-in child, the first live one. Wired to it, the finding closed as
+# answered the moment the merge-in landed.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancM","status":"open","assignee":"","title":"ancM","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"mrgM","status":"open","assignee":"","title":"Rework PR#9: base rewritten, PR conflicts","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancM"}},
+        {"id":"cfuM1","status":"open","assignee":"","title":"Address review comments on PR#9 (through review 0, comment 100)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancM","source_review":"100"}},
+        {"id":"cfuM2","status":"open","assignee":"","title":"Address review comments on PR#9 (through review 0, comment 200)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancM","source_review":"200"}}]'
+for c in mrgM cfuM1 cfuM2; do gc bd dep "$c" --blocks tk-ancM >/dev/null; done
+: > "$STUB_GC_LOG"
+FM=$("$SUT" upsert --anchor tk-ancM --lane human --source "human:johnzook" --locus "assets/scripts/m.sh:go()" --message "guard the empty batch" --fix-unit cfuM2)
+eq "$(meta "$FM" 'finding.fix_unit')" "cfuM2" "upsert --fix-unit records the batch's child on the finding"
+has "$(cat "$STUB_GC_LOG")" '"finding.fix_unit":"cfuM2"' "…in the create's one insert"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata finding.fix_unit" "…with no second write"
+hasnt "$(deps)" "cfuM2|blocks|$FM" "an unvalidated finding still carries no inbound fix-unit edge"
+"$SUT" set-disposition --finding "$FM" --anchor tk-ancM --disposition must-fix
+has "$(deps)" "cfuM2|blocks|$FM" "must-fix hangs the close-ordering edge from the recorded child"
+hasnt "$(deps)" "mrgM|blocks|$FM" "…not from the stale-base merge-in child the lane match takes first"
+hasnt "$(deps)" "cfuM1|blocks|$FM" "…nor from the earlier batch's child"
+gc bd update mrgM --status=closed >/dev/null
+gc bd update cfuM1 --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancM
+eq "$(bstatus "$FM")" "open" "the merge-in and the earlier batch's child landing do not close the finding as answered"
+gc bd update cfuM2 --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancM
+eq "$(bstatus "$FM")" "closed" "…its own batch's child landing does"
+FN=$("$SUT" upsert --anchor tk-ancM --lane human --source "human:johnzook" --locus "assets/scripts/m.sh:stop()" --message "no fix unit to record")
+eq "$(meta "$FN" 'finding.fix_unit')" "<absent>" "without --fix-unit the finding records none"
+
+# The recorded child wins whether it is live or has already LANDED, the
+# dispatch-vs-ruling race: the batch's child landed before the validator ruled,
+# while a merge-in child is still in flight on the anchor.
+: > "$STUB_DEPS"
+export STUB_ENFORCE_BLOCKS=1
+store '[{"id":"tk-ancN","status":"open","assignee":"","title":"ancN","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"mrgN","status":"open","assignee":"","title":"Rework PR#10: base rewritten, PR conflicts","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancN"}},
+        {"id":"cfuN","status":"closed","assignee":"","title":"Address review comments on PR#10 (through review 0, comment 300)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancN","source_review":"300"}}]'
+FLN=$("$SUT" upsert --anchor tk-ancN --lane human --source "human:johnzook" --locus "assets/scripts/n.sh:go()" --message "guard the write" --fix-unit cfuN)
+"$SUT" set-disposition --finding "$FLN" --anchor tk-ancN --disposition must-fix
+has "$(deps)" "cfuN|blocks|$FLN" "must-fix hangs the recorded child that already landed"
+hasnt "$(deps)" "mrgN|blocks|$FLN" "…not the live merge-in child the lane match prefers"
+"$SUT" close-answered --anchor tk-ancN
+eq "$(bstatus "$FLN")" "closed" "…so the finding closes, its batch's fix on the branch"
+unset STUB_ENFORCE_BLOCKS
+
+# A recorded child whose edge will not hang costs the close ordering, as any
+# fix-unit edge does, and never falls back to the lane match.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancP","status":"open","assignee":"","title":"ancP","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"mrgP","status":"open","assignee":"","title":"Rework PR#11: base rewritten, PR conflicts","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancP"}},
+        {"id":"cfuP","status":"open","assignee":"","title":"Address review comments on PR#11 (through review 0, comment 400)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancP","source_review":"400"}}]'
+FP=$("$SUT" upsert --anchor tk-ancP --lane human --source "human:johnzook" --locus "assets/scripts/p.sh:go()" --message "quote it" --fix-unit cfuP)
+STUB_DEP_FAIL=cfuP "$SUT" set-disposition --finding "$FP" --anchor tk-ancP --disposition must-fix 2>/dev/null; rc=$?
+eq "$rc" "0" "a recorded child's edge that will not hang leaves the ruling standing"
+has "$(deps)" "$FP|blocks|tk-ancP" "…the finding's own anchor edge holds the merge"
+hasnt "$(deps)" "mrgP|blocks|$FP" "…and no other child is wired in the recorded one's place"
+
+# ---------------------------------------------------------------------------
+# A later batch re-raising an open finding records its own child: it re-raised
+# the objection after the earlier child was dispatched, and its child carries it.
+# On a finding the validator already ruled must-fix, which is never ruled again,
+# the re-adoption hangs that child's edge too, so the finding closes only once the
+# latest child carrying it lands.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancQ","status":"open","assignee":"","title":"ancQ","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"cfuQ1","status":"open","assignee":"","title":"Address review comments on PR#12 (through review 0, comment 500)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancQ","source_review":"500"}},
+        {"id":"cfuQ2","status":"open","assignee":"","title":"Address review comments on PR#12 (through review 0, comment 600)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancQ","source_review":"600"}}]'
+upsert_q() { "$SUT" upsert --anchor tk-ancQ --lane human --source "human:johnzook" --locus "assets/scripts/q.sh:$1()" --message "$2" ${3:+--fix-unit "$3"}; }
+QU=$(upsert_q un "still unruled" cfuQ1)
+eq "$(upsert_q un "still unruled" cfuQ2)" "$QU" "a later batch's re-raise re-adopts the open finding"
+eq "$(meta "$QU" 'finding.fix_unit')" "cfuQ2" "…and records that batch's child"
+hasnt "$(deps)" "cfuQ2|blocks|$QU" "…hanging no edge onto a finding the validator has not ruled"
+QM=$(upsert_q mf "ruled must-fix" cfuQ1)
+"$SUT" set-disposition --finding "$QM" --anchor tk-ancQ --disposition must-fix
+has "$(deps)" "cfuQ1|blocks|$QM" "the first batch's child answers the finding it raised"
+eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "a later batch re-raises the must-fix finding"
+eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…which records the later child"
+has "$(deps)" "cfuQ2|blocks|$QM" "…and hangs its close-ordering edge onto the already-ruled finding"
+has "$(deps)" "cfuQ1|blocks|$QM" "…beside the first child's, which stays"
+gc bd update cfuQ1 --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancQ
+eq "$(bstatus "$QM")" "open" "the earlier child landing does not close a finding the later batch re-raised"
+: > "$STUB_GC_LOG"
+eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "re-raising with the child already recorded re-adopts it"
+hasnt "$(cat "$STUB_GC_LOG")" "update $QM" "…and writes nothing"
+hasnt "$(cat "$STUB_GC_LOG")" "dep cfuQ2 --blocks" "…and hangs no second edge"
+eq "$("$SUT" upsert --anchor tk-ancQ --lane human --locus "assets/scripts/q.sh:mf()" --message "ruled must-fix")" "$QM" "a re-raise with no --fix-unit re-adopts the finding"
+eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…and leaves its recorded child alone"
+gc bd update cfuQ2 --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancQ
+eq "$(bstatus "$QM")" "closed" "the latest child landing closes it"
+
+# The re-adoption fails closed: a finding left recording the earlier child closes
+# as answered when that child lands, so a write that does not stick exits 2 and
+# prints no id, and the caller retries the batch.
+QF=$(upsert_q uf "stamp refused" cfuQ1)
+out=$(STUB_UPDATE_FAIL="$QF" upsert_q uf "stamp refused" cfuQ2 2>/dev/null); rc=$?
+eq "$rc/$out" "2/" "a re-raise whose fix-unit write is refused exits 2 with no id"
+eq "$(meta "$QF" 'finding.fix_unit')" "cfuQ1" "…leaving the finding as it was"
+QE=$(upsert_q ue "edge refused" cfuQ1)
+"$SUT" set-disposition --finding "$QE" --anchor tk-ancQ --disposition must-fix
+out=$(STUB_DEP_FAIL=cfuQ2 upsert_q ue "edge refused" cfuQ2 2>/dev/null); rc=$?
+eq "$rc/$out" "2/" "a re-raise whose edge onto the must-fix finding will not hang exits 2 with no id"
+eq "$(upsert_q ue "edge refused" cfuQ2)" "$QE" "the retry re-adopts the finding"
+has "$(deps)" "cfuQ2|blocks|$QE" "…and hangs the edge"
+
+# ---------------------------------------------------------------------------
 # set-disposition must-fix wires the close-ordering edge even when the fix unit
 # has ALREADY LANDED. The dispatch of a fix unit and the validator's must-fix
 # ruling race: a fix unit can close before its finding is ruled. Wiring only to a
