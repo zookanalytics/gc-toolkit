@@ -10,13 +10,17 @@
 # gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
 # the close, because a closed visit with no gc.outcome is a sitting the board
 # cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# A visit also gets gc.work_outcome=no-op, for the work-record gate the close
+# runs, from work-outcome.sh: a write of its own that never gates the close and
+# never replaces a work outcome the visit already records.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# outcome when the visit lacks one.
+# outcome and that work outcome when the visit lacks them.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
-# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh.
+# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
+# pr-facts.sh (a PR closed with a pre-recorded disposition).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -34,9 +38,13 @@ BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 # tracking the origin holds its close, the same subject-scoped precondition
 # merge.sh applies to a merge (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || { echo "bead-rehome: cannot source work-outcome.sh from $HERE" >&2; exit 1; }
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
-ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""
+ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; EXCEPT_KEY=""
 
 usage() {
     cat <<'U'
@@ -45,7 +53,7 @@ Usage:
                  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
-                 [--dry-run]
+                 [--except-key <escalation-key>] [--dry-run]
 
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
@@ -55,6 +63,14 @@ from the sitting that ruled. It is required either way.
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
 An already-closed origin gains the pointer and an appended note (repair path).
+
+An open visit on the origin holds the close (finalize-gate.sh). --except-key
+is for the caller that reports its own refusals of this close through
+escalate.sh: it names the escalation key that caller files them under. A visit
+under that key, stamped for this origin, that nobody is engaged in does not hold
+the retry it asks for. A visit someone has claimed, or bound by assignee or
+session, still holds. So does every visit under any other key. The caller
+concludes its visits once the close lands.
 U
     exit "${1:-1}"
 }
@@ -69,6 +85,7 @@ while [ $# -gt 0 ]; do
         --note)             NOTE="${2:-}"; shift 2 ;;
         --origin-store)     ORIGIN_STORE="${2:-}"; shift 2 ;;
         --successor-store)  SUCCESSOR_STORE="${2:-}"; shift 2 ;;
+        --except-key)       EXCEPT_KEY="${2:-}"; shift 2 ;;
         --dry-run)          DRY_RUN=1; shift ;;
         -h|--help)          usage 0 ;;
         *)                  die "unknown argument '$1' (try --help)" 64 ;;
@@ -202,9 +219,11 @@ REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 # the same way. The --kind IS the disposition, so it is the outcome word, and
 # $REASON is its headline. An outcome the visit already records is the sitting's
 # own word and is left untouched (a visit closed through visit-close.sh, then
-# re-homed, already carries the word it signed off with).
+# re-homed, already carries the word it signed off with). gc.work_outcome is not
+# part of that word: step 1a stamps it whether or not the outcome is stamped.
 ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
 PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+PRIOR_WORK_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // empty' 2>/dev/null || true)
 STAMP_OUTCOME=""
 if [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_OUTCOME" ]; then STAMP_OUTCOME=1; fi
 
@@ -216,6 +235,7 @@ if [ -n "$DRY_RUN" ]; then
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
     [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
+    [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_WORK_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
@@ -269,6 +289,14 @@ if [ -n "$STAMP_OUTCOME" ]; then
     fi
 fi
 
+# 1a. A visit's work outcome, for the work-record gate the close runs. It goes
+# through work-outcome.sh as a write of its own, after the gated stamps above,
+# so it never decides whether the visit closes. It runs on the repair path too,
+# where it reaches a closed visit that records its outcome but lacks this key.
+if [ "$ORIGIN_KIND" = "visit" ]; then
+    work_outcome_noop "$ORIGIN" bd_at "$ORIGIN_PATH"
+fi
+
 # 1b. Drop ONLY the wait edge to THIS successor: it would refuse the close,
 # and gc.superseded_by records the relationship more strongly. Any other
 # blocker is a real hold whose refusal below is correct.
@@ -309,7 +337,9 @@ else
     # The successor pointer is already stamped, so a hold here leaves an OPEN,
     # pointed, findable bead — the shape a refused close below also leaves. The
     # release is to conclude the open visit, then re-run this close.
-    if ! FG_REASON=$("$FINALIZE_GATE" check "$ORIGIN" 2>/dev/null); then
+    FG_ARGS=(check "$ORIGIN")
+    if [ -n "$EXCEPT_KEY" ]; then FG_ARGS+=(--except-key "$EXCEPT_KEY"); fi
+    if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null); then
         echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}." >&2
         echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Conclude the open visit, then re-run this close." >&2
         exit 5

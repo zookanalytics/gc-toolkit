@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # liveness-sweep-precheck.test.sh — the sweep's mechanical half decides without
-# an agent session, and can only ever decide "nothing" from good reads
-# (bead tk-7h51d).
+# an agent session, and can only ever decide "nothing" from good reads.
 #
 # The script under test is the `check` of a condition-triggered order, so its
 # whole contract is its EXIT CODE: 0 runs the agent pass, non-zero does not.
@@ -157,7 +156,14 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
+  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-sling-convoy","title":"sling-tk-xxxxx","issue_type":"convoy","metadata":{}},
+  {"id":"f-synthetic-convoy","title":"a convoy a sling minted","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"f-titled-not-convoy","title":"input convoy for tk-yyyyy: why the walk never fires","issue_type":"bug","metadata":{}},
+  {"id":"o-wisp-aaaaa","title":"order: liveness-sweep (testrig)","issue_type":"task","metadata":{}},
+  {"id":"f-order-human","title":"order: tidy the convoy helpers","issue_type":"task","metadata":{}},
+  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}}
 ]
 JSON
 
@@ -178,7 +184,7 @@ cat > "$FIX/live.json" <<'JSON'
 JSON
 
 # WIDEN is every OTHER non-closed status. f-blocked-child is the live case
-# tk-dhue in miniature: a blocked child still names its parent's wait, and it is
+# in miniature: a blocked child still names its parent's wait, and it is
 # absent from LIVE, so an edge check resolved against LIVE alone would misfile
 # the parent as unnamed.
 cat > "$FIX/widen.json" <<'JSON'
@@ -241,7 +247,7 @@ hasnt ",$SURV," ",f-routed," "gc.routed_to non-empty is excluded (class 1)"
 hasnt ",$SURV," ",f-visit," "task_kind=visit is excluded (class 3)"
 hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
 hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
-# bead tk-d6ddn: the same class-3 exclusion, on a visit that named its subject
+# the same class-3 exclusion, on a visit that named its subject
 # ONLY through the tracks edge because the gc.continuation_group stamp landed
 # empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
@@ -258,6 +264,19 @@ hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not ne
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
 hasnt ",$SURV," ",f-convoy," "a convoy tracking a live member is excluded (class 2i-b)"
 hasnt ",$SURV," ",f-spec," "a bead tracking a live root is excluded (class 2i-c)"
+# class 0: the per-sling machine convoys and order-tracking wisps a sling mints
+# are machinery, not work. The sweep drops them first; the precheck must too, or
+# every pass after any sling re-arms the very session it just ran to conclude
+# "nothing new".
+hasnt ",$SURV," ",f-input-convoy," "a convoy titled 'input convoy for ...' is excluded (class 0)"
+hasnt ",$SURV," ",f-sling-convoy," "a convoy titled 'sling-...' is excluded (class 0)"
+hasnt ",$SURV," ",f-synthetic-convoy," "a gc.synthetic convoy is excluded (class 0)"
+hasnt ",$SURV," ",o-wisp-aaaaa," "an order-tracking wisp is excluded (class 0)"
+# The guards that keep class 0 from hiding real work. issue_type is load-bearing
+# for the convoy arm; order_wisp requires BOTH the wisp id and the order: title.
+has ",$SURV," ",f-titled-not-convoy," "a non-convoy whose TITLE names a convoy survives — the issue_type guard"
+has ",$SURV," ",f-order-human," "a human bead titled 'order:' with no wisp id survives — order_wisp needs both"
+has ",$SURV," ",n-wisp-bbbbb," "a wisp that is not an order survives — order_wisp needs both"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.
@@ -267,7 +286,7 @@ has ",$SURV," ",f-worked," "a convoy-worked bead is NOT excluded locally — tha
 
 # 2i-a resolves against the NOT-CLOSED set, not the open one. Re-run with the
 # only live child BLOCKED (it lives in WIDEN, absent from LIVE): the parent must
-# still be excluded, or the live case tk-dhue returns.
+# still be excluded, or the live case returns.
 echo "── 'still alive' means NOT CLOSED, never 'present in the open listing' ──"
 cp "$FIX/live.json" "$TMP/live.bak"
 cp "$FIX/ready.json" "$TMP/ready.bak"
@@ -308,7 +327,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
+# The su-ab9je shape at the SUBJECT level. The sitting is live
 # and held, but its gc.continuation_group stamp landed empty, so only the tracks
 # edge names f-subject. Read on the stamp alone this is "no visit", and the
 # precheck greenlights a pass that files a SECOND visit on a subject converse is
@@ -739,11 +758,14 @@ WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage through the shared predicate, which
-# liveness-sweep.sh sources before it. Supply the same defs ($VISIT_IDENTITY_JQ)
-# from the real lib so the extracted block resolves them and cannot drift.
+# The classify block matches visit coverage and standing records through two
+# shared definitions, which liveness-sweep.sh sources before it. Supply the same
+# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
+# extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"

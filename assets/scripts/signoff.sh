@@ -62,12 +62,17 @@ PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # opens, so the validator polecat that claims it names the method. Same builder
 # pr-facts.sh uses for the human feedback batch's pass. Overridable for the test.
 VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
+# The single writer of the city's PR posts. A post-open verdict goes through it
+# so the review carries the city's mark, and the superseded-block dismissal asks
+# its definition of the city's own review (gc_city_own) rather than the login.
+PR_POST="$HERE/pr-post.sh"
 
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>] [--add-gates <checks>]
+                  [--visual <decision>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
@@ -93,12 +98,18 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  remove a declared check, validated against the check index at
                  the reviewed commit; each check added is recorded on the anchor
                  as a `triage-add:` note.
+  --visual       the demo check's decision: none when the change needs no
+                 visual, else the modality that conveys it (repo-artifact,
+                 screenshot or video). Required on every demo verdict and
+                 refused on any other check's; none records with approve only.
+                 Stamped on the review bead as visual=<decision> and named on
+                 the posted artifact's `Visual:` line.
 U
 }
 
 warn() { echo "signoff: $*" >&2; }
 
-REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""
+REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -107,6 +118,7 @@ while [ $# -gt 0 ]; do
     --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
+    --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
@@ -132,6 +144,8 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 
 # The check whose method owns the checks-needed decision; no other check widens.
 TRIAGE_GATE=triage
+# The check whose method owns the visual decision; no other check records one.
+VISUAL_GATE=demo
 INDEX_PARSER="$SCRIPT_DIR/review-checks.sh"
 # A check_set as one lowercase token per line. The comma split comes first and
 # the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
@@ -200,6 +214,27 @@ CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 if [ -n "$ADD_GATES" ]; then
   [ "$VERDICT" = "approve" ] || { warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1; }
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
+fi
+
+# --visual carries the demo check's decision: whether the change needs a visual
+# and, when it does, the modality that conveys it. A demo verdict without one is
+# refused rather than recorded without the decision it exists to make, and no
+# other check records one. none is approve-only: a check that found no visual
+# needed has nothing to block on. Refused before a marker is touched.
+VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
+  case "$VISUAL" in
+    none|repo-artifact|screenshot|video) ;;
+    '') warn "the '$VISUAL_GATE' check records its visual decision on every verdict: pass --visual none|repo-artifact|screenshot|video. Nothing written"; exit 1 ;;
+    *)  warn "--visual must be none, repo-artifact, screenshot or video (got '$VISUAL'); nothing written"; exit 1 ;;
+  esac
+  if [ "$VISUAL" = none ] && [ "$VERDICT" != approve ]; then
+    warn "--visual none records that the change needs no visual, which leaves the '$VISUAL_GATE' check nothing to block on; it records with --verdict approve only. Nothing written"
+    exit 1
+  fi
+elif [ -n "$VISUAL" ]; then
+  warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
+  exit 1
 fi
 
 # The anchor the check lands on: the durable anchor_bead stamp first, the
@@ -353,7 +388,9 @@ else
   printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$BODY_FILE" 2>/dev/null
 fi
 [ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
-printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
+printf '\n' >> "$BODY_FILE"
+[ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL" >> "$BODY_FILE"
+printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
 
 # The commit a verdict bound to is recorded on the review bead first, and only
 # then does the artifact go where its findings are read. That record is the
@@ -366,18 +403,29 @@ printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID
 # read, never which commit was judged, so the record does not vary with it.
 # request-changes records it too: it leaves no marker, but the round it spent
 # is part of the same ledger. Because the record is written first, a store that
-# will not take it costs a re-run instead of a marker nothing accounts for.
+# will not take it costs a re-run instead of a marker nothing accounts for. A
+# demo verdict's visual decision rides in the same write, so the record names
+# what the check decided as well as the commit it decided on.
 post_artifact() {
-  gc bd update "$REVIEW_BEAD" --set-metadata "reviewed_oid=$REVIEWED_OID" >/dev/null 2>&1 || true
-  local got; got=$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)
+  local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
+  [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
+  gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
+  local row got
+  row=$(bd_json show "$REVIEW_BEAD")
+  got=$(row_meta "$row" reviewed_oid)
   if [ "$got" != "$REVIEWED_OID" ]; then
     warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" visual)
+  if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
+    warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then
     # COMMENT for both verdicts, NEVER --approve: approval is external/human,
     # and the merge is held by the recorded marker, not by a bot review.
-    gh pr review "$PR_NUMBER" --repo "$PR_REPO_Q" --comment --body-file "$BODY_FILE" >/dev/null 2>&1 \
+    "$PR_POST" review --repo "$PR_REPO_Q" --pr "$PR_NUMBER" --body-file "$BODY_FILE" >/dev/null 2>&1 \
       || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
   else
     # Pre-open, the bead's notes are the only copy of the body. pr-open.sh
@@ -528,7 +576,9 @@ ensure_validation_pass() {
 
 # A pass at a new head retracts the city's OWN superseded CHANGES_REQUESTED,
 # else the PR stays BLOCKED on a dead commit while the bead reads green.
-# Guards, all fail-closed: our handle only (a human's block is a real veto);
+# Guards, all fail-closed: our own review only — one pr-post.sh marked, or one
+# under our handle from before the anchor's provenance cutover (gc_city_own); a
+# human's block, or an unmarked review under our handle after it, is a real veto;
 # a commit other than the reviewed one; the reviewed commit still the live
 # head; auto-merge definitely disarmed (with it armed, a dismissal can let
 # GitHub merge server-side, past the approval rule merge.sh enforces);
@@ -536,17 +586,20 @@ ensure_validation_pass() {
 # so no dismissal goes unrecorded.
 dismiss_superseded() {
   [ -n "$POST_OPEN" ] || return 0
-  local handle live raw rc stale rid paired
+  local handle live raw rc stale rid paired owndef since
   handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
   [ -n "$handle" ] || return 0
+  owndef=$("$PR_POST" own-def 2>/dev/null) && [ -n "$owndef" ] || return 0
+  # Passed on as found: gc_city_cutover reads a malformed stamp as no cutover.
+  since=$(row_meta "$ANCHOR_ROW" pr_provenance_since)
   live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0
   printf '%s' "$raw" | jq -e 'type == "object" and has("autoMergeRequest") and .autoMergeRequest == null' >/dev/null 2>&1 || return 0
   raw=$(gh api --hostname "$PR_HOST" --paginate "repos/$PR_REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[]' 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] || return 0
-  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg oid "$REVIEWED_OID" \
-    '.[] | select((.user.login // "") == $h and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
+  stale=$(printf '%s' "$raw" | jq -rs --arg h "$handle" --arg since "$since" --arg oid "$REVIEWED_OID" "$owndef"'
+    .[] | select(gc_city_own($h; $since) and .state == "CHANGES_REQUESTED" and (.commit_id // "") != $oid) | .id' 2>/dev/null)
   for rid in $stale; do
     gc bd update "$ANCHOR" --set-metadata "signoff_dismissed=$rid@$REVIEWED_OID" >/dev/null 2>&1 || true
     paired=$(row_meta "$(bd_json show "$ANCHOR")" signoff_dismissed)
@@ -775,15 +828,16 @@ else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
 # One review bead owns at most one rework child. This path is fully re-runnable:
-# close_review is its last write, and every exit-2 above it (work-order verify,
-# an unproven pour) leaves the review OPEN with a child already filed. A re-pool
-# re-enters here, so a create keyed to the same review mints a SECOND child for
-# one finding — one dispatches and lands, the other is a duplicate a human must
-# reap. Adopt the open child that already answers this review instead.
+# close_review is its last write, and every exit-2 above it (a create whose id
+# did not come back, work-order verify, an unproven pour) leaves the review OPEN
+# with a child already filed. A re-pool re-enters here, so a create keyed to the
+# same review mints a SECOND child for one finding — one dispatches and lands,
+# the other is a duplicate a human must reap. Adopt the open child that already
+# answers this review instead.
 #
 # Discover it by the source_review_bead it carries, not by the anchor's blocks
-# edge. The child is created and stamped (below) BEFORE its blocks edge is hung,
-# so a prior run that filed and stamped the child but exited before hanging the
+# edge. The child carries that key from its create (below), before its blocks
+# edge is hung, so a prior run that filed the child but exited before hanging the
 # edge leaves an orphan no anchor-edge walk can see, and the create arm mints a
 # second child. source_review_bead is the exact key: it is this review bead's own
 # id, unique to one review of one anchor, and the only bead type stamped with it
@@ -829,9 +883,23 @@ if [ -n "$FIX_BEAD" ]; then
   echo "signoff: adopting existing open rework child $FIX_BEAD for review $REVIEW_BEAD (a prior attempt filed it but never dispatched); filing no second child"
   [ -n "$(row_meta "$(bd_json show "$FIX_BEAD")" rejection_reason)" ] && REJECTION_REASON=""
 else
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+  # The identity keys ride in the create itself. The dedup above finds a prior
+  # child by source_review_bead alone, so a child that exists without it is
+  # invisible to the retry, which files a second child beside it. A create
+  # followed by a separate stamp is two writes: a create whose id never comes
+  # back, or a run that ends before the work-order stamp below, leaves a child
+  # carrying no key any reader matches on. One write cannot: the child and its
+  # identity land together or not at all. The full work order is stamped and
+  # read back below, on a fresh child and an adopted one alike.
+  FIX_IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg r "$REVIEW_BEAD" \
+    '{task_kind: "rework", anchor_bead: $a, source_review_bead: $r}' 2>/dev/null)
+  if [ -z "$FIX_IDENTITY" ]; then
+    warn "could not build the rework child's identity metadata; review left open for a retry"
+    exit 2
+  fi
+  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
   if [ -z "$FIX_BEAD" ]; then
-    warn "could not create the rework child; review left open for a retry"
+    warn "the rework child create returned no id; review left open for a retry, which adopts the child by source_review_bead=$REVIEW_BEAD if the create landed"
     exit 2
   fi
 fi

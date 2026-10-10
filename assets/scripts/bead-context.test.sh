@@ -110,7 +110,7 @@ J
 # tk-inreview: held by a review bead the review cadence dispatched. The review
 # bead's live route is CLEARED by the pour (gc.routed_to="") and its status is not
 # in_progress, so it looks like an unrouted stuck blocker — but it is machine work
-# the pool owns, so its advance is advancing, not stuck (tk-ikpyzn.5).
+# the pool owns, so its advance is advancing, not stuck.
 bead "$R_TK" tk-inreview <<'J'
 {"id":"tk-inreview","title":"held by a review in flight","status":"open","issue_type":"task","metadata":{},
  "dependencies":[{"id":"tk-rev","dependency_type":"blocks","status":"open","title":"review branch -> main"}]}

@@ -34,8 +34,11 @@ returns —
 store, ask elsewhere" from "no such bead anywhere".
 
 `--rig` narrows that to one rig's store rather than fixing it, and it cannot
-name the city's own store at all: `gc --rig <hq-rig> bd list` answers empty
-where `gc bd --db <city>/.beads list` answers. Only a `--db` path reaches
+name the city's own store at all: `gc --rig <hq-rig> bd list` exits 1 with
+`rig not found` where `gc bd --db <city>/.beads list` answers. `GC_RIG` set to
+the city's rig name does no better. `gc bd` warns that it names no bound rig,
+ignores it, and answers from the caller's working directory, so a caller in a
+rig checkout reads and writes that rig's store. Only a `--db` path reaches
 every store, the city's included.
 
 ## A flag's value can select the store
@@ -141,8 +144,14 @@ reference to a dozen live beads.
 
 ## Who asks it
 
-- `escalation-rig.sh` binds `GC_RIG` for `escalate.sh`, so a visit lands in
-  the store its subject lives in.
+- `escalate.sh` pins every read and write on its board route to its subject's
+  store by path, through `escalation-rig.sh --db`, so a visit lands in the
+  store its subject lives in, the city's included, wherever the caller sits. A
+  subject it cannot place falls back to the caller's `GC_RIG` store. Without
+  `GC_RIG`, what the lookup proved decides. A subject proven to name no bead,
+  or a wisp, is filed on the standing triage subject of the store the caller
+  sits in. A subject whose store could not be read may still be a real bead,
+  so it is refused.
 - `bead-rehome.sh` places both ends of a successor pointer, so
   `gc.superseded_by_store` names the store that actually holds the successor.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind

@@ -217,9 +217,9 @@ A **rig-scoped** agent therefore runs in a git worktree of the rig it serves:
 hook running `assets/scripts/worktree-setup.sh` to cut that worktree from the
 rig root before the session starts. This holds for the worker pools (polecat,
 proactive, refinery) and for the coordination roles that shell `gh`/`git`
-(converse and its per-model variants, witness). The worktree is not the rig's
-main checkout (`rigs/<rig>`), so it does not collide with the refinery's home;
-`worktree-reap.sh` protects it as an agent home.
+(the `converse-<model>` sitting templates, witness). The worktree is not the
+rig's main checkout (`rigs/<rig>`), so it does not collide with the refinery's
+home; `worktree-reap.sh` protects it as an agent home.
 
 A **city-scoped** agent (mechanik, deacon, dog) spans rigs and has no single
 `{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
@@ -672,7 +672,8 @@ A conversation about a bead is a **visit** — a small child bead with
 no session. The operator draws one off the board and `gc-helm engage`
 spawns a manual `converse-<model>` sitting on demand, binds the visit to
 the session's runtime name so the session's own `gc hook --claim` adopts it
-with no pool routing, and attaches; `gc-helm dismiss` ends it. See
+with no pool routing, and attaches once the reconciler has started it;
+`gc-helm dismiss` ends it. See
 docs/architecture.md, "How agents exist and converse".
 
 ## Variant D — Patrol agents (overlay)
@@ -984,8 +985,10 @@ speak to; see
 [the inert-liveness footgun](#a-deterministic-workers-liveness-signals-are-structurally-inert).
 
 The **Ad-hoc** column means an ordinary operator-spawned `-adhoc-<id>`
-instance. (A converse session is not one: it is a **pool worker**
-summoned by a routed visit bead, and it addresses like the pool column.)
+instance. (A converse sitting is a manual-origin session too, but not an
+`-adhoc-` one: `gc-helm engage` opens it with `--alias <visit>`, so it
+addresses like this column through that alias, which gc qualifies as
+`<rig>/gc-toolkit.<visit-id>`, or through its session id.)
 
 | Command | Named singleton | Pool worker | Ad-hoc (`-adhoc-`) |
 |---|---|---|---|
@@ -1135,6 +1138,15 @@ When you mean "this session should be gone for good," use
 controller to consider this session still desired and respawn
 it." If you `kill` a named singleton whose bead is still active,
 the next reconciler patrol will materialize it again.
+
+A pool session that holds no work is not restarted after a kill.
+The bead sleeps with `sleep_reason=killed`, which is not one of the
+sleep reasons for which core frees a pool slot, so the bead keeps
+its slot with nothing running in it and the pool runs one short of
+its cap. The `pool-slot-reap` order closes such a bead once it has
+been asleep for 15 minutes with no work assigned in any store, and
+records the close in the incident ledger. To retire a pool session
+at once, use `close`.
 
 ### Stamping only `gc.routed_to` on a named singleton strands the work
 
@@ -1425,7 +1437,7 @@ and both scopes ship in one pack:
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
 | dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
-| converse, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+| converse-opus, converse-fable, converse-codex, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 `[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read

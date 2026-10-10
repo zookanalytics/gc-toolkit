@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/deferred-dispatch.sh (tk-y0ygs).
+# Hermetic test for assets/scripts/deferred-dispatch.sh.
 #
 # WHAT THE SCRIPT IS FOR. `gc sling` pours immediately and reads no `blocks`
 # deps, so sequencing used to be an agent remembering not to dispatch yet — a
@@ -14,6 +14,10 @@
 #   * arm ACCEPTS a bead carrying only gc.execution_routed_to (execution
 #     provenance, not a live queue): the shape doctor/check-blocked-work-armed
 #     flags and names arming as the fix for, so refusing would be a dead end;
+#   * arm's cross-store warning — a `blocks` edge bd cannot resolve in the
+#     bead's own store holds nothing, so arm names it rather than announce an
+#     immediate dispatch, pinned by --db or not, and withholds that announcement
+#     whenever it could not read the bead's edges;
 #   * the dispatch arm: ready + armed -> exactly one `gc sling` with the
 #     recorded target and pass-through args, then the record cleared;
 #   * the two-state gc.dispatch_when_ready_slung marker: a proven "slung@" marker
@@ -80,21 +84,24 @@ cat > "$BIN/bd" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"
 # Global flags precede the verb, as they do for real bd. The store is a single
-# fixture file, so --db is consumed and discarded rather than honoured.
-while [ "${1:-}" = "--db" ]; do shift 2 || shift || true; done
+# fixture file, so --db is consumed rather than honoured; it only records that
+# the read is pinned, which turns off the by-id routing modeled under `list`.
+pinned=0
+while [ "${1:-}" = "--db" ]; do pinned=1; shift 2 || shift || true; done
 if [ -n "${STUB_BD_LIST_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
     echo "bd: simulated listing failure" >&2; exit 1
 fi
 case "${1:-}" in
   list)
     shift
-    key=""; ready=0; all=0; id=""
+    key=""; ready=0; all=0; gates=0; id=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
         --id) shift; id="${1:-}" ;;
         --ready) ready=1 ;;
         --all) all=1 ;;
+        --include-gates) gates=1 ;;
         *) : ;;
       esac
       shift || true
@@ -115,16 +122,31 @@ case "${1:-}" in
     # field. A blocker's STATUS is NOT part of that edge shape — it is resolved by
     # a separate `bd list --id <blocker>`, so the blocker must be its own bead in
     # the store, exactly as it is live.
-    jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" '
+    #
+    # `gc bd` routes a by-id read to the store that holds the id it names, ahead
+    # of GC_RIG, unless --db pins the store. Modeled for the case a check must
+    # survive: an unpinned --id list none of whose ids has a row in this store,
+    # but which another store holds (STUB_FOREIGN_STORE), is answered from that
+    # other store, where the ids do have rows.
+    src="$STORE"
+    if [ "$pinned" = 0 ] && [ -n "$id" ] && [ -n "${STUB_FOREIGN_STORE:-}" ] \
+       && jq -e --arg id "$id" '($id | split(",")) as $ids | all(.[]; (.id as $i | $ids | index($i)) == null)' "$STORE" >/dev/null \
+       && jq -e --arg id "$id" '($id | split(",")) as $ids | any(.[]; (.id as $i | $ids | index($i)) != null)' "$STUB_FOREIGN_STORE" >/dev/null; then
+      src="$STUB_FOREIGN_STORE"
+    fi
+    # Real bd hides a gate bead from a listing unless --include-gates asks for
+    # it, so a fixture bead with issue_type "gate" is hidden the same way.
+    jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" '
       ($id | if . == "" then [] else split(",") end) as $ids
       | [ .[]
         | select($k == "" or (.metadata | has($k)))
         | select(($ids | length) == 0 or (.id as $i | $ids | index($i)))
         | select($all == 1 or .status != "closed")
         | select($ready == 0 or (._ready == true))
+        | select($gates == 1 or (.issue_type // "") != "gate")
         | . as $b
         | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
-        | del(._ready) | del(._deps) ]' "$STORE"
+        | del(._ready) | del(._deps) ]' "$src"
     ;;
   show)
     id="${2:-}"
@@ -175,9 +197,10 @@ case "${1:-}" in
     echo "updated $id"
     ;;
   dep)
-    # Only `dep list <id> --json` is used (own_blocks_cleared). Real bd answers an
-    # ARRAY of {id, dependency_type, status} — a bead's own outgoing edges — and an
-    # ERROR OBJECT (not an array) for an unresolvable id, so the stub serves both
+    # Only `dep list <id> --json` is used (own_blocks_cleared and
+    # own_blocks_unresolved_ids). Real bd answers an ARRAY of {id,
+    # dependency_type, status} — a bead's own outgoing edges — and an ERROR
+    # OBJECT (not an array) for an unresolvable id, so the stub serves both
     # shapes to exercise the SUT's fail-closed array check.
     shift
     [ "${1:-}" = "list" ] || { echo "bd stub: unsupported 'dep ${1:-}'" >&2; exit 2; }
@@ -193,10 +216,21 @@ case "${1:-}" in
       # _deps models the bead's own edges. Absent it, a not-ready bead stands in
       # for the common "waiting on its own open blocker" case and a ready one for
       # "no blockers left", so the pre-existing fixtures stay honest with no _deps.
+      # When _deps IS set, real bd hides an edge whose target has no row in this
+      # store (cross-repo/external): it warns on stderr and omits it from the
+      # array, so `bd dep list <bead>` returns [] for a bead whose only blocker is
+      # cross-store. Model that, so own_blocks_cleared reads such a bead as cleared
+      # exactly as it does live, and own_blocks_unresolved_ids sees the edge dep
+      # list dropped. An in-store gate resolves here, as it does live, though a
+      # default listing hides it.
       jq -c --arg id "$depid" '
-        [ .[] | select(.id == $id) ] | .[0] as $b
-        | ($b._deps //
-            (if ($b._ready // false) then [] else [{"id":"_synthetic_blocker","dependency_type":"blocks","status":"open"}] end))' "$STORE"
+        . as $store
+        | [ .[] | select(.id == $id) ] | .[0] as $b
+        | if ($b._deps == null) then
+            (if ($b._ready // false) then [] else [{"id":"_synthetic_blocker","dependency_type":"blocks","status":"open"}] end)
+          else
+            [ $b._deps[] | select(.id as $t | ($store | any(.[]; .id == $t))) ]
+          end' "$STORE"
     fi
     ;;
   *) echo "bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
@@ -283,6 +317,75 @@ has "$out" "no open blocker right now" "arm on an unblocked bead warns it will d
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":false}]'
 out="$("$SUT" arm b-1 --target rig/pool 2>&1)"
 hasnt "$out" "no open blocker right now" "arm on a BLOCKED bead does not claim it will dispatch immediately"
+
+echo "# arm warns on a cross-store blocker it cannot resolve"
+# bd resolves dependencies within one store, so a `blocks` edge to a bead in
+# another rig (here sl-x, which has no row in this store) holds nothing: bd
+# reports the bead ready (_ready) and own_blocks_cleared, reading the same store,
+# sees no blocker. arm's hint would then say "no open blocker right now" while
+# the blocker is open, so arm must name the unresolvable blocker instead, the one
+# place a human can redirect the sequencing. Another store holds sl-x, and this
+# run is unpinned, so `gc bd` would answer a read naming sl-x from that store
+# and find its row: the check must ask only about b-1's own edges.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"sl-x","dependency_type":"blocks","status":"open"}]}]'
+printf '%s' '[{"id":"sl-x","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/foreign.json"
+out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm still records the dispatch on a cross-store-blocked bead"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
+has "$out" "sl-x" "arm names the unresolvable cross-store blocker"
+has "$out" "no row in this store" "arm says why that blocker holds nothing here"
+hasnt "$out" "no open blocker right now" "arm does NOT claim the cross-store-blocked bead is unblocked"
+
+# The same arm pinned with --db: no routing, and the same answer.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"sl-x","dependency_type":"blocks","status":"open"}]}]'
+out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool --db "$TMP/rig/.beads" 2>&1)"
+has "$out" "has a 'blocks' edge to sl-x" "a pinned arm names the cross-store blocker too"
+hasnt "$out" "no open blocker right now" "and does not claim the bead is unblocked"
+
+echo "# arm does not mistake an in-store gate blocker for a cross-store one"
+# A gate is hidden from a listing that does not ask for gates, but it has a row
+# in this store and dep list resolves it. Its edge must not read as cross-store,
+# and because the gate is closed the bead is announced ready.
+store '[{"id":"g-0","status":"closed","issue_type":"gate","assignee":"","metadata":{},"notes":""},
+        {"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"g-0","dependency_type":"blocks","status":"closed"}]}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"
+hasnt "$out" "no row in this store" "an in-store gate blocker triggers no cross-store warning"
+has "$out" "no open blocker right now" "and the bead its closed gate released is announced ready"
+
+echo "# arm does not mistake an in-store blocker for a cross-store one"
+# b-0 has a row in this store, so its edge resolves: no cross-store warning, and
+# because the blocker is open the bead is correctly held, not announced ready.
+store '[{"id":"b-0","status":"open","assignee":"","metadata":{},"notes":"","_ready":true},
+        {"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks","status":"open"}]}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm exits 0 with an in-store blocker"
+hasnt "$out" "no row in this store" "an in-store blocker triggers no cross-store warning"
+hasnt "$out" "no open blocker right now" "and the in-store-blocked bead is not announced ready"
+
+echo "# arm does not announce 'no blocker' when the cross-store enumeration itself fails"
+# own_blocks_unresolved_ids fails closed (non-zero) when its own `bd list --id`
+# read fails, while dep list still reads the bead cleared (no in-store blocker,
+# _ready true). cmd_arm must not collapse that enumeration failure into "no
+# cross-store blocker": the check is unproven, so the immediate-dispatch hint
+# must not stand on it. A read that folded the failure into "none found" would
+# print the all-clear here, which the two trailing assertions catch.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_BD_LIST_FAIL=1 "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm still records the dispatch when the cross-store probe read fails"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
+hasnt "$out" "no open blocker right now" "arm does NOT announce an unblocked bead when the cross-store check could not be proven"
+has "$out" "could not enumerate" "arm warns the cross-store check could not be proven"
+
+echo "# arm does not announce 'no blocker' when its listing carries no row for the bead"
+# The listing read succeeds but answers no row for g-1: bd hides a gate bead
+# from a listing that does not ask for gates. An empty answer proves nothing
+# about g-1's edges, so it must read as unproven, not as "no cross-store
+# blocker", even though dep list reads the bead cleared.
+store '[{"id":"g-1","status":"open","issue_type":"gate","assignee":"","metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" arm g-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm still records the dispatch when its listing has no row for the bead"
+hasnt "$out" "no open blocker right now" "arm does NOT announce an unblocked bead whose edges it never read"
+has "$out" "could not enumerate" "arm warns the cross-store check could not be proven"
 
 echo "# arm accepts the doctor-flagged shape"
 # gc.execution_routed_to is provenance, not a live queue, so a blocked bead
@@ -455,7 +558,7 @@ eq "$(slings)" "0" "a closed armed bead is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "a closed armed bead's record is retired"
 has "$out" "1 retired" "summary counts the retire"
 
-# --- RECONCILE: the parent-cascade fix (tk-so8clv) ---------------------------
+# --- RECONCILE: the parent-cascade fix ---------------------------
 # An armed OPEN bead whose own `blocks` edges have all closed is dispatchable
 # even when `bd list --ready` excludes it: the is_blocked flag cascades DOWN
 # parent-child edges, so an epic child under a container held on a human gate
@@ -534,24 +637,28 @@ unset STUB_BD_LOG
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
 # armed_rows used to hand the whole --ready snapshot to jq as a single --argjson
 # value. That snapshot carries one row per armed bead, and a single argv
-# argument past the kernel's per-argument size cap (128 KiB on Linux) aborts jq
-# with "argument list too long" — so once the armed backlog held a few dozen
-# full-body rows EVERY enumeration failed and nothing dispatched. The snapshots
-# now reach jq over stdin, which has no such cap. The fixture is sized so the
-# old argv pass provably dies (the positive control below), then the SUT must
-# still enumerate and dispatch the whole set. The stub ignores --brief, so it
-# feeds the SUT full-body rows — the payload the stdin path has to survive.
+# argument past the kernel's size cap aborts jq with "argument list too long" —
+# so once the armed backlog held a few dozen full-body rows EVERY enumeration
+# failed and nothing dispatched. The snapshots now reach jq over stdin, which
+# has no such cap. The fixture is sized so the old argv pass provably dies (the
+# positive control below), then the SUT must still enumerate and dispatch the
+# whole set. The stub ignores --brief, so it feeds the SUT full-body rows — the
+# payload the stdin path has to survive.
+#
+# Linux refuses any one argument past 128 KiB. macOS has no per-argument cap and
+# refuses only argv and the environment together past ARG_MAX, 1 MiB. Forty rows
+# of 32 KiB put the snapshot past both.
 echo "# a large armed set enumerates and dispatches (no argv size cap)"
 big_store="$(jq -nc '[ range(0;40)
   | {id:("big-\(.)"), status:"open", assignee:"",
      metadata:{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},
-     notes:("x" * 8000), _ready:true} ]')"
+     notes:("x" * 32768), _ready:true} ]')"
 store "$big_store"
 ready_payload="$(gc bd list --has-metadata-key gc.dispatch_when_ready --ready --json --limit 0)"
 if jq -n --argjson r "$ready_payload" '1' >/dev/null 2>&1; then
   bad "scale fixture too small: the --ready snapshot fits in one argv value, so it cannot exercise the cap"
 else
-  ok "scale fixture exceeds the kernel per-argument cap (the pre-fix --argjson pass dies here)"
+  ok "scale fixture exceeds the kernel's argv size cap (the pre-fix --argjson pass dies here)"
 fi
 out="$("$SUT" list 2>&1)"; rc=$?
 eq "$rc" 0 "list enumerates a large armed set without an argv failure"
@@ -757,7 +864,7 @@ TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
-LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l)
+LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
 echo

@@ -11,14 +11,14 @@
 # cached for GC_VISIT_RIG_CACHE_TTL seconds so a burst of presses opens the
 # picker without re-paying that wait. A second popup then runs `gum write`
 # (multi-line by design — command-prompt is single-line and its response is
-# re-parsed as a tmux command, tk-7z8c6); the submitted text goes through a
+# re-parsed as a tmux command); the submitted text goes through a
 # per-press DRAFT FILE to gc-visit-open.sh, which mints the subject and queues
 # the conversation, and the chosen rig reaches it as --rig. A bare bead id is an
 # existing-bead request whose own rig is authoritative, so the chosen rig is
 # dropped for one — the intake refuses --rig there. The draft is removed at
 # exactly two moments —
 # the intake CONFIRMS an id, or the file is provably empty — and every other
-# path keeps it and names its path (tk-w4dp4: this key's whole purpose is
+# path keeps it and names its path (this key's whole purpose is
 # that a thought is never lost). Esc cannot be recovered: gum never emits an
 # unsubmitted buffer, so every cancel says that it discarded. Drafts live
 # outside /tmp by default and are reaped after GC_VISIT_DRAFT_KEEP_DAYS.

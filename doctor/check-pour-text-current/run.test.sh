@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-pour-text-current (I9, tk-5w3boh). Real
+# Hermetic test for doctor/check-pour-text-current (I9). Real
 # throwaway git repos plus a stub `gc` on PATH; no live city, Dolt, network.
 # Exercised: every ERROR arm with a positive control each; the fail-open case
 # (a stale remote-tracking ref makes the naive behind-count read 0, so it must

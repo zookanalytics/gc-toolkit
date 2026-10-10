@@ -25,6 +25,9 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-open-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# pr-open.sh flips the anchor to pull_request through lifecycle.sh, which execs
+# gctk.
+harness_build_gctk
 harness_init
 
 SD="$TMP/scripts"
@@ -56,7 +59,7 @@ finding() { # id anchor [disposition] [lane]
     "$1" "$2" "${3:-must-fix}" "${4:-correctness}" "${4:-correctness}"
 }
 # An anchor like pre(), but targeting integration/<convoy> instead of main — the
-# owned-convoy checkpoint tk-6bji7k.9 marks with a banner and a base: label.
+# owned-convoy checkpoint marked with a banner and a base: label.
 pre_int() { # id branch convoy
   pre "$1" "$2" | jq -c --arg t "integration/$3" '.metadata.merged_target=$t'
 }
@@ -199,6 +202,30 @@ hasnt "$newbody3d" "OLD: a legacy body with nothing after the handoff." "…and 
 has "$newbody3d" "<!-- gc:pr-summary -->" "the region is now marked, so a later pass splices in place"
 has "$(cat "$STUB_GH_LOG")" "pr edit 84" "the body was edited in place"
 
+echo "# adoption re-splices a region whose handoff bullet says the PR opened green"
+# The summary is current, and the region differs from the open-mode composition
+# only in that bullet: 'PR opened green' reads as a CI result a static body cannot
+# know. Adoption writes the open-mode bullet, which names the gates' sign-off and
+# points to the PR checks, so the claim is gone before the flip.
+store "[$(pre RFG polecat/rfg ',"pr_summary":"CURRENT: the summary the region carries."')]"
+STALEG=$(printf '%s\n' \
+  '<!-- gc:pr-summary -->' '## Summary' '' 'CURRENT: the summary the region carries.' '' \
+  '<details>' '<summary>Dispatch — what this work was asked to do</summary>' '' 'd RFG' '' '</details>' '' \
+  '## Refinery handoff' '' '- Issue: `RFG`' '- Source branch: `polecat/rfg`' '- Target: `main`' \
+  '- Gates `correctness` signed off pre-open at `sha-rfg`; PR opened green.' \
+  '<!-- /gc:pr-summary -->')
+prrow 85 OPEN polecat/rfg sha-rfg main | jq --arg b "$STALEG" '. + {body:$b}' > "$GH_DIR/pr_view_85.json"
+printf '[%s]' "$(prrow 85 OPEN polecat/rfg sha-rfg main)" > "$GH_DIR/pr_list_polecat_rfg.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta RFG merge_result)" "pull_request" "the anchor flips after the refresh"
+newbodyg=$(jq -r '.body' "$GH_DIR/pr_view_85.json")
+hasnt "$newbodyg" "opened green" "the CI claim is gone from the adopted body"
+has "$newbodyg" '- Gates `correctness` signed off pre-open at `sha-rfg`. For CI status, see the PR checks.' \
+    "the bullet names the gates' sign-off and points to the PR checks for CI"
+has "$newbodyg" "CURRENT: the summary the region carries." "the current summary is kept"
+eq "$(grep -c 'pr edit 85' "$STUB_GH_LOG")" "1" "the body was edited in place, once"
+
 echo "# an unreadable OPEN PR body holds the anchor rather than flipping a stale one"
 # The reworked pr_summary must reach the published body before the flip. A body
 # that cannot even be read leaves the current one possibly stale, so flipping
@@ -333,6 +360,7 @@ has "$ghlog" "pr create --repo github.com/zook/gc-toolkit --base main --head pol
 hasnt "$ghlog" "--draft" "the PR is non-draft"
 has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER, pinned"
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
+has "$ghlog" "<!-- gc:city -->" "the replayed verdict carries the city's provenance mark (posted through pr-post.sh)"
 hasnt "$ghlog" "pr review" "never an approval"
 
 echo "# the body summarizes the diff, and demotes the dispatch text"
@@ -352,6 +380,9 @@ has "$body" "## Summary"$'\n'$'\n'"Compares heads instead of branch names, so a 
 has "$body" "<summary>Dispatch — what this work was asked to do</summary>" "the dispatch text is demoted, not dropped"
 has "$body" "d E1" "…and it is still in the body"
 has "$body" "## Refinery handoff" "the handoff block is unchanged"
+has "$body" '- Gates `correctness` signed off pre-open at `sha-e1`. For CI status, see the PR checks.' \
+    "the handoff bullet names the gates' sign-off at the head and points to the PR checks for CI"
+hasnt "$body" "opened green" "…and states no CI result"
 has "$body" "<!-- gc:pr-summary -->" "the composed body is wrapped in a managed-region marker"
 has "$body" "<!-- /gc:pr-summary -->" "…closed by its end marker, so an adoption can re-splice it"
 
@@ -411,6 +442,7 @@ out=$("$SUT" 2>&1)
 has "$out" "superseding closed PR#50" "the fresh PR names the headstone"
 eq "$(meta D1 pr_number)" "51" "the fresh PR is the recorded identity"
 has "$(cat "$STUB_GH_LOG")" "pr comment 50" "the superseded PR got the pointer comment"
+has "$(cat "$STUB_GH_LOG")" "$(printf 're-gated at `sha-d1-n`.\n\n<!-- gc:city -->')" "the pointer comment carries the city's provenance mark"
 
 echo "# closed-unmerged at the SAME head is a human decision"
 store "[$(pre D2 polecat/d2), $(rev D2)]"
@@ -485,6 +517,29 @@ hasnt "$tlog" "chore: fix(pr-open):" "…and no derived type is prepended to it"
 has "$tlog" "--title chore: Tidy the enumerate step (ttbare) --body-file" \
     "a bead with no issue_type falls back to chore"
 
+echo "# a title the create opened with is one pr-stack keeps"
+# Once a PR is open, pr-stack.sh composes its title from the anchor and edits a PR
+# whose title differs. Each create above, carried by its PR once the anchor reaches
+# pull_request, must already read current there, or every PR this arm opens is
+# retitled on the next pass.
+cp "$HERE/pr-stack.sh" "$SD/pr-stack.sh"
+agree_n=0
+while IFS=$'\t' read -r tid ttitle; do
+  [ -n "${tid:-}" ] || continue
+  agree_n=$((agree_n + 1)); anum=$((400 + agree_n))
+  jq --arg id "$tid" --arg n "$anum" \
+    'map(if .id == $id then .metadata.merge_result = "pull_request" | .metadata.pr_number = $n else . end)' \
+    "$STUB_STORE" > "$TMP/x" && mv "$TMP/x" "$STUB_STORE"
+  jq -n --argjson n "$anum" --arg b "polecat/$tid" --arg t "$ttitle" \
+    '{number: $n, state: "OPEN", headRefName: $b, headRefOid: "sha-agree", title: $t, body: ""}' \
+    > "$GH_DIR/pr_view_$anum.json"
+done < <(sed -n 's/.* --head polecat\/\([^ ]*\) --title \(.*\) --body-file .*/\1\t\2/p' <<<"$tlog")
+eq "$agree_n" "6" "every create's title was read off its logged create"
+: > "$STUB_GH_LOG"
+aout=$("$SD/pr-stack.sh" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "--title" "pr-stack finds every created title current and retitles none"
+has "$aout" "0 retitled" "…and reports none"
+
 # The label writer pr-open delegates to. It is absent from the SUT dir above, where
 # the reconcile/mark-base calls are best-effort and silently no-op without it (no
 # earlier case asserts a label). Installed now so the cases below exercise the real
@@ -536,6 +591,52 @@ inewbody=$(jq -r '.body' "$GH_DIR/pr_view_93.json")
 has "$inewbody" "[!IMPORTANT]" "the refreshed body carries the checkpoint banner"
 has "$inewbody" 'integration/tk-5kk1zh' "…naming the integration base"
 has "$(pv_labels 93)" "base: integration" "adoption also stamps the base: label"
+
+echo "# pacing: anchors gate-ensure recorded settled go first; each group rotates under --deadline/--cursor"
+# Q3 and Q4 carry a settled machine verdict, Q1 and Q2 do not, and the ids sort
+# the groups the other way round, so the order of the visits is the arm's. None
+# has a backing review, so each visit only holds, and a settled anchor the arm
+# holds stays settled. A deadline of epoch 1 has always passed, so a pass
+# visits one settled anchor and one other.
+SETTLED=',"pr.machine":"settled@sha-x@2026-10-05T00:00:00Z"'
+store "[$(pre Q1 polecat/q1), $(pre Q2 polecat/q2), $(pre Q3 polecat/q3 "$SETTLED"), $(pre Q4 polecat/q4 "$SETTLED")]"
+OCUR="$TMP/open.cursor"; rm -f "$OCUR" "$OCUR.first"
+heads() { grep -o 'pr list --head [^ ]*' "$STUB_GH_LOG" | awk '{print $4}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass exits 0"
+eq "$(heads)" "polecat/q3,polecat/q1" "past the deadline one settled anchor goes first, then one other anchor"
+has "$out" "visited 2 of 4 pre-open anchors (2 settled and unheld first) before the deadline; the next pass resumes at Q2" "the pass names its pacing and where the rotation resumes"
+eq "$(cat "$OCUR" 2>/dev/null)" "Q1" "the cursor records the other anchor, never a settled one"
+eq "$(cat "$OCUR.first" 2>/dev/null)" "Q3" "the settled anchors rotate on a cursor of their own"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1)
+eq "$(heads)" "polecat/q4,polecat/q2" "the next pass resumes both rotations after their cursors, so the held settled anchor does not lead every pass"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$OCUR" 2>&1)
+eq "$(heads)" "polecat/q3,polecat/q4,polecat/q1,polecat/q2" "a deadline that has not passed visits every anchor, settled first"
+has "$out" "visited 4 of 4 pre-open anchors (2 settled and unheld first)" "…and reports the whole walk"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(heads)" "polecat/q3,polecat/q4,polecat/q1,polecat/q2" "with no pacing args the walk is unbounded, settled first"
+
+echo "# pacing: a settled anchor this arm holds on its own row is not visited first"
+# R2 to R5 all carry a settled verdict, but R3 has an operator's merge_hold, R4
+# a rebase_hold and R5 no check_set, and the gate holds each of those whatever
+# its lanes say. Only R2 goes first; the held three rotate with R1, which is not
+# settled.
+store "[$(pre R1 polecat/r1), $(pre R2 polecat/r2 "$SETTLED"),
+        $(pre R3 polecat/r3 "$SETTLED"',"merge_hold":"true"'),
+        $(pre R4 polecat/r4 "$SETTLED"',"rebase_hold":"true"'),
+        $(pre R5 polecat/r5 "$SETTLED" "")]"
+OCUR="$TMP/open-held.cursor"; rm -f "$OCUR" "$OCUR.first"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$OCUR" 2>&1)
+eq "$(heads)" "polecat/r2,polecat/r1" "past the deadline the one settled, unheld anchor goes first, then one other"
+has "$out" "visited 2 of 5 pre-open anchors (1 settled and unheld first) before the deadline; the next pass resumes at R3" "the held settled anchors wait in the other rotation"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(heads)" "polecat/r2,polecat/r1,polecat/r3,polecat/r4,polecat/r5" "unpaced, the held settled anchors are visited among the rest"
 
 echo "# the phase model: an open-as-draft check opens the PR as a draft, and a later arm surfaces it"
 # A controlled index so the test does not depend on the live pack's review-checks.toml:
@@ -754,6 +855,59 @@ printf '%s' "$(prrow 89 OPEN polecat/dh1 sha-dh1 main)" > "$GH_DIR/pr_view_89.js
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(meta dh1 draft_readied)" "sha-dh1" "a held anchor whose PR reads ready records draft_readied"
 hasnt "$(cat "$STUB_GH_LOG")" "pr ready 89" "…and nothing is flipped"
+
+echo "# pacing: the draft-to-ready walk rotates on a cursor of its own under --deadline/--cursor"
+# Three drafts the refinery opened, each held, so a visit reads the PR and leaves
+# it a candidate. A pre-open anchor shares the store, so the pre-open walk runs
+# first under the same deadline. A deadline of epoch 1 has always passed, so a
+# pass visits one pre-open anchor and then one draft.
+for n in 111 112 113; do
+  printf '%s' "$(prrow "$n" OPEN "polecat/pd$n" "sha-pd$n" main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_$n.json"
+done
+store "[$(pre PQ1 polecat/pq1),
+        $(pr_anchor pd111 polecat/pd111 111 'correctness,demo' sha-pd111 | jq -c '.metadata.merge_hold="true"'),
+        $(pr_anchor pd112 polecat/pd112 112 'correctness,demo' sha-pd112 | jq -c '.metadata.merge_hold="true"'),
+        $(pr_anchor pd113 polecat/pd113 113 'correctness,demo' sha-pd113 | jq -c '.metadata.merge_hold="true"')]"
+RCUR="$TMP/ready.cursor"; rm -f "$RCUR" "$RCUR.first" "$RCUR.ready"
+drafts() { grep -o 'pr view 11[1-3]' "$STUB_GH_LOG" | awk '{print $3}' | paste -sd, -; }
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1); rc=$?
+eq "$rc" 0 "a paced pass over drafts exits 0"
+has "$out" "visited 1 of 1 pre-open anchors" "the pre-open walk visits its anchor first"
+eq "$(drafts)" "111" "past the deadline the draft walk still visits one draft"
+has "$out" "visited 1 of 3 draft PRs before the deadline; the next pass resumes at pd112" "the pass names the draft walk's pacing and where it resumes"
+eq "$(cat "$RCUR.ready" 2>/dev/null)" "pd111" "the draft walk records its progress on a cursor of its own"
+eq "$(cat "$RCUR" 2>/dev/null)" "PQ1" "…apart from the pre-open walk's"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "112" "the next pass resumes after the cursor, so a held draft does not lead every pass"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "113" "the third pass reaches the last draft"
+has "$out" "the next pass resumes at pd111" "…and the rotation wraps to the lowest id"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline "$(( $(date +%s) + 600 ))" --cursor "$RCUR" 2>&1)
+eq "$(drafts)" "111,112,113" "a deadline that has not passed visits every draft"
+has "$out" "visited 3 of 3 draft PRs" "…and reports the whole walk"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
+eq "$(drafts)" "111,112,113" "with no pacing args the draft walk is unbounded"
+
+echo "# pacing: a draft the walk skips for free does not spend its one visit past the deadline"
+# pd121 is disposed, so the walk passes it without a read. It leads the
+# rotation and the deadline has passed, so the visit the walk is owed goes to
+# pd122.
+for n in 121 122; do
+  printf '%s' "$(prrow "$n" OPEN "polecat/pd$n" "sha-pd$n" main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_$n.json"
+done
+store "[$(pr_anchor pd121 polecat/pd121 121 'correctness,demo' sha-pd121 | jq -c '.metadata["gc.pr_close_disposition_kind"]="superseded"'),
+        $(pr_anchor pd122 polecat/pd122 122 'correctness,demo' sha-pd122 | jq -c '.metadata.merge_hold="true"')]"
+RCUR="$TMP/ready-skip.cursor"; rm -f "$RCUR" "$RCUR.first" "$RCUR.ready"
+: > "$STUB_GH_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" --deadline 1 --cursor "$RCUR" 2>&1)
+has "$(cat "$STUB_GH_LOG")" "pr view 122" "the visit goes to the first draft that costs a read"
+hasnt "$(cat "$STUB_GH_LOG")" "pr view 121" "…and the disposed draft is passed without one"
+has "$out" "visited 1 of 2 draft PRs" "…counted once"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

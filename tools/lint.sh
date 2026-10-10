@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# lint.sh — the rig's one lint entry point: shell static analysis and go vet.
+# lint.sh — the rig's one lint entry point: shell static analysis, go vet and
+# gofmt.
 #
-# Wired as the refinery's lint_command, it runs on every merge. It runs two
+# Wired as the refinery's lint_command, it runs on every merge. It runs three
 # linters, each at the scope a merge gate can enforce given the tree's current
 # finding-debt:
 #
@@ -17,22 +18,42 @@
 #   GO — `go vet ./...` in every Go module (each go.mod tree). Whole-module, not
 #   argv-scoped: vet is a per-package analysis, it is clean across the tree
 #   today, so running it everywhere on every merge is zero-noise and still
-#   catches a regression in a package the diff did not name.
+#   catches a regression in a package the diff did not name. Vet runs cgo, so
+#   it needs the C headers a cgo package includes, and services/helm reaches ICU
+#   through one, Dolt's go-icu-regex. Each vet is handed the cgo flags
+#   assets/scripts/icu4c-cgo.sh works out, which on macOS point at Homebrew's
+#   keg-only icu4c, the same flags the helm-svc build uses.
 #
-# Fail-closed throughout: a linter that cannot run — no shellcheck, no go — is a
-# finding, never a silent pass, the same contract shellcheck-run.sh enforces.
+#   GOFMT — `gofmt -l` over every tracked Go file. Whole-tree for the reason vet
+#   is: the tree is gofmt-clean today, so checking every file on every merge is
+#   zero-noise. It also catches drift in a file no diff named, such as a
+#   toolchain whose gofmt formats differently. gofmt lists a file it would
+#   rewrite and still exits 0, so the listing is the finding. lint.sh only
+#   lists; it never rewrites a file.
+#
+# Fail-closed throughout: a linter that cannot run — no shellcheck, no go, no
+# gofmt — is a finding, never a silent pass, the same contract shellcheck-run.sh
+# enforces.
 #
 # Usage: lint.sh [FILE ...]
 #   FILE ...  files to lint; the shell scripts among them — a .sh suffix or a
 #             shell shebang (sh, bash, dash, ksh) — are shellchecked, and the
 #             rest drop out. With no shell file given none is linted, and go vet
-#             still runs.
+#             and gofmt still run.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
 set -uo pipefail
 
 PROG=lint
+
+# ── The icu4c cgo flags ──────────────────────────────────────────────────────
+# Sourced from lint.sh's own checkout, before the cd below can change what a
+# relative invocation path names. Its absence is a packaging error, as the
+# shell-lint runner's is below.
+# shellcheck source=../assets/scripts/icu4c-cgo.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/icu4c-cgo.sh" \
+  || { echo "$PROG: cannot source assets/scripts/icu4c-cgo.sh from lint.sh's checkout" >&2; exit 2; }
 
 # ── Repository root ──────────────────────────────────────────────────────────
 # Both linters are repo-relative: shell paths resolve from the root and go vet
@@ -126,8 +147,11 @@ elif ! command -v go >/dev/null 2>&1; then
   fail=1
   summary+=("go: FAIL — 'go' not on PATH; ${#modules[@]} module(s) unvetted; fail-closed, treated as a finding")
 else
+  # Worked out once, and only when vet is about to run, so a tree with nothing
+  # to vet never asks brew.
+  icu4c_cgo_flags "$PROG"
   for m in "${modules[@]}"; do
-    if ( cd "$ROOT/$m" && go vet ./... ); then
+    if ( cd "$ROOT/$m" && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go vet ./... ); then
       summary+=("go: $m vet clean")
     else
       rc=$?
@@ -135,6 +159,47 @@ else
       summary+=("go: FAIL — $m go vet exit $rc")
     fi
   done
+fi
+
+# ── Gofmt: gofmt -l over every tracked Go file ───────────────────────────────
+# The listing is checked before it is read. A git ls-files that failed would
+# yield an empty list, which reads exactly like a tree with no Go in it and
+# skips the check. core.quotePath=false keeps a non-ASCII path unquoted so gofmt
+# can open it; a path git still quotes cannot be opened, and gofmt fails on it
+# loudly rather than the file dropping out unchecked.
+if ! go_listing="$(git -c core.quotePath=false ls-files -- '*.go')"; then
+  echo "$PROG: cannot enumerate tracked Go files under $ROOT" >&2
+  exit 2
+fi
+go_files=()
+while IFS= read -r f; do
+  [ -n "$f" ] && go_files+=("$f")
+done <<<"$go_listing"
+
+if [ "${#go_files[@]}" -eq 0 ]; then
+  summary+=("gofmt: no tracked Go files — skipped")
+elif ! command -v gofmt >/dev/null 2>&1; then
+  fail=1
+  summary+=("gofmt: FAIL — 'gofmt' not on PATH; ${#go_files[@]} Go file(s) unchecked; fail-closed, treated as a finding")
+else
+  # A non-zero exit means gofmt could not read or parse a file. That fails the
+  # check on its own, whatever the listing holds.
+  if unformatted="$(gofmt -l "${go_files[@]}")"; then rc=0; else rc=$?; fi
+  listed=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    listed=$((listed + 1))
+    summary+=("gofmt: FAIL — $f is not gofmt-clean; gofmt -d $f shows the rewrite")
+  done <<<"$unformatted"
+  if [ "$rc" -ne 0 ]; then
+    fail=1
+    summary+=("gofmt: FAIL — gofmt exit $rc; a Go file could not be read or parsed")
+  fi
+  if [ "$listed" -gt 0 ]; then
+    fail=1
+  elif [ "$rc" -eq 0 ]; then
+    summary+=("gofmt: ${#go_files[@]} Go file(s) clean")
+  fi
 fi
 
 # ── Report ───────────────────────────────────────────────────────────────────

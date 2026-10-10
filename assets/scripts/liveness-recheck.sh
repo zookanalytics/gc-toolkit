@@ -52,6 +52,13 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
+# The one definition of the standing kinds, shared with liveness-sweep.sh, the
+# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
+# classify block splices in.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -171,7 +178,7 @@ fi
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 AGE=""
 if [ -n "$PASS_AT" ]; then
-    PASS_EPOCH=$(date -u -d "$PASS_AT" +%s 2>/dev/null || echo "")
+    PASS_EPOCH=$(jq -rn --arg t "$PASS_AT" '$t | fromdateiso8601' 2>/dev/null || echo "")
     NOW_EPOCH=$(date -u +%s 2>/dev/null || echo "")
     if [ -n "$PASS_EPOCH" ] && [ -n "$NOW_EPOCH" ] && [ "$NOW_EPOCH" -ge "$PASS_EPOCH" ]; then
         AGE=$(awk -v a="$PASS_EPOCH" -v b="$NOW_EPOCH" 'BEGIN { printf "%.1fh", (b - a) / 3600 }')
@@ -198,9 +205,9 @@ CENSUS=$(jq -n \
     --arg demand_state "$DEMAND_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
-  # Standing-record idioms (never claimable, never close) — the SAME list as
-  # standing_kinds in liveness-sweep.sh; liveness-recheck.test.sh pins the pair.
-  def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # Standing-record idioms (never claimable, never close): standing_kinds,
+  # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
+  '"$STANDING_KINDS_JQ"'
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset

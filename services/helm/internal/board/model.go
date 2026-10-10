@@ -159,30 +159,42 @@ type Anchor struct {
 	// `asking`; the title, which is the demand's authored headline; and the
 	// creation instant, which is when an unanswered demand's turn began.
 	//
-	// It is the SAME read as WaitingOn, not a second one — [source.waitingEdges]
-	// produces both from one dependency query — so an anchor whose edges could
-	// not be read reports the empty set here and WaitingUnknown below, exactly
-	// as it does for the id slices.
+	// It is the SAME read as WaitingOn, not a second one —
+	// [source.waitingFromEdges] produces both from one dependency query — so an
+	// anchor whose edges could not be read reports the empty set here and
+	// WaitingUnknown below, exactly as it does for the id slices.
 	Blockers []Blocker `json:"blockers,omitempty"`
 
-	// WaitingUnknown says the source could not READ this anchor's edges at
-	// all: the per-anchor dependency query itself failed, so the empty
-	// WaitingOn above is an absence of knowledge rather than a proof that
-	// nothing is outstanding.
+	// WaitingUnknown says the source could not establish this anchor's waits,
+	// so the empty WaitingOn above is an absence of knowledge rather than a
+	// proof that nothing is outstanding.
 	//
-	// The two are not interchangeable, and only one consumer can tell them
-	// apart. An unresolved BLOCKER is already handled — it is absent from
+	// The beads source sets it when its dependency read fails, or when the
+	// hydration that resolves the blockers does. That read is one batched query
+	// per rig and status pass ([source.BeadsSource.attachEdges]), so a single
+	// failure marks every anchor of the pass whose kind reads waits
+	// ([source.needsWaitingEdges]). Epic and convoy are among those kinds: they
+	// read their `blocks` edges for the dependency-family grouping, so a failed
+	// read flags them too. The supervisor backend sets it on every
+	// metadata-keyed row it serves, because it cannot resolve a blocker's
+	// status ([source.SupervisorSource.metadataAnchorFor]).
+	//
+	// An unread wait set and an empty one are not interchangeable. A blocker
+	// that was read but has not closed is already handled — it is absent from
 	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
 	// unreadable EDGE SET has no such fallback: it looks exactly like a row
 	// with no waits, which is the state [ruled] reads as "every recorded wait
-	// has landed". Without this flag a per-anchor Dolt timeout would satisfy
-	// that clause vacuously and stand an answered human-gated row down,
-	// telling the operator to close or extend a question whose routed work may
-	// still be open (tk-fhd705).
+	// has landed". Without this flag a Dolt timeout on that read would satisfy
+	// that clause vacuously and stand an answered human-gated row down, telling
+	// the operator to close or extend a question whose routed work may still
+	// be open.
 	//
-	// Only the kinds that spend the edges pay the read, so this stays false
-	// for an epic or a convoy: they never asked, so nothing about them is
-	// unknown.
+	// Only [ruled] and [ruledInFlight] read the flag, and both refuse a row
+	// that carries it, so the row falls through to the un-ruled arm. The family
+	// grouping reads WaitingOn and never this flag. So on an epic or a convoy
+	// the flag matters only when the row is routed to the operator. Both
+	// readers apply only to rows [humanGated] accepts, and for an epic or a
+	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
 }
 
@@ -258,7 +270,10 @@ type Tile struct {
 	Open    int `json:"open"`
 	// InProgress is the RAW status count — honestly 0 for a slung bead, whose
 	// work never leaves status=open. InProgressLive is the count that answers
-	// "is anything actually moving", under both mechanisms.
+	// "is anything actually moving": a child the city is working (claimed by a
+	// live owner, or covered by a live workflow) PLUS a live workflow over the
+	// anchor's OWN bead — the common sling shape, where the work bead is the
+	// anchor and its molecule stands over it rather than under a child.
 	InProgress int `json:"in_progress"`
 	Assigned   int `json:"assigned"`
 
@@ -267,8 +282,9 @@ type Tile struct {
 	DeadOwner      bool `json:"dead_owner"`
 
 	// InFlight is the part of InProgressLive attributable to a live graph.v2
-	// workflow rather than to a claimed child, surfaced so the join can be
-	// audited without re-deriving it.
+	// workflow rather than to a claimed child — a child the workflow carries, or
+	// the anchor's own bead when a workflow stands over it — surfaced so the join
+	// can be audited without re-deriving it. Equal to len(InFlightHeads).
 	InFlight      int      `json:"in_flight"`
 	InFlightHeads []string `json:"in_flight_heads"`
 
@@ -385,9 +401,10 @@ type Tile struct {
 	// PRApproval is whether this pull request still owes an external approval
 	// before it can merge: required, met, or unknown. Approval is a universal
 	// merge rule (merge.sh holds every open PR until a non-city APPROVED review
-	// stands at the live head), so only `approved` is met and every other posture
-	// owes one — the field is the city's rule, not GitHub's protection set, so a
-	// PR on an integration/* base or in a rule-less repo still reads `required`.
+	// stands, and one given at any commit stands until dismissed), so only
+	// `approved` is met and every other posture owes one — the field is the
+	// city's rule, not GitHub's protection set, so a PR on an integration/* base
+	// or in a rule-less repo still reads `required`.
 	//
 	// A separate field rather than a fourth machine value, because a PR can
 	// need an approval while the cadence is still progressing, and folding the
@@ -469,10 +486,12 @@ type Tile struct {
 	// too. A rig the board holds no pull request URL for keeps the bare branch.
 	PRBranchURL string `json:"pr_branch_url"`
 
-	// PRPhase is who must act on this merge anchor next — `working`,
-	// `needs-review`, or `needs-attention` — the same status: taxonomy
-	// pr-status-label.sh projects to the GitHub PR list, so the board and the
-	// label read one vocabulary rather than two. Empty on a non-merge row.
+	// PRPhase is this merge anchor's PR status. On a live anchor it is who must act
+	// next — `working`, `needs-review`, or `needs-attention` — the same status:
+	// taxonomy pr-status-label.sh projects to the GitHub PR list, so the board and
+	// the label read one vocabulary rather than two. On a closed anchor it is the
+	// PR's resolved state, `merged` or `closed`, so a done row names how its PR
+	// ended rather than freezing on its last live value. Empty on a non-merge row.
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
@@ -628,10 +647,17 @@ func (s Sitting) Headline() string {
 type Facts struct {
 	// Visits holds the ids of anchors an open visit bead names.
 	Visits map[string]bool
-	// Inflight maps a WORK-BEAD id — an anchor's CHILD, not the anchor — to the
-	// session names of the live graph.v2 workflows standing over it. The gather
-	// resolves each live workflow root through its input convoy to that
-	// convoy's single tracked member, and that member is the key.
+	// Inflight maps a work-bead id to the session names of the live graph.v2
+	// workflows standing over it. The gather resolves each live workflow root
+	// through its input convoy, and the key is that convoy's single tracked
+	// member. The gather does not know which beads are anchors, so a key is
+	// whatever bead the sling tracked. The board looks up three kinds of id:
+	// an anchor's child ([rollUp]), a review or rework bead blocking a merge
+	// anchor ([liveReviewOrRework]), and the anchor's own bead
+	// ([Facts.anchorInFlight]). The anchor's own bead is the key when the anchor
+	// is itself the slung work bead and its molecule stands over it rather than
+	// under a child. [Facts.wfLive] re-checks each session's liveness at derive
+	// time.
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee can be resolved whichever form it was written in.

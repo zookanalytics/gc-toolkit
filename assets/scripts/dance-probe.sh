@@ -57,8 +57,11 @@ num "$POLL" || POLL=10
 num "$PEEK_LINES" || PEEK_LINES=30
 num "$CALL_TIMEOUT" || CALL_TIMEOUT=15
 
-# Busy markers: both CLIs print these while mid-turn — mid-turn is alive.
-BUSY_RE="${DANCE_PROBE_BUSY:-esc to interrupt|ctrl.{0,2}c to (stop|interrupt)}"
+# Busy markers: both CLIs print these while mid-turn — mid-turn is alive. Held
+# as one single-quoted literal, because a `}` inside ${VAR:-default} closes the
+# expansion early.
+DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
+BUSY_RE="${DANCE_PROBE_BUSY:-$DEFAULT_BUSY}"
 
 run_bounded() {
   if [ "$CALL_TIMEOUT" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
@@ -71,6 +74,15 @@ run_bounded() {
 WAITED=0
 evidence() { printf 'evidence: %s\n' "$*"; }
 verdict()  { printf 'verdict=%s round=%s session=%s waited=%s\n' "$1" "$ROUND" "$SESSION" "$WAITED"; exit 0; }
+
+# grep exits 2 on a pattern it rejects, and the busy test reads that as "not
+# busy", so an override grep rejects gives way to the default markers.
+BUSY_RC=0
+grep -Eq -- "$BUSY_RE" </dev/null >/dev/null 2>&1 || BUSY_RC=$?
+if [ "$BUSY_RC" -gt 1 ]; then
+  evidence "busy-markers: DANCE_PROBE_BUSY is not a valid ERE — default markers used"
+  BUSY_RE="$DEFAULT_BUSY"
+fi
 
 # 1. Parked short-circuit — ask the recovery order, never the pane. No helper
 # or no output is unknown, never a verdict: the round proceeds.
