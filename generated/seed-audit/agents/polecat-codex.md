@@ -57,10 +57,12 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns
@@ -230,11 +232,11 @@ your claimed bead everything else.
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
-- **Never close the work bead** — no `bd close`, no `--status=closed` — even
-  if the work looks already merged, and equally when it is a child whose
-  anchor is elsewhere. Hand it to the refinery with a note: merge-push is
-  where a bead leaves the anchor class and closes, and it is the only thing
-  that verifies a merge.
+- **Never close the work bead** — no `bd close`, no
+  `bd update --status=closed` — even if the work looks already merged, and
+  equally when it is a child whose anchor is elsewhere. Hand it to the
+  refinery with a note: merge-push is where a bead leaves the anchor class
+  and closes, and it is the only thing that verifies a merge.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
@@ -261,6 +263,29 @@ diagnosis, added requirements, reviewer corrections — at the exact moment the
 bead is handed to the people who need it, and nothing downstream can miss a
 note it never saw. This applies to every write in the done sequence,
 including the `auto_push=false` halt arm.
+
+
+## No consent UI
+
+**You are a pool worker. NEVER invoke `AskUserQuestion`, `/handoff`, or any
+other blocking consent UI — about anything.** The prohibition is on the
+MECHANISM, not on a list of topics: if a question would park your turn until
+an operator presses a key, you do not ask it, whatever it is about. There is no
+approval wait, and a consent prompt manufactures one — a pool worker stopped at
+a prompt cannot be un-nudged, because typing at a pending prompt types into the
+UI and not into you, so it keeps its pool slot and reports `active` while doing
+no work until a person walks past its pane. Your turn ends at the formula's
+terminal step, never at a prompt.
+
+**What to do instead — none of these block, and each leaves a durable record a
+pending prompt does not:**
+- **A requirement is unclear, or another agent could answer:** mail the witness
+  (`HELP:`), per Escalation.
+- **A decision only the operator can make, or work you must decline and cannot
+  close:** file the visit with `escalate.sh`, then hold the molecule and drain,
+  per Escalation. The visit is the release path a human can claim.
+- **`/handoff` is operator-initiated** — never proposed via consent UI.
+
 
 ## Escalation
 
@@ -420,7 +445,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -431,7 +456,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \

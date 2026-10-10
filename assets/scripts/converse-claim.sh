@@ -120,15 +120,15 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (tk-tu5g3; su-ab9je is the edge holding where the stamp
+# carries the subject (su-ab9je is the edge holding where the stamp
 # did not). Left empty, the deliberate cannot-prove-foreign fallback below
 # silently disables this guard for exactly the turn it exists to catch — an
-# unrelated visit vacuumed onto a live sitting (tk-msfmu) — so recover the
+# unrelated visit vacuumed onto a live sitting — so recover the
 # group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
 # not a visit-only edge (a convoy tracks its members), and inventing a group
 # for a non-visit would release a turn this session was entitled to work. A
 # visit carrying neither recording still resolves to the fallback below; the
-# writer-side loss (tk-ax6y4) is repaired where the visit is filed.
+# writer-side loss is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
         | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
@@ -174,7 +174,7 @@ fi
 # step 7), so a visit still open while carrying one is a sitting whose record
 # is complete and whose close did not run. Held, it is offered back to its own
 # session for as long as the pool has demand, and the close never runs. The
-# item keeps whatever headline it has: the hold stamped one when the sitting
+# subject keeps whatever headline it has: the hold stamped one when the sitting
 # began, and a closing takeaway that failed on the way out is not recovered
 # here.
 #
@@ -240,26 +240,32 @@ if [ "$REASON" = "existing_assignment" ]; then
     # sitting that reached its hold, and a claim that died before step 2 ever
     # re-checked the premise. The trace only a real hold leaves is gc.hold_demand,
     # which step 5 stamps on THIS visit before it waits; it is attributable
-    # because it lives on the visit, so a sibling holding the same item cannot
-    # forge it. Absence is three answers, not one: a visit bead that will not read
-    # is UNKNOWN and must not license a close; no key but an open demand still on
-    # the item is a hold that predates the key or a sibling's on the shared item
-    # (RECHECK); only a clean read with no key and no open item demand is a claim
-    # that plainly never began (NO). The yes/unknown/recheck/no RULES are the
-    # caller's; this reports the reading.
+    # because it lives on the visit, so a sibling holding the same subject
+    # cannot forge it. Absence is three answers, not one: a visit bead that will
+    # not read is UNKNOWN and must not license a close; no key but an open demand
+    # still on the subject is a hold that predates the key or a sibling's on the
+    # shared subject (RECHECK); only a clean read with no key and no open subject
+    # demand is a claim that plainly never began (NO). The yes/unknown/recheck/no
+    # RULES are the caller's; this reports the reading.
     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and ((.[0].id // "") != "")' >/dev/null 2>&1; then
         BEGAN=unknown
     elif printf '%s' "$BEAD_JSON" | jq -e '(.[0].metadata["gc.hold_demand"] // "") != ""' >/dev/null 2>&1; then
         BEGAN=yes
     else
-        HD_ITEM=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.stall_root // ""' 2>/dev/null || printf '')
-        HD_ITEM="${HD_ITEM:-$GROUP}"
+        # A hold's demand gates one of two beads: the SUBJECT ($GROUP) for a
+        # pre-PR subject or an explicit merge hold, the VISIT ($BEAD) for the
+        # conversation wait on a PR anchor (converse-hold.sh files it there so the
+        # merge keeps moving). Match either, or an anchored hold whose
+        # gc.hold_demand stamp did not persist reads as NO — a dead pre-step-2
+        # claim — and the caller closes a live wait as a dead premise, orphaning
+        # the demand on the visit it just closed.
         # --include-gates: a demand can be a human gate (issue_type=gate), which
-        # `bd list` hides by default; without it an open gate-demand on the item
-        # reads as absent, and a hold with no gc.hold_demand is then misjudged NO
-        # (a dead pre-step-2 claim) when it is a live wait the caller must RECHECK.
+        # `bd list` hides by default; without it an open gate-demand reads as absent.
+        # A bead with no gc.demand_for gates nothing, so it never matches: with an
+        # empty $GROUP (a visit whose group did not resolve) the bare comparison
+        # matched every ordinary open bead, and BEGAN could never read NO.
         HD_LIST=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 2>/dev/null | scrub)
-        if printf '%s' "$HD_LIST" | jq -e --arg i "$HD_ITEM" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") == $i)' >/dev/null 2>&1; then
+        if printf '%s' "$HD_LIST" | jq -e --arg i "$GROUP" --arg v "$BEAD" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") as $d | $d != "" and ($d == $i or $d == $v))' >/dev/null 2>&1; then
             BEGAN=recheck
         elif printf '%s' "$HD_LIST" | jq -e 'type == "array"' >/dev/null 2>&1; then
             BEGAN=no
@@ -284,7 +290,7 @@ fi
 
 # release_turn <bead-id> — three ORDERED writes (bd's claim guard refuses
 # --assignee "" on an in_progress bead, and metadata writes bypass it, so:
-# unset session pointers, --status=open, then --assignee="" — tk-z27pw), then
+# unset session pointers, --status=open, then --assignee=""), then
 # the read-back that decides. gc.routed_to is deliberately left alone: it is
 # the pool's offer predicate, and clearing it would park the turn. Every
 # write is attempted even after one fails; the READ must also agree.

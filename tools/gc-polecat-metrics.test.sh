@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-polecat-metrics.sh (tk-6lvz29). Drives the tool
+# Hermetic test for tools/gc-polecat-metrics.sh. Drives the tool
 # entirely through its GC_POLECAT_METRICS_FIXTURE seam — canned bead-store reads
 # and a canned usage sink, no live city — and asserts on the --json output.
 #

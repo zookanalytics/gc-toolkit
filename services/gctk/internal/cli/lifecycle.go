@@ -12,11 +12,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
-// `gctk lifecycle` is the port of assets/scripts/lifecycle.sh: THE writer of
-// anchor lifecycle transitions. The CLI is contract-preserving — same verbs,
-// same flags, same exit codes, same stdout grammar — because its callers
-// (pr-open, merge, pr-facts, mol-refinery-patrol) treat it as an opaque command
-// and must not notice which language answers.
+// `gctk lifecycle` is THE writer of anchor lifecycle transitions, and the only
+// implementation of assets/scripts/lifecycle.sh, which execs it. The CLI is the
+// script's contract — same verbs, same flags, same exit codes, same stdout
+// grammar — because its callers (pr-open, merge, pr-facts, mol-refinery-patrol)
+// invoke lifecycle.sh as an opaque command.
 //
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 // 2 post-write verification mismatch (or unreadable bead).
@@ -225,7 +225,7 @@ type transitionOpts struct {
 // token is a malformed invocation and returns an error: the empty string it
 // would otherwise take drops --expect's compare-and-swap guard, so a truncated
 // command must fail rather than transition unguarded. An explicitly supplied
-// empty argument (--assignee '' clears the assignee) is a real token and is
+// empty argument (--assignee "" clears the assignee) is a real token and is
 // preserved.
 func parseTransition(args []string) (transitionOpts, error) {
 	var o transitionOpts
@@ -313,6 +313,27 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: --to %s requires --close — a closed state must close in the same atomic write, or the bead is left open+%s\n", prog, o.to, o.to)
 		return 1
 	}
+	// `merged` carries the evidence its own definition names: lifecycle.toml
+	// declares [states.merged] meaning = "landed; merged_sha recorded". Require
+	// that sha in the same atomic write, so the state cannot be entered with no
+	// landing to point at — the closed-implies-landed violation
+	// doctor/check-closed-implies-landed reports after the fact, refused here at
+	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh, the
+	// gctk merge port, mol-refinery-patrol) passes --set merged_sha=<oid>. What
+	// this refuses is a bead that never had a PR: it is no merge anchor, and it
+	// closes with a plain `gc bd close`, not a false landing.
+	if o.to == "merged" {
+		haveSha := false
+		for _, s := range o.sets {
+			if k, v := kv(s); k == "merged_sha" && v != "" {
+				haveSha = true
+			}
+		}
+		if !haveSha {
+			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead that never had a PR has not landed and is no merge anchor: with merge_result absent, close it with a plain 'gc bd close %s', not --to merged\n", prog, id)
+			return 1
+		}
+	}
 	// A human state is a bead waiting on a person, so it must name one. An
 	// omitted --route takes the default; an EMPTY one is the write that leaves a
 	// bead waiting on nobody — no queue holds it and no invariant can name it.
@@ -376,7 +397,12 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: --expect's compare-and-swap, edge legality,
+	// the dated-value resolution, and the idle-skip below all decide from it, and
+	// nothing re-checks the backing store at write time. So it takes the
+	// authoritative path, not the daemon's cache — a stale read would let --expect
+	// pass against an old state and then stamp one the real state forbids.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to transition blind\n", prog, id)
 		return 2
@@ -587,8 +613,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Re-read and verify every written field; a write that reported success but
-	// did not land must never be reported as a transition.
-	bead = client.Show(id)
+	// did not land must never be reported as a transition. The read-back must
+	// observe the write just made and must carry the appended notes, so it uses
+	// the authoritative path, never the daemon's cached, notes-less read.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s %s -> %s written but the read-back failed; UNVERIFIED\n", prog, id, cur, o.to)
 		return 2
@@ -698,7 +726,11 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	client := gcbd.New()
-	bead := client.Show(id)
+	// This read governs the write: reopen proceeds only when the bead is closed on
+	// a non-closed merge_result, and nothing re-checks that at write time. So it
+	// takes the authoritative path, not the daemon's cache — a stale read could
+	// show a non-closed state and reopen a bead already legitimately closed.
+	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to reopen blind\n", prog, id)
 		return 2
@@ -728,8 +760,9 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// Same read-back discipline as transition: verify status flipped and
-	// merge_result stayed put before reporting the repair.
-	bead = client.Show(id)
+	// merge_result stayed put before reporting the repair. Authoritative read,
+	// not the daemon's cache, so the just-written flip is observed.
+	bead = client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s reopen written but the read-back failed; UNVERIFIED\n", prog, id)
 		return 2

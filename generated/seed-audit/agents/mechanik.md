@@ -106,41 +106,60 @@ until its work merges, so `closed` always means landed.
 You run city-scoped, so `gc bd` and `gc convoy` resolve to the city store
 unless you name a rig. A dispatch bead left there is invisible to the rig's
 polecat pool, which reads only the rig store — it maroons, claimable by no
-one. Name the rig on every dispatch create with `--rig <rig>`: the same
-`<rig>` you sling to.
+one. Name the rig with `--rig <rig>` on every dispatch create and on every
+link between dispatch beads: the same `<rig>` you sling to.
 
 A **shared input artifact** (a decisions doc, a spec several polecats need
-before any produce mergeable work) is never committed directly to the
-default branch — seed it on the convoy's integration branch:
+before any produce mergeable work) is never committed directly to the default
+branch — it is seeded on the convoy's integration branch.
+`assets/scripts/convoy-seed.sh` is that recipe in one idempotent act: it
+creates the owned convoy, sets `target = integration/<convoy-id>`, and
+cuts+pushes the branch from a disposable worktree. The disposable worktree is
+load-bearing — reconcile keeps the rig root fast-forwarded to the default
+branch and directory-imported packs build from its working tree, so a branch
+checkout or commit there parks the deploy off the default branch.
+`--artifact <file>` starts the branch one commit ahead of the default with
+that artifact on it; without it the branch starts equal to the default.
 
 ```bash
-# 1. Owned convoy with an integration branch as target, in the rig's store.
-CONVOY=$(gc convoy create "<initiative>" --owned --rig <rig> \
-    --target "integration/<convoy-id>" --json | jq -r .convoy_id)
+# Create the convoy, cut + push its integration branch, seed the artifact onto
+# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig
+# twice: GC_RIG scopes the convoy to the rig you sling to, and --rig-root binds
+# the cut and push to that rig's checkout and its origin. Your home is not a
+# checkout of the rig, and without --rig-root the script falls back to
+# GC_RIG_ROOT and then to the repository your working directory sits in.
+RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
+[ -d "$RIG_ROOT" ] || { echo "no checkout found for rig <rig>; not seeding" >&2; exit 1; }
+CONVOY=$(GC_RIG=<rig> "[[PACK-ROOT]]/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
+    --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# 2. Seed the integration branch with the shared artifact from a DISPOSABLE
-#    worktree — never the rig root. reconcile keeps the rig root fast-forwarded
-#    to main and directory-imported packs build from its working tree, so a
-#    branch checkout or commit there parks the deploy off main.
-git -C <rig-root> fetch --prune origin
-SEED=$(mktemp -d)/wt
-git -C <rig-root> worktree add "$SEED" -b "integration/<convoy-id>" origin/main
-# add + commit the shared artifact in "$SEED", then:
-git -C "$SEED" push -u origin "integration/<convoy-id>"
-git -C <rig-root> worktree remove "$SEED"
-
-# 3. File child work beads in the rig's store, link to convoy, sling normally.
+# File child work beads in the rig's store under the convoy, read the link back,
+# and sling normally. The link and its read-back name the rig too: a dep add
+# that crosses stores prints success and exits 0 with no edge to read back, and
+# a child slung unlinked opens its PR against the default branch.
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
-gc bd dep add "$WORK" "$CONVOY" --type=parent-child
+gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
+LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
+[ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
 gc sling <rig>/gc-toolkit.polecat "$WORK"   # inherits metadata.target via convoy walk
+```
+
+A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
+and "Choosing a design-convoy" below is the test for one. The molecule runs the
+same branch cut from a pool session, then files the design child and, under the
+design-gated default, arms implementation behind the design's approval. Sling it
+on an initiative bead in the rig's store:
+
+```bash
+gc sling <rig>/gc-toolkit.polecat <initiative> --on mol-design-convoy --var issue=<initiative>
 ```
 
 Children inherit `metadata.target = integration/<convoy-id>` via the
 convoy-ancestor walk in `gc sling`: polecats branch from the integration
-branch and the refinery lands their work back onto it, never onto main.
-When all children close AND the ledger records at least one landing on the
-branch, the cadence graduates the convoy automatically — a human-approved
-`integration/<id>` -> main PR through the same work-bead machine. Children
+branch and the refinery lands their work back onto it, never onto the default
+branch. When all children close AND the ledger records at least one landing on
+the branch, the cadence graduates the convoy automatically — a human-approved
+`integration/<id>` -> default-branch PR through the same work-bead machine. Children
 closed having landed nothing leave "all closed" vacuously true, and the
 pass reports the convoy vacuous rather than graduating it; land a genuinely
 complete but unrecorded convoy deliberately with `gc convoy land`.
@@ -148,10 +167,33 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 
-**Anti-pattern:** dispatching a shared input artifact to land on main by
-itself, with no convoy above it. Catching this shape is a dispatch judgment
-here, not a downstream gate, so seed the artifact on the convoy's integration
-branch as above.
+**Anti-pattern:** dispatching a shared input artifact to land on the default
+branch by itself, with no convoy above it. Catching this shape is a dispatch
+judgment here, not a downstream gate, so seed the artifact on the convoy's
+integration branch as above.
+
+
+## Choosing a design-convoy
+
+A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
+one initiative. A design child lands its doc on the convoy's integration branch,
+implementation builds there, and the whole unit graduates to the default branch
+as one reviewed PR. Choose the route for a follow-up by asking, in order:
+
+1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
+   or decision the operator owns, with nothing to build, has nothing to
+   dispatch.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
+   unit and the design gate catches a wrong shape before it is built. No: a
+   plain work bead on the default one-child convoy, one PR to the default
+   branch.
+
+`design_gated` defaults to `true`, which holds implementation until the operator
+approves the design's PR. `docs/design-convoy.md` describes the gates and when
+all-in-one (`--var design_gated=false`) fits.
+
 
 ## Scope-miss recovery: amend the open PR
 
@@ -182,9 +224,11 @@ branch is rejected non-fast-forward and stays with its polecat.
 
 `gc sling` stamps `gc.routed_to` and nothing else, whatever the target.
 For a **pool** that is the whole address — polecat, polecat-codex, dog,
-proactive, converse — because pool members run the routed tier of the
-work query, and the bead has to stay unassigned for their claim filter
-to offer it.
+proactive — because pool members run the routed tier of the work query,
+and the bead has to stay unassigned for their claim filter to offer it.
+A converse sitting is neither a pool nor a named agent: a visit parks on
+the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
+sitting when the operator draws it off the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
 witness, refinery, keeper. Their sessions skip the routed tier, so a
@@ -433,10 +477,12 @@ sits below it.
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns
@@ -487,7 +533,7 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
-OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation -d "## Statement
 <the generalizable point>
 
@@ -498,7 +544,9 @@ OBS=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" 
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json | jq -r '.id // .[0].id')
+<optional: what the diff was doing>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$OBS" \
   --set-metadata task_kind=observation \
   --set-metadata "obs.category=<free-slug>" \

@@ -13,7 +13,9 @@
 # tip survive removal when no branch reaches it. Covers the reporting claims:
 # a removal that returns success and leaves the directory is counted as a
 # failure and named, and a repo whose PR listing fails is held rather than
-# reaped. Covers --dry-run, the budget yield, and the rails.
+# reaped. Covers the refusals: a ledger that answers nothing, and a cwd probe
+# that lists nothing or fails. Covers --dry-run, the budget yield, and the
+# rails.
 #
 # Every keep is asserted alongside a take in the same run. A pass that
 # filtered everything and a pass that filtered nothing print the same summary,
@@ -22,6 +24,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-worktree-reap-test.XXXXXX")"
+# git lists a worktree by its resolved path, and the reaper matches a bead's
+# work_dir to that path exactly, so the fixture builds every path on a resolved
+# root. A TMPDIR behind a symlink, as macOS's is, would otherwise name no tree.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # assertions only; harness_init would stub out git
@@ -53,14 +59,26 @@ export PATH="$BIN:$PATH"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
-# A --rig <name> travels right after the top-level command group. Strip it,
-# keeping the group as $1 so the case key stays "<group> <sub>"; the captured
-# name lets bd statuses/list read a per-rig fixture (statuses.<rig>.json,
-# beads.<rig>.json) where a multi-store test writes one, and fall back to the
-# shared file otherwise. Single-store tests never pass --rig, so nothing here
-# changes for them.
+# A store selector travels right after the top-level command group. Strip it,
+# keeping the group as $1 so the case key stays "<group> <sub>", and resolve it
+# against the rig list the way the binary does: `--db <path>/.beads` reaches any
+# row's store, the HQ row's included, while `--rig <name>` reaches only a
+# declared rig, so the HQ row's name answers "not found". The resolved name lets
+# bd statuses/list read a per-rig fixture (statuses.<rig>.json, beads.<rig>.json)
+# where a multi-store test writes one, and fall back to the shared file
+# otherwise. Single-store tests pass no selector, so nothing here changes for
+# them.
 grp="${1:-}"; rig=""
-if [ "${2:-}" = "--rig" ]; then rig="${3:-}"; set -- "$grp" "${@:4}"; fi
+case "${2:-}" in
+  --db | --rig)
+    sel="$2"; val="${3:-}"; set -- "$grp" "${@:4}"
+    if [ "$sel" = "--db" ]; then
+      rig="$(jq -r --arg v "$val" '[.rigs[]? | select((.path + "/.beads") == $v)][0].name // empty' "${STUB_RIGS:-/dev/null}" 2>/dev/null)"
+    else
+      rig="$(jq -r --arg v "$val" '[.rigs[]? | select(.name == $v and (.hq // false) != true)][0].name // empty' "${STUB_RIGS:-/dev/null}" 2>/dev/null)"
+    fi
+    [ -n "$rig" ] || { echo "gc bd: $sel \"$val\" not found" >&2; exit 1; } ;;
+esac
 case "${1:-} ${2:-}" in
   "agent list")   cat "${STUB_AGENTS:?}" ;;
   "session list") cat "${STUB_SESSIONS:?}" ;;
@@ -151,7 +169,7 @@ mk_wt() { # <path> <branch|--detach>
 # A bead row as `bd list --json` returns one.
 bead_to() { # <file> <id> <status> <hours-since-close> <work_dir> <branch>
     local f="$1" id="$2" st="$3" hrs="$4" wd="$5" br="$6"
-    local at; at="$(date -u -d "@$((NOW - hrs * HOUR))" +%Y-%m-%dT%H:%M:%SZ)"
+    local at; at="$(jq -nr --argjson t "$((NOW - hrs * HOUR))" '$t | todate')"
     [ -s "$f" ] || echo '[]' > "$f"
     jq -c --arg id "$id" --arg st "$st" --arg at "$at" --arg wd "$wd" --arg br "$br" \
         '. += [{id: $id, status: $st, closed_at: $at, updated_at: $at,
@@ -362,9 +380,11 @@ jq -c --arg d "$REPO/wt/session" '{sessions:[{work_dir:$d}]}' <<< '{}' > "$STUB_
 ( cd "$REPO/wt/deep-cwd/sub" && exec sleep 25 ) &
 SLEEPER=$!
 # A backgrounded subshell forks with the caller's cwd and only then chdirs, so
-# wait for /proc to show the directory the run is meant to find.
+# wait for lsof, the probe the reaper reads, to show the directory the run is
+# meant to find.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ "$(readlink -f "/proc/$SLEEPER/cwd" 2>/dev/null)" = "$REPO/wt/deep-cwd/sub" ] && break
+    lsof -w -n -P -F n -a -p "$SLEEPER" -d cwd 2>/dev/null \
+        | awk -v n="n$REPO/wt/deep-cwd/sub" '$0 == n { f = 1 } END { exit f ? 0 : 1 }' && break
     sleep 0.1
 done
 run > /dev/null
@@ -423,6 +443,25 @@ OUT="$(run 2>&1)"
 if exists "$REPO/wt/unclaimed"; then ok "an unreadable ledger reaps nothing"; else bad "an unreadable ledger reaps nothing"; fi
 has "$OUT" "refusing to reap" "the refusal says so"
 
+# A cwd probe that lists nothing, or that fails after listing part of the host,
+# cannot show that no process stands in a tree, so the pass refuses. The same
+# tree is taken once lsof answers, so the refusal is what held it.
+new_repo
+mk_wt "$REPO/wt/blind" polecat/blind
+bead b-blind closed 100 "$REPO/wt/blind" polecat/blind
+NOLSOF="$TMP/nolsof-bin"; mkdir -p "$NOLSOF"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NOLSOF/lsof"
+FAILLSOF="$TMP/faillsof-bin"; mkdir -p "$FAILLSOF"
+printf '#!/usr/bin/env bash\nprintf "p1\\nfcwd\\nn/\\n"\nexit 1\n' > "$FAILLSOF/lsof"
+chmod +x "$NOLSOF/lsof" "$FAILLSOF/lsof"
+OUT="$(PATH="$NOLSOF:$PATH" run)"
+if exists "$REPO/wt/blind"; then ok "an lsof that lists no cwd reaps nothing"; else bad "an lsof that lists no cwd reaps nothing"; fi
+has "$OUT" "refusing to reap" "the refusal says so"
+OUT="$(PATH="$FAILLSOF:$PATH" run)"
+if exists "$REPO/wt/blind"; then ok "an lsof that fails reaps nothing, whatever it listed first"; else bad "an lsof that fails reaps nothing, whatever it listed first"; fi
+run > /dev/null
+if exists "$REPO/wt/blind"; then bad "with lsof answering, the same tree is taken"; else ok "with lsof answering, the same tree is taken"; fi
+
 # --- dry run ---------------------------------------------------------------
 new_repo
 mk_wt "$REPO/wt/planned" polecat/planned
@@ -431,7 +470,7 @@ OUT="$(run --dry-run)"
 if exists "$REPO/wt/planned"; then ok "--dry-run removes nothing"; else bad "--dry-run removes nothing"; fi
 has "$OUT" "would remove 1 worktrees" "--dry-run reports the plan"
 has "$OUT" "$REPO/wt/planned" "--dry-run names each path it would take"
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run writes no archive tag"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "--dry-run writes no archive tag"
 
 # --- prunable registry litter is pinned, and a dry run prunes nothing -------
 # A worktree whose directory was deleted out from under git leaves an admin
@@ -446,7 +485,7 @@ bead b-gone closed 100 "$REPO/wt/gone" ""
 rm -rf "$REPO/wt/gone"                 # rogue delete: dir gone, admin entry lingers
 run --dry-run > /dev/null
 if registered "$REPO/wt/gone"; then ok "--dry-run does not prune registry litter"; else bad "--dry-run does not prune registry litter"; fi
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run pins no prunable tip"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "--dry-run pins no prunable tip"
 run > /dev/null
 if registered "$REPO/wt/gone"; then bad "a real run prunes the litter entry"; else ok "a real run prunes the litter entry"; fi
 GTAG="$(git -C "$REPO" tag -l 'archive/worktree/*')"
@@ -467,7 +506,7 @@ chmod -R a-w "$REPO/.git/refs" 2>/dev/null
 run > /dev/null
 chmod -R u+w "$REPO/.git/refs" 2>/dev/null
 if registered "$REPO/wt/nopin"; then ok "an unpinnable prunable tip is not pruned"; else bad "an unpinnable prunable tip is not pruned"; fi
-eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "and no tag was written before the prune was held"
+eq "$(($(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)))" 0 "and no tag was written before the prune was held"
 
 # --- the budget yields, and says what it left -------------------------------
 # A slow `git` on PATH spends the budget inside the pass, which is the only way
@@ -682,7 +721,9 @@ git -C "$REPO2" config user.name Test
 git -C "$REPO2" config commit.gpgsign false
 git -C "$REPO2" remote add origin https://github.com/zook/broken.git
 echo seed > "$REPO2/seed"; git -C "$REPO2" add seed; git -C "$REPO2" commit -qm seed
-# Rig mode: both stores come from `gc rig list`, named, so --rig is passed.
+# Rig-list mode: both repos come from `gc rig list`, and the reaper opens each
+# one's store by path, as `gc bd --db <path>/.beads`. The stub resolves that
+# path to the row's name, which selects the per-rig fixtures written below.
 jq -n --arg r1 "$REPO" --arg r2 "$REPO2" \
     '{rigs:[{name:"demo",path:$r1,hq:false},{name:"broken",path:$r2,hq:false}]}' > "$TMP/rigs.json"
 export STUB_RIGS="$TMP/rigs.json"
@@ -708,10 +749,63 @@ BAD_TIP="$(git -C "$REPO2" commit-tree "$BAD_TREE" -p "$(git -C "$REPO2" rev-par
 git -C "$REPO2" branch polecat/zz-bad "$BAD_TIP"
 git -C "$REPO2" update-ref refs/remotes/origin/main "$BAD_TIP"
 git -C "$REPO2" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
-OUT="$(WORKTREE_REAP_REPOS= run)"
+OUT="$(WORKTREE_REAP_REPOS='' run)"
 if git -C "$REPO2" show-ref --verify --quiet refs/heads/polecat/zz-bad; then ok "an unreadable store's branch family is held though its name-bead is closed and landed"; else bad "an unreadable store's branch family is held though its name-bead is closed and landed"; fi
 if git -C "$REPO" show-ref --verify --quiet refs/heads/polecat/zz-healthy; then bad "the healthy store's closed, landed branch is dropped in the same run"; else ok "the healthy store's closed, landed branch is dropped in the same run"; fi
 has "$OUT" "dropped 1 stale local branches" "only the healthy store's branch is dropped"
+unset STUB_RIGS
+
+# The HQ row in `gc rig list` is the city itself, and its store answers by path
+# alone: `gc bd --rig` resolves only declared rigs. Its beads count like any
+# rig's. A live city bead holds the tree and the branch it names, though a closed
+# rig bead names the same tree. A closed city bead makes the tree it names a
+# candidate, and the town repo's branch pass runs on the city store's answer. A
+# closed rig bead's tree is reaped in the same run, the take that proves the rig
+# store answered by path too.
+new_repo                                   # $REPO is rig "demo"
+git init -q -b main "$CITY"                # $CITY is the town repo, the HQ row
+git -C "$CITY" config user.email t@example.com
+git -C "$CITY" config user.name Test
+git -C "$CITY" config commit.gpgsign false
+git -C "$CITY" remote add origin https://github.com/zook/town.git
+echo seed > "$CITY/seed"; git -C "$CITY" add seed; git -C "$CITY" commit -qm seed
+jq -n --arg c "$CITY" --arg r "$REPO" \
+    '{rigs:[{name:"town",path:$c,hq:true},{name:"demo",path:$r,hq:false}]}' > "$TMP/rigs.json"
+export STUB_RIGS="$TMP/rigs.json"
+if gc bd --rig town statuses --json >/dev/null 2>&1; then
+    bad "the stub, like the binary, answers the HQ store by path alone"
+else ok "the stub, like the binary, answers the HQ store by path alone"; fi
+: > "$TMP/beads.town.json"; : > "$TMP/beads.demo.json"
+mk_wt "$REPO/wt/hq-path"    polecat/zz-hqpath
+mk_wt "$REPO/wt/hq-branch"  polecat/zz-hqbranch
+mk_wt "$REPO/wt/hq-closed"  polecat/lx-hqclosed
+mk_wt "$REPO/wt/rig-closed" polecat/zz-rigclosed
+bead_to "$TMP/beads.demo.json" zz-hqpath    closed 100 "$REPO/wt/hq-path"    polecat/zz-hqpath
+bead_to "$TMP/beads.town.json" lx-hqpath    open    "" "$REPO/wt/hq-path"    ""
+bead_to "$TMP/beads.demo.json" zz-hqbranch  closed 100 "$REPO/wt/hq-branch"  polecat/zz-hqbranch
+bead_to "$TMP/beads.town.json" lx-hqbranch  open    "" ""                    polecat/zz-hqbranch
+bead_to "$TMP/beads.town.json" lx-hqclosed  closed 100 "$REPO/wt/hq-closed"  polecat/lx-hqclosed
+bead_to "$TMP/beads.demo.json" zz-rigclosed closed 100 "$REPO/wt/rig-closed" polecat/zz-rigclosed
+# The town repo's branch family, both refs landed on its default branch: a
+# closed city bead's branch is the take, and a closed city bead's branch that a
+# live city child records is the keep.
+TOWN_TIP="$(git -C "$CITY" commit-tree "$(git -C "$CITY" rev-parse 'main^{tree}')" -p "$(git -C "$CITY" rev-parse main)" -m 'work in lx-towndrop')"
+git -C "$CITY" branch polecat/lx-towndrop "$TOWN_TIP"
+git -C "$CITY" branch polecat/lx-townheld main
+git -C "$CITY" update-ref refs/remotes/origin/main "$TOWN_TIP"
+git -C "$CITY" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+bead_to "$TMP/beads.town.json" lx-towndrop  closed 100 "" polecat/lx-towndrop
+bead_to "$TMP/beads.town.json" lx-townheld  closed 100 "" polecat/lx-townheld
+bead_to "$TMP/beads.town.json" lx-townchild open    "" "" polecat/lx-townheld
+OUT="$(WORKTREE_REAP_REPOS='' run)"
+if exists "$REPO/wt/hq-path"; then ok "a live city bead on the path holds it, though a closed rig bead names it too"; else bad "a live city bead on the path holds it, though a closed rig bead names it too"; fi
+if exists "$REPO/wt/hq-branch"; then ok "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; else bad "a live city bead on the BRANCH holds it, though the path's own rig bead closed"; fi
+if exists "$REPO/wt/hq-closed"; then bad "a tree only a closed city bead names is taken"; else ok "a tree only a closed city bead names is taken"; fi
+if exists "$REPO/wt/rig-closed"; then bad "a closed rig bead's tree is taken in the same run"; else ok "a closed rig bead's tree is taken in the same run"; fi
+has "$OUT" "removed 2 of" "only the two trees no live bead holds are reaped"
+if git -C "$CITY" show-ref --verify --quiet refs/heads/polecat/lx-towndrop; then bad "the town repo's branch pass drops a closed, landed city bead's branch"; else ok "the town repo's branch pass drops a closed, landed city bead's branch"; fi
+if git -C "$CITY" show-ref --verify --quiet refs/heads/polecat/lx-townheld; then ok "a live city bead's claim holds a closed, landed town branch"; else bad "a live city bead's claim holds a closed, landed town branch"; fi
+has "$OUT" "dropped 1 stale local branches" "only the unclaimed town branch is dropped"
 unset STUB_RIGS
 
 echo

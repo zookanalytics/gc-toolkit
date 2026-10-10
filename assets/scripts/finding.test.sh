@@ -64,7 +64,9 @@ eq "$(grep -c "^$F1|blocks|tk-anc$" "$STUB_DEPS")" "1" "re-running must-fix adds
 # set-disposition deferred: a real objection becomes tracked later-work. The
 # finding CLOSES (no stay-open orphan that holds the human review hostage), a
 # claimable follow-up bead carries the work, and the follow-up — not the finding
-# — holds the discovered-from provenance.
+# — holds the discovered-from provenance, pointing at the finding. The stub keeps
+# one edge per pair the way bd does, so provenance on the follow-up/anchor pair
+# would take the gate's pair and the deferral would fail closed.
 # ---------------------------------------------------------------------------
 F3=$("$SUT" upsert --anchor tk-anc --lane correctness --locus "docs/x.md" --message "stale reference to a retired script")
 "$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred --reason "the rewrite it needs lands in the next PR"
@@ -72,8 +74,9 @@ eq "$(meta "$F3" 'finding.disposition')" "deferred" "disposition recorded as def
 eq "$(bstatus "$F3")" "closed" "a deferred finding closes — no stay-open orphan holding the review"
 F3FU=$(meta "$F3" 'finding.follow_up')
 if [ -n "$F3FU" ] && [ "$F3FU" != "<absent>" ]; then ok "deferred files a follow-up bead and records its id on the finding"; else bad "deferred did not record finding.follow_up"; fi
-has "$(deps)" "$F3FU|discovered-from|tk-anc" "the follow-up — not the finding — carries the discovered-from provenance"
-hasnt "$(deps)" "$F3|discovered-from|tk-anc" "the closed finding holds no provenance edge of its own"
+has "$(deps)" "$F3FU|discovered-from|$F3" "the follow-up — not the finding — carries the discovered-from provenance, pointing at the finding"
+hasnt "$(deps)" "$F3|discovered-from|" "the closed finding holds no provenance edge of its own"
+hasnt "$(deps)" "$F3FU|discovered-from|tk-anc" "no provenance edge on the follow-up/anchor pair — that pair is the gate's"
 hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
 has "$(meta "$F3" 'finding.reply')" "$F3FU" "the follow-up id is stamped as the reply the raiser's thread receives"
@@ -110,7 +113,7 @@ eq "$(bstatus "$F5")" "closed" "the reclassified finding closes"
 hasnt "$(deps)" "$F5|blocks|tk-anc" "must-fix -> deferred retracts the blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F5 " "merge.sh's probe no longer sees the reclassified finding"
 F5FU=$(meta "$F5" 'finding.follow_up')
-has "$(deps)" "$F5FU|discovered-from|tk-anc" "the reclassification files a follow-up carrying the provenance"
+has "$(deps)" "$F5FU|discovered-from|$F5" "the reclassification files a follow-up carrying the provenance"
 has "$(deps)" "tk-anc|blocks|$F5FU" "the reclassified deferral's follow-up is gated behind the anchor"
 eq "$(meta "$F5FU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the reclassified deferral's follow-up is armed to the fix pool"
 
@@ -183,7 +186,7 @@ esac; done
 existing=$(gc bd list --metadata-field escalation_key="$key" --status=open,in_progress,blocked --json 2>/dev/null \
   | jq -r --arg s "$subj" '[.[]? | select((.metadata["gc.continuation_group"] // "") == $s)][0].id // empty')
 [ -n "$existing" ] && exit 0
-vid=$(gc bd create "visit: $subj — $msg" -t task --json | jq -r '.id // .[0].id')
+vid=$(gc bd create "visit: $subj — $msg" -t task --json | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 gc bd update "$vid" --set-metadata task_kind=visit --set-metadata escalation_key="$key" \
   --set-metadata gc.continuation_group="$subj" --set-metadata gc.routed_to=human >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
@@ -226,25 +229,44 @@ has "$(deps)" "$FU|blocks|$F1" "fix unit blocks the first finding it answers"
 has "$(deps)" "$FU|blocks|$F2" "fix unit blocks the second finding it answers"
 
 # ---------------------------------------------------------------------------
-# open-must-fix: the quiescence read helper.
+# open-must-fix: the read pr-open.sh holds a publish behind.
 # ---------------------------------------------------------------------------
 if out=$("$SUT" open-must-fix --anchor tk-anc); then ok "open-must-fix exits 0 when a must-fix finding is open"; else bad "open-must-fix missed the open must-fix finding"; fi
 has " $out " " $F1 " "open-must-fix names the must-fix finding"
 if "$SUT" open-must-fix --anchor tk-anc --lane arch >/dev/null; then bad "open-must-fix found a must-fix on a lane with none"; else ok "open-must-fix is lane-scoped (none on arch)"; fi
 
 # ---------------------------------------------------------------------------
-# close-unvalidated: an approving lane clears its own unruled findings, and
-# leaves a validated one (must-fix) alone.
+# close-unvalidated: a green lane clears its own unruled findings, and leaves a
+# validated one (must-fix) alone. gate-ensure.sh drives this per reconcile pass
+# off the derived green lane state (the close moved out of signoff.sh), so it
+# must also be a safe no-op when the lane has nothing left to resolve.
 # ---------------------------------------------------------------------------
-eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the approve"
-"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane approved"
+eq "$(bstatus "$F2")" "open" "the unvalidated finding is open before the lane derives green"
+"$SUT" close-unvalidated --anchor tk-anc --lane correctness --reason "lane green"
 eq "$(bstatus "$F2")" "closed" "close-unvalidated closes the unvalidated finding"
 eq "$(bstatus "$F1")" "open" "close-unvalidated leaves the must-fix finding for the validator/fix unit"
+# Re-run on the now-clean lane: it closes nothing and still exits 0. This is the
+# per-pass-safe shape gate-ensure relies on — it early-returns before the cache
+# invalidation when there is nothing to resolve, exactly as close-answered does.
+if "$SUT" close-unvalidated --anchor tk-anc --lane correctness >/dev/null; then ok "close-unvalidated is a no-op when the lane has no unvalidated findings"; else bad "close-unvalidated errored on a lane with nothing to resolve"; fi
+eq "$(bstatus "$F1")" "open" "…and still leaves the must-fix finding open"
+
+# --lanes: one call resolves several green lanes in a single finding-set read
+# (the batched shape gate-ensure uses after its gate loop), and stays lane-scoped
+# — a lane not named is left alone.
+LA=$("$SUT" upsert --anchor tk-anc --lane arch --locus "assets/scripts/a.sh:a()" --message "arch unvalidated one")
+LP=$("$SUT" upsert --anchor tk-anc --lane pm --locus "docs/p.md" --message "pm unvalidated one")
+LD=$("$SUT" upsert --anchor tk-anc --lane docs --locus "docs/d.md" --message "docs unvalidated one")
+"$SUT" close-unvalidated --anchor tk-anc --lanes "arch,pm" --reason "lanes green at deadbeef"
+eq "$(bstatus "$LA")" "closed" "close-unvalidated --lanes closes the arch finding"
+eq "$(bstatus "$LP")" "closed" "…and the pm finding, in the one call"
+eq "$(bstatus "$LD")" "open" "…and leaves a lane it was not given (docs) alone"
+eq "$(bstatus "$F1")" "open" "…and still never touches the must-fix finding"
 
 # ---------------------------------------------------------------------------
 # close-answered: the must-fix finding closes once its fix unit LANDS (every
-# blocks-blocker closed), which is what releases the re-gate quiescence and
-# unwedges a pre_open_gate anchor. FU (wired above) blocks the must-fix F1.
+# blocks-blocker closed), which releases the publish and the merge, unwedging a
+# pre_open_gate anchor. FU (wired above) blocks the must-fix F1.
 # ---------------------------------------------------------------------------
 eq "$(bstatus "$F1")" "open" "the must-fix finding is open with its fix unit still in flight"
 "$SUT" close-answered --anchor tk-anc
@@ -254,9 +276,9 @@ gc bd update "$FU" --status=closed >/dev/null
 "$SUT" close-answered --anchor tk-anc
 eq "$(bstatus "$F1")" "closed" "close-answered closes the must-fix finding once its fix unit landed"
 has "$(notes "$F1")" "fix unit landed" "the close records why the finding was resolved"
-# Quiescence clears: gate-ensure's open-must-fix now finds nothing on the
-# anchor, so the re-gate the open finding held is free to dispatch.
-if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix still holds the re-gate after the finding closed"; else ok "quiescence clears once the answered finding closes, so the anchor re-gates"; fi
+# The anchor is released: open-must-fix, the read pr-open.sh publishes behind,
+# now finds nothing on it, so nothing the open finding held is left.
+if "$SUT" open-must-fix --anchor tk-anc >/dev/null; then bad "open-must-fix still holds the publish after the finding closed"; else ok "open-must-fix clears once the answered finding closes, so the anchor can publish"; fi
 
 # A must-fix finding NO fix unit blocks is an objection nothing has answered
 # yet: close-answered must leave it open, or it drops the objection.
@@ -377,6 +399,151 @@ FF=$("$SUT" upsert --anchor tk-ancF --lane codex --locus "assets/scripts/f.sh:f(
 gc bd update "$FF" --set-metadata finding.disposition=must-fix >/dev/null
 "$SUT" close-answered --anchor tk-ancF
 eq "$(bstatus "$FF")" "open" "close-answered leaves an edge-less must-fix finding open while its lane's fix unit is in flight"
+
+# ---------------------------------------------------------------------------
+# fix-in-flight: the actor gate-ensure's quiescence holds on. It names the fix
+# unit answering an open must-fix finding — the finding's live blocks-blocker, or
+# for an edge-less finding the live fix unit on its lane — and reports the open
+# must-fix findings no fix unit answers, so a hold never names a bead that is not
+# acting on the anchor.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancG","status":"open","assignee":"","title":"ancG","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fuG","status":"in_progress","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancG","source_review_bead":"revG"}}]'
+GA=$("$SUT" upsert --anchor tk-ancG --lane codex --locus "assets/scripts/g.sh:a()" --message "guard the read")
+GB=$("$SUT" upsert --anchor tk-ancG --lane codex --locus "assets/scripts/g.sh:b()" --message "quote the expansion")
+out=$("$SUT" fix-in-flight --anchor tk-ancG); rc=$?
+eq "$rc" "1" "fix-in-flight exits 1 when no must-fix finding is open"
+eq "$out" "" "…and reports no unanswered finding"
+# The ruling hangs fuG's close-ordering edge onto GA, so fuG is GA's fix in flight.
+"$SUT" set-disposition --finding "$GA" --anchor tk-ancG --disposition must-fix
+out=$("$SUT" fix-in-flight --anchor tk-ancG); rc=$?
+eq "$rc" "0" "fix-in-flight exits 0 while a live fix unit answers an open must-fix finding"
+eq "$out" "fuG in_progress $GA" "…naming the fix unit, its status, and the finding it answers"
+# The fix unit lands. GA's only blocker is closed, so no fix is in flight for it:
+# its release is close-answered's, and fix-in-flight reports it unanswered.
+gc bd update fuG --status=closed >/dev/null
+out=$("$SUT" fix-in-flight --anchor tk-ancG); rc=$?
+eq "$rc" "1" "a must-fix finding whose fix unit has landed has no fix in flight"
+eq "$out" "$GA" "…and is reported unanswered"
+hasnt " $out " " $GB " "an unvalidated finding is not a demand, so it is never reported"
+
+# An edge-less must-fix finding is matched by lane: a human finding takes the
+# human batch's fix unit (no source_review_bead), never a machine lane's.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancH","status":"open","assignee":"","title":"ancH","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fuHm","status":"open","assignee":"","title":"Rework: address codex findings","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancH","source_review_bead":"revH"}}]'
+HH=$("$SUT" upsert --anchor tk-ancH --lane human --locus "PR review" --message "rename the flag")
+gc bd update "$HH" --set-metadata finding.disposition=must-fix >/dev/null
+out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
+eq "$rc" "1" "a machine lane's fix unit does not answer an edge-less human finding"
+eq "$out" "$HH" "…so the human finding is reported unanswered"
+# pr-facts.sh files the human batch's fix unit: task_kind=rework, no source_review_bead.
+store "$(jq -c '. + [{"id":"fuHh","status":"open","assignee":"","title":"Address review comments","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancH","source_review":"5000"}}]' "$STUB_STORE")"
+out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
+eq "$rc" "0" "the human batch's fix unit answers the edge-less human finding"
+eq "$out" "fuHh open $HH" "…matched by lane"
+# A read that fails is never "no fix unit".
+STUB_DEP_GARBAGE=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "an unreadable blocker read exits 2"
+STUB_LIST_FAIL=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "an unreadable finding read exits 2"
+
+# ---------------------------------------------------------------------------
+# shed-orphaned: an unvalidated finding whose anchor has left the open set is
+# moot (no validator runs on closed work) and is shed, keyed on the anchor being
+# closed and never on an approve. A finding on a still-open anchor is left alone,
+# for gate-ensure's per-anchor pass.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-open","status":"open","assignee":"","title":"open anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}},
+        {"id":"tk-gone","status":"closed","assignee":"","title":"merged anchor","notes":"","metadata":{"merge_result":"merged"}}]'
+ORPH=$("$SUT" upsert --anchor tk-gone --lane correctness --locus "assets/scripts/g.sh:g()" --message "orphan on a merged anchor")
+LIVEF=$("$SUT" upsert --anchor tk-open --lane correctness --locus "assets/scripts/h.sh:h()" --message "live on an open anchor")
+"$SUT" shed-orphaned --reason "test"
+eq "$(bstatus "$ORPH")" "closed" "shed-orphaned closes an unvalidated finding on a closed anchor"
+eq "$(bstatus "$LIVEF")" "open" "…and leaves one on a still-open anchor for gate-ensure's per-anchor pass"
+
+# ---------------------------------------------------------------------------
+# upsert files a finding in ONE write, so a failure leaves a fully stamped
+# finding or none. A bead stamped in a second write was left open with no
+# metadata when that write failed: no finding reader selects it, and the retry's
+# dedup, which reads finding.key, filed a stamped twin beside it.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancA","status":"open","assignee":"","title":"ancA","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness"}}]'
+# The id the stub's next create mints.
+next_id() { printf 'new-%s' "$(( $(jq 'length' "$STUB_STORE") + 1 ))"; }
+# Open beads titled as findings that carry no task_kind, so no finding reader sees them.
+live_unstamped() {
+  jq -r '[ .[] | select((.status // "open") != "closed") | select((.title // "") | startswith("finding["))
+               | select(((.metadata // {}).task_kind // "") == "") ] | length' "$STUB_STORE"
+}
+live_titled() { jq -r --arg t "$1" '[ .[] | select((.status // "open") != "closed") | select(.title == $t) ] | length' "$STUB_STORE"; }
+upsert_a() { "$SUT" upsert --anchor tk-ancA --lane correctness --locus "assets/scripts/atomic.sh:$1()" --message "$2"; }
+key_a() { "$SUT" key --lane correctness --locus "assets/scripts/atomic.sh:$1()" --message "$2"; }
+
+: > "$STUB_GC_LOG"
+FA1=$(upsert_a one "stamp the birth write")
+eq "$(meta "$FA1" 'finding.key')" "$(key_a one "stamp the birth write")" "the create lands the finding's key"
+has "$(cat "$STUB_GC_LOG")" "--metadata {\"task_kind\":\"finding\",\"anchor_bead\":\"tk-ancA\"" "the identity rides the create"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata task_kind=finding" "…and no second write stamps it"
+
+# The incident: the store refuses every write to the bead after its create.
+NX=$(next_id)
+export STUB_UPDATE_FAIL="$NX"
+FA2=$(upsert_a two "survive a refused second write"); rc=$?
+export STUB_UPDATE_FAIL=""
+eq "$rc" "0" "a store that refuses every write after the create still files the finding"
+eq "$FA2" "$NX" "…and upsert returns it"
+eq "$(meta "$NX" 'finding.key')" "$(key_a two "survive a refused second write")" "…carrying its key"
+eq "$(live_unstamped)" "0" "…so no open finding bead is left unstamped"
+eq "$(upsert_a two "survive a refused second write")" "$NX" "the retry re-raises that finding"
+eq "$(live_titled "finding[correctness]: survive a refused second write")" "1" "…and files no twin"
+
+BEFORE=$(jq 'length' "$STUB_STORE")
+export STUB_CREATE_FAIL=1
+FA3=$(upsert_a three "retry a refused create"); rc=$?
+export STUB_CREATE_FAIL=""
+eq "$rc" "2" "a refused create exits 2"
+eq "$FA3" "" "…prints no finding"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and leaves no bead"
+FA3b=$(upsert_a three "retry a refused create")
+eq "$(meta "$FA3b" 'finding.key')" "$(key_a three "retry a refused create")" "the retry files the finding with its key"
+eq "$(live_titled "finding[correctness]: retry a refused create")" "1" "…once"
+
+# The create lands and its reply is lost: the key it was born with finds it.
+NX=$(next_id)
+export STUB_CREATE_GARBAGE=1
+FA4=$(upsert_a four "recover a lost create reply"); rc=$?
+export STUB_CREATE_GARBAGE=""
+eq "$rc" "0" "a create whose reply does not parse is recovered in the same call"
+eq "$FA4" "$NX" "…by the key it was born with"
+eq "$(live_unstamped)" "0" "…and no open finding bead is left unstamped"
+eq "$(upsert_a four "recover a lost create reply")" "$NX" "the retry re-raises the landed finding"
+eq "$(live_titled "finding[correctness]: recover a lost create reply")" "1" "…and files no twin"
+# Inside a reconcile pass bd_list is memoized, and upsert's dedup read has cached
+# the anchor's findings from before the create.
+GC_RECONCILE_BD_CACHE=$(mktemp -d "$TMP/bdcache.XXXXXX"); export GC_RECONCILE_BD_CACHE
+NX=$(next_id)
+export STUB_CREATE_GARBAGE=1
+FA6=$(upsert_a six "recover a lost reply past the pass cache"); rc=$?
+export STUB_CREATE_GARBAGE=""
+unset GC_RECONCILE_BD_CACHE
+eq "$rc/$FA6" "0/$NX" "inside a reconcile pass the recovery reads past the cached pre-create findings"
+
+# The create lands without its payload: the keyless bead is closed, not left open.
+NX=$(next_id)
+export STUB_DROP_KEYS="$NX:task_kind,anchor_bead,finding.lane,finding.key,finding.disposition,finding.source"
+FA5=$(upsert_a five "close a keyless birth"); rc=$?
+export STUB_DROP_KEYS=""
+eq "$rc" "2" "a create whose payload did not land exits 2"
+eq "$FA5" "" "…prints no finding"
+eq "$(bstatus "$NX")" "closed" "…and closes the keyless bead it left"
+eq "$(live_unstamped)" "0" "…so no open finding bead is left unstamped"
+FA5b=$(upsert_a five "close a keyless birth")
+eq "$(meta "$FA5b" 'finding.key')" "$(key_a five "close a keyless birth")" "the retry files the finding with its key"
+eq "$(live_titled "finding[correctness]: close a keyless birth")" "1" "…and it is the only open bead with that title"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

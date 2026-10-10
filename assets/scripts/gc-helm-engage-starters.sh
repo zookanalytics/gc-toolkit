@@ -4,13 +4,18 @@
 # its visit. A seed establishes the TOPIC and the sitting's READINESS to talk;
 # it does not set an agenda or presume a direction — the operator leads once
 # engaged. The one investigative seed (unstick-a-stall) still names no single
-# cause. These live here, not inline in engage's prompt loop, so they can be
-# tuned without touching the CLI. `__SUBJECT__` is replaced with the subject
-# bead id at emit time.
+# cause. A lens brief names a skill the sitting loads and reads the subject
+# through (`engage --skill`); a seed or the operator's own opener, when there is
+# one, follows it. These live here, not inline in engage's prompt loop, so they
+# can be tuned without touching the CLI. `__SUBJECT__` is replaced with the
+# subject bead id and `__SKILL__` with the skill name at emit time.
 # Interface:
 #   gc-helm-engage-starters.sh list                 -> "<key>\t<label>\t<letter>" per seed
 #   gc-helm-engage-starters.sh seed <key> [subject] -> the seed body on stdout
-# Exit: 0 ok, 2 unknown key / usage.
+#   gc-helm-engage-starters.sh lens <skill> [subject] [opener]
+#                                                   -> the lens brief on stdout,
+#                                                      the opener verbatim after it
+# Exit: 0 ok, 2 unknown key / not a skill name / usage.
 # Caller: assets/scripts/gc-helm.sh (cmd_engage).
 set -eu
 
@@ -54,6 +59,31 @@ H
     esac
 }
 
+# lens_body <with-opener> — the raw lens brief, with the literal __SKILL__ and
+# __SUBJECT__ placeholders. The skill's own method carries a final step written
+# for the bead it was built to serve (a review skill ends in a signoff.sh
+# verdict on its review bead), and a sitting holds a visit, not that bead, so
+# the brief keeps the skill's judgment and withholds its final writes. Its last
+# sentence says what to do first: with no opener the lens is the whole
+# assignment, and with one the opener that follows decides.
+lens_body() {
+    cat <<'H'
+The operator engaged this sitting to look at __SUBJECT__ through the __SKILL__
+skill. Load that skill before you prep, and keep its lens for the whole sitting:
+read and judge __SUBJECT__ and its universe the way the skill does. Use its way
+of reading and judging, not its final step. A review verdict, a sign-off, or any
+other write the skill makes on the bead it was written for is not yours to make,
+because you hold a visit, not that bead. State the skill's judgment in your
+framing instead. If no skill by that name is available to you, say so at the top
+of your framing and continue without it.
+H
+    if [ "$1" = 1 ]; then
+        echo "The operator's opener follows and says what to do first."
+    else
+        echo "Post your framing through that lens, then WAIT for the operator's direction."
+    fi
+}
+
 case "${1:-}" in
     list)
         seed_list
@@ -71,18 +101,39 @@ case "${1:-}" in
             exit 2
         fi
         ;;
+    lens)
+        [ $# -ge 2 ] || { echo "$PROG: lens needs <skill>" >&2; exit 2; }
+        skill="$2"
+        subject="${3:-<subject>}"
+        opener="${4:-}"
+        # A skill name is letters, digits, dots and hyphens. Refusing anything
+        # else keeps the plain s|| below sound, since no sed metacharacter can
+        # reach the replacement.
+        case "$skill" in
+            ""|*[!A-Za-z0-9._-]*) echo "$PROG: lens: '$skill' is not a skill name" >&2; exit 2 ;;
+        esac
+        with_opener=0
+        if [ -n "$opener" ]; then with_opener=1; fi
+        lens_body "$with_opener" | sed "s|__SUBJECT__|$subject|g; s|__SKILL__|$skill|g"
+        # The opener is the operator's own text, so it is emitted verbatim and
+        # never passes through the substitution.
+        if [ "$with_opener" = 1 ]; then printf '\n%s\n' "$opener"; fi
+        ;;
     ""|-h|--help)
         cat >&2 <<'U'
 usage: gc-helm-engage-starters.sh list
        gc-helm-engage-starters.sh seed <key> [subject]
+       gc-helm-engage-starters.sh lens <skill> [subject] [opener]
 
   list   print "<key>\t<label>\t<letter>" for each starter seed, in menu order.
   seed   print the named seed's body, replacing __SUBJECT__ with [subject].
+  lens   print the brief that seeds a sitting with <skill> as its lens on
+         [subject]; a non-empty [opener] follows it verbatim.
 U
         [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || exit 2
         ;;
     *)
-        echo "$PROG: unknown subcommand '$1' (try: list, seed)" >&2
+        echo "$PROG: unknown subcommand '$1' (try: list, seed, lens)" >&2
         exit 2
         ;;
 esac

@@ -128,6 +128,10 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   pattern is *surfaced* to the operator (held with the block stated), never
   adopted; it promotes later on corroboration or an explicit `learn this`
   endorsement.
+  `obs.source` records who filed an observation, not whose words it carries,
+  so an operator correction captured by the agent it corrected reads `self`.
+  The distiller checks the voice behind each `self` observation before it
+  treats a cluster as all-self.
 - **Remedy class (Gate 2).** A remedy that is an exhortation ("be
   thorough", "try harder") or that fixes a structural failure (a
   verification gap, a race, a missing mechanical check) does not become a
@@ -193,8 +197,9 @@ code, docs, and bead bodies someone else reads. Each such role composes the base
 and its class fragment, so a universal standard lives in the base once while a
 class-specific one reaches only the classes it impacts — a standard about
 changing a repo does not reach the human converse class. The classes: polecats
-(polecat, polecat-codex), human (converse and its per-model variants), system
-(deacon, mechanik, proactive, witness, refinery, keeper).
+(polecat, polecat-codex), human (the converse-opus, converse-fable and
+converse-codex sittings), system (deacon, mechanik, proactive, witness,
+refinery, keeper).
 `formulas/mol-review.toml` resolves these fragments during a review and holds
 the diff's output to them. Hard cap **12 entries per fragment**.
 

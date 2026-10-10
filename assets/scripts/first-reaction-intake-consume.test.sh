@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for mol-first-reaction.toml's live-intake consume block
-# (tk-amc65l.1 / tk-lefs8h).
+# Hermetic test for mol-first-reaction.toml's live-intake consume block.
 #
 # A direct pour of a subject marked gc.reaction_owned=1 records the reaction
 # (gc.proactive_reaction=1, the permanent proof) and consumes the one-shot intake
@@ -63,11 +62,14 @@ case "$1 $2" in
     esac
     exit 0 ;;
   "bd show")
+    # The read-back serves each marker in the form bd stores it:
+    # `--set-metadata gc.proactive_reaction=1` as the JSON number 1, and the
+    # create-time `--metadata '{"gc.reaction_owned":"1"}'` as the string "1".
     pr="$(cat "$STATE/proactive" 2>/dev/null || true)"
     ik="$(cat "$STATE/intake" 2>/dev/null || true)"
     jq -n --arg pr "$pr" --arg ik "$ik" \
       '[{id:"tk-sub", metadata:
-          ((if $pr=="1" then {"gc.proactive_reaction":"1"} else {} end)
+          ((if $pr=="1" then {"gc.proactive_reaction":1} else {} end)
          + (if $ik=="1" then {"gc.reaction_owned":"1"} else {} end))}]' ;;
 esac
 STUB

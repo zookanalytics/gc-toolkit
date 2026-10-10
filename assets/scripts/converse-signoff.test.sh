@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # converse-signoff.test.sh — regression test for the converse role's
-# thread-ending contract (bugs tk-bzm86 and tk-mndjz; precedent:
+# thread-ending contract (precedent:
 # gate-visit.test.sh).
 #
 # Two operator complaints, opposite in sign, and the contract has to hold
-# both at once — which is why they are guarded in one file. tk-bzm86: a
+# both at once — which is why they are guarded in one file. One: a
 # sitting ended and said nothing, so the operator was left reading a
-# thread that had already gone. tk-mndjz: a visit that needed no operator
+# thread that had already gone. The other: a visit that needed no operator
 # at all held a sitting anyway, so the operator was asked to decide about
 # a state they already knew and accepted. The first bug's fix — "never end
 # without a sign-off" — is the second bug's cause if it is read as "every
@@ -17,23 +17,23 @@
 # vanished. The work was recorded correctly and the operator was never
 # told. Two endings produce that same disappearance —
 #   1. deliberate close (step 6 → step 7 drains, the session goes), and
-#   2. an unattended kill. The per-model sittings run wake_mode=resume, so
-#      the respawn replays the thread; only the legacy fresh pool, or a
-#      failed resume, comes back without it.
+#   2. an unattended kill. The sittings run wake_mode=resume, so the respawn
+#      replays the thread; only a failed resume comes back without it.
 # Nothing pack-owned runs at kill time, so the contract has to hold the
 # line in two places, and BOTH are load-bearing:
 #   • the durable trace is stamped when the hold BEGINS, not only at
 #     close — it is the demand gate the board reads and work blocks on,
-#     and it is also what a fresh respawn or a failed resume finds; and
+#     and it is also what a failed resume finds; and
 #   • a deliberate close ends with a sign-off — a plain-language wrap-up
 #     of what the sitting settled — so the last line the operator sees is
 #     an ending rather than an unanswered question.
 #
-# Neither ending is a clock. `idle_timeout = "0"` keeps converse off the
-# idle ladder, so a held sitting ends when its visit closes. That
-# is a config value with no other guard, which is the shape that gets
-# tidied back to a plausible-looking "8h", so it is pinned here alongside
-# the operator lever that ends a sitting by hand (`gc-helm dismiss`).
+# Neither ending is a clock. `idle_timeout = "0"` on every converse-<model>
+# template keeps a sitting off the idle ladder, so a held sitting ends when
+# its visit closes. That is a config value with no other guard, which is the
+# shape that gets tidied back to a plausible-looking "8h", so it is pinned
+# here alongside the operator lever that ends a sitting by hand
+# (`gc-helm dismiss`).
 #
 # Each assertion below is one way the fix silently reverts. A prompt is
 # prose: a well-meaning edit that "tidies" the hold step can drop the
@@ -42,13 +42,19 @@
 # test rather than a comment.
 #
 # Hermetic: reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-PROMPT="$REPO/agents/converse/prompt.template.md"
-ATOML="$REPO/agents/converse/agent.toml"
+PROMPT="$REPO/agents/_converse/prompt.template.md"
+# A sitting runs from one of the converse-<model> templates. They differ only in
+# provider and model, and converse-opus carries the per-field documentation the
+# others cite, so the config's prose is read there and its values on every one.
+ATOML="$REPO/agents/converse-opus/agent.toml"
+SITTINGS=("$REPO"/agents/converse-*/agent.toml)
 HELM="$REPO/assets/scripts/gc-helm.sh"
 ENGAGE="$REPO/docs/gascity-human-engagement.md"
 # Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
@@ -91,7 +97,7 @@ eq() {
     if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
 }
 
-for f in "$PROMPT" "$ATOML" "$HELM" "$ENGAGE" \
+for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" \
     "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
@@ -107,12 +113,20 @@ echo "── the hold stamps the takeaway BEFORE waiting (the stamp files the de
 # step 2. Under wake_mode=resume the thread replays across a restart, so the
 # stamp does not rest on surviving a kill; a fresh respawn or a failed resume is
 # the one case that comes back without the thread, and there the durable trace
-# is what a reader finds instead. The takeaway on the item, the demand gate and
+# is what a reader finds instead. The takeaway on the subject, the demand gate and
 # the gc.hold_demand read-back ship as converse-hold.sh (run against stubs in
-# converse-hold.test.sh, which also pins the stamp to the item and the writer
+# converse-hold.test.sh, which also pins the stamp to the subject and the writer
 # search); here the prompt is pinned to CALL it before it waits.
 have "the hold runs converse-hold.sh before it waits" 'converse-hold.sh' "$SK_HOLD"
 have "the hold skill keeps the stamp-before-wait invariant" 'Stamp BEFORE you wait' "$SK_HOLD"
+
+echo "── a stand-down ruling states its disposition ──"
+# gc-helm.sh takeaway refuses a --release park that names no disposition
+# unless an open blocker already holds the anchor, and writes nothing. A
+# stand-down ruling ends the wait, so the command the sitting copies carries
+# --no-wait.
+have "the stand-down example passes --no-wait" \
+     'takeaway <anchor> "<ruling>" --release --no-wait' "$SK_HOLD"
 
 # The cross-rig takeaway-writer resolution moved out of the prompt into
 # converse-hold.sh and converse-signoff.sh; it runs against stubs in
@@ -132,11 +146,11 @@ have "the close goes through the shared guarded close (visit-close.sh), which st
     'visit-close.sh' "$SK_SETTLE"
 have "the guarded close names only the visit" '--visit "$VISIT"' "$SK_SETTLE"
 
-# THE ORDER, not the presence (tk-747cl). Closing the visit removes the
+# THE ORDER, not the presence. Closing the visit removes the
 # session's last wake reason, and the no-wake-reason drain pinned further down
 # takes the pane whole about a minute later without reading anything out of
 # it. So a sign-off written AFTER the close is written into a surface that is
-# already condemned: on tk-z9nln the substantive answer to the operator's
+# already condemned: the substantive answer to the operator's
 # question was posted 15 seconds after the visit closed, and they almost
 # certainly never saw it. Step 7's heading always said "sign off, then close";
 # its procedure did the opposite, and the procedure is the half that runs.
@@ -155,9 +169,9 @@ else
     # immediately before it closes, so the stamp lands after the sign-off
     # whenever the CALL does. A call ahead of the sign-off reopens the original
     # bug — a death between the stamp and the sign-off strands a visit that then
-    # finishes silently, dropping the sign-off it still owed (tk-ayd4c0) — and a
+    # finishes silently, dropping the sign-off it still owed — and a
     # sign-off written after the close lands in a pane the drain is already
-    # taking (tk-747cl).
+    # taking.
     s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF '<subject-id> — <short human label>' | head -1 | cut -d: -f1)
     s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'visit-close.sh' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
@@ -264,8 +278,8 @@ fi
 # That paragraph was necessary and not sufficient. The role's FIRST
 # sentence still read "You hold visits: bounded sittings", so the model was
 # already set — visit == sitting — by the time the earned-sitting rule
-# arrived to qualify it, and the two contradicted each other on page one
-# (tk-flctq). A definition has to be right where it is first given, which
+# arrived to qualify it, and the two contradicted each other on page one.
+# A definition has to be right where it is first given, which
 # means "sitting" naming only the held path from the opening line.
 if printf '%s\n' "$INTRO" | grep -q 'filed request'; then
     ok "the opening defines a visit as a request for a sitting"
@@ -366,7 +380,7 @@ if printf '%s\n' "$HOLD_DEF" | grep -q 'demand'; then
     ok "the Hold definition ties the mandatory stamp to the demand it files"
 else
     bad "the Hold definition ties the mandatory stamp to the demand it files" \
-        "the stamp is mandatory because the hold IS a demand — the gate the item blocks on and re-surfaces under; that reason, not restart-fear, is what a tidy edit must not drop"
+        "the stamp is mandatory because the hold IS a demand — the gate the conversation blocks on; that reason, not restart-fear, is what a tidy edit must not drop"
 fi
 if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
     ok "the Hold definition makes the hold-time stamp mandatory"
@@ -390,28 +404,32 @@ lacks "config header no longer equates a visit with a sitting" \
     'holds visits: bounded sittings' "$ATOML" \
     "the header states visit == sitting, which is the behaviour tk-mndjz removed"
 
-echo "── the idle reap is OFF for this role, and the operator's lever exists ──"
+echo "── the idle reap is OFF for every sitting template, and the operator's lever exists ──"
 # The layout rule on this surface: an operator reading a held thread must not
 # lose it to a clock. Idle is measured from terminal OUTPUT, so a reader
 # produces none, and 8h of attention reads as 8h of abandonment. A template
 # whose idle_timeout is <= 0 is never registered with the idle tracker, so the
 # ladder is never reached. This is a single config VALUE with nothing else
 # guarding it: an edit that puts a plausible-looking duration back removes the
-# rule and passes every other assertion in this file.
-IDLE_VAL="$(sed -n 's/^idle_timeout = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n')"
-case "$IDLE_VAL" in
-    0|0s|0m|0h)
-        ok "agent.toml keeps the idle reap disabled (idle_timeout=$IDLE_VAL)" ;;
-    "")
-        bad "agent.toml keeps the idle reap disabled" \
-            "no idle_timeout line at all; an absent value disables the reap too, but it takes the explanation with it — keep it explicit" ;;
-    *)
-        bad "agent.toml keeps the idle reap disabled" \
-            "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
-esac
+# rule and passes every other assertion in this file. The idle tracker reads it
+# per template, so every template a sitting can run from is checked.
+for SITTING in "${SITTINGS[@]}"; do
+    NAME="$(basename "$(dirname "$SITTING")")"
+    IDLE_VAL="$(sed -n 's/^idle_timeout = "\(.*\)"$/\1/p' "$SITTING" | tr -d '\n')"
+    case "$IDLE_VAL" in
+        0|0s|0m|0h)
+            ok "$NAME keeps the idle reap disabled (idle_timeout=$IDLE_VAL)" ;;
+        "")
+            bad "$NAME keeps the idle reap disabled" \
+                "no idle_timeout line at all; an absent value disables the reap too, but it leaves nothing for a reader or this test to see — keep it explicit" ;;
+        *)
+            bad "$NAME keeps the idle reap disabled" \
+                "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
+    esac
+done
 have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
-# With no idle clock and no release valve, a held visit nobody answers holds a
-# pool slot with nothing able to reclaim it. The verb IS that valve, so its
+# With no idle clock and no release valve, a held visit nobody answers keeps its
+# session running with nothing able to end it. The verb IS that valve, so its
 # absence is not a missing convenience.
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
@@ -427,7 +445,7 @@ have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE"
 
 # Page one outranks a rule further down here too: the doc opens with the
 # pack's vocabulary, and a definition reading "a visit IS a sitting, held
-# live, closed when the sitting ends" teaches the tk-mndjz behaviour to
+# live, closed when the sitting ends" teaches that equation to
 # every reader who never reaches the section that corrects it. The
 # vocabulary paragraph — not the doc as a whole — has to carry both
 # endings, so it is extracted and checked on its own.
@@ -455,7 +473,7 @@ fi
 # The doc defines a visit TWICE — the vocabulary above, and again in
 # "What upstream does not ship", which announces itself as "a definition
 # first, because everything below uses it". Fixing the first and leaving
-# the second is what happened (tk-flctq): the block still opened "A visit
+# the second is what happened: the block still opened "A visit
 # is one bounded sitting", then contradicted itself a few lines later with
 # the silent close. Both copies are authoritative, so both are pinned, and
 # the stale phrase is barred from the whole file — the next definition
@@ -490,29 +508,35 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     'is one bounded sitting' "$ENGAGE" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
-echo "── the post-sitting drain is documented, not just the reap ──"
-# tk-tufrw: an operator lost an unsubmitted multi-paragraph reply. The
-# reap section above was written about a HELD sitting and reads as the
-# complete account of how the pane goes; it is not. Once a sitting ENDS
-# the session has no wake reason and is drained as `no-wake-reason`
-# within about a minute, and that drain kills the pane and its process
-# tree outright — nothing reads the composer, and nothing warns.
-# Every claim below is load-bearing for a reader deciding whether a
-# visible pane is safe to type into, and each one was absent (not wrong)
-# before the incident. Absence is exactly what made the window invisible.
-# The HEADING, not the phrase: the forward pointer added to the reap
+echo "── the post-sitting ending is documented, not just the held one ──"
+# An operator lost an unsubmitted multi-paragraph reply. The
+# held-sitting section above reads as the complete account of how the pane
+# goes; it is not. Once a sitting ENDS its manual session stays up until the
+# converse-reap order closes it, on the first pass that finds the visit closed
+# and the pane unattached, and that close kills the pane and its process tree
+# outright: nothing reads the composer, and nothing warns. Every claim below is
+# load-bearing for a reader deciding whether a visible pane is safe to type
+# into, so each is pinned inside that section rather than anywhere in the doc.
+# The HEADING, not the phrase: the forward pointer in the held-sitting
 # section quotes the section name, so a bare phrase match passes even
 # with the section itself deleted (caught by mutating this file).
 have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
-have "doc names the drain reason" 'no-wake-reason' "$ENGAGE"
-# The mechanism, pinned at both ends: the deferred signal the reconciler
-# actually sends (metadata, not a keystroke) and the call that actually
-# destroys the pane. A reader who trusts a visible pane needs to know
-# there is no interruption, no prompt and no read-out first — the pane
-# and everything composed in it goes in one step.
-have "doc names the deferred drain signal" 'GC_DRAIN_ACK=1' "$ENGAGE"
-have "doc names the destructor" 'KillSessionWithProcesses' "$ENGAGE"
-have "doc rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$ENGAGE"
+POST_SEC="$TMPD/post-sitting-section.txt"
+awk '/^## How a pane dies when no sitting is live/ {f=1; next} f && /^## / {exit} f {print}' \
+    "$ENGAGE" >"$POST_SEC"
+# What ends a settled sitting is the pack's reap, not a runtime clock: the
+# awake set keeps a manual session, so the pool's no-wake-reason drain never
+# reaches one. A section that drops either half has a reader trusting a clock
+# that does not run, or missing the one that does.
+have "the section names the reap that ends a settled sitting" 'converse-reap' "$POST_SEC"
+have "the section names the reap's close" 'gc session close' "$POST_SEC"
+have "the section says what holds the pane up" 'manual origin' "$POST_SEC"
+have "the section says the pool drain does not reach a sitting" 'no-wake-reason' "$POST_SEC"
+# The mechanism, pinned at the call that destroys the pane. A reader who
+# trusts a visible pane needs to know there is no interruption, no prompt and
+# no read-out first — the pane and everything composed in it goes in one step.
+have "the section names the destructor" 'KillSessionWithProcesses' "$POST_SEC"
+have "the section rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$POST_SEC"
 # Regression guard, not decoration. The first version of this section
 # said the drain's first act was `Provider.Interrupt` -> SendKeysRaw C-c
 # clearing the composer, and THIS suite pinned that string — so the false
@@ -521,21 +545,21 @@ have "doc rules out the keystroke" 'no Ctrl-C keystroke injection into the pane'
 # only interrupt wrapper and has no caller outside its own unit test;
 # nothing on this path types into the pane. Keep it that way.
 lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
-    "the no-wake-reason drain signals through GC_DRAIN_ACK metadata and kills; it sends no keys"
-have "doc records the misleading stop wording" 'drain acknowledged by agent' "$ENGAGE"
-have "doc points at the upstream filing" 'gc-ze774' "$ENGAGE"
+    "the stop kills the pane's process tree through Provider.Stop; it sends no keys"
+# Attachment is the reap's only proxy for a reader, and with one tmux client
+# switched between sessions it covers only the pane on screen. A reader who
+# takes "the reap skips attached panes" as protection for a pane they switched
+# away from is the one who loses a draft.
+have "the section says attachment covers only the pane on screen" 'one tmux client' "$POST_SEC"
+have "the section points at the upstream filing" 'gc-ze774' "$POST_SEC"
 # The operator's ruling is a PROHIBITION, and it is the part most likely
 # to be softened by a later edit into "capture it on the way out" — which
 # is the option they explicitly overrode. Pin the ruling itself, not a
 # paraphrase of it.
-have "doc carries the hard-no ruling" 'should be a hard no' "$ENGAGE"
-# A live pane is not evidence the system knows anyone is there: the
-# session survives on the pool having ANY open visit, so a reader must
-# not infer protection from the pane still being up.
-have "doc says the pane is held by unrelated demand" 'demand-driven' "$ENGAGE"
-# A reader who finds the reap section first must not stop there: without
-# a forward pointer the held-sitting account silently doubles as "all the
-# ways the pane goes", which is the reading that left this window
+have "doc carries the hard-no ruling" 'should be a hard no' "$POST_SEC"
+# A reader who finds the held-sitting section first must not stop there:
+# without a forward pointer the held-sitting account silently doubles as "all
+# the ways the pane goes", which is the reading that left this window
 # unguarded in the first place.
 HELD_SEC="$(awk '/^## How a held sitting ends/ {f=1; next} f && /^## / {exit} f {print}' "$ENGAGE")"
 if printf '%s\n' "$HELD_SEC" | grep -qF 'How a pane dies when no sitting is live'; then
@@ -544,11 +568,11 @@ else
     bad "the held-sitting section points at the other ending" \
         "without the pointer, the held-sitting account reads as the complete one"
 fi
-# Both role-facing copies carry it too. The config is where someone goes
-# to tune idle_timeout, and the prompt is what the session reads at wake;
-# a correction that lands only in the central doc reaches neither.
-have "config names the second, shorter clock" 'no-wake-reason' "$ATOML"
-have "prompt names the second, shorter clock" 'no-wake-reason' "$PROMPT"
+# Both role-facing copies carry it too. converse-opus is where someone goes to
+# tune idle_timeout, and the prompt is what the session reads at wake; a
+# correction that lands only in the central doc reaches neither.
+have "config names the reap that ends a settled sitting" 'converse-reap' "$ATOML"
+have "prompt names the reap that ends a settled sitting" 'converse-reap' "$PROMPT"
 
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"
@@ -558,20 +582,20 @@ have "takeaway usage documents the converse caller" 'host|proactive|converse' "$
 have "takeaway stamps gc.takeaway" 'gc.takeaway=$text' "$HELM"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group (tk-msfmu)
+# THE CLAIM BOUNDARY — a turn is claimed WITHIN a continuation group
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# THE BUG: `agent.toml` names `specs/tk-h9pq5/design-doc.md` as the design
-# authority, and it says the role "re-claims within the group and drains when
-# the group is dry". The shipped prompt said the opposite — "a claim is
-# authoritative even when it names a different subject than your last one" —
-# because `gc hook --claim` has no group filter, so the scoped re-claim was not
-# expressible with the tool the prompt calls its only source of work. On
-# 2026-08-22 an operator mid-conversation about the helm board UI had an
-# unrelated merge-skill visit prepped in the same thread.
+# THE BUG: the converse design authority, `specs/tk-h9pq5/design-doc.md`, says
+# the role "re-claims within the group and drains when the group is dry". The
+# shipped prompt said the opposite — "a claim is authoritative even when it
+# names a different subject than your last one" — because `gc hook --claim`
+# has no group filter, so the scoped re-claim was not expressible with the tool
+# the prompt calls its only source of work. On 2026-08-22 an operator
+# mid-conversation about the helm board UI had an unrelated merge-skill visit
+# prepped in the same thread.
 #
 # THE FIX: `assets/scripts/converse-claim.sh` claims, and puts a foreign turn
-# BACK in the pool before telling the session to drain. The release is the
+# BACK, unclaimed, before telling the session to drain. The release is the
 # load-bearing half — draining on a turn still assigned to a dying session is
 # worse than the bug, because the reconciler's reassign path refuses a held
 # visit by design.
@@ -603,7 +627,7 @@ have "step 8 re-claims within the group" "scoped to this thread's group" "$SK_CO
 # mechanism), so a file-wide grep is satisfied by the prose alone: mutating
 # the nudge to "Claim with gc hook --claim --json; work the visit." — the
 # regression this pair exists to catch — left all assertions green while these
-# two read the whole file (tk-mpl1c).
+# two read the whole file.
 NUDGE_VAL="$TMPD/converse-nudge.txt"
 # `tr -d` the newline: sed prints an empty LINE for an empty capture, so
 # without it `nudge = ""` writes one byte and reads as non-empty below.
@@ -611,11 +635,25 @@ sed -n 's/^nudge = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n' > "$NUDGE_VAL"
 # An absent key and a deliberately empty one are the same value to the engine
 # and different to a reader, so the field has to stay written out.
 if grep -qE '^nudge = ' "$ATOML"; then
-    ok "agent.toml states its nudge explicitly"
+    ok "converse-opus states its nudge explicitly"
 else
-    bad "agent.toml states its nudge explicitly" \
+    bad "converse-opus states its nudge explicitly" \
         "the key is gone; deleting it loses the record of why the field is empty"
 fi
+# The nudge is read per template, and the sitting templates differ only in
+# provider and model, so every one states the same nudge. Everything below reads
+# converse-opus's value, so a sibling that drifted from it would go unchecked.
+for SITTING in "${SITTINGS[@]}"; do
+    [ "$SITTING" -ef "$ATOML" ] && continue
+    NAME="$(basename "$(dirname "$SITTING")")"
+    if grep -qE '^nudge = ' "$SITTING" &&
+        [ "$(sed -n 's/^nudge = "\(.*\)"$/\1/p' "$SITTING" | tr -d '\n')" = "$(cat "$NUDGE_VAL")" ]; then
+        ok "$NAME states the same nudge as converse-opus"
+    else
+        bad "$NAME states the same nudge as converse-opus" \
+            "its nudge is missing or differs from converse-opus's, which is the only value the checks below read"
+    fi
+done
 if [ -s "$NUDGE_VAL" ]; then
     have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$NUDGE_VAL"
     lacks "…and does not still tell the session to run the raw claim" \
@@ -626,7 +664,7 @@ if [ -s "$NUDGE_VAL" ]; then
     # pane is a machine work-log, so only here does nudge length cost the operator
     # anything. It ratcheted 21 -> 40 -> 55 words in 13 days because each incident
     # appended a clause and none removed one, and the operator read the result in
-    # their own thread (tk-82epi -> tk-mpl1c). The standing rule is "put the fix in
+    # their own thread. The standing rule is "put the fix in
     # the prompt or a script, not another clause here"; an instruction-dependent
     # rule fails silently, so the cap is the enforcement. It sits just above the
     # longest peer (proactive, 23 words) and well under the 40 that drew the first
@@ -763,7 +801,7 @@ eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked
 eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 
 # --- (EMPTYSTAMP) the stamp is empty; the tracks edge still carries it -------
-# tk-tu5g3. `gc hook --claim` reports the gc.continuation_group STAMP, and the
+# `gc hook --claim` reports the gc.continuation_group STAMP, and the
 # stamp lands empty on a minority of visits. An empty group turns the
 # deliberate (NOGROUP) fallback above from a rare benign case into THE failure
 # case, silently disabling this guard for exactly the turn it was written to
@@ -817,7 +855,7 @@ grep -q -- '--assignee=' <<< "$CUPD" \
 
 # (SPLIT) bd's claim guard refuses --assignee "" on an in_progress bead and
 # rolls the WHOLE update back, so batching the clears loses the ones that
-# needed no claim (tk-z27pw). One call doing both is the shape that fails.
+# needed no claim. One call doing both is the shape that fails.
 if grep -qE -- '--status=open.*--assignee=|--assignee=.*--status=open' <<< "$CUPD"; then
     bad "(SPLIT) the release is split into separate writes" \
         "status and assignee ride one update — the claim guard rolls both back"
@@ -934,7 +972,7 @@ grep -q 'could not release .*tk-sib1' "$CTMP/err" \
 read_back() {
     env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
         FAKE_SHOW_DIR="$CTMP/show.d" gc bd show "$1" --json \
-        | sed -e 's/.*"status":"\([^"]*\)".*"assignee":\("\([^"]*\)"\|null\).*/\1|\3/'
+        | sed -E -e 's/.*"status":"([^"]*)".*"assignee":("([^"]*)"|null).*/\1|\3/'
 }
 eq "$(read_back tk-foreign)" "open|" \
    "(VACUUM-HELD-NAMED) fixture: the named turn did read back released"
@@ -1316,7 +1354,7 @@ have "…and stamps the disposition beside the headline" 'gc.takeaway_settled=$n
 # argument and gc-helm died with `unknown flag '--waiting-on tk-… --waiting-on
 # tk-…'`. The empty case splits to nothing in every shell, so the bug was
 # invisible on sittings that routed nothing and fired reliably on the ones the
-# flag exists for — twice in one day before it was diagnosed (tk-2cy79). It
+# flag exists for — twice in one day before it was diagnosed. It
 # reverts by one pair of quotes coming off, so it is pinned from both sides.
 lacks "…and never as an unquoted string, which zsh does not split" \
       '--by converse $WAIT' "$REPO/assets/scripts/converse-signoff.sh" \
@@ -1325,10 +1363,10 @@ lacks "…nor teaches the broken idiom as deliberate" \
       'Unquoted on purpose' "$REPO/assets/scripts/converse-signoff.sh" \
       "the comment blessed the word-splitting idiom, so the next editor restores it"
 have "the routing rule tells converse to wire the wait" '--waiting-on <work-bead>' "$SK_SETTLE"
-# The takeaway is read back on the ITEM. The verification the block already
+# The takeaway is read back on the SUBJECT. The verification the block already
 # shipped checks `gc.outcome` on the VISIT, which is a different bead: a sitting
 # whose takeaway died still passed it and closed clean — the "unstamped closed
-# visit" this same step warns against, one bead over (tk-2cy79, recurrence 2).
+# visit" this same step warns against, one bead over.
 have "the takeaway is read back, not just the visit's outcome stamp" \
      'metadata["gc.takeaway"]' "$REPO/assets/scripts/converse-signoff.sh"
 # The ORDER is the safety property: the stamp is written first, so an edge that
@@ -1409,7 +1447,7 @@ fi
 # prompt states which and calls them. Matched on the CAPTURE, not the call: the
 # sign-off re-states a demand with the same tokens, so a looser pattern passes
 # on a hold that files nothing.
-have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$ITEM"' "$REPO/assets/scripts/converse-hold.sh"
+have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$GATED"' "$REPO/assets/scripts/converse-hold.sh"
 have "…and reads the demand id back off stdout" "awk '/^demand /{print \$2; exit}'" "$REPO/assets/scripts/converse-hold.sh"
 lacks "…and never authorizes a prose-only wait in its place" \
       'the takeaway is then the only record' "$REPO/assets/scripts/converse-hold.sh" \
@@ -1417,7 +1455,8 @@ lacks "…and never authorizes a prose-only wait in its place" \
 
 have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
-have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
+have "…and re-states the wait on the SUBJECT when it does not (cut-short consolidation)" \
+     '"$HELM" demand "$SUBJECT" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
@@ -1574,8 +1613,8 @@ fi
 # The step-7 sign-off/discharge bash ships as assets/scripts/converse-signoff.sh
 # (§C1 above still exercises the takeaway-writer RESOLUTION inside the prompt's
 # fenced block; here the whole discharge is RUN). These assertions drive the
-# script against stubs: the takeaway lands on the item with the WAIT disposition,
-# the demand discharges one of two ways keyed to --ruled, and a held item is
+# script against stubs: the takeaway lands on the subject with the WAIT disposition,
+# the demand discharges one of two ways keyed to --ruled, and a held subject is
 # released only when the sitting ruled. The writers are searched for on the
 # candidate roots, never assumed.
 echo "── step 7 discharge ships and runs as converse-signoff.sh ──"
@@ -1596,13 +1635,32 @@ cat >"$SOBIN/gc" <<'STUB'
 case "${2:-}" in
     show)
         case "${3:-}" in
-            v-x) jq -nc --arg sr "${SO_STALL-item-x}" \
-                    '[{id:"v-x",metadata:(({"task_kind":"visit"}+(if $sr=="" then {} else {"stall_root":$sr} end)))}]' ;;
+            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
+                    '[{id:"v-x",metadata:(({"task_kind":"visit"}
+                        +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
+                        +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
+                      +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
             *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
                  else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
-    list)  if [ "${SO_DEMAND:-1}" = "1" ]; then jq -nc '[{id:"d-x",assignee:"",metadata:{"gc.demand_for":"item-x"}}]'
-           else printf '[]\n'; fi ;;
+    list)
+        # The demand list the discharge filters client-side: a subject/anchor demand
+        # (SO_DEMAND, default on — the explicit merge-hold case) and/or a demand on
+        # the visit (SO_VISIT_DEMAND, default off — the conversation-wait case).
+        # SO_DEMAND_LIST replaces both with a literal list, for the cases where
+        # sibling sittings hold topic-keyed demands on one shared subject.
+        if [ -n "${SO_DEMAND_LIST:-}" ]; then printf '%s\n' "$SO_DEMAND_LIST"
+        else
+            items=""
+            [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","metadata":{"gc.demand_for":"item-x"}}'
+            if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
+                [ -n "$items" ] && items="$items,"
+                items="$items"'{"id":"d-v","assignee":"","metadata":{"gc.demand_for":"v-x"}}'
+            fi
+            printf '[%s]\n' "$items"
+        fi ;;
     gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
     close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
     update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
@@ -1632,7 +1690,7 @@ chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
 
 # run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
 # non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
-# a case dials SO_STALL / SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
+# a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
 # GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs.
 SOARGS=()
 SO_OUT=""; SO_RC=0
@@ -1644,65 +1702,174 @@ run_so() {
     SO_RC=$?
 }
 
-echo "── --ruled yes: record on the item, resolve the gate, release a held item ──"
-SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+echo "── --ruled yes: record on the subject, resolve the gate, release a held subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
 run_so
 eq "$SO_RC" "0" "the discharge exits 0 on a clean ruling"
-have "the takeaway lands on the item with the outcome and --no-wait" \
+have "the takeaway lands on the subject with the outcome and --no-wait" \
      'helm[RIG] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
 have "a ruled sitting resolves the demand gate" 'bd gate resolve d-x --reason approved' "$SOGC"
 have "…and stamps the ruling onto the demand's board sentence through the takeaway verb, whose --no-wait marks it settled" \
      'helm[RIG] takeaway d-x approved --by converse --no-wait' "$SOLOG"
 if grep -q 'gc.takeaway_settled' "$SOGC"; then bad "…and never hand-stamps the settled mark" "gc.takeaway_settled reached a direct bd update; the verb's --no-wait is its only writer"; else ok "…and never hand-stamps the settled mark, so the verb stays its only writer"; fi
-have "…and releases the held item back to the pool it named" \
+have "…and releases the held subject back to the pool it named" \
      'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
 
-echo "── --ruled no: re-state the demand, leave the item held ──"
-SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+echo "── --ruled no: re-state the demand, leave the subject held ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
 run_so
 eq "$SO_RC" "0" "the cut-short discharge exits 0"
-have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+have "an unruled sitting re-states the demand on the subject" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
 
-echo "── the item is the stall_root, and falls back to the subject ──"
-SOARGS=(--visit v-x --subject sub --outcome "x — y" --ruled no --still-owed z)
-run_so SO_STALL=item-q
-have "a named stall_root is the item the takeaway targets" 'takeaway item-q' "$SOLOG"
-run_so SO_STALL=
-have "an absent stall_root falls back to the subject" 'takeaway sub' "$SOLOG"
+# Under a standing scope two sittings share one bucket subject and each
+# holds its own topic-keyed demand on it. The discharge must resolve the exact
+# demand THIS sitting filed — the one converse-hold stamped as gc.hold_demand on
+# the visit — so a ruling on finding-b cannot resolve or re-state finding-a's
+# operator question. Two demands sit on item-x, A before B; the unscoped
+# first-match would resolve dA.
+echo "── --ruled yes discharges THIS sitting's demand, not a sibling topic's ──"
+TWO_DEMANDS='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_HOLD_DEMAND=dB SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
+eq "$SO_RC" "0" "the topic-scoped discharge exits 0"
+have "the ruling resolves the demand gc.hold_demand names" 'bd gate resolve dB --reason approved' "$SOGC"
+if grep -q 'gate resolve dA' "$SOGC"; then bad "…and never the sibling topic's gate" "gate resolve reached dA — a sibling topic's operator question"; else ok "…and never the sibling topic's gate (dA left shut)"; fi
+have "…and stamps the ruling onto its own demand's board sentence" 'helm[RIG] takeaway dB approved --by converse --no-wait' "$SOLOG"
+if grep -q 'takeaway dA' "$SOLOG"; then bad "…and never onto the sibling's" "the ruling reached dA's board sentence"; else ok "…and never onto the sibling's board sentence"; fi
+
+# With no gc.hold_demand stamped (a hold predating it), the fallback scan scopes
+# by the visit's escalation_key, so it still isolates finding-b from finding-a.
+echo "── the discharge isolates by topic even with no gc.hold_demand stamp ──"
+run_so SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
+have "the topic-scoped fallback resolves finding-b's demand" 'bd gate resolve dB --reason approved' "$SOGC"
+if grep -q 'gate resolve dA' "$SOGC"; then bad "…and not finding-a's" "the fallback scan resolved a sibling topic's demand"; else ok "…and not finding-a's demand"; fi
+
+echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
+# Default Phase A shape: converse-hold files the conversation demand on the visit,
+# not the anchor, so the PR is never frozen by the conversation. The discharge
+# finds and resolves it off the visit exactly as it does an anchor demand.
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
+eq "$SO_RC" "0" "the discharge exits 0 on a conversation-wait ruling"
+have "a ruled sitting resolves the demand gating the VISIT" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "…and stamps the ruling onto the visit demand's board sentence" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
+
+echo "── a cut-short conversation wait is MOVED off the closing visit onto the subject ──"
+# The visit is about to close, so a demand left on it orphans — gate-visit-sweep
+# names it on stderr forever and no return trip re-offers it. The cut-short
+# discharge closes the visit demand and re-states the wait on the SUBJECT, where the
+# liveness sweep re-offers the next sitting and the merge holds until it is answered.
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
+have "the visit demand is closed so it does not orphan on the closing visit" 'gate resolve d-v' "$SOGC"
+have "…its board question is settled as moved" \
+     'helm[RIG] takeaway d-v cut short; wait moved to item-x --by converse --no-wait' "$SOLOG"
+have "…and the wait is re-stated on the SUBJECT, not the visit" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+if grep -q 'demand v-x' "$SOLOG"; then bad "…and no longer re-states on the closing visit" "found 'demand v-x' on a cut-short"; else ok "…and no longer re-states on the closing visit"; fi
+
+echo "── cut-short with BOTH a visit wait and a merge hold: both consolidate on the subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_DEMAND=1 SO_VISIT_DEMAND=1
+have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
+have "…and the wait is re-stated on the subject (refreshing the merge hold)" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+
+echo "── a conversation wait AND an explicit merge hold: both demands discharge ──"
+# A sitting that both waits on the operator (visit demand) and pauses the merge
+# (anchor demand) discharges each on the ruling.
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_DEMAND=1 SO_VISIT_DEMAND=1 STUB_STATE=pull_request
+have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "the merge-hold (anchor) demand resolves too" 'bd gate resolve d-x --reason approved' "$SOGC"
+
+# The two shapes compose under a standing scope. Each sitting's conversation wait
+# gates its own visit, and each sitting that took --hold-merge holds its own
+# topic-keyed demand on the shared anchor. A ruling resolves this sitting's visit
+# demand and its own merge hold, never a sibling's merge hold, so the anchor's
+# merge stays paused until that sibling is answered too.
+echo "── a ruling discharges THIS sitting's merge hold on a shared anchor, not a sibling's ──"
+SIBLING_HOLDS='[{"id":"d-v","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:v-x:finding-b","metadata":{"gc.demand_for":"v-x","gc.demand_topic":"finding-b"}},{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-a","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-a"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:finding-b","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"finding-b"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS" STUB_STATE=pull_request
+have "the conversation (visit) demand resolves" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "…this sitting's merge hold on the anchor resolves" 'bd gate resolve dB --reason approved' "$SOGC"
+lacks "…and a sibling sitting's merge hold stays shut" 'gate resolve dA' "$SOGC" \
+      "gate resolve reached dA — the ruling released a merge another sitting still holds"
+
+# Re-stated with no topic, the moved wait would match any demand on the shared
+# subject and refresh a sibling sitting's gate in place, overwriting its question.
+echo "── a cut-short moves the wait onto the subject under THIS sitting's topic ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_HOLD_DEMAND=d-v SO_TOPIC=finding-b SO_DEMAND_LIST="$SIBLING_HOLDS"
+have "the visit demand is closed" 'gate resolve d-v' "$SOGC"
+have "…and the wait is re-stated on the subject under the sitting's topic" \
+     'helm[RIG] demand item-x still need X --by converse --topic finding-b' "$SOLOG"
+lacks "…and a sibling's demand is left alone" 'gate resolve dA' "$SOGC" \
+      "the cut-short resolved dA, a sibling sitting's demand"
+
+echo "── the takeaway lands on the subject it is handed ──"
+SOARGS=(--visit v-x --subject item-q --outcome "x — y" --ruled no --still-owed z)
+run_so
+have "the takeaway targets the subject it is handed" 'takeaway item-q' "$SOLOG"
+lacks "…and no other bead" 'takeaway item-x' "$SOLOG" \
+      "the takeaway reached item-x, a bead this sitting was not handed"
+
+# The sign-off writes to the subject. Step 1 passes it, and the visit records it
+# twice, as its tracks edge and as its gc.continuation_group stamp, so an absent
+# --subject is recovered from the visit the way converse-fold.sh recovers it.
+# With neither, the cut-short discharge would close the visit's demand and then
+# re-state the wait on an empty bead id, dropping the operator's question; it
+# refuses before any write instead.
+echo "── an absent --subject is recovered from the visit, and refused when the visit names none ──"
+SOARGS=(--visit v-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_TRACKS=item-t
+eq "$SO_RC" "0" "a sign-off with no --subject runs when the visit tracks its subject"
+have "…the takeaway lands on the tracked subject" 'helm[RIG] takeaway item-t cut-short — need input --by converse' "$SOLOG"
+have "…and the moved wait is re-stated on it" 'helm[RIG] demand item-t still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_GROUP=item-g
+have "with no tracks edge, the gc.continuation_group stamp names the subject" \
+     'helm[RIG] demand item-g still need X --by converse' "$SOLOG"
+run_so SUBJECT= SO_DEMAND=0 SO_VISIT_DEMAND=1
+eq "$SO_RC" "2" "a visit that names no subject is refused (exit 2)"
+case "$SO_OUT" in *"no subject"*) ok "…and the refusal says why" ;;
+                  *) bad "…and the refusal says why" "got: $SO_OUT" ;; esac
+lacks "…before the visit's demand is closed, so the operator's question survives" 'gate resolve d-v' "$SOGC" \
+      "the sign-off closed the visit demand with no subject to re-state it on"
+lacks "…and before any takeaway or demand is written" 'helm[' "$SOLOG" \
+      "a write reached gc-helm.sh with no subject"
 
 echo "── the WAIT disposition passes through as repeated flags ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)
 run_so
 have "each routed wait rides as its own --waiting-on" \
      'takeaway item-x o — p --by converse --waiting-on tk-a --waiting-on tk-b' "$SOLOG"
 
-echo "── the takeaway read-back is loud when the item carries none ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+echo "── the takeaway read-back is loud when the subject carries none ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so SO_TAKEAWAY=0
 case "$SO_OUT" in *"NO TAKEAWAY ON"*) ok "a takeaway that did not land is called out" ;;
                   *) bad "a takeaway that did not land is called out" "got: $SO_OUT" ;; esac
 
-echo "── a ruling releases only a HELD item ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling r --route human)
+echo "── a ruling releases only a HELD subject ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r --route human)
 run_so STUB_STATE=unanchored
-if grep -q 'lc transition' "$SOLOG"; then bad "an item not held is not transitioned" "found a transition on an unanchored item"; else ok "an item not held is not transitioned"; fi
+if grep -q 'lc transition' "$SOLOG"; then bad "a subject not held is not transitioned" "found a transition on an unanchored subject"; else ok "a subject not held is not transitioned"; fi
 
 echo "── gate resolve falls back to close for a pre-gate demand ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
 run_so SO_GATE_RC=1
 have "a demand that refuses gate resolve is closed on the same terms" 'bd close d-x --reason the ruling' "$SOGC"
 
-echo "── no demand on the item: nothing to discharge ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+echo "── no demand on the subject: nothing to discharge ──"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so SO_DEMAND=0
 if grep -qE 'demand|gate resolve' "$SOLOG" "$SOGC" 2>/dev/null; then
     bad "no demand present means no discharge" "found a discharge with no demand present"
 else ok "no demand present means no discharge"; fi
 
 echo "── the writer is searched for; none on any root is LOUD ──"
-SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled no --still-owed z)
 run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$TMPD/no-such-city"
 case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer on any candidate root is LOUD" ;;
                   *) bad "no writer on any candidate root is LOUD" "got: $SO_OUT" ;; esac

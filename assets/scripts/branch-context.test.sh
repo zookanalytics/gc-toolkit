@@ -31,7 +31,12 @@ SCRIPT="$HERE/branch-context.sh"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-branch-context-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -257,11 +262,13 @@ grep -qF '[ "$REPO_CTX" = "ok" ]' "$SCRIPT" \
   && ok "(T12) the script gates existence/geometry on REPO_CTX=ok" || bad "(T12) the script must gate on REPO_CTX=ok"
 
 # --- The formula still parses as TOML. ---------------------------------------
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "(T13) formula still parses as TOML" || bad "(T13) formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "(T13) formula still parses as TOML" || bad "(T13) formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f: tomllib.load(f)
 PY
+else
+  echo "skip - (T13) formula still parses as TOML: $TOML_PY"
 fi
 
 echo "---"

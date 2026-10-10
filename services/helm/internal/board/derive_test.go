@@ -1008,7 +1008,7 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 //
 // The two look identical on the anchor — WaitingOn is empty in both the
 // "nothing outstanding" case and the "never learned" one — and reading the
-// empty set as an answer is the hazard. A per-anchor Dolt timeout or schema
+// empty set as an answer is the hazard. A Dolt timeout or schema
 // skew would otherwise stand an answered row down and tell the operator to
 // close or extend a question whose routed work the board never checked
 // (tk-fhd705). Not standing it down costs a glance; standing it down on an
@@ -2339,6 +2339,52 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	}
 }
 
+// A merged PR's anchor closes carrying its last pre-merge facts — posture still
+// approved, merge state frozen at CLEAN, never restamped — so prstatus.Derive,
+// reading only those live facts, still names it working. The board must not paint
+// that live chip on a done row; it names the PR's resolved state off the close
+// instead. A landed PR closes its anchor with merge_result=merged and reads
+// "merged"; a merge anchor that reached a closed bead without that marker — a
+// supersede or disposal — closed without merging and reads "closed". The per-bead
+// Phase stays empty on a closed row, so the frontier keeps its age phrase. The
+// live twin, with the merged anchor's identical frozen facts but still open,
+// proves closedness is the only thing moving the PR axis off working.
+func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
+	frozen := map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdPRMergeState: "CLEAN@" + headLive,
+	}
+	merged := mergeAnchor("tk-merged", map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdPRMergeState: "CLEAN@" + headLive,
+		mdMergeResult:  mergeResultMerged,
+		"merged_sha":   "abc123def456",
+	})
+	merged.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+	// Closed without merging: merge_result stays the default pull_request — a bare
+	// close on a supersede, never transitioned to merged.
+	superseded := mergeAnchor("tk-super", frozen)
+	superseded.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+	live := mergeAnchor("tk-live", frozen) // the merged anchor's facts, still open
+
+	b := BuildBoard([]Anchor{merged, superseded, live}, fixtureNow, false, nil, Facts{})
+
+	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseWorking {
+		t.Fatalf("test premise: the identical live anchor derives working; got %q", got)
+	}
+	if got := mustTile(t, b, "tk-merged").PRPhase; got != PhaseMerged {
+		t.Errorf("a merged (closed) anchor reads merged on the PR axis; got %q (the DONE-bead-shows-WORKING report)", got)
+	}
+	if got := mustTile(t, b, "tk-super").PRPhase; got != PhaseClosed {
+		t.Errorf("a merge anchor closed without merging reads closed; got %q", got)
+	}
+	for _, id := range []string{"tk-merged", "tk-super"} {
+		if got := mustTile(t, b, id).Phase; got != "" {
+			t.Errorf("%s: a closed row carries no per-bead phase; got %q", id, got)
+		}
+	}
+}
+
 // A closed merge anchor is not a coverage gap either, and this is the half the
 // owed test cannot cover: the queue and the coverage sentence have to empty
 // together. The closed pass fills the DONE band with rows carrying the same
@@ -2747,9 +2793,10 @@ func TestDemandBlockerIsNotProgressing(t *testing.T) {
 }
 
 // TestApprovalClauseIsTotalOverThePosture. The mapping has to cover every value
-// pr-facts.sh can record: a partial one leaves the rest to be invented, and
-// `not_required` in particular has to be reachable from an ordinary row, or the
-// coverage sentence never clears for a repository with no protection rule.
+// pr-facts.sh can record: a partial one leaves the rest to be invented. Under the
+// universal approval rule only `approved` is met; every other posture, `none`
+// included, owes the approval, so none renders as a merge GitHub or the city's
+// own rule will let through.
 func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 	at := fixtureNow.Add(-5 * time.Hour)
 	cases := []struct {
@@ -2763,8 +2810,10 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 		{postureChangesRequested, ApprovalRequired, true,
 			"GitHub keeps the veto standing across pushes; in the settled tail the operator clears it by re-reviewing"},
 		{postureApproved, ApprovalMet, false, "approved"},
-		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
-		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
+		{postureCommented, ApprovalRequired, true,
+			"a comment-only review has not approved, and approval is universal — the merge still owes one"},
+		{postureNone, ApprovalRequired, true,
+			"no reviewDecision (an integration/* base, or a repo with no required-review rule) still owes the universal approval"},
 	}
 	for _, c := range cases {
 		t.Run(c.posture, func(t *testing.T) {
@@ -2975,14 +3024,14 @@ func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
 }
 
 // TestReadableConversationIsNotACoverageGap. A recorded position is a fact, not
-// a gap: only an unread axis holds the all-clear open. A settled, quiet,
-// approval-not-required row with no demand is genuinely nobody's move.
+// a gap: only an unread axis holds the all-clear open. A settled, quiet row whose
+// approval is met, with no demand, is genuinely nobody's move.
 func TestReadableConversationIsNotACoverageGap(t *testing.T) {
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-clear", map[string]string{
 			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
 			"pr.conversation": dated(ConversationQuiet, headLive, fixtureNow),
-			"pr_posture":      dated(postureNone, headLive, fixtureNow),
+			"pr_posture":      dated(postureApproved, headLive, fixtureNow),
 		}),
 	}, fixtureNow, false, nil, Facts{})
 
@@ -2991,7 +3040,7 @@ func TestReadableConversationIsNotACoverageGap(t *testing.T) {
 		t.Errorf("pr_conversation = %q, want quiet", tile.PRConversation)
 	}
 	if tile.Owed {
-		t.Error("a settled, quiet, approval-not-required row is nobody's move")
+		t.Error("a settled, quiet row whose approval is met is nobody's move")
 	}
 	if c := Coverage(b.Tiles); !c.Complete() || c.ConversationUnknown != 0 {
 		t.Errorf("a recorded conversation clears the gap it would otherwise hold: %+v", c)

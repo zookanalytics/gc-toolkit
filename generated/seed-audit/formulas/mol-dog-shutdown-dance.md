@@ -39,7 +39,7 @@ Round timeouts: 60s / 120s / 240s (cumulative 7m), carried by dance-probe.sh
 the warrant's status, notes, and the target's session state.
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: it renders the dog route (this prefix plus `dog`) named in this dance's warrant contract, and an empty prefix renders a bare dog address that no agent holds. (default=gc-toolkit.)
 
 Steps (6):
   ├── mol-dog-shutdown-dance.receive-warrant: Validate the warrant
