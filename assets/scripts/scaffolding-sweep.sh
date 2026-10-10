@@ -255,7 +255,7 @@ for kind in rework finding validation; do
       exit 1
     }
   fi
-  # Findings sorted by anchor, so each anchor's PR comments are read once.
+  # Sorted by anchor, so the loop reads each anchor, and its PR comments, once.
   rows=$(printf '%s' "$ROWS" | jq -r --arg k "$kind" "$ROW_JQ" 2>/dev/null | LC_ALL=C sort -t "$US" -k2,2)
   [ -n "$rows" ] || continue
   CANDS="${CANDS:+$CANDS$NL}$rows"
@@ -263,12 +263,19 @@ done
 [ -n "$CANDS" ] || { echo "$PROG: no live scaffolding beads${ANCHOR_ONLY:+ on $ANCHOR_ONLY}"; exit 0; }
 
 swept=0; carried=0; held=0; stuck=0; unread=0
+AROW_FOR=""; AROW=""
 while IFS="$US" read -r sid anchor kind hold fsrc fcid fpath; do
   [ -n "${sid:-}" ] || continue
   # A scaffolding bead with no anchor_bead cannot be tested against a disposition.
   [ -n "$anchor" ] || { held=$((held + 1)); continue; }
 
-  if ! AROW=$(bd_show "$anchor"); then
+  # One read per run of rows naming the same anchor: each kind's rows are sorted
+  # by anchor, and this sweep never writes an anchor.
+  if [ "$anchor" != "$AROW_FOR" ]; then
+    AROW_FOR="$anchor"
+    AROW=$(bd_show "$anchor") || AROW=""
+  fi
+  if [ -z "$AROW" ]; then
     echo "$PROG: $kind $sid names anchor $anchor, which does not resolve; leaving it open" >&2
     held=$((held + 1)); continue
   fi

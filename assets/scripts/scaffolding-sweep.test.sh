@@ -207,11 +207,13 @@ echo "# --anchor clears the whole blocker set a disposed anchor's close meets"
 # blocks edge on the anchor.
 store "[$(scaf RW ADONE rework in_progress),$(scaf FM ADONE finding),$(scaf VP ADONE validation),$(anchor ADONE pull_request ",$DISP")]"
 printf 'RW|blocks|FM\nRW|blocks|ADONE\nFM|blocks|ADONE\nVP|blocks|ADONE\n' > "$STUB_DEPS"
+: > "$STUB_GC_LOG"
 out=$(STUB_ENFORCE_BLOCKS=1 "$SUT" --anchor ADONE 2>&1); rc=$?
 eq "$rc" 0 "the pass exits 0"
 eq "$(open_blockers ADONE)" "0" "nothing left open blocks the anchor's close"
 eq "$(bstatus ADONE)" "open" "…and the anchor itself is still not this sweep's to close"
 has "$out" "3 scaffolding bead(s) closed" "…all three retired in one pass"
+eq "$(grep -c '^bd show ADONE ' "$STUB_GC_LOG")" "1" "…reading the anchor once, not once per bead"
 : > "$STUB_DEPS"
 
 echo "# a finding is mooted only when it objects to the disposed diff"
