@@ -13,7 +13,7 @@ and `$VISIT` / `$SUBJECT` in its environment. It exits non-zero when the
 hold did not fully land, and then you must NOT frame:
 ```bash
 if VISIT="$VISIT" SUBJECT="$SUBJECT" \
-     "$CONV/converse-hold.sh" "<the one decision or input needed, ≤140 chars>"; then
+     "$CONV/converse-hold.sh" "<the one decision or input needed, ≤130 chars>"; then
   : # the hold is real and stamped — post the framing below
 else
   # NOT a hold yet: nothing re-asks the subject. Do NOT post the framing.
@@ -50,7 +50,7 @@ instead decides the merge must wait on the operator — the PR should not land
 until this is settled — add the flag to the same call:
 ```bash
 if VISIT="$VISIT" SUBJECT="$SUBJECT" \
-     "$CONV/converse-hold.sh" --hold-merge "<the one decision or input needed, ≤140 chars>"; then
+     "$CONV/converse-hold.sh" --hold-merge "<the one decision or input needed, ≤130 chars>"; then
   : # the hold is real and the merge is held — post the framing below
 else
   # the conversation hold or the merge hold did not land — do NOT frame.
@@ -76,8 +76,11 @@ brings the subject back if the thread is lost before they take it. The
 gate is not about there being a question; it is about the subject not
 moving until a person acts.
 
-**One sentence, ≤140 characters — the writer refuses a longer one.**
-It is the board's NEEDS cell; what will not fit goes in the notes.
+**One sentence, ≤130 characters.** The takeaway reads
+`holding — <your sentence>`, the board's NEEDS cell, and the prefix spends
+part of the headline cap. `converse-hold.sh` refuses a longer sentence
+before it writes anything and says how far to cut it. What will not fit
+goes in the notes.
 Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a stand-down
 ruling, written as
