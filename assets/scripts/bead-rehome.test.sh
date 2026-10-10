@@ -4,7 +4,7 @@
 # Fakes `gc rig list --json` and `bd` (a file-per-bead ledger under each fake
 # rig's .beads/) on PATH. No dependency on the live city, Dolt, or the network.
 #
-# The invariants under test are the ones the incident turned on (tk-isyz0):
+# The invariants under test are the ones the incident turned on:
 #   (a) a re-home stamps the forward pointer AND closes with a populated reason
 #       naming kind + successor + store — never a bare `[Closed]`;
 #   (b) the successor must exist in the named store, or nothing is written at
@@ -39,7 +39,9 @@
 #   (v) an outcome that does not read back refuses the close, the same way a
 #       dropped pointer does — a closed outcome-less visit is unreachable;
 #   (w) a dropped gc.outcome_reason refuses the close too — the board shows the
-#       reason as the sitting's headline, so an outcome without it is unreadable.
+#       reason as the sitting's headline, so an outcome without it is unreadable;
+#   (x) an open visit on the origin holds the close at the finalize gate;
+#   (y) --except-key reaches that gate, and nothing is excepted without it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -213,11 +215,13 @@ export BEADS_ACTOR="test__rehome-lx-0000"
 # The finalize gate is a sibling bead-rehome forks before the close. Stub it so
 # this suite tests the WIRING (a refusal holds the close, leaving an open pointed
 # bead) without a live tracks-edge probe — the gate's own logic is covered by
-# finalize-gate.test.sh. Default: allow; FG_VERDICT=hold makes it refuse.
+# finalize-gate.test.sh. Default: allow; FG_VERDICT=hold makes it refuse. Each
+# call's argv is appended to FG_LOG.
 FG_STUB="$TMP/bin/finalize-gate-stub.sh"
-printf '#!/usr/bin/env bash\ncase "${FG_VERDICT:-pass}" in\n  hold) echo "held by open visit vis-x — its subject ${2:-?} owes a conversation before finalize"; exit 1 ;;\n  *) exit 0 ;;\nesac\n' > "$FG_STUB"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${FG_LOG:?}"\ncase "${FG_VERDICT:-pass}" in\n  hold) echo "held by open visit vis-x — its subject ${2:-?} owes a conversation before finalize"; exit 1 ;;\n  *) exit 0 ;;\nesac\n' > "$FG_STUB"
 chmod +x "$FG_STUB"
 export GC_FINALIZE_GATE_TOOL="$FG_STUB"
+export FG_LOG="$TMP/finalize-gate.log"; : > "$FG_LOG"
 
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 
@@ -249,6 +253,22 @@ eq "$(field alpha status al-vhold)" open "…the origin stays OPEN under the hol
 eq "$(field alpha m.gc.superseded_by al-vhold)" bt-vsucc "…the pointer is still stamped, so the disposition is findable"
 has "$(cat "$TMP/err")" "the close is held" "…stderr says the close is held"
 has "$(cat "$TMP/err")" "held by open visit" "…and carries the gate's reason"
+
+# --- (y) --except-key reaches the finalize gate, and only when given -------
+# The caller's own reports of an earlier refused close ask for this retry, so
+# their escalation key is named to the gate, which owns what an exception may
+# pass.
+mkbead alpha open al-except
+mkbead beta  open bt-except
+: > "$FG_LOG"
+rc=0; run --origin al-except --successor bt-except --kind not-needed --except-key pr-dispose-failed.7 || rc=$?
+eq "$rc" 0 "a close naming an excepted key lands when the gate passes"
+eq "$(cat "$FG_LOG")" "check al-except --except-key pr-dispose-failed.7" "the gate is asked with the caller's excepted key"
+mkbead alpha open al-noexcept
+mkbead beta  open bt-noexcept
+: > "$FG_LOG"
+rc=0; run --origin al-noexcept --successor bt-noexcept --kind not-needed || rc=$?
+eq "$(cat "$FG_LOG")" "check al-noexcept" "without the flag the gate is asked with no exception"
 
 # --- (b) missing successor: nothing written at all --------------------------
 mkbead alpha open al-origin2
@@ -368,7 +388,7 @@ eq "$(field alpha status al-origin12)" open "the bead is not closed over it"
 # A converse sitting that BOTH routes work and disposes of its subject writes
 # `--waiting-on <successor>` onto the subject — a real `blocks` edge — and then
 # closes it. `bd close` refuses a blocked issue, so the wait refused the ruling
-# it was written beside (tk-hs5rz, live at visit tk-e9ffv). A disposed bead is
+# it was written beside. A disposed bead is
 # not waiting to proceed, and gc.superseded_by already records the relationship,
 # so the edge to THIS successor goes. Same store: a `blocks` edge can only join
 # two beads in one.
@@ -468,7 +488,7 @@ eq "$rc" 0 "a visit that already has an outcome still re-homes"
 eq "$(field alpha m.gc.outcome al-visit2)" dismissed "the sitting's own outcome word is not overwritten"
 
 # --- (u) an already-closed visit missing the outcome is repaired -----------
-# This is tk-iooouz's shape: bead-rehome closed the visit before this guard, so
+# This is the shape where bead-rehome closed the visit before this guard, so
 # the repair path stamps the outcome the same as the live close does.
 mkbead alpha closed al-visit3
 printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit3"

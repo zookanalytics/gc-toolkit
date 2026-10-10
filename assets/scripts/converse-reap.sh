@@ -7,9 +7,9 @@
 # so nothing in the runtime cycles it. Both endings the config names — the
 # agent's sign-off and the operator's `gc-helm dismiss` — close the VISIT on the
 # belief that closing the visit ends the sitting. It does not: the manual session
-# outlives its closed visit, holding a max_active_sessions slot (default 2) and,
-# when the operator has walked away, leaving a closed visit beside a live pane.
-# This pass is the reap those two endings assume.
+# outlives its closed visit as a live provider process and, when the operator has
+# walked away, a closed visit beside a live pane. This pass is the reap those two
+# endings assume.
 #
 # A converse session whose visit is CLOSED (or gone) is settled: the hold it
 # protected is over, so there is nothing left to protect. Close the session.
@@ -21,9 +21,9 @@
 # standing ruling is that draining a pane with typed text is a hard no. Attachment
 # is the only signal the pack has for "someone is at this pane", so an attached
 # sitting is left for its own sign-off or a dismiss even when its visit already
-# reads closed. The unattached settled sittings — the leaked slots — are what this
-# reaps. Ending a sitting whose visit is still OPEN (the operator walked away
-# before any sign-off) is the harder, separate case; this pass never touches it.
+# reads closed. The unattached settled sittings, the leaked sessions, are what
+# this reaps. A sitting whose visit is still OPEN (the operator walked away
+# before any sign-off) is the harder, separate case; this pass leaves it alone.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per converse session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
@@ -158,9 +158,9 @@ while IFS=$'\t' read -r sid vid; do
 
     # Record the per-session line only once the sitting is actually gone. A close
     # that FAILS is reported on stderr and counted skipped; it must NOT land in the
-    # reaped list, which is the summary's account of the slots this pass freed, and
-    # the close is the one operation this order performs. A dry run frees nothing,
-    # so there the line is the plan.
+    # reaped list, which is the summary's account of the sittings this pass closed,
+    # and the close is the one operation this order performs. A dry run closes
+    # nothing, so there the line is the plan.
     if [ "$DRY_RUN" -eq 1 ]; then
         reaped=$((reaped + 1))
     elif "$GC" session close "$sid" >/dev/null 2>&1; then

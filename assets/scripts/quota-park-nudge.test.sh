@@ -45,7 +45,7 @@
 # parked but neither nudged nor recorded; (z) the `--status` surface answers the
 # patrols in closed fields only — never pane text — and answers `unknown` rather
 # than a verdict when this order has not swept recently; (aa) the order file
-# parses and still carries the wiring the sweep depends on (cooldown/3m/city + a
+# parses and still carries the wiring the sweep depends on (cooldown/5m/city + a
 # live exec path); (ab) a session a completed pass never REACHED — deferred by
 # the budget, or peeked unsuccessfully — reports `unknown`, not the `no` a fresh
 # heartbeat alone would imply, while a session the same pass did classify still
@@ -95,6 +95,8 @@ SCRIPT="$HERE/quota-park-nudge.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-quota-park-nudge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -709,7 +711,7 @@ printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=1\nunconfirmed=0\nes
     | mkstate "$TMP/state/lx-codex"
 FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_BACKOFF_BASE=0 bash "$SCRIPT" > /dev/null
 eq "$(nudges_for lx-codex)" "0" \
-    "QUOTA_PARK_BACKOFF_BASE=0 falls back (a zero window would nudge every 3m sweep)"
+    "QUOTA_PARK_BACKOFF_BASE=0 falls back (a zero window would nudge every 5m sweep)"
 
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"
@@ -785,7 +787,7 @@ else
     # --- Run 14b: and the NEXT cycle must respect the backoff. --------------
     # This is where refusing the immediate retry stops being enough. The runtime
     # may well have taken that nudge; if the timeout leaves the counters alone,
-    # the next 3m pass sees attempts=0, reads the session as never nudged, skips
+    # the next 5m pass sees attempts=0, reads the session as never nudged, skips
     # the backoff entirely and sends a second resume message into the same pane
     # — the duplicate the no-fallback rule exists to prevent, arriving one cycle
     # later. Pacing therefore keys on the last delivery ATTEMPT, confirmed or not.
@@ -1109,9 +1111,9 @@ grep -q '^session=lx-inject quota_park=unknown ' "$TMP/status-no-hb" \
 # this file.
 ORDER_ROOT="$(cd "$HERE/../.." && pwd)"
 ORDER_TOML="$ORDER_ROOT/orders/quota-park-nudge.toml"
-if ! python3 -c 'import tomllib' >/dev/null 2>&1; then
-    echo "skip - order wiring tests (no python3 tomllib on this host)"
-elif python3 - "$ORDER_TOML" > "$TMP/order.env" 2>"$TMP/order.err" <<'PY'
+if ! TOML_PY="$(tomllib_python)"; then
+    echo "skip - order wiring tests: $TOML_PY"
+elif "$TOML_PY" - "$ORDER_TOML" > "$TMP/order.env" 2>"$TMP/order.err" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as fh:
     order = tomllib.load(fh).get("order", {})
@@ -1122,7 +1124,7 @@ then
     ok "order wiring: orders/quota-park-nudge.toml parses as TOML"
     ord_get() { grep -m1 "^$1=" "$TMP/order.env" | cut -d= -f2-; }
     eq "$(ord_get trigger)"  "cooldown" "order wiring: trigger=cooldown"
-    eq "$(ord_get interval)" "3m"       "order wiring: interval=3m"
+    eq "$(ord_get interval)" "5m"       "order wiring: interval=5m"
     eq "$(ord_get scope)"    "city"     "order wiring: scope=city (sweeps every session, not one rig)"
     eq "$(ord_get exec)" '$PACK_DIR/assets/scripts/quota-park-nudge.sh' \
         "order wiring: exec points at the sweep script"
@@ -1235,7 +1237,7 @@ fi
 # `>` writes THROUGH an existing symlink or FIFO. STATE_DIR is a shared runtime
 # directory whose location is an override, and every path under it is named by a
 # session id, so an entry planted beside our state would have this order writing
-# wherever it points — as the order's user, on every 3m sweep. A FIFO is worse
+# wherever it points — as the order's user, on every 5m sweep. A FIFO is worse
 # than a wrong destination: with no reader the open blocks, and the sweep hangs
 # where it is meant to be bounded.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
@@ -1431,12 +1433,12 @@ grep -q '^session=lx-codex quota_park=unknown .*reason=no-recent-sweep$' "$TMP/s
 
 # --- Run 28: ending an episode removes only this order's OWN state file. ----
 # The week-old prune (run 15) is careful about ownership. The paths that run
-# every three minutes were not: a clean pane and an excluded alias each ended
+# every five minutes were not: a clean pane and an excluded alias each ended
 # their episode with a bare `rm -f "$STATE_DIR/<id>"`, which is not "end the
 # episode" but "delete whatever is at that name" — in a directory this order
 # does not own, since STATE_DIR defaults inside the shared city runtime dir and
 # is an override besides. A session id is not a rare shape for a filename. That
-# is the prune's blast radius on a fuse 3360× shorter, and it was reproduced
+# is the prune's blast radius on a fuse 2016× shorter, and it was reproduced
 # during review: an unrelated regular file at $STATE_DIR/lx-clean, destroyed by
 # one clean sweep. Same ownership test as the prune, now shared by all three.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
@@ -1688,7 +1690,7 @@ grep -q '^session=lx-foreign ' "$TMP/status32-all" \
     && bad "a foreign file must not be enumerated as an episode this order tracks" \
     || ok "a foreign file is not enumerated as an episode this order tracks"
 
-# The delete direction. `lx-clean`'s pane is clean, so the every-3-minutes
+# The delete direction. `lx-clean`'s pane is clean, so the every-5-minutes
 # removal path runs against its state path on every pass; the week-old prune runs
 # on every pass too, and this file's record claims 1970.
 printf 'first_seen=1\nlast_seen=1\nattempts=1\n' > "$TMP/state/lx-clean"

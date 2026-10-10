@@ -2,11 +2,12 @@
 # Hermetic test for doctor/check-blocked-work-armed. Stub gc/bd only; no live
 # city, Dolt, or network. Covers: the finding (blocked plainly-work bead with
 # neither route nor arm, including one carrying only gc.execution_routed_to —
-# provenance, not a dispatch path), every exemption (routed, armed, assigned,
-# merge anchor, review/step/workflow/demand metadata, decision/epic/infra
-# types), the per-rig labelling, the remedy string, the fail-closed probes
-# (unreadable blocked listing, unreadable rig list), and the quiet paths (empty
-# store, all-armed store).
+# provenance, not a dispatch path — and one whose route or arm holds only
+# whitespace), every exemption (routed, armed, assigned,
+# merge anchor, review/step/workflow/demand metadata, every standing kind,
+# decision/epic/infra types), the per-rig labelling, the remedy string, the
+# fail-closed probes (unreadable blocked listing, unreadable rig list), and the
+# quiet paths (empty store, all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -142,6 +143,17 @@ for t in bug feature chore spike; do
     clear_stores
 done
 
+# A route or an arm holding only whitespace is no dispatch path
+# (assets/scripts/dispatch-path.sh): a pool matches its route byte for byte, and
+# gc sling refuses the value as a target. The bead strands like one with neither
+# key, so each is a finding.
+blocked_store alpha "$(bmeta a-1 gc.routed_to ' ')" "$(bmeta a-2 gc.dispatch_when_ready ' ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked bead whose route or arm holds only whitespace warns (exit 1)"
+has "$OUT" "alpha bead a-1" "…the whitespace route is named as a finding"
+has "$OUT" "alpha bead a-2" "…and so is the whitespace arm"
+clear_stores
+
 # --- 2. exemptions: each must NOT be flagged --------------------------------
 blocked_store alpha "$(brouted a-1)"
 OUT=$(run_check); RC=$?
@@ -168,6 +180,23 @@ for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow" "gc.d
     k="${pair%%=*}"; v="${pair#*=}"
     blocked_store alpha "$(bmeta a-1 "$k" "$v")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead carrying $k is not plainly work — not flagged"
+    clear_stores
+done
+
+# A standing record is never dispatched, so blocked-and-unrouted is its resting
+# state, and the arm remedy would sling it to a pool when its blocker closed.
+# The kinds come from the shared definition itself, so a kind added there is
+# exempted and covered here with no edit to this file.
+# shellcheck source=../../assets/scripts/standing-kinds.sh
+. "$HERE/../../assets/scripts/standing-kinds.sh"
+KINDS=$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')
+[ -n "$KINDS" ] && ok "the shared definition lists the standing kinds to exempt" \
+    || bad "the shared definition lists the standing kinds to exempt" "standing_kinds read back empty"
+for k in $KINDS; do
+    blocked_store alpha "$(bmeta a-1 task_kind "$k")"
+    OUT=$(run_check); RC=$?
+    eq "$RC" "0" "a blocked standing record (task_kind=$k) is not flagged"
+    hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy (task_kind=$k)"
     clear_stores
 done
 

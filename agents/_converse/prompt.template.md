@@ -27,8 +27,14 @@ know something, now knows it, and the sitting closes.
 
 Definitions:
 
-- **Subject** — the bead the dialogue is about. Its id is the
-  continuation group every one of its visits carries.
+- **Subject** — the bead the dialogue is about, and the bead steps 5
+  and 7 write to. Its id is the continuation group every one of its
+  visits carries. A standing scope (`task_kind=triage-subject`) carries
+  one visit per distinct situation, so its group is a bucket that
+  sibling sittings share, and each demand a sitting files there carries
+  its visit's `escalation_key`. Step 5 stamps the takeaway and files the
+  conversation demand on the gated bead: the visit for a PR anchor, the
+  subject otherwise.
 - **Universe** — the subject together with its dependents and related
   items; for an epic, the stories and tasks under it and the work in
   flight across it. A sitting reasons over that whole scope rather than
@@ -44,16 +50,9 @@ Definitions:
   at claim time (step 2). A `tracks` edge carries its subject, never
   `parent-child`, which would transmit the subject's blocked state to the
   visit and make it unclaimable (`formulas/mol-visit.toml`).
-- **Item** — the BEAD this visit is about, which is not always the
-  subject: a visit that names its own target carries it as `stall_root`,
-  and with no target named the item is the subject. A standing scope
-  (`task_kind=triage-subject`) carries one visit per distinct item, so
-  its group is a bucket. Step 5 stamps the takeaway and files the demand
-  on `$ITEM`, never on that bucket.
 - **Topic** — what makes two visits the same sitting, which is not always
-  a bead: `stall_root` when the visit names a target, `escalation_key`
-  when `escalate.sh` filed it for one situation, the subject otherwise.
-  The fold check keys on `$TOPIC`.
+  a bead: `escalation_key` when `escalate.sh` filed the visit for one
+  situation, the subject otherwise. The fold check keys on `$TOPIC`.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
   only a person can perform is assigned to them, and the assignment is what
@@ -66,8 +65,10 @@ Definitions:
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
   sitting ends only when its VISIT closes (**How this thread ends**). The
   hold IS a demand, so the hold-time stamp (step 5) is mandatory: it files
-  the gate the item blocks on and re-surfaces under, and a hold that files
-  none parks a bead nothing re-asks.
+  the gate the conversation blocks on — the visit, so the subject's merge is
+  not frozen while you talk — and a hold that files none parks a bead nothing
+  re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
+  the anchor.
 
 **A wait is an edge onto a bead, and a bead is either ready or blocked.**
 There is no parked state: what a person owes is a demand bead, what a
@@ -123,7 +124,7 @@ The loop, every visit:
 1. **Claim.** `assets/scripts/converse-claim.sh` is your only source of
    work. It wraps `gc hook --claim --json` and adds the one thing that
    command cannot express: a claim scoped to a continuation group. It puts
-   an out-of-group turn back in the pool, completes the close of a sitting
+   an out-of-group turn back unclaimed, completes the close of a sitting
    whose record is already done, and reports which of the four verdicts
    applies. Resolve it once, then let it decide:
 
@@ -154,14 +155,14 @@ The loop, every visit:
    `SUBJECT` its `continuation_group`; both are used by name below.
 
    **A claim outside your current group is not yours to work.** The
-   script puts an out-of-group turn BACK in the pool and tells you to
+   script puts an out-of-group turn BACK, unclaimed, and tells you to
    drain. `reason=unreleasable` means it could not: work the turn it
    hands you, say in your first message that the thread is switching
    subjects, and use `VISIT` as parsed rather than the bead it named.
 
    **`action=finish` — this visit's sitting is over and only its close is
    missing.** Everything durable a sitting writes had already landed when
-   the session died: the takeaway on the item, the demand and the hold
+   the session died: the takeaway on the subject, the demand and the hold
    discharged, and `gc.outcome` stamped on the visit. What was lost is the
    `gc bd close` that follows that stamp, and the claimer performs it as it
    hands the line back. Then go to step 8 and claim again.
@@ -205,10 +206,11 @@ The loop, every visit:
    prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
    witness `HELP:`, and do not `drain-ack` it and do not work it.
 
-   **`BEGAN=recheck`** — no key, but the item still carries an open demand.
-   That demand is a hold's own trace. It belongs to a sitting that held
-   before this key existed, or to a sibling on the shared item, and neither
-   can be closed on the strength of a missing key. Fall through to step 2 and
+   **`BEGAN=recheck`** — no key, but an open demand still gates the subject or
+   this visit (a PR-anchor conversation files its demand on the visit). That
+   demand is a hold's own trace. It belongs to a sitting that held before this
+   key existed, or to a sibling on the shared subject, and neither can be closed
+   on the strength of a missing key. Fall through to step 2 and
    re-check the premise, but treat the demand as the hold it is, not as a
    benign wait to hand back: close here ONLY if the premise is moot, the
    frontier routed or the bead closed or the sitting settled elsewhere. A
@@ -216,8 +218,8 @@ The loop, every visit:
    which re-files the demand and stamps `gc.hold_demand`, so the next restart
    reads it as `yes`.
 
-   **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
-   holds no open demand, so nothing here earned a hold: fall through to step 2
+   **`BEGAN=no`** — the visit read cleanly, carries no key, and no open demand
+   gates it or its subject, so nothing here earned a hold: fall through to step 2
    and re-check the premise. A visit whose premise died between filing and
    claiming closes there, and its benign exits still apply, an open PR on the
    operator's own review queue or a known acceptable state, because no hold of
@@ -230,7 +232,7 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `ITEM` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
    ```bash
    # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
    # so a read that did not resolve leaves it empty — the "hold" case below.
@@ -239,10 +241,12 @@ The loop, every visit:
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
-   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   moves this visit's merge-hold keys (`pr_number`, `pr_url`, `anchor_bead`) to
+   `$HOLDER` so a PR's merge stays held after this visit closes, stamps
+   `gc.outcome=folded` and its board-visible reason, and closes:
    ```bash
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome folded --reason "folded into $HOLDER"
+     --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
@@ -284,7 +288,10 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. What you never do is change a repository. Never
+  threads; and retire it. Post every comment and reply through
+  `assets/scripts/pr-post.sh` (`comment`, `reply`), which marks it as the
+  city's own; the reconcile reads an unmarked post on the PR as new feedback
+  and routes it into rework. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.
@@ -295,7 +302,7 @@ Rules:
   argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
   7 with `--ruled no` and `gc.outcome=cut-short` — sign-off included — and
-  drain. The decision is still open, so `--ruled no` keeps the item
+  drain. The decision is still open, so `--ruled no` keeps the subject
   `held`, re-states its demand rather than closing it, and the refreshed
   stamp earns the next visit. This is the ONLY path to `cut-short`, and a
   sitting the operator has not ruled on is never ended to unblock
@@ -313,25 +320,24 @@ Rules:
   hands the operator important information — a live decision, a routing
   answer, anything they may want to respond to — posts the hand-back and
   leaves the visit open, and that thread ends on a later turn instead.
-  `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
-  that reading a thread cannot end it.
+  `idle_timeout` is `0` on every `converse-<model>` template, so that
+  reading a thread cannot end it.
   Closing the visit ends the sitting's work but does not drain the
   session: a manual converse session is exempt from the `no-wake-reason`
   clock that collects an ended pool session. The `converse-reap` order
   (`assets/scripts/converse-reap.sh`) closes the settled session on a
-  later pass, once its visit reads closed or gone, and frees the
-  `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
-  closed-visit sitting you are still attached to waits until it is no
-  longer attended. The per-model sittings run `wake_mode = "resume"`
-  (`agents/converse-opus/agent.toml`), so a health restart replays the
-  thread and the sitting continues; the durable demand and the step-1
-  re-claim guard cover the rare respawn that comes up without it. The
-  record never lives only in the thread, and the discipline is unchanged:
-  the sign-off has to land before you close, not after; stamp the takeaway
-  when the hold BEGINS (step 5); and append the outcome as soon as a
-  sitting settles anything (step 6). That is what the board reads and a
-  later reader inherits. Mechanism: `docs/gascity-human-engagement.md` →
-  "How a held sitting ends".
+  later pass, once its visit reads closed or gone; it reaps only an
+  UNATTACHED pane, so a closed-visit sitting you are still attached to
+  waits until it is no longer attended. The per-model sittings run
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a health
+  restart replays the thread and the sitting continues; the durable
+  demand and the step-1 re-claim guard cover the rare respawn that comes
+  up without it. The record never lives only in the thread, and the
+  discipline is unchanged: the sign-off has to land before you close, not after;
+  stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
+  soon as a sitting settles anything (step 6). That is what the board reads
+  and a later reader inherits. Mechanism: `docs/gascity-human-engagement.md`
+  → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is

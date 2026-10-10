@@ -247,10 +247,11 @@ a pass: say so in the verdict body and, when the missing lane leaves you unable
 to reach a confident verdict, treat the review as request-changes with a
 finding that names the coverage gap rather than approving on one lane.
 
-**3. Run the suite once at the pinned commit** in a throwaway detached
-worktree, exactly as `formulas/mol-review.toml`'s `review` step step 2 does
-(the trap owns teardown). The lanes did not run tests; this is the quorum's
-single verification. A failure that also fails on the base is pre-existing
+**3. Run the suite once at the pinned commit** in the review's workspace,
+exactly as `formulas/mol-review.toml`'s `review` step 2 does
+(`review-workspace.sh add`; anything else you write to disk goes in the same
+workspace). The lanes did not run tests; this is the quorum's single
+verification. A failure that also fails on the base is pre-existing
 context, not this branch's defect.
 
 **4. Synthesize the verdict body.** UNION the lanes' findings — two providers
@@ -280,6 +281,12 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework or
 finding beads, and never run `gh pr review --approve`.
 
+Pass on this same call any flag the check section of the review bead's dispatch
+note names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+When signoff.sh refuses a verdict for a missing or invalid flag, it has written
+nothing, so re-run the call with the flag corrected; that is still the one
+verdict.
+
 **7. Failure arms** are mol-review's `verdict-and-drain` arms verbatim: a
 `superseded`/`already closed` exit from signoff needs no re-pin (drop the
 verdict, close the chain, drain); any other failure appends your findings to
@@ -287,12 +294,14 @@ the review bead (`--append-notes`, never `--notes`), then — after the chain is
 closed — restores the bead's route from `metadata.review_pool` so the pool can
 re-claim it, then drains.
 
-**8. Close this workflow's step chain forward, then drain.** Terminal step:
-close every step by its `(gc.root_bead_id, gc.step_ref)` pair through
-step-close.sh, in forward order; the lanes closed their own beads already, so
-those return "not this session's to close" and are left for the finalizer.
-Never close `workflow-finalize`.
+**8. Close this workflow's step chain forward, remove the workspace, then
+drain.** Terminal step: close every step by its `(gc.root_bead_id,
+gc.step_ref)` pair through step-close.sh, in forward order; the lanes closed
+their own beads already, so those return "not this session's to close" and are
+left for the finalizer. Never close `workflow-finalize`.
 ```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
@@ -300,12 +309,16 @@ done
 for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
   "$SC" --step "mol-review-quorum-signoff.$STEP" --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
 done
+# >>> quorum-review-workspace-remove
+[ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"
+# <<< quorum-review-workspace-remove
 gc runtime drain-ack
 ```
 
 **Exit criteria:** both lanes read (or reduced coverage recorded), suite run
 once at the pinned commit, findings.md + findings.json written, exactly one
 signoff.sh call succeeded (or findings appended and the route restored), step
-chain closed forward, drain acknowledged.
+chain closed forward, the workspace removed unless the bead went back to the
+pool, drain acknowledged.
 """
 metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }

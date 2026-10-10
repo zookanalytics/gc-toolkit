@@ -43,7 +43,7 @@ in the discard list below it.
 | **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
 | **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
-| **Check-set + check marker** | declared merge preconditions, each bound to a commit | merges depend on whoever remembers to look |
+| **Check-set + check lane** | the merge preconditions an anchor declares in `check_set`, one lane per check. A lane's `check.<g>` marker carries one bare state word that names no commit, and the reviewed commit is recorded on the review bead as `reviewed_oid`. `lane-state.sh` derives a lane's green from its reviews. [state-machine.md](state-machine.md#checks) owns the vocabulary. | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
@@ -69,7 +69,10 @@ A bead's kind is `metadata.task_kind`. Every reader that branches on kind
 reads that key and nothing else — `visit`, `review`, `triage-subject`,
 `observation` and the standing kinds are all resolved this way, in the
 liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
-filter.
+filter. The standing kinds name a record that is open, unrouted and unassigned
+by design and never closes. Their one definition is
+`assets/scripts/standing-kinds.sh`, which a reader sources for the list and
+for the `is_standing_kind` test.
 
 A label naming the same word is **not** the kind. It is a listing narrowing:
 `gc bd list -l observation` is cheaper than reading every bead's metadata, and
@@ -127,9 +130,10 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
-  commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
-  `pr_posture`, `merged_target` — does not move the head; the pre-merge
-  re-read is what catches a mid-pass write to any of them.
+  commit, but the authorization set — `merge_hold`, `pr_posture`,
+  `merged_target`, and every declared lane's derived green — does not move
+  the head; the pre-merge re-read, which re-derives each lane through
+  `lane-state.sh`, is what catches a mid-pass change to any of them.
 
 ---
 
@@ -146,22 +150,29 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
 | **I5** | No bead is closed while the work it represents is unlanded: closed anchor ⇒ `merged` + `merged_sha`, or an explicit terminal state. | `doctor/check-closed-implies-landed` |
 | **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is a bare lane-state word. | `doctor/check-gate-integrity` |
-| **I7** | A check verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half in two arms. Green is derived from the outcome graph (`lane-state.sh`), so its **outcome arm** audits that graph markerlessly: every CLOSED `task_kind=review` bead that backs a lane on an open gating anchor — `signoff_verdict=approve` carrying a non-empty `reviewed_oid`, the local backing `lane-state.sh` derives green from — must record `gc.outcome=recorded` (a live backing) or `gc.outcome=superseded` (retired); an approve carrying any other outcome still derives the lane green (`lane-state.sh` excludes only `superseded`) while standing on a verdict no writer recorded, and is the finding. Because `gate-ensure.sh` still reads `check.<lane>` and skips dispatch on `green`, a **marker arm** is kept during the transition: a `check.<lane>=green` on such an anchor that resolves to no backing — no local approve or legacy-recorded bead, no APPROVED GitHub review on its `pr_number` — is the wedge (gate-ensure raises no review while `lane-state.sh` holds the merge), an error, or an undetermined warning when the GitHub path could not run. It reads no commit oid, and a legacy no-verdict `gc.outcome=recorded` bead and an operator's APPROVED GitHub review both pass both arms. The sanctioned writers (`signoff.sh` close, `review-outcome.sh back-lane`) record only `recorded` or `superseded`, so a clean store has no findings — it stays a forward regression detector. The marker arm is removed once the last marker consumer reads `lane-state.sh`. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
+| **I7** | A check verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half in two arms. Green is derived from the outcome graph (`lane-state.sh`), so its **outcome arm** audits that graph markerlessly: every CLOSED `task_kind=review` bead that backs a lane on an open gating anchor — `signoff_verdict=approve` carrying a non-empty `reviewed_oid`, the local backing `lane-state.sh` derives green from — must record `gc.outcome=recorded` (a live backing) or `gc.outcome=superseded` (retired); an approve carrying any other outcome still derives the lane green (`lane-state.sh` excludes only `superseded`) while standing on a verdict no writer recorded, and is the finding. Because `gate-ensure.sh` still reads `check.<lane>` and skips dispatch on `green`, a **marker arm** is kept during the transition: a `check.<lane>=green` on such an anchor that resolves to no backing — no closed `signoff_verdict=approve` review bead for that lane carrying a `reviewed_oid`, no APPROVED GitHub review on its `pr_number` — is the wedge (gate-ensure raises no review while `lane-state.sh` holds the merge), an error, or an undetermined warning when the GitHub path could not run. It reads no commit oid. An operator's APPROVED GitHub review passes both arms. A closed review with no `signoff_verdict` backs no lane, because `signoff.sh` stamps `gc.outcome=recorded` on every close and `recorded` names no verdict. The outcome arm never fetches such a bead, and a green marker resting on such a bead alone resolves only through an APPROVED GitHub review. The sanctioned writers (`signoff.sh` close, `review-outcome.sh back-lane`) record only `recorded` or `superseded`, so a clean store has no findings — it stays a forward regression detector. The marker arm is removed once the last marker consumer reads `lane-state.sh`. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
 | **I8** | Every step bead reaches a terminal state: no offerable step under a closed root, no frontier stalled past its bound. A step under a closed root is offerable when its own status is open and every blocking dependency has closed; one parked at `status=blocked`, or still waiting on a live blocker, is inert residue and reported as a note, because no pool can hand it out. | `doctor/check-step-terminal` |
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Held on purpose: a non-empty `gc.takeaway` or `hold_reason`, on the step or on the root `gc.root_bead_id` names, takes a step out of both arms as a note whose remedy is `status=blocked` — releasing a held step to `open` hands it to the pool its route still names, which is what the hold exists to prevent. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
 | **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 | **I13** | Every started workflow root is still advancing or reachable: an in_progress `gc.kind=workflow` root whose owning session is gone and whose work has not landed does not sit behind an executable frontier that is unclaimable — unrouted AND unowned — which no pool can be offered and no orphan recovery reaches. | `doctor/check-root-advancing` (tk-d12vam): a graph.v2 molecule runs its continuation-group steps inline in one pool session, and those steps carry no owner and no route by construction, so a drain landing mid-molecule strands them past both recovery paths — the witness's orphan recovery keys on an assignee, and no route means no pool is offered them. Reported STRANDED (error) only when all four hold, each a distinct healthy shape it must not report: SILENT (root or any member, a close included, untouched past the bound — default 120m, `GC_DOCTOR_ROOT_STALL_MINUTES`); UNHELD (no live session behind the root's `gc.session_name` or any member's assignee, `gc.session_id` or `gc.session_name` — the affinity slot a restart reuses counts, so a live slot exempts); STARTED (at least one step has closed, so it moved then stopped, AND its input convoy is still open, since a convoy closes when its one work bead lands); UNCLAIMABLE (a non-empty executable frontier — the `bd ready` members minus the inert `workflow`/`scope`/`spec` topology kinds poured alongside steps — every member unassigned AND carrying neither `gc.routed_to` nor `gc.execution_routed_to`, so the execution route a recovery fix stamps reads as reachable). A non-empty `gc.takeaway` or `hold_reason` on the root or a member is a note. It is the root-level complement to I8 (closed roots) and I11 (claimed or routed steps), neither of which fires here. Fails toward silence: an unread roster declines the run, and an unread store, convoy or closed-step listing leaves that unit unjudged rather than flagged. |
+| **I14** | A refinery whose queue holds work is cycling its patrol: once a bead has waited in its find-work queue past the bound, a `mol-refinery-patrol` wisp assigned to that refinery was written within the bound. | `doctor/check-refinery-patrol-live`: the agent half of the refinery, where I10 asserts the cadence half. Each patrol iteration takes one bead from the queue and pours its successor wisp before it burns itself, so a refinery working a queue renews its wisp once per bead. A refinery that stops cycling halts intake: no handoff in its queue is gated or landed, and no handed-back rework closes. The queue is the set find-work selects from: open, assigned to the refinery, carrying `metadata.branch`, not an epic, and with no `merge_result`. Reported STALLED (error) only when both halves hold, because each alone is a healthy shape. An empty queue ends the turn and leaves the wisp resting, so an old wisp alone is an idle refinery. A queue whose oldest bead is younger than the bound (default 60m, `GC_DOCTOR_REFINERY_PATROL_STALL_MINUTES`) holds work the refinery has not yet had the bound to take. Waits are aged by `updated_at`, which any later write resets, so the check errs toward silence. A suspended refinery or rig is a note, and an unread roster, queue or wisp listing warns. |
 
-Ten further checks guard structure that is not an anchor invariant:
+Further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound), `doctor/check-wisp-cascade-intact` (every bead
+been latched past a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
+Stop hook and its no-consent doctrine name the same roles: every agent carrying
+`overlay_dir = "overlays/cycle-recycle"` injects the `heartbeat-no-consent-ui`
+fragment and every agent injecting it carries the overlay, so no role recycles
+with nothing telling it not to prompt and none holds that doctrine while the hook
+never recycles it; static, reads `pack.toml` and the resolved agent prompts),
+`doctor/check-wisp-cascade-intact` (every bead
 store's schema enforces the wisp auxiliary cascade — the constraint both
 removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
 write naming a wisp that does not exist, so a store without it accumulates
@@ -200,13 +211,13 @@ open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
-An eleventh non-invariant check, `doctor/check-demo-toolchain`, reports readiness
+Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, a Chromium
 build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
 session learns before it captures whether the clip will narrate or degrade to a
 silent, captioned one.
-That is the whole set: **23 checks — 22 asserting a live structural property
-and one reporting toolchain readiness** — none greps the source for a past fix.
+That is the whole set: every check asserts a live structural property or reports
+toolchain readiness, and none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
 
@@ -307,7 +318,7 @@ city executes, with nothing unplaced and no row carrying any other value.
 **The placement rule.** A component belongs to the workflow whose product it
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge
 because what it produces is merge decisions. `gate-ensure.sh` is review even
-though it runs as arm 1 of the merge cadence, because what it produces is a
+though it runs as arm 6 of the merge cadence, because what it produces is a
 raisable check and a routed review bead. Patrol is the workflow whose product
 is a fleet that can still run the other five.
 
@@ -325,10 +336,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
-| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
+| `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
-| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up `discovered-from` the anchor and closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
+| `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the worktree the review tests in, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
+| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up that the anchor `blocks` and that is `discovered-from` the finding, then closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. |
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
 | `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
@@ -337,18 +349,22 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
-| `assets/scripts/merge.sh` | merge | Arm 4: the single writer of merged truth. |
+| `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. It also keeps each walk's seen marks, what it saw of each anchor at its last visit, so an arm can put first the anchors that changed since. The paced arms source it, and `gctk merge` carries the same rotation. |
+| `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
+| `assets/scripts/review-verdict.sh` | merge | The approval rule as one jq definition: each outside account's latest approving or change-requesting review decides. `merge.sh` lands on it, `pr-facts.sh` brings only an approved PR's branch current by it, and `bring-current-guard.sh` reads the approvals a judgment-laden bring-current dismisses. |
+| `assets/scripts/bring-current-guard.sh` | merge | Keeps an approval from covering code it never saw. Run at a merge-in child's handoff, it classifies the bring-current as mechanical, which leaves the approval standing, or as judgment, which files a visit on the anchor and dismisses the approval. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
-| `assets/scripts/pr-open.sh` | merge | Arm 6: `pre_open_gate` to `pull_request`. |
+| `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/duplicate-sweep.sh` | merge | Arm 10: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
-| `assets/scripts/pr-stack.sh` | merge | Arm 11: keeps each open PR's body current with its anchor in both managed regions — the branch-beads section, and the `pr-summary` region a rework moved past. Writes only PR bodies. No merge authority. |
+| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize; leaves reviews, human visits, and the anchor itself alone. No merge authority. |
+| `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches, and of never-dispatched rework twins whose same-review sibling landed, via `bead-rehome.sh`. No merge authority. |
+| `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR current with its anchor — the branch-beads section, the `pr-summary` region a rework moved past, and the title composed from the anchor's. Writes only PR bodies and titles. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
-| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or file a visit for the operator's judgment. It sits in visit because its product is a bead the human no longer has to triage. |
+| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of five dispositions: route the bead to a pool, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or put it to the operator as a human gate for their judgment. It sits in visit because its product is a bead the human no longer has to triage. |
 | `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. It never closes a bead: the close disposition slings the bead to a validating closer. |
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
@@ -357,11 +373,14 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
+| `orders/converse-reap.toml` | visit | Fires the converse sitting reaper every five minutes, city-wide. |
+| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose visit reads closed or gone. A sign-off or a `gc-helm dismiss` closes the visit and leaves the manual session running, so this pass is the teardown both endings rely on ([gascity-human-engagement.md](gascity-human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a visit's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
 | `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close visit. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
 | `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
+| `assets/scripts/tmux-dismiss-sitting.sh` | visit | `prefix + X`: dismiss the converse sitting in view, after a confirm. |
 | `assets/scripts/tmux-bindings.sh` | visit | Installs the keybindings that reach the surfaces above. |
 | `assets/scripts/tmux-pick-helm.sh` | visit | The board picker. |
 | `assets/scripts/tmux-pick-session.sh` | visit | The session picker. |
@@ -381,12 +400,15 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
+| `orders/build-scratch-reap.toml` | patrol | Fires the build/test scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
+| `orders/review-workspace-reap.toml` | patrol | Fires the review-workspace reaper hourly, city-wide. |
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
+| `orders/pool-slot-reap.toml` | patrol | Fires the pool-slot reaper every five minutes, city-wide. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
-| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in, and reports a sweep that finished more than an interval before it was collected as stale, never as current findings. |
 | `assets/scripts/gc-deacon-ledger.sh` | patrol | The deacon's rolling incident ledger: one open `deacon-ledger` bead, one comment per non-routine action, rotated so it stays skimmable. Reconstructs a shift for an operator or a recycled deacon without a transcript. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
@@ -394,17 +416,23 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
-| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions that have ended, and of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/build-scratch-reap.sh` | patrol | Removes build and test scratch (Go toolchain trees, gc.test per-run trees, templated tool temp) that a killed or crashed run left behind, gated on no live holder and — for pid-named trees — a dead pid, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
 | `assets/scripts/notification-wisp-reap.sh` | patrol | Closes a city-store "Human gate awaiting you" notice once its gate is no longer open, and collapses duplicate "ESCALATION" copies to one open notice — the notification wisps core mails and never retires. |
 | `assets/scripts/dolt-reclaim.sh` | patrol | Measures each managed Dolt store's noms size and runs `gc dolt compact --gc-only --only-db <db>` on the ones over the per-database line, so a store size-bloated below the flatten commit-threshold is reclaimed on a cadence. Never runs a bare flatten; defers while the data plane is degraded. |
+| `assets/scripts/pool-slot-reap.sh` | patrol | Closes an asleep pool session bead that holds a slot with no runtime and no work once it has stayed asleep past a grace window, and records each close in the incident ledger. Core frees a pool slot only for its listed sleep reasons, and `killed` is not one of them, so without this pass a killed pool session that holds no work keeps its pool one short of the cap it reports. |
 | `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key — the door to a human, for what only a human can answer. The window is one OPEN visit, so a recurring observation belongs in `patrol-finding.sh` instead. |
-| `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key`. A proactive first reaction disposes it: routed to a pool, held on an edge, or put to the operator as a visit. |
+| `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key`. A proactive first reaction disposes it: routed to a pool, held on an edge, or put to the operator as a human gate. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. `doctor/check-seed-audit-current` reports its freshness in a checkout; its `--check-merge` mode is what `merge.sh` gates a landing on. |
 | `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
+| `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
+| `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan (visit) sources it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. |
+| `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |
+| `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
 
 ### The placements worth arguing about
 
@@ -445,5 +473,5 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Adding an invariant** — name its check in the same PR.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
-  by construction. If you find the ledger disagreeing with this document, one
-  of the fourteen checks is missing a case; fix the check, not the prose.
+  by construction. If you find the ledger disagreeing with this document, a
+  check is missing a case; fix the check, not the prose.

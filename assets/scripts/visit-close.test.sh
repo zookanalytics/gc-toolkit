@@ -26,24 +26,33 @@ trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; LOG="$TMPD/log"
 mkdir -p "$BIN"
 
-# A stub gc that records every write and reflects it back, so the readback that
-# gates the close reads exactly what was stamped. Failure knobs:
-#   FAIL_STAMP  the update exits 0 but records nothing (the silent drop)
+# A stub gc that records every write and reflects it back PER BEAD ID, so the
+# readback that gates the close reads exactly what was stamped — and the fold
+# hold-transfer (to a second bead, the holder) reads back independently of the
+# folded visit. Metadata is kept per id in "$LOG.m/<id>.json", status in
+# "$LOG.m/<id>.status". Failure knobs:
+#   FAIL_STAMP  any update exits 0 but records nothing (the silent drop)
+#   FAIL_XFER   an update carrying pr_number exits 0 but records nothing (the
+#               fold hold-transfer's silent drop)
 #   FAIL_CLOSE  the close logs but the status never becomes closed
 #   NEED_FORCE  a plain close is refused; only a --force close takes
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] || exit 2
-O="$LOG.o"; R="$LOG.r"; ST="$LOG.st"
-case "${2:-}" in
+sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
+case "$sub" in
     update)
         printf 'update %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_STAMP:-}" ] && exit 0
+        case "${FAIL_XFER:-}" in "") ;; *) case "$*" in *pr_number=*) exit 0 ;; esac ;; esac
+        mkdir -p "$MDIR"; f="$MDIR/$id.json"; [ -f "$f" ] || printf '{}' >"$f"
+        prev=""
         for a in "$@"; do
-            case "$a" in
-                gc.outcome=*)        printf '%s' "${a#gc.outcome=}" >"$O" ;;
-                gc.outcome_reason=*) printf '%s' "${a#gc.outcome_reason=}" >"$R" ;;
-            esac
+            if [ "$prev" = "--set-metadata" ]; then
+                k="${a%%=*}"; v="${a#*=}"
+                t=$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+            fi
+            prev="$a"
         done ;;
     close)
         forced=0; for a in "$@"; do [ "$a" = "--force" ] && forced=1; done
@@ -51,18 +60,26 @@ case "${2:-}" in
             printf 'close-refused %s\n' "$*" >>"$LOG"; exit 1
         fi
         printf 'close %s\n' "$*" >>"$LOG"
-        [ -n "${FAIL_CLOSE:-}" ] || printf 'closed' >"$ST" ;;
-    show)   jq -nc \
-              --arg o "$(cat "$O" 2>/dev/null)" \
-              --arg r "$(cat "$R" 2>/dev/null)" \
-              --arg s "$(cat "$ST" 2>/dev/null)" \
-              '[{id:"v-x",status:(if $s=="" then "open" else $s end),metadata:{"gc.outcome":$o,"gc.outcome_reason":$r}}]' ;;
+        [ -n "${FAIL_CLOSE:-}" ] || { mkdir -p "$MDIR"; printf 'closed' >"$MDIR/$id.status"; } ;;
+    show)
+        f="$MDIR/$id.json"; m='{}'; [ -f "$f" ] && m=$(cat "$f")
+        s="open"; [ -f "$MDIR/$id.status" ] && s=$(cat "$MDIR/$id.status")
+        jq -nc --arg id "$id" --arg s "$s" --argjson m "$m" \
+          '[{id:$id,status:$s,metadata:$m}]' ;;
     *) exit 2 ;;
 esac
 STUB
 chmod +x "$BIN/gc"
 
-reset() { : >"$LOG"; rm -f "$LOG.o" "$LOG.r" "$LOG.st"; }
+reset() { : >"$LOG"; rm -rf "$LOG.m"; }
+# Pre-seed a metadata key on a bead, the way an earlier write would have left it.
+seed_meta() { # <id> <key> <value>
+  mkdir -p "$LOG.m"; local f="$LOG.m/$1.json"; [ -f "$f" ] || printf '{}' >"$f"
+  local t; t=$(jq -c --arg k "$2" --arg v "$3" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+}
+meta_of() { # <id> <key> — the live stub value, for an assertion
+  PATH="$BIN:$PATH" LOG="$LOG" gc bd show "$1" --json | jq -r --arg k "$2" '.[0].metadata[$k] // ""'
+}
 
 echo "── shipped executable and syntactically valid ──"
 [ -x "$SUT" ] && ok "visit-close.sh is executable" || bad "visit-close.sh is executable" "chmod +x it"
@@ -111,6 +128,66 @@ has "the forced close is the one that took" 'close v-x --reason dismissed: opera
 reset; RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" NEED_FORCE=1 bash "$SUT" --visit v-x --outcome dismissed --reason "operator ended it" >/dev/null 2>&1 ) || RC=$?
 is "without --force a refused close is not silently a success" "$RC" "4"
+
+echo "── fold: the merge-hold keys move to the holder, then the folded visit closes ──"
+reset
+seed_meta v-x pr_number 559
+seed_meta v-x pr_url https://github.com/o/r/pull/559
+seed_meta v-x anchor_bead tk-anchor
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --into v-hold \
+    --outcome folded --reason "folded into v-hold" ) || RC=$?
+is "a fold that moves the hold exits 0" "$RC" "0"
+has "pr_number is stamped on the holder" 'update v-hold --set-metadata pr_number=559' "$LOG"
+is "the holder carries pr_number after the fold" "$(meta_of v-hold pr_number)" "559"
+is "the holder carries pr_url after the fold" "$(meta_of v-hold pr_url)" "https://github.com/o/r/pull/559"
+is "the holder carries anchor_bead after the fold" "$(meta_of v-hold anchor_bead)" "tk-anchor"
+has "the folded visit closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── fold: a transfer that will not read back refuses the close (exit 5) ──"
+reset
+seed_meta v-x pr_number 559
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_XFER=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a dropped merge-hold transfer exits 5" "$RC" "5"
+hasnt "the folded visit is NOT closed when the hold did not move" 'close v-x' "$LOG"
+
+echo "── fold: a merge-holding visit with no --into is refused, never silently dropped (exit 5) ──"
+reset
+seed_meta v-x pr_number 559
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --outcome folded --reason "folded" >/dev/null 2>&1 ) || RC=$?
+is "a merge-holding fold with no --into exits 5" "$RC" "5"
+hasnt "nothing is closed without a holder for the hold" 'close v-x' "$LOG"
+
+echo "── fold: a conflicting holder pr_number is refused, not clobbered (exit 5) ──"
+reset
+seed_meta v-x pr_number 559
+seed_meta v-hold pr_number 560
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a holder already holding another PR refuses the fold (exit 5)" "$RC" "5"
+is "the holder's pr_number is not clobbered" "$(meta_of v-hold pr_number)" "560"
+hasnt "the folded visit is NOT closed on a conflict" 'close v-x' "$LOG"
+
+echo "── fold: a visit with no merge hold needs no transfer and closes normally ──"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" ) || RC=$?
+is "a fold with no pr_number exits 0" "$RC" "0"
+hasnt "no pr_number is written when there is no hold to move" 'pr_number=' "$LOG"
+has "the folded visit still closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── a non-fold close of a merge-holding visit does not require --into ──"
+reset
+seed_meta v-x pr_number 559
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --outcome moot --reason "premise died" ) || RC=$?
+is "a moot close of a pr_number visit still exits 0" "$RC" "0"
+has "the moot close takes" 'close v-x --reason moot: premise died' "$LOG"
 
 echo
 echo "visit-close: $PASS passed, $FAIL failed"

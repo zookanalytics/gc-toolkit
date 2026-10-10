@@ -8,7 +8,7 @@
 # ONE VISIT PER GATE. The sweep's idempotence key is the gate itself: once a
 # visit stands for a gate, the gate is stamped gc.gate_visit=<visit-id> and is
 # never re-offered. Keying on "is a visit open right now" instead would re-file
-# every two minutes after any sitting that ends with the gate still open — a
+# every five minutes after any sitting that ends with the gate still open — a
 # benign close, a cut-short hold that re-states the demand, an operator
 # `dismiss` — spawning a fresh converse session per cooldown for a question
 # already put to a person. The return trip for a cut-short hold is the liveness
@@ -28,9 +28,14 @@
 #     names such a gate on stderr every pass until it is resolved by hand.
 #
 # A visit already standing for the gated bead — the sitting that filed the
-# demand mid-hold, matched by continuation_group, tracks edge OR stall_root
-# (the union liveness-sweep reads; `open` alone reads only the first two) —
-# is recorded on the gate as its visit without filing a second one.
+# demand mid-hold, matched by the shared visit identity (visit-identity.sh: the
+# tracks edge, the gc.continuation_group stamp as fallback) — is recorded on
+# the gate as its visit without filing a second one. A gate whose
+# gated bead is ITSELF a visit (an anchored hold files the conversation demand on
+# the VISIT) is self-covering the same way: that visit is the sitting that
+# resolves the gate, so it is recorded as the gate's visit and no second one is
+# filed — a visit never covers itself, so without this the sweep would file a
+# visit on a visit.
 #
 # Rig-scoped (orders/gate-visit-sweep.toml): each importing rig sweeps its own
 # store, and the gate and its gated bead live in the same store. Per-gate
@@ -125,14 +130,24 @@ while IFS=$'\t' read -r gate_id gated title; do
     fi
 
     # A visit already standing for the gated bead. visit_covers is the shared
-    # identity test (tracks edge, gc.continuation_group fallback). The stall_root
-    # arm is retained as an advisory liveness read per the tk-fhlqce ruling:
-    # nothing writes stall_root today, so it is inert, and its removal (once the
-    # edge is proven to cover the same visits) is tracked as a follow-up.
+    # identity test (tracks edge, gc.continuation_group fallback).
     visit=$(printf '%s' "$LIVE_RAW" | jq -r --arg s "$gated" "$VISIT_IDENTITY_JQ"'
       [ .[] | select((.metadata.task_kind // "") == "visit")
-        | select(visit_covers($s) or ((.metadata.stall_root // "") == $s))
+        | select(visit_covers($s))
         | .id ] | first // empty' 2>/dev/null || true)
+
+    # A gate whose gated bead is itself a visit is self-covering: an anchored hold
+    # files its conversation demand on the VISIT, and that visit IS the sitting
+    # that resolves the gate. visit_covers never matches a visit against itself, so
+    # without this the sweep would `helm open` a visit on a visit. Record the gated
+    # visit as its own cover; the stamp below keys the gate on it. converse-hold.sh
+    # already stamps gc.gate_visit at filing time, so this is the backstop for when
+    # that best-effort write did not land.
+    if [ -z "$visit" ]; then
+        gated_kind=$(printf '%s' "$LIVE_RAW" | jq -r --arg b "$gated" \
+            '[ .[] | select((.id // "") == $b) | (.metadata.task_kind // "") ] | first // ""' 2>/dev/null || echo "")
+        [ "$gated_kind" = "visit" ] && visit="$gated"
+    fi
 
     if [ -n "$visit" ]; then
         HELD=$((HELD + 1))
@@ -146,8 +161,10 @@ Settle it in this sitting, then resolve the gate: gc bd gate resolve $gate_id"
         if out=$("$HELM" open "$gated" --reason "$reason" --body "$body" 2>&1); then
             # `open` names the visit either way: "visit <id> filed on" for a
             # fresh one, "visit <id> is already open for" when one stands.
+            # The alternation needs -E: in a basic regex `\|` is a GNU
+            # extension, and BSD sed reads it as a literal bar.
             visit=$(printf '%s\n' "$out" \
-                | sed -n 's/^.*: visit \([^ ]*\) \(filed on\|is already open for\) .*$/\1/p' | head -n 1)
+                | sed -n -E 's/^.*: visit ([^ ]*) (filed on|is already open for) .*$/\1/p' | head -n 1)
             FILED=$((FILED + 1))
         else
             echo "$PROG: FAILED to file a visit on $gated for gate $gate_id (will retry next sweep)" >&2
