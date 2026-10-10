@@ -3,8 +3,8 @@
 # never executed.
 #
 # services/helm links ICU through Dolt's go-icu-regex, a cgo package, so every
-# compile of it needs ICU's headers: the helm-svc build and the go vet in
-# tools/lint.sh both stop at `'unicode/regex.h' file not found` without them.
+# compile of it needs ICU's headers. Without them the helm-svc build and the
+# go vet in tools/lint.sh stop at `'unicode/regex.h' file not found`.
 # Off macOS the system libicu is on the default search path. On macOS,
 # Homebrew installs icu4c keg-only, so its headers and libraries are on no
 # default search path, and neither the supervisor's environment nor an agent
