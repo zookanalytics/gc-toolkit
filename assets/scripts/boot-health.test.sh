@@ -10,8 +10,8 @@
 # The defect this file exists to pin: the wisp query FALSE-EMPTIES against a
 # healthy deacon, which for a report-only detector means mailing the mayor a
 # bogus "deacon wedged". It has now been introduced twice from two different
-# directions — once by omitting --include-infra (lx-ody8m), once by keeping
-# --status=in_progress (tk-qdhnd, and this order's own draft) — so both are
+# directions — once by omitting --include-infra, once by keeping
+# --status=in_progress (this order's own draft) — so both are
 # asserted mechanically, plus the row cap that would reproduce it a third way
 # under load only.
 #
@@ -123,7 +123,7 @@ paced()  { local v; v="$(state_get last_report)"; [ "${v:-0}" -gt 0 ] && echo ye
 # `open` is the regression: a just-poured wisp is open until the deacon claims
 # it, and the deacon burns the previous wisp BEFORE claiming the next, so a
 # status-filtered query is empty right here — against a deacon patrolling
-# normally. Reproduced live 2026-08-09 (lx-wisp-222j, open at 05:06:25Z).
+# normally.
 for st in open in_progress; do
     run 2 STUB_WISPS="$(wisp "$st" 60)" BOOT_HEALTH_REPORT_AFTER=0
     eq "$(mailed)" no "young wisp with status=$st reads healthy — no report"
@@ -184,7 +184,7 @@ run 2 STUB_WISPS="$(awk -v n=120 -v old="$(iso $((NOW - 7200)))" -v new="$(iso $
     BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" no "a young wisp behind 120 unrelated rows still reads healthy"
 
-# --- (f) The pane is a FALLBACK, not an override (tk-uz3de). -----------------
+# --- (f) The pane is a FALLBACK, not an override. -----------------
 # The pre-inversion bug this section now pins: a busy or advancing pane exited
 # "healthy" BEFORE the wisp was ever consulted, so an expired-login session —
 # which paints a busy, animating pane while completing no work — read as alive
@@ -232,7 +232,7 @@ COLD_OPENED="$(state_get cold_since)"
 pass STUB_PANE='idle 2m' STUB_WISPS='' BOOT_HEALTH_REPORT_AFTER=0                   # unreadable + numeric-only change
 eq "$(state_get cold_since)" "$COLD_OPENED" "unreadable + numeric-only change is STATIC (digits normalized) — clock stands"
 
-# --- (f2) The report describes the pane HONESTLY (tk-xiswq / tk-uz3de). -------
+# --- (f2) The report describes the pane HONESTLY. -------
 # The inversion (f) makes the report fire on a stale/absent wisp REGARDLESS of
 # the pane, so the wedge it catches has a pane that looks alive — busy AND
 # moving. The report text must NOT keep hardcoding the old static-pane predicate:

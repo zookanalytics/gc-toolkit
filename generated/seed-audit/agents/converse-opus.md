@@ -241,10 +241,12 @@ The loop, every visit:
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
-   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   moves this visit's merge-hold keys (`pr_number`, `pr_url`, `anchor_bead`) to
+   `$HOLDER` so a PR's merge stays held after this visit closes, stamps
+   `gc.outcome=folded` and its board-visible reason, and closes:
    ```bash
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome folded --reason "folded into $HOLDER"
+     --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
@@ -517,10 +519,12 @@ visit, say) keeps that format. Operator-initiated form: the
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns

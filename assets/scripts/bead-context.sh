@@ -159,7 +159,7 @@ bd_show() { bd_json "$1" show "$2" --brief-deps; }
 # EXCEPT a tracked review or rework bead (task_kind): that is machine work the pool
 # owns, and its route is cleared by the pour that dispatched it, so an empty route on
 # one is the pour's residue, not a human gate — a review in flight is advancing, never
-# stuck (tk-ikpyzn.5). This mirrors the board's isReviewReworkKind band
+# stuck. This mirrors the board's isReviewReworkKind band
 # (services/helm/internal/board/derive.go), which treats a review/rework leaf as
 # in-flight by kind. Liveness — whether that review's session is still up — is the
 # finer signal the board's wfLive join adds and this jq surface does not reach, so a

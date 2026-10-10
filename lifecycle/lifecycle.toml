@@ -46,6 +46,9 @@ park_route = "human"
 # States whose legal status is closed; every other declared state is open.
 # lifecycle.sh enforces the pairing both ways: --close is accepted only into a
 # closed state, and a transition into a closed state must carry --close.
+# Entering `merged` additionally requires a non-empty --set merged_sha: its
+# meaning is "landed; merged_sha recorded", so it cannot be entered without the
+# landing that defines it.
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.
@@ -415,6 +418,7 @@ keys = [
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
+  "bring_current_from",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -553,6 +557,13 @@ keys = [
 #   every pass and stops it ever re-flipping a PR an operator later re-drafted,
 #   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
 #   Absent means the arm has not read it ready. Never cleared. An oid.
+# bring_current_from — the PR head a rejected-branch resume started from,
+#   written by mol-polecat-work.toml's resume block before it merges the target
+#   in. bring-current-guard.sh reads it at submit as the start of what the
+#   bring-current added, so a session that re-runs the handoff after the push
+#   still reads the whole bring-current. Absent, the guard starts from the origin
+#   head it read before the push. Never cleared; the next resume overwrites it.
+#   An oid.
 
 [metadata.gates]
 keys = [
@@ -578,8 +589,9 @@ keys = [
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
-#   in the same update that closes the review bead (signoff.sh; review-outcome.sh
-#   writes `approve` on a back-lane outcome). lane-state.sh derives a lane green
+#   in the same write that closes the review bead (signoff.sh's closing update;
+#   review-outcome.sh writes `approve` in the create that files a back-lane
+#   outcome already closed). lane-state.sh derives a lane green
 #   from a closed review carrying `approve` with a non-empty reviewed_oid and a
 #   non-superseded gc.outcome; doctor/check-gate-marker-provenance audits the
 #   same shape. A closed review with no signoff_verdict, such as a legacy review
@@ -699,6 +711,17 @@ keys = [
   # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
   # pass does not answer the same thread twice.
   "finding.reply_posted",
+  # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
+  # a machine finding ruled must-fix or deferred to its PR: a file-level review
+  # comment, or a Conversation comment when the locus names no file in the diff.
+  # Set once the post lands, so a later pass leaves the finding alone until it
+  # closes.
+  "finding.pr_comment",
+  # Set by the same write-back once a posted finding has closed and its comment
+  # carries the answer: `1` when it was answered, `gone` when the comment had been
+  # removed from the PR and nothing was left to answer. A finding carrying it
+  # costs the write-back no GitHub read.
+  "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
   # reason, and a --discovered-from edge to the finding for provenance; the anchor
@@ -946,7 +969,10 @@ keys = [
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
-#   enumerates by `--has-metadata-key duplicate_of`. A bead id. Never cleared.
+#   enumerates by `--has-metadata-key duplicate_of`. Stamped by hand on a
+#   diagnosed duplicate, and by duplicate-sweep.sh on a rework twin it has
+#   already closed, so pr-stack.sh drops that twin from the branch's bead list.
+#   A bead id. Never cleared.
 # duplicate_of_store — the store that survivor lives in, the sibling of
 #   gc.superseded_by_store, set only where the survivor's id prefix is ambiguous.
 #   duplicate-sweep.sh reads it to leave a duplicate alone when its survivor sits
