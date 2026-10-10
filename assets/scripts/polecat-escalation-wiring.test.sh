@@ -12,8 +12,8 @@
 # behind a hold, the silent strand that leaves a de-routed molecule no query returns.
 #
 # The sender half is useless without the receiver half, so this pins both: the
-# doctrine that tells the polecat to mail HELP, and the witness patrol step
-# that triages it.
+# doctrine that tells the polecat to mail HELP or NOTICE, and the witness patrol
+# step that triages it.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
@@ -61,6 +61,12 @@ fi
 grep -q 'HELP' "$WITNESS" && grep -q 'escalate\.sh' "$WITNESS" \
   && ok "witness patrol still triages HELP mail and promotes it to a visit" \
   || bad "witness patrol no longer receives what the doctrine tells polecats to send"
+
+# A NOTICE reports a fact the sender does not own. The witness files every one
+# as a finding, so a notice the doctrine sends always reaches a tracked record.
+grep -q 'NOTICE:' "$DOCTRINE" && grep -q '# >>> notice-finding' "$WITNESS" \
+  && ok "the doctrine's NOTICE: mail has a receiver that files it as a finding" \
+  || bad "the doctrine sends NOTICE: mail that the witness patrol no longer files"
 
 echo
 echo "polecat-escalation-wiring: $PASS passed, $FAIL failed"

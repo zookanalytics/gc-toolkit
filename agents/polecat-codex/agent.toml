@@ -19,7 +19,9 @@ of existing_assignment means you already hold the work, so execute it instead \
 of reporting it. If you cannot proceed, record why on the bead and clear your \
 assignee so the work is re-offered.\
 """
-pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+# Codex reads no .claude overlay, so the gh origin guard is registered in the
+# Codex home before the session starts (docs/gh-origin-guard.md, "Codex").
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync", "{{.ConfigDir}}/assets/scripts/gh-origin-guard-codex.sh"]
 idle_timeout = "2h"
 min_active_sessions = 0
 # Pool sizing, not review policy: two concurrent sessions per rig.
