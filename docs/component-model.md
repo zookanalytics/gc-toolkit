@@ -172,6 +172,12 @@ Stop hook and its no-consent doctrine name the same roles: every agent carrying
 fragment and every agent injecting it carries the overlay, so no role recycles
 with nothing telling it not to prompt and none holds that doctrine while the hook
 never recycles it; static, reads `pack.toml` and the resolved agent prompts),
+`doctor/check-work-context-hook` (a polecat's claim delivers its work bead's
+description: the PostToolUse command the polecat agent's overlay registers for
+Bash runs in a scratch copy of that overlay on a simulated claim of a formula
+step, with a stub `gc` serving the step, its root, the root's input convoy and
+the work bead, and must print the work bead's description as
+`additionalContext`; the hook's other branches are covered by its behavior test),
 `doctor/check-wisp-cascade-intact` (every bead
 store's schema enforces the wisp auxiliary cascade — the constraint both
 removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
