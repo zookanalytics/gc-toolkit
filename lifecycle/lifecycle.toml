@@ -567,7 +567,8 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
+  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "signoff_verdict", "visual",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -588,6 +589,15 @@ keys = [
 #   back before the irreversible dismissal, so no dismissal goes unrecorded. A
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
+# approval_dismissed — on a validation-pass bead, the outside approvals that
+#   pass dismissed when it ruled a fresh whole-diff review warranted: the GitHub
+#   review ids, comma-separated. A lone id can read back as a number, so a
+#   reader compares it with tostring. Written by approval-withdraw.sh after it
+#   notes the judgment on the anchor, and read back before the first
+#   irreversible dismissal. A retry of the same pass reads it and dismisses only
+#   those reviews, so it never dismisses an approval given after them. Absent
+#   means the pass dismissed nothing: it converged, or no approval stood. Never
+#   cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane

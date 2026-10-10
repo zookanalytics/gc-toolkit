@@ -9,7 +9,8 @@
 #   (RECOVER)   states the no-poured-workflow recovery (gc formula show).
 #   (NOOTHER)   forbids substituting another method.
 #   (NOFANOUT)  forbids subagents / persona validators / parallel passes.
-#   (WRITES)    names the disposition + review-outcome writes; never check.<lane>.
+#   (WRITES)    names the disposition, review-outcome and approval-withdrawal
+#               writes; never check.<lane>.
 #   (PEER)      the human-finding rule is the peer model — decline on merits +
 #               owed reply — not the retired referral (hold must-fix, refer by
 #               visit, only the raiser withdraws).
@@ -47,6 +48,7 @@ hasF "$OUT" 'no persona validators' "(NOFANOUT) forbids persona validators"
 hasF "$OUT" 'no parallel validation pass' "(NOFANOUT) forbids a parallel validation pass"
 hasF "$OUT" 'finding.disposition' "(WRITES) names the disposition write"
 hasF "$OUT" 'review-outcome.sh' "(WRITES) names the review-outcome write"
+hasF "$OUT" 'approval-withdraw.sh' "(WRITES) names the approval withdrawal a batch that has not converged makes"
 hasF "$OUT" 'never stamps a `check.<lane>` marker' "(WRITES) forbids the retired lane marker"
 hasF "$OUT" 'ruled on its merits like a machine one' "(PEER) a human finding is ruled on its merits, not held gospel"
 hasF "$OUT" 'owes them an answer' "(PEER) declining a human objection owes a reply"

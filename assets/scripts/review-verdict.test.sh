@@ -78,7 +78,8 @@ eq "$(withdrawn "$STANDING")" '[{"veto":"human3","approver":""},{"veto":"","appr
 echo "# every reader sources the one definition"
 READERS="assets/scripts/merge.sh
 assets/scripts/pr-facts.sh
-assets/scripts/bring-current-guard.sh"
+assets/scripts/bring-current-guard.sh
+assets/scripts/approval-withdraw.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

@@ -72,9 +72,13 @@ on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
 review is warranted. A `human` batch is anchor-wide: unconverged, it supersedes
 every lane the anchor's `check_set` declares (`supersede-anchor`); converged, it
 writes no outcome, leaving the declared lanes' green and the open must-fix
-findings to hold the merge. It never stamps a `check.<lane>` marker, never closes
-or routes the anchor, and never runs `gh pr review --approve` — the city does not
-approve PRs. Closing the validation-pass bead is the terminal step; the
+findings to hold the merge. A batch of either shape that has not converged also
+dismisses every approval on the PR from an account other than the city's
+(`approval-withdraw.sh`) and notes that on the anchor, because the change it
+calls for is not the code the approver saw. A converged batch leaves any
+approval standing. The pass never stamps a `check.<lane>` marker, never closes
+or routes the anchor, and never runs `gh pr review --approve` — the city does
+not approve PRs. Closing the validation-pass bead is the terminal step; the
 dispositions and any convergence outcome above are what carry the lane state.
 H
 
