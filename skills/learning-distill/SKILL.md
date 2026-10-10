@@ -233,6 +233,9 @@ it corrected reads `self`. Before you treat a cluster as all-self, check each
 self observation's voice: a PR comment or review whose GitHub author is the
 operator (`gh api` on the provenance, `.user.login`), or the operator's own
 words quoted from a sitting or visit, is an operator correction.
+The operator also runs reviews that post under the city's login, so a comment
+that login posted counts as the operator's when the body of its review
+(`.pull_request_review_id`) says the operator ran it.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans. Self-sourced clusters have been
