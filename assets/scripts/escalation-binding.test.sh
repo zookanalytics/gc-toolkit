@@ -4,12 +4,13 @@
 # and a city-scoped agent runs with it unset:
 #
 #   escalate.sh defaults to gc.routed_to=human — the helm board, which is
-#   always routable and rig-agnostic — so a bare call is not refused; but
-#   without a rig the visit lands in whatever store the ambient environment
-#   resolves, i.e. on some other rig's board than the one that owns the
-#   situation. A --pool <rig>/<agent> or a pinned GC_RIG names the store, so an
-#   unbound call site promises a visit on a specific board and lands it on the
-#   wrong one.
+#   always routable and rig-agnostic — so a bare call is not refused. It files
+#   the visit in the store its subject's id prefix names. Where the subject
+#   names no store, GC_RIG is the only thing that names one: a pool never does,
+#   and without GC_RIG the visit lands in whatever store the ambient
+#   environment resolves, on some other rig's board than the one that owns the
+#   situation. So an unbound call site promises a visit on a specific board and
+#   can land it on the wrong one.
 #
 #   patrol-finding.sh files into the store GC_RIG selects and rig-qualifies the
 #   proactive pool from it. Unbound it falls back to the gc-toolkit store, so a
@@ -49,9 +50,8 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
 # names no flags are neither.
 WRITERS='escalate|patrol-finding'
 invocations() { grep -n -E "\\\$SCRIPTS/($WRITERS)\\.sh|(^|[^-/[:alnum:]])($WRITERS)\\.sh[[:space:]]+--" "$1"; }
-# GC_RIG= binds either writer; --pool <rig>/… binds escalate.sh, and --rig
-# binds patrol-finding.sh.
-bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--pool[[:space:]]+[A-Za-z0-9._-]+/|--rig[[:space:]]+[A-Za-z0-9._-]'; }
+# GC_RIG= binds either writer, and --rig binds patrol-finding.sh.
+bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--rig[[:space:]]+[A-Za-z0-9._-]'; }
 
 EXAMINED=0
 for f in "$ROOT"/agents/*/prompt.template.md "$ROOT"/formulas/mol-*.toml; do

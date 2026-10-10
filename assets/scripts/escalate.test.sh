@@ -232,8 +232,28 @@ reset
 GC_RIG=gc-toolkit "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "human" "the default route is the board"
 reset
-GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
-eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
+GC_RIG=gc-toolkit "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/gc-toolkit.converse >/dev/null 2>&1
+eq "$(meta vis-1 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "--pool overrides the default"
+
+echo "# a pool in another rig never moves the visit out of its subject's store"
+# The misfile this closes: an escalation about a subject in one rig, routed to a
+# pool bound to another, was filed in the POOL's store. The subject's own store,
+# and merge.sh reading it for a PR's merge holds, could not see it. The subject
+# selects the store on every route, so a pool that does not read it is refused,
+# whatever GC_RIG says, and nothing is filed anywhere.
+for caller in other gc-toolkit ""; do
+  label="GC_RIG=${caller:-<unset>}"
+  reset
+  if [ -n "$caller" ]; then
+    out=$(GC_RIG="$caller" "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse 2>&1); rc=$?
+  else
+    out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse 2>&1); rc=$?
+  fi
+  eq "$rc" 1 "$label: a pool from another rig than the subject's is refused"
+  eq "$(visits)" "0" "  ... and files nothing"
+  hasnt "$(cat "$STUB_GC_LOG")" "[other] bd " "  ... and no bd call ran in the pool's rig store"
+  has "$out" "never reads" "  ... naming the pool as one that does not read the subject's store"
+done
 
 echo "# a board-route caller whose GC_RIG is not the subject's rig files in the subject's store"
 # `human` names no store, and `gc bd` only WARNS on a GC_RIG that names no bound
@@ -434,30 +454,61 @@ eq "$rc" 1 "a cross-rig pool exits 1"
 eq "$(visits)" "0" "and files nothing"
 has "$out" "never reads" "says the pool does not read this store"
 
-echo "# a rig-less caller's rig-qualified --pool selects the store too"
-# The other half of the same invariant: the identity is live, so the route
-# passes, and with GC_RIG unset the create lands in whatever store the ambient
-# environment picks — well-formed, verified, and still in a store that pool
-# never lists. Adopting the pool's rig is what keeps route and store together.
+echo "# a rig-less caller's pool route files in the subject's store, not the pool's"
+# The subject's id prefix names its store (tk -> gc-toolkit), and every call is
+# pinned there by path whatever the route, so a pool in the subject's own rig is
+# a route that reads the store its visit lands in. The pool's rig segment
+# selects nothing.
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m \
   --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
-eq "$rc" 0 "a rig-qualified --pool from a rig-less caller files"
+eq "$rc" 0 "a pool in the subject's rig, from a rig-less caller, files"
 eq "$(visits)" "1" "the visit exists"
 eq "$(meta vis-1 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "routed to the pool it named"
 hasnt "$(cat "$STUB_GC_LOG")" "[<unset>] bd " "no bd call ran against the ambient store"
-has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create ran in the pool's rig store"
-has "$out" "adopting rig 'gc-toolkit'" "and the adoption is announced"
+has "$(grep 'bd create' "$STUB_GC_LOG")" "--db /nonexistent-rig/.beads" "the create is pinned to the subject's store by path"
+has "$out" "deriving rig 'gc-toolkit' from subject 'tk-a'" "and the store is named as the subject's"
+hasnt "$out" "adopting rig" "and no rig is adopted from the pool"
 
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool no/such.pool 2>&1); rc=$?
-eq "$rc" 1 "adopting a rig is not a bypass — an unheld pool is still refused"
+eq "$rc" 1 "an unheld pool in another rig is refused"
 eq "$(visits)" "0" "and files nothing"
 
+echo "# a bare pool is qualified with the subject's rig"
+# pool-route.sh qualifies a bare name with GC_RIG, which the pin binds to the
+# subject's rig. A bare name a pool in that rig carries routes there. A city
+# identity (gc-toolkit.dog) does not read the subject's store, so it is refused.
+reset
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "a bare pool name files"
+eq "$(meta vis-1 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "  ... routed to that pool in the subject's rig"
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit.dog 2>&1); rc=$?
-eq "$rc" 0 "a bare pool a city agent holds still files"
-has "$(cat "$STUB_GC_LOG")" "[<unset>] bd create" "and keeps the ambient store — there is no rig to adopt"
+eq "$rc" 1 "a city pool that does not read the subject's store is refused"
+eq "$(visits)" "0" "  ... and files nothing"
+
+echo "# where the subject names no store, the pool does not name one either"
+# A subject proven to name no bead is redirected onto the standing triage subject
+# in the ambient store. A bare pool a city agent holds is matched as given. A
+# rig-qualified pool cannot be proven to read the ambient store, and a pool never
+# selects the store, so with GC_RIG unset it is refused before anything is
+# created, the triage subject included.
+reset
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m --pool gc-toolkit.dog 2>&1); rc=$?
+eq "$rc" 0 "a bare city pool files for a subject that names no store"
+has "$(cat "$STUB_GC_LOG")" "[<unset>] bd create" "  ... in the ambient store, with no store to pin"
+eq "$(meta vis-2 gc.routed_to)" "gc-toolkit.dog" "  ... routed to the city identity as given"
+reset
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 1 "a rig-qualified pool is refused when nothing names the store"
+eq "$(visits)" "0" "  ... and nothing is created"
+has "$out" "A pool never selects the store" "  ... saying the pool does not pick the store"
+hasnt "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd " "  ... and no rig was adopted from it"
+reset
+out=$(GC_RIG=gc-toolkit "$SUT" --subject zz-a --key k1 --message m --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "with GC_RIG naming the store, the same pool files"
+eq "$(meta vis-2 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "  ... routed to it"
 
 echo "# an unreadable agent set is not proof — a --pool route files, loudly unverified"
 # The board default needs no live-agent match, so the verify path is exercised
@@ -554,32 +605,41 @@ eq "$rc" 0 "an unprovable route leaves the visit alone"
 eq "$(meta vis-0 gc.routed_to)" "gc-toolkit.converse" "the route is not rewritten on no evidence"
 has "$out" "UNVERIFIED" "and says so"
 
-echo "# a rig-less caller with a bare --pool cannot confirm a rig-qualified route"
-# The board route derives its store from the subject (above), and a rig-qualified
-# --pool adopts its rig, but a BARE --pool does neither, so GC_RIG stays unset.
-# The dedup listing then runs against whatever store the ambient environment
-# picks, and nothing here says the matched visit lives in the store its
-# rig-scoped pool reads. Counting it exits 0 on a visit that may have asked
-# nobody — the same mute, entered from the dedup side — while the create path
-# refuses this very caller. Repointing is wrong too: the route is likely sound.
+echo "# a rig-less caller's dedup reads the subject's store, so a route there is confirmed"
+# The pin binds GC_RIG to the subject's rig on every route, so the dedup listing
+# runs in the store the subject lives in, and an open visit there routed to that
+# rig's pool is a proved match. It is counted, whatever --pool names.
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again --pool gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "an open visit in the subject's store is counted"
+eq "$(visits)" "0" "and nothing is filed"
+has "$out" "already open" "the situation is confirmed, not guessed"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd list" "the dedup read ran in the subject's store"
+
+echo "# where the subject names no store, a rig-less caller cannot confirm a rig-qualified route"
+# A subject proven to name no bead pins no store, so GC_RIG stays unset and the
+# key-only dedup runs against whatever store the ambient environment picks.
+# Nothing here says the matched visit lives in the store its rig-scoped pool
+# reads. Counting it exits 0 on a visit that may have asked nobody, the same mute
+# entered from the dedup side. Repointing is wrong too: the route is likely sound.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"sub-0"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message again 2>&1); rc=$?
 eq "$rc" 1 "an unconfirmable already-open route exits 1"
 eq "$(visits)" "0" "and files nothing"
 eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "and leaves the route it cannot condemn"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "no write at all"
 has "$out" "GC_RIG is unset" "says why the open visit cannot be counted"
-has "$out" "--pool 'gc-toolkit/gc-toolkit.converse'" "and the repair names the row's own route"
+has "$out" "re-run with GC_RIG=gc-toolkit" "and the repair names the store that route's pool reads"
+hasnt "$out" "re-run with --pool" "and never offers a pool as the way to name a store"
 
-# The repair the refusal names: --pool binds the store, and the dedup that
-# could not be trusted rig-less is then a proved match in the pool's own store.
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
-out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again \
-  --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
-eq "$rc" 0 "naming that pool exits 0"
+# The repair the refusal names: GC_RIG names the store, and the dedup that could
+# not be trusted rig-less is then a proved match in that store.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"sub-0"},"notes":""}]'
+out=$(GC_RIG=gc-toolkit "$SUT" --subject zz-a --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "naming that store exits 0"
 eq "$(visits)" "0" "still files nothing"
 has "$out" "already open" "the situation is confirmed, not guessed"
-has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd list" "the dedup read ran in the pool's own store"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd list" "the dedup read ran in the named store"
 
 # A city identity carries no rig segment, so there is no store claim to
 # reconcile and the rig-less caller's dedup stands on identity alone.
