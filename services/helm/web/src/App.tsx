@@ -164,6 +164,36 @@ function PRPhaseChip({ tile }: { tile: Tile }) {
   return <span className={`pr-phase pr-phase--${tile.pr_phase}`}>{tile.pr_phase}</span>;
 }
 
+// What each conversation value means to the operator, for the chip's hover text.
+const CONVERSATION_MEANING: Record<string, string> = {
+  quiet: 'nothing has been said on this pull request',
+  outstanding: 'a comment is waiting on the city',
+  answered: 'the city has answered; the reply is there to look at',
+  asking: 'the city is waiting on your answer',
+  unknown: 'the merge cadence has not recorded where the conversation stands',
+};
+
+/**
+ * Where the conversation with the operator stands on a merge anchor's pull
+ * request, which is how the board shows which PRs carry the operator's comments.
+ * The value is the wire's own word, so the board, the legend and the JSON use one
+ * vocabulary. `unknown` renders as itself rather than reading as quiet. A closed
+ * row carries none: a finished pull request's conversation is nobody's move, and
+ * the coverage sentence leaves closed rows out for the same reason.
+ */
+function PRConversationChip({ tile }: { tile: Tile }) {
+  if (!tile.pr_conversation || tile.closed_at) return null;
+  const meaning = CONVERSATION_MEANING[tile.pr_conversation];
+  return (
+    <span
+      className={`pr-conversation pr-conversation--${tile.pr_conversation}`}
+      title={`conversation ${tile.pr_conversation}${meaning ? `: ${meaning}` : ''}`}
+    >
+      <span aria-hidden="true">💬</span> {tile.pr_conversation}
+    </span>
+  );
+}
+
 /**
  * What the board could not read about the pull requests it holds.
  *
@@ -604,6 +634,7 @@ function AnchorRow({
       <td>
         <PRPhaseChip tile={tile} />
         <PRLink tile={tile} />
+        <PRConversationChip tile={tile} />
       </td>
       <td className="title-cell" style={{ '--depth': depth } as CSSProperties}>
         {isParent ? (
@@ -704,6 +735,10 @@ function Legend() {
       </span>
       <span className="legend__item">
         <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a visit holds it
+      </span>
+      <span className="legend__item">
+        <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·
+        answered = the reply is there to look at · quiet = nothing said
       </span>
       <span className="legend__item legend__item--done">closed rows dimmed</span>
     </p>

@@ -585,6 +585,15 @@ is current only at the head `pr.machine` was last resolved at; pinned to any
 other head it reads `unknown`, which is a rendered value and never a fallback to
 the quiet end.
 
+**Every live PR row shows its conversation.** The row is where the operator sees
+which pull requests carry their comments. The dashboard puts a `💬 <value>` chip
+beside the PR link, colored for `outstanding`, `answered` and `asking`, with the
+value's meaning on hover. The terminal board ends the row's needs with
+`conversation <value>`, including a member row inside a fold, and skips it on an
+`asking` row, whose needs already names the question. Neither prints one on a
+closed row, since nobody acts on a finished pull request's conversation. Each
+surface's legend says what the values mean.
+
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false
 negative on a row nobody sees. The section withholds "Nothing is owed by you"
