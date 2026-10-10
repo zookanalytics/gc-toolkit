@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # converse-fold-scope.test.sh — regression test for the converse role's
-# fold-on-concurrent-hold check (pattern tk-ogsok; precedent:
+# fold-on-concurrent-hold check (precedent:
 # converse-signoff.test.sh, liveness-sweep-delta.test.sh).
 #
 # The bug: the check keyed two per-visit decisions off the SHARED
@@ -14,8 +14,7 @@
 #      situation B, because they share a bucket. A's decision is dropped
 #      and the fold reads as correct dedup.
 #   2. MUTUAL FOLD — both live sessions see each other, both fold, and
-#      the subject ends with ZERO sittings. Recorded live: su-331y and
-#      su-s1if under group su-vehr, the rule firing both ways.
+#      the subject ends with ZERO sittings, the rule firing both ways.
 #
 # Neither is a knowledge gap, so neither is fixable by telling the role
 # to be careful: an agent that follows the contract exactly still drops
@@ -30,7 +29,7 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-PROMPT="$REPO/agents/converse/prompt.template.md"
+PROMPT="$REPO/agents/_converse/prompt.template.md"
 FOLD_SUT="$REPO/assets/scripts/converse-fold.sh"
 CLAIMER="$REPO/assets/scripts/converse-claim.sh"
 
@@ -70,9 +69,10 @@ BIN="$TMPD/bin"
 FIXDIR="$TMPD/fix"
 mkdir -p "$BIN" "$FIXDIR"
 
-# A stub `gc` serving exactly the two reads the block makes. Anything else
-# exits 2, so a block that grows a third read fails here rather than
-# silently reading the live store from a test.
+# A stub `gc` serving exactly the reads the block makes: the claim hook, a
+# `rig list` to enumerate stores, a `bd show`, and the per-store `bd list --db`
+# the cross-store scan unions. Anything else exits 2, so a block that grows an
+# unmodeled read fails here rather than silently reading the live store.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 # The premise-gate probe drives the shipped converse-claim.sh, which opens with
@@ -84,13 +84,33 @@ if [ "${1:-}" = "hook" ]; then
         "${HOOK_BEAD:-}" "${HOOK_GROUP:-}"
     exit 0
 fi
+# The cross-store scan enumerates stores with `gc rig list --json`.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+    if [ -r "$FIXDIR/rigs.json" ]; then cat "$FIXDIR/rigs.json"; else printf '{"rigs":[]}\n'; fi
+    exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
         f="$FIXDIR/show-${3:-}.json"
         if [ -r "$f" ]; then cat "$f"; else printf '[]\n'; fi
         ;;
-    list) cat "$FIXDIR/list.json" ;;
+    list)
+        # The scan reads one store at a time by path: `--db <rig>/.beads`. Map
+        # that back to a per-store fixture (store-<rig>.json), and fall back to
+        # the single-store list.json when none is present — so a single-rig
+        # setup runs the union over exactly one store, unchanged.
+        db=""; prev=""
+        for a in "$@"; do
+            [ "$prev" = "--db" ] && { db="$a"; break; }
+            prev="$a"
+        done
+        if [ -n "$db" ]; then
+            key=$(basename "$(dirname "$db")")
+            [ -r "$FIXDIR/store-$key.json" ] && { cat "$FIXDIR/store-$key.json"; exit 0; }
+        fi
+        if [ -r "$FIXDIR/list.json" ]; then cat "$FIXDIR/list.json"; else printf '[]\n'; fi
+        ;;
     *) exit 2 ;;
 esac
 STUB
@@ -114,13 +134,39 @@ visit() {
                     + (if $k == "" then {} else {"escalation_key":$k} end))}
          + (if $t == "" then {} else {dependencies:[{id:$t, dependency_type:"tracks"}]} end)'
 }
-# fixture <visit-json>... — write list.json plus a show-<id>.json per visit.
+# rigs <key>[:suspended]... — write rigs.json naming one store per key, each
+# rooted at $FIXDIR/<key> so its `--db <key>/.beads` read maps to
+# store-<key>.json. `key:suspended` marks that rig suspended.
+rigs() {
+    local arr="[]" spec k susp
+    for spec in "$@"; do
+        k="${spec%%:*}"; susp=false
+        [ "$spec" = "$k:suspended" ] && susp=true
+        arr=$(printf '%s' "$arr" | jq -c --arg p "$FIXDIR/$k" --argjson s "$susp" \
+            '. + [{name:$p, path:$p, suspended:$s}]')
+    done
+    printf '%s' "$arr" | jq -c '{rigs: .}' >"$FIXDIR/rigs.json"
+}
+# store <key> <visit-json>... — write store-<key>.json (what `gc bd list --db
+# <key>/.beads` returns) plus a show-<id>.json per visit (gc bd show resolves
+# cross-store, so the visit's own read does not depend on which store it is in).
+store() {
+    local key="$1"; shift
+    printf '%s\n' "$@" | jq -sc '.' >"$FIXDIR/store-$key.json"
+    for row in "$@"; do
+        printf '%s' "$row" | jq -c '[.]' >"$FIXDIR/show-$(printf '%s' "$row" | jq -r '.id').json"
+    done
+}
+# fixture <visit-json>... — write list.json plus a show-<id>.json per visit, and
+# one default store whose --db read falls back to list.json. Every single-store
+# case therefore runs the cross-store union over exactly one store.
 fixture() {
     rm -f "$FIXDIR"/*.json
     printf '%s\n' "$@" | jq -sc '.' >"$FIXDIR/list.json"
     for row in "$@"; do
         printf '%s' "$row" | jq -c '[.]' >"$FIXDIR/show-$(printf '%s' "$row" | jq -r '.id').json"
     done
+    rigs default
 }
 # unreadable — a listing that is not JSON (the read that did not happen).
 unreadable() {
@@ -238,8 +284,64 @@ is "a held visit of another group is not a holder, same key or not" \
 fixture "$(visit v-one sub sess-1)"
 is "a lone sitting holds" "$(holder v-one sub)" "v-one"
 
+echo "── one subject, sittings in TWO stores: they still fold to one ──"
+# A subject's sittings can be filed into different rig stores. The peer scan
+# unions the in_progress listing across every rig's store before the lowest-id
+# tiebreak, so two sittings on one subject fold to the lowest id wherever each
+# was filed.
+rm -f "$FIXDIR"/*.json
+rigs r1 r2
+store r1 "$(visit v-one sub sess-1)"
+store r2 "$(visit v-two sub sess-2)"
+is "positive control: store r1 alone holds only v-one (a single-store scan could never fold it)" \
+    "$(jq '[.[] | select(.assignee != "")] | length' "$FIXDIR/store-r1.json")" "1"
+is "positive control: store r2 alone holds only v-two" \
+    "$(jq '[.[] | select(.assignee != "")] | length' "$FIXDIR/store-r2.json")" "1"
+h1="$(holder v-one sub)"
+h2="$(holder v-two sub)"
+is "v-one (store r1) holds — the lowest id city-wide" "$h1" "v-one"
+is "v-two (store r2) folds into v-one across stores" "$h2" "v-one"
+folds=0
+[ "$h1" = "v-one" ] || folds=$((folds + 1))
+[ "$h2" = "v-two" ] || folds=$((folds + 1))
+is "exactly one of the two cross-store sittings folds (never both, never neither)" "$folds" "1"
+
+echo "── a store that does not read is skipped; the readable ones still dedup ──"
+# The union is best-effort: an unreadable store cannot force a wrong fold — a
+# fold only ever targets a readable lower id — so one store's blip degrades to
+# the old single-store miss rather than failing the whole scan closed.
+rm -f "$FIXDIR"/*.json
+rigs r1 r2
+store r1 "$(visit v-one sub sess-1)" "$(visit v-two sub sess-2)"
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
+is "the readable store still folds the higher id into the lower" "$(holder v-two sub)" "v-one"
+
+echo "── a suspended store is not queried ──"
+# Querying a suspended rig would auto-start an orphan Dolt server, and it has no
+# live session to hold a sitting, so it is skipped: a lower-id stamp there does
+# not fold a live sitting elsewhere.
+rm -f "$FIXDIR"/*.json
+rigs r1 r2
+store r1 "$(visit v-one sub sess-1)"
+store r2 "$(visit v-low sub sess-0)"
+is "positive control: with r2 live, v-one folds into the lower-id sitting there" \
+    "$(holder v-one sub)" "v-low"
+rigs r1 r2:suspended
+is "a lower-id sitting in a suspended store is not a holder" "$(holder v-one sub)" "v-one"
+
+echo "── every store unreadable resolves no holder (hold, never fold) ──"
+# The city-wide analogue of the single-store unreadable case: if not one store
+# reads, nothing proves another session holds anything, so the block resolves
+# EMPTY and the prompt holds.
+rm -f "$FIXDIR"/*.json
+rigs r1 r2
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r1.json"
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
+printf '%s' "$(visit v-two sub sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
+is "no store read resolves no holder" "$(holder v-two sub)" ""
+
 echo "── an EMPTY continuation group never folds across subjects ──"
-# tk-tu5g3. The claim reports the gc.continuation_group STAMP, and the stamp
+# The claim reports the gc.continuation_group STAMP, and the stamp
 # lands empty on a minority of visits. With an empty $SUBJECT both filters
 # stop discriminating — every empty-group visit matches the first, and a
 # keyless topic falls back to $s and matches the second — and the lowest-id
@@ -405,7 +507,7 @@ esac
 # blocks from the same prompt, so the hold-arm gate rides the harness the fold
 # block built — same stub `gc`, same fixtures dir.
 #
-# The defect (tk-3vbus7): step 1's action=hold arm skipped the premise re-check
+# The defect: step 1's action=hold arm skipped the premise re-check
 # on the action=hold verdict ALONE. But `gc hook --claim` returns
 # existing_assignment (→ action=hold) for ANY bead already assigned to this
 # session identity, including a claim that died BEFORE step 2 ever ran. The gate
@@ -460,7 +562,7 @@ hv_demand() { # demand-id subject-id — a sibling open demand naming the subjec
 }
 
 echo "── a claim that died before step 5 leaves no trace: re-check the premise ──"
-# The observed shape (tk-fzvjw7): an escalate visit under a standing scope whose
+# The observed shape: an escalate visit under a standing scope whose
 # replacement claim found no gc.hold_demand on the visit.
 hv_reset
 hv_visit v-dead

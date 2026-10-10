@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # run-tests.test.sh — the serial re-run that tells a parallel-contention false
-# failure from a real one, and the runs a file with parts is split into.
+# failure from a real one, the runs a file with parts is split into, and how
+# many runs the parallel wave holds at once and at what priority.
 #
 # A file can fail under -j for a reason that is not its own: a sibling job
 # saturates the host and a command the file spawned is killed, so an assertion
 # reads a 143 where it wanted a real exit. The runner re-runs each failed file
 # serially, where no sibling competes with it, and only a file that fails alone
 # too is a real failure. That reclassification is what this pins.
+#
+# It also pins the affected subset, the suites a set of changed paths selects:
+# each shape of suite a change can break outside its sibling test is a --list
+# case over a fixture repo.
 #
 # Asserted here:
 #   - a file with parts runs once per declared part, each run handed its part
@@ -21,12 +26,44 @@
 #   - --retry rejects a non-integer;
 #   - every file commits and tags with signing off, under a git config that
 #     signs both with a signer that always fails, and a git config entry the
-#     caller exported still reaches it.
+#     caller exported still reaches it;
+#   - every file runs under the physical path of the caller's TMPDIR, or of
+#     /tmp when it is unset, with no symlink and no trailing slash, while the
+#     same file run directly gets the TMPDIR as given; a TMPDIR that names no
+#     directory is a usage error;
+#   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
+#     counted by nproc, else getconf, else sysctl, and capped at the run count;
+#     TEST_JOBS and -j each override that default;
+#   - a run of the parallel wave starts at a niceness 10 above the caller's,
+#     and at ionice's lowest best-effort level where ionice can set it, while a
+#     serial re-run keeps the caller's priority; an ionice that refuses the
+#     class is left out and fails no run;
+#   - a changed script reaches its sibling, every suite naming it on a line
+#     that is not a comment, and the sibling of every script naming it so, one
+#     hop and no further; no suite naming a longer name that ends in it, and
+#     the same suites when the path is typed with ./;
+#   - a changed library reaches every suite of each script that sources it,
+#     through a `.` command or a shellcheck directive, and of whatever sources
+#     those in turn; a message or a document that says "source" sources
+#     nothing;
+#   - every subset includes the suites whose opening comment block declares
+#     the tree scope, and only those;
+#   - a basename two tracked files share is matched with the parent directory
+#     that tells them apart;
+#   - a changed file that is not a script, or that no longer exists, reaches
+#     the suites that name it;
+#   - with no PATH every tracked suite is listed once;
+#   - a scope other than tree, or an empty one, is a usage error in the
+#     affected run and the full run alike.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
 # first time, passes the next" stands in for the contention the real flake needs
-# a loaded host to produce. No live city, no network.
+# a loaded host to produce. The job-count and priority cases put stub nproc,
+# getconf, sysctl and ionice ahead of the real tools on PATH, so the counts and
+# I/O class they assert are the same on every host. The affected-subset cases
+# run a copy of the runner inside throwaway git repos whose tracked files are
+# the fixtures. No live city, no network.
 
 set -u
 
@@ -305,6 +342,366 @@ reset_state
 OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" signing_env bash "$FIX/signing.test.sh" 2>&1)"; RC=$?
 if [ "$RC" -ne 0 ]; then ok "the file run directly fails"; else bad "the file run directly fails" "it exited 0"; fi
 has "$OUT" "failed to write commit object" "because the commit could not be signed"
+
+echo "── tmpdir: every file runs under the physical path of the caller's TMPDIR ──"
+# A temp directory named through a symlink, with a trailing slash, stands in for
+# macOS's TMPDIR, which ends in a slash and sits under /var, a symlink to
+# /private/var.
+mkdir -p "$TMP/tmp-real"
+ln -s "$TMP/tmp-real" "$TMP/tmp-link"
+TMP_REAL="$(cd "$TMP/tmp-real" && pwd -P)"
+cat > "$FIX/tmpdir.test.sh" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "${TMPDIR-unset}" > "$RUNTESTS_FIXTURE_STATE/tmpdir"
+F
+reset_state
+TMPDIR="$TMP/tmp-link/" run "$FIX/tmpdir.test.sh"
+eq "$RC" 0 "a file runs under a TMPDIR named through a symlink"
+eq "$(cat "$STATE/tmpdir")" "$TMP_REAL" "it gets the directory's physical path, with no trailing slash"
+# The same file run directly gets the TMPDIR it was given: the physical path
+# above is the runner's doing.
+reset_state
+RUNTESTS_FIXTURE_STATE="$STATE" TMPDIR="$TMP/tmp-link/" bash "$FIX/tmpdir.test.sh"
+eq "$(cat "$STATE/tmpdir")" "$TMP/tmp-link/" "the file run directly gets the TMPDIR as given"
+reset_state
+OUT="$(unset TMPDIR; RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/tmpdir.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a file runs with TMPDIR unset"
+eq "$(cat "$STATE/tmpdir")" "$(cd /tmp && pwd -P)" "and gets the physical path of /tmp"
+reset_state
+TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
+eq "$RC" 2 "a TMPDIR that names no directory is a usage error"
+has "$OUT" "cannot resolve the temp directory '$TMP/no-such-dir'" "…and named"
+if [ -e "$STATE/tmpdir" ]; then bad "and no file runs" "the fixture ran"; else ok "and no file runs"; fi
+
+echo "── jobs: the default is half the cores, at least one ──"
+# The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of
+# the real tools on PATH answer from STUB_NPROC, STUB_GETCONF and STUB_SYSCTL,
+# and fail with no output where theirs is unset, as a missing tool does. The
+# file's twelve parts outnumber every default below but one, so the header line
+# reports the default itself rather than the cap at the run count.
+CORES_BIN="$TMP/cores-bin"
+mkdir -p "$CORES_BIN"
+cat > "$CORES_BIN/nproc" <<'F'
+#!/usr/bin/env bash
+[ -n "${STUB_NPROC:-}" ] || exit 127
+echo "$STUB_NPROC"
+F
+cat > "$CORES_BIN/getconf" <<'F'
+#!/usr/bin/env bash
+{ [ "${1:-}" = _NPROCESSORS_ONLN ] && [ -n "${STUB_GETCONF:-}" ]; } || exit 1
+echo "$STUB_GETCONF"
+F
+cat > "$CORES_BIN/sysctl" <<'F'
+#!/usr/bin/env bash
+{ [ "${1:-}" = -n ] && [ "${2:-}" = hw.ncpu ] && [ -n "${STUB_SYSCTL:-}" ]; } || exit 1
+echo "$STUB_SYSCTL"
+F
+chmod +x "$CORES_BIN"/*
+cat > "$FIX/wide.test.sh" <<'F'
+#!/usr/bin/env bash
+# run-tests-parts: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12
+F
+# run_cores [VAR=value...] [-- runner-args...] -> sets RC, OUT, and PAR: the
+# parallel count the header line reports for the twelve-part file, run with no
+# -j unless one is given, under the core stubs and the given env.
+run_cores() {
+  local -a vars=()
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done
+  [ "$#" -eq 0 ] || shift
+  OUT="$(env PATH="$CORES_BIN:$PATH" "${vars[@]}" "$RUNNER_COPY" -t 30 "$@" "$FIX/wide.test.sh" 2>&1)"; RC=$?
+  PAR="$(printf '%s\n' "$OUT" | sed -n 's/^run-tests: .* runs, \([0-9]*\) parallel,.*/\1/p')"
+}
+run_cores STUB_NPROC=8
+eq "$RC" 0 "a run on the default job count passes"
+eq "$PAR" 4 "eight cores from nproc give four jobs"
+run_cores STUB_GETCONF=6
+eq "$PAR" 3 "with no nproc, six from getconf give three"
+run_cores STUB_SYSCTL=10
+eq "$PAR" 5 "with neither, ten from sysctl give five"
+run_cores STUB_NPROC=1
+eq "$PAR" 1 "one core gives one job, not none"
+run_cores
+eq "$RC" 0 "a host no tool reports a count for still runs"
+eq "$PAR" 1 "on one job"
+run_cores STUB_NPROC=64
+eq "$PAR" 12 "a default wider than the runs is capped at the run count"
+run_cores STUB_NPROC=8 TEST_JOBS=3
+eq "$PAR" 3 "TEST_JOBS overrides the default"
+run_cores STUB_NPROC=8 -- -j 5
+eq "$PAR" 5 "and so does -j"
+
+echo "── priority: the parallel wave runs niced, a serial re-run at the caller's priority ──"
+# The file fails its first run and passes its second, so run 1 is the parallel
+# wave's and run 2 the serial re-run's. Each records its niceness and the I/O
+# class a stub ionice, ahead of any real one on PATH, exported to it. The stub
+# refuses every class while STUB_IONICE_REFUSE is set. The niceness expected of
+# the wave is what nice -n 10 gives a child of this shell, which the system caps,
+# so the case holds when this suite itself runs niced, as it does in a wave.
+PRIO_BIN="$TMP/prio-bin"
+mkdir -p "$PRIO_BIN"
+cat > "$PRIO_BIN/ionice" <<'F'
+#!/usr/bin/env bash
+[ -z "${STUB_IONICE_REFUSE:-}" ] || exit 1
+class="" level=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -c) class="$2"; shift 2 ;;
+    -n) level="$2"; shift 2 ;;
+    *)  break ;;
+  esac
+done
+export STUB_IONICE="class $class level $level"
+exec "$@"
+F
+chmod +x "$PRIO_BIN/ionice"
+cat > "$FIX/prio.test.sh" <<'F'
+#!/usr/bin/env bash
+c="$RUNTESTS_FIXTURE_STATE/prio.count"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+printf '%s|%s\n' "$(ps -o ni= -p "$$" | tr -d ' ')" "${STUB_IONICE-none}" > "$RUNTESTS_FIXTURE_STATE/prio.$n"
+[ "$n" -ge 2 ]
+F
+OWN_NICE="$(ps -o ni= -p "$$" | tr -d ' ')"
+NICED="$(nice -n 10 sh -c 'ps -o ni= -p "$$"' | tr -d ' ')"
+reset_state
+PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
+eq "$RC" 0 "the file passes on its serial re-run"
+eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|class 2 level 7" \
+  "the wave's run is niced 10 and at ionice's lowest best-effort level"
+eq "$(cat "$STATE/prio.2" 2>/dev/null)" "$OWN_NICE|none" \
+  "the serial re-run keeps the caller's niceness and I/O class"
+reset_state
+STUB_IONICE_REFUSE=1 PATH="$PRIO_BIN:$PATH" run "$FIX/prio.test.sh"
+eq "$RC" 0 "an ionice that refuses the class fails no run"
+eq "$(cat "$STATE/prio.1" 2>/dev/null)" "$NICED|none" \
+  "the wave's run is still niced 10, without ionice"
+
+# The affected subset is read from what a repo tracks, so its cases get a repo
+# whose tracked files are the fixtures. The runner sits in it as it does in the
+# pack, and every path below is passed relative to the root, the way
+# `git diff --name-only` prints it.
+AREPO="$TMP/affected"
+mkdir -p "$AREPO/tools" "$AREPO/lib" "$AREPO/guard" "$AREPO/a" "$AREPO/b" "$AREPO/c" "$AREPO/conf"
+cp "$RUNNER" "$AREPO/tools/run-tests.sh"
+fixture() { mkdir -p "$(dirname "$AREPO/$1")"; cat > "$AREPO/$1"; }
+
+# A library, a script that sources it with a `.` command, and a script that
+# sources that one through a variable, which only its shellcheck directive names.
+fixture lib/shared.sh <<'F'
+#!/usr/bin/env bash
+shared_fn() { echo shared; }
+F
+fixture lib/consumer.sh <<'F'
+#!/usr/bin/env bash
+. "$(dirname "$0")/shared.sh"
+shared_fn
+F
+fixture lib/wrapper.sh <<'F'
+#!/usr/bin/env bash
+LIB="$(dirname "$0")/consumer.sh"
+# shellcheck source=consumer.sh
+. "$LIB"
+F
+# Names the library in a comment and in a message that says "source", and
+# sources nothing; a document whose prose does the same and that shows the
+# command, and a suite that reads that document.
+fixture lib/mention.sh <<'F'
+#!/usr/bin/env bash
+# . "$(dirname "$0")/shared.sh" is what a consumer would run.
+echo "run this after you source shared.sh"
+F
+fixture docs/notes.md <<'F'
+Whichever source wins, `shared.sh` decides. A consumer loads it with
+
+    . "$HERE/shared.sh"
+F
+fixture c/notes.test.sh <<'F'
+#!/usr/bin/env bash
+grep -q wins "$(git rev-parse --show-toplevel)/docs/notes.md"
+F
+fixture lib/consumer.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/consumer.sh"
+F
+fixture lib/wrapper.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/wrapper.sh"
+F
+fixture lib/mention.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/mention.sh"
+F
+# Suites other than the siblings that run the consumer, the wrapper and the
+# mention.
+fixture c/consumer-run.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/lib/consumer.sh" --check
+F
+fixture c/wrapper-run.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/lib/wrapper.sh" --check
+F
+fixture c/mention-run.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/lib/mention.sh" --check
+F
+
+# A script with its sibling, a second suite that runs it, one that only
+# mentions it in a comment, and one that runs a script whose name ends in its.
+fixture lib/tool.sh <<'F'
+#!/usr/bin/env bash
+echo tool
+F
+fixture lib/tool.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/tool.sh"
+F
+fixture lib/tool-more.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/tool.sh" --more
+F
+fixture lib/tool-prose.test.sh <<'F'
+#!/usr/bin/env bash
+# Mentions tool.sh, and runs none of it.
+true
+F
+fixture lib/mytool.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/mytool.sh"
+F
+# A script that runs the tool in place, and one that runs that script in turn,
+# each with its sibling, neither of which names the tool.
+fixture lib/runner.sh <<'F'
+#!/usr/bin/env bash
+"$(dirname "$0")/tool.sh"
+F
+fixture lib/runner.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/runner.sh"
+F
+fixture lib/outer.sh <<'F'
+#!/usr/bin/env bash
+"$(dirname "$0")/runner.sh"
+F
+fixture lib/outer.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/outer.sh"
+F
+
+# Two scripts that share a basename, and a suite that runs one of them by the
+# path that tells them apart.
+for d in a b; do
+  printf '#!/usr/bin/env bash\necho %s\n' "$d" | fixture "$d/run.sh"
+  printf '#!/usr/bin/env bash\nbash "$(dirname "$0")/run.sh"\n' | fixture "$d/run.test.sh"
+done
+fixture c/pick.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/a/run.sh"
+F
+
+# A file that is not a script, a suite that reads it, and a suite that runs a
+# script the tree no longer has.
+printf 'key = 1\n' | fixture conf/settings.toml
+fixture c/config.test.sh <<'F'
+#!/usr/bin/env bash
+grep -q key "$(git rev-parse --show-toplevel)/conf/settings.toml"
+F
+fixture c/legacy.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/lib/gone.sh"
+F
+
+# A suite that declares the tree scope, and one whose declaration sits below
+# its opening comment block, which is not one.
+fixture guard/scan.test.sh <<'F'
+#!/usr/bin/env bash
+# Scans every tracked file for a pattern.
+#
+# run-tests-scope: tree
+git ls-files
+F
+fixture guard/late.test.sh <<'F'
+#!/usr/bin/env bash
+# No scope is declared up here.
+: <<'X'
+# run-tests-scope: tree
+X
+F
+git -C "$AREPO" init -q
+git -C "$AREPO" add -A
+
+# alist [paths...] -> sets RC, OUT, and LIST: what --list printed, sorted onto
+# one line. -j is wider than the fixture set, so the order is not by size.
+alist() {
+  OUT="$("$AREPO/tools/run-tests.sh" -j 64 --list "$@" 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+}
+
+echo "── 10. a script reaches its sibling, every suite naming it in code, and the sibling of every script naming it ──"
+alist lib/tool.sh
+eq "$RC" 0 "--list over a changed script exits 0"
+eq "$LIST" "guard/scan.test.sh lib/runner.test.sh lib/tool-more.test.sh lib/tool.test.sh " \
+  "the sibling, the suite that runs it, the sibling of the script that runs it in place, and the tree-wide suite"
+hasnt "$LIST" "lib/outer.test.sh" "not the suite of a script one more hop away"
+hasnt "$LIST" "lib/tool-prose.test.sh" "not a suite that mentions it only in a comment"
+hasnt "$LIST" "lib/mytool.test.sh" "not a suite naming a longer name that ends in it"
+alist ./lib/tool.sh
+eq "$LIST" "guard/scan.test.sh lib/runner.test.sh lib/tool-more.test.sh lib/tool.test.sh " \
+  "a path typed with ./ selects each suite once, under the same name"
+alist lib//
+eq "$(printf '%s\n' "$OUT" | grep -c .)" "$(printf '%s\n' "$OUT" | sort -u | grep -c .)" \
+  "a directory typed with a trailing slash lists no suite twice"
+
+echo "── 11. a sourced library reaches every suite of what sources it, transitively ──"
+alist lib/shared.sh
+eq "$LIST" "c/consumer-run.test.sh c/wrapper-run.test.sh guard/scan.test.sh lib/consumer.test.sh lib/mention.test.sh lib/wrapper.test.sh " \
+  "the suites running its consumer, by a . command, and its consumer's consumer, by a shellcheck directive; the sibling of the script naming it"
+hasnt "$LIST" "c/mention-run.test.sh" "a script whose message says source is not a consumer"
+hasnt "$LIST" "c/notes.test.sh" "nor is a document that shows the command"
+
+echo "── 12. every subset includes the tree-wide suites ──"
+alist docs/unrelated.md
+eq "$RC" 0 "a path no suite names is not an error"
+eq "$LIST" "guard/scan.test.sh " \
+  "the suite declaring the tree scope runs; a declaration below the opening comment block is not one"
+alist lib
+eq "$LIST" "guard/scan.test.sh lib/consumer.test.sh lib/mention.test.sh lib/mytool.test.sh lib/outer.test.sh lib/runner.test.sh lib/tool-more.test.sh lib/tool-prose.test.sh lib/tool.test.sh lib/wrapper.test.sh " \
+  "a directory runs every suite beneath it, plus the tree-wide ones"
+
+echo "── 13. a shared basename is told apart by its parent directory ──"
+alist a/run.sh
+eq "$LIST" "a/run.test.sh c/pick.test.sh guard/scan.test.sh " \
+  "the suite naming a/run.sh runs for it"
+alist b/run.sh
+eq "$LIST" "b/run.test.sh guard/scan.test.sh " \
+  "and not for b/run.sh, whose own sibling names only run.sh"
+
+echo "── 14. a file that is not a script, or no longer exists, reaches the suites that name it ──"
+alist conf/settings.toml
+eq "$LIST" "c/config.test.sh guard/scan.test.sh " "a config file reaches the suite that reads it"
+alist lib/gone.sh
+eq "$LIST" "c/legacy.test.sh guard/scan.test.sh " "a deleted script reaches the suite that still runs it"
+
+echo "── 15. with no PATH every tracked suite is listed, once ──"
+alist
+eq "$(printf '%s\n' "$OUT" | grep -c .)" "$(git -C "$AREPO" ls-files '*.test.sh' | grep -c .)" \
+  "the full list is every tracked *.test.sh"
+
+echo "── 16. a scope other than tree is a usage error ──"
+SREPO="$TMP/scope"
+mkdir -p "$SREPO/tools"
+cp "$RUNNER" "$SREPO/tools/run-tests.sh"
+printf '#!/usr/bin/env bash\n# run-tests-scope: tre\n' > "$SREPO/typo.test.sh"
+git -C "$SREPO" init -q
+git -C "$SREPO" add -A
+OUT="$("$SREPO/tools/run-tests.sh" --list typo.test.sh 2>&1)"; RC=$?
+eq "$RC" 2 "a misspelled scope fails the affected run"
+has "$OUT" "typo.test.sh declares an unknown scope 'tre'" "…and names the file and the value"
+OUT="$("$SREPO/tools/run-tests.sh" --list 2>&1)"; RC=$?
+eq "$RC" 2 "and the full run too"
+printf '#!/usr/bin/env bash\n# run-tests-scope:\n' > "$SREPO/typo.test.sh"
+OUT="$("$SREPO/tools/run-tests.sh" --list 2>&1)"; RC=$?
+eq "$RC" 2 "an empty scope is refused as well"
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

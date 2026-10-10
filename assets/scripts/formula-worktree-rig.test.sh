@@ -10,6 +10,8 @@
 # neither resolves. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
+#
+# run-tests-scope: tree
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +20,10 @@ REVIEW_TOML="$ROOT/formulas/mol-review.toml"
 PATROL_TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 SYNC_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-formula-worktree-rig-test.XXXXXX")"
+# git lists a worktree by its resolved path, so every path is built on a
+# resolved root and compares to git's as a string, a TMPDIR behind a symlink
+# (as macOS's is) included.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -108,15 +114,9 @@ bare_adds() {
 
 count() { awk 'NF { n++ } END { print n + 0 }'; }
 wt_paths() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'; }
-# in_paths <newline-separated paths> <path> -> yes|no, compared by realpath so a
-# symlinked TMPDIR cannot turn a real match into a miss.
+# in_paths <newline-separated paths> <path> -> yes|no, an exact line match.
 in_paths() {
-  local want p
-  want="$(realpath -m "$2" 2>/dev/null || printf '%s' "$2")"
-  while IFS= read -r p; do
-    [ -n "$p" ] && [ -n "$want" ] && [ "$(realpath -m "$p")" = "$want" ] && { echo yes; return 0; }
-  done <<< "$1"
-  echo no
+  if [ -n "$2" ] && grep -qxF -- "$2" <<< "$1"; then echo yes; else echo no; fi
 }
 registered() { in_paths "$(wt_paths "$1")" "$2"; }
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; git -C "$1" rev-parse HEAD; }
@@ -222,7 +222,7 @@ for mode in env roster; do
   eq "$(in_paths "$(cat "$D/probe/rig" 2>/dev/null || true)" "$WT")" yes "review/$mode: the worktree is registered in the RIG repo"
   eq "$(in_paths "$(cat "$D/probe/cwd" 2>/dev/null || true)" "$WT")" no  "review/$mode: the worktree is NOT registered in the cwd repo"
   eq "$(cat "$D/probe/head" 2>/dev/null || true)" "$OID" "review/$mode: the worktree is checked out at the reviewed OID"
-  eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "$(realpath -m "${WT:-/nonexistent}")" "review/$mode: the block leaves the shell in the review worktree"
+  eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "${WT:-/nonexistent}" "review/$mode: the block leaves the shell in the review worktree"
   review_remove
   eq "$(registered "$D/rig" "$WT")" no "review/$mode: the verdict step's remove unregisters the worktree from the rig"
   if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"

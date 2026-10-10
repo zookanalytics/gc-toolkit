@@ -106,12 +106,14 @@ performer; the full transition table with writers is
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park — are handled by five reactive paths:
-`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
-witness patrol recovers work orphaned by dead sessions, the `dog` pool is
-warrant executor for due-process recovery of wedged sessions (demand-scaled
-0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
-and `boot-health.sh` detects a wedged deacon (report-only by design). See
+session dying, a pool slot the runtime does not free, a provider quota park —
+are handled by six reactive paths: `pr-facts.sh` (an arm of the cadence)
+records PR events and files a visit, the witness patrol recovers work orphaned
+by dead sessions, the `dog` pool is warrant executor for due-process recovery
+of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
+session bead the runtime left holding its slot with no runtime and no work,
+`quota-park-nudge.sh` nudges a session parked behind a provider limit, and
+`boot-health.sh` detects a wedged deacon (report-only by design). See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
@@ -122,10 +124,11 @@ The human surface is subject / visit / takeaway on native primitives
 ([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
-  identity; turns are small child beads routed to the converse role. Warm, the
-  next turn vacuums onto the live session through the continuation group;
-  cold, a fresh session reconstitutes from the record. The record is the
-  durable thing; sessions are disposable.
+  identity; turns are small child beads that park on the helm board
+  (`gc.routed_to=human`) until the operator engages one. Warm, the next turn
+  vacuums onto the live sitting through the continuation group; cold,
+  `gc-helm engage` spawns a fresh `converse-<model>` sitting that reconstitutes
+  from the record. The record is the durable thing; sessions are disposable.
 - **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
   canonical entry point. Two channels carry a signal, and which applies
   depends on who can answer it. Mail is the agent-to-agent pathway: a worker
@@ -163,10 +166,10 @@ corrective feedback into standing behavior, so attention is never spent twice:
    everything else. A lesson is real when it is merged pack content, not when
    it is remembered.
 
-Doctor is the same idea applied to structure: ten of its twelve checks assert
-an invariant from [component-model.md](component-model.md) §3 against the live
-ledger, and the other two guard pack structure, so a property that stops
-holding fails a named check instead of waiting to be rediscovered.
+Doctor is the same idea applied to structure: its checks assert invariants
+from [component-model.md](component-model.md) §3 against the live ledger and
+guard pack structure, so a property that stops holding fails a named check
+instead of waiting to be rediscovered.
 
 ## The consistency test
 

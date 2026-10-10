@@ -5,9 +5,10 @@
 > `gc init`.
 
 gc-toolkit ships a **native agent roster** — polecat, refinery, witness,
-deacon, converse, mechanik, polecat-codex, proactive — declared in its own
-`pack.toml`. It imports nothing: there are no gastown prerequisites, no
-transitive imports, and no agent patches to wire.
+deacon, mechanik, polecat-codex, proactive, and the converse-opus,
+converse-fable and converse-codex sittings — declared in its own `pack.toml`.
+It imports nothing: there are no gastown prerequisites, no transitive imports,
+and no agent patches to wire.
 
 Covered here:
 
@@ -65,7 +66,8 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
-  role (`converse`), and `proactive` (always-on, 2-slot).
+  sittings (`converse-opus`, `converse-fable`, `converse-codex`, which
+  `gc-helm engage` opens per visit), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
@@ -170,6 +172,7 @@ The pack's checks, and what a failure means:
 | `check-cadence-live` | every pack order fired within its interval, and a `gctk` binary is deployed for `lifecycle.sh` to exec (I10) | order not registered for a rig, the controller is down, or the `gctk-build` order has never published a binary |
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
+| `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 | `check-recycle-capable` | cycle-recycle can fire: a Stop event reaches the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, and no refinery defer guard is latched | the Stop wiring stopped passing the hook its stdin, the transcript shape moved under the measurement, or an uncommitted tracked file has latched the refinery's git-op guard |
@@ -209,8 +212,8 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `dog`, `converse`, `mechanik` — with no
-gastown entries.
+`refinery`, `witness`, `deacon`, `dog`, `converse-opus`, `converse-fable`,
+`converse-codex`, `mechanik` — with no gastown entries.
 
 ### First render of the seed audit
 
