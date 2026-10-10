@@ -13,6 +13,8 @@
 #   (PEER)      the human-finding rule is the peer model — decline on merits +
 #               owed reply — not the retired referral (hold must-fix, refer by
 #               visit, only the raiser withdraws).
+#   (DEFER)     a question an open visit already carries is needs-you --visit on
+#               that visit, the one case the pass does not rule on its merits.
 #   (NOAPPROVE) never gh pr review --approve.
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
@@ -51,6 +53,7 @@ hasF "$OUT" 'never stamps a `check.<lane>` marker' "(WRITES) forbids the retired
 hasF "$OUT" 'ruled on its merits like a machine one' "(PEER) a human finding is ruled on its merits, not held gospel"
 hasF "$OUT" 'owes them an answer' "(PEER) declining a human objection owes a reply"
 hasF "$OUT" "posted to their PR thread by pr-facts.sh's write-back" "(PEER) the owed reply rides the write-back"
+hasF "$OUT" 'needs-you --visit' "(DEFER) a question an open visit already carries is deferred to that visit"
 notF "$OUT" 'referred to the operator by a visit' "(PEER) the retired referral rule is gone"
 notF "$OUT" 'only they may withdraw' "(PEER) the only-the-raiser-withdraws rule is gone"
 hasF "$OUT" 'gh pr review --approve' "(NOAPPROVE) addresses --approve (never used)"

@@ -203,7 +203,36 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | select(((.metadata["finding.lane"] // "") ) == $lane)
       | select((.metadata["finding.disposition"] // "") == "unvalidated")
       | "\\(.id)\\t\\(.title)"'
+echo "open visits on anchor $ANCHOR's feedback:"
+"$SCRIPTS/finding.sh" open-visits --anchor "$ANCHOR"; VRC=$?
+[ "$VRC" -le 1 ] || { echo "cannot read the open visits on anchor $ANCHOR; refusing to rule its findings past them unread" >&2; exit 1; }
+[ "$VRC" -eq 1 ] && echo "  (none)"
 ```
+
+**First, the questions the operator already holds.** The open visits printed
+above sit on this anchor's feedback: each tracks the anchor or one of its rework
+children, or holds a rework child through a blocks edge, which is how a rework
+parks itself on a question it put to the operator. Read what each one asks, from
+its title or `gc bd show <visit>`. A human finding whose question one of them
+already carries is ruled `needs-you` on that visit, never on its merits. The
+operator holds that decision. A decline or a deferral would overrule it, and the
+finding's close would let pr-facts.sh dismiss their review while they decide;
+must-fix would settle it as "keep the change and fix it". `needs-you --visit`
+leaves the finding open and the review changes-requested, files no second visit,
+and posts the visit's id to the raiser's thread. Once the visit closes and the
+work the ruling calls for has landed, the finding closes on its own:
+```bash
+"$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --visit <V> --reason "<the question visit <V> already carries>"
+```
+`finding.sh` enforces the case it can name exactly. When an open visit tracks or
+holds the rework child minted for the finding's own feedback batch, every other
+ruling of that human finding exits 3 and names the visit. An exit 3 is a ruling
+to redo, not a failure to stop the pass on: rule `needs-you --visit` on that
+visit, or, when the visit asks something else (a rebase, a red check, a stuck
+dispatch), repeat the ruling you meant with `--unrelated-visit <V>`, which
+records that judgment on the finding. A visit on the anchor itself refuses
+nothing, because an anchor gathers visits about anything; judge whether it
+carries the finding's question the same way.
 
 **The threshold** — this rig's `defer_policy`, rendered here at pour:
 
@@ -241,7 +270,8 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined --reason "<why this is not an objection>"
   ```
   A HUMAN finding — `finding.source` begins `human:` — you may decline on its
-  merits exactly as you decline a machine one. The operator is a highly informed
+  merits exactly as you decline a machine one, unless an open visit already
+  carries its question (see the first paragraph). The operator is a highly informed
   peer whose objection you weigh, not an authority you may never overrule; the old
   rule that only the raiser could withdraw their objection made their word gospel,
   which is the deference this pass now ends. What a human decline owes that a
@@ -268,9 +298,12 @@ dependency edge by hand:
   routed to the operator), records its id as the reply the raiser's PR thread
   receives, and leaves the finding OPEN. An open finding holds the review
   changes-requested until the operator rules the visit, so the decision is visible
-  — a visit plus a PR comment — never a silent park; their ruling then
-  re-dispositions this finding. Reserve it for what you cannot judge: a comment
-  you can weigh is must-fix or declined, and one you can defer is deferred.
+  — a visit plus a PR comment — never a silent park. Once the visit has closed
+  and no fix unit on the finding's lane is in flight, gate-ensure's
+  `finding.sh close-answered` closes the finding. Reserve it for what you cannot
+  judge: a comment you can weigh is must-fix or declined, and one you can defer
+  is deferred. A question an open visit already carries is `needs-you --visit`
+  on that visit, as the first paragraph says, never a second visit.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```
@@ -282,7 +315,9 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume. The rulings that owe an answer
+leave the chain open for the next claim to resume. Exit 3 is the one exception:
+it wrote nothing, because an open visit already carries the finding's question,
+so re-rule that finding as the first paragraph says and carry on. The rulings that owe an answer
 ride the same guard: a declined finding's `--reply`, a deferred finding's
 follow-up and its reply, and a needs-you finding's visit and its reply are all
 recorded BEFORE the finding is closed or left open, and `set-disposition` exits
