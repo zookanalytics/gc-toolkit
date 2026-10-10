@@ -51,10 +51,9 @@
 # declined finding closes, so the human review it belongs to auto-dismisses once
 # every finding clears (pr-facts.sh); a needs-you finding stays open, which is
 # what holds that review until the operator rules its visit and the work their
-# ruling calls for lands. The discovered-from
-# edge is the follow-up's own — a dispatchable bead — and points at the finding it
-# carries forward. bd keeps one edge per (issue, depends_on) pair, and the
-# follow-up/anchor pair is the gate's.
+# ruling calls for lands. The discovered-from edge is the follow-up's own — a
+# dispatchable bead — and points at the finding it carries forward. bd keeps one
+# edge per (issue, depends_on) pair, and the follow-up/anchor pair is the gate's.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -277,16 +276,16 @@ strip_inbound_blocks() { # <finding>
 #
 # Given a human finding's row (`gc bd show --json`), it keeps only the visits on
 # the rework children minted for that finding's own feedback batch, the case
-# set-disposition refuses on. The
-# anchor's batch ledger names the bead each routed comment's batch went to
-# (pr-facts.sh, comment-batch-ledger: one `<disposition>|<floor>|<mark>` record per
-# batch in pr_comment_batch, pr_review_batch or pr_issue_comment_batch, each keyed
-# by its own comment id space), and a comment rework's source_review names the
-# reviews its batch carried. The ledger reaches a Conversation comment, which names
-# no review, and source_review still names the batch after the ledger retires the
-# record of an answered one. A visit on the anchor itself is left to the
-# validator's judgment, because an anchor gathers visits about anything: a merge
-# gate, a red check, a stuck dispatch.
+# set-disposition refuses on. The anchor's batch ledger names the bead each routed
+# comment's batch went to (pr-facts.sh, comment-batch-ledger: one
+# `<disposition>|<floor>|<mark>` record per batch in pr_comment_batch,
+# pr_review_batch or pr_issue_comment_batch, each keyed by its own comment id
+# space), and a comment rework's source_review names the reviews its batch
+# carried. The ledger reaches a Conversation comment, which names no review, and
+# source_review still names the batch after the ledger retires the record of an
+# answered one. A visit on the anchor itself is left to the validator's judgment,
+# because an anchor gathers visits about anything: a merge gate, a red check, a
+# stuck dispatch.
 #
 # Reads the anchor's beads and every live visit in the store, plus, given a
 # finding, the anchor's own row for its ledger. Exits 2 with nothing printed when
