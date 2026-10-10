@@ -103,6 +103,9 @@ case "${1:-}" in
     # reason to exist. Distinct from STUB_UPD_FAIL, which no longer touches the
     # identity stamps now that they ride the create.
     [ -n "${STUB_CREATE_NOMETA:-}" ] && meta="{}"
+    # STUB_CREATE_DROP names one metadata key a create lands without, so a
+    # payload half-lands and its read-back finds the rest.
+    [ -n "${STUB_CREATE_DROP:-}" ] && meta=$(printf '%s' "$meta" | jq -c --arg k "$STUB_CREATE_DROP" 'del(.[$k])')
     # One create can fail while another lands: the run that mints a standing
     # subject issues two, and the fail-open arm is only reachable when the
     # first fails by itself.
@@ -180,7 +183,7 @@ export STUB_TMP="$TMP"
 export GC_ESCALATE_VISIT_CLOSE_TOOL="$BIN/visit-close.sh" STUB_VISIT_CLOSE_LOG="$TMP/visit-close.log"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
       STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL \
-      STUB_CREATE_NOMETA 2>/dev/null || true
+      STUB_CREATE_NOMETA STUB_CREATE_DROP 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
@@ -690,6 +693,9 @@ eq "$rc" 0 "an ephemeral subject files"
 eq "$(visits)" "2" "the standing subject is minted alongside the visit"
 eq "$(meta vis-1 task_kind)" "triage-subject" "the minted bead is a standing triage subject"
 eq "$(meta vis-1 triage.scope)" "ephemeral-subject-findings" "carrying the scope the lookup filters on"
+has "$(grep 'bd create' "$STUB_GC_LOG" | head -1)" '--metadata {"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"}' \
+  "both markers ride the create that mints it"
+hasnt "$(grep 'bd update vis-1' "$STUB_GC_LOG")" "triage-subject" "no second write stamps them"
 has "$(field vis-1 title)" "triage: escalations raised from an ephemeral subject" "and a title that says what hangs there"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit's group is the standing subject, not the wisp"
 has "$(cat "$STUB_DEPS")" "vis-2|vis-1|tracks" "and its tracks edge points there too"
@@ -759,7 +765,7 @@ has "$out" "will be lost when it burns" "and says what that costs"
 
 echo "# markers that do not read back cost the NEXT escalation, not this one"
 reset
-out=$(STUB_UPD_FAIL_MATCH="triage.scope" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+out=$(STUB_CREATE_DROP="triage.scope" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "the escalation files"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on it — an unmarked bead is still durable"
 has "$out" "markers did not read back" "the lost markers are reported"

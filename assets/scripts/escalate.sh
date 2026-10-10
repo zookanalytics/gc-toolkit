@@ -569,22 +569,17 @@ if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
     # An unreadable listing arrives here too and mints a second bucket. That
     # is the trade the dedup listing already makes: a duplicate bead is a
     # bounded nuisance, a disposition written to a burned wisp is gone.
-    STANDING=$(gc bd create -t task \
+    # Both markers ride the create, because they are what the lookup above
+    # filters on: a bucket born without them is one every later ephemeral
+    # escalation misses, minting another.
+    STANDING_META=$(jq -nc --arg s "$TRIAGE_SCOPE" '{task_kind: "triage-subject", "triage.scope": $s}' 2>/dev/null)
+    STANDING=$(bd_create "$STANDING_META" -t task \
       --title "triage: escalations raised from an ephemeral subject (this rig)" \
       -d "Standing subject for escalations whose caller named an ephemeral subject — a patrol wisp, which is burned and re-poured every cycle. One open visit per situation key hangs here; each visit names the wisp that raised it in escalation_raised_by, and a sitting's outcome and takeaway land on this bead." \
-      ${STORE_DB:+--db "$STORE_DB"} --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
-    if [ -n "$STANDING" ] && [ "$STANDING" != "null" ]; then
-      gc bd update "$STANDING" ${STORE_DB:+--db "$STORE_DB"} --set-metadata "task_kind=triage-subject" \
-        --set-metadata "triage.scope=$TRIAGE_SCOPE" >/dev/null
-      # Both stamps are what the lookup above filters on, so a stamp that did
-      # not land costs a fresh bucket on every later ephemeral escalation.
-      STANDING_ROW=$(bd_json show "$STANDING" ${STORE_DB:+--db "$STORE_DB"})
-      STANDING_KIND=$(printf '%s' "$STANDING_ROW" | jq -r '.[0].metadata.task_kind // ""' 2>/dev/null)
-      STANDING_SCOPE=$(printf '%s' "$STANDING_ROW" | jq -r '.[0].metadata["triage.scope"] // ""' 2>/dev/null)
-      if [ "$STANDING_KIND" != "triage-subject" ] || [ "$STANDING_SCOPE" != "$TRIAGE_SCOPE" ]; then
-        warn "standing subject $STANDING was created but its markers did not read back (task_kind='$STANDING_KIND' triage.scope='$STANDING_SCOPE'); the next ephemeral escalation will mint another. repair: gc bd update $STANDING${STORE_DB:+ --db $STORE_DB} --set-metadata task_kind=triage-subject --set-metadata triage.scope=$TRIAGE_SCOPE"
-      fi
-    else
+      ${STORE_DB:+--db "$STORE_DB"} 2>/dev/null); STANDING_RC=$?
+    if [ "$STANDING_RC" -eq 2 ]; then
+      warn "standing subject $STANDING was created but its markers did not read back as written; the next ephemeral escalation may mint another. repair: gc bd update $STANDING${STORE_DB:+ --db $STORE_DB} --set-metadata task_kind=triage-subject --set-metadata triage.scope=$TRIAGE_SCOPE"
+    elif [ "$STANDING_RC" -ne 0 ]; then
       STANDING=""
     fi
   fi
