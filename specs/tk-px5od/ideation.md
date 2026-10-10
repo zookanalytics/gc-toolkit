@@ -1,3 +1,8 @@
+---
+name: Escalation ideation, broad candidate set
+description: The full inventory of practices, skills, metrics, cadences, and anti-patterns considered for the escalation work (tk-px5od), each with a source tag and a current lean. Read it for breadth, since marching-orders.md and docs/foundation.md hold what was chosen.
+---
+
 # Escalation Ideation — Broad Candidate Set
 
 > **Status: drafting.** Wide net first; the user's job on return is selection,

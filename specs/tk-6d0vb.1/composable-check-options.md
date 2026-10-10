@@ -1,3 +1,8 @@
+---
+name: Composable-check options for the keystone close-condition (tk-6d0vb.1.4)
+description: A read-only analysis of how an owned convoy's close-check set could be expressed and evaluated. It deep-dives gascity's existing check seam, sets out pack-side, core-seam, and hybrid options, and recommends a direction for the keystone tk-6d0vb.1.
+---
+
 # Composable-Check Options for the Keystone Close-Condition
 
 > **Bead:** tk-6d0vb.1.4 (child of keystone tk-6d0vb.1) · **Kind:** formalization /

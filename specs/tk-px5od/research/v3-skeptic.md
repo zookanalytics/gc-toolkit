@@ -1,3 +1,8 @@
+---
+name: V3 skeptic case against the pack's premise
+description: Validation report V3 for the escalation work (tk-px5od), which steelmans the case that organizational practice does not transfer to AI-assisted development because the borrowed disciplines assume a deterministic producer. It sets out the arguments and the evidence and draws implications for the pack.
+---
+
 # V3 Skeptic — The Strongest Case Against the Pack's Premise
 
 > **Status: drafting.** Steelman of the case that organizational wisdom does

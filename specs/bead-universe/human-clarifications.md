@@ -1,3 +1,8 @@
+---
+name: Human review decisions and corrections at the bead-universe PRD gate
+description: The operator's rulings at the bead-universe PRD gate on 2026-06-06, including the correction that consult-host is an abandoned idea and the three-part spine the design must deliver. Where it conflicts with prd-draft.md or prd-review.md, this file wins.
+---
+
 # Human Review — Decisions & Corrections (AUTHORITATIVE)
 
 Operator's answers at the PRD gate, 2026-06-06. **Where this conflicts with prd-draft.md

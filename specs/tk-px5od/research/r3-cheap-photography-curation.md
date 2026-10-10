@@ -1,3 +1,8 @@
+---
+name: R3 Cheap photography and curation
+description: Research report R3 for the escalation work (tk-px5od), on how professional skill moved from capture to curation as photography got cheap. It grounds recognition over reading, and opinion alongside options, in the picture editor's cull-then-select practice, with mappings to AI-assisted development.
+---
+
 # R3: Cheap Photography and Curation — Lessons for AI-Assisted Development
 
 ## Summary

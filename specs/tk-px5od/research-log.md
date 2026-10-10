@@ -1,3 +1,8 @@
+---
+name: Escalation research log
+description: The index of the cross-industry research behind the escalation work (tk-px5od), with the working thesis, each report's area, and a summary of what it found. Read it to find which research report covers a given borrowing.
+---
+
 # Escalation Research Log
 
 Companion to `../../docs/foundation.md`. Captures the cross-industry

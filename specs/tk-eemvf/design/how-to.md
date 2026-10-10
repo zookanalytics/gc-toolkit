@@ -1,3 +1,8 @@
+---
+name: How to run the Attention Canvas design session
+description: How to run the Claude Design session for the Attention Canvas from this folder's input bundle, covering what each file is, the two-loop method, what to bring back, and the existing visual references.
+---
+
 # How to run the Attention Canvas design session
 
 This folder is the **input bundle** for a visual-exploration session in

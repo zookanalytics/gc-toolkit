@@ -1,3 +1,8 @@
+---
+name: Cross-agent review-chain pilot learnings (signal-loom Epic 6)
+description: Research input for the review-chain formula design (tk-ztapg), consolidating what the cross-agent review-chain pilots on signal-loom Epic 6 showed about push timing, review-driven work that landed outside the chain, other friction, and open questions. It surveys and does not design the formula.
+---
+
 # Cross-agent review-chain pilot learnings (signal-loom Epic 6)
 
 **Bead:** tk-0tdy7 (research/survey for tk-ztapg)
