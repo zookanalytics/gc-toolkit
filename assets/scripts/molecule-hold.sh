@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # molecule-hold — hold a graph.v2 molecule at the step this shell is executing,
-# without closing anything.
+# without closing anything, or end it once the work it was poured for is over.
 #
 #   molecule-hold.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [--dry-run]
+#
+# A hold lasts no longer than the work the molecule was poured for, so
+# molecule-end.sh runs before the hold. When that work has already closed,
+# there is nothing left to hold for: the molecule ends there, through
+# dead-molecule-dispose.sh with this session's own claim set aside, and the
+# hold writes nothing. When the work is still open, the hold goes ahead and the
+# molecule's end bead is armed on that work, so the pool is offered the end the
+# moment it closes. A hold whose end could not be armed exits 1: the molecule
+# is quiet, but it would outlive its work.
 #
 # For the refusal arms that must NOT close: closing advances the graph into the
 # next step, and for mol-polecat-work that step recreates the branch and
@@ -33,7 +42,8 @@
 #
 # Callers: mol-polecat-work load-context's duplicate-dispatch arm; any polecat
 # arm that declines work it must not close.
-# exit: 0 the molecule is quiet · 1 the hold did not fully land · 2 refused, nothing written
+# exit: 0 the molecule is quiet: held with its end armed, or ended · 1 the hold
+#       or its end did not fully land · 2 refused, nothing written
 set -uo pipefail
 
 PROG="molecule-hold"
@@ -60,10 +70,12 @@ usage: molecule-hold.sh --step <formula.step-id> --reason "<text>" [--bead <id>]
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
      set are tried as the assignee.
 
-Closes nothing, and never touches the work bead — record the reason there and
-escalate separately.
+Never touches the work bead — record the reason there and escalate separately.
+Closes nothing while that work is open, and arms the molecule's end on it; once
+it has closed, ends the molecule instead of holding it (molecule-end.sh).
 
-exit: 0 the molecule is quiet · 1 the hold did not fully land · 2 refused, nothing written
+exit: 0 the molecule is quiet: held with its end armed, or ended · 1 the hold
+      or its end did not fully land · 2 refused, nothing written
 USAGE
 }
 
@@ -82,7 +94,7 @@ require_value() {
   esac
 }
 
-STEP=""; REASON=""; HINT=""; DRY_RUN=0; HELD_ALREADY=0; QUIESCE_FAILED=0
+STEP=""; REASON=""; HINT=""; DRY_RUN=0; HELD_ALREADY=0; QUIESCE_FAILED=0; END_FAILED=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -117,6 +129,7 @@ fi
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+END_TOOL="${GC_MOLECULE_END_TOOL:-$_bd_lib_dir/molecule-end.sh}"
 
 # bd_json swallows gc's exit status through the pipe, and the quiesce reads
 # below assign its output without checking the status or the shape — so a failed
@@ -234,6 +247,36 @@ else
   ROOT_READABLE=0
 fi
 
+# ── Bound the hold by the molecule's work, before anything is written.
+# molecule-end.sh ends the molecule when the work it was poured for has closed,
+# and otherwise arms the end bead that ends it once that work does. An end bead
+# is never held: it has to stay open for the pool to be offered it when its
+# blockers close, so a hold asked for at that step is the end's own run and
+# stops there. A root this script could not resolve skips the end and is
+# reported by the quiesce below, which fails closed on it.
+if [ "$ROOT_READABLE" = "1" ] && [ -n "$ROOT" ]; then
+  if [ "$DRY_RUN" = "1" ]; then
+    END_OUT=$("$END_TOOL" "$TARGET" --dry-run 2>&1) || END_FAILED=1
+  else
+    END_OUT=$("$END_TOOL" "$TARGET" 2>&1) || END_FAILED=1
+  fi
+  [ -n "$END_OUT" ] && printf '%s\n' "$END_OUT"
+  if [ "$END_FAILED" = "0" ]; then
+    case "$END_OUT" in
+      *"result=ended"*)
+        echo "$PROG: molecule $ROOT ended with the work it was poured for; there is nothing left to hold"
+        exit 0 ;;
+      *"result=would_end"*)
+        echo "$PROG: DRY RUN — the work molecule $ROOT was poured for has closed; would end the molecule instead of holding $TARGET"
+        exit 0 ;;
+    esac
+  fi
+fi
+if [ "$STEP" = "molecule-end" ]; then
+  [ "$END_FAILED" = "0" ] || exit 1
+  exit 0
+fi
+
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$HELD_ALREADY" = "1" ]; then
     echo "$PROG: DRY RUN — $TARGET ($STEP) is already blocked; would de-route root ${ROOT:-<unresolved>} and quiesce that root's other steps"
@@ -275,6 +318,10 @@ finish() {
     echo "$PROG: FATAL — $TARGET ($STEP) is blocked, but the quiesce above is incomplete and this molecule can still be re-offered. Do not drain." >&2
     exit 1
   fi
+  if [ "$END_FAILED" = "1" ]; then
+    echo "$PROG: FATAL — $TARGET ($STEP) is blocked and the molecule is quiet, but molecule-end.sh could not arm its end on the work it was poured for, so it would outlive that work. Do not drain; re-run this hold, which re-checks the molecule, once the store answers." >&2
+    exit 1
+  fi
   exit 0
 }
 
@@ -308,6 +355,8 @@ fi
 # drain-ack with them still assigned is what re-pools the molecule. Route
 # first, assignee second: the reverse order leaves a bead briefly
 # `open + unassigned + routed`, which is exactly the pool's offer predicate.
+# The end bead keeps its route: its blockers, not a missing route, are what
+# keep the pool from it, and it has to be routed when they close.
 [ -n "$ROOT" ] || finish
 
 if ! SIB_JSON=$(bd_json_array list --status=open,in_progress --limit=0); then
@@ -320,6 +369,7 @@ SIBLINGS=$(printf '%s' "$SIB_JSON" | jq -r --arg root "$ROOT" --arg self "$TARGE
       | select((.metadata["gc.root_bead_id"] // "") == $root)
       | select(.id != $self)
       | select((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize") | not)
+      | select((.metadata["gc.step_ref"] // "") != "molecule-end")
       | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
       | select(((.metadata["gc.routed_to"] // "") != "") or ((.assignee // "") != ""))
       | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // "")]

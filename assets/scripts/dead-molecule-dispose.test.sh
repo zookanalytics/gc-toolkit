@@ -389,6 +389,110 @@ eq "$(bstatus tk-hroot)" "in_progress" "preview leaves the husk root alone"
 husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
 OUT=$("$SCRIPT" tk-hroot 2>&1)
 has "$OUT" "result=live_root" "preview of a live molecule reports live_root, not would-dispose"
+
+echo "--- non-closed root: a CLOSED work bead is past the PR guard ---"
+# merge.sh lands open anchors only, so a PR a closed bead names is merged,
+# retired with its anchor, or the anchor's own to land. A rework child closed
+# moot keeps its anchor's pr_number with an empty merge_result.
+close_work() { jq -c 'map(if .id=="tk-hwork" then .status="closed" else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"; }
+for MR in pre_open_gate pull_request; do
+  husk
+  jq -c --arg mr "$MR" 'map(if .id=="tk-hwork" then .metadata.merge_result=$mr else . end)' \
+    "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+  close_work
+  OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+  has "$OUT" "result=disposed" "a closed work bead carrying merge_result=$MR does not hold the molecule"
+done
+husk
+jq -c 'map(if .id=="tk-hwork" then (.metadata.pr_number="824" | .metadata.task_kind="rework" | .metadata.anchor_bead="tk-anchor") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+close_work
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=disposed" "a closed rework child's inherited pr_number does not hold its molecule"
+has "$(notes tk-hload)" "ends with its work bead tk-hwork, which is closed" "the note says the molecule ended with its closed work"
+# The same child still open keeps the fail-closed refusal.
+husk
+jq -c 'map(if .id=="tk-hwork" then (.metadata.pr_number="824" | .metadata.task_kind="rework" | .metadata.anchor_bead="tk-anchor") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "source_pr_unresolved=824" "an OPEN rework child's pr_number still refuses"
+
+echo "--- --if-source-closed: only a molecule whose work closed ends ---"
+husk
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1); rc=$?
+eq "$rc" "0" "an open work bead refuses with the chain intact"
+has "$OUT" "result=refused" "an open work bead is refused under --if-source-closed"
+has "$OUT" "source_open=tk-hwork" "the refusal names the open work bead"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an open work bead draws no write"
+husk
+close_work
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "a closed work bead lets the molecule end"
+eq "$(bstatus tk-hroot)" "closed" "the root closes with its work"
+eq "$(bstatus tk-hwork)" "closed" "the work bead is read, never written"
+# No input convoy, or a convoy that does not track exactly one bead, is no
+# source to end with.
+husk
+jq -c 'map(if .id=="tk-hroot" then (.metadata |= del(.["gc.input_convoy_id"])) else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "detail=no_source" "a root with no input convoy has no source to end with"
+husk
+close_work
+jq -c '. + [{"id":"tk-hwork2","status":"closed","assignee":"","title":"second member","metadata":{}}]' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+printf 'tk-hconv|tracks|tk-hwork2\n' >> "$STUB_DEPS"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "detail=no_source" "a convoy tracking two beads names no single source"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "no source draws no write"
+# The other refusals still hold when the work has closed.
+husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+close_work
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=live_root" "a live session still keeps a molecule whose work closed"
+husk
+close_work
+jq -c '. + [{"id":"tk-hvisit","status":"open","assignee":"","title":"visit","metadata":{"escalation_key":"k","task_kind":"visit"}}]' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+printf 'tk-hvisit|tracks|tk-hwork\n' >> "$STUB_DEPS"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "open_escalation=tk-hvisit" "an open escalation still keeps a molecule whose work closed"
+
+echo "--- --owner: the caller's own claim is not a live worker ---"
+OWN_ROSTER='{"sessions":[{"id":"lx-me","session_name":"gc-toolkit__polecat-lx-me","alias":"","name":"gc-toolkit__polecat-lx-me","agent_name":"gc-toolkit/gc-toolkit.polecat-3","state":"active"},
+  {"id":"lx-live-other","session_name":"gc-toolkit__polecat-lx-live-other","alias":"","state":"active"}]}'
+own_claim() { jq -c 'map(if .id=="tk-hload" then (.status="in_progress" | .assignee="gc-toolkit/gc-toolkit.polecat-3" | .metadata["gc.session_id"]="lx-me") else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"; }
+husk "$OWN_ROSTER"; close_work; own_claim
+OUT=$(GC_SESSION_ID=lx-me "$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "live_session=" "without --owner the caller's own claim reads as live"
+husk "$OWN_ROSTER"; close_work; own_claim
+OUT=$(GC_SESSION_ID=lx-me "$SCRIPT" tk-hload --apply --owner --if-source-closed 2>&1); rc=$?
+eq "$rc" "0" "the owner ends its own molecule (exit 0)"
+has "$OUT" "result=disposed" "the caller's id and agent address do not hold the molecule under --owner"
+eq "$(bstatus tk-hload)" "closed" "the caller's own claimed step closes with the molecule"
+has "$(notes tk-hload)" "besides the caller" "the note records that the caller's own session was set aside"
+husk "$OWN_ROSTER"; close_work; own_claim
+OUT=$(GC_SESSION_NAME=gc-toolkit__polecat-lx-me "$SCRIPT" tk-hload --apply --owner --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "the caller is found by GC_SESSION_NAME as well"
+# Any other live session still keeps it.
+husk "$OWN_ROSTER"; close_work; own_claim
+jq -c 'map(if .id=="tk-himpl" then .metadata["gc.session_id"]="lx-live-other" else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$(GC_SESSION_ID=lx-me "$SCRIPT" tk-hload --apply --owner --if-source-closed 2>&1)
+has "$OUT" "live_session=lx-live-other" "another live session still keeps the molecule under --owner"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a molecule another session holds draws no write"
+# A name the caller shares with another active session still counts for that one.
+husk '{"sessions":[{"id":"lx-me","session_name":"s-me","alias":"","agent_name":"gc-toolkit/gc-toolkit.polecat-3","state":"active"},
+  {"id":"lx-twin","session_name":"s-twin","alias":"","agent_name":"gc-toolkit/gc-toolkit.polecat-3","state":"active"}]}'
+close_work; own_claim
+OUT=$(GC_SESSION_ID=lx-me "$SCRIPT" tk-hload --apply --owner --if-source-closed 2>&1)
+has "$OUT" "live_session=gc-toolkit/gc-toolkit.polecat-3" "a name shared with another active session is still live under --owner"
+# --owner names a session or it is a usage error.
+husk "$OWN_ROSTER"
+"$SCRIPT" tk-hload --apply --owner >/dev/null 2>&1; eq "$?" "2" "--owner with no session identity in the environment exits 2"
+# A closed root is residue whatever its source says.
+fixture
+OUT=$("$SCRIPT" tk-load --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "a closed root disposes under --if-source-closed whatever its source"
 # Do not let the guarded path's env leak into the closed-root tests below.
 export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
 

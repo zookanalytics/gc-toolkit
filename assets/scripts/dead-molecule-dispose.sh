@@ -22,12 +22,35 @@
 #       - EVERY ESCALATION ANSWERED: no visit carrying an escalation_key tracks
 #         the root or its input-convoy work bead while still open. An open visit
 #         is a human owning the decision, and disposing would strand it.
-#       - SOURCE NOT MID-PR: the input-convoy work bead carries no merge_result
-#         of pre_open_gate or pull_request (an in-flight PR the refinery owns),
-#         and no pr_number/pr_url left unresolved by an empty merge_result (a PR
-#         reference the store cannot prove closed — fail closed).
+#       - SOURCE NOT MID-PR: while the input-convoy work bead is OPEN, it
+#         carries no merge_result of pre_open_gate or pull_request (an
+#         in-flight PR the refinery owns), and no pr_number/pr_url left
+#         unresolved by an empty merge_result (a PR reference the store cannot
+#         prove closed — fail closed). A CLOSED work bead passes. merge.sh
+#         lands open anchors only, so a PR a closed bead references was merged,
+#         was retired with its anchor, or is its anchor's to land, and no step
+#         of this molecule carries anything to it. A rework child closed moot
+#         still carries its anchor's pr_number with an empty merge_result, and
+#         that number names the anchor's PR, not one this molecule owes.
 #     Guard semantics mirror doctor/check-root-advancing (I13): a session is
 #     live iff its state is active.
+#
+# Two flags are for a caller that is itself part of the molecule, ending it as
+# the molecule's work closes (molecule-end.sh, which molecule-hold.sh and the
+# worker that claims a molecule's end bead both run):
+#   --owner             the caller is a session holding a member of this
+#                       molecule, and it drains next. Its own session record is
+#                       left out of the live set, so its claim does not read as
+#                       a live worker standing behind the molecule; every other
+#                       active session still counts. The record is the one
+#                       GC_SESSION_ID or GC_SESSION_NAME names, and with neither
+#                       set the flag is a usage error.
+#   --if-source-closed  refuse (source_open) unless the input-convoy work bead
+#                       reads closed, so a molecule whose work is still open
+#                       stays as it is. A root whose input convoy does not track
+#                       exactly one bead refuses (no_source). A closed root is
+#                       residue whatever its source says, so the flag does not
+#                       apply to one.
 #
 # TWO PHASES, and the order is the safety property. Closing a step readies its
 # successor, so a chain torn down close-first passes through states where a
@@ -47,12 +70,15 @@
 #   * a non-closed root with a live session, an open escalation, a source
 #     mid-PR, or a source carrying an unresolved PR reference — not residue yet,
 #     or not this script's to close;
+#   * under --if-source-closed, a non-closed root whose work bead is not closed
+#     or cannot be named;
 #   * a root that will not read — an unreadable root is not a disposable one;
 #   * a bead in the chain carrying `branch` or `merge_result` — that is a work
 #     bead, and only the refinery closes an anchor, on a verified merge.
 #
 # Usage:
 #   dead-molecule-dispose.sh <bead-id> [--apply] [--json] [--db <path>]
+#                            [--owner] [--if-source-closed]
 # <bead-id> is any member of the chain: the root itself, or a step carrying
 # gc.root_bead_id. Without --apply this previews — it resolves and reports and
 # writes nothing.
@@ -77,12 +103,16 @@ usage() { sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed 's/^# \{0,1\}//'; }
 BEAD=""
 APPLY=0
 WANT_JSON=0
+OWNER=0
+IF_SOURCE_CLOSED=0
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --apply) APPLY=1 ;;
         --json)  WANT_JSON=1 ;;
+        --owner) OWNER=1 ;;
+        --if-source-closed) IF_SOURCE_CLOSED=1 ;;
         --db)
             if [ $# -lt 2 ]; then echo "$PROG: --db needs a value" >&2; exit 2; fi
             shift; BD_DB="$1" ;;
@@ -96,6 +126,10 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$BEAD" ] || { echo "$PROG: a bead id is required" >&2; usage >&2; exit 2; }
+if [ "$OWNER" = "1" ] && [ -z "${GC_SESSION_ID:-}" ] && [ -z "${GC_SESSION_NAME:-}" ]; then
+    echo "$PROG: --owner needs GC_SESSION_ID or GC_SESSION_NAME to name the caller's own session" >&2
+    exit 2
+fi
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
@@ -137,6 +171,9 @@ CLEARED=0
 CLOSED=0
 MEMBERS=""
 ROOT=""
+# The input-convoy work bead, resolved for a non-closed root only.
+WORK_BEAD=""
+WB_STATUS=""
 
 emit() { # <result> <detail>
     local result="$1" detail="${2:-}"
@@ -249,11 +286,20 @@ if [ "$ROOT_NOT_CLOSED" = "1" ]; then
     # pool worker carries its agent address (the form an assignee often takes,
     # e.g. gc-toolkit/gc-toolkit.polecat-1) in name/agent_name with alias empty,
     # so id/session_name/alias alone would miss it and dispose a live molecule.
+    # Under --owner the caller's own record contributes none of its names. The
+    # record is dropped whole rather than its names struck from the set, so a
+    # name it shares with another active session still counts for that one.
     declare -A LIVE_SET=()
     while IFS= read -r _id; do
         [ -n "$_id" ] && LIVE_SET["$_id"]=1
     done <<EOF
-$(printf '%s' "$SESS" | jq -r '.[] | select(((.state // "") | tostring) == "active" or (.running == true)) | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "")' 2>/dev/null)
+$(printf '%s' "$SESS" | jq -r --arg own "$OWNER" --arg sid "${GC_SESSION_ID:-}" --arg sname "${GC_SESSION_NAME:-}" '
+    .[]
+    | select(((.state // "") | tostring) == "active" or (.running == true))
+    | select($own != "1"
+             or ((($sid != "" and ((.id // "") | tostring) == $sid)
+                  or ($sname != "" and ((.session_name // "") | tostring) == $sname)) | not))
+    | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "")' 2>/dev/null)
 EOF
     LIVE_SESSION=""
     while IFS= read -r _cand; do
@@ -273,6 +319,7 @@ EOF
     # enumerated or closed. A convoy present but unreadable fails closed.
     CONVOY="$(meta_of "$ROOT_JSON" gc.input_convoy_id)"
     WORK_BEAD=""
+    WORK_COUNT=0
     if [ -n "$CONVOY" ]; then
         WB_RAW="$(bd_ dep list "$CONVOY" --direction=down -t tracks --json 2>/dev/null | scrub)"
         if ! printf '%s' "$WB_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -280,21 +327,44 @@ EOF
             refuse refused "convoy_unreadable=$CONVOY"
         fi
         WORK_BEAD="$(printf '%s' "$WB_RAW" | jq -r '[ .[]? | .id ] | (.[0] // "")')"
+        WORK_COUNT="$(printf '%s' "$WB_RAW" | jq -r '[ .[]? | .id ] | length')"
     fi
-
-    # GUARD 2 — SOURCE NOT MID-PR. An in-flight PR is the refinery's to land, so
-    # disposing the molecule under it would orphan the PR. merge_result is the
-    # store's record of a PR's fate: the two detached states (pre_open_gate,
-    # pull_request) are a live PR and refuse here. A pr_number/pr_url left with an
-    # empty merge_result is a PR reference nothing resolved — unprovable from the
-    # store, so it fails closed rather than risk orphaning an open PR. A resolved
-    # merge_result (merged/abandoned/…) proves the PR is not open.
+    WB_JSON=""
+    WB_STATUS=""
     if [ -n "$WORK_BEAD" ]; then
         WB_JSON="$(show_bead "$WORK_BEAD")" || WB_JSON=""
         if [ -z "$WB_JSON" ]; then
             echo "$PROG: root $ROOT is $ROOT_STATUS but its work bead $WORK_BEAD would not read — cannot prove it has no open PR; nothing disposed" >&2
             refuse refused "work_bead_unreadable=$WORK_BEAD"
         fi
+        WB_STATUS="$(printf '%s' "$WB_JSON" | jq -r '.status // ""')"
+    fi
+
+    # --if-source-closed: the caller ends a molecule only because its work has
+    # closed, so a source that is open, or that the convoy does not name as its
+    # one tracked bead, leaves the molecule as it is.
+    if [ "$IF_SOURCE_CLOSED" = "1" ]; then
+        if [ -z "$WORK_BEAD" ] || [ "$WORK_COUNT" != "1" ]; then
+            echo "$PROG: root $ROOT is $ROOT_STATUS and its input convoy ${CONVOY:-<none>} does not track exactly one work bead — no source to end it with; nothing disposed" >&2
+            refuse refused "no_source"
+        fi
+        if [ "$WB_STATUS" != "closed" ]; then
+            echo "$PROG: root $ROOT is $ROOT_STATUS and its work bead $WORK_BEAD is $WB_STATUS, not closed — the molecule stays; nothing disposed" >&2
+            refuse refused "source_open=$WORK_BEAD"
+        fi
+    fi
+
+    # GUARD 2 — SOURCE NOT MID-PR, judged while the work bead is open. An
+    # in-flight PR is the refinery's to land, so disposing the molecule under it
+    # would orphan the PR. merge_result is the store's record of a PR's fate:
+    # the two detached states (pre_open_gate, pull_request) are a live PR and
+    # refuse here. A pr_number/pr_url left with an empty merge_result is a PR
+    # reference nothing resolved — unprovable from the store, so it fails closed
+    # rather than risk orphaning an open PR. A resolved merge_result
+    # (merged/abandoned/…) proves the PR is not open. A closed work bead is past
+    # the guard: merge.sh lands open anchors only, and a closed bead's molecule
+    # carries nothing to whatever PR it names.
+    if [ -n "$WORK_BEAD" ] && [ "$WB_STATUS" != "closed" ]; then
         WB_MR="$(meta_of "$WB_JSON" merge_result)"
         WB_PR="$(meta_of "$WB_JSON" pr_number)"
         [ -n "$WB_PR" ] || WB_PR="$(meta_of "$WB_JSON" pr_url)"
@@ -338,8 +408,11 @@ fi
 
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 
-# Why the chain is residue — a closed root, or a dead husk the guards cleared.
-if [ "$ROOT_NOT_CLOSED" = "1" ]; then
+# Why the chain is residue — a closed root, a molecule whose work closed, or a
+# dead husk the guards cleared.
+if [ "$ROOT_NOT_CLOSED" = "1" ] && [ "$WB_STATUS" = "closed" ]; then
+    DISPOSE_REASON="molecule root $ROOT ends with its work bead $WORK_BEAD, which is closed (root status=$ROOT_STATUS, no live session$([ "$OWNER" = "1" ] && printf ' besides the caller'), no open escalation)"
+elif [ "$ROOT_NOT_CLOSED" = "1" ]; then
     DISPOSE_REASON="molecule root $ROOT is a dead husk (status=$ROOT_STATUS, no live session, no open escalation, no in-flight PR)"
 else
     DISPOSE_REASON="molecule root $ROOT is closed"

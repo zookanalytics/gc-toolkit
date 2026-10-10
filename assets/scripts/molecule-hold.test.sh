@@ -241,6 +241,20 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+
+# molecule-end.sh runs before every hold. It is exercised end to end, against
+# the real disposer, in molecule-end.test.sh; here it is a stub that answers
+# FAKE_END_OUT (default: nothing bounds the molecule) and exits FAKE_END_RC, so
+# these assertions stay on the hold's own writes. Each call is logged to
+# $END_LOG with the bead it was handed.
+cat > "$TMP/bin/molecule-end-stub" <<'ENDSTUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${END_LOG:?}"
+printf '%s\n' "${FAKE_END_OUT:-result=unbound bead=${1:-} detail=stub}"
+exit "${FAKE_END_RC:-0}"
+ENDSTUB
+chmod +x "$TMP/bin/molecule-end-stub"
+export GC_MOLECULE_END_TOOL="$TMP/bin/molecule-end-stub" END_LOG="$TMP/end.log"
 export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" FAKE_UPDFAIL="$TMP/updfail"
 export FAKE_UPDFAIL_ROUTE="$TMP/updfail.route" FAKE_UPDFAIL_ASSIGNEE="$TMP/updfail.assignee"
 export FAKE_SHOWFAIL="$TMP/showfail"
@@ -549,6 +563,55 @@ eq "$RC" "1" "a sibling list that returns non-array JSON exits 1 — an unparsea
 has "$OUT" "could not enumerate sibling steps" "the unparseable enumeration is named"
 eq "$(bstatus s-load)" "blocked" "the step is still held"
 eq "$(bassignee s-setup)" "$MINE" "the siblings keep their claims"
+
+echo "== the hold is bounded by the molecule's work: molecule-end.sh runs first =="
+reset_store; : > "$END_LOG"
+OUT=$("$SCRIPT" --step "$STEP" --reason "duplicate dispatch" 2>&1); RC=$?
+eq "$RC" "0" "a molecule nothing bounds is held as before"
+eq "$(head -1 "$END_LOG")" "s-load" "molecule-end.sh is handed the step this session holds"
+# The work has closed: the molecule ended, so the hold writes nothing.
+reset_store; : > "$END_LOG"
+OUT=$(FAKE_END_OUT="result=ended bead=s-load root=root-1 source=tk-w" "$SCRIPT" --step "$STEP" --reason "work closed" 2>&1); RC=$?
+eq "$RC" "0" "a molecule that ended with its work exits 0, so the caller drains"
+has "$OUT" "nothing left to hold" "and says the hold had nothing to do"
+eq "$(bstatus s-load)" "in_progress" "the hold wrote nothing over the ended molecule"
+hasnt "$(gclog)" "bd update" "no update is issued once the molecule ended"
+# The end could not be armed: the hold still lands, and the exit stops a drain.
+reset_store
+OUT=$(FAKE_END_RC=1 FAKE_END_OUT="result=failed bead=s-load detail=create_failed" "$SCRIPT" --step "$STEP" --reason "duplicate dispatch" 2>&1); RC=$?
+eq "$RC" "1" "a hold whose end could not be armed exits 1"
+has "$OUT" "could not arm its end" "the failure names the end, not the quiesce"
+eq "$(bstatus s-load)" "blocked" "the step is still held"
+eq "$(meta s-setup 'gc.routed_to')" "<absent>" "and the molecule is still quiesced"
+# Dry run asks molecule-end.sh for its own dry run and reports an end.
+reset_store; : > "$END_LOG"
+OUT=$(FAKE_END_OUT="result=would_end bead=s-load" "$SCRIPT" --step "$STEP" --reason "peek" --dry-run 2>&1); RC=$?
+eq "$RC" "0" "a dry run over a closed source exits 0"
+has "$OUT" "would end the molecule" "and says it would end the molecule rather than hold it"
+has "$(cat "$END_LOG")" "--dry-run" "molecule-end.sh is run as a dry run too"
+hasnt "$(gclog)" "bd update" "and nothing is written"
+
+echo "== the end bead keeps its route through a hold =="
+reset_store
+jq -c '. + [{"id":"s-end","status":"open","assignee":"","metadata":{"gc.step_ref":"molecule-end","gc.root_bead_id":"root-1","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' \
+  "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+OUT=$("$SCRIPT" --step "$STEP" --reason "duplicate dispatch" 2>&1); RC=$?
+eq "$RC" "0" "a molecule with an end bead holds"
+eq "$(meta s-end 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "the end bead keeps its route; its blockers keep the pool from it"
+eq "$(bstatus s-end)" "open" "the end bead stays open, so it is offered when its blockers close"
+
+echo "== a hold at the end bead's own step is the end's run, and never holds it =="
+reset_store
+jq -c '. + [{"id":"s-end","status":"in_progress","assignee":"'"$MINE"'","metadata":{"gc.step_ref":"molecule-end","gc.root_bead_id":"root-1","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' \
+  "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+: > "$END_LOG"
+OUT=$(FAKE_END_OUT="result=armed bead=s-end waits_on=tk-v" "$SCRIPT" --step molecule-end --bead s-end --reason "end" 2>&1); RC=$?
+eq "$RC" "0" "the end's run exits 0"
+eq "$(head -1 "$END_LOG")" "s-end" "molecule-end.sh is handed the end bead"
+eq "$(bstatus s-end)" "in_progress" "the end bead is not held at blocked"
+hasnt "$(gclog)" "--status=blocked" "nothing is held"
+OUT=$(FAKE_END_RC=1 "$SCRIPT" --step molecule-end --bead s-end --reason "end" 2>&1); RC=$?
+eq "$RC" "1" "a failed end run exits 1"
 
 # --- The formula wiring. ------------------------------------------------------
 # Extracted verbatim, so a wholesale reconciliation against the base formula
