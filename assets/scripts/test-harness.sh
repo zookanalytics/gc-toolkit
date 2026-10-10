@@ -119,11 +119,13 @@ mk_sut_dir() { # <dir> <file>...
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
   # gc.work_outcome stamp every visit closer (visit-close.sh among them) sources
-  # by sibling path. Copy all five beside the SUT so those calls resolve in the
-  # private dir; cp keeps pr-post.sh's executable bit. They sit beside this
-  # harness, so they are found whatever the SUT's own directory is.
+  # by sibling path. visit-identity.sh, the one definition of what a visit covers,
+  # is sourced by sibling path too (finding.sh among its readers). Copy each of
+  # them beside the SUT so those calls resolve in the private dir; cp keeps
+  # pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/visit-identity.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, is sourced by sibling path the same way.

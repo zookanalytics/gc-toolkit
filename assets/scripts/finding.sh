@@ -24,7 +24,9 @@
 #                        or no-objection finding owes none and sets it not.
 #   finding.follow_up    the deferred finding's later-work bead, armed to its fix
 #                        pool (deferred-dispatch) to dispatch once the anchor merges
-#   finding.visit        the open visit a needs-you finding filed for the operator
+#   finding.visit        the open visit that carries a needs-you finding's decision:
+#                        one the ruling filed, or one already open on the anchor's
+#                        feedback that the ruling named
 #
 # What a ruled finding holds, and how it ends (component-model I1: no wait lives
 # only in a metadata string):
@@ -38,7 +40,9 @@
 #   declined   closed, no edge            not an objection: closed with the reason
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
-#                                         holds the review until they rule it
+#                                         holds the review until the visit closes and
+#                                         no fix unit on its lane is in flight; then
+#                                         closed (close-answered)
 #
 # `blocks` is the type must-fix uses, and not because it is the only edge that
 # blocks a close: merge.sh reads exactly `blocks` downward, so a finding held by
@@ -46,7 +50,8 @@
 # Every ruling ends the finding closed or converts it to a visit: a deferred or
 # declined finding closes, so the human review it belongs to auto-dismisses once
 # every finding clears (pr-facts.sh); a needs-you finding stays open, which is
-# what holds that review until the operator rules its visit. The discovered-from
+# what holds that review until the operator rules its visit and the work their
+# ruling calls for lands. The discovered-from
 # edge is the follow-up's own — a dispatchable bead — and points at the finding it
 # carries forward. bd keeps one edge per (issue, depends_on) pair, and the
 # follow-up/anchor pair is the gate's.
@@ -61,10 +66,23 @@
 # close a blocked issue. Routing a finding would make each its own claim and
 # break that cardinality.
 #
+# A human finding's question can reach the operator before this ruling does: the
+# rework minted for its feedback batch put it to them in a visit, which tracks the
+# rework or holds it through a blocks edge. A merits ruling then answers a
+# decision the operator holds. A decline or a deferral overrules it, and closing
+# the finding lets pr-facts.sh dismiss their review while they are still
+# deciding; must-fix settles it as "keep the change and fix it"; a fresh needs-you
+# visit asks them the same question twice. So set-disposition refuses each of
+# those while such a visit is open (exit 3), naming it. needs-you --visit <that
+# visit> is the ruling that defers to it, and --unrelated-visit names a visit that
+# asks something else, so the ruling proceeds past it with that judgment on record.
+#
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
 #   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S]
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
+#                              [--visit V] [--unrelated-visit V1,V2,...]
+#   finding.sh open-visits   --anchor A
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
 #   finding.sh fix-in-flight --anchor A
@@ -75,14 +93,17 @@
 # Callers: signoff.sh (upsert on request-changes), the validator through
 # set-disposition — which hangs the fix unit's edge onto a finding only as it
 # rules that finding must-fix, so the fix unit blocks only the findings it must
-# answer — pr-open.sh (open-must-fix holds a publish while the city has ruled the
-# diff must change), and gate-ensure, the sole owner of stage-3 resolution
-# (fix-in-flight names the fix unit quiescence holds on; close-answered releases
-# the finding once that fix unit lands; close-unvalidated resolves a green lane's
-# still-unvalidated findings as moot; shed-orphaned resolves them when the anchor
-# closes before a pass revisits it).
+# answer — and through open-visits, which it reads beside the batch it rules;
+# pr-open.sh (open-must-fix holds a publish while the city has ruled the diff must
+# change), and gate-ensure, the sole owner of stage-3 resolution (fix-in-flight
+# names the fix unit quiescence holds on; close-answered releases a must-fix
+# finding once that fix unit lands, and a needs-you finding once its visit closes
+# with none in flight; close-unvalidated resolves a green lane's still-unvalidated
+# findings as moot; shed-orphaned resolves them when the anchor closes before a
+# pass revisits it).
 # Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
-# store would not read.
+# store would not read. set-disposition exits 1 on a usage error, 2 when a read or
+# write fails, and 3 when an open visit already carries the finding's question.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -95,6 +116,8 @@ scrub() { tr -d '\000-\037'; }
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=visit-identity.sh
+. "${GC_VISIT_IDENTITY_LIB:-$_bd_lib_dir/visit-identity.sh}" || { echo "cannot source visit-identity.sh beside this script" >&2; exit 1; }
 warn() { echo "finding: $*" >&2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -106,6 +129,8 @@ usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>]
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>] [--fix-pool <pool>]
+                             [--visit <visit-id>] [--unrelated-visit <visit-id,...>]
+  finding.sh open-visits --anchor <id>
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
   finding.sh fix-in-flight --anchor <id>
@@ -242,6 +267,93 @@ strip_inbound_blocks() { # <finding>
   done
 }
 
+# The open visits already on <anchor>'s feedback, as one JSON array of
+# {id, key, title, on: [{bead, kind, how}]}. A visit is on the feedback when it
+# covers the anchor or one of its rework children by the shared visit identity
+# (visit-identity.sh: its tracks edge, or its gc.continuation_group stamp when it
+# has none), or when it holds a rework child through a blocks edge, the way a bare
+# rework parks itself on the question it put to the operator. kind is anchor or
+# rework, and how is tracks or holds.
+#
+# Given a human finding's row (`gc bd show --json`), it keeps only the visits on
+# the rework children minted for that finding's own feedback batch, the case
+# set-disposition refuses on. The
+# anchor's batch ledger names the bead each routed comment's batch went to
+# (pr-facts.sh, comment-batch-ledger: one `<disposition>|<floor>|<mark>` record per
+# batch in pr_comment_batch, pr_review_batch or pr_issue_comment_batch, each keyed
+# by its own comment id space), and a comment rework's source_review names the
+# reviews its batch carried. The ledger reaches a Conversation comment, which names
+# no review, and source_review still names the batch after the ledger retires the
+# record of an answered one. A visit on the anchor itself is left to the
+# validator's judgment, because an anchor gathers visits about anything: a merge
+# gate, a red check, a stuck dispatch.
+#
+# Reads the anchor's beads and every live visit in the store, plus, given a
+# finding, the anchor's own row for its ledger. Exits 2 with nothing printed when
+# any read fails, so no caller takes an unread store for an empty one.
+_FEEDBACK_VISITS_JQ='
+  def blockers: [ (.dependencies // [])[]
+                  | select(((.dependency_type // .type) // "") == "blocks")
+                  | ((.id // .depends_on_id) // "") | select(. != "") ];
+  def ledger($l): [ ($l // "" | tostring) | split(";")[] | select(length > 0)
+                    | split("|") | select(length == 3)
+                    | { disp: .[0], lo: (.[1] | tonumber? // null), hi: (.[2] | tonumber? // null) }
+                    | select(.lo != null and .hi != null) ];
+  def among($xs): . as $x | any($xs[]; . == $x);
+  .[0] as $beads | .[1] as $visits | (.[2][0] // null) as $fd | (.[3][0] // null) as $an
+  | [ $beads[] | select(((.metadata.task_kind // "") | tostring) == "rework")
+               | { id: ((.id // "") | tostring), held: blockers } ] as $rw
+  | (if $f == "" then [ $rw[].id ]
+     else
+       (($fd.metadata["finding.comment_id"] // "") | tostring) as $c
+       | (($fd.metadata["finding.review_id"] // "") | tostring) as $r
+       | ($c | tonumber? // null) as $cn
+       | (if $r != "" and $r == $c then ["pr_review_batch"]
+          elif $r != "" then ["pr_comment_batch"]
+          else ["pr_comment_batch", "pr_issue_comment_batch"] end) as $spaces
+       | ( [ if $cn == null then empty
+             else $spaces[] as $k | ledger(($an // {}).metadata[$k])[]
+                  | select(.lo < $cn and $cn <= .hi) | .disp
+                  | select(startswith("rework:")) | ltrimstr("rework:") end ]
+         + [ $beads[] | select(((.metadata.task_kind // "") | tostring) == "rework")
+                      | ((.metadata.source_review // "") | tostring | split(",")) as $sr
+                      | select($r != "" and ($r | among($sr)))
+                      | ((.id // "") | tostring) ] )
+       | unique
+     end) as $mine
+  | [ $visits[]
+      | select(((.metadata.task_kind // "") | tostring) == "visit")
+      | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+      | ((.id // "") | tostring) as $v
+      | visit_identity_subjects as $subj
+      | ( (if $f == "" then [ $subj[] | select(. == $a) | { bead: ., kind: "anchor", how: "tracks" } ] else [] end)
+        + [ $rw[] | select(.id | among($mine)) | .held as $held
+                  | (if (.id | among($subj)) then { bead: .id, kind: "rework", how: "tracks" } else empty end),
+                    (if ($v | among($held)) then { bead: .id, kind: "rework", how: "holds" } else empty end) ] ) as $on
+      | select(($on | length) > 0)
+      | { id: $v, key: ((.metadata.escalation_key // "") | tostring),
+          title: ((.title // "") | tostring), on: $on } ]'
+feedback_visits() { # <anchor-id> [<finding-row-json>]
+  local beads visits frow="${2:-[]}" arow='[]'
+  printf '%s' "$frow" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  beads=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 2
+  visits=$(bd_list --metadata-field task_kind=visit --status="$LIVE_STATUSES") || return 2
+  if [ -n "${2:-}" ]; then
+    arow=$(bd_json show "$1")
+    printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || return 2
+  fi
+  # The reads reach jq on stdin, not as arguments: an anchor's beads can outgrow
+  # the OS limit on one argument.
+  printf '%s\n%s\n%s\n%s\n' "$beads" "$visits" "$frow" "$arow" \
+    | jq -cs --arg a "$1" --arg f "${2:+finding}" "$VISIT_IDENTITY_JQ$_FEEDBACK_VISITS_JQ" 2>/dev/null \
+    || return 2
+}
+
+# One line per visit in a feedback_visits array: the visit, how it sits on the
+# anchor's feedback, its escalation_key ("-" for none), and its title.
+visit_lines() { jq -r '.[] | [ .id, ([ .on[] | "\(.how) \(.kind) \(.bead)" ] | join(", ")),
+                                (if .key == "" then "-" else .key end), .title ] | @tsv'; }
+
 cmd_key() {
   local lane="" locus="" msg=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -319,7 +431,7 @@ cmd_upsert() {
 }
 
 cmd_set_disposition() {
-  local finding="" anchor="" disp="" reason="" reply="" fix_pool=""
+  local finding="" anchor="" disp="" reason="" reply="" fix_pool="" visit="" unrelated=""
   while [ $# -gt 0 ]; do case "$1" in
     --finding) finding="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
@@ -327,10 +439,50 @@ cmd_set_disposition() {
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reply) reply="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --fix-pool) fix_pool="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --visit) visit="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --unrelated-visit) unrelated="${unrelated:+$unrelated,}${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
+  if [ -n "$visit" ] && [ "$disp" != needs-you ]; then
+    warn "--visit names the open visit a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
+  fi
+  # Every ruling of a human finding but needs-you --visit first meets the visits
+  # already carrying its question: an open visit on a rework child minted for the
+  # finding's own feedback batch (feedback_visits). Each one the caller has not
+  # named --unrelated-visit refuses the ruling, exit 3, before any write, so the
+  # finding keeps its current disposition and the validator re-rules it. A merits
+  # ruling would answer the operator's pending decision for them: a decline or a
+  # deferral overrules it, and must-fix settles it as "keep the change and fix
+  # it". needs-you --visit is the deferral, so it skips the check. A machine
+  # finding passes: no human raised it, so no visit holds its question.
+  local past=""
+  case "$disp" in
+    must-fix|declined|deferred|needs-you)
+      if [ -z "$visit" ]; then
+        local frow held standing
+        frow=$(bd_json show "$finding")
+        printf '%s' "$frow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+          || { warn "could not read finding $finding; nothing ruled"; exit 2; }
+        if printf '%s' "$frow" | jq -e '.[0].metadata as $m
+             | ((($m["finding.lane"] // "") | tostring) == "human")
+               or ((($m["finding.source"] // "") | tostring) | startswith("human:"))' >/dev/null 2>&1; then
+          held=$(feedback_visits "$anchor" "$frow") \
+            || { warn "could not read the open visits on anchor $anchor's feedback; refusing to rule $finding $disp past them unread"; exit 2; }
+          standing=$(printf '%s' "$held" | jq -c --arg u "$unrelated" \
+            '($u | split(",") | map(select(. != ""))) as $un | [ .[] | select(.id as $v | any($un[]; . == $v) | not) ]' 2>/dev/null) \
+            || { warn "could not filter the open visits on anchor $anchor's feedback"; exit 2; }
+          if printf '%s' "$standing" | jq -e 'length > 0' >/dev/null 2>&1; then
+            warn "$finding is a human comment whose question is already with the operator, in the open visit(s) below; nothing ruled."
+            printf '%s' "$standing" | visit_lines | sed 's/^/  /' >&2
+            warn "Rule it needs-you --visit <visit>: the finding stays open and its review changes-requested until that visit is ruled. A visit that asks something else is named with --unrelated-visit <visit>, and the ruling then proceeds past it."
+            exit 3
+          fi
+          past=$(printf '%s' "$held" | jq -r '[ .[].id ] | join(", ")' 2>/dev/null)
+        fi
+      fi ;;
+  esac
   # finding.disposition is the committing write of each arm, stamped last — never
   # up front. A disposition recorded before the ruling's follow-up, visit, or edge
   # exists outlives a fail-closed exit as a validated value, and the validator
@@ -495,49 +647,93 @@ cmd_set_disposition() {
       ;;
     needs-you)
       # The objection turns on a call only the operator can make, so this ruling
-      # does not close the finding — it converts it to a visit. File the visit
-      # (board-visible, routed to the operator by escalate.sh's default `human`
-      # route), record its id as the reply the raiser's thread receives, and leave
-      # the finding OPEN. An open finding keeps pr-facts.sh from auto-dismissing
-      # the human review, so the review holds the merge changes-requested until the
-      # operator rules the visit; their ruling then re-dispositions this finding
-      # (must-fix, declined, or deferred). needs-you holds nothing of its own, so
-      # retract any blocks edge a prior must-fix ruling hung and strip inbound
-      # blocks — the hold is the review, carried by this finding staying open.
+      # does not close the finding — it converts it to a visit, records the visit's
+      # id as the reply the raiser's thread receives, and leaves the finding OPEN.
+      # An open finding keeps pr-facts.sh from auto-dismissing the human review, so
+      # the review holds the merge changes-requested until the operator rules the
+      # visit; close-answered then closes the finding once no fix unit on its lane
+      # is still in flight, which is when the work the ruling calls for has landed.
+      #
+      # The visit is resolved before anything is written. --visit names one already
+      # open on the anchor's feedback, which this ruling defers to rather than ask
+      # the operator the same question twice; it must be on the anchor or one of
+      # its rework children, so a mistyped or closed id cannot leave the finding
+      # waiting on a visit nobody will rule. Without --visit, escalate.sh files one
+      # visit per finding, keyed on its id; it dedups on the (escalation_key,
+      # subject) pair, so a re-ruled finding reuses its open visit rather than
+      # filing a second. The escalate path is overridable for the hermetic test.
+      local vid vreply nnote
+      if [ -n "$visit" ]; then
+        local onfb
+        onfb=$(feedback_visits "$anchor") \
+          || { warn "could not read the open visits on anchor $anchor's feedback, so --visit $visit cannot be verified; nothing ruled"; exit 2; }
+        printf '%s' "$onfb" | jq -e --arg v "$visit" 'any(.[]; .id == $v)' >/dev/null 2>&1 \
+          || { warn "--visit $visit is not an open visit on anchor $anchor or one of its rework children; nothing ruled"; exit 1; }
+        vid="$visit"
+        vreply="This comment needs your decision, and visit $vid already asks you for it. The review stays changes-requested until you rule that visit and the work your ruling calls for lands."
+        nnote="needs-you: deferred to open visit $vid, which already carries this question"
+      else
+        local vkey="review-needs-you.$finding" vmsg escalate
+        vmsg="A review comment on anchor $anchor needs your decision; the review pass cannot judge it."
+        [ -n "$reason" ] && vmsg="$vmsg $reason"
+        escalate="${GC_ESCALATE_SH:-$_bd_lib_dir/escalate.sh}"
+        [ -x "$escalate" ] \
+          || { warn "escalate.sh not found beside this script; cannot file the needs-you visit for $finding"; exit 2; }
+        "$escalate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
+          || { warn "could not file the needs-you visit for $finding (escalate.sh failed)"; exit 2; }
+        # The open visit on this subject carrying our key — escalate.sh filed or
+        # found exactly one. Its id is the answer the raiser is owed on the PR.
+        vid=$(bd_list --metadata-field escalation_key="$vkey" --status="$LIVE_STATUSES" 2>/dev/null \
+          | jq -r --arg a "$anchor" '[ .[]? | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | .[0].id // empty' 2>/dev/null)
+        [ -n "$vid" ] \
+          || { warn "needs-you visit filed for $finding but its id did not read back; NOT recording a reply"; exit 2; }
+        vreply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it and the work your ruling calls for lands."
+        nnote="needs-you: opened visit $vid"
+      fi
+      # needs-you holds nothing of its own, so retract any blocks edge a prior
+      # must-fix ruling hung and strip inbound blocks: the hold is the review,
+      # carried by this finding staying open.
       if edge_exists "$finding" "$anchor"; then
         gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
           || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
       fi
       strip_inbound_blocks "$finding"
-      # One visit per finding, keyed on its id; escalate.sh dedups on the
-      # (escalation_key, subject) pair, so a re-ruled finding reuses its open visit
-      # rather than filing a second. The path is overridable for the hermetic test.
-      local vkey="review-needs-you.$finding" vmsg vid escalate
-      vmsg="A review comment on anchor $anchor needs your decision; the review pass cannot judge it."
-      [ -n "$reason" ] && vmsg="$vmsg $reason"
-      escalate="${GC_ESCALATE_SH:-$_bd_lib_dir/escalate.sh}"
-      [ -x "$escalate" ] \
-        || { warn "escalate.sh not found beside this script; cannot file the needs-you visit for $finding"; exit 2; }
-      "$escalate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
-        || { warn "could not file the needs-you visit for $finding (escalate.sh failed)"; exit 2; }
-      # The open visit on this subject carrying our key — escalate.sh filed or
-      # found exactly one. Its id is the answer the raiser is owed on the PR.
-      vid=$(bd_list --metadata-field escalation_key="$vkey" --status="$LIVE_STATUSES" 2>/dev/null \
-        | jq -r --arg a "$anchor" '[ .[]? | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | .[0].id // empty' 2>/dev/null)
-      [ -n "$vid" ] \
-        || { warn "needs-you visit filed for $finding but its id did not read back; NOT recording a reply"; exit 2; }
       gc bd update "$finding" \
         --set-metadata finding.disposition=needs-you \
         --set-metadata finding.visit="$vid" \
-        --set-metadata finding.reply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it." >/dev/null 2>&1 \
+        --set-metadata finding.reply="$vreply" >/dev/null 2>&1 \
         || { warn "could not stamp finding.disposition/finding.visit/finding.reply on $finding"; exit 2; }
-      local nnote="needs-you: opened visit $vid"
       [ -n "$reason" ] && nnote="$nnote — $reason"
       gc bd update "$finding" --append-notes "$nnote" >/dev/null 2>&1 \
         || warn "could not record the needs-you note on $finding"
       ;;
     *) warn "--disposition must be must-fix, deferred, declined, or needs-you (got '$disp')"; exit 1 ;;
   esac
+  # A ruling that went past open visits the caller judged to ask something else
+  # records that judgment on the finding, so a reader of the finding can weigh it.
+  if [ -n "$past" ]; then
+    gc bd update "$finding" --append-notes "ruled $disp past open visit(s) $past, judged by the validator not to carry this question" >/dev/null 2>&1 \
+      || warn "could not record on $finding the open visits this ruling went past"
+  fi
+}
+
+# The open visits already on <anchor>'s feedback (feedback_visits), one per line:
+#   <visit> TAB <how it sits there, e.g. "holds rework tk-r"> TAB <escalation_key or -> TAB <title>
+# mol-validate prints this beside the batch it rules, so the validator sees the
+# questions the operator already holds before it rules a human finding. It lists
+# the anchor's own visits too, which set-disposition leaves to that judgment.
+# Exit 0 when one or more is open, 1 when none is, 2 when the store would not read.
+cmd_open_visits() {
+  local anchor="" rows
+  while [ $# -gt 0 ]; do case "$1" in
+    --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$anchor" ] || { warn "open-visits needs --anchor"; exit 1; }
+  rows=$(feedback_visits "$anchor") \
+    || { warn "could not read the open visits on anchor $anchor's feedback"; return 2; }
+  printf '%s' "$rows" | jq -e 'length > 0' >/dev/null 2>&1 || return 1
+  printf '%s' "$rows" | visit_lines
 }
 
 cmd_wire_fix_unit() {
@@ -592,9 +788,12 @@ cmd_open_must_fix() {
   return 1
 }
 
-# The fix unit in flight answering an open must-fix finding on <anchor>, the actor
-# gate-ensure's quiescence holds on. An open must-fix finding is a demand on the
-# anchor, not an actor on it: the fix unit answering it is what changes the diff.
+# The fix unit in flight answering an open must-fix or needs-you finding on
+# <anchor>, the actor gate-ensure's quiescence holds on. An open must-fix finding
+# is a demand on the anchor, not an actor on it: the fix unit answering it is what
+# changes the diff. A needs-you finding waits on the operator's ruling, and the fix
+# unit on its lane is the work that ruling releases, often parked on that very
+# visit, so a review poured meanwhile would read a diff the ruling may yet change.
 # A finding's blocks-blockers are its fix units (wire-fix-unit, set-disposition),
 # so a live one is the fix in flight. A finding with NO blocker edge is matched by
 # lane, through the same census close-answered disambiguates it with. A finding
@@ -602,8 +801,9 @@ cmd_open_must_fix() {
 # close-answered closes it. A finding no fix unit answers has none either.
 # Exit 0 prints "<fix-unit> <status> <finding>" for the first pair found. Exit 1
 # prints the open must-fix findings no fix unit is answering, one per line, and
-# nothing when no must-fix finding is open. Exit 2 means the store would not read,
-# including one finding's blockers, so a failed read never passes for "no fix unit".
+# nothing when none is open; a needs-you finding is never listed, because it waits
+# on a person and holds no merge. Exit 2 means the store would not read, including
+# one finding's blockers, so a failed read never passes for "no fix unit".
 cmd_fix_in_flight() {
   local anchor=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -616,9 +816,10 @@ cmd_fix_in_flight() {
     || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
-          | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
+          | select(((.metadata["finding.disposition"] // "") | tostring) as $d
+                   | $d == "must-fix" or $d == "needs-you") ]
     | .[].id') \
-    || { warn "could not filter must-fix findings on $anchor"; return 2; }
+    || { warn "could not filter must-fix and needs-you findings on $anchor"; return 2; }
   for id in $ids; do
     blk=$(bd_json dep list "$id" --direction=down -t blocks)
     printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
@@ -637,7 +838,9 @@ cmd_fix_in_flight() {
       printf '%s %s\n' "$hit" "$id"
       return 0
     fi
-    unanswered="$unanswered$id
+    printf '%s' "$rows" | jq -e --arg id "$id" \
+      'any(.[]; .id == $id and ((.metadata["finding.disposition"] // "") | tostring) == "must-fix")' >/dev/null 2>&1 \
+      && unanswered="$unanswered$id
 "
   done
   printf '%s' "$unanswered"
@@ -696,7 +899,11 @@ cmd_close_unvalidated() {
 # longer be revisited by gate-ensure (which reads open anchors only), so a lane's
 # still-unvalidated findings would sit open forever. They are moot the moment the
 # anchor closes: no validator will ever run on closed work. This sheds them, the
-# close-transition counterpart to the green-lane moot close above. It keys on the
+# close-transition counterpart to the green-lane moot close above. A needs-you
+# finding is shed the same way: an anchor that merged on an approval, or was
+# disposed, while the finding waited on its visit leaves nothing for its review to
+# hold, and close-answered, which reads open anchors only, never reaches it. Its
+# visit is the operator's conversation and is left standing. It keys on the
 # anchor being gone, NOT on any approve signal, so it rebuilds no re-approval
 # proxy: a human GitHub approval does not close a finding here either — the anchor
 # leaving the open set does.
@@ -706,28 +913,36 @@ cmd_shed_orphaned() {
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
-  local rows pairs anchor fid note astatus
-  # Live unvalidated findings across every anchor — --status scopes out closed
-  # ones, so a finding already shed is not re-read. The set is small in steady
-  # state: a finding is transient, ruled or moot-closed.
-  rows=$(bd_list --metadata-field "finding.disposition=unvalidated" --status="$LIVE_STATUSES") || { warn "could not read unvalidated findings"; return 2; }
-  pairs=$(printf '%s' "$rows" | jq -r '
-    .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
-        | ((.metadata.anchor_bead // "") | tostring) as $a
-        | select($a != "")
-        | "\(.id) \($a)"') \
-    || { warn "could not filter unvalidated findings"; return 2; }
-  [ -n "$pairs" ] || return 0
-  printf '%s\n' "$pairs" | while IFS=' ' read -r fid anchor; do
-    [ -n "$fid" ] && [ -n "$anchor" ] || continue
-    # Shed only when the anchor is gone. An unreadable anchor row is left for the
-    # next pass rather than closing the finding on an absence (fail closed).
-    astatus=$(bd_json show "$anchor" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
-    [ "$astatus" = closed ] || continue
-    note="resolved: anchor $anchor closed before this finding was validated — moot (no validator runs on closed work)"
-    [ -n "$reason" ] && note="$note ($reason)"
-    gc bd update "$fid" --status=closed --append-notes "$note" >/dev/null 2>&1 || true
+  local rows pairs anchor fid note astatus disp seen=""
+  for disp in unvalidated needs-you; do
+    # Live findings of this disposition across every anchor — --status scopes out
+    # closed ones, so a finding already shed is not re-read. The set is small in
+    # steady state: a finding is transient, ruled or moot-closed.
+    rows=$(bd_list --metadata-field "finding.disposition=$disp" --status="$LIVE_STATUSES") || { warn "could not read $disp findings"; return 2; }
+    pairs=$(printf '%s' "$rows" | jq -r '
+      .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | ((.metadata.anchor_bead // "") | tostring) as $a
+          | select($a != "")
+          | "\(.id) \($a)"') \
+      || { warn "could not filter $disp findings"; return 2; }
+    [ -n "$pairs" ] || continue
+    seen=1
+    printf '%s\n' "$pairs" | while IFS=' ' read -r fid anchor; do
+      [ -n "$fid" ] && [ -n "$anchor" ] || continue
+      # Shed only when the anchor is gone. An unreadable anchor row is left for the
+      # next pass rather than closing the finding on an absence (fail closed).
+      astatus=$(bd_json show "$anchor" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
+      [ "$astatus" = closed ] || continue
+      if [ "$disp" = needs-you ]; then
+        note="resolved: anchor $anchor closed while this finding waited on its visit — moot (the diff it objected to no longer awaits a merge)"
+      else
+        note="resolved: anchor $anchor closed before this finding was validated — moot (no validator runs on closed work)"
+      fi
+      [ -n "$reason" ] && note="$note ($reason)"
+      gc bd update "$fid" --status=closed --append-notes "$note" >/dev/null 2>&1 || true
+    done
   done
+  [ -n "$seen" ] || return 0
   bd_cache_clear
 }
 
@@ -747,6 +962,14 @@ cmd_shed_orphaned() {
 # close-ordering edge leaves behind when a fix landed — so it is closed only when
 # the lane's fix unit census shows one landed and none still live, the same fact
 # the edge would have carried.
+#
+# A needs-you finding is closed once its visit (finding.visit) has closed and no
+# fix unit answers it any more: nothing blocks it, and none on its lane is live.
+# The operator has then ruled, and the work their ruling calls for is on the
+# branch, or the ruling called for none. Until then the finding holds its review
+# changes-requested, and fix-in-flight holds review dispatch while a fix unit on
+# its lane is live. A visit, blocker list or census that will not read leaves it
+# open.
 cmd_close_answered() {
   local anchor="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -755,14 +978,19 @@ cmd_close_answered() {
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
-  local rows ids id note cnote blk n_all n_live flane census c_live c_landed
+  local rows ids nyids id note cnote blk n_all n_live flane census c_live c_landed nyvisit vst
   rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]
     | .[].id') \
     || { warn "could not filter must-fix findings on $anchor"; return 2; }
-  [ -n "$ids" ] || return 0
+  nyids=$(printf '%s' "$rows" | jq -r '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | select(((.metadata["finding.disposition"] // "") | tostring) == "needs-you") ]
+    | .[].id') \
+    || { warn "could not filter needs-you findings on $anchor"; return 2; }
+  [ -n "$ids$nyids" ] || return 0
   note="resolved: fix unit landed — every blocker closed, so the objection's fix is on the branch"
   [ -n "$reason" ] && note="$note ($reason)"
   for id in $ids; do
@@ -796,6 +1024,25 @@ cmd_close_answered() {
     gc bd update "$id" --status=closed --append-notes "$cnote" >/dev/null 2>&1 \
       || warn "could not close answered finding $id"
   done
+  for id in $nyids; do
+    nyvisit=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.visit"] // "") | tostring' 2>/dev/null)
+    [ -n "$nyvisit" ] || continue
+    vst=$(bd_json show "$nyvisit" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
+    [ "$vst" = closed ] || continue
+    blk=$(bd_json dep list "$id" --direction=down -t blocks)
+    printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
+      || { warn "could not read blockers of finding $id; leaving it open"; continue; }
+    n_live=$(printf '%s' "$blk" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed") ] | length' 2>/dev/null)
+    [ "${n_live:-1}" -eq 0 ] || continue
+    flane=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.lane"] // "") | tostring' 2>/dev/null)
+    census=$(anchor_fix_unit_census "$anchor" "$flane") || continue
+    c_live="${census%% *}"
+    [ "${c_live:-1}" -eq 0 ] || continue
+    cnote="resolved: its visit $nyvisit closed, and no fix unit on lane $flane is still in flight"
+    [ -n "$reason" ] && cnote="$cnote ($reason)"
+    gc bd update "$id" --status=closed --append-notes "$cnote" >/dev/null 2>&1 \
+      || warn "could not close needs-you finding $id after its visit $nyvisit closed"
+  done
   # Closed findings leave the LIVE set; drop the per-pass bd_list cache so the
   # same-pass re-read (gate-ensure recomputes quiescence right after) does not
   # still see them. No-op outside a reconcile pass.
@@ -808,6 +1055,7 @@ case "$VERB" in
   key)               cmd_key "$@" ;;
   upsert)            cmd_upsert "$@" ;;
   set-disposition)   cmd_set_disposition "$@" ;;
+  open-visits)       cmd_open_visits "$@" ;;
   wire-fix-unit)     cmd_wire_fix_unit "$@" ;;
   open-must-fix)     cmd_open_must_fix "$@" ;;
   fix-in-flight)     cmd_fix_in_flight "$@" ;;

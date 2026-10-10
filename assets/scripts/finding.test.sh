@@ -545,5 +545,161 @@ FA5b=$(upsert_a five "close a keyless birth")
 eq "$(meta "$FA5b" 'finding.key')" "$(key_a five "close a keyless birth")" "the retry files the finding with its key"
 eq "$(live_titled "finding[correctness]: close a keyless birth")" "1" "…and it is the only open bead with that title"
 
+# ---------------------------------------------------------------------------
+# A human finding whose question an open visit already carries. pr-facts mints a
+# rework per human feedback batch, and that rework can put the question to the
+# operator before the validator rules: a visit that tracks the rework, or one on
+# the anchor that holds the rework through a blocks edge. Declining or deferring
+# the finding then overrules a decision the operator holds, and its close lets
+# pr-facts dismiss their review; a fresh needs-you visit asks them twice. So those
+# rulings refuse (exit 3) and needs-you --visit defers to the open visit.
+# List rows carry their dependencies the way `gc bd list --json` renders them,
+# which is what the shared visit identity reads.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancV","status":"open","assignee":"","title":"PR#7 anchor","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat","pr_review_batch":"rework:rwV|0|5000","pr_issue_comment_batch":"rework:rwV|0|50"}},
+        {"id":"rwV","status":"blocked","assignee":"","title":"Address review comments on PR#7 (through review 5000, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancV","source_review":"5000"},"dependencies":[{"issue_id":"rwV","depends_on_id":"visV","type":"blocks"}]},
+        {"id":"visV","status":"open","assignee":"","title":"visit: tk-ancV — PR#7 approach is rejected; drop it or keep it?","notes":"","metadata":{"task_kind":"visit","escalation_key":"approach-rejected","gc.continuation_group":"tk-ancV","gc.routed_to":"human"},"dependencies":[{"issue_id":"visV","depends_on_id":"tk-ancV","type":"tracks"}]},
+        {"id":"visOld","status":"closed","assignee":"","title":"visit: tk-ancV — an old question, already ruled","notes":"","metadata":{"task_kind":"visit","escalation_key":"old-question","gc.continuation_group":"tk-ancV"},"dependencies":[{"issue_id":"visOld","depends_on_id":"tk-ancV","type":"tracks"}]}]'
+human_finding() { # <anchor> <locus> <message> <comment-id> [<review-id>]
+  local f
+  f=$("$SUT" upsert --anchor "$1" --lane human --source "human:johnzook" --locus "$2" --message "$3")
+  gc bd update "$f" --set-metadata "finding.comment_id=$4" >/dev/null
+  [ -z "${5:-}" ] || gc bd update "$f" --set-metadata "finding.review_id=$5" >/dev/null
+  printf '%s' "$f"
+}
+FV1=$(human_finding tk-ancV "PR review" "This sweeps state that should not exist instead of fixing its cause" 5000 5000)
+
+out=$("$SUT" open-visits --anchor tk-ancV); rc=$?
+eq "$rc" "0" "open-visits exits 0 while a visit is open on the anchor's feedback"
+has "$out" "visV	tracks anchor tk-ancV, holds rework rwV	" "…and names the visit holding the batch's rework, and the anchor it tracks"
+has "$out" "approach-rejected	visit: tk-ancV — PR#7 approach is rejected" "…with its key and title, so the validator can read what it asks"
+hasnt "$out" "visOld" "a closed visit carries no question the operator still holds"
+
+BEFORE=$(jq 'length' "$STUB_STORE")
+err=$("$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition declined --reason "a reaper is the principled design" --reply "We disagree." 2>&1 >/dev/null); rc=$?
+eq "$rc" "3" "declining a human finding whose batch rework an open visit holds is refused (exit 3)"
+has "$err" "visV" "…naming the visit that already carries the question"
+has "$err" "needs-you --visit" "…and the ruling that defers to it"
+eq "$(meta "$FV1" 'finding.disposition')" "unvalidated" "…and nothing is ruled, so the validator's retry set still holds the finding"
+eq "$(bstatus "$FV1")" "open" "…and the finding stays open, so pr-facts keeps the operator's review changes-requested"
+eq "$(meta "$FV1" 'finding.reply')" "<absent>" "…and no overrule is stamped for the write-back to post"
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition deferred --reason "later" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "deferring it is refused the same way"
+eq "$(meta "$FV1" 'finding.follow_up')" "<absent>" "…and no follow-up is filed"
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition needs-you --reason "the operator's call" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a needs-you that would file a second visit for the same question is refused"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and none of the refused rulings wrote a bead"
+
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition needs-you --visit visV --reason "visV already asks whether to drop the approach"; rc=$?
+eq "$rc" "0" "needs-you --visit defers to the open visit"
+eq "$(meta "$FV1" 'finding.disposition')" "needs-you" "…recording needs-you"
+eq "$(meta "$FV1" 'finding.visit')" "visV" "…naming the visit that carries the decision"
+has "$(meta "$FV1" 'finding.reply')" "visit visV already asks you for it" "…as the reply the raiser's thread receives"
+eq "$(bstatus "$FV1")" "open" "…and the finding stays open, holding the review"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and no second visit is filed"
+has "$(notes "$FV1")" "deferred to open visit visV" "…and the finding's notes record the deferral"
+
+FV2=$(human_finding tk-ancV "assets/scripts/x.sh" "quote the expansion" 4999 5000)
+"$SUT" set-disposition --finding "$FV2" --anchor tk-ancV --disposition must-fix >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "must-fix is refused too: it would settle the operator's question as keep-and-fix"
+hasnt "$(deps)" "$FV2|blocks|tk-ancV" "…and wires no hold"
+
+# A Conversation comment names no review, so the anchor's batch ledger is what
+# names its batch's rework.
+FV3=$(human_finding tk-ancV "PR conversation" "why an hourly order at all?" 40)
+"$SUT" set-disposition --finding "$FV3" --anchor tk-ancV --disposition declined --reason "answered in the PR summary" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a Conversation comment routed to the held rework by the batch ledger is refused too"
+
+# A machine finding carries no comment of a human's, so no visit holds its question.
+FM=$("$SUT" upsert --anchor tk-ancV --lane correctness --locus "assets/scripts/m.sh:m()" --message "nit: rename")
+"$SUT" set-disposition --finding "$FM" --anchor tk-ancV --disposition declined --reason "cosmetic"; rc=$?
+eq "$rc" "0" "a machine finding is declined past the open visit"
+
+# --visit must name an open visit on this anchor's feedback.
+FV4=$(human_finding tk-ancV "docs/y.md" "is this the product intent?" 4998 5000)
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition needs-you --visit visOld >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "needs-you --visit refuses a closed visit"
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition needs-you --visit tk-nosuch >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "…and a visit that is not on the anchor's feedback"
+eq "$(meta "$FV4" 'finding.disposition')" "unvalidated" "…leaving the finding unruled"
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition declined --visit visV >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "--visit applies to needs-you only"
+STUB_LIST_FAIL=1 "$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition declined --reason "x" >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "a store that will not list the visits refuses the ruling (exit 2), never reads as none open"
+eq "$(bstatus "$FV4")" "open" "…and leaves the finding open"
+
+# The PR#992 shape: the rework's own visit tracks the rework, holding no edge, and
+# the anchor carries no ledger, so source_review (stored as a number) names the
+# batch. A visit on the anchor itself is left to the validator's judgment.
+: > "$STUB_DEPS"
+store "$(jq -c '. + [
+  {"id":"tk-ancW","status":"open","assignee":"","title":"PR#9 anchor","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"rwW","status":"in_progress","assignee":"","title":"Address review comments on PR#9 (through review 777, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancW","source_review":777}},
+  {"id":"rwW2","status":"open","assignee":"","title":"Address review comments on PR#9 (through review 999, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancW","source_review":"999"}},
+  {"id":"visW","status":"open","assignee":"","title":"visit: rwW — PR#9 sweep or fix the cause?","notes":"","metadata":{"task_kind":"visit","escalation_key":"pr9-sweep-approach","gc.continuation_group":"rwW"},"dependencies":[{"issue_id":"visW","depends_on_id":"rwW","type":"tracks"}]},
+  {"id":"visA","status":"open","assignee":"","title":"visit: tk-ancW — seed-audit merge gate","notes":"","metadata":{"task_kind":"visit","escalation_key":"seed-audit-merge-gate.9","gc.continuation_group":"tk-ancW"}}]' "$STUB_STORE")"
+FW1=$(human_finding tk-ancW "PR review" "This feels heavy handed; fix why the state occurs" 777 777)
+FW2=$(human_finding tk-ancW "assets/scripts/w.sh" "nit: a typo" 1001 999)
+out=$("$SUT" open-visits --anchor tk-ancW)
+has "$out" "visW	tracks rework rwW" "open-visits names the visit tracking the batch's rework"
+has "$out" "visA	tracks anchor tk-ancW" "…and the anchor's own visit, which the validator judges"
+"$SUT" set-disposition --finding "$FW1" --anchor tk-ancW --disposition declined --reason "x" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a visit tracking the rework minted for the finding's review refuses the decline"
+"$SUT" set-disposition --finding "$FW2" --anchor tk-ancW --disposition declined --reason "cosmetic"; rc=$?
+eq "$rc" "0" "a finding from another batch is declined past both visits: one sits on another rework, one on the anchor"
+eq "$(bstatus "$FW2")" "closed" "…and closes"
+"$SUT" set-disposition --finding "$FW1" --anchor tk-ancW --disposition declined --reason "not an objection" --unrelated-visit visW; rc=$?
+eq "$rc" "0" "--unrelated-visit names a visit that asks something else, and the ruling proceeds"
+eq "$(meta "$FW1" 'finding.disposition')" "declined" "…as the ruling the validator meant"
+has "$(notes "$FW1")" "past open visit(s) visW" "…and the finding's notes record the visit it was ruled past"
+
+# ---------------------------------------------------------------------------
+# The release: a needs-you finding closes once its visit has closed and no fix
+# unit on its lane is in flight, and while one is, fix-in-flight names it so
+# quiescence holds reviews off a diff the ruling may still change.
+# ---------------------------------------------------------------------------
+out=$("$SUT" fix-in-flight --anchor tk-ancV); rc=$?
+eq "$rc" "0" "fix-in-flight holds while the held rework answers the needs-you finding's lane"
+has "$out" "rwV blocked" "…naming that rework"
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "open" "close-answered leaves a needs-you finding open while its visit is open"
+jq -c 'map(if .id == "visV" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "open" "…and once the visit closes, while the rework its ruling released is still in flight"
+gc bd update rwV --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "closed" "…and closes it once the rework has landed too"
+has "$(notes "$FV1")" "its visit visV closed" "…recording why"
+# A needs-you finding with nothing answering it waits on a person and holds no
+# merge, so it never reads as an unanswered demand.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancN","status":"open","assignee":"","title":"ancN","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visN","status":"open","assignee":"","title":"visit: tk-ancN","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancN"}}]'
+FN=$(human_finding tk-ancN "docs/n.md" "which audience is this for?" 60)
+"$SUT" set-disposition --finding "$FN" --anchor tk-ancN --disposition needs-you --visit visN >/dev/null; rc=$?
+eq "$rc" "0" "needs-you --visit adopts a visit on the anchor itself"
+out=$("$SUT" fix-in-flight --anchor tk-ancN); rc=$?
+eq "$rc/$out" "1/" "fix-in-flight reports a needs-you finding with no fix unit as neither in flight nor unanswered"
+jq -c 'map(if .id == "visN" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" close-answered --anchor tk-ancN
+eq "$(bstatus "$FN")" "closed" "close-answered closes it once its visit closes, with no fix unit to wait on"
+
+# shed-orphaned: a needs-you finding on an anchor that has closed is moot; its
+# visit is the operator's and stays.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancS","status":"closed","assignee":"","title":"merged","notes":"","metadata":{"merge_result":"merged"}},
+        {"id":"tk-ancT","status":"open","assignee":"","title":"open","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visS","status":"open","assignee":"","title":"visit: tk-ancS","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancS"}},
+        {"id":"visT","status":"open","assignee":"","title":"visit: tk-ancT","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancT"}}]'
+FS=$(human_finding tk-ancS "a.md" "orphaned question" 70)
+gc bd update "$FS" --set-metadata finding.disposition=needs-you --set-metadata finding.visit=visS >/dev/null
+FT=$(human_finding tk-ancT "b.md" "live question" 71)
+gc bd update "$FT" --set-metadata finding.disposition=needs-you --set-metadata finding.visit=visT >/dev/null
+"$SUT" shed-orphaned --reason "test"
+eq "$(bstatus "$FS")" "closed" "shed-orphaned closes a needs-you finding whose anchor has closed"
+eq "$(bstatus "visS")" "open" "…and leaves its visit to the operator"
+eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its visit"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
