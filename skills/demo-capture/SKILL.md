@@ -187,11 +187,18 @@ The capture needs Node ≥ 22.18, a Chromium build, and ffmpeg; narration also
 needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
 
 - **Chromium** — `npx playwright install chromium-headless-shell` (add
-  `--with-deps` on a bare host). A host-provided browser is used when present.
+  `--with-deps` on a bare host). The engine runs headless, so Playwright
+  launches its own `chromium-headless-shell` build from its browser cache:
+  `PLAYWRIGHT_BROWSERS_PATH` when set, else `~/Library/Caches/ms-playwright` on
+  macOS and `${XDG_CACHE_HOME:-~/.cache}/ms-playwright` on Linux. A browser on
+  `PATH` is not used.
 - **ffmpeg** — a host `ffmpeg` on `PATH` (or `FFMPEG_BIN`) is used when present;
   otherwise the engine's bundled `ffmpeg-static` provides it.
-- **`OPENAI_API_KEY`** — read from the environment; the host places it in
-  `~/.gc/secrets.env`, merged into the session environment.
+- **`OPENAI_API_KEY`** — read from the environment. The host places it in
+  `$GC_HOME/secrets.env` (`~/.gc/secrets.env` when `GC_HOME` is unset), and
+  gascity copies it into the supervisor's service env when
+  `gc supervisor install` writes that env. Sessions started after that carry
+  the key.
 
 The `doctor/check-demo-toolchain` check reports which of these are resolvable,
 so a session knows before it captures whether the clip will be narrated or
