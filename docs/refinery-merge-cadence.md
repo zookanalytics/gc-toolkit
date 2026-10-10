@@ -440,15 +440,24 @@ the cadence — the arms run whether or not any refinery session is awake.
    body whose every inline comment is one. Such feedback sits inside the
    batch's range, but the batch's bead never saw it, so unless a finding names
    it, it is acknowledged and never marked. A record is dropped once
-   every comment it covers carries its final mark. The reactions are written
+   every comment it covers carries its final mark and every inline comment the
+   batch answered sits in a resolved thread. The reactions are written
    first and bounded per pass; when the cap or a failed write leaves one owing,
    that pass posts no answer, so no comment is answered before it is
    acknowledged. A thread with a post after the city's own reply that is not
    itself the city's own is left open, and so is one holding a comment above
    the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
-   every later pass. Idempotence is read back off GitHub, so a repeat pass
-   writes nothing and a failed write is retried by the next one.
+   every later pass. A thread left open keeps its batch's record, so every
+   later pass still answers for it: the post that left it open routes as
+   feedback of its own, and the answer to that post resolves the thread. A
+   thread the city answered for a batch or for a ruled machine finding (below)
+   and cannot resolve under its identity (GitHub reports `viewerCanResolve`
+   false) stays owed. Each pass tries the resolve again and logs the thread,
+   and files the situation through `patrol-finding.sh` as one finding for the
+   repository, keyed `pr-thread-unresolvable.<owner>.<repo>`. The finding names
+   no anchor, so it holds no merge. Idempotence is read back off GitHub, so a
+   repeat pass writes nothing and a failed write is retried by the next one.
    The per-anchor walk runs under the arm's share of the pass budget,
    first the anchors that need action, then the rest in a rotation. Needing
    action is a PR that left the open list (a merge or a close to record), an
@@ -475,9 +484,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    comment is answered with how it closed: the head that carries the fix and
    the fix units that landed it, or the deferral's follow-up. The thread is then
    resolved unless a post that is not the city's own has come after it, and a
-   Conversation comment is edited to carry the answer. A finding that closed
-   before it was posted, as a pre-open round's findings have, is posted with its
-   answer already in place. A human finding is never posted, because it already
+   Conversation comment is edited to carry the answer. A thread the identity
+   cannot resolve leaves the finding owed its answer, as above. A finding that
+   closed before it was posted, as a pre-open round's findings have, is posted
+   with its answer already in place. A human finding is never posted, because it already
    sits on the PR where its raiser wrote it and is answered there. One
    store-wide read of the findings serves the pass, and `finding.pr_comment` and
    `finding.pr_answered` record each write, so an anchor whose findings are

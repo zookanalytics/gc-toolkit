@@ -718,9 +718,10 @@ keys = [
   # closes.
   "finding.pr_comment",
   # Set by the same write-back once a posted finding has closed and its comment
-  # carries the answer: `1` when it was answered, `gone` when the comment had been
-  # removed from the PR and nothing was left to answer. A finding carrying it
-  # costs the write-back no GitHub read.
+  # carries the answer: `1` when it was answered and its thread, if it has one,
+  # is resolved or carries a later post that is not the city's own, and `gone`
+  # when the comment had been removed from the PR and nothing was left to
+  # answer. A finding carrying it costs the write-back no GitHub read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
