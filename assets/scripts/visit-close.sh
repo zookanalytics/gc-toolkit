@@ -13,6 +13,10 @@
 # under, and it is read back first because a --set-metadata pair can exit 0
 # having written nothing. Once the visit is closed no re-run reaches it, so a
 # dropped stamp is permanent; both stamps must read back or the visit stays open.
+# The stamp is also the last write before the close. converse-claim.sh reads an
+# open visit carrying gc.outcome as a sitting whose record is complete and
+# closes it, so everything else this close owes lands first, and a close
+# refused before the stamp leaves no stamp behind.
 #
 # Usage:
 #   visit-close.sh --visit <id> --outcome <word> --reason <one-line> \
@@ -20,12 +24,16 @@
 #   --outcome is the one-word class the sitting closed on (moot|benign|folded|
 #   dismissed|the word a held sitting signs off with). --reason is the sentence
 #   naming why. --subject, when given, also appends the reading to its notes.
-#   --into names the visit a fold closes this one INTO. A PR-comment visit
-#   carries the merge-hold keys pr-facts.sh stamps (pr_number, pr_url,
-#   anchor_bead) that merge.sh reads to hold the PR; the fold moves them to the
-#   holder and reads pr_number back, refusing the close if it did not land.
+#   --into names the visit a fold closes this one INTO, which must be in the
+#   same store. A PR-comment visit carries the merge-hold keys pr-facts.sh
+#   stamps (pr_number, pr_url, anchor_bead) that merge.sh reads to hold the PR;
+#   the fold moves them to the holder and reads pr_number back, refusing the
+#   close if it did not land.
 #   --force closes over a holder's claim, for an actor closing a visit it does
 #   not own (the operator's dismiss).
+# Exit: 0 closed · 2 usage · 3 the outcome stamps did not read back · 4 the
+# close did not take · 5 the fold was refused (no holder, a holder in another
+# store or holding another PR, or a merge hold that did not move)
 set -u
 
 # >>> control-char-scrub
@@ -46,7 +54,7 @@ while [ $# -gt 0 ]; do
     --subject) shift; [ $# -gt 0 ] || die "--subject needs a value"; SUBJECT="$1" ;;
     --into)    shift; [ $# -gt 0 ] || die "--into needs a value"; INTO="$1" ;;
     --force)   FORCE=1 ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         die "unknown argument '$1'" ;;
   esac
   shift
@@ -63,6 +71,56 @@ meta_now() {
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -r --arg k "$2" 'if type=="array" then (.[0].metadata[$k] // "") else "" end' 2>/dev/null
 }
+
+# A fold never crosses stores. A bead's id prefix names its store, and merge.sh
+# reads a PR's merge holds from its own rig's store only, so a hold moved to a
+# visit in another store holds nothing. The repair for a holder in the wrong
+# store is where the visit was filed, never a city-wide read of holds. Checked
+# before any write, so a refused fold leaves the visit as it was.
+if [ -n "$INTO" ] && [ "${INTO%%-*}" != "${VISIT%%-*}" ]; then
+  echo "visit-close: fold target $INTO is in another store than $VISIT ('${INTO%%-*}', not '${VISIT%%-*}'); NOT closing — a fold never crosses stores, because a merge hold moved there holds nothing where merge.sh reads it. Fold into a visit in $VISIT's own store." >&2
+  exit 5
+fi
+
+# A folded visit closes, so any merge hold it carries must move to the holder
+# first or it lifts unheld. A PR-comment visit (pr-facts.sh) stamps pr_number,
+# pr_url and anchor_bead, and merge.sh holds the PR's merge while that visit
+# stays open carrying pr_number. pr_number is the key merge.sh reads; pr_url
+# qualifies the repository; anchor_bead rides along. A fold with no holder, or
+# into a holder already holding another PR, is refused before any write. The
+# transfer gates the close the way the outcome stamps below do: read pr_number
+# back on the holder, and refuse the close if it did not land.
+PRNUM=""
+if [ "$OUTCOME" = "folded" ]; then
+  PRNUM=$(meta_now "$VISIT" pr_number)
+  if [ -n "$PRNUM" ]; then
+    if [ -z "$INTO" ]; then
+      echo "visit-close: $VISIT holds PR#$PRNUM's merge (pr_number) and is folding, but no --into <holder> was given; NOT closing — a fold with no holder to carry the hold would lift it silently. Pass --into <holder-visit>." >&2
+      exit 5
+    fi
+    HOLDER_PRNUM=$(meta_now "$INTO" pr_number)
+    if [ -n "$HOLDER_PRNUM" ] && [ "$HOLDER_PRNUM" != "$PRNUM" ]; then
+      echo "visit-close: fold target $INTO already carries pr_number=$HOLDER_PRNUM, not $PRNUM; NOT closing — moving the key would drop one PR's merge hold. Reconcile by hand." >&2
+      exit 5
+    fi
+  fi
+fi
+if [ -n "$PRNUM" ]; then
+  PRURL=$(meta_now "$VISIT" pr_url)
+  ANCHOR=$(meta_now "$VISIT" anchor_bead)
+  XFER=(--set-metadata "pr_number=$PRNUM")
+  [ -n "$PRURL" ]  && XFER+=(--set-metadata "pr_url=$PRURL")
+  [ -n "$ANCHOR" ] && XFER+=(--set-metadata "anchor_bead=$ANCHOR")
+  gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true
+  if [ "$(meta_now "$INTO" pr_number)" != "$PRNUM" ]; then
+    gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true
+  fi
+  GOT_PN=$(meta_now "$INTO" pr_number)
+  if [ "$GOT_PN" != "$PRNUM" ]; then
+    echo "visit-close: the merge-hold key pr_number did not transfer to $INTO (got '$GOT_PN', want '$PRNUM'); NOT closing — closing $VISIT now would lift PR#$PRNUM's merge hold with no holder. Re-run visit-close." >&2
+    exit 5
+  fi
+fi
 
 # The reading also lands on the subject's notes when one is named, the way the
 # moot/benign close has always recorded it, so the subject carries the trace too.
@@ -82,42 +140,6 @@ GOT_R=$(meta_now "$VISIT" gc.outcome_reason)
 if [ "$GOT_O" != "$OUTCOME" ] || [ "$GOT_R" != "$REASON" ]; then
   echo "visit-close: the outcome stamps did not read back on $VISIT (gc.outcome='$GOT_O', gc.outcome_reason='$GOT_R'); NOT closing — a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Re-run visit-close." >&2
   exit 3
-fi
-
-# A folded visit closes, so any merge hold it carries must move to the holder
-# first or it lifts unheld. A PR-comment visit (pr-facts.sh) stamps pr_number,
-# pr_url and anchor_bead, and merge.sh holds the PR's merge while that visit
-# stays open carrying pr_number. pr_number is the key merge.sh reads; pr_url
-# qualifies the repository; anchor_bead rides along. The transfer gates the
-# close the way the outcome stamps above do: read pr_number back on the holder,
-# and refuse the close if it did not land.
-if [ "$OUTCOME" = "folded" ]; then
-  PRNUM=$(meta_now "$VISIT" pr_number)
-  if [ -n "$PRNUM" ]; then
-    if [ -z "$INTO" ]; then
-      echo "visit-close: $VISIT holds PR#$PRNUM's merge (pr_number) and is folding, but no --into <holder> was given; NOT closing — a fold with no holder to carry the hold would lift it silently. Pass --into <holder-visit>." >&2
-      exit 5
-    fi
-    HOLDER_PRNUM=$(meta_now "$INTO" pr_number)
-    if [ -n "$HOLDER_PRNUM" ] && [ "$HOLDER_PRNUM" != "$PRNUM" ]; then
-      echo "visit-close: fold target $INTO already carries pr_number=$HOLDER_PRNUM, not $PRNUM; NOT closing — moving the key would drop one PR's merge hold. Reconcile by hand." >&2
-      exit 5
-    fi
-    PRURL=$(meta_now "$VISIT" pr_url)
-    ANCHOR=$(meta_now "$VISIT" anchor_bead)
-    XFER=(--set-metadata "pr_number=$PRNUM")
-    [ -n "$PRURL" ]  && XFER+=(--set-metadata "pr_url=$PRURL")
-    [ -n "$ANCHOR" ] && XFER+=(--set-metadata "anchor_bead=$ANCHOR")
-    gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true
-    if [ "$(meta_now "$INTO" pr_number)" != "$PRNUM" ]; then
-      gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true
-    fi
-    GOT_PN=$(meta_now "$INTO" pr_number)
-    if [ "$GOT_PN" != "$PRNUM" ]; then
-      echo "visit-close: the merge-hold key pr_number did not transfer to $INTO (got '$GOT_PN', want '$PRNUM'); NOT closing — closing $VISIT now would lift PR#$PRNUM's merge hold with no holder. Re-run visit-close." >&2
-      exit 5
-    fi
-  fi
 fi
 
 # Close last, with the reason as the bead's close_reason too (the ledger reads

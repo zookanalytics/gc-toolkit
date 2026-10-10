@@ -172,6 +172,48 @@ is "a holder already holding another PR refuses the fold (exit 5)" "$RC" "5"
 is "the holder's pr_number is not clobbered" "$(meta_of v-hold pr_number)" "560"
 hasnt "the folded visit is NOT closed on a conflict" 'close v-x' "$LOG"
 
+echo "── fold: a holder in another store is refused before any write (exit 5) ──"
+# merge.sh reads a PR's merge holds from its own rig's store only, so a hold
+# moved to a visit in another store holds nothing. The id prefix names the store.
+reset
+seed_meta v-x pr_number 559
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --into gc-hold \
+    --outcome folded --reason "folded into gc-hold" >/dev/null 2>&1 ) || RC=$?
+is "a fold target in another store is refused (exit 5)" "$RC" "5"
+is "the hold is not moved into the other store" "$(meta_of gc-hold pr_number)" ""
+is "the folded visit keeps its own hold" "$(meta_of v-x pr_number)" "559"
+hasnt "the folded visit is NOT closed" 'close v-x' "$LOG"
+hasnt "nothing is written at all" 'update' "$LOG"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into gc-hold \
+    --outcome folded --reason "folded into gc-hold" >/dev/null 2>&1 ) || RC=$?
+is "a cross-store fold is refused with no merge hold to move, too" "$RC" "5"
+hasnt "  ... and nothing is written" 'update' "$LOG"
+
+echo "── a refused fold leaves no gc.outcome for converse-claim.sh to finish ──"
+# converse-claim.sh closes an open visit carrying gc.outcome as a sitting whose
+# record is complete. A fold refused after that stamp would be closed there
+# anyway on the next claim, and the merge hold it carries would lift unheld.
+reset
+seed_meta v-x pr_number 559
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub \
+    --outcome folded --reason "folded" >/dev/null 2>&1 )
+is "no --into: no gc.outcome is stamped" "$(meta_of v-x gc.outcome)" ""
+hasnt "no --into: no reading is appended to the subject" '--append-notes' "$LOG"
+reset
+seed_meta v-x pr_number 559
+seed_meta v-hold pr_number 560
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 )
+is "a holder holding another PR: no gc.outcome is stamped" "$(meta_of v-x gc.outcome)" ""
+reset
+seed_meta v-x pr_number 559
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_XFER=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 )
+is "a transfer that did not land: no gc.outcome is stamped" "$(meta_of v-x gc.outcome)" ""
+
 echo "── fold: a visit with no merge hold needs no transfer and closes normally ──"
 reset
 RC=0
