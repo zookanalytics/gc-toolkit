@@ -602,7 +602,16 @@ cat > "$TMP/armpack/assets/scripts/molecule-hold.sh" <<'MHSTUB'
 printf 'HOLD %s\n' "$*" >> "${ARM_LOG:?}"
 exit "${ARM_HOLD_RC:-0}"
 MHSTUB
-chmod +x "$TMP/armpack/assets/scripts/escalate.sh" "$TMP/armpack/assets/scripts/molecule-hold.sh"
+# The gate takes its pack from the first candidate carrying every script it
+# calls, so the stub pack carries the tree check too. The live-conflict path
+# this drives is refused on its assignee and never reaches it.
+cat > "$TMP/armpack/assets/scripts/work-tree-holder.sh" <<'WTSTUB'
+#!/usr/bin/env bash
+printf 'TREE %s\n' "$*" >> "${ARM_LOG:?}"
+exit 0
+WTSTUB
+chmod +x "$TMP/armpack/assets/scripts/escalate.sh" "$TMP/armpack/assets/scripts/molecule-hold.sh" \
+         "$TMP/armpack/assets/scripts/work-tree-holder.sh"
 
 # run_arm <hold-exit-code> [escalate-exit-code] -> "<rc>"; the helper trace is
 # left in $TMP/arm.log and the gc trace in $GC_LOG. {{convoy_id}} is substituted
@@ -623,6 +632,7 @@ has "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "it files an escalation
 has "$(cat "$TMP/arm.log")" "--key polecat-duplicate-dispatch" "under the live-conflict key: this drives the in-flight path"
 has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "it holds its own step"
 has "$(gclog)" "runtime drain-ack" "an escalation and a hold that both landed are followed by the drain"
+hasnt "$(cat "$TMP/arm.log")" "TREE " "a bead refused on its assignee never reaches the tree check"
 
 eq "$(run_arm 1)" "1" "a refused hold still exits 1"
 has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "the hold was attempted"
