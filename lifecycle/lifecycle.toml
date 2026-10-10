@@ -633,18 +633,18 @@ keys = [
 #   child by gate-ensure.sh, which reads it back (falling back to
 #   gc.execution_routed_to) to repair a wedged lane. Never cleared. A pool name.
 # source_review_bead / source_review — which feedback a rework child answers, in
-#   two id spaces that cannot share a key. signoff.sh stamps source_review_bead =
-#   the review BEAD it filed the child from, and gate-ensure's already-answered
-#   probe counts a child by that key. pr-facts.sh
+#   two id spaces that cannot share a key. rework-child.sh stamps
+#   source_review_bead = the review BEAD signoff.sh files the child for, and
+#   gate-ensure's already-answered probe counts a child by that key. pr-facts.sh
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
 #   child carries verbatim, a comment batch rather than a signoff round.
 #   Neither is cleared.
 # source_ruling_bead — the visit a ruling-sourced rework child answers, the
 #   analog of source_review_bead for an operator ruling rather than a review
-#   verdict. converse-rework.sh stamps it = the visit the sitting reached the
-#   ruling in, and dedups a second child against it. A rework child carries
-#   source_review_bead or source_ruling_bead, never both: the two name the two
-#   authorities a rework originates from, a review and a ruling. Not cleared.
+#   verdict. rework-child.sh stamps it = the visit converse-rework.sh names, the
+#   one the sitting reached the ruling in. A child rework-child.sh files carries
+#   source_review_bead or source_ruling_bead, never both, and the writer dedups
+#   a second child against that key. Not cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a

@@ -11,7 +11,8 @@
 # approve: post the artifact (gh pr review --comment post-open; review-bead
 # notes pre-open), stamp check.<name>=green on the anchor, and dismiss the
 # city's own superseded CHANGES_REQUESTED review. request-changes: clear the
-# marker, returning the lane to unreviewed, and file ONE routed rework child.
+# marker, returning the lane to unreviewed, and file ONE routed rework child
+# through rework-child.sh.
 # Convergence is judged, not counted. The validator rules whether a further
 # whole-diff review is warranted once the must-fix set closes
 # (specs/tk-ztapg/review-cycle-architecture.md), so request-changes files a
@@ -50,9 +51,12 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
-# The route gate (pool-route.sh) lives beside this script; the rework route is
-# proved through it before the fix child is filed.
+# The check-index parser (review-checks.sh) lives beside this script.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+# The one writer of a rework child. request-changes files its fix unit through it,
+# under this review's provenance, and the writer proves the pool route, the work
+# order, the blocks edge and the dispatch.
+REWORK_CHILD="$HERE/rework-child.sh"
 # The single writer of the workflow-owned `status:` PR label. A verdict is the
 # event-precise flip: request-changes sets the PR working (a rework child now
 # stands on it), the cap park sets needs-attention, and an approve reconciles to
@@ -794,18 +798,11 @@ fi
 FINDING_COUNT=0
 [ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
 
-# The child is offered off this route by exact byte equality, and GC_RIG picks
-# both the store it lands in and the rig segment a rig-scoped pool carries, so
-# an address built out of GC_RIG alone renders bare for a rig-less caller: the
-# stamp reads back clean, no polecat is ever offered the rework, and the PR
-# just stops moving. Prove the route BEFORE the child exists — a review left
-# open is retried, a rework child nothing claims is found by a human.
+# The fix unit is filed by rework-child.sh under this review's provenance
+# (source_review_bead). What the review decides is decided here: the pool the
+# rework routes to (the review's fix_target_pool, else the writer's default),
+# where it lands, and the reason and title it carries.
 FIX_POOL_NAME=$(row_meta "$REVIEW_ROW" fix_target_pool)
-[ -n "$FIX_POOL_NAME" ] || FIX_POOL_NAME="gc-toolkit.polecat"
-FIX_POOL=$("$SCRIPT_DIR/pool-route.sh" "$FIX_POOL_NAME") || {
-  warn "the rework child would route to '$FIX_POOL_NAME', which no live pool claims; review left open for a retry"
-  exit 2
-}
 FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$REVIEW_ROW" review_base)
@@ -827,115 +824,18 @@ if [ -n "$POST_OPEN" ]; then
 else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
-# One review bead owns at most one rework child. This path is fully re-runnable:
-# close_review is its last write, and every exit-2 above it (a create whose id
-# did not come back, work-order verify, an unproven pour) leaves the review OPEN
-# with a child already filed. A re-pool re-enters here, so a create keyed to the
-# same review mints a SECOND child for one finding — one dispatches and lands,
-# the other is a duplicate a human must reap. Adopt the open child that already
-# answers this review instead.
-#
-# Discover it by the source_review_bead it carries, not by the anchor's blocks
-# edge. The child carries that key from its create (below), before its blocks
-# edge is hung, so a prior run that filed the child but exited before hanging the
-# edge leaves an orphan no anchor-edge walk can see, and the create arm mints a
-# second child. source_review_bead is the exact key: it is this review bead's own
-# id, unique to one review of one anchor, and the only bead type stamped with it
-# is a rework child — so a match needs no wider scope, and a genuine next round is
-# a new review bead the key does not match. When more than one live child carries
-# the key, a prior pass filed one and died before dispatch while a retry filed and
-# dispatched another; a child stamped gc.execution_routed_to is in flight on the
-# branch, so prefer it over any inert sibling. Selecting the inert one by creation
-# order re-slings it and double-dispatches the molecule the routed child already
-# owns. Fail closed: an unreadable query cannot be told from "no prior child", and
-# a create on that ambiguity is the double-file this guard prevents, so leave the
-# review open for a retry instead.
-if PRIOR_CHILDREN=$(bd_list --metadata-field "source_review_bead=$REVIEW_BEAD" --status="$LIVE_STATUSES"); then
-  FIX_BEAD=$(printf '%s' "$PRIOR_CHILDREN" | jq -r --arg r "$REVIEW_BEAD" '
-      [ .[]? | select((.metadata.source_review_bead // "") == $r) ]
-      | sort_by(.created_at // .id) as $all
-      | ( ( [ $all[] | select((.metadata["gc.execution_routed_to"] // "") != "") ][0] )
-          // $all[0] )
-      | (.id // empty)' 2>/dev/null)
-else
-  warn "could not read prior rework children for review $REVIEW_BEAD (dedup query failed); review left open for a retry rather than risk a second child"
+REWORK_ARGS=(--anchor "$ANCHOR" --review-bead "$REVIEW_BEAD" --branch "$BRANCH"
+             --target "$FIX_TARGET" --title "$TITLE" --reason "$REJECTION_REASON")
+[ -z "$FIX_POOL_NAME" ] || REWORK_ARGS+=(--pool "$FIX_POOL_NAME")
+[ -z "$POST_OPEN" ] || REWORK_ARGS+=(--pr-url "$PR_URL" --pr-number "$PR_NUMBER")
+# close_review is this path's last write, so a filing that did not complete leaves
+# the review open. The re-pool re-enters here, and the writer adopts the child
+# this pass filed rather than minting a second one.
+if ! FILED=$("$REWORK_CHILD" "${REWORK_ARGS[@]}"); then
+  warn "the rework child for review $REVIEW_BEAD was not dispatched; review left open for a retry"
   exit 2
 fi
-if [ -n "$FIX_BEAD" ]; then
-  # A child that already read back a pour (gc.execution_routed_to stamped) is in
-  # flight: only close_review was still owed. Re-stamping or re-slinging it would
-  # stomp a live worktree or double-dispatch the molecule, so close and stop.
-  ADOPT_ROUTE=$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")
-  if [ -n "$ADOPT_ROUTE" ]; then
-    echo "signoff: rework child $FIX_BEAD (source_review_bead=$REVIEW_BEAD) was already dispatched to $ADOPT_ROUTE; closing the review it left open, filing no second child"
-    ensure_validation_pass
-    close_review
-    # The in-flight rework child means the city holds the ball; keep it working.
-    [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
-      --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-    echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $ADOPT_ROUTE"
-    exit 0
-  fi
-  # Never dispatched: adopt it and finish the dispatch this pass owes. The work
-  # order is re-stamped below, repairing a partial prior write; the round the
-  # child already records is this same round, so it is preserved rather than
-  # advanced, and refilled only if that prior write never landed one.
-  echo "signoff: adopting existing open rework child $FIX_BEAD for review $REVIEW_BEAD (a prior attempt filed it but never dispatched); filing no second child"
-  [ -n "$(row_meta "$(bd_json show "$FIX_BEAD")" rejection_reason)" ] && REJECTION_REASON=""
-else
-  # The identity keys ride in the create itself. The dedup above finds a prior
-  # child by source_review_bead alone, so a child that exists without it is
-  # invisible to the retry, which files a second child beside it. A create
-  # followed by a separate stamp is two writes: a create whose id never comes
-  # back, or a run that ends before the work-order stamp below, leaves a child
-  # carrying no key any reader matches on. One write cannot: the child and its
-  # identity land together or not at all. The full work order is stamped and
-  # read back below, on a fresh child and an adopted one alike.
-  FIX_IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg r "$REVIEW_BEAD" \
-    '{task_kind: "rework", anchor_bead: $a, source_review_bead: $r}' 2>/dev/null)
-  if [ -z "$FIX_IDENTITY" ]; then
-    warn "could not build the rework child's identity metadata; review left open for a retry"
-    exit 2
-  fi
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-  if [ -z "$FIX_BEAD" ]; then
-    warn "the rework child create returned no id; review left open for a retry, which adopts the child by source_review_bead=$REVIEW_BEAD if the create landed"
-    exit 2
-  fi
-fi
-
-# The stamped fields ARE the work order: branch/target say what to resume and
-# where it lands, existing_pr keeps the rework on THIS PR, source_review_bead
-# names the findings it answers. task_kind and anchor_bead are the role marker:
-# the child resumes the ANCHOR's own branch, so with no marker a metadata read
-# cannot tell the child from the anchor, and the title prefix is the only signal
-# left.
-META=(
-  --set-metadata "task_kind=rework"
-  --set-metadata "anchor_bead=$ANCHOR"
-  --set-metadata "branch=$BRANCH"
-  --set-metadata "target=$FIX_TARGET"
-  --set-metadata "source_review_bead=$REVIEW_BEAD"
-  --set-metadata "merge_strategy=mr"
-)
-# Always set on a fresh child; empty only when adopting one that already records
-# its round, which is kept rather than overwritten with a later round's number.
-[ -n "$REJECTION_REASON" ] && META+=(--set-metadata "rejection_reason=$REJECTION_REASON")
-if [ -n "$POST_OPEN" ]; then
-  META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL" --set-metadata "pr_number=$PR_NUMBER")
-fi
-gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
-
-# The child must BLOCK the anchor. Recorded the other way round it waits on an
-# anchor that closes only once the rework lands, so nothing ever claims it, and
-# count_rounds, which walks the anchor's dependencies, cannot see it either.
-# Skip when the edge is already there: an adopted child carries it from the
-# prior attempt, and a second identical edge is one the round-count walk sees
-# twice.
-if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
-     | jq -e --arg f "$FIX_BEAD" 'any(.[]?; .id == $f)' >/dev/null 2>&1; then
-  gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
-fi
+read -r FIX_BEAD FIX_POOL FIX_STATE <<< "$FILED"
 
 # The fix unit's edges onto the findings it answers are NOT hung here. Every
 # finding is still unvalidated at this point, and a fix unit that blocked one the
@@ -943,61 +843,15 @@ fi
 # blocked issue) and stall the validator's triage. The close-ordering edge onto a
 # finding is hung as the validator rules that finding must-fix (finding.sh
 # set-disposition), so the fix unit blocks only the findings it must answer. The
-# anchor edge above is what holds the merge in the meantime.
-
-# Verify the work order — every field the resumed workflow reads — and the
-# blocks edge BEFORE the pour, so a claimed rework can never run against absent
-# fields.
-FIX_ROW=$(bd_json show "$FIX_BEAD")
-MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
-  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg pr "${POST_OPEN:+$PR_URL}" \
-  --arg a "$ANCHOR" '
-  (.[0] // {}) as $x | ($x.metadata // {}) as $m | [
-    (if ($m.task_kind // "") == "rework" then empty else "task_kind" end),
-    (if ($m.anchor_bead // "") == $a then empty else "anchor_bead" end),
-    (if ($m.branch // "") == $b then empty else "branch" end),
-    (if ($m.target // "") == $t then empty else "target" end),
-    (if ($m.source_review_bead // "") != "" then empty else "source_review_bead" end),
-    (if ($m.merge_strategy // "") == "mr" then empty else "merge_strategy" end),
-    (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
-    (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end)
-  ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
-if [ "$MISSING" = "ok" ]; then
-  EDGE=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
-    | jq -r --arg f "$FIX_BEAD" 'if type == "array" and any(.[]; .id == $f) then "ok" else "" end' 2>/dev/null)
-  [ "$EDGE" = "ok" ] || MISSING="blocks_edge"
-fi
-if [ "$MISSING" != "ok" ]; then
-  warn "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
-  exit 2
-fi
-
-# Dispatch is a sling, not a bare route stamp. mol-polecat-work gives the rework
-# the same control-dispatcher driver and continuation affinity poured work and
-# reviews (gate-ensure.sh) get; a bare gc.routed_to route has no driver and
-# starves behind assigned molecule steps in the pool's pull queue. The pour
-# retires gc.routed_to and stamps gc.execution_routed_to=<pool> on the work
-# bead — that is the read-back that proves it. On success wake the pool to claim
-# it. If the route does not read back the pour may still have started the
-# workflow and only failed to stamp the route (a partial pour that exits
-# success); a bare gc.routed_to stamp would then let the pool claim query and
-# the workflow dispatcher both act on the same work — a double-dispatch. So
-# never bare-stamp: exit non-zero and leave the review unclosed, so the dispatch
-# is retried rather than the work double-dispatched.
-WORK_FORMULA="mol-polecat-work"
-gc sling ${GC_RIG:+--rig "$GC_RIG"} "$FIX_POOL" "$FIX_BEAD" --on "$WORK_FORMULA" >/dev/null 2>&1
-if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")" = "$FIX_POOL" ]; then
-  DISPATCH="slung $WORK_FORMULA to"
-  gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
-  gc session nudge "$FIX_POOL" "Rework $FIX_BEAD for anchor $ANCHOR" >/dev/null 2>&1 || true
-else
-  warn "rework child $FIX_BEAD: mol-polecat-work pour did not stamp gc.execution_routed_to=$FIX_POOL; not falling back to a bare route (double-dispatch hazard) — review left open for a retry."
-  exit 2
-fi
+# fix unit's edge onto the anchor is what holds the merge in the meantime.
 ensure_validation_pass
 close_review
 # A rework child now stands on the anchor; the city holds the ball until it lands.
 [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-echo "signoff: request-changes recorded on $ANCHOR — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD $DISPATCH $FIX_POOL"
+if [ "$FIX_STATE" = in-flight ]; then
+  echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"
+else
+  echo "signoff: request-changes recorded on $ANCHOR — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD slung mol-polecat-work to $FIX_POOL"
+fi
 exit 0

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/converse-rework.sh — the ruling-sourced rework
-# minter. Stubbed gc; no live city, Dolt, or network. It mints the same fix unit
-# signoff.sh mints (task_kind=rework, anchor_bead, branch, target, merge_strategy
-# =mr, PR fields), sourced by source_ruling_bead rather than source_review_bead,
-# blocks the anchor on it, and slings mol-polecat-work. The assertions pin: the
-# child's full work order, that it carries source_ruling_bead and NOT a minted
-# source_review_bead, the blocks edge, the dispatch read-back, idempotency on the
-# ruling, the open-PR-only guard, and the no-double-dispatch refusal on a partial
-# pour.
+# Hermetic test for assets/scripts/converse-rework.sh — an operator ruling's entry
+# to rework — run end to end through rework-child.sh, the one writer of a rework
+# child that signoff.sh files through too. Stubbed gc; no live city, Dolt, or
+# network. The child is the fix unit a review verdict files (task_kind=rework,
+# anchor_bead, branch, target, merge_strategy=mr, PR fields), sourced by
+# source_ruling_bead rather than source_review_bead; it blocks the anchor and is
+# slung with mol-polecat-work. The assertions pin: the child's full work order,
+# that it carries source_ruling_bead and NOT a minted source_review_bead, the
+# blocks edge, the dispatch read-back, idempotency on the ruling, the identity
+# riding in the create so a lost create id is adopted rather than twinned, a
+# review's child never adopted for a ruling, the open-PR-only guard, and the
+# no-double-dispatch refusal on a partial pour.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,12 +85,26 @@ case "${1:-}" in
     done
     mv "$tmp" "$STORE"; echo "updated $id" ;;
   create)
-    shift; title="$1"
+    shift; title="$1"; shift
     [ -n "${STUB_CREATE_FAIL:-}" ] && exit 1
+    # --metadata lands in the same insert as the bead, as bd applies it.
+    cmeta='{}'
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --metadata) shift; cmeta="${1:-}" ;;
+        --metadata=*) cmeta="${1#--metadata=}" ;;
+      esac
+      shift || true
+    done
+    printf '%s' "$cmeta" | jq -e 'type == "object"' >/dev/null 2>&1 \
+      || { echo "bd: --metadata is not a JSON object (stub)" >&2; exit 1; }
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
-    jq -c --arg id "fix-$n" '. + [{"id":$id,"status":"open","assignee":"","metadata":{},"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
+    # is killed after its write commits.
+    [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
     printf '{"id":"fix-%s"}\n' "$n" ;;
   dep)
     shift
@@ -155,7 +172,7 @@ export STUB_CREATED="$TMP/created"
 reset() {
   printf '%s\n' "$1" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; printf '0' > "$STUB_SEQ"
-  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_LIST_FAIL 2>/dev/null || true
+  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL 2>/dev/null || true
 }
 meta()    { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STUB_STORE"; }
 created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
@@ -229,6 +246,43 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
 unset STUB_LIST_FAIL
 eq "$RC" "2" "exit 2 when the dedup query is unreadable"
 eq "$(created)" "0" "no child filed on an unreadable dedup query"
+
+echo "# --- identity at create: a create whose id never came back is adopted on the retry, not twinned ---"
+# The child is in the store, but the run never learned its id, so nothing past the
+# create ran: no work order, no edge, no pour. The dedup finds a prior child only
+# by source_ruling_bead, so that key must ride in the create itself; a child born
+# bare and keyed by a later write is invisible to the retry, which files a twin.
+reset "$ANCHOR_PR"
+export STUB_CREATE_NOID=1
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+unset STUB_CREATE_NOID
+eq "$RC" "2" "exit 2 when the create returned no id"
+has "$OUT" "returned no id" "says the create's id was lost"
+eq "$(created)" "1" "the create landed exactly one child"
+eq "$(meta fix-1 source_ruling_bead)" "vis-1" "the child carries the ruling's key from its create"
+eq "$(meta fix-1 task_kind)" "rework" "…and its role marker"
+eq "$(meta fix-1 anchor_bead)" "anc-1" "…and the anchor it belongs to"
+eq "$(meta fix-1 branch)" "" "no work order was stamped on a child whose id never came back"
+eq "$(meta fix-1 gc.execution_routed_to)" "" "…and it was never dispatched"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "the retry exits 0"
+eq "$(created)" "1" "the retry files NO second child"
+has "$OUT" "adopting existing open rework child fix-1" "…it adopts the child the lost-id create filed"
+eq "$(meta fix-1 branch)" "polecat/anc-1" "the adopted child is stamped with the full work order"
+has "$(meta fix-1 rejection_reason)" "apply the amendment" "…including the ruling as its rejection_reason"
+eq "$(meta fix-1 gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "the adopted child is dispatched on the retry"
+eq "$(grep -cxF 'anc-1|fix-1|blocks' "$STUB_DEPS")" "1" "exactly one edge holds the anchor"
+
+echo "# --- provenance: a review's rework child is never adopted for a ruling ---"
+# The source key is the dedup key, so a live child a review verdict filed on the
+# same anchor answers that review, not this ruling: the ruling files its own.
+reset "$(printf '%s' "$ANCHOR_PR" | jq -c '. + [{"id":"rv-kid","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_review_bead":"rv-1","branch":"polecat/anc-1","target":"main"}}]')"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+eq "$RC" "0" "exit 0"
+eq "$(created)" "1" "the ruling files its own child beside the review's"
+eq "$(meta fix-1 source_ruling_bead)" "vis-1" "…keyed on the ruling"
+eq "$(meta rv-kid source_ruling_bead)" "" "the review's child is not re-keyed"
+eq "$(meta rv-kid gc.execution_routed_to)" "" "…nor dispatched by the ruling"
 
 echo
 echo "===================="
