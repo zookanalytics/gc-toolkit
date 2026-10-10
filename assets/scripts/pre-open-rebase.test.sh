@@ -72,7 +72,7 @@ git init -q -b main "$SRC"
   git checkout -q -b polecat/tk-ok "$BASE"
   echo g > g.txt; git add g.txt; git commit -qm ok
   git checkout -q -b polecat/tk-moot "$BASE"
-  sed -i 's/proves nothing about this one/proves nothing about this head/' pin.sh
+  sed -i.bak 's/proves nothing about this one/proves nothing about this head/' pin.sh && rm -f pin.sh.bak
   git commit -qam moot
   git checkout -q main
   printf 'l1\nMAIN\nl3\n' > f.txt

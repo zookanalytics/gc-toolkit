@@ -143,8 +143,12 @@ scenario() {
   git checkout -q -b "b-$1" "$BASE"; "b_$1"; git add -A; git commit -qm "branch edits for $1"
   git checkout -q main
 }
+# In-place edit that GNU and BSD sed both accept. GNU's -i takes no suffix and
+# BSD's requires one, and only a suffix attached to the flag reads the same on
+# both.
+sedi() { sed -i.bak "$1" "$2" && rm -f "$2.bak"; }
 edit_pin_line() { # <file>: the branch's in-place edit inside check_pin
-  sed -i 's/a review bound to an older commit proves nothing about this one/a verdict bound to an older commit proves nothing about this head/' "$1"
+  sedi 's/a review bound to an older commit proves nothing about this one/a verdict bound to an older commit proves nothing about this head/' "$1"
 }
 drop_pin_block() { # <file>: the base side deletes check_pin outright
   awk '/^check_pin\(\) \{/ {skip=1} skip && /^}$/ {skip=0; getline; next} !skip' "$1" > "$1.n" && mv "$1.n" "$1"
@@ -159,7 +163,7 @@ b_del() { edit_pin_line lib/gate.sh; }
 scenario del "remove the commit pin"
 # A later, unrelated commit on the same file: the landed line names the commit
 # that deleted the block, not merely the newest one to touch the file.
-git checkout -q m-del; sed -i 's/^# gate helpers$/# gate helpers, sourced by the gate scripts/' lib/gate.sh; git commit -qam "describe the gate helpers"; git checkout -q main
+git checkout -q m-del; sedi 's/^# gate helpers$/# gate helpers, sourced by the gate scripts/' lib/gate.sh; git commit -qam "describe the gate helpers"; git checkout -q main
 
 m_rew() { rewrite_pin_body lib/gate.sh; }
 b_rew() { edit_pin_line lib/gate.sh; }
@@ -169,8 +173,8 @@ m_both() { drop_pin_block lib/gate.sh; }
 b_both() { rewrite_pin_body lib/gate.sh; }
 scenario both "remove the commit pin"
 
-m_ord() { sed -i 's/pin current for/the pin is current for/' lib/gate.sh; }
-b_ord() { sed -i 's/pin current for/pin still current for/' lib/gate.sh; }
+m_ord() { sedi 's/pin current for/the pin is current for/' lib/gate.sh; }
+b_ord() { sedi 's/pin current for/pin still current for/' lib/gate.sh; }
 scenario ord "reword the current-pin message"
 
 # Small edits on alternating lines of one block: no unchanged line between them,
@@ -202,11 +206,11 @@ b_small() { printf 'greet() {\n  echo "hello there $1"\n}\n' > lib/small.sh; }
 scenario small "greet with printf"
 
 m_gone() { git rm -q lib/gone.sh; }
-b_gone() { sed -i 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
+b_gone() { sedi 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
 scenario gone "retire the old dispatcher"
 
 m_ren() { git mv lib/gone.sh lib/dispatch.sh; }
-b_ren() { sed -i 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
+b_ren() { sedi 's/could not pour $lane/could not pour the $lane review/' lib/gone.sh; }
 scenario ren "rename the dispatcher"
 
 m_gen() { rewrite_pin_body generated/out.sh; }
@@ -241,8 +245,12 @@ m_init() { printf 'package board\n\nfunc init() { severity(1) }\n' > pkg/board/a
 b_init() { printf 'package board\n\nfunc init() { severity(2) }\n' > pkg/board/b.go; }
 scenario init "register at init"
 
-m_shdup() { sed -i 's/^prelude() { echo start; }$/prelude() { echo start; }\nusage() { echo "usage: gate"; }/' lib/gate.sh; }
-b_shdup() { sed -i 's/^postlude() { echo done; }$/usage() { echo "usage: gate <anchor>"; }\npostlude() { echo done; }/' lib/gate.sh; }
+# A newline in a replacement is a backslash before a real line break: BSD sed
+# reads `\n` there as a plain n.
+m_shdup() { sedi 's/^prelude() { echo start; }$/prelude() { echo start; }\
+usage() { echo "usage: gate"; }/' lib/gate.sh; }
+b_shdup() { sedi 's/^postlude() { echo done; }$/usage() { echo "usage: gate <anchor>"; }\
+postlude() { echo done; }/' lib/gate.sh; }
 scenario shdup "add usage to the gate helpers"
 
 # A root commit sharing no history with BASE.
