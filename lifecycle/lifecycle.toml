@@ -645,7 +645,9 @@ keys = [
 #   one the sitting reached the ruling in. A child rework-child.sh files carries
 #   source_review_bead or source_ruling_bead, never both, and the writer dedups
 #   a second child against that key. gate-ensure's quiescence probe counts a
-#   live child by either key. Not cleared.
+#   live child by either key. The finding lanes' fix-unit readers (finding.sh,
+#   liveness-sweep.sh) take no child carrying source_ruling_bead: it answers the
+#   ruling, not a finding. Not cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a

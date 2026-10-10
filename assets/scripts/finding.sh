@@ -183,9 +183,12 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
 _anchor_reworks() { # <anchor-id> <finding-lane>
   local rows
   rows=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 2
+  # A ruling's rework child carries no source_review_bead either, but it answers
+  # the ruling its source_ruling_bead names, not a finding, so no lane takes it.
   printf '%s' "$rows" | jq -r --arg lane "${2:-}" '
     .[]
     | select(((.metadata.task_kind // "") | tostring) == "rework")
+    | select(((.metadata.source_ruling_bead // "") | tostring) == "")
     | select(
         if $lane == "human"
         then ((.metadata.source_review_bead // "") | tostring) == ""
