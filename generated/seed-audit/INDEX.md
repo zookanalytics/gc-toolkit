@@ -7,7 +7,7 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 17 · formulas: 26
+- agents: 17 · formulas: 27
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -33,15 +33,15 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 35,039 | 8,759 |
-| [`converse-fable`](agents/converse-fable.md) | 35,039 | 8,759 |
-| [`converse-opus`](agents/converse-opus.md) | 35,039 | 8,759 |
+| [`converse-codex`](agents/converse-codex.md) | 36,469 | 9,117 |
+| [`converse-fable`](agents/converse-fable.md) | 36,469 | 9,117 |
+| [`converse-opus`](agents/converse-opus.md) | 36,469 | 9,117 |
 | [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
 | [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 29,477 | 7,369 |
+| [`mechanik`](agents/mechanik.md) | 32,300 | 8,075 |
 | [`polecat`](agents/polecat.md) | 27,726 | 6,931 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,756 | 6,939 |
 | [`proactive`](agents/proactive.md) | 12,437 | 3,109 |
@@ -59,6 +59,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,386 | 846 |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
