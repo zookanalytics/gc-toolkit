@@ -25,7 +25,9 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
-mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/pack"
+mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/pack/orders" "$TMP/empty-city"
+# The interval the owed window takes from the pack, as orders/deferred-dispatch.toml declares it.
+printf '[order]\ntrigger = "cooldown"\ninterval = "5m"\nscope = "rig"\n' > "$TMP/pack/orders/deferred-dispatch.toml"
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"}]}
 EOF
@@ -34,6 +36,9 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  # The order registry, for the cadence window. With no ORDERS_JSON it answers
+  # nothing, the shape of a registry that did not read.
+  "order list") [ -n "${ORDERS_JSON:-}" ] && cat "$ORDERS_JSON"; exit 0 ;;
   "bd "*)     shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -132,8 +137,10 @@ BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 
+# GC_CITY_PATH is pinned to a fixture city, so the dispatch budget the window is
+# derived from never comes from the AMBIENT city.toml.
 run_check() {
-    RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
+    RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GC_CITY_PATH="${CITY_DIR:-$TMP/empty-city}" bash "$CHECK" 2>&1
 }
 clear_stores() { rm -f "$TMP/stores/"*.json; }
 
@@ -388,6 +395,46 @@ has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 DEPN=$( [ -f "$DEPLOG" ] && wc -l < "$DEPLOG" | tr -d ' ' || echo 0 )
 eq "$DEPN" "1" "the store's dependency edges are read in ONE batch, not one call per bead"
+clear_stores
+
+# --- the owed window is the deferred-dispatch order's cadence window ----------
+# check-cadence-live (I10) and this check read one definition
+# (assets/scripts/order-cadence.sh): max(3×interval, one trip of the order
+# dispatch rotation). 70 clock-driven registrations at the default budget of 4
+# make a trip of ceil(70/4) = 18 passes, 2160s at 120s a pass, and the pack
+# declares deferred-dispatch at 5m, so the window is 2160s.
+ago() { jq -rn --argjson t "$(( $(date +%s) - $1 ))" '$t | todate'; }
+{
+    printf '{"orders":[{"name":"deferred-dispatch","rig":"alpha","trigger":"cooldown","interval":"5m"}'
+    for i in $(seq 1 69); do printf ',{"name":"other-%s","rig":"","trigger":"cooldown","interval":"5m"}' "$i"; done
+    printf ',{"name":"gated","rig":"alpha","trigger":"condition"}]}\n'
+} > "$TMP/orders-busy.json"
+armed_store alpha "$(aarmed w-1)"
+edges_store alpha "$(e_blk w-1 c-1)"
+blockers_store alpha "$(b_closed c-1 "$(ago 1200)")"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" run_check); RC=$?
+eq "$RC" "0" "an arm ready for 1200s is inside a 2160s window (the 900s one called it owed)"
+hasnt "$OUT" "alpha bead w-1" "…so it is not reported"
+blockers_store alpha "$(b_closed c-1 "$(ago 2500)")"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" run_check); RC=$?
+eq "$RC" "1" "an arm ready for 2500s, past the window, is owed"
+has "$OUT" "(> 2160s)" "…and the finding states the window"
+# No registry: the window falls back to the 30m minimum, and says so.
+blockers_store alpha "$(b_closed c-1 "$(ago 1500)")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "with no registry, an arm ready for 1500s is inside the 1800s minimum window"
+has "$OUT" "did not read, so the owed window uses the 1800s minimum floor" "…and the fallback is noted"
+blockers_store alpha "$(b_closed c-1 "$(ago 2000)")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "with no registry, an arm ready for 2000s is owed"
+has "$OUT" "(> 1800s)" "…against the minimum window"
+clear_stores
+
+if grep -qE '^[[:space:]]*OWED_WINDOW_SECONDS=[0-9]' "$CHECK"; then
+    bad "the check carries no owed-window constant of its own"
+else ok "the check carries no owed-window constant of its own"; fi
+grep -qF 'assets/scripts/order-cadence.sh' "$CHECK" && ok "the check sources assets/scripts/order-cadence.sh" \
+    || bad "the check sources assets/scripts/order-cadence.sh"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
