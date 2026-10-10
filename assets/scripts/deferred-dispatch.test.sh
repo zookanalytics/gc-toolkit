@@ -273,7 +273,7 @@ if [ "${1:-}" = "sling" ]; then
         : > "$STUB_SLING_HOLD.taken"
         : > "$STUB_SLING_HOLD.started"
         i=0
-        while [ ! -e "$STUB_SLING_HOLD.release" ] && [ "$i" -lt 2400 ]; do sleep 0.05; i=$((i + 1)); done
+        while [ ! -e "$STUB_SLING_HOLD.release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
     fi
     exit "${STUB_SLING_RC:-0}"
 fi
@@ -922,7 +922,7 @@ mkdir -p "$TMP/state/rig-a"
   flock -n 9 || exit 1
   : > "$TMP/rig-a-held"
   i=0
-  while [ ! -e "$TMP/rig-a-release" ] && [ "$i" -lt 2400 ]; do sleep 0.05; i=$((i + 1)); done ) &
+  while [ ! -e "$TMP/rig-a-release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ) &
 holder=$!
 if await "$TMP/rig-a-held"; then
     printf '%s %s\n' "$holder" "$(date -u +%s)" > "$TMP/state/rig-a/pass.holder"
