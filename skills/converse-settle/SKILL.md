@@ -45,20 +45,47 @@ and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
-subject is parked for a person.
+subject is parked for a person. It exits non-zero when it stopped before
+writing the trace, and then you must NOT sign off:
 ```bash
-VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
-  --visit "$VISIT" --subject "$SUBJECT" \
-  --outcome "<outcome> — <what this sitting settled or needs next, ≤140 chars>" \
-  --ruled no --still-owed "<what is still owed, ≤140 chars>"
-  # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
-  # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
+if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
+     --visit "$VISIT" --subject "$SUBJECT" \
+     --outcome "<outcome> — <what this sitting settled or needs next, ≤140 chars>" \
+     --ruled no --still-owed "<what is still owed, ≤140 chars>"
+     # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
+     # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
+     # --rework | --no-rework   (with --ruled yes; required on an open-PR subject)
+then
+  : # the trace ran — fix any write it reports failed, then post the sign-off below
+else
+  # NOT signed off, and no trace was written. Do NOT post the sign-off or close
+  # the visit. Repair what it printed and re-run, or raise it in the thread.
+  exit 1
+fi
 ```
 **Set `--ruled` from what this sitting actually settled.** The gate
 starts shut, so `--ruled no` re-states the wait rather than dropping it;
 `--ruled yes` resolves it and releases a `held` subject. A demand a named
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
+
+**On a `--ruled yes` sign-off whose subject is an open PR
+(`merge_result=pull_request`), answer whether the ruling changes what the
+branch must contain.** Pass `--rework` when it does: the PR still reads
+review-ready against a head that predates the ruling. It files the rework
+demand a review verdict would file, a fix unit that blocks the subject
+anchor and resumes its branch, sourced by this visit. Pass `--no-rework`
+when the branch stands as it is. Given neither on an open-PR subject, the
+sign-off refuses and writes nothing, because a ruling whose rework is
+never filed lands only in notes nothing reads while the stale PR keeps
+reading ready. The rework files before the sign-off writes
+anything else. A rework that does not file stops the sign-off there, and
+the script exits non-zero. No trace is written and every demand this
+sitting filed still stands, so a merge hold you took still holds the PR.
+Re-run once the cause is repaired, and the re-run adopts a child an
+earlier attempt filed. `--rework` applies only to an open-PR subject. On
+any other subject, file the ruling's consequence as work the way the
+routing rule below says, and re-run without `--rework`.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

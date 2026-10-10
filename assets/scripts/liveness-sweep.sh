@@ -622,9 +622,12 @@ wedged_fix_escalations() {
             # with none still live is the wedge; a live fix unit (fix in flight) or
             # no fix unit (unanswered objection) is not. --status carries closed
             # because a landed fix unit is closed and a bare query is open-only.
+            # A ruling's rework child answers its ruling, not a finding, so it
+            # counts in no lane's census.
             bd_read "$WEDGE_FU" list --metadata-field anchor_bead="$anchor" --status=open,in_progress,blocked,deferred,hooked,pinned,closed --limit=0 --json || continue
             census=$(jq -r --arg lane "$lane" '
               [ .[] | select((.metadata.task_kind // "") == "rework")
+                    | select((.metadata.source_ruling_bead // "") == "")
                     | select(if $lane == "human" then (.metadata.source_review_bead // "") == "" else (.metadata.source_review_bead // "") != "" end) ] as $fus
               | ([ $fus[] | select(((.status // "open") | ascii_downcase) != "closed") ] | length) as $l
               | ([ $fus[] | select(((.status // "open") | ascii_downcase) == "closed") ] | length) as $c
