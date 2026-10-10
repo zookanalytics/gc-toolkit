@@ -2004,33 +2004,36 @@ has "$out" "already covers this batch; re-checking its route" "the next pass fin
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
 eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
-echo "# …an unstamped comment-rework orphan is ADOPTED, never twinned"
+echo "# …a child whose anchor_bead does not read back is inert, never routed"
 store "[$(anchor W2 46)]"
 printf '%s' "$(prview 46 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_46.json"
 echo '[]' > "$GH_DIR/reviews_46.json"
 printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_46.json"
 out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-has "$out" "did not record anchor_bead=W2; left unrouted" "an unstamped child is inert, never routed"
+has "$out" "did not record anchor_bead=W2; left unrouted" "a child the batch probe cannot see is never routed"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and cannot be claimed"
-out=$(run)
-has "$out" "adopting unstamped comment-rework orphan new-2" "the next pass adopts it by its deterministic title"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL exactly one child"
-eq "$(meta new-2 'gc.routed_to')" "$FIX" "…now routed"
 
-echo "# …but a CLOSED orphan is never adopted: it holds nothing and still moves the mark"
+echo "# …a comment rework is filed whole, so a create whose reply is lost is found next pass, never twinned"
+# The work order and the blocks edge ride the create, so the child that landed
+# behind a lost reply carries the anchor_bead the batch probe matches.
 store "[$(anchor W3 47)]"
 printf '%s' "$(prview 47 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_47.json"
 echo '[]' > "$GH_DIR/reviews_47.json"
 printf '[{"id":9200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_47.json"
-out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-has "$out" "did not record anchor_bead=W3; left unrouted" "the dropped stamp leaves an orphan again"
-ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
+: > "$STUB_GC_LOG"
+out=$(STUB_CREATE_GARBAGE=1 run)
+has "$out" "could not file the comment rework for PR#47; retry next pass" "a lost create reply is reported, and nothing is routed"
+CW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "W3") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CW" "<none>" "…yet the child landed with its work order"
+eq "$(meta "$CW" prepare_mode)|$(meta "$CW" merge_strategy)|$(meta "$CW" pr_number)" "merge|mr|47" "…all of it, on the create"
+grep -qxF "$CW|blocks|W3" "$STUB_DEPS" && ok "…and holds the merge through the edge it was born with" || bad "the lost-reply child carries no blocks edge"
+hasnt "$(grep "^bd update $CW" "$STUB_GC_LOG")" "--set-metadata task_kind" "…with no second write stamping it"
+eq "$(meta W3 pr_comment_disposition)" "<absent>" "…and the batch is not watermarked past it"
 out=$(run)
-hasnt "$out" "adopting unstamped comment-rework orphan" "a closed orphan is passed over"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
-eq "$(meta new-3 'gc.routed_to')" "$FIX" "…and that one is routed"
-eq "$(meta W3 pr_comment_disposition)" "rework:new-3" "the disposition names the live child"
-grep -qxF "new-3|blocks|W3" "$STUB_DEPS" && ok "…and it is what holds the merge" || bad "blocks edge missing"
+has "$out" "comment rework $CW already covers this batch; re-checking its route" "the next pass finds the child that landed"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "W3")] | length' "$STUB_STORE")" "1" "STILL exactly one child"
+eq "$(meta "$CW" 'gc.routed_to')" "$FIX" "…now routed"
+eq "$(meta W3 pr_comment_disposition)" "rework:$CW" "…and the disposition names it"
 
 echo "# …a child whose ROUTE stamp drops is never watermarked past"
 # The blocks edge holds the merge either way, so the failure is not a silent
@@ -2346,9 +2349,10 @@ eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic corr
 grep -qxF "$VPM|blocks|Vm" "$STUB_DEPS" && ok "…and it blocks the multi-lane anchor, both lanes green or not" || bad "validation-pass blocks edge missing"
 
 echo "# a validation-pass blocks edge that will not attach warns, holds the batch, and does not watermark"
-# The pass and its blocks edge are separate writes; an edge that cannot be
-# attached and read back is a pass that holds nothing, so the batch is not
-# watermarked and retries. The rework child is already filed, so the retry is free.
+# The pass carries its blocks edge on its create. An edge that did not land with
+# it and cannot be attached and read back is a pass that holds nothing, so the
+# batch is not watermarked and retries. The rework child is already filed, so
+# the retry is free.
 store "[$(anchor Vb 76)]"
 printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
 echo '[]' > "$GH_DIR/reviews_76.json"
@@ -2390,19 +2394,21 @@ eq "$(meta "$HP" check_name)" "human" "…named human, the lane the validator ru
 eq "$(meta "$HP" reviewed_oid)" "sha-77" "…pinned to the head the batch was produced at"
 grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the correctness pass" || bad "human-lane validation-pass blocks edge missing"
 
-echo "# an unstamped validation-pass orphan from a dropped stamp is adopted, not twinned"
-# A prior pass created the bead but its stamp dropped, so it carries no
-# check_name and the human-lane probe cannot see it; the title probe adopts it
-# rather than mint a twin.
-ORPH='{"id":"orph-72","status":"open","assignee":"","title":"Validate PR#72 feedback (through review 0, comment 8720)","notes":"","metadata":{}}'
-store "[$(anchor Vo 72),$ORPH]"
+echo "# the human-lane pass is filed whole: its shape and its blocks edge ride the create"
+# A create whose reply is lost has then still landed where the human-lane probe
+# finds it, so the next pass reuses it rather than minting a twin.
+store "[$(anchor Vo 72)]"
 printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
 echo '[]' > "$GH_DIR/reviews_72.json"
 printf '[{"id":8720,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_72.json"
+: > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "adopting unstamped validation-pass orphan orph-72" "the orphan is adopted"
-eq "$(vpass_id Vo)" "orph-72" "…and stamped into the pass, no twin minted"
-eq "$(meta orph-72 anchor_bead)" "Vo" "…now carrying the anchor open_validation_pass reads"
+VO=$(vpass_id Vo)
+hasnt "$VO" "<none>" "the batch opens a human-lane pass"
+VOC=$(grep '^bd create Validate PR#72' "$STUB_GC_LOG")
+has "$VOC" '"task_kind":"validation","anchor_bead":"Vo","check_name":"human"' "…whose shape rides its create"
+has "$VOC" "--deps blocks:Vo" "…and so does the blocks edge onto the anchor"
+hasnt "$(grep "^bd update $VO" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a held anchor: the batch opens a pass but does NOT lift the operator's hold"
 # An operator's own hold is theirs to lift, so this arm never touches it; it
@@ -2449,16 +2455,16 @@ eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "true" "…and the operator's hold stands"
 eq "$(meta R7 'gc.routed_to')" "human" "…with the hold it belongs to"
 
-echo "# a validation-pass stamp that drops warns, holds the batch, and does not twin"
-# The pass and its anchor_bead stamp are separate writes; a stamp that does not
-# record fails closed — the batch is not watermarked, so it retries and the next
-# pass adopts the unstamped bead by title rather than minting a twin. The rework
-# child is already filed and routed, so the retry costs nothing.
+echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
+# The shape rides the create and is read back. A pass that landed without its
+# anchor_bead, and whose repair write is refused, fails closed: the batch is not
+# watermarked, so it retries. The rework child is already filed and routed, so
+# the retry costs nothing.
 store "[$(anchor Vf 74)]"
 printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
 echo '[]' > "$GH_DIR/reviews_74.json"
 printf '[{"id":8740,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_74.json"
-out=$(STUB_UPDATE_FAIL="new-3" run)
+out=$(STUB_DROP_KEYS="new-3:anchor_bead" STUB_UPDATE_FAIL="new-3" run)
 has "$out" "did not record the batch shape" "the dropped stamp is reported, not swallowed"
 eq "$(vpass_id Vf)" "<none>" "…and no stamped validation pass stands on the anchor"
 eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass opens, so it retries"
@@ -2537,24 +2543,6 @@ out=$(STUB_DROP_KEYS="new-3:task_kind" run)
 has "$out" "did not record the batch shape" "the dropped task_kind is reported, not swallowed"
 has "$out" "task_kind=<absent>" "…naming the field that did not land"
 eq "$(meta Vg pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
-
-echo "# a same-anchor half-stamped pass (its task_kind dropped) is reclaimed and repaired, not twinned"
-# A prior pass created THIS anchor's human pass and had the task_kind half of its
-# shaping write drop, so the bead carries anchor_bead and check_name=human but no
-# task_kind. The human-lane probe (task_kind==validation) cannot see it and the
-# orphan-by-title probe (anchor_bead=="") skips it, so a naive arm would mint a
-# twin that double-blocks the anchor. The reclaim finds it by title on this anchor
-# and the shape gate restores its task_kind.
-HALF_VP='{"id":"half-85","status":"open","assignee":"","title":"Validate PR#85 feedback (through review 0, comment 8850)","notes":"","metadata":{"anchor_bead":"Vz","check_name":"human","reviewed_oid":"sha-85"}}'
-store "[$(anchor Vz 85),$HALF_VP]"
-printf '%s' "$(prview 85 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_85.json"
-echo '[]' > "$GH_DIR/reviews_85.json"
-printf '[{"id":8850,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_85.json"
-out=$(run)
-has "$out" "reclaiming half-stamped validation pass half-85" "the half-stamped pass is reclaimed by title on its anchor"
-eq "$(vpass_id Vz)" "half-85" "…and repaired into the human-lane pass — no twin minted"
-eq "$(meta half-85 task_kind)" "validation" "…its dropped task_kind is restored"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "validation")] | length' "$STUB_STORE")" "0" "no second validation pass is minted"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"

@@ -125,6 +125,9 @@ eq "$(gc bd dep list tk-sub --direction=up -t blocks --json | jq -r '[.[].id] | 
 gc bd create "two" -t task --deps "blocks:tk-anc,discovered-from:tk-sub" --json >/dev/null
 eq "$(gc bd dep list new-8 --direction=down -t discovered-from --json | jq -r '[.[].id] | join(",")')|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" \
   "tk-sub|new-3,new-8" "create --deps takes a comma list, each entry its own edge"
+STUB_DEP_FAIL="new-9" gc bd create "edgeless" -t task --deps "blocks:tk-anc" --json >/dev/null
+eq "$(bstatus new-9)|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" "open|new-3,new-8" \
+  "STUB_DEP_FAIL naming the minted id lands the bead without its --deps edges"
 
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an

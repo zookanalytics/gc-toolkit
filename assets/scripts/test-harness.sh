@@ -419,6 +419,8 @@ case "$verb" in
     # id, depends-on:<id> and blocked-by:<id> make the new bead depend on <id>
     # (a blocks edge from <id>), blocks:<id> makes <id> depend on the new bead,
     # and any other <type>:<id> makes the new bead depend on <id> with that type.
+    # STUB_DEP_FAIL naming the minted id lands the bead without its edges, as it
+    # refuses a `dep` write from that id.
     title="${1:-}"; shift || true
     body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
     while [ $# -gt 0 ]; do
@@ -453,6 +455,7 @@ case "$verb" in
            else $m end) as $meta
       | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
       "$S" > "$tmp" && mv "$tmp" "$S"
+    case " ${STUB_DEP_FAIL:-} " in *" $nid "*) cdeps="" ;; esac
     old_ifs="$IFS"; IFS=','
     for spec in $cdeps; do
       [ -n "$spec" ] || continue
