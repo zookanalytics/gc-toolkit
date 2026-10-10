@@ -5,7 +5,9 @@
 # arm, the folded rig-scoped-order arm, the reachability arm (stranded /
 # legitimate wait / parent shape / dependency shape / excluded type), and
 # every fail-closed probe — including that a failing probe surfaces its
-# stderr, not just its rc.
+# stderr, not just its rc. Also the cost shape the doctor budget rests on: slim
+# listings, batched re-reads, stores and their listings read at once, a report
+# merged in rig order, and a scan that cannot report counted as NOT checked.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -50,27 +52,64 @@ cat > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
+# Each call is logged when a case asks, so it can assert what the check read.
+[ -n "${CALL_LOG:-}" ] && printf '%s\n' "$*" >> "$CALL_LOG"
 sub="$1"; db=""; prev=""
 for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")
 bd_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 [ "$name" = "${BD_FAIL_STORE:-}" ] && bd_die
+# BD_SLOW names the stores whose listings (list, ready, blocked) each take
+# BD_SLOW_SECS, "all" for every store. BD_BLANK names <store>:<subcommand>
+# reads that answer whitespace at rc 0.
+case "$sub" in list|ready|blocked)
+    case " ${BD_SLOW:-} " in *" $name "*|*" all "*) sleep "${BD_SLOW_SECS:-3}" ;; esac
+    [ "$name:$sub" = "${BD_BLANK:-}" ] && { printf '  '; exit 0; } ;;
+esac
 case "$sub" in
-  list)    f="$STORES/$name.json" ;;
+  # BD_REAP_SCAN_AT names a store whose listing removes the check's scan
+  # scratch from under it, as a scratch reaper would.
+  list)    [ "$name" = "${BD_REAP_SCAN_AT:-}" ] && rm -rf "${TMPDIR:?}"/gctk-check-routed-work-claimable-scan.*
+           f="$STORES/$name.json" ;;
   # A healthy store offers every open bead, so `ready` serves the `list`
   # fixture unless a case overrides it, and `blocked` is empty unless one does.
+  # `ready` applies the --unassigned and --has-metadata-key filters as bd does,
+  # so a read that asks for the wrong rows loses candidates it should offer.
   ready)   [ "$name" = "${BD_FAIL_READY:-}" ] && bd_die
-           f="$STORES/$name.ready.json"; [ -f "$f" ] || f="$STORES/$name.json" ;;
-  blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && bd_die
-           f="$STORES/$name.blocked.json" ;;
-  # `show <id>` re-reads one bead at report time. Its fixture defaults to the
-  # `list` snapshot, so a case only sets `<store>.show.json` when the two must
-  # differ (a just-closed bead, a closed molecule root the open list omits).
-  show)    [ "$name" = "${BD_FAIL_SHOW:-}" ] && bd_die
-           f="$STORES/$name.show.json"; [ -f "$f" ] || f="$STORES/$name.json"
-           if [ -f "$f" ]; then jq -c --arg id "$2" '[.[] | select((.id // "") == $id)]' "$f" 2>/dev/null || printf '[]'
+           f="$STORES/$name.ready.json"; [ -f "$f" ] || f="$STORES/$name.json"
+           un=0; key=""; prev=""
+           for a in "$@"; do
+               [ "$a" = "--unassigned" ] && un=1
+               [ "$prev" = "--has-metadata-key" ] && key="$a"
+               prev="$a"
+           done
+           if [ -f "$f" ]; then
+               jq -c --argjson un "$un" --arg key "$key" '[.[]
+                   | select($un == 0 or ((.assignee // "") == ""))
+                   | select($key == "" or ((.metadata // {})[$key] != null))]' "$f"
            else printf '[]'; fi
            exit 0 ;;
+  blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && bd_die
+           f="$STORES/$name.blocked.json" ;;
+  # `show <id>...` re-reads beads at report time, many per call. Like bd, it
+  # answers with the rows it found at rc 0, and with an error object at rc 1
+  # when none resolved. Its fixture defaults to the `list` snapshot, so a case
+  # only sets `<store>.show.json` when the two must differ (a just-closed bead,
+  # a closed molecule root the open list omits).
+  show)    [ "$name" = "${BD_FAIL_SHOW:-}" ] && bd_die
+           f="$STORES/$name.show.json"; [ -f "$f" ] || f="$STORES/$name.json"
+           ids=(); skip=0
+           for a in "${@:2}"; do
+               if [ "$skip" = 1 ]; then skip=0; continue; fi
+               case "$a" in --db) skip=1 ;; -*) ;; *) ids+=("$a") ;; esac
+           done
+           rows='[]'
+           [ -f "$f" ] && rows=$(jq -c --args '[.[] | select((.id // "") as $i | any($ARGS.positional[]; . == $i))]' "${ids[@]}" < "$f")
+           if [ "$(printf '%s' "$rows" | jq 'length')" = 0 ]; then
+               printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
+               exit 1
+           fi
+           printf '%s' "$rows"; exit 0 ;;
   *) printf '[]'; exit 0 ;;
 esac
 if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
@@ -350,15 +389,30 @@ hasnt "$OUT" "orphaned step" "an unreadable root is not flagged as an orphan str
 clear_stores
 
 # --- 11c4. a step whose molecule root does NOT resolve warns, not a strand -----
-# The root read succeeds (rc=0) but names no such bead, so it yields no status.
-# The molecule cannot be proven dead (an unresolvable or cross-store root reads
-# the same way), so this warns rather than manufacturing an orphan-strand error.
-store alpha "$(routed_step sm-6 alpha/pack.polecat mol-v.advance sm-gone sm-blk6 alpha)"
+# The roots of one store are read in one batch. Here the batch resolves the live
+# root sm-root7 and not sm-gone, so it succeeds (rc=0) and gives sm-gone no
+# status. The molecule cannot be proven dead (an unresolvable or cross-store
+# root reads the same way), so this warns rather than manufacturing an
+# orphan-strand error, and the step whose root did resolve is judged as usual.
+store alpha "$(routed_step sm-6 alpha/pack.polecat mol-v.advance sm-gone sm-blk6 alpha)" \
+            "$(routed_step sm-7 alpha/pack.polecat mol-u.advance sm-root7 sm-blk7 alpha)" "$(open_bead sm-root7)"
 ready_store alpha; blocked_store alpha
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a graph.v2 step whose molecule root does not resolve warns, never passes"
-has "$OUT" "liveness is undetermined" "the warning names the unresolvable root"
+has "$OUT" "sm-6: gc.routed_to=\"alpha/pack.polecat\" is the graph.v2 step mol-v.advance of molecule sm-gone, whose molecule liveness is undetermined" "the warning names the unresolvable root"
 hasnt "$OUT" "orphaned step" "an unresolvable root is not flagged as an orphan strand"
+has "$OUT" "sm-7: gc.routed_to=\"alpha/pack.polecat\" is the graph.v2 step mol-u.advance of molecule sm-root7, which is open" "a root the same batch resolved still exempts its step"
+clear_stores
+
+# --- 11c5. a root batch that resolves nothing warns for every step it served ---
+# `bd show` exits 1 when none of its ids resolves, so the root read failed and
+# each step it served warns that its root could not be read.
+store alpha "$(routed_step sm-8 alpha/pack.polecat mol-t.advance sm-gone8 sm-blk8 alpha)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a step whose root batch resolved nothing warns, never passes"
+has "$OUT" "molecule sm-gone8, whose liveness could not be read (\`gc bd show sm-gone8\` rc=1)" "the warning names the failed root read"
+hasnt "$OUT" "orphaned step" "a failed root read is not flagged as an orphan strand"
 clear_stores
 
 # --- 11d. a candidate that closed since the listing is dropped, not flagged ---
@@ -383,6 +437,12 @@ OUT=$(BD_FAIL_BLOCKED=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable \`bd blocked\` warns"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "with both listings readable the same bead passes — the warning was the probe, not the bead"
+clear_stores
+# A store with no routed, unassigned bead has nothing for the queues to answer,
+# so their failure there hides nothing.
+store alpha "$(assigned n-10 alpha/pack.refinery)"
+OUT=$(BD_FAIL_READY=alpha run_check); RC=$?
+eq "$RC" "0" "an unreadable \`bd ready\` in a store with no routed work hides nothing and passes"
 clear_stores
 
 # --- 13. the cross-store arm: a live address that reads another store ---------
@@ -431,6 +491,84 @@ store alpha "$(routed x-4 alpha/pack.polecat)"
 ready_store alpha "$(routed x-4 alpha/pack.polecat)"; blocked_store alpha
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "with an unscoped roster the cross-store arm makes no finding"
+clear_stores
+
+# --- 14. the reads ask only for what the arms judge ---------------------------
+# Every probe costs a gc start-up, and a listing held whole costs time per byte,
+# so the reads are slim and the re-reads batched. Three live steps whose roots
+# live in two stores cost one candidate re-read and one root read per store,
+# where a read per candidate and per root would cost six.
+store alpha "$(routed_step sb-1 alpha/pack.polecat mol-b.a sb-root sb-blk alpha)" \
+            "$(routed_step sb-2 alpha/pack.polecat mol-b.b sb-root sb-blk alpha)" \
+            "$(routed_step sb-3 alpha/pack.polecat mol-c.a sb-root3 sb-blk3 beta)" "$(open_bead sb-root)"
+store beta "$(inprogress_bead sb-root3)"
+ready_store alpha; blocked_store alpha
+: > "$TMP/calls.log"
+OUT=$(CALL_LOG="$TMP/calls.log" run_check); RC=$?
+eq "$RC" "0" "three live steps with roots in two stores pass"
+has "$OUT" "sb-3: gc.routed_to=\"alpha/pack.polecat\" is the graph.v2 step mol-c.a of molecule sb-root3, which is in_progress" "a root in another store is read from that store"
+eq "$(grep -c '^list ' "$TMP/calls.log")" "3" "one listing per store"
+eq "$(grep '^list ' "$TMP/calls.log" | grep -vc -- '--brief')" "0" "every listing omits the free text"
+eq "$(grep '^ready ' "$TMP/calls.log" | grep -c -- '--brief')" "3" "every ready read omits the free text"
+eq "$(grep '^ready ' "$TMP/calls.log" | grep -c -- '--unassigned')" "3" "every ready read asks for unassigned rows only"
+eq "$(grep '^ready ' "$TMP/calls.log" | grep -c -- '--has-metadata-key gc.routed_to')" "3" "every ready read asks for routed rows only"
+eq "$(grep -c '^show ' "$TMP/calls.log")" "3" "the re-reads are one batch of candidates and one root batch per store"
+eq "$(grep '^show ' "$TMP/calls.log" | grep -c 'sb-1 sb-2 sb-3 ')" "1" "one call re-reads every candidate"
+clear_stores
+
+# --- 15. the stores, and each store's listings, are read at once --------------
+# Each of the three listings of each of the three stores takes 4s here. Read one
+# after another they would take 36s, and with only the stores overlapping 12s;
+# read at once they take about one listing's time.
+S=$(date +%s)
+OUT=$(BD_SLOW=all BD_SLOW_SECS=4 run_check); RC=$?
+E=$(( $(date +%s) - S ))
+eq "$RC" "0" "three slow stores still pass"
+if [ "$E" -lt 10 ]; then ok "nine 4s listings overlap (took ${E}s)"
+else bad "nine 4s listings overlap (took ${E}s, want under 10s)"; fi
+
+# --- 16. findings come out in rig order, however the scans interleave ---------
+# alpha's listings are slowed so beta's scan finishes first; the report still
+# lists alpha's finding before beta's, as the rig list orders them.
+store alpha "$(routed o-1 pack.polecat)"
+store beta "$(routed o-2 pack.polecat)"
+OUT=$(BD_SLOW=alpha BD_SLOW_SECS=2 run_check); RC=$?
+eq "$RC" "2" "a finding in each of two stores is an ERROR"
+case "$OUT" in
+    *"alpha bead o-1"*"beta bead o-2"*) ok "the slower store's finding still comes first, in rig order" ;;
+    *) bad "the slower store's finding still comes first, in rig order (got: $OUT)" ;;
+esac
+clear_stores
+
+# --- 17. a scan that cannot report is a store NOT checked, never a pass -------
+# The scans report through a scratch directory. Removed mid-run, as a scratch
+# reaper would remove it, no store's report survives, and every store is named
+# as not checked.
+mkdir -p "$TMP/scratch"
+store alpha "$(routed r-1 alpha/pack.polecat)"
+OUT=$(TMPDIR="$TMP/scratch" BD_REAP_SCAN_AT=alpha run_check); RC=$?
+eq "$RC" "1" "a run whose scans lost their scratch warns instead of passing"
+has "$OUT" "alpha: the scan of $TMP/alpha/.beads ended without reporting — this store was NOT checked" "the store whose report was lost is named"
+hasnt "$OUT" "OK:" "it never reads as a clean pass"
+clear_stores
+
+# --- 18. no scratch directory, no scan ----------------------------------------
+OUT=$(TMPDIR="$TMP/no-such-dir" run_check); RC=$?
+eq "$RC" "1" "with no scratch directory the check warns instead of passing"
+has "$OUT" "could not create a scratch directory" "the warning names the missing scratch"
+
+# --- 19. a listing that is not one JSON array is unreadable, not empty ---------
+# A read that answers whitespace at rc 0 holds no array. Taken as an empty
+# store it would pass the store, and taken as an empty ready queue it would
+# flag every candidate it should have offered.
+store alpha "$(routed w-1 alpha/pack.polecat)"
+OUT=$(BD_BLANK=alpha:list run_check); RC=$?
+eq "$RC" "1" "a whitespace open-bead listing warns instead of passing the store"
+has "$OUT" "alpha: open-bead listing from $TMP/alpha/.beads could not be parsed — this store was NOT checked" "the warning names the unparsable listing"
+OUT=$(BD_BLANK=alpha:ready run_check); RC=$?
+eq "$RC" "1" "a whitespace ready queue warns instead of flagging the candidates"
+has "$OUT" "the \`bd ready\`/\`bd blocked\` listings from $TMP/alpha/.beads could not be parsed" "the warning names the unparsable queue"
+hasnt "$OUT" "no pool offers it" "no candidate is flagged from an unread queue"
 clear_stores
 
 echo
