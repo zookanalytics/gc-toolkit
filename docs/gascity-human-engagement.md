@@ -274,9 +274,10 @@ can have.
 message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
 hq/city-workspace store — that store runs no reaction pool, so a topic filed
 there would park on the board with nobody to engage it, and it is dropped from
-the picker rather than offered. A suspended or not-running rig is still tagged,
-not withheld, since `gc rig suspend` keeps the beads store accessible and a
-report filed there is recorded and triaged on resume. The picker is defaulted to
+the picker rather than offered. A suspended rig is still tagged, not withheld,
+since `gc rig suspend` keeps the beads store accessible and a report filed there
+is recorded and triaged on resume. A rig with no agents running is idle, not
+paused, and is offered untagged. The picker is defaulted to
 the rig of the pane the key was pressed in (its `GC_RIG`, else the
 `<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
 the operator just picks). Enter confirms that default or the operator picks

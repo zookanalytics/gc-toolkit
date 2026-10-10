@@ -95,17 +95,21 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "rig list")
-    # suspended/running are injected per rig ONLY when the driving var is set, so
-    # the default cases see neither field (null → unknown → the guard allows) and
-    # a liveness case sets exactly the flag it is exercising. Mirrors the real
-    # projection, which carries the two flags through {name,path,prefix,...}.
-    jq -n --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
+    # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
+    # controller, injected via $HQ_RUNNING. Each rig's suspended/running are
+    # injected ONLY when the driving var is set, so the default cases see no flag
+    # (null → unknown → no note) and a liveness case sets exactly the flag it is
+    # exercising.
+    jq -n --arg c "$FAKE_RIGS/city" --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
+          --arg hrun "${HQ_RUNNING-}" \
           --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
           --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
-      '{rigs:[({name:"gc-toolkit", path:$t, prefix:"tk"}
+      '{rigs:[({name:"loomington", path:$c, prefix:"lx", hq:true}
+               + (if $hrun  != "" then {running:   ($hrun =="true")} else {} end)),
+              ({name:"gc-toolkit", path:$t, prefix:"tk", hq:false}
                + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
                + (if $trun  != "" then {running:   ($trun =="true")} else {} end)),
-              ({name:"gascity",    path:$g, prefix:"gc"}
+              ({name:"gascity",    path:$g, prefix:"gc", hq:false}
                + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
                + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
   "agent list")
@@ -332,10 +336,11 @@ has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAU
 
 # --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
 # Suspend means paused processing, not a dead store: gc rig suspend leaves the
-# beads database accessible, so a report filed into a suspended (or not-yet-
-# running) rig is recorded now and triaged on resume. The intake mints the
-# subject and notes that it will wait — it never refuses, which would deny a rig
-# paused on purpose and filed into to process later.
+# beads database accessible, so a report filed into a suspended rig, or filed
+# while the city controller is down, is recorded now and triaged once the rig
+# resumes or the controller is back. The intake mints the subject and notes that
+# it will wait — it never refuses, which would deny a rig paused on purpose and
+# filed into to process later.
 export GASCITY_SUSPENDED=true
 run no "a report for a suspended rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) a suspended target rig files normally"
@@ -344,21 +349,32 @@ has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
 has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
 unset GASCITY_SUSPENDED
 
-export GASCITY_RUNNING=false
-run no "a report for a downed rig" --rig gascity
-eq "$RC" "0" "(LIVENESS) a not-running target rig files normally"
-has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the not-running rig"
-has "$ERR" "no agents running" "(LIVENESS) and the note names the downed runtime"
-unset GASCITY_RUNNING
+export HQ_RUNNING=false
+run no "a report while the controller is down" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed while the controller is down files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the target rig"
+has "$ERR" "city controller is down" "(LIVENESS) and the note names the downed controller"
+has "$ERR" "gc status" "(LIVENESS) and points at the city's status"
+unset HQ_RUNNING
+
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches its triage like anywhere else, so
+# the report gets no wait-note.
+export HQ_RUNNING=true GASCITY_RUNNING=false
+run no "a report for an idle rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an idle target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the idle rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for an idle rig"
+unset HQ_RUNNING GASCITY_RUNNING
 
 # Explicit-live files with no note — the control that proves the note fires on
 # the paused case, not every case.
-export GASCITY_SUSPENDED=false GASCITY_RUNNING=true
+export HQ_RUNNING=true GASCITY_SUSPENDED=false GASCITY_RUNNING=true
 run no "a report for a live rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for a live rig"
-unset GASCITY_SUSPENDED GASCITY_RUNNING
+unset HQ_RUNNING GASCITY_SUSPENDED GASCITY_RUNNING
 
 # A gc that reports neither flag leaves them null: unknown, no note. This is the
 # default-stub path every other case runs on, asserted here explicitly so the
