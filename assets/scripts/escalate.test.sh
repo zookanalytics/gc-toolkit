@@ -681,7 +681,7 @@ has "$out" "repointed" "and says so"
 
 echo "# an ephemeral subject is filed on a durable standing subject"
 # The sitting writes its outcome and its takeaway to the subject
-# (agents/converse/prompt.template.md step 7). A wisp is burned at the end of
+# (agents/_converse/prompt.template.md step 7). A wisp is burned at the end of
 # its iteration, so a visit filed on one carries both writes to a bead that is
 # gone before anyone claims it.
 reset
@@ -907,7 +907,7 @@ echo "# a moot or benign verdict suppresses a re-file inside the window"
 # detector whose condition outlives the sitting re-files the identical
 # situation on its next cycle. moot and benign are the two verdicts that mean
 # no human was needed, so only they suppress.
-ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
+ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 closed_visit() {  # id key subject outcome age_seconds [recurrences]
   printf '{"id":"%s","status":"closed","title":"t","description":"d","notes":"","closed_at":"%s","metadata":{"task_kind":"visit","escalation_key":"%s","gc.continuation_group":"%s","gc.outcome":"%s"%s}}' \
     "$1" "$(ago "$5")" "$2" "$3" "$4" "${6:+,\"escalation.recurrences\":\"$6\"}"

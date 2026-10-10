@@ -29,12 +29,14 @@ disposes it: routed to a pool, held on an edge, or escalated to the operator
 as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
 a bead — an emergency that needs a human now.
 
-Every address this formula stamps comes from assets/scripts/resolve-route.sh.
-The agents it files to do not share a scope: the dog is city-scoped and its
-identity carries no rig segment, while the polecat and refinery pools are
-rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
-the other, and either stamp reads back clean, so a hand-written address is
-right only by luck.
+Every address this formula stamps or queries comes from
+assets/scripts/resolve-route.sh. The agents it files to do not share a scope:
+the dog is city-scoped and its identity carries no rig segment, while the
+polecat and refinery pools are rig-scoped and carry `<rig>/`. The qualifier that
+reaches one is invisible to the other, and either stamp reads back clean, so a
+hand-written address is right only by luck. A query by a hand-written address
+fails just as quietly: listing beads by an address no agent holds returns a
+valid empty array, which reads as an empty queue.
 
 Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
 downstream-court-skip, topology-root-skip, liveness-map-guard,
@@ -743,14 +745,10 @@ case "${PREV_COUNT:-}" in
   *)           COUNT=$((PREV_COUNT + 1)) ;;
 esac
 CRASH_LOOP=0
-# The empty case is split off because `date -d ''` does not fail: GNU date
-# resolves it to midnight TODAY, which reads as a recovery minutes ago through
-# the small hours and turns every legacy bead into a loop until 06:00 UTC.
-PREV_EPOCH=""
-case "${PREV_AT:-}" in
-  '') : ;;
-  *)  PREV_EPOCH=$(date -u -d "$PREV_AT" +%s 2>/dev/null || printf '') ;;
-esac
+# jq reads the %Y-%m-%dT%H:%M:%SZ form NOW_AT stamps as UTC in any local zone,
+# and the epoch it gives does not depend on which date(1) the host ships. A
+# value it cannot parse, an empty one included, leaves PREV_EPOCH empty.
+PREV_EPOCH=$(jq -rn --arg t "${PREV_AT:-}" '$t | fromdateiso8601' 2>/dev/null || printf '')
 NOW_EPOCH=$(date -u +%s)
 # `if`, not `[ ... ] && CRASH_LOOP=1`: a false test makes that AND-list the
 # block's last command and its exit status 1, so under `set -e` the caller dies
@@ -800,7 +798,18 @@ sat untouched far past that turnover, which the session is failing to advance.
 Escalate only that.
 ```bash
 # >>> refinery-stuck-escalate
-REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+SCRIPTS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?escalate.sh and resolve-route.sh not found in the pack}"
+# The queue is whatever is assigned to the refinery's live identity, so the
+# address is resolved against the roster rather than assembled: bd lists an
+# address no agent holds as a valid empty array, which reads exactly like a
+# clean queue. The rig-qualified form goes in, as in bug-dispatch, so an
+# unreadable roster (exit 3) echoes back, unverified, a name a rig-scoped
+# refinery can hold. A refusal prints nothing, which leaves REFINERY empty.
+if REFINERY=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"); then ROUTE_RC=0; else ROUTE_RC=$?; fi
 # A bead assigned to the refinery clears on its own: a handoff within a poll
 # interval, a rebase/rework task within the fix pool's work time (observed under
 # ~2h). Past this bound it is not churn; the session is not advancing it.
@@ -814,8 +823,12 @@ NOW=$(date -u +%s)
 # tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse,
 # the same strip recover-orphaned-beads applies to its bd --json read above.
 # The common blinding case is a control byte in an otherwise-valid queue, which
-# the strip rescues.
-if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0 | tr -d '[:cntrl:]'); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+# the strip rescues. An unresolved address is never read.
+QUEUE=""
+QUEUE_RC=0
+if [ -n "$REFINERY" ]; then
+  if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0 | tr -d '[:cntrl:]'); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+fi
 # Keep only the session's own inbound work (merge_result empty; a gating anchor
 # carries one and belongs to the cadence, and is unassigned anyway) that has sat
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
@@ -825,7 +838,14 @@ STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty e
 case "${STUCK_N:-}" in
   ''|*[!0-9]*) STUCK_N="" ;;
 esac
-if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
+if [ -z "$REFINERY" ]; then
+  # No live agent carries the address, so there is no queue to read. A listing
+  # there would come back empty and look healthy, so no stuck handoff would ever
+  # escalate. The monitor is blind, so escalate that under its own key, the way
+  # an unreadable queue is escalated.
+  echo "check-refinery: no live refinery identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery'; read no queue and retracted nothing; escalating the blind monitor" >&2
+  "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unroutable --message "check-refinery cannot resolve the refinery address it builds for rig ${GC_RIG:-<unset>} to a live agent identity, so it read no queue. A listing at an address no agent holds returns an empty array that looks like a clean queue, so the stuck-handoff monitor is blind until the address resolves. Compare the binding_prefix this witness patrol was poured with against the refinery identity in gc agent list." || echo "check-refinery: refinery address unroutable AND escalation failed" >&2
+elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A silent stderr log here was the defect this
   # block fixes — a blinded monitor lets a genuinely stuck handoff go unseen —
@@ -834,20 +854,10 @@ if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # is this patrol run (a wisp id, or the session as a fallback); escalate.sh
   # redirects an ephemeral subject onto the standing triage bucket.
   echo "check-refinery: refinery queue unreadable (rc=$QUEUE_RC; not a JSON array after the control-byte strip); escalating the blind monitor" >&2
-  SCRIPTS=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?escalate.sh not found in the pack}"
   "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unreadable --message "check-refinery cannot read the refinery queue (rc=$QUEUE_RC; the bd --json listing is not a JSON array even after stripping control bytes). The stuck-handoff monitor is blind, so a genuinely stuck refinery handoff would go unseen until this is fixed. Inspect the refinery queue listing and the store's health." || echo "check-refinery: queue unreadable AND escalation failed (rc=$QUEUE_RC)" >&2
 elif [ "$STUCK_N" -eq 0 ]; then
   echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  SCRIPTS=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?escalate.sh not found in the pack}"
   printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
     "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
   done
@@ -871,21 +881,21 @@ fi
 # assigned to a refinery.
 #
 # The candidate pass runs only after a queue read that parsed as an array
-# ($STUCK_N set); a failed queue read leaves every visit as it is until a later
-# cycle reads the queue. Only a visit whose group is exactly the handoff bead id
-# is a candidate; a legacy group carrying extra tokens (a malformed-subject
-# filing) is left for repair.
-if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
+# ($STUCK_N set), at an address the roster verified (resolve-route.sh exit 0).
+# A failed queue read leaves every visit as it is until a later cycle reads the
+# queue, and so does an unreadable roster (exit 3): the address is then the
+# rendered name echoed back unproven, and the role each candidate is compared
+# against comes from it. A wrong retract closes the visit moot, which
+# escalate.sh's verdict window holds against a re-escalation of that handoff for
+# a day by default. Only a visit whose group is exactly the handoff bead id is a
+# candidate; a legacy group carrying extra tokens (a malformed-subject filing) is
+# left for repair.
+if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
   CANDIDATES=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -c --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then [ .[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g ] else [] end' 2>/dev/null) || CANDIDATES=""
   CANDIDATE_IDS=$(printf '%s' "$CANDIDATES" | jq -r 'if type == "array" then join(",") else empty end' 2>/dev/null) || CANDIDATE_IDS=""
   if [ -n "$CANDIDATE_IDS" ]; then
-    SCRIPTS=""
-    for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-    done
-    : "${SCRIPTS:?escalate.sh not found in the pack}"
     # One read for every candidate, closed ones included.
     HANDOFFS=$(gc bd list --id="$CANDIDATE_IDS" --all --json --limit=0 2>/dev/null | tr -d '[:cntrl:]') || HANDOFFS=""
     printf '%s' "$CANDIDATES" | jq -r '.[]' | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
@@ -922,14 +932,16 @@ subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
 escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. The counterpart retract closes the loop. A handoff an open
-visit escalates that the queue listing no longer carries is read by id, and the
-visit is retracted moot through escalate.sh --retract (guarded by
+silently trusted. A refinery address that resolves to no live agent is blind the
+same way and escalates once under a key of its own, without reading a queue.
+The counterpart retract closes the loop. A handoff an open visit escalates that
+a queue read at the refinery's verified address no longer carries is read by
+id, and the visit is retracted moot through escalate.sh --retract (guarded by
 visit-close.sh, which stamps gc.outcome) only when that read shows the handoff
 closed, prepared, or assigned away from the refinery. A listing that omits a
-handoff still sitting with the refinery, as a wrong address does, withdraws
-nothing, and a handoff that cannot be read keeps its visit. Close this step and
-continue to next-iteration."""
+handoff still sitting with the refinery withdraws nothing, and a handoff that
+cannot be read keeps its visit. Close this step and continue to
+next-iteration."""
 
 [[steps]]
 id = "next-iteration"

@@ -134,6 +134,7 @@ has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_
 hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
 hasnt "$posture_line" "--deadline" "the posture arm is never paced: merge needs every posture current"
 hasnt "$posture_line" "--cursor" "…so it takes no cursor either"
+has "$posture_line" "--seen $TMP/state/myrig/pr-posture.seen" "…but keeps what each posture was read from in the rig's pass state dir"
 at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
 posture_at=$(at 'pr-facts.*--posture-only')
 merge_at=$(at 'merge.sh')
@@ -169,6 +170,7 @@ has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_A
   || bad "pre-open-rebase did not run after pr-open (preopen=$preopen_at propen=$propen_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
+has "$grad_line" "--stamp $TMP/state/myrig/convoy-graduate.stamp" "convoy-graduate keeps its interval stamp in the rig's pass state dir"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;

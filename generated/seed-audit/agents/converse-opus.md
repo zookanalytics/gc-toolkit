@@ -124,7 +124,7 @@ The loop, every visit:
 1. **Claim.** `assets/scripts/converse-claim.sh` is your only source of
    work. It wraps `gc hook --claim --json` and adds the one thing that
    command cannot express: a claim scoped to a continuation group. It puts
-   an out-of-group turn back in the pool, completes the close of a sitting
+   an out-of-group turn back unclaimed, completes the close of a sitting
    whose record is already done, and reports which of the four verdicts
    applies. Resolve it once, then let it decide:
 
@@ -155,7 +155,7 @@ The loop, every visit:
    `SUBJECT` its `continuation_group`; both are used by name below.
 
    **A claim outside your current group is not yours to work.** The
-   script puts an out-of-group turn BACK in the pool and tells you to
+   script puts an out-of-group turn BACK, unclaimed, and tells you to
    drain. `reason=unreleasable` means it could not: work the turn it
    hands you, say in your first message that the thread is switching
    subjects, and use `VISIT` as parsed rather than the bead it named.
@@ -241,10 +241,12 @@ The loop, every visit:
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
-   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   moves this visit's merge-hold keys (`pr_number`, `pr_url`, `anchor_bead`) to
+   `$HOLDER` so a PR's merge stays held after this visit closes, stamps
+   `gc.outcome=folded` and its board-visible reason, and closes:
    ```bash
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome folded --reason "folded into $HOLDER"
+     --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
@@ -318,25 +320,24 @@ Rules:
   hands the operator important information — a live decision, a routing
   answer, anything they may want to respond to — posts the hand-back and
   leaves the visit open, and that thread ends on a later turn instead.
-  `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
-  that reading a thread cannot end it.
+  `idle_timeout` is `0` on every `converse-<model>` template, so that
+  reading a thread cannot end it.
   Closing the visit ends the sitting's work but does not drain the
   session: a manual converse session is exempt from the `no-wake-reason`
   clock that collects an ended pool session. The `converse-reap` order
   (`assets/scripts/converse-reap.sh`) closes the settled session on a
-  later pass, once its visit reads closed or gone, and frees the
-  `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
-  closed-visit sitting you are still attached to waits until it is no
-  longer attended. The per-model sittings run `wake_mode = "resume"`
-  (`agents/converse-opus/agent.toml`), so a health restart replays the
-  thread and the sitting continues; the durable demand and the step-1
-  re-claim guard cover the rare respawn that comes up without it. The
-  record never lives only in the thread, and the discipline is unchanged:
-  the sign-off has to land before you close, not after; stamp the takeaway
-  when the hold BEGINS (step 5); and append the outcome as soon as a
-  sitting settles anything (step 6). That is what the board reads and a
-  later reader inherits. Mechanism: `docs/gascity-human-engagement.md` →
-  "How a held sitting ends".
+  later pass, once its visit reads closed or gone; it reaps only an
+  UNATTACHED pane, so a closed-visit sitting you are still attached to
+  waits until it is no longer attended. The per-model sittings run
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a health
+  restart replays the thread and the sitting continues; the durable
+  demand and the step-1 re-claim guard cover the rare respawn that comes
+  up without it. The record never lives only in the thread, and the
+  discipline is unchanged: the sign-off has to land before you close, not after;
+  stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
+  soon as a sitting settles anything (step 6). That is what the board reads
+  and a later reader inherits. Mechanism: `docs/gascity-human-engagement.md`
+  → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
@@ -399,10 +400,38 @@ Rules:
   field of each `formulas/*.toml` in the rig checkout, and name the
   formula you chose when you frame the choice. File the work bead as a
   sibling and wire the wait exactly as step 7 says.
+- **Which route — a bare visit, a plain work bead, or a design-convoy.**
+  Decide with the questions under "Choosing a design-convoy" below. When they
+  point at a design-convoy, recommend `mol-design-convoy`: the
+  `gc.recommended_formula` stamp the operator Accepts and slings like any other
+  subject formula.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+
+## Choosing a design-convoy
+
+A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
+one initiative. A design child lands its doc on the convoy's integration branch,
+implementation builds there, and the whole unit graduates to the default branch
+as one reviewed PR. Choose the route for a follow-up by asking, in order:
+
+1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
+   or decision the operator owns, with nothing to build, has nothing to
+   dispatch.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
+   unit and the design gate catches a wrong shape before it is built. No: a
+   plain work bead on the default one-child convoy, one PR to the default
+   branch.
+
+`design_gated` defaults to `true`, which holds implementation until the operator
+approves the design's PR. `docs/design-convoy.md` describes the gates and when
+all-in-one (`--var design_gated=false`) fits.
+
 
 
 ## Context discipline
@@ -490,10 +519,12 @@ visit, say) keeps that format. Operator-initiated form: the
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns
@@ -515,8 +546,9 @@ visit, say) keeps that format. Operator-initiated form: the
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (converse and its per-model variants). Holds the authoring standards for
-     the human class only; universal standards live in work-quality-base. -->
+     (the converse-opus, converse-fable and converse-codex sittings). Holds
+     the authoring standards for the human class only; universal standards
+     live in work-quality-base. -->
 
 <!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, pr:zookanalytics/signal-loom#533 adopted:2026-10-03 -->
 - When the ask is to simplify, or is about architecture or the big picture,
@@ -569,6 +601,7 @@ gc bd update "$OBS" \
   --set-metadata "obs.directive=<standing or diff>" \
   --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   --set-metadata gc.outcome=recorded \
+  --set-metadata gc.work_outcome=no-op \
   --status=closed
 ```
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Evidence generator for the `survey` step of mol-upstream-gc-rebase, and the
 # audit that prices how often survey misses what the rebase later finds.
 #

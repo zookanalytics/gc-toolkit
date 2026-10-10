@@ -227,6 +227,12 @@ so one correction captured by both self-report and the miner is one voice,
 not two. A blocked pattern is **surfaced, not adopted**: hold it on its
 pattern bead with the block stated and do not file the `prompt-update` bead.
 It promotes later on corroboration or endorsement.
+`obs.source` records who filed an observation, and the capture recipe files
+every agent capture as `self`, so an operator correction captured by the agent
+it corrected reads `self`. Before you treat a cluster as all-self, check each
+self observation's voice: a PR comment or review whose GitHub author is the
+operator (`gh api` on the provenance, `.user.login`), or the operator's own
+words quoted from a sitting or visit, is an operator correction.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans. Self-sourced clusters have been

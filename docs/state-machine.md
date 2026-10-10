@@ -74,14 +74,16 @@ stateDiagram-v2
   abandoned --> [*]: human
   retargeted --> [*]: human
 
-  UN --> held: agents/converse — a sitting holds for an operator decision
+  UN --> held: converse-hold.sh — a sitting holds for an operator decision
   held --> UN: the ruling landed
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
 (branch recorded, assignee = refinery, `merge_result` still absent); the
 anchored states are the `merge_result` values. `merged` is the only state with
-`status = closed`; the human states stay open, routed to human.
+`status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
+`merged_sha`, the landing the state names; the human states stay open, routed
+to human.
 
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
@@ -142,8 +144,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
 | handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
-| unanchored → held | `agents/converse` hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
+| unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
+| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
 the check marker and files one routed rework child that blocks the anchor — the
@@ -255,9 +257,10 @@ review, inline comment, and conversation comment that is not the city's own
 post is feedback, whoever wrote it. The city's own post is one that
 `assets/scripts/pr-post.sh` marked, which is every post the pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
-replies, the visit reminder, a demo delivery, `pr-dispose.sh`'s closing
-comment. A model review the operator runs under the city's GitHub account is
-unmarked, so it is feedback like a person's. Rework hand-backs post nothing.
+replies and its ruled-finding comments, the visit reminder, a demo delivery,
+`pr-dispose.sh`'s closing comment. A model review the operator runs under the
+city's GitHub account is unmarked, so it is feedback like a person's. Rework
+hand-backs post nothing.
 
 A PR's posts from before the city marked anything carry no mark. Each anchor
 records the instant `pr-facts.sh` first read its open PR
@@ -424,7 +427,9 @@ other than this arm, such as a sitting that replies in-thread and resolves the
 thread, stops holding the merge. A comment written after the city's last reply in
 the thread stays outstanding, because a reply does not reopen a resolved thread,
 and a thread resolved with no reply from the city answers nothing. An unmarked
-reply under the city's login after the cutover is feedback, not an answer. A review body
+reply under the city's login after the cutover is feedback, not an answer. The
+write-back's awaiting answer says only that the comments before it wait on a
+person, so it is not an answer either. A review body
 above its watermark is answered once the thread read has answered every inline
 comment the review carries, since the body frames those comments. A review with
 no inline comment has no thread to answer it and stays on the watermark.
@@ -668,8 +673,19 @@ review's result set.
   dies after claim, a rework child filed with its dependency edge reversed —
   stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
   stale-gate pass catches them, not a count on the check.
-- **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one merge-in rework
-  child while none is in flight. A live child on the branch — dispatched or
+- **External rework** (`pr-facts.sh`): a CONFLICTING PR that is approved — a
+  standing APPROVED review from an account other than the city's and no
+  standing CHANGES_REQUESTED, the rule merge.sh lands on
+  (`assets/scripts/review-verdict.sh`) — gets one merge-in rework child while
+  none is in flight. An unapproved one records its posture and gets nothing: a
+  bring-current costs a polecat round and a CI run and goes stale whenever main
+  moves, and a PR nobody approved cannot land however current its branch is.
+  The child's handoff runs `bring-current-guard.sh`: a bring-current git made
+  on its own, or whose conflicts kept both sides' insertions whole, leaves the
+  approval standing, and one that took judgment files a visit on the anchor and
+  dismisses the approval, so materially changed code is re-reviewed rather than
+  landed under the approval given before it.
+  A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
   closed child does not, so a branch still CONFLICTING with nothing in flight is
   re-dispatched, on every head it conflicts at rather than only the PR's first
@@ -690,8 +706,12 @@ review's result set.
   never close work beads. The arm closes it through `bead-rehome.sh --kind
   duplicate` only when the named successor resolves and is closed or shipped
   AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It writes nothing to the
-  successor's branch or PR, and holds on anything it cannot establish.
+  or by carrying no work-product key at all. It also closes an unmarked rework
+  twin, an open rework child that was never dispatched (no dispatch metadata,
+  no convoy tracking it) whose review is closed and whose same-review,
+  same-anchor sibling landed. That twin would otherwise hold its anchor
+  forever. It writes nothing to the successor's branch or PR, and holds on
+  anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -721,7 +741,8 @@ under every kind, because it is the whole of that distinction. The read side
 searches every store before concluding a close was false. Consumers: the
 mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
+cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
+twins), and any patrol judging a closed bead.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is

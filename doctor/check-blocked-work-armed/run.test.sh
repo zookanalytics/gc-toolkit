@@ -2,7 +2,8 @@
 # Hermetic test for doctor/check-blocked-work-armed. Stub gc/bd only; no live
 # city, Dolt, or network. Covers: the finding (blocked plainly-work bead with
 # neither route nor arm, including one carrying only gc.execution_routed_to —
-# provenance, not a dispatch path), every exemption (routed, armed, assigned,
+# provenance, not a dispatch path — and one whose route or arm holds only
+# whitespace), every exemption (routed, armed, assigned,
 # merge anchor, review/step/workflow/demand metadata, every standing kind,
 # decision/epic/infra types), the per-rig labelling, the remedy string, the
 # fail-closed probes (unreadable blocked listing, unreadable rig list), and the
@@ -141,6 +142,17 @@ for t in bug feature chore spike; do
     eq "$(run_check >/dev/null; echo $?)" "1" "a blocked $t with no dispatch path is flagged (work allowlist)"
     clear_stores
 done
+
+# A route or an arm holding only whitespace is no dispatch path
+# (assets/scripts/dispatch-path.sh): a pool matches its route byte for byte, and
+# gc sling refuses the value as a target. The bead strands like one with neither
+# key, so each is a finding.
+blocked_store alpha "$(bmeta a-1 gc.routed_to ' ')" "$(bmeta a-2 gc.dispatch_when_ready ' ')"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked bead whose route or arm holds only whitespace warns (exit 1)"
+has "$OUT" "alpha bead a-1" "…the whitespace route is named as a finding"
+has "$OUT" "alpha bead a-2" "…and so is the whitespace arm"
+clear_stores
 
 # --- 2. exemptions: each must NOT be flagged --------------------------------
 blocked_store alpha "$(brouted a-1)"
