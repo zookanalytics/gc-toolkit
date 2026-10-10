@@ -1928,12 +1928,14 @@ cmd_react() {
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
     # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
-    # guard skipped an already-reacted bead, and 4 (RC_LIVE_WORKFLOW) when its
-    # live-workflow guard skipped a bead a live workflow already drives. Each is
-    # a no-op, not a failure, and NO reaction was dispatched. Re-raise them as
-    # exit 5 and exit 6 so an intake caller (gc-visit-open) files its own visit,
-    # naming the cause, instead of waiting for a reaction that never ran; any
-    # other non-zero is a real failure.
+    # guard skipped an already-reacted bead, 4 (RC_LIVE_WORKFLOW) when its
+    # live-workflow guard skipped a bead a live workflow already drives, and 5
+    # (RC_DISPATCH_PATH) when its dispatch-path guard skipped a bead that is
+    # already routed or armed. Each is a no-op, not a failure, and NO reaction
+    # was dispatched. Re-raise them as exit 5, exit 6 and exit 7 so an intake
+    # caller (gc-visit-open) files its own visit, naming the cause, instead of
+    # waiting for a reaction that never ran; any other non-zero is a real
+    # failure.
     if "$tool" "$@"; then
         :
     else
@@ -1945,6 +1947,10 @@ cmd_react() {
         if [ "$sling_rc" -eq 4 ]; then
             echo "$PROG: react: a live workflow already drives $bead — nothing slung (a first reaction never races work in flight). React once that workflow's root closes, or file the visit directly." >&2
             exit 6
+        fi
+        if [ "$sling_rc" -eq 5 ]; then
+            echo "$PROG: react: $bead is already routed or armed — nothing slung (a first reaction never second-guesses a dispatch already decided). File the visit directly, or react once that route or arm is cleared." >&2
+            exit 7
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4

@@ -368,15 +368,17 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
 
 echo "── a first reaction happens once: a reacted bead is not re-slung ──"
 # The actionable exit releases its subject on a bare gc.routed_to — a legitimate
-# pool claim a worker picks up directly. A SECOND sling of mol-first-reaction
-# retires that route at workflow-start (gascity retireInputConvoyClaimRoutes)
-# and drives nothing in its place, stranding the bead disposed-looking but
-# offered to no pool. So the sling skips a bead that already carries a reaction,
-# keyed on either marker a completed one leaves: gc.first_reaction (stamped by
-# the dispose) or gc.proactive_reaction (stamped by the release). A bead with
-# neither still slings. beads.json feeds the guard the subject state the way
-# agents.json feeds the deliverable probe; it lists only these beads, so every
-# other sling test above (px-1) reads as un-reacted and is unaffected.
+# pool claim a worker picks up directly. A SECOND reaction disposes of nothing.
+# A gc that reads mol-first-reaction's retain_input_routes leaves that route live
+# beside it, so the pool can hand the bead to a worker mid-reaction. A gc that
+# does not retires the route at workflow-start and drives nothing in its place,
+# stranding the bead disposed-looking but offered to no pool. So the sling skips
+# a bead that already carries a reaction, keyed on either marker a completed one
+# leaves: gc.first_reaction (stamped by the dispose) or gc.proactive_reaction
+# (stamped by the release). A bead with neither still slings. beads.json feeds
+# the guard the subject state the way agents.json feeds the deliverable probe; it
+# lists only these beads, so every other sling test above (px-1) reads as
+# un-reacted and is unaffected.
 cat > "$FXDIR/beads.json" <<'JSON'
 {
   "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},

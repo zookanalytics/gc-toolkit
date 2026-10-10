@@ -36,18 +36,20 @@ SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
 # Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
-# the bead already carries a first reaction, "live-workflow" when a live
-# workflow already drives it. cmd_scan's --sling loop reads it in-process to
-# keep a skip from spending the cap; the `sling` CLI verb in main() translates
-# it to RC_ALREADY_REACTED or RC_LIVE_WORKFLOW so a cross-process caller
-# (gc-helm react, gc-visit-open) can tell the no-op from a dispatch, name its
-# cause, and file its own visit rather than wait for a reaction that never ran.
+# the bead already carries a first reaction, "dispatch-path" when it already has
+# a route or an arm, "live-workflow" when a live workflow already drives it.
+# cmd_scan's --sling loop reads it in-process to keep a skip from spending the
+# cap; the `sling` CLI verb in main() translates it to RC_ALREADY_REACTED,
+# RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process caller (gc-helm react,
+# gc-visit-open) can tell the no-op from a dispatch, name its cause, and file its
+# own visit rather than wait for a reaction that never ran.
 SLING_SKIPPED=""
 # Exit codes the `sling` CLI verb uses for those skips — distinct from a
 # dispatch (0) and an error (1), so a caller that needs a NEW reaction can
 # branch on them.
 RC_ALREADY_REACTED=3
 RC_LIVE_WORKFLOW=4
+RC_DISPATCH_PATH=5
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
@@ -114,18 +116,19 @@ rig_beads_db() {
 }
 
 # sling_first_reaction_guard — a first reaction happens once, so refuse to
-# re-start mol-first-reaction on a bead that already carries one. A workflow
-# start retires the subject's pool claim route (gascity's
-# retireInputConvoyClaimRoutes), on the premise the started workflow will drive
-# that bead as work. mol-first-reaction does not: it reacts to the subject and,
-# on an already-reacted one, first-reaction-dispose.sh refuses the second
-# dispose. So a re-sling destroys the route the first disposition set and puts
-# nothing in its place, leaving the bead disposed-looking but offered to no
-# pool. gc.first_reaction is stamped by the dispose before it acts,
-# gc.proactive_reaction by the release; either proves a completed reaction. The
-# subject is read from the fixture under test, live otherwise; an unreadable
-# bead is not proof of a reaction, so it proceeds. Returns non-zero when the
-# bead is already reacted, so the caller skips the sling.
+# re-start mol-first-reaction on a bead that already carries one. On an
+# already-reacted bead first-reaction-dispose.sh refuses the second dispose, so a
+# second reaction disposes of nothing, and what it does to the route the first
+# disposition set depends on the gc that starts it. mol-first-reaction declares
+# retain_input_routes. A gc that reads the key leaves that route live, so its
+# pool can hand the bead to a worker while the second reaction runs. A gc that
+# does not retires the route and puts nothing in its place, leaving the bead
+# disposed-looking but offered to no pool. gc.first_reaction is stamped by the
+# dispose before it acts, gc.proactive_reaction by the release; either proves a
+# completed reaction. The subject is read from the fixture under test, live
+# otherwise; an unreadable bead is not proof of a reaction, so it proceeds.
+# Returns non-zero when the bead is already reacted, so the caller skips the
+# sling.
 sling_first_reaction_guard() {
     local bead="$1" meta fr pr ro detail
     if [ -n "$FIXTURE" ]; then
@@ -150,7 +153,56 @@ sling_first_reaction_guard() {
     pr="$(printf '%s' "$meta" | jq -r '."gc.proactive_reaction" // ""' 2>/dev/null || printf '')"
     [ -n "$fr" ] || [ "$pr" = "1" ] || return 0
     detail="gc.first_reaction=${fr:-<unset>}, gc.proactive_reaction=${pr:-<unset>}"
-    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once; re-slinging retires its route and drives nothing, leaving the bead offered to no pool. Clear the reaction marker to re-react."
+    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once: a second one disposes of nothing, and it either leaves the bead's route live beside it or retires that route and leaves the bead offered to no pool. Clear the reaction marker to re-react."
+    return 1
+}
+
+# sling_dispatch_path_guard — a first reaction never second-guesses a dispatch
+# someone already decided, so refuse to start mol-first-reaction on a bead that
+# has a dispatch path (has_dispatch_path, assets/scripts/dispatch-path.sh): a
+# route or a deferred-dispatch arm. scan_precision_filter keeps such a bead out
+# of every sweep; this guard holds the same line for a bead named directly, the
+# way gc-helm react and gc-visit-open reach the sling. mol-first-reaction
+# declares retain_input_routes, so a gc that reads the key leaves a route live
+# when the reaction starts. The pool that serves the route could then hand the
+# bead to a worker mid-reaction, and the disposition's release would reopen and
+# unassign it under that worker. An arm is no safer: the deferred-dispatch
+# reconcile pass slings it without reading any reaction.
+#
+# Returns 0 when the bead has no dispatch path, 1 when it has one, and 2 when its
+# metadata cannot be read. A failed read is not proof that it has none, so the
+# caller fails closed on 2. bd's not-found error is an answer: a bead that does
+# not exist has no dispatch path, and gc sling names it missing. The read comes
+# from the fixture under test (beads.json), live otherwise.
+sling_dispatch_path_guard() {
+    local bead="$1" shown="" meta paths
+    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its metadata could not be read) — not slinging. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || return 0
+        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
+            || { log "$unreadable"; return 2; }
+    else
+        local db; db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        shown="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null)" || {
+            if printf '%s' "$shown" | jq -e 'type == "object" and ((.error // "") | test("no issues? found"))' >/dev/null 2>&1; then
+                return 0
+            fi
+            log "$unreadable"; return 2
+        }
+        meta="$(printf '%s' "$shown" | scrub \
+            | jq -c 'if type == "array" and length == 1 then (.[0].metadata // {}) else error("unreadable") end' 2>/dev/null)" \
+            || { log "$unreadable"; return 2; }
+    fi
+    # Each key is asked on its own through the shared predicate, so the log can
+    # name the path it found without a second definition of one.
+    paths="$(printf '%s' "$meta" | jq -r "$DISPATCH_PATH_JQ"'
+        . as $m | [ dispatch_path_keys[] as $k
+                    | select({metadata: {($k): $m[$k]}} | has_dispatch_path)
+                    | "\($k)=\($m[$k])" ] | join(", ")' 2>/dev/null)" \
+        || { log "$unreadable"; return 2; }
+    [ -n "$paths" ] || return 0
+    log "$PROG: sling: $bead already has a dispatch path ($paths) — not slinging a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File the visit directly, or react once that route or arm is cleared."
     return 1
 }
 
@@ -291,8 +343,9 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       codex-gated mr path. Refuses --merge
                                       direct (the security invariant). Exit 0
                                       slung, $RC_ALREADY_REACTED already reacted,
+                                      $RC_DISPATCH_PATH already routed or armed,
                                       $RC_LIVE_WORKFLOW already driven by a live
-                                      workflow (both no-ops, nothing slung), 1
+                                      workflow (each a no-op, nothing slung), 1
                                       error.
        $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
@@ -512,7 +565,8 @@ cmd_demand() {
 #     a reaction to an armed bead only second-guesses the arm and can leave the
 #     bead dispatched twice. An arm reconcile has stopped retrying at its
 #     failure cap is dropped too: that bead waits on the visit the cap
-#     escalated, not on a first reaction.
+#     escalated, not on a first reaction. sling_dispatch_path_guard refuses the
+#     same beads, so one routed or armed after this read is still never slung.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -675,7 +729,7 @@ cmd_scan() {
     # many downstream sessions as the scan found candidates. What it skips is
     # named, not silently dropped — the next sweep sees the same beads, since
     # a candidate only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0 reacted=0 driven=0
+    local slung=0 skipped=0 reacted=0 routed=0 driven=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
@@ -687,13 +741,15 @@ cmd_scan() {
         # Only a genuine dispatch spends the cap. cmd_sling skips an
         # already-reacted bead as a no-op and flags it in SLING_SKIPPED — a
         # reaction that landed after the scan selected it, since
-        # scan_precision_filter drops the rest. It skips a bead a live workflow
-        # drives the same way. Counting either skip is the cap-starvation bug:
-        # beads that need no reaction would spend the whole cap every sweep
-        # while no new reaction is slung.
+        # scan_precision_filter drops the rest. It skips a bead routed or armed
+        # since the scan's read, and a bead a live workflow drives, the same way.
+        # Counting any skip is the cap-starvation bug: beads that need no
+        # reaction would spend the whole cap every sweep while no new reaction
+        # is slung.
         if cmd_sling "$id"; then
             case "$SLING_SKIPPED" in
                 reacted)       reacted=$(( reacted + 1 )) ;;
+                dispatch-path) routed=$(( routed + 1 )) ;;
                 live-workflow) driven=$(( driven + 1 )) ;;
                 *)             slung=$(( slung + 1 )) ;;
             esac
@@ -701,6 +757,7 @@ cmd_scan() {
     done
     local note="" uncounted=""
     if [ "$reacted" -gt 0 ]; then uncounted="$reacted already reacted"; fi
+    if [ "$routed" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$routed already routed or armed"; fi
     if [ "$driven" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$driven driven by a live workflow"; fi
     if [ -n "$uncounted" ]; then note=" ($uncounted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then
@@ -735,25 +792,33 @@ cmd_sling() {
         *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
     esac
 
-    # A first reaction happens once. Re-slinging one destroys the route the
-    # first disposition set (see sling_first_reaction_guard), so skip it as an
-    # idempotent no-op rather than clobber a live dispatch. A reaction never
-    # races a live workflow either (see sling_live_workflow_guard), so skip a
-    # bead one drives the same way. cmd_sling returns 0 for both skips and
-    # flags each out-of-band in SLING_SKIPPED: the in-process cmd_scan --sling
-    # loop reads that flag to tell a skip from a dispatch and not spend a cap
-    # slot on it, and the `sling` CLI verb in main() reads it to exit
-    # RC_ALREADY_REACTED or RC_LIVE_WORKFLOW, the signal a cross-process caller
-    # needs. The return stays 0 because a non-zero one cannot carry the
-    # distinction here: caught in the loop's condition it would disable set -e
-    # for this function, and returned to main it would read as the generic
-    # fail-closed error, not the specific no-op. A live-workflow read that
-    # fails is that error: it returns 1 and nothing is slung.
+    # A first reaction happens once (see sling_first_reaction_guard), so skip
+    # an already-reacted bead as an idempotent no-op rather than clobber a live
+    # dispatch. A reaction never second-guesses a dispatch already decided (see
+    # sling_dispatch_path_guard) and never races a live workflow (see
+    # sling_live_workflow_guard), so skip those beads the same way. cmd_sling
+    # returns 0 for each skip and flags it out-of-band in SLING_SKIPPED: the
+    # in-process cmd_scan --sling loop reads that flag to tell a skip from a
+    # dispatch and not spend a cap slot on it, and the `sling` CLI verb in
+    # main() reads it to exit with the skip's own code, the signal a
+    # cross-process caller needs. The return stays 0 because a non-zero one
+    # cannot carry the distinction here: caught in the loop's condition it would
+    # disable set -e for this function, and returned to main it would read as
+    # the generic fail-closed error, not the specific no-op. A dispatch-path or
+    # live-workflow read that fails is that error: it returns 1 and nothing is
+    # slung.
     SLING_SKIPPED=""
     if ! sling_first_reaction_guard "$bead"; then
         SLING_SKIPPED="reacted"
         return 0
     fi
+    local pathed=0
+    sling_dispatch_path_guard "$bead" || pathed=$?
+    case "$pathed" in
+        0) ;;
+        1) SLING_SKIPPED="dispatch-path"; return 0 ;;
+        *) return 1 ;;
+    esac
     local live=0
     sling_live_workflow_guard "$bead" || live=$?
     case "$live" in
@@ -818,6 +883,7 @@ main() {
             # its own visit instead of waiting for a reaction that never ran.
             case "$SLING_SKIPPED" in
                 reacted)       exit "$RC_ALREADY_REACTED" ;;
+                dispatch-path) exit "$RC_DISPATCH_PATH" ;;
                 live-workflow) exit "$RC_LIVE_WORKFLOW" ;;
             esac
             ;;

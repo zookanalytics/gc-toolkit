@@ -8,12 +8,13 @@
 # execution provenance a formula pour leaves, and no queue reads it.
 #
 # Sourced (never executed) by the readers that ask whether a bead already has a
-# dispatch path: the proactive scan (tools/gc-proactive.sh), which reacts only
-# to input that has none, and the doctor checks check-blocked-work-armed, which
-# flags blocked work that has none, and check-step-terminal, which counts a step
-# as offerable only when it has one. One definition, no copies: a key added here
-# is read by every one of them at once, and dispatch-path.test.sh fails when a
-# reader stops sourcing this file or tests the keys itself.
+# dispatch path: the proactive scan and sling (tools/gc-proactive.sh), which
+# react only to input that has none, and the doctor checks
+# check-blocked-work-armed, which flags blocked work that has none, and
+# check-step-terminal, which counts a step as offerable only when it has one.
+# One definition, no copies: a key added here is read by every one of them at
+# once, and dispatch-path.test.sh fails when a reader stops sourcing this file
+# or tests the keys itself.
 #
 # Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
 # defs to a jq program, e.g.

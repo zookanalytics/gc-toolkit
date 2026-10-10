@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
-# the dispatch-path drop, the fail-closed-on-unset-GC_RIG sweep guard, and the
-# scan's drop of a bead a live workflow already drives (INFLIGHT-*).
+# the dispatch-path drop and sling guard, the fail-closed-on-unset-GC_RIG sweep
+# guard, and the scan's drop of a bead a live workflow already drives
+# (INFLIGHT-*).
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -28,6 +29,18 @@
 #   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
+# The sling holds the same line for a bead named to it directly, because a gc
+# that reads mol-first-reaction's retain_input_routes leaves a route live when
+# the reaction starts, and the pool serving it could hand the bead to a worker
+# mid-reaction:
+#   (PATH-SKIP)  sling refuses a bead carrying any dispatch-path key, an arm,
+#                a capped arm and the human park route (exit RC_DISPATCH_PATH)
+#   (PATH-GO)    …while blank keys and an execution stamp still proceed
+#   (PATH-ORDER) a reacted, routed bead reports the reaction (exit 3)
+#   (PATH-SWEEP) a sweep skips a bead routed after its read without spending
+#                a cap slot
+#   (PATH-READS) on the live read, a route refuses, bd's not-found proceeds and
+#                any other failed read fails the sling closed
 # A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
 # key is all that sets it apart from raw input:
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
@@ -180,6 +193,78 @@ hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
 for k in $PATH_KEYS; do
     hasnt "$OUT" "tk-path-$k" "(ARMED-SWEEP) …nor at the bead carrying $k"
 done
+
+# --- the sling guard refuses a bead with a dispatch path --------------------
+# The scan never offers a routed or armed bead, but gc-helm react and
+# gc-visit-open name a bead to the sling directly. mol-first-reaction declares
+# retain_input_routes, so under a gc that reads the key a reaction started on a
+# routed bead leaves the route live, and the pool could hand the bead to a
+# worker mid-reaction. The sling refuses such a bead as a no-op with its own
+# exit code. beads.json gives the guard the metadata of every scan row above,
+# plus these shapes:
+#   tk-human           parked on the human route, which is a route too
+#   tk-exec-only       only the gc.execution_routed_to a finished pour leaves,
+#                      which no queue reads
+#   tk-reacted-routed  the shape an actionable disposition leaves: reacted, and
+#                      routed to the pool it chose
+jq -n --slurpfile rows "$TMP/scan.json" '
+  [ $rows[0][] | {key: .id, value: {metadata: .metadata}} ] | from_entries
+  + {"tk-human":          {"metadata": {"gc.routed_to": "human"}},
+     "tk-exec-only":      {"metadata": {"gc.execution_routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+     "tk-reacted-routed": {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}}' \
+  > "$TMP/beads.json"
+
+echo "# sling refuses a routed or armed bead as a no-op, naming the path"
+for k in $PATH_KEYS; do
+    set +e
+    OUT="$(bash "$SCRIPT" sling "tk-path-$k" 2>&1)"; RC=$?
+    set -e
+    eq "$RC" 5 "(PATH-SKIP) sling of a bead carrying $k exits RC_DISPATCH_PATH (5)"
+    has "$OUT" "already has a dispatch path ($k=gc-toolkit/gc-toolkit.polecat)" "(PATH-SKIP) …naming the key and its value"
+    hasnt "$OUT" "would sling" "(PATH-SKIP) …nothing dispatched"
+done
+for b in tk-armed tk-capped tk-human; do
+    set +e
+    OUT="$(bash "$SCRIPT" sling "$b" 2>&1)"; RC=$?
+    set -e
+    eq "$RC" 5 "(PATH-SKIP) sling of $b exits RC_DISPATCH_PATH (5)"
+    hasnt "$OUT" "would sling" "(PATH-SKIP) …nothing dispatched for $b"
+done
+has "$(bash "$SCRIPT" sling tk-human 2>&1 || true)" "gc.routed_to=human" "(PATH-SKIP) the human park route is named as the path"
+
+echo "# blank keys and an execution stamp are no dispatch path"
+for b in tk-blank tk-exec-only; do
+    set +e
+    OUT="$(bash "$SCRIPT" sling "$b" 2>&1)"; RC=$?
+    set -e
+    eq "$RC" 0 "(PATH-GO) sling of $b exits 0"
+    has "$OUT" "would sling mol-first-reaction at $b" "(PATH-GO) …and dispatches"
+done
+
+echo "# a reacted bead reports the reaction, not the route its disposition set"
+set +e
+OUT="$(bash "$SCRIPT" sling tk-reacted-routed 2>&1)"; RC=$?
+set -e
+eq "$RC" 3 "(PATH-ORDER) a reacted, routed bead exits RC_ALREADY_REACTED (3), not 5"
+
+# Two candidates, the late-routed one oldest so it ranks first: with a cap of
+# one, the slot shows whether its skip was counted. The scan row carries no
+# route, which is the view a sweep has when the route lands after the scan's
+# read. The guard's read at sling time finds it.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-late-routed", "issue_type":"task", "description":"routed after the scan read", "title":"late", "created_at":"2026-01-01T00:00:00Z", "metadata":{}},
+  {"id":"tk-raw",         "issue_type":"task", "description":"a raw input bead",          "title":"raw",  "created_at":"2026-01-02T00:00:00Z", "metadata":{}}
+]
+JSON
+cat > "$TMP/beads.json" <<'JSON'
+{"tk-late-routed": {"metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}, "tk-raw": {"metadata":{}}}
+JSON
+echo "# a sweep skips a bead routed since its read without spending a cap slot"
+OUT="$(GC_PROACTIVE_SLING_CAP=1 bash "$SCRIPT" scan --sling 2>&1)"
+hasnt "$OUT" "would sling mol-first-reaction at tk-late-routed" "(PATH-SWEEP) the late-routed bead is never slung"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(PATH-SWEEP) …the cap's one slot goes to the next candidate"
+has "$OUT" "1 already routed or armed, not counted" "(PATH-SWEEP) …and the sweep names the uncounted skip"
 
 # --- a molecule step is not a scan candidate --------------------------------
 # Most graph.v2 steps are issue_type task, and no graph.v2 step has a
@@ -642,6 +727,50 @@ set -e
 eq "$RC" 1 "(LIVE-READS) any other failed read fails the sling closed (exit 1)"
 has "$OUT" "cannot tell whether a live workflow already drives tk-live-broken" "(LIVE-READS) …saying why"
 hasnt "$OUT" "stub gc sling" "(LIVE-READS) …and never reaches gc sling"
+
+# The dispatch-path guard's live read is the bead's own `bd show`. A third stub
+# answers it per bead and passes every other call to the first:
+#   tk-path-live     routed, with a raw control byte in its title, so the read
+#                    parses only when it is scrubbed
+#   tk-live-missing  bd's not-found error, an answer: the bead has no route
+#   tk-path-locked   any other failed read. Its convoy read answers empty, so
+#                    the dispatch-path guard alone stands between it and the
+#                    sling.
+SHOW="$TMP/stub-show"
+mkdir -p "$SHOW"
+cat > "$SHOW/gc" <<SH
+#!/bin/sh
+case "\$*" in
+  "bd show tk-path-live --json")
+      printf '[{"id":"tk-path-live","title":"routed\001","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
+  "bd show tk-live-missing --json")
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1 ;;
+  "bd show tk-path-locked --json") printf '{"error":"database is locked"}'; exit 1 ;;
+  "bd dep list tk-path-live --direction up -t tracks --json"|"bd dep list tk-path-locked --direction up -t tracks --json") printf '[]' ;;
+  *) exec "$STUB/gc" "\$@" ;;
+esac
+SH
+chmod +x "$SHOW/gc"
+show_sling() { env -u GC_PROACTIVE_FIXTURE PATH="$SHOW:$PATH" bash "$SCRIPT" sling "$1" --dry-run 2>&1; }
+
+echo "# the dispatch-path guard's live read"
+set +e
+OUT="$(show_sling tk-path-live)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-READS) the live path refuses a routed bead (exit 5)"
+has "$OUT" "gc.routed_to=gc-toolkit/gc-toolkit.polecat" "(PATH-READS) …naming its route, raw control byte and all"
+hasnt "$OUT" "stub gc sling" "(PATH-READS) …and never reaches gc sling"
+set +e
+OUT="$(show_sling tk-live-missing)"; RC=$?
+set -e
+eq "$RC" 0 "(PATH-READS) a bead bd does not know proceeds, so gc sling names it missing"
+has "$OUT" "stub gc sling" "(PATH-READS) …to the dry-run sling"
+set +e
+OUT="$(show_sling tk-path-locked)"; RC=$?
+set -e
+eq "$RC" 1 "(PATH-READS) any other failed read fails the sling closed (exit 1)"
+has "$OUT" "cannot tell whether tk-path-locked already has a dispatch path" "(PATH-READS) …saying why"
+hasnt "$OUT" "stub gc sling" "(PATH-READS) …and never reaches gc sling"
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"

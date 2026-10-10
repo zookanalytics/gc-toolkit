@@ -16,7 +16,8 @@
 #   the rig-enumeration helper leaving no trap installed on its caller
 #   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
 #     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
-#     and a live-workflow sling skip (exit 4) re-raised as react's code (6)
+#     a live-workflow sling skip (exit 4) re-raised as react's code (6), and a
+#     dispatch-path sling skip (exit 5) re-raised as react's code (7)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2868,6 +2869,19 @@ grep -q "a live workflow already drives tk-react1" "$TMP/rerr3" \
 grep -q "already carries a first reaction\|failed" "$TMP/rerr3" \
   && bad "(REACT) a live-workflow skip must not read as already reacted or as a failure" \
   || ok "(REACT) …and is neither an already-reacted skip nor a failure"
+
+# The sling's dispatch-path guard exits RC_DISPATCH_PATH (5) when the bead is
+# already routed or armed: a third no-op with its own cause. react re-raises it
+# as its own code (7). Without that, react would report the skip as a failure
+# (exit 4) and the intake caller would name a sling failure that never happened.
+rrc=0; FAKE_SLING_RC=5 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr4" || rrc=$?
+eq "$rrc" "7" "(REACT) a dispatch-path skip (sling exit 5) becomes react exit 7"
+grep -q "tk-react1 is already routed or armed" "$TMP/rerr4" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react dispatch-path message missing: $(cat "$TMP/rerr4")"
+grep -q "already carries a first reaction\|live workflow\|failed" "$TMP/rerr4" \
+  && bad "(REACT) a dispatch-path skip must not read as another skip or as a failure" \
+  || ok "(REACT) …and is neither of the other skips nor a failure"
 unset GC_PROACTIVE_TOOL FAKE_SLING_RC
 
 echo ""

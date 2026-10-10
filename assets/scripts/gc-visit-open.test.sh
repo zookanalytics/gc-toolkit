@@ -308,6 +308,22 @@ hasnt "$ERR" "already carries a first reaction" "(DRIVEN) it is NOT reported as 
 hasnt "$ERR" "sling FAILED" "(DRIVEN) it is NOT reported as a sling failure"
 unset FAKE_HELM_REACT_RC
 
+# --- (ROUTED) a subject already routed or armed files the visit directly ------
+# react returns its third no-op code (7) when the subject already has a dispatch
+# path: the guard slung nothing because a reaction never second-guesses a
+# dispatch already decided, so no reaction will file the visit. The visit body
+# must name that cause, not another skip and not a sling failure.
+FAKE_HELM_REACT_RC=7 run yes "a topic on a subject already routed to a pool"
+eq "$RC" "0" "(ROUTED) exits 0 — the visit is filed"
+has "$CALLS" "helm react tk-newsub" "(ROUTED) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(ROUTED) a routed subject falls through to filing the visit"
+has "$CALLS" "the subject is already routed or armed" "(ROUTED) the visit body names the route or arm"
+has "$ERR" "subject tk-newsub is already routed or armed" "(ROUTED) the reason names the no-op skip"
+hasnt "$ERR" "already carries a first reaction" "(ROUTED) it is NOT reported as an already-reacted subject"
+hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a driven subject"
+hasnt "$ERR" "sling FAILED" "(ROUTED) it is NOT reported as a sling failure"
+unset FAKE_HELM_REACT_RC
+
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
 run no "some cross-cutting topic"
 has "$CALLS" "--db $TMP/rigs/gc-toolkit/.beads" "(RIG) the default rig is gc-toolkit, not inferred from cwd"

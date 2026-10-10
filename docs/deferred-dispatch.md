@@ -88,12 +88,15 @@ is silent manual-follow-up debt — the exact miss
 
 An arm is a dispatch path, as a route is. Both are defined once, in
 `assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
-dispatch is already decided sources that file: the proactive scan,
+dispatch is already decided sources that file: the proactive scan and sling,
 `doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
 also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
 looks for raw input to react to, and it drops a bead that has a dispatch path.
 Otherwise a sweep that ran between a blocker closing and the next reconcile
 pass would sling a first reaction at a bead the arm is about to dispatch.
+`tools/gc-proactive.sh sling` refuses such a bead too, so a reaction named
+directly, from `gc-helm.sh react` or `gc-visit-open.sh`, cannot race the arm
+either.
 
 To see what is owed, in this rig's store:
 
