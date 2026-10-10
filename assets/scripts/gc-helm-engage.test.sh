@@ -364,14 +364,15 @@ case "$1 ${2:-}" in
     esac ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$CALLS"
-    # --new-subject creates the SUBJECT bead with --metadata (and --db); cmd_open
-    # creates the VISIT with neither. Distinguish so each returns its own id.
+    # cmd_open creates the VISIT, titled "visit: …"; --new-subject creates the
+    # SUBJECT bead (with --db). Both carry --metadata, so the title tells them
+    # apart and each returns its own id.
     # $SUBJ_CREATE_FAIL makes the subject create fail (bare error object, no id).
     case "$*" in
-      *--metadata*)
+      *"--title visit: "*) jq -n '{id:"tk-vis"}' ;;
+      *)
         if [ -n "${SUBJ_CREATE_FAIL:-}" ]; then jq -n '{error:"store write refused"}'
         else jq -n --arg i "${NEW_SUBJECT_ID:-tk-newsubj}" '{id:$i}'; fi ;;
-      *) jq -n '{id:"tk-vis"}' ;;
     esac ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
               # engage probes the visit's blockers (dep list --direction=down)
@@ -1327,7 +1328,7 @@ export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 run_engage "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
 eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
-SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--title visit: ' | head -n1)"
 has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ) the subject is created with the gc.reaction_owned marker"
 has "$SUBJ_CREATE" "gc.origin" "(NEWSUBJ) …and gc.origin=operator (honest origin; the force-to-visit invariant is preserved)"
 has "$SUBJ_CREATE" "--db $TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
@@ -1336,7 +1337,7 @@ has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the
 has "$CALLED" "session new converse-opus --alias tk-vis --no-attach" "(NEWSUBJ) then engages the one visit it filed"
 # The title doubles as the opener when no --reason/--template is given: the visit
 # cmd_open files carries it (visit title tail is the opener).
-VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--title visit: ' | head -n1)"
 has "$VISIT_CREATE" "ship the new intake flow" "(NEWSUBJ-OPENER) the title doubles as the visit's opener"
 # The marker outlives a SUCCESSFUL engage (it is what stands the async worker
 # down); the abort backstop must be disarmed once the visit is filed, so a clean
@@ -1396,9 +1397,9 @@ export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 run_engage "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
-SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--title visit: ' | head -n1)"
 has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
-VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--title visit: ' | head -n1)"
 has "$VISIT_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one parked visit, carrying its opener"
 hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
 has "$OUT" "parked on the helm board" "(NEWSUBJ-ABORT) …and tells the operator the visit is parked for them to engage"
@@ -1413,7 +1414,7 @@ printf 'open' > "$VIS_STATUS"
 run_engage_tty 'draft the Q3 plan\n\n\n' --new-subject --no-attach
 eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
 has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
-SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--title visit: ' | head -n1)"
 has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
 has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
 has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
@@ -1525,7 +1526,7 @@ export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 run_engage "weigh the renderer split" --new-subject --rig gc-toolkit --skill review-arch --no-input --no-attach
 eq "$RC" 0 "(SKILL-NEWSUBJ) --new-subject with --skill exits 0"
-VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--title visit: ' | head -n1)"
 has "$VISIT_CREATE" "visit: tk-newsubj — review-arch lens: weigh the renderer split" "(SKILL-NEWSUBJ) the visit is titled by the skill, then the subject"
 has "$CALLED" "look at tk-newsubj through the gc-toolkit.review-arch" "(SKILL-NEWSUBJ) …and briefed with the lens on the new subject"
 

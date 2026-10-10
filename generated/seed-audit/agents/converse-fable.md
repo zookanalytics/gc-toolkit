@@ -551,8 +551,16 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
+OBS_META=$(jq -nc \
+  --arg category "<free-slug>" \
+  --arg scope "<repo:<rig> or agent:<role> or global — guess narrow>" \
+  --arg directive "<standing or diff>" \
+  --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
+  '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
+    "gc.outcome": "recorded"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation -d "## Statement
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <the generalizable point>
 
 ## Quote
@@ -565,16 +573,10 @@ OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source re
 <optional: what the diff was doing>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-gc bd update "$OBS" \
-  --set-metadata task_kind=observation \
-  --set-metadata "obs.category=<free-slug>" \
-  --set-metadata "obs.scope=<repo:<rig> or agent:<role> or global — guess narrow>" \
-  --set-metadata obs.source=self \
-  --set-metadata "obs.directive=<standing or diff>" \
-  --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
-  --set-metadata gc.outcome=recorded \
-  --status=closed
 ```
+
+The metadata and the closed status ride the create, so the observation is
+filed whole or not at all.
 
 The provenance key's `<owner/repo>` is the full slug — derive it with
 `gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
@@ -596,5 +598,5 @@ is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
 
 Operator fast path: "learn this: …" files the same bead with the
-operator's wording as `## Statement`, plus `obs.source=operator` and
-`--set-metadata obs.endorsed=operator`.
+operator's wording as `## Statement`, and `"obs.source": "operator"` plus
+`"obs.endorsed": "operator"` in its metadata.

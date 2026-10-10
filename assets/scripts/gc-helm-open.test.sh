@@ -18,8 +18,9 @@
 #
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
-#   (EXISTS)   a resolvable subject still files the visit: create + all three
-#              stamps + the tracks edge, exit 0 (the gate does not break `open`)
+#   (EXISTS)   a resolvable subject still files the visit: one create carrying
+#              all three stamps, + the tracks edge, exit 0 (the gate does not
+#              break `open`)
 #   (HELD)     an already-open visit short-circuits, exit 0, nothing created
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (SHAPE)    that object shape never crashes jq into a false "found"
@@ -137,12 +138,18 @@ eq "$RC" "0" "(EXISTS) a resolvable subject exits 0"
 # The stub records `$*`, so quoting is flattened — match the argv words.
 grep -q 'bd create .*--title visit: tk-real1' <<< "$CALLS" \
   && ok "(EXISTS) the visit bead is created" || bad "(EXISTS) visit created (calls: $CALLS)"
-grep -q 'gc.routed_to=human' <<< "$CALLS" \
-  && ok "(EXISTS) parked on the helm board (routed_to=human)" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
-grep -q 'gc.continuation_group=tk-real1' <<< "$CALLS" \
-  && ok "(EXISTS) continuation_group stamped with the subject" || bad "(EXISTS) continuation_group stamp"
-grep -q 'task_kind=visit' <<< "$CALLS" \
-  && ok "(EXISTS) task_kind=visit stamped" || bad "(EXISTS) task_kind stamp"
+# The three stamps ride the create, so a visit never exists without the keys
+# the already-held guard matches.
+VCREATE=$(grep 'bd create .*--title visit: tk-real1' <<< "$CALLS" || true)
+grep -qF '"gc.routed_to":"human"' <<< "$VCREATE" \
+  && ok "(EXISTS) parked on the helm board (routed_to=human, on the create)" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
+grep -qF '"gc.continuation_group":"tk-real1"' <<< "$VCREATE" \
+  && ok "(EXISTS) continuation_group stamped with the subject, on the create" || bad "(EXISTS) continuation_group stamp"
+grep -qF '"task_kind":"visit"' <<< "$VCREATE" \
+  && ok "(EXISTS) task_kind=visit stamped, on the create" || bad "(EXISTS) task_kind stamp"
+grep -q 'bd update tk-visit1 .*task_kind=visit' <<< "$CALLS" \
+  && bad "(EXISTS) no second write stamps the visit's identity" "found an update stamping task_kind (calls: $CALLS)" \
+  || ok "(EXISTS) no second write stamps the visit's identity"
 grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
   && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
 # The converse routed-pool is retired: a successful open parks the visit on the

@@ -125,15 +125,18 @@ gc bd update "$WORK_BEAD_ID" --append-notes "$(printf 'Did not close (%s): <why 
 # >>> gate-visit
 # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
 POOL="human"
+# The route, the group and task_kind ride the create, so the visit and the keys
+# every live-visit guard matches land in one write; a visit stamped in a second
+# write is invisible to those guards whenever that write fails.
+VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$WORK_BEAD_ID" \
+  '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}')
 VISIT_JSON=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — proposed close did not validate: accept or redirect" \
-  -d "A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work." --json)
+  -d "A first reaction proposed closing $WORK_BEAD_ID; validation did not confirm it. Read the subject's notes, then close, redirect, or route the work." \
+  --metadata "$VISIT_META" --json)
 VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
        echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
-gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-  --set-metadata "gc.continuation_group=$WORK_BEAD_ID" \
-  --set-metadata "task_kind=visit"
 gc bd dep add "$VISIT" "$WORK_BEAD_ID" --type=tracks
 # tracks, NOT parent-child: parent-child transmits the subject's
 # blocked state to the visit, making it unclaimable.

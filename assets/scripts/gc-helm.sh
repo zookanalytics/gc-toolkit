@@ -1835,21 +1835,24 @@ cmd_open() {
     # with `gc-helm engage`. `human` is the board's exact gather predicate.
     # >>> gate-visit
     POOL="human"
+    # The route, the group and task_kind ride the create, so the visit and the
+    # keys the already-held guard above matches land in one write. A visit
+    # stamped in a second write is invisible to that guard whenever the write
+    # fails, and the next open on the subject files a second visit.
+    VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$bead" \
+        '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}')
     # bd create answers an ARRAY (or bare object) carrying the id on success and
     # a bare {"error":…} OBJECT on failure; extract the id type-guarded and
     # scrubbed so an error object never crashes jq. The subject already resolved
     # above, so an empty id here is bd's failure — surface bd's own message.
     VISIT_JSON=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
-        -d "$visit_body" \
+        -d "$visit_body" --metadata "$VISIT_META" \
         --json 2>/dev/null || true)
     VISIT=$(printf '%s' "$VISIT_JSON" | scrub \
         | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
         || { create_err=$(printf '%s' "$VISIT_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
              echo "$PROG: open: could not create a visit bead for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
-    gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-        --set-metadata "gc.continuation_group=$bead" \
-        --set-metadata "task_kind=visit"
     # --type=tracks, NOT parent-child: parent-child transmits the subject's blocked state to the visit, making it unclaimable
     gc bd dep add "$VISIT" "$bead" --type=tracks
     # Read the group stamp back and repair it from the subject if it landed

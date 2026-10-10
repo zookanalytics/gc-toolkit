@@ -329,10 +329,9 @@ ones from this rig's open beads (an unreadable listing aborts the run,
 `--outcome fail`, exit — same fail-safe as step 1). Seed a new pattern
 bead per new cluster:
 ```bash
-PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json)
+PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --metadata '{"task_kind":"feedback-pattern"}' --json)
 PATTERN=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$PATTERN" ] || { CREATE_ERR=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "could not seed the pattern bead${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-gc bd update "$PATTERN" --set-metadata task_kind=feedback-pattern
 ```
 
 ## 3. Recompute the rollups (derived by query, single-writer)
@@ -497,12 +496,15 @@ BODY="## Rule
 ## Reasoning
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
-BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json)
+# task_kind, target=main and merge_strategy=mr ride the create with the route,
+# so the bead is born whole and routed: the standard pool worker -> refinery
+# pipeline takes it from there, and routing on the create (no sling) IS the
+# dispatch.
+BEAD_META=$(jq -nc --arg pool "$POOL" \
+  '{task_kind: "prompt-update", target: "main", merge_strategy: "mr", "gc.routed_to": $pool}')
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --metadata "$BEAD_META" --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
-# target=main + merge_strategy=mr ride the standard pool worker -> refinery
-# pipeline; routing (stamp, don't sling) IS the dispatch.
-gc bd update "$BEAD" --set-metadata task_kind=prompt-update --set-metadata target=main --set-metadata merge_strategy=mr --set-metadata gc.routed_to="$POOL"
 echo "filed + routed prompt-update $BEAD (pattern $PATTERN)"
 ```
 
@@ -543,15 +545,18 @@ SUBJECT="$PATTERN"
 # >>> gate-visit
 # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
 POOL="human"
+# The route, the group and task_kind ride the create, so the visit and the keys
+# every live-visit guard matches land in one write; a visit stamped in a second
+# write is invisible to those guards whenever that write fails.
+VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$SUBJECT" \
+  '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}')
 VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
-  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json)
+  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" \
+  --metadata "$VISIT_META" --json)
 VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
        echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
-gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-  --set-metadata "gc.continuation_group=$SUBJECT" \
-  --set-metadata "task_kind=visit"
 gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # tracks, not parent-child: a parent-child edge would transmit the
 # subject's blocked state to the visit, making it unclaimable.

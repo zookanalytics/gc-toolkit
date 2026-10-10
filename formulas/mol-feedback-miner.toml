@@ -252,13 +252,16 @@ $NORM
 # Optionally append a '## Context' section (what the diff was doing) when it
 # helps the distiller read the quote.
 
-BEAD_JSON=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task -l learning -l observation -d "$BODY" --json)
+# The observation is filed whole and closed in one create: its provenance and
+# category, the pair key the dedup reads, ride the create, so no observation
+# exists without them. A create whose reply is lost has still landed whole,
+# and the next run's pair-key dedup finds it.
+OBS_META=$(jq -nc --arg c "$CATEGORY" --arg s "$SCOPE" --arg d "$DIRECTIVE" --arg k "$KEY" \
+  '{task_kind: "observation", "obs.category": $c, "obs.scope": $s, "obs.source": "miner",
+    "obs.directive": $d, "obs.provenance": $k, "gc.outcome": "recorded"}')
+BEAD_JSON=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task -l learning -l observation -d "$BODY" --metadata "$OBS_META" --status=closed --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create observation for $KEY${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
-
-# Non-atomic create→update: a crash between the two leaves an observation
-# without its provenance stamp, invisible to dedup. Accepted — low probability.
-gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --status=closed
 echo "filed observation $BEAD ($KEY)"
 ```
 
