@@ -124,6 +124,12 @@ all closed, either merged or superseded.
   the molecule to that session, whose hold, gate or terminal step ends it. A
   session that drains mid-chain without holding hands its next step to a fresh
   session, and on a gated step that session ends the molecule.
+- **The held step's own marker.** The held step still carries
+  `blocked_reason` with no `blocks` edge of its own, which
+  `doctor/check-wait-is-an-edge` (I1) reports at warning severity, as it did
+  before. The molecule's wait on its work is the end bead's edge. An edge on
+  the held step would also hold a lift, which returns the step to `open`, until
+  that blocker closed, and lifting a hold is tk-p9wh2oh's path.
 
 ## Coordination
 

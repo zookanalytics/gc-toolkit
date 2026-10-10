@@ -327,6 +327,10 @@ case "$D_RESULT" in
     VISIT=$(printf '%s' "$VISITS" | jq -r '[ .[]? | .id ] | sort | (.[0] // "")')
     [ -n "$VISIT" ] || fail "escalate.sh answered for $ROOT but no open visit carries key $KEY — nothing armed" "visit_missing"
     arm "$VISIT" ;;
+  unreadable)
+    fail "dead-molecule-dispose.sh could not read what it needed to end $ROOT ($D_DETAIL) — nothing done" "${D_DETAIL:-dispose_unreadable}" ;;
+  partial)
+    fail "dead-molecule-dispose.sh tore $ROOT down part way ($D_DETAIL): every member is de-routed, so none is offered, but some did not close and a person finishes it" "partial:${D_DETAIL}" ;;
   *)
     fail "dead-molecule-dispose.sh answered rc=$D_RC with no result for $ROOT — nothing done" "dispose_failed" ;;
 esac

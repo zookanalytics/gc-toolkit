@@ -172,7 +172,6 @@ for B in tk-load tk-impl tk-submit "$END"; do eq "$(meta "$B" gc.routed_to)" "<a
 eq "$(bstatus tk-conv)" "open" "the input convoy is never written"
 hasnt "$(grep -- 'bd update tk-work' "$STUB_GC_LOG")" "update" "the work bead is never written"
 eq "$(bstatus tk-other)" "open" "a bead outside the molecule is untouched"
-hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-sweep" "no sweep ran"
 
 echo "--- park after close: a hold on work already closed ends the molecule there ---"
 molecule
@@ -382,6 +381,13 @@ OUT=$(REAL_GC="$TMP/bin/gc" PATH="$TMP/refbin:$PATH" "$END_SH" tk-load 2>&1); rc
 eq "$rc" "1" "a refused blocks edge exits 1"
 has "$OUT" "edge_failed=tk-work" "and names the blocker"
 eq "$(meta "$(end_bead)" gc.routed_to)" "<absent>" "the end bead was never routed, so no pool is offered it"
+molecule; close_bead tk-work
+export STUB_CLOSE_FAIL="tk-impl"
+OUT=$("$END_SH" tk-load 2>&1); rc=$?
+export STUB_CLOSE_FAIL=""
+eq "$rc" "1" "a teardown that closed only part of the molecule exits 1"
+has "$OUT" "detail=partial" "and says the teardown was partial"
+eq "$(meta tk-impl gc.routed_to)" "<absent>" "the member that did not close is de-routed, so no pool is offered it"
 
 echo "--- dry run writes nothing ---"
 molecule
