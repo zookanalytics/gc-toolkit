@@ -78,10 +78,11 @@ when the output path is not covered by an LFS filter.
 ## One-call capture and the rig-demo mol
 
 `assets/scripts/rig-demo-capture.sh` runs the three steps above (resolve the
-engine, lint, capture) as one call. It exits non-zero when anything stops the
-capture, including a run that leaves no MP4 behind. It carries no bead or
-routing logic, so a shell and a formula step drive it the same way. Its
-`--help` lists every flag:
+engine, lint, capture) as one call. It exits 1 when anything stops the capture,
+including a run that leaves no MP4 behind, and 3 when it recorded a clip in
+which at least one step failed its proof. Its last line names the clip and says
+whether it is narrated. It carries no bead or routing logic, so a shell and a
+formula step drive it the same way. Its `--help` lists every flag:
 
 ```bash
 assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \

@@ -24,7 +24,7 @@ trap 'rm -rf "$TMPD"' EXIT
 # PATH, so a path that should resolve the real engine instead finds nothing —
 # which is why every happy case must set $SPRINTSHOW_BIN.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
-for c in bash sed tr head dirname mkdir wc cat; do
+for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$FARM/$c"
 done
@@ -38,6 +38,11 @@ OUT="$TMPD/out.mp4"
 # its argv to $RUNLOG, finds the -o path, and (unless told otherwise) writes
 # bytes there; $RUN_RC fails the run, $RUN_NOFILE leaves no file, $RUN_EMPTY
 # leaves an empty one — the three ways a capture can "succeed" yet deliver nothing.
+# $RUN_REPORT prints the engine's closing report for a clip of that kind
+# (narrated, silent), in the engine's words. $RUN_FAILED writes the clip, prints
+# that report with its failed-proof line for that many steps, and exits 1, as
+# the engine does when a step of a captured clip fails its proof. $RUN_LATE_RC
+# writes the clip and then exits with that code without any report.
 STUB="$TMPD/sprintshow-stub"
 cat >"$STUB" <<'STUB'
 #!/usr/bin/env bash
@@ -47,8 +52,17 @@ if [ "${1:-}" = "run" ]; then
   o=""; prev=""
   for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
   [ "${RUN_RC:-0}" != 0 ] && exit "${RUN_RC}"
+  if [ -n "${RUN_FAILED:-}" ]; then
+    [ -n "${RUN_NOFILE:-}" ] || printf 'mp4-bytes\n' >"$o"
+    printf 'step 1/2: Open the board\n  ✓ proof held\nstep 2/2: Expand the row\n  ✗ _Prove:_ did not hold: `visible .row`\n\n'
+    printf '✅ %s demo → %s\n' "${RUN_REPORT:-narrated}" "$o"
+    printf '   ⚠️  %s step(s) failed their proof — video and frames kept: .captures/fixture-123\n' "$RUN_FAILED"
+    exit 1
+  fi
   [ -n "${RUN_NOFILE:-}" ] && exit 0
   if [ -n "${RUN_EMPTY:-}" ]; then : >"$o"; else printf 'mp4-bytes\n' >"$o"; fi
+  [ "${RUN_LATE_RC:-0}" != 0 ] && exit "${RUN_LATE_RC}"
+  [ -n "${RUN_REPORT:-}" ] && printf '\n✅ %s demo → %s\n' "$RUN_REPORT" "$o"
   exit 0
 fi
 exit 0
@@ -58,13 +72,16 @@ chmod +x "$STUB"
 RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty=""
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0
   while [ $# -gt 0 ]; do
     case "$1" in
       LINT_RC=*)   lint_rc="${1#*=}" ;;
       RUN_RC=*)    run_rc="${1#*=}" ;;
       RUN_NOFILE=*) nofile="${1#*=}" ;;
       RUN_EMPTY=*) empty="${1#*=}" ;;
+      RUN_REPORT=*) report="${1#*=}" ;;
+      RUN_FAILED=*) failed="${1#*=}" ;;
+      RUN_LATE_RC=*) late_rc="${1#*=}" ;;
       --) shift; break ;;
       *) break ;;
     esac
@@ -73,6 +90,7 @@ run() {
   : >"$RUNLOG"; rm -f "$OUT"
   ( cd "$TMPD" && env -i PATH="$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
+      RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
       bash "$SUT" "$@" 2>&1 )
 }
 
@@ -123,6 +141,36 @@ echo "# fail closed: the engine produces an EMPTY file -> exit 1"
 out="$(run RUN_EMPTY=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "empty output exits 1" "[ '$rc' = 1 ]"
 has "is empty" "$out" "it catches an empty clip"
+
+echo "# the last line says whether the clip is narrated or silent, from the engine's report"
+out="$(run RUN_REPORT=narrated -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a narrated capture exits 0" "[ '$rc' = 0 ]"
+has "captured $OUT (narrated," "$out" "it reports a narrated clip"
+out="$(run RUN_REPORT=silent -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a silent capture exits 0" "[ '$rc' = 0 ]"
+has "captured $OUT (silent," "$out" "it reports a silent clip"
+out="$(run 'RUN_REPORT=narrated + music bed' -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+has "captured $OUT (narrated," "$out" "a music bed does not hide the narration"
+
+echo "# a clip in which a step failed its proof -> exit 3, naming the clip and the engine's kept working files"
+TMPD_PWD="$(cd "$TMPD" && pwd)"
+out="$(run RUN_FAILED=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a failed step proof exits 3" "[ '$rc' = 3 ]"
+ok "the clip stays on disk" "[ -s '$OUT' ]"
+has "1 step(s) failed their proof" "$out" "it counts the failed steps"
+has "captured $OUT (narrated)" "$out" "it names the clip and its narration"
+has "kept its working files in $TMPD_PWD/.captures/fixture-123" "$out" "it names the kept working files by absolute path"
+hasnt "capture failed" "$out" "a clip with a failed step is not reported as a failed capture"
+
+echo "# fail closed: a failed-proof report with no clip on disk -> exit 1"
+out="$(run RUN_FAILED=2 RUN_NOFILE=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a failed-proof report without a clip exits 1" "[ '$rc' = 1 ]"
+has "capture failed" "$out" "it reports the capture failure"
+
+echo "# fail closed: the engine writes the file, then errors with no report -> exit 1"
+out="$(run RUN_LATE_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "an error after the file was written exits 1" "[ '$rc' = 1 ]"
+has "capture failed (sprintshow run exited 1)" "$out" "a file without the engine's report is not a captured clip"
 
 echo "# usage errors (exit 2)"
 out="$(run -- --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
