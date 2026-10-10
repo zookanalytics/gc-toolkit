@@ -77,6 +77,33 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The gc bd create stub lands a create the way real bd does: --metadata (a JSON
+# value, its types kept), --status and --notes ride the one insert, and a
+# --metadata that is not JSON is refused with nothing created. A stub that
+# dropped the payload made a writer whose stamps ride the create look like one
+# that stamps in a second write, so no suite could see a payload land at birth.
+store '[]'
+eq "$(gc bd create "born" -t task --metadata '{"task_kind":"review","n":1,"oid":"0123"}' --status=closed --notes "first note" --json | jq -r '.id')" \
+  "new-1" "create answers the id it minted"
+eq "$(bstatus new-1)" "closed" "--status rides the create"
+eq "$(meta new-1 task_kind)" "review" "--metadata rides the create"
+eq "$(jq -c '.[] | select(.id == "new-1") | .metadata.n' "$STUB_STORE")" '1' "…keeping its JSON types: a number stays a number"
+eq "$(jq -c '.[] | select(.id == "new-1") | .metadata.oid' "$STUB_STORE")" '"0123"' "…and a JSON string stays a string"
+eq "$(notes new-1)" "first note" "--notes rides the create"
+gc bd create "plain" -t task --json >/dev/null
+eq "$(bstatus new-2)" "open" "a create with no --status is open"
+eq "$(jq -c '.[] | select(.id == "new-2") | .metadata' "$STUB_STORE")" '{}' "…and carries no metadata"
+if gc bd create "bad" --metadata 'not json' --json >/dev/null 2>&1; then bad "an unparseable --metadata was accepted"; else ok "an unparseable --metadata is refused"; fi
+eq "$(jq 'length' "$STUB_STORE")" "2" "…and creates nothing"
+STUB_DROP_KEYS="new-3:status,oid" gc bd create "partial" --metadata '{"task_kind":"review","oid":"x"}' --status=closed --json >/dev/null
+eq "$(bstatus new-3)" "open" "STUB_DROP_KEYS naming the minted id drops the create's status"
+eq "$(meta new-3 oid)" "<absent>" "…and the named metadata keys"
+eq "$(meta new-3 task_kind)" "review" "…and lands the rest"
+if STUB_CREATE_FAIL=1 gc bd create "refused" --json >/dev/null 2>&1; then bad "STUB_CREATE_FAIL did not refuse the create"; else ok "STUB_CREATE_FAIL refuses the create"; fi
+eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
+if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
+eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
+
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an
 # unassigned bead or the actor's own closes plainly, and `bd update
@@ -226,6 +253,15 @@ eq "$(stored_json arr)"    '"[1]"'   "a JSON array is stored as its raw text"
 eq "$(stored_json obj)"    '"{}"'    "a JSON object is stored as its raw text"
 eq "$(stored_json empty)"  '""'      "an empty value is stored as the empty string"
 
+# The gc bd update stub replaces a description the way real bd does, under
+# either spelling of the flag, and leaves the rest of the bead as it was.
+store '[{"id":"tk-desc","status":"open","assignee":"","title":"d","description":"first","notes":"n","metadata":{"k":"v"}}]'
+gc bd update tk-desc --description "second, with a space" >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "second, with a space" "update --description replaces the description"
+gc bd update tk-desc -d third >/dev/null
+eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
+eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
+
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
 # failure an undeclared name records is read back from its output rather than
@@ -244,6 +280,40 @@ out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
       part gamma; echo "gamma=$? fails=$((FAIL - base))"; part beta; echo "beta=$?")
 has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
 has "$out" "beta=0" "…and runs the part it names"
+
+# tomllib_python: each probe's PATH holds stand-in interpreters and a directory
+# with only the grep and sort the search runs, so no real Python on the host is
+# found. A stand-in answers the two questions the search asks: whether tomllib
+# imports, and which version it is.
+PYT="$TMP/python"
+mkdir -p "$PYT/tools" "$PYT/new" "$PYT/old" "$PYT/versioned" "$PYT/oldversioned"
+ln -s "$(command -v grep)" "$(command -v sort)" "$PYT/tools/"
+fake_python() { # <path> <version> <yes|no: tomllib imports>
+  local rc=1
+  [ "$3" = yes ] && rc=0
+  printf '#!/bin/sh\ncase "$2" in\n  *tomllib*) exit %s ;;\n  *platform*) echo %s ;;\nesac\n' "$rc" "$2" > "$1"
+  chmod +x "$1"
+}
+fake_python "$PYT/new/python3" 3.12.3 yes
+fake_python "$PYT/old/python3" 3.9.6 no
+fake_python "$PYT/versioned/python3.11" 3.11.9 yes
+fake_python "$PYT/versioned/python3.13" 3.13.1 yes
+fake_python "$PYT/versioned/python3.14-config" 3.14.0 yes
+fake_python "$PYT/oldversioned/python3.10" 3.10.4 no
+out=$(PATH="$PYT/new:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 with tomllib is found"
+eq "$out" "$PYT/new/python3" "…and printed by its path, ahead of any versioned name"
+out=$(PATH="$PYT/old:$PYT/versioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "0" "tomllib_python: a python3 without tomllib is passed over for a versioned one that has it"
+eq "$out" "$PYT/versioned/python3.13" "…the newest python3.N, and never a name such as python3.14-config"
+out=$(PATH="$PYT/old:$PYT/oldversioned:$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python that has tomllib, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has $PYT/old/python3 3.9.6, $PYT/oldversioned/python3.10 3.10.4" \
+  "…and names every Python it found, with its version"
+# shellcheck disable=SC2123  # a PATH with no Python on it is the case under test
+out=$(PATH="$PYT/tools"; tomllib_python); rc=$?
+eq "$rc" "1" "tomllib_python: with no Python at all, it returns 1"
+eq "$out" "tomllib needs Python 3.11 or newer, and PATH has no python3" "…and says there is none"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

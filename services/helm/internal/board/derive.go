@@ -633,7 +633,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledGate bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, stalledCheck bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -647,7 +647,7 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 		sev0 = SevHigh
 	// A review or rework child is a childless leaf — the merge anchor it blocks
 	// carries the roll-up. It bands NORMAL as in-flight work; the anchor, not the
-	// child, is where a stalled gate surfaces (preOpenCodexStall). Placed ahead of
+	// child, is where a stalled check surfaces (preOpenCheckStall). Placed ahead of
 	// the count branches so a childless leaf does not fall to the empty-LOW arm.
 	case isReviewReworkKind(a.Source):
 		sev0 = SevNormal
@@ -695,11 +695,11 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 	if sev0 == SevNormal && stale > staleThresholdDays {
 		sev0 = SevElevated
 	}
-	// A stalled pre-open codex gate is at least ELEVATED. Childless it would
-	// otherwise land in the LOW branch above and sink to the bottom, where a
-	// stalled gate is indistinguishable from a settled one; the bump never lowers
-	// a row that a stronger branch already banded HIGH or ELEVATED.
-	if stalledGate && (sev0 == SevLow || sev0 == SevNormal) {
+	// A stalled pre-open check is at least ELEVATED. Childless it would otherwise
+	// land in the LOW branch above and sink to the bottom, where a stalled check
+	// is indistinguishable from a settled one; the bump never lowers a row that a
+	// stronger branch already banded HIGH or ELEVATED.
+	if stalledCheck && (sev0 == SevLow || sev0 == SevNormal) {
 		return SevElevated
 	}
 	return sev0
@@ -857,7 +857,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
-	machine, approval string, ask *Blocker, prIsOwed bool, stallReason string) string {
+	machine, approval string, ask *Blocker, prIsOwed bool, stallNeeds string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
 	// nothing now — it ages out of the DONE band on its own once it has been
@@ -909,12 +909,12 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	prPosture, _, _, _ := splitDated(a.Metadata[mdPRPosture])
 
 	switch {
-	// A stalled pre-open codex gate names the gate and why it is stuck, ahead of
-	// the merge-anchor position phrase below: the position is exactly what has
-	// gone stale ("in the merge cadence" while no review runs), and stallReason is
+	// A stalled pre-open check names the lane and why it is stuck, ahead of the
+	// merge-anchor position phrase below: the position is exactly what has gone
+	// stale ("in the merge cadence" while no review runs), and stallNeeds is
 	// non-empty only for that shape, so this case cannot fire on any other row.
-	case stallReason != "":
-		return preOpenStallNeeds(stallReason)
+	case stallNeeds != "":
+		return stallNeeds
 	case a.Source == "unowned":
 		return "unowned — assign an owning bead"
 	case a.Source == kindReview:
@@ -1455,14 +1455,14 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 	}
 }
 
-// The pre-open codex gate the stall signal reads. mergeResultPreOpenGate is the
-// merge_result of an anchor parked at that gate, before any PR exists;
-// checkSetCodex is the only gate set this city runs there; mdCheckPrefix+the set
-// names the gate marker (check.codex); and checkGreen is the settled marker value
-// on which pre-open-resolve opens the PR.
+// The pre-open state the stall signal reads. mergeResultPreOpenGate is the
+// merge_result of an anchor parked before its PR exists; pr-open.sh opens the PR
+// once every lane the anchor's check_set declares derives green. mdCheckPrefix
+// plus a lane names that lane's marker (check.correctness), and checkGreen is the
+// value signoff.sh stamps there when the lane's review approves and clears when a
+// review requests changes.
 const (
 	mergeResultPreOpenGate = "pre_open_gate"
-	checkSetCodex          = "codex"
 	mdCheckPrefix          = "check."
 	checkGreen             = "green"
 
@@ -1471,15 +1471,23 @@ const (
 	stallReasonReviewedNotAdvanced = "reviewed-not-advanced"
 )
 
-// preOpenStaleThresholdDays is how long a pre-open codex gate may hold before the
+// preOpenStaleThresholdDays is how long a pre-open check may hold before the
 // board reads it as STALLED rather than in-flight. Three days is the floor below
 // which a hold is still plausibly a fresh, healthy park. It is deliberately far
 // tighter than staleThresholdDays: that clock stale-bumps an already-NORMAL row,
-// while a childless pre-open gate bands LOW and never reaches the bump at all.
+// while a childless anchor at pre_open_gate bands LOW and never reaches the bump
+// at all.
 const preOpenStaleThresholdDays = 3
 
-// preOpenCodexStall reports whether a merge anchor is stuck at the pre-open codex
-// gate with nothing moving it, and dates the stall for the owed clock.
+// preOpenCheckStall reports whether a merge anchor is stuck at pre_open_gate on a
+// check with nothing moving it, names the first lane its check_set declares that
+// does not read green, and dates the stall for the owed clock.
+//
+// Every declared lane holds the PR, so the anchor is past its checks only once
+// each lane's marker reads green, and any lane name counts — a legacy codex lane
+// as much as correctness. A check_set that declares no lane is not a stalled
+// check: pr-open.sh opens none, off or approval alone without a review, and
+// gate-ensure.sh stamps the default over an empty one.
 //
 // It fires only on the bare held shape — the one prOwed leaves with no cause of
 // its own. A recorded wedge, a demand, or a settled-and-unapproved position each
@@ -1498,29 +1506,64 @@ const preOpenStaleThresholdDays = 3
 // and a genuinely stalled anchor is touched by nothing, so the last-touch instant
 // is when it went quiet. An anchor a reconcile pass still writes is fresh and
 // never reaches the threshold, which is the correct non-fire.
-func preOpenCodexStall(a Anchor, machine string, blockers []Blocker, stale int, f Facts) (stalled bool, since time.Time, reason string) {
-	if a.Metadata[mdMergeResult] != mergeResultPreOpenGate || a.Metadata[mdCheckSet] != checkSetCodex {
-		return false, time.Time{}, ""
+func preOpenCheckStall(a Anchor, machine string, blockers []Blocker, stale int, f Facts) (stalled bool, since time.Time, lane, reason string) {
+	if a.Metadata[mdMergeResult] != mergeResultPreOpenGate {
+		return false, time.Time{}, "", ""
+	}
+	lanes := checkLanes(a.Metadata[mdCheckSet])
+	if len(lanes) == 0 {
+		return false, time.Time{}, "", ""
 	}
 	// A recorded wedge already owns the row — owed, dated, named — so leave it to
 	// prOwed/prNeeds rather than restating it in weaker words.
 	if isWedge(machine) {
-		return false, time.Time{}, ""
+		return false, time.Time{}, "", ""
 	}
-	// The gate has gone green: pre-open-resolve opens the PR on its next pass, so
-	// the anchor is about to leave this state, not stalled in it. The lane marker
-	// carries a bare state word, so a settled gate is an exact "green".
-	if a.Metadata[mdCheckPrefix+checkSetCodex] == checkGreen {
-		return false, time.Time{}, ""
+	// Every lane reads green: pr-open.sh opens the PR on its next pass, so the
+	// anchor is about to leave this state, not stalled in it. A lane marker
+	// carries a bare state word, so a settled lane is an exact "green".
+	lane = firstUngreenLane(a, lanes)
+	if lane == "" {
+		return false, time.Time{}, "", ""
 	}
 	// A live review or rework is the healthy hold — something is moving it.
 	if liveReviewOrRework(blockers, f) {
-		return false, time.Time{}, ""
+		return false, time.Time{}, "", ""
 	}
 	if stale < preOpenStaleThresholdDays {
-		return false, time.Time{}, ""
+		return false, time.Time{}, "", ""
 	}
-	return true, a.UpdatedAt, preOpenStallReason(blockers)
+	return true, a.UpdatedAt, lane, preOpenStallReason(blockers)
+}
+
+// checkLanes returns the review lanes a check_set declares, in declared order,
+// by the rule merge.sh and pr-open.sh apply (lanes_of, and the gates_of
+// pr-summary-region.sh defines): split on commas, strip every whitespace
+// character, and drop the tokens that name no lane. none and off are the
+// checkless opt-out, and approval is met by a GitHub review, which cannot exist
+// before the PR does. The drop is case-insensitive; a surviving name keeps its
+// case, because it names a lane and that lane's marker.
+func checkLanes(checkSet string) []string {
+	var lanes []string
+	for _, tok := range strings.Split(checkSet, ",") {
+		lane := strings.Join(strings.Fields(tok), "")
+		if lane == "" || strings.EqualFold(lane, "none") || strings.EqualFold(lane, "off") || strings.EqualFold(lane, "approval") {
+			continue
+		}
+		lanes = append(lanes, lane)
+	}
+	return lanes
+}
+
+// firstUngreenLane returns the first of lanes whose check marker on a is not
+// checkGreen, or "" when every lane reads green.
+func firstUngreenLane(a Anchor, lanes []string) string {
+	for _, lane := range lanes {
+		if a.Metadata[mdCheckPrefix+lane] != checkGreen {
+			return lane
+		}
+	}
+	return ""
 }
 
 // liveReviewOrRework reports whether an open review or rework child of a merge
@@ -1548,23 +1591,26 @@ func liveReviewOrRework(blockers []Blocker, f Facts) bool {
 }
 
 // isReviewOrRework reports whether a blocker is one of the cadence's open review
-// or rework children — the beads that legitimately hold a merge anchor at the
-// pre-open gate while one runs. signoff.sh and pr-facts.sh title them "Review …"
-// and "Rework …"; the title is the discriminator because neither the route nor
-// the type identifies the pair (a mol-review child is not route-stamped and a
-// rework child carries no task_kind).
+// or rework children — the beads that legitimately hold a merge anchor at
+// pre_open_gate while one runs. gate-ensure.sh titles a review "Review …" and
+// signoff.sh titles a rework "Rework …"; the title is the discriminator because
+// neither the route nor the type identifies the pair (a mol-review child is not
+// route-stamped and a rework child carries no task_kind).
 func isReviewOrRework(b Blocker) bool {
 	return b.Status != "closed" &&
 		(strings.HasPrefix(b.Title, "Review ") || strings.HasPrefix(b.Title, "Rework "))
 }
 
-// preOpenStallReason names WHY the gate is stuck, for the NEEDS line. It reads
-// the blocker titles the cadence writes (signoff.sh / pr-facts.sh file "Review
-// branch …" / "Review PR#…" and "Rework branch …"): an open rework child means
-// findings are filed and unaddressed; a review that has run with no open rework
-// means the branch was reviewed but never advanced to a PR; neither means no
-// review has run at all. It is a best-effort hint, so it degrades to
-// never-reviewed rather than guessing when a title does not match.
+// preOpenStallReason names WHY the anchor's checks are stuck, for the NEEDS line.
+// It reads the blocker titles the cadence writes (gate-ensure.sh files "Review
+// branch …" and signoff.sh files "Rework branch …"): an open rework child
+// means findings are filed and unaddressed; a review that has run with no open
+// rework means the branch was reviewed but never advanced to a PR; neither means
+// no review has run at all. It reads every review and rework child on the
+// anchor, not only the named lane's: a rework title names no lane, and a review
+// title keeps the lane name it was filed under, which a check rename does not
+// rewrite. It is a best-effort hint, so it degrades to never-reviewed rather
+// than guessing when a title does not match.
 func preOpenStallReason(blockers []Blocker) string {
 	openRework, reviewed := false, false
 	for _, b := range blockers {
@@ -1589,17 +1635,17 @@ func preOpenStallReason(blockers []Blocker) string {
 	}
 }
 
-// preOpenStallNeeds is the NEEDS sentence for a stalled pre-open codex gate. It
-// names the codex gate rather than reading "in the merge cadence"; the age rides
-// the frontier's owed clock, so it is not repeated here.
-func preOpenStallNeeds(reason string) string {
+// preOpenStallNeeds is the NEEDS sentence for a stalled pre-open check. It names
+// the lane holding the PR rather than reading "in the merge cadence"; the age
+// rides the frontier's owed clock, so it is not repeated here.
+func preOpenStallNeeds(lane, reason string) string {
 	switch reason {
 	case stallReasonFindingsOpen:
-		return "codex gate stalled — findings open, none in flight"
+		return lane + " check stalled — findings open, none in flight"
 	case stallReasonReviewedNotAdvanced:
-		return "codex gate stalled — reviewed, not advanced"
+		return lane + " check stalled — reviewed, not advanced"
 	default:
-		return "codex gate stalled — no review has run"
+		return lane + " check stalled — no review has run"
 	}
 }
 
@@ -1726,20 +1772,22 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	ask := askingDemand(a.Blockers)
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
 
-	// A pre-open codex gate that nothing is advancing — no live review, no
-	// in-flight rework, past the staleness floor — bands LOW when childless, its
-	// position reading "in the merge cadence" indistinguishably from a healthy
-	// hold. Give it an owed cause so it carries its age and leaves the floor. Only
-	// for the bare held shape, though: a disposition, a ruling, a takeaway, a
-	// human route, or an open demand already owns the row and names it — the
-	// demand as its own `asking: <title>`, the operator's actual question — so
-	// those are excluded before the gate is read, not overwritten with the gate's
+	// A pre-open check that nothing is advancing — no live review, no in-flight
+	// rework, past the staleness floor — bands LOW when childless, its position
+	// reading "in the merge cadence" indistinguishably from a healthy hold. Give
+	// it an owed cause so it carries its age and leaves the floor. Only for the
+	// bare held shape, though: a disposition, a ruling, a takeaway, a human
+	// route, or an open demand already owns the row and names it — the demand as
+	// its own `asking: <title>`, the operator's actual question — so those are
+	// excluded before the checks are read, not overwritten with the stall's
 	// generic wording.
-	stalled, stalledReason := false, ""
+	stalled, stallNeeds := false, ""
 	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" && ask == nil {
 		var stalledSince time.Time
-		stalled, stalledSince, stalledReason = preOpenCodexStall(a, machine, a.Blockers, stale, f)
+		var stalledLane, stalledReason string
+		stalled, stalledSince, stalledLane, stalledReason = preOpenCheckStall(a, machine, a.Blockers, stale, f)
 		if stalled {
+			stallNeeds = preOpenStallNeeds(stalledLane, stalledReason)
 			prIsOwed = true
 			if owedSince.IsZero() || (!stalledSince.IsZero() && stalledSince.Before(owedSince)) {
 				owedSince = stalledSince
@@ -1833,7 +1881,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stalledReason),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -1916,10 +1964,12 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// wrapper neither sources a rig's repository nor waits for one.
 	linkPRBranches(folded)
 
-	// Stamp who must act next — PRPhase on a merge anchor, Phase on every live
-	// row — from the shared prstatus core, the same taxonomy pr-status-label.sh
-	// projects to the GitHub status: label; then let the frontier lead with that
-	// state so the board's primary vocabulary is the liveness.
+	// Stamp each row's phase: PRPhase on a merge anchor, Phase on every live row.
+	// A live row's phase is the status: label tri-state from the shared prstatus
+	// core, the same one pr-status-label.sh projects to the GitHub status: label;
+	// a closed merge anchor's PRPhase is instead a board-only terminal state
+	// (merged or closed). Then let the frontier lead with that state so the
+	// board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
 
 	// Split Held into parked vs engaged on each held row, from the same sittings
@@ -1986,14 +2036,23 @@ func repoBaseFromPRURL(prURL string) string {
 	return u.Scheme + "://" + u.Host + "/" + parts[0] + "/" + parts[1]
 }
 
-// The phase values — the mutually-exclusive status: taxonomy
-// pr-status-label.sh projects to a GitHub PR label, defined by the shared
-// prstatus package so the board and the label name the states from one source.
+// The phase values — the status: vocabulary defined by the shared prstatus
+// package so the board and the GitHub PR label name the states from one source.
+// The live tri-state is what pr-status-label.sh projects to the label; the
+// terminal pair is the board's alone, stamped on a resolved row by
+// [terminalPRPhase].
 const (
 	PhaseWorking        = string(prstatus.Working)
 	PhaseNeedsReview    = string(prstatus.NeedsReview)
 	PhaseNeedsAttention = string(prstatus.NeedsAttention)
+	PhaseMerged         = string(prstatus.Merged)
+	PhaseClosed         = string(prstatus.Closed)
 )
+
+// mergeResultMerged is the merge_result the refinery records on the anchor it
+// closes for a landed PR — the lifecycle's one closed state, and the board's
+// signal that a resolved row merged rather than closed without merging.
+const mergeResultMerged = "merged"
 
 // classifyPhases stamps a row's tri-state — who must act on it next — from the
 // shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
@@ -2008,8 +2067,10 @@ const (
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
 // states — before the frontier SPEAKS that tri-state: on a live row the liveness
 // word leads the one-line summary, so the board's primary vocabulary is the state
-// rather than the roll-up. A closed row keeps its age phrase — the tri-state has
-// no live answer for it, so beadPhase left it empty and the prefix is skipped.
+// rather than the roll-up. A closed row keeps its age phrase: the per-bead Phase
+// has no live answer for it, so the terminal branch below leaves Phase empty and
+// the prefix is skipped. The PR round-trip axis is not empty there — a resolved PR
+// has a final state — so that branch stamps PRPhase merged or closed.
 func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	reworkKids := make(map[string]int)
@@ -2030,6 +2091,18 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		if !ok {
 			continue
 		}
+		// A closed row is terminal: nobody must act on it next, so the per-bead
+		// liveness (Phase) stays empty and the frontier keeps its age phrase. The PR
+		// round-trip axis is not empty there — a resolved PR has a final state — so
+		// the board names it off the close, merged or closed. The two axes part here
+		// on purpose: the terminal word is the board's to stamp because the frozen
+		// pre-merge facts prPhase would read (posture=approved, merge_state=CLEAN)
+		// still say working. Recorded axes (PRMachine) travel on a closed row
+		// unchanged.
+		if !a.ClosedAt.IsZero() {
+			tiles[i].PRPhase = terminalPRPhase(a)
+			continue
+		}
 		kids := reworkKids[tiles[i].ID]
 		prP := prPhase(a, kids)
 		phase := beadPhase(a, f, kids)
@@ -2041,13 +2114,10 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
 		// the chip and the per-bead Phase the frontier speaks — so a row the machine
 		// calls blocked cannot read needs-attention on one and awaiting-review on the
-		// other. A closed row has no live Phase to lift, so its frontier keeps its
-		// age phrase.
+		// other.
 		if isBlocked(tiles[i].PRMachine) {
 			prP = PhaseNeedsAttention
-			if phase != "" {
-				phase = PhaseNeedsAttention
-			}
+			phase = PhaseNeedsAttention
 		}
 		tiles[i].PRPhase = prP
 		tiles[i].Phase = phase
@@ -2195,11 +2265,13 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 	}
 }
 
-// prPhase answers who must act on a merge anchor next, delegating to
+// prPhase answers who must act on a LIVE merge anchor next, delegating to
 // prstatus.Derive — the same function assets/scripts/pr-status-label.sh runs
 // through `gctk pr-status derive` to write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
+// [classifyPhases] calls it only on a live row; a resolved anchor's PR state is
+// [terminalPRPhase]'s, off the close rather than the frozen pre-merge facts.
 func prPhase(a Anchor, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
@@ -2207,15 +2279,30 @@ func prPhase(a Anchor, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
 }
 
-// beadPhase is the per-bead liveness for every LIVE row — the generalization of
-// prPhase, applied to any bead through the same prstatus core so a merge anchor
-// and a plain bead name their state from one rule. A closed row is terminal and
-// carries no live tri-state, so it reads empty, the way prPhase reads empty off a
-// non-merge row.
-func beadPhase(a Anchor, f Facts, openReworkKids int) string {
-	if !a.ClosedAt.IsZero() {
+// terminalPRPhase names a resolved PR's final state for the PR round-trip axis on
+// a closed anchor: merged when the refinery landed it (it closes the anchor
+// carrying merge_result=merged), else closed — a merge anchor that reached a
+// closed bead without that marker closed without merging, a supersede or disposal.
+// prstatus.Derive cannot name this: a merged anchor freezes at posture=approved,
+// merge_state=CLEAN (never restamped), which it reads as working, and the sole
+// terminal signal is the close the board holds. Empty on a non-merge row, which
+// has no PR to resolve.
+func terminalPRPhase(a Anchor) string {
+	if !isMergeAnchor(a) {
 		return ""
 	}
+	if a.Metadata[mdMergeResult] == mergeResultMerged {
+		return PhaseMerged
+	}
+	return PhaseClosed
+}
+
+// beadPhase is the per-bead liveness for every live row — the generalization of
+// prPhase, applied to any bead through the same prstatus core so a merge anchor
+// and a plain bead name their state from one rule. Terminal-ness is not its
+// concern: [classifyPhases] returns on a closed row before it calls beadPhase — a
+// closed bead's per-bead liveness is empty — so beadPhase derives unconditionally.
+func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 
@@ -2264,6 +2351,16 @@ const clusterThreshold = 3
 // because dropping it would erase the only trace of the attention; its needs is
 // rewritten from its own title so the kept row states the ask instead of the
 // empty "routed to you — no question recorded".
+//
+// A CLOSED wrapper never moves its ask. Its conversation has ended, so folding
+// the ask would mark the subject owed on the strength of an ask nobody is making
+// any more. Its row is dropped whenever its subject has a row, live or DONE, and
+// whether or not that subject is itself a wrapper: the subject's row either
+// survives the fold or is dropped in favour of a row that does, so the attention
+// stays on the board. Closed wrappers that name each other in a loop keep their
+// rows, since no row outside the loop stands for them. With no subject row the
+// closed wrapper stays in the DONE band like any closed anchor, because it is the
+// only trace of the attention it carried.
 func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
@@ -2284,6 +2381,27 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		}
 		return false
 	}
+	// closedLoop reports whether walking from a closed wrapper to its subject, and
+	// on through every subject that is a closed wrapper too, comes back to where it
+	// started. Any other walk ends at a row the fold keeps, or at an open wrapper
+	// the fold keeps or folds onto a row it keeps. A loop is the one shape in which
+	// dropping every closed wrapper beside its subject would leave no row at all.
+	closedLoop := func(start string) bool {
+		seen := map[string]bool{}
+		for cur := start; !seen[cur]; {
+			seen[cur] = true
+			subj, _, _, _ := wrapperTarget(anchorByID[cur])
+			if subj == start {
+				return true
+			}
+			j, has := idx[subj]
+			if !has || !isWrapper(subj) || tiles[j].ClosedAt.IsZero() {
+				return false
+			}
+			cur = subj
+		}
+		return false
+	}
 	asks := make(map[string][]foldedAsk) // subject id -> the asks folded onto it
 	drop := make(map[string]bool)
 	for i := range tiles {
@@ -2295,13 +2413,16 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		if !ok {
 			continue
 		}
-		// A CLOSED wrapper is a finished conversation, not a live ask. Leaving it
-		// in the DONE band is right; folding it onto a subject would mark that
-		// subject owed on the strength of a visit that already ended.
+		j, has := idx[subj]
+		// A CLOSED wrapper is a finished conversation, not a live ask: nothing of
+		// it folds onto the subject, whose row already stands for it.
 		if !tiles[i].ClosedAt.IsZero() {
+			if has && !closedLoop(a.ID) {
+				drop[a.ID] = true
+			}
 			continue
 		}
-		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
+		if has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
 			asks[subj] = append(asks[subj], foldedAsk{ask: ask, kind: kind, owedSince: owedSince(tiles[i])})
 			drop[a.ID] = true
 		} else if ask != "" {

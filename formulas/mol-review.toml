@@ -135,9 +135,12 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 # reads through learning-recurrence.sh --inventory. Anchors live here, not
 # beside the dimension: the step description below renders into a step bead,
 # where an HTML comment is noise in the text the reviewer reads. One line per
-# adopted dimension, naming the "What to check" bullet it amended:
+# adopted entry, naming the "What to check" bullet it amended:
 # <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
 # <!-- rule:tk-wamr3 src:pr:#105 (operator feedback) adopted:2026-09-03 --> Comments
+# <!-- rule:tk-v32d2u src:pr:#1015:comment:4180705562, pr:#1025:comment:4180671214, visit:tk-cm64ub1 (operator feedback) adopted:2026-10-06 --> Comments
+# <!-- rule:tk-0rhvews src:pr:#964:comment:4171895604, pr:#1117:comment:4198995344 (operator feedback) adopted:2026-10-07 --> Testing
+# <!-- rule:tk-prvea src:pr:#1045:comment:4212283737, pr:#1075:comment:4211952314, pr:#1067:review:5423601195 (operator feedback) adopted:2026-10-08 --> Contract
 
 [[steps]]
 id = "review"
@@ -172,10 +175,17 @@ review rather than to any one shell: `add` returns the same worktree each time
 it runs, so a later block gets it back by running these lines again.
 ```bash
 # >>> review-workspace-add
+# The worktree is made in the rig's repository, named by path, so the
+# session's cwd cannot pick the repo. Without --repo, add uses the current
+# directory's repository, and an empty --repo does the same, so an
+# unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID") || exit 1
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
 # run the suites the diff touches; record real pass/fail counts
@@ -203,9 +213,17 @@ finding this diff carries, not the first one that appears.
 - **Contract** — does it break a caller, a stored format, a metadata key, or
   a script that greps for the old shape? Find the other call sites of
   anything it changed; the recurring defect class is a predicate fixed in
-  one copy and left stale in two.
+  one copy and left stale in two. Search the same way for what it adds: a
+  rule the diff writes where existing code already defines it, or one edit
+  repeated across copies of a code path, is a finding until one definition
+  serves every site, and a follow-up to fold the copies later does not
+  answer it. Where the surface has no include mechanism, that definition is
+  a marker-fenced block a test holds every copy to.
 - **Testing** — do the tests exercise real behavior, is the new path
-  covered, does a regression pin the bug that was fixed?
+  covered, does a regression pin the bug that was fixed? A new case pins its
+  change only if it fails when the change is reverted, so run each new case
+  against the pre-change code, and confirm that a failure-path case's stub
+  can produce the failure it names.
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
 - **Comments** — a comment carries the code's non-obvious why. Narration of
@@ -216,7 +234,11 @@ finding this diff carries, not the first one that appears.
   code is complex or the comment is making a simple thing look complex. A
   comment that explains a real why earns its place, so this is not a case for
   stripping comments. Tests and fixtures matter less here than the code they
-  exercise.
+  exercise. A docs/ page is held to the same rule: a section that restates a
+  component's usage, commands, flags, environment or tests from its header,
+  skill or formula is duplicated prose, so a component's page carries its
+  rationale and the invariants other components rely on. A page with nothing
+  else left is not warranted.
 - **The PR as published** — the `## Summary` is the human-facing
   merge-decision surface, so it must holistically and currently account for
   the ENTIRE branch diff you just read, not one contributor's share of it. A
@@ -314,12 +336,20 @@ if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   FILED="unfiled — duplicate probe unreadable"
 else
   FILED=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
-  [ -n "$FILED" ] || FILED=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json | jq -r '.id // .[0].id')
+  if [ -z "$FILED" ]; then
+    FILED_JSON=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json)
+    FILED=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    if [ -z "$FILED" ]; then
+      CREATE_ERR=$(printf '%s' "$FILED_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+      FILED="unfiled — bd create returned no id${CREATE_ERR:+: $CREATE_ERR}"
+    fi
+  fi
 fi
 echo "$FILED"
 ```
-An unreadable probe files nothing. Say so in the verdict rather than filing
-blind, and the next round re-probes.
+An unreadable probe files nothing, and neither does a create that returns no
+id. Say so in the verdict rather than filing blind, and the next round
+re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step:
@@ -412,6 +442,12 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads or finding beads (signoff.sh files the findings from your
 `findings.json`), and never run `gh pr review --approve`.
+
+Pass on this same call any flag the check section of this bead's dispatch note
+names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+When signoff.sh refuses a verdict for a missing or invalid flag, it has written
+nothing, so re-run the call with the flag corrected; that is still the one
+verdict.
 
 **2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and

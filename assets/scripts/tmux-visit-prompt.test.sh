@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test for tmux-visit-prompt.sh — the `prefix + a` operator-origin visit
-# intake (tk-bn1oi, input surface restored in tk-7z8c6), and for the binding
+# intake, and for the binding
 # tmux-bindings.sh installs for it.
 #
 # Two halves, because the defect classes are different:
@@ -22,13 +22,13 @@
 #               that shape is what cost the operator multi-line input, and
 #               `-b` is load-bearing now that the handler holds a modal popup
 #               open for as long as the operator is typing.
-#   (MULTILINE) THE acceptance criterion (tk-7z8c6). `command-prompt` is
+#   (MULTILINE) THE acceptance criterion. `command-prompt` is
 #               single-line by construction, so the operator could file a
 #               sentence and nothing longer. A message with embedded newlines
 #               must reach gc-visit-open's argv with every line intact — which
 #               is what reaches the bead, since gc-visit-open writes the topic
 #               verbatim into the subject bead's body as well as its title.
-#   (ROUNDTRIP) the OTHER acceptance criterion, and the reason tk-02v4g moved
+#   (ROUNDTRIP) the OTHER acceptance criterion, and the reason this moved
 #               to a popup in the first place. `command-prompt` substitutes the
 #               response as TEXT and then PARSES the result as a tmux command,
 #               so a message containing `;` or `"` spliced into a command line
@@ -47,7 +47,7 @@
 #               what press N had not read yet — the foreground read existed
 #               only to sequence around that. A file per press removes the
 #               collision instead, and this is what pins it.
-#   (DRAFTKEEP) tk-w4dp4, and the reason the rest of this group exists: the
+#   (DRAFTKEEP) the reason the rest of this group exists: the
 #               handler used to arm `trap 'rm -f' EXIT` over the draft, so
 #               EVERY exit destroyed the only copy of what was typed. An
 #               operator lost a paragraph to it with zero trace — no subject,
@@ -155,6 +155,8 @@
 #               was filed and was not.
 #   (GONE)      tmux-spawn-thread.sh is deleted and nothing live still points
 #               at it (specs/ is a historical record and is exempt).
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

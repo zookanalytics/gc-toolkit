@@ -1,11 +1,13 @@
 # Scratch reclaim
 
 Every Claude Code session gets a private tree under a per-uid scratch root,
-`$TMPDIR/claude-<uid>/<project-slug>/<session-id>/`, holding its scratchpad,
-task output and shell snapshots. The harness reclaims none of it when the
-session ends and session directories arrive by the thousand per day, so
-without a reaper the trees are a standing floor under the per-uid tmpfs
-quota.
+`/tmp/claude-<uid>/<project-slug>/<session-id>/`, holding its scratchpad,
+task output and shell snapshots. Claude Code puts the root under
+`$CLAUDE_CODE_TMPDIR` in place of `/tmp` when that is set, and never under
+`TMPDIR`, which macOS sets for every process; the reaper's default root
+follows the same rule. The harness reclaims none of it when the session ends
+and session directories arrive by the thousand per day, so without a reaper
+the trees are a standing floor under the per-uid tmpfs quota.
 
 Exhausting that quota is not a disk problem. Past it, every command that
 prints fails with empty output while silent ones still succeed, so the whole
@@ -31,10 +33,23 @@ A tree is aged by the newest entry anywhere inside it, directories included,
 so one stale file cannot condemn a session that is still working, and a tree
 whose only recent activity was a `mkdir` still reads as active. A session with
 a running process is held whatever its mtime. Claude Code exports
-`CLAUDE_CODE_SESSION_ID` to its children, so `/proc` names the sessions that
-are certainly alive. The signal is one-directional: a session between turns
-owns no process and does not appear, so it only ever protects, and the horizon
-carries the rest.
+`CLAUDE_CODE_SESSION_ID` to every command it runs and writes the command's
+output to a file in the session's tree, so two readings name the sessions
+that are certainly alive:
+
+- **A process carries the session's id in its environment.** Linux exposes
+  each process's environment under `/proc`. Elsewhere `ps -E` prints it, and
+  macOS hides the environment of its own system binaries, `/bin/zsh` and
+  `/bin/sleep` among them, from every other process.
+- **A process holds a file open inside the session's tree, or stands in it.**
+  lsof reads this on Linux and macOS alike, whatever binary the process runs.
+
+The signal is one-directional: a session between turns owns no process and
+does not appear, so it only ever protects, and the horizon carries the rest.
+A reading that cannot be taken holds everything it would have protected. When
+lsof fails or its listing leaves out the pass's own process, or the
+environments cannot be read with the pass's own among them, the pass takes no
+session tree at all, keeps every one, and says why; stray files still age out.
 
 Reclaim is reported as measured before/after bytes, never as a count of
 removals. A read-only tree — a Go module cache copied into scratch is mode
@@ -113,9 +128,12 @@ deeper belongs to a session the pass chose to keep.
 
 `assets/scripts/scratch-reap.test.sh` is the regression suite, hermetic
 against a synthetic root in a tempdir, with a stand-in for gc's session list —
-no city and no network. Its ended-session cases run real processes, so each
-hold is shown holding a tree and then, with that process gone, letting the
-same tree go.
+no city and no network. One case reaches outside the tempdir: with neither
+`SCRATCH_REAP_ROOT` nor `CLAUDE_CODE_TMPDIR` set, it asks the real default root
+for a session id no session has, which reads that root's directory names and
+removes nothing. The live-session and ended-session cases run real processes,
+so each hold is shown holding a tree and then, with that process gone, letting
+the same tree go.
 
 ## Operating it
 
@@ -125,7 +143,8 @@ assets/scripts/scratch-reap.sh               # reap, one summary line
 assets/scripts/scratch-reap.sh --session <id> # take one session's tree now
 ```
 
-`SCRATCH_REAP_ROOT` overrides the root, `SCRATCH_REAP_BUDGET` (default 240s)
+`SCRATCH_REAP_ROOT` overrides the root, `CLAUDE_CODE_TMPDIR` moves the default
+root as it moves Claude Code's, `SCRATCH_REAP_BUDGET` (default 240s)
 bounds the pass, `SCRATCH_REAP_ENDED_AFTER` (default 600s) sets the quiet
 margin of the ended-session rule, and `SCRATCH_REAP_GC` names the gc binary
 that lists the open sessions. The summary line counts the trees taken past the

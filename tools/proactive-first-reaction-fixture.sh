@@ -252,8 +252,8 @@ has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"
     "$(extract_toml_block work_query)"
 
 echo "── scale_check is the same demand in COUNT form (agent.toml) ──"
-# The reconciler's pool SPAWN decision runs scale_check, NOT work_query
-# (tk-8j2g1). It must mirror the demand query in COUNT form — same route and
+# The reconciler's pool SPAWN decision runs scale_check, NOT work_query.
+# It must mirror the demand query in COUNT form — same route and
 # filters, 0 when there is nothing — so a spawn always finds work to claim.
 SC_RAW="$(extract_toml_block scale_check)"
 SC="$(printf '%s\n' "$SC_RAW" | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
@@ -614,15 +614,20 @@ DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
 has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
-has "exit: recommend — file a visit that carries an action to Accept" "--disposition recommend" "$F"
+has "exit: recommend — a gate whose visit offers an action to Accept" "--disposition recommend" "$F"
 has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
 has "exit: close — route to a validating closer"   "--disposition close"      "$F"
-has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
+has "exit: ruling — put it to the operator as a human gate" "--disposition ruling" "$F"
 has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
 has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
 has "the close exit defers behind the reaction's own root" "--after-workflow" "$F"
-has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
+# The reaction produces the human gate and the sweep files its visit, so the
+# operator's escalation has one producer and one visit rule. A gate-visit block
+# back in the formula would file a visit beside the one the sweep files.
+absent "the ruling and recommend exits file no visit inline" "# >>> gate-visit" "$F"
+has "…they put the bead to the operator as a human gate" "human gate"       "$F"
+has "…and name the sweep that files the gate's visit" "gate-visit-sweep"    "$F"
 # recommend is the bridge between actionable and ruling: it files a visit like
 # ruling, but names the execution mol the operator Accepts — the flag ruling
 # rejects and recommend requires, so its presence discriminates the two exits.
@@ -639,6 +644,7 @@ has "the script records the choice on the bead"    "gc.first_reaction="       "$
 has "…and the reason beside it"                    "gc.first_reaction_reason=" "$D"
 has "…and what the choice named"                   "gc.first_reaction_target=" "$D"
 has "the blocked exit refuses a cross-store edge"  "another store"            "$D"
+has "the ruling and recommend exits file the gate through demand" '"$HELM" demand' "$D"
 has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
 # Origin does not decide the exit: an operator capture is triaged on its merits
 # like any other bead, and the guardrail (a genuine fork, an irreversible or
@@ -658,15 +664,14 @@ has "…naming the two ways a disposition fails to land" "never became a"     "$
 echo "── the terminal step drains a re-offered LANDED reaction before any exit ──"
 # A reaction that has landed carries gc.proactive_reaction=1. When advance-and-drain
 # is re-offered after that (a first session disposed, then drained before closing
-# this step), running an exit again is wrong on all five — and on the ruling and
-# recommend exits the gate-visit block files a SECOND visit before
-# first-reaction-dispose.sh can refuse the re-dispose, leaving a duplicate the
-# board carries. So a reacted-guard sits AHEAD of the exit blocks and drains
-# instead of running one. Extract the
-# last step and assert the guard is there, keyed on the landed marker, and that its
-# drain precedes the first exit block (1a) — so a re-offer never reaches the
-# gate-visit create. assets/scripts/first-reaction-reacted-guard.test.sh runs the
-# guard against each stored form of the marker; this checks its place in the step.
+# this step), running an exit again is wrong on all five: it re-releases a bead a
+# worker may already hold. first-reaction-dispose.sh refuses that re-dispose, and
+# a reacted-guard AHEAD of the exit blocks lets the re-offered run drain clean
+# instead of failing on the refusal. Extract the last step and assert the guard is
+# there, keyed on the landed marker, and that its drain precedes the first exit
+# block (1a) — so a re-offer never reaches an exit.
+# assets/scripts/first-reaction-reacted-guard.test.sh runs the guard against each
+# stored form of the marker; this checks its place in the step.
 AD_STEP="$(awk '/^id = "advance-and-drain"/{f=1} f' "$FORMULA_TOML")"
 has "advance-and-drain guards on the landed reaction marker" "gc.proactive_reaction" "$AD_STEP"
 DRAINS="$(printf '%s\n' "$AD_STEP" | grep -c 'gc runtime drain-ack')"
@@ -674,7 +679,7 @@ eq  "advance-and-drain has three drain paths (the reaction-owned stand-down, the
 GUARD_DRAIN_LINE="$(printf '%s\n' "$AD_STEP" | awk '/# >>> advance-and-drain-reacted-guard/{f=1} f && /gc runtime drain-ack/{print NR; exit}')"
 EXIT1A_LINE="$(printf '%s\n' "$AD_STEP" | grep -n '1a. ACTIONABLE' | head -1 | cut -d: -f1)"
 { [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
-  && ok "the reacted-guard drains before the first exit block (no gate-visit on a re-offer)" \
+  && ok "the reacted-guard drains before the first exit block (no exit runs on a re-offer)" \
   || bad "the reacted-guard drains before the first exit block" "guard_drain < exit1a" "guard_drain=$GUARD_DRAIN_LINE exit1a=$EXIT1A_LINE"
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"

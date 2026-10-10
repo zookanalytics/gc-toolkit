@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for tmux-new-subject.sh (tk-amc65l.1), the prefix+A wrapper that
+# Hermetic test for tmux-new-subject.sh, the prefix+A wrapper that
 # opens `gc-helm engage --new-subject` in a fresh tmux window. gc-helm.sh is
 # stubbed, so no live city or gc is needed; the test proves the wrapper hands
 # engage the right verb and flags and wires the city env the binding baked in.

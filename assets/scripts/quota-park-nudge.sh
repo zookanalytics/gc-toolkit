@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # quota-park-nudge — resume agents parked at a provider quota banner
-# (tk-al95k: a quota window closing mid-turn leaves the session state=active,
+# (a quota window closing mid-turn leaves the session state=active,
 # idle under the banner, with nothing to wake it).
 # Job: poll every live session's pane; nudge the ones showing a limit banner.
 # A nudge is the ONLY action — never kill, never file a warrant. Signatures
 # are provider-agnostic (extend via $QUOTA_PARK_MATCH); recovery polls rather
 # than sleeping until the banner's stated reset (a manual reset lands early).
-# Callers: the quota-park-nudge exec order (3m cadence); the deacon/witness
+# Callers: the quota-park-nudge exec order (5m cadence); the deacon/witness
 # patrols read the closed-field `--status` surface INSTEAD of the pane.
 # See docs/quota-park-recovery.md.
 set -euo pipefail
@@ -50,9 +50,13 @@ BACKOFF_CAP="${QUOTA_PARK_BACKOFF_CAP:-900}"
 ESCALATE_AFTER="${QUOTA_PARK_ESCALATE_AFTER:-7200}"
 ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
-# How long this order's findings stay authoritative for `--status` (the sweep
-# runs every 3m; ten minutes is three missed cycles).
-STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-600}"
+# How long this order's findings stay authoritative for `--status`. The
+# controller fires a bounded number of clock-driven orders per tick
+# (orders.max_dispatches_per_tick), so on a loaded host passes of a 5m order
+# can land more than fifteen minutes apart. Past this window a parked session's
+# `yes` becomes `unknown`, which puts it back on the patrols' normal warrant
+# path, so thirty minutes leaves room for one slow gap and a missed pass.
+STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-1800}"
 
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
@@ -245,7 +249,7 @@ detector_class() {
     lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
     if [ -n "${QUOTA_PARK_MATCH:-}" ]; then
         echo "custom-match"
-    # Here-strings, never pipes into grep -q (tk-zfjg9: SIGPIPE + pipefail
+    # Here-strings, never pipes into grep -q (SIGPIPE + pipefail
     # makes a matched line read unmatched).
     elif grep -qEi -- 'your [a-z0-9 -]{0,24}limit' <<< "$lines"; then
         echo "possessive-limit"
@@ -274,7 +278,7 @@ num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
 num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
-num_min "$STALE_AFTER"    1 || STALE_AFTER=600
+num_min "$STALE_AFTER"    1 || STALE_AFTER=1800
 
 # --- The status surface: quota-park-nudge.sh --status [<session-id>] ---------
 # What the patrols read INSTEAD of peeking a pane (pane text is agent output;
@@ -403,7 +407,7 @@ fi
 # that keeps recovery working.
 valid_ere() {
     local rc=0
-    # Empty input by redirect, never a pipe into grep -q (tk-zfjg9): rc 1 =
+    # Empty input by redirect, never a pipe into grep -q: rc 1 =
     # valid ERE, 2 = malformed.
     grep -Eq -- "${1:-}" </dev/null >/dev/null 2>&1 || rc=$?
     [ "$rc" -le 1 ]
@@ -595,7 +599,7 @@ while IFS=$'\t' read -r id alias; do
     checked=$((checked + 1))
 
     # A failed/empty peek proves nothing, and the clean branch DELETES the
-    # episode — only a successful peek may end one. Keep state; retry in 3m.
+    # episode — only a successful peek may end one. Keep state; retry next cycle.
     peek_rc=0
     pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || peek_rc=$?
     if [ "$peek_rc" -ne 0 ] || [ -z "$pane" ]; then
@@ -608,7 +612,7 @@ while IFS=$'\t' read -r id alias; do
 
     # Parked = a bare banner in the tail of an idle pane; busy/cited/scrolled-up
     # are not parked, and clearing the state file is what ends an episode.
-    # Process substitutions, never pipes into grep -q (tk-zfjg9): a SIGPIPE'd
+    # Process substitutions, never pipes into grep -q: a SIGPIPE'd
     # writer under pipefail would land on the FAIL-OPEN side here.
     if grep -qEi -- "$BUSY_RE" < <(pane_tail "$pane") \
         || ! grep -qEi -- "$MATCH_RE" < <(banner_candidates "$pane"); then
@@ -681,7 +685,7 @@ while IFS=$'\t' read -r id alias; do
         unconfirmed_now=$((unconfirmed_now + 1))
         echo "quota-park-nudge: nudge UNCONFIRMED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age"), paced as attempt $((attempts + unconfirmed))"
     else
-        # Fast rejection: nothing delivered, nothing paced; retry in 3m.
+        # Fast rejection: nothing delivered, nothing paced; retry next cycle.
         echo "quota-park-nudge: nudge FAILED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age")"
     fi
 
