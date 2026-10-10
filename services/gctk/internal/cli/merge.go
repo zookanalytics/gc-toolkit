@@ -22,8 +22,8 @@ import (
 // takes two pacing flags (--deadline <epoch-secs>, --cursor <file>) and exits 0
 // except when the check resolver is missing, the gating anchors cannot be
 // enumerated, or a merged PR's record failed (exit 1). refinery-reconcile.sh
-// invokes merge.sh as an opaque command and reads only that exit code and the
-// stdout grammar.
+// invokes merge.sh as an opaque command: it reads only that exit code, and
+// appends what the pass prints to its pass log.
 //
 // Visit order: anchors whose PR has left the open list, or could land this pass
 // by everything read without a per-PR call (draft flag, anchor-local holds,

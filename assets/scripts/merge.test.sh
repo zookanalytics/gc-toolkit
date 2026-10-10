@@ -127,7 +127,7 @@ has "$(notes M1)" "Merged to main at merged-s" "the close reason names the landi
 eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update carried close+record"
 
 echo "# a resolver that dies mid-run holds the merge (never reads empty as 'no lanes')"
-# first_notgreen_lane captures the resolver's exit status: a crash prints nothing,
+# The lane check captures the resolver's exit status: a crash prints nothing,
 # and an empty lane list would read as all-green and merge on approval alone. Here
 # the lane IS backed green and the PR IS approved, so ONLY the resolver's failure
 # can hold it — proving the merge does not proceed on approval alone when it dies.
@@ -1394,9 +1394,10 @@ has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge hel
 # read started runs. pr_view_<n>.queue/<fields>/ scripts the reads of one field
 # set in order; the fixture is the computed answer every later read gets.
 unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
-# The pinned read's field set, from bd-lib.sh, where merge.sh takes it. The queue
-# is keyed by it, so a queued answer goes to the pinned read or a re-read of it
-# and never to a read of another field set.
+# The pinned read's field set: bd-lib.sh's PR_FIELDS, which pr-facts.sh reads
+# and gctk merge must ask for too. The queue is keyed by it, so a queued answer
+# goes to the pinned read or a re-read of it and never to a read of another
+# field set.
 # shellcheck source=bd-lib.sh
 PR_FIELDS=$(. "$HERE/bd-lib.sh" && printf '%s' "$PR_FIELDS")
 queue_answer() { # num seq answer: read <seq> of the pinned field set gets <answer>
