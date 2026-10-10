@@ -372,24 +372,19 @@ Nothing has been sent. A write to a repo the rig does not own is the operator's
 to make, so an agent prepares the command and stops (docs/outbound-sends.md).
 Closing this bead answers the ask either way: sent, or declined."
 
-  BEAD=$(gc bd create -t task --title "$TITLE" -d "$BODY" --json | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  [ -n "$BEAD" ] && [ "$BEAD" != "null" ] \
-    || { warn "gc bd create returned no id — nothing parked; re-run rather than improvising another create form"; exit 1; }
-  gc bd update "$BEAD" \
-    --set-metadata "task_kind=upstream-send" \
-    --set-metadata "upstream_send_key=$KEY" \
-    --set-metadata "gh_target_repo=$TARGET" \
-    --set-metadata "gh_verb=$VERB" \
-    --set-metadata "gh_command=$PASTE" >/dev/null 2>&1
-
   # The command IS the deliverable and the key is what keeps one ask from
-  # becoming three, so both are read back. A bead whose command did not land
-  # asks a human to paste nothing.
-  ROW=$(bd_json show "$BEAD")
-  GOT_CMD=$(printf '%s' "$ROW" | jq -r '.[0].metadata.gh_command // ""' 2>/dev/null)
-  GOT_KEY=$(printf '%s' "$ROW" | jq -r '.[0].metadata.upstream_send_key // ""' 2>/dev/null)
-  if [ "$GOT_CMD" != "$PASTE" ] || [ "$GOT_KEY" != "$KEY" ]; then
+  # becoming three, so both ride the create with the rest of the send, and the
+  # create reads them back. A bead whose command did not land asks a human to
+  # paste nothing. A create whose reply was lost has still landed with its key,
+  # and a re-run finds it above.
+  META=$(jq -nc --arg k "$KEY" --arg t "$TARGET" --arg v "$VERB" --arg c "$PASTE" \
+    '{task_kind: "upstream-send", upstream_send_key: $k, gh_target_repo: $t, gh_verb: $v, gh_command: $c}' 2>/dev/null)
+  BEAD=$(bd_create "$META" -t task --title "$TITLE" -d "$BODY"); BEAD_RC=$?
+  if [ "$BEAD_RC" -eq 2 ]; then
     warn "bead $BEAD was created but its stamps did not read back; the command is in the description. Repair: gc bd update $BEAD --set-metadata upstream_send_key=$KEY --set-metadata gh_command=<the command>"
+    exit 1
+  elif [ "$BEAD_RC" -ne 0 ]; then
+    warn "gc bd create filed nothing — nothing parked; re-run rather than improvising another create form"
     exit 1
   fi
 fi
