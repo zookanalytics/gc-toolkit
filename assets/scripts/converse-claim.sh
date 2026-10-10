@@ -124,15 +124,15 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (tk-tu5g3; su-ab9je is the edge holding where the stamp
+# carries the subject (su-ab9je is the edge holding where the stamp
 # did not). Left empty, the deliberate cannot-prove-foreign fallback below
 # silently disables this guard for exactly the turn it exists to catch — an
-# unrelated visit vacuumed onto a live sitting (tk-msfmu) — so recover the
+# unrelated visit vacuumed onto a live sitting — so recover the
 # group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
 # not a visit-only edge (a convoy tracks its members), and inventing a group
 # for a non-visit would release a turn this session was entitled to work. A
 # visit carrying neither recording still resolves to the fallback below; the
-# writer-side loss (tk-ax6y4) is repaired where the visit is filed.
+# writer-side loss is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
         | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
@@ -298,7 +298,7 @@ fi
 
 # release_turn <bead-id> — three ORDERED writes (bd's claim guard refuses
 # --assignee "" on an in_progress bead, and metadata writes bypass it, so:
-# unset session pointers, --status=open, then --assignee="" — tk-z27pw), then
+# unset session pointers, --status=open, then --assignee=""), then
 # the read-back that decides. gc.routed_to is deliberately left alone: it is
 # the pool's offer predicate, and clearing it would park the turn. Every
 # write is attempted even after one fails; the READ must also agree.

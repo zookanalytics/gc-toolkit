@@ -4,7 +4,7 @@
 # Fakes `gc rig list --json` and `bd` (a file-per-bead ledger under each fake
 # rig's .beads/) on PATH. No dependency on the live city, Dolt, or the network.
 #
-# The invariants under test are the ones the incident turned on (tk-isyz0):
+# The invariants under test are the ones the incident turned on:
 #   (a) a re-home stamps the forward pointer AND closes with a populated reason
 #       naming kind + successor + store — never a bare `[Closed]`;
 #   (b) the successor must exist in the named store, or nothing is written at
@@ -409,7 +409,7 @@ eq "$(field alpha status al-origin12)" open "the bead is not closed over it"
 # A converse sitting that BOTH routes work and disposes of its subject writes
 # `--waiting-on <successor>` onto the subject — a real `blocks` edge — and then
 # closes it. `bd close` refuses a blocked issue, so the wait refused the ruling
-# it was written beside (tk-hs5rz, live at visit tk-e9ffv). A disposed bead is
+# it was written beside. A disposed bead is
 # not waiting to proceed, and gc.superseded_by already records the relationship,
 # so the edge to THIS successor goes. Same store: a `blocks` edge can only join
 # two beads in one.
@@ -521,7 +521,7 @@ FIRST=$(grep -m1 -e '^m\.gc\.work_outcome=' -e '^status=closed$' "$TMP/rigs/alph
 eq "${FIRST%%=*}" m.gc.work_outcome "gc.work_outcome lands before the close the work-record gate checks"
 
 # --- (u) an already-closed visit missing the outcome is repaired -----------
-# This is tk-iooouz's shape: bead-rehome closed the visit before this guard, so
+# This is the shape where bead-rehome closed the visit before this guard, so
 # the repair path stamps the outcome the same as the live close does.
 mkbead alpha closed al-visit3
 printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit3"
