@@ -1,6 +1,6 @@
 ---
 name: gh origin guard
-description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own, and posts on one we own that carry no city mark — which verbs it covers, how it resolves the target, what it deliberately does not cover. Read it before changing the guard or adding an agent.
+description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own, and posts on one we own that carry no city mark — which verbs it covers, how it resolves the target, how Claude and Codex agents each reach it, what it deliberately does not cover. Read it before changing the guard or adding an agent.
 ---
 
 # gh origin guard
@@ -11,9 +11,10 @@ comment on someone else's repository spends a stranger's attention. That
 decision belongs to the operator, and the guard is where the boundary is
 enforced rather than requested.
 
-The implementation is a Claude Code `PreToolUse` hook at
-`assets/scripts/gh-origin-guard.sh`, registered for every claude-provider agent
-by the overlays in `pack.toml`.
+The implementation is one `PreToolUse` hook, `assets/scripts/gh-origin-guard.sh`,
+that both providers run. Claude agents reach it through the overlays in
+`pack.toml`, and Codex agents through the Codex home's hooks file
+([Codex](#codex)).
 
 ## What it refuses
 
@@ -115,7 +116,8 @@ The guard resolves the target the way `gh` itself does, in the same order:
    global one.
 3. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
    same command line, or ambient in the environment.
-4. The `origin` remote of the working directory.
+4. The `origin` remote of the working directory. For a Codex call, that is the
+   directory its `workdir` argument names ([Codex](#codex)).
 
 The working-directory step is the one that matters most. `gh` with no `--repo`
 writes to whatever repository the working directory belongs to, so an agent
@@ -206,6 +208,54 @@ rather than refused.
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.
 
+## Codex
+
+Codex hands a shell call to a `PreToolUse` hook in the shape Claude does: the
+tool is `Bash`, the command is `tool_input.command`, and the payload carries a
+`cwd`. It reads the same deny object back and refuses the call with its reason.
+The guard therefore runs unchanged under both providers. Two things differ: where
+Codex reads its hooks, and where a Codex call runs.
+
+**Where Codex reads hooks.** Codex reads a project's hooks from `.codex/hooks.json`
+at the project root, and for a linked git worktree the project root is the
+repository's main checkout, not the worktree. polecat-codex and converse-codex
+run in worktrees, so a hooks file staged into their working directory is never
+read. Every Codex session also reads the hooks file in the Codex home
+(`$CODEX_HOME`, else `~/.codex`), whatever directory it runs in, so the guard is
+registered there.
+
+`assets/scripts/gh-origin-guard-codex.sh` makes that registration. It copies the
+`PreToolUse` group for `Bash` out of `overlays/gh-origin-guard/.claude/settings.json`
+verbatim, so Codex runs the command every Claude overlay runs. Every
+codex-provider agent runs it as `pre_start`, so a Codex session starts only once
+the guard is registered, and a registration that cannot be made fails the start.
+It keeps everything else in the file, replaces a guard registration in an older
+form, and leaves a current one untouched. A file that is not a hooks document is
+refused rather than overwritten.
+
+Codex runs a hook from the Codex home only once the hook is trusted. A new or
+changed hook raises Codex's "Hooks need review" prompt when a session starts, and
+gc's startup handling answers it with "Trust all and continue", which records the
+trust in the Codex home's `config.toml`. Codex keys that trust to the hook's place
+in the file and its content, which is why the script leaves a current
+registration where it stands.
+
+**Where a Codex call runs.** A Codex shell call names its working directory in a
+`workdir` argument, and the hook payload carries neither that argument nor the
+directory: its `cwd` is the session's. Codex records each call the model makes in
+the session transcript before it runs the hook. The guard finds the call there by
+the payload's `transcript_path` and `tool_use_id`, reads its `workdir`, and
+measures the call in that directory. A relative `workdir` resolves against the
+session's directory, and a call with none runs in the session's directory. A
+payload carrying `turn_id` is Codex's; Claude's carries none and is never looked
+up.
+
+A call made from inside Codex's code-mode tool has no transcript line of its own,
+so its directory is unknown. The same holds for a session with no transcript and
+for a `workdir` that does not exist. A write that would resolve against an unknown
+directory is refused. A write that names its repository with `--repo`, a URL,
+`GH_REPO`, or a `gh api` endpoint path is measured as usual, and reads pass.
+
 ## What it does not cover
 
 The hook inspects the command an agent types into Bash. These are outside it:
@@ -218,24 +268,30 @@ The hook inspects the command an agent types into Bash. These are outside it:
   repository in the query body, and an endpoint such as `gists` or `user` names
   no repository to measure. The origin rule leaves both alone; a graphql
   mutation that posts is still held to the mark.
-- **Codex agents.** `dog` and `polecat-codex` never read
-  `.claude/settings.json`, so no `.claude` hook reaches them.
+- **A Codex session gc did not start.** The Codex home's registration is read by
+  every Codex session, but it finds the guard through `$GC_RIG_ROOT` and
+  `$GC_CITY_PATH`, and a session started by hand sets neither, so it runs no
+  guard.
 - **A missing `jq`.** The hook parses its payload with `jq` and stays silent
   without it.
 - **A determined bypass.** `bash -c`, a wrapper script, or a here-doc all reach
-  `gh` without matching. This guards reach by accident, and it is not a sandbox.
+  `gh` without matching, and so does text Codex writes into a shell it already
+  started, which Codex sends to no hook. This guards reach by accident, and it is
+  not a sandbox.
 
 ## Wiring
 
-An agent takes exactly one `overlay_dir`. Agents that already ship a hook get
-the guard registered inside their own overlay's `settings.json`, and the rest
-take `overlays/gh-origin-guard`:
+A Claude agent takes exactly one `overlay_dir`. Agents that already ship a hook
+get the guard registered inside their own overlay's `settings.json`, and the rest
+take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and runs
+`gh-origin-guard-codex.sh` as `pre_start` instead ([Codex](#codex)):
 
-| Overlay | Agents |
+| Registration | Agents |
 |---|---|
 | `overlays/work-context` | polecat |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
 | `overlays/gh-origin-guard` | converse-opus, converse-fable, mechanik, proactive, demo |
+| the Codex home, by `pre_start` | polecat-codex, converse-codex, dog |
 
 Every registration runs the same command, which resolves the script from
 `$GC_RIG_ROOT` and then from `$GC_CITY_PATH/rigs/gc-toolkit`. Both are set by
@@ -247,10 +303,18 @@ writes are allowed.
 ## Tests
 
 `assets/scripts/gh-origin-guard.test.sh` runs the shipped script against local
-repositories with fabricated remotes. It asserts both directions, because a
-guard that refuses everything and a guard that refuses nothing are equally
-broken and equally quiet.
+repositories with fabricated remotes, and Codex payloads against fabricated
+session transcripts. It asserts both directions, because a guard that refuses
+everything and a guard that refuses nothing are equally broken and equally
+quiet.
+
+`assets/scripts/gh-origin-guard-codex.test.sh` runs the shipped registration
+script against scratch Codex homes: what it writes, what it keeps, what it
+leaves alone, and what it refuses to overwrite.
 
 `assets/scripts/gh-origin-guard-wiring.test.sh` enumerates `agents/` and fails
-when a claude-provider agent is left uncovered. An unwired agent is invisible at
-runtime, since it looks exactly like one whose writes were all legitimate.
+when an agent is left uncovered: a Claude agent without an overlay registering
+the guard, or a Codex agent whose `pre_start` does not register it. It also
+fails when the Codex registration's command differs from the overlays'. An
+unwired agent is invisible at runtime, since it looks exactly like one whose
+writes were all legitimate.

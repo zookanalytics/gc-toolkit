@@ -36,6 +36,7 @@ This is infrastructure work. You:
 |----------|--------|-------------|
 | max_orphans_for_sql | formula default | Max stale dropped databases before escalating instead of forcing (default 20) |
 | warn_threshold | formula default | Orphan count that triggers a warning maintenance notice (default 5) |
+| protected_warn_threshold | formula default | Non-baseline (excludes active-rig) protected process count that triggers a separate warning maintenance notice (default 10) |
 
 ## Safety
 
@@ -69,6 +70,7 @@ Root only: true
 
 Variables:
   {{max_orphans_for_sql}}: Maximum stale dropped database count the formula auto-applies; above this, it escalates instead (default=20)
+  {{protected_warn_threshold}}: Non-baseline (non-active-rig) protected process count that triggers a separate warning maintenance notice (default=10)
   {{warn_threshold}}: Orphan count that triggers a warning maintenance notice (default=5)
 
 Steps (1):
