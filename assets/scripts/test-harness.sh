@@ -85,6 +85,7 @@ harness_init() {
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
+  export STUB_DELETE_SOURCE_HANG="" STUB_REOPEN_SOURCE_HANG="" STUB_REOPEN_SOURCE_STALL=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
   # behaviour every existing suite relies on); a file path serves that roster;
   # STUB_SESSION_LIST_RC models the read the liveness guard must fail closed on.
@@ -161,20 +162,28 @@ case "$sub" in
     # for a store that does carry the linkage. reopen-source performs the real
     # mutation: workflow_id and the session-affinity keys cleared, route
     # preserved, status open, assignee empty.
+    # A stall ignores SIGTERM, as the real commands do once they hold their
+    # per-bead lock, so only a SIGKILL ends it early. STUB_DELETE_SOURCE_HANG
+    # and STUB_REOPEN_SOURCE_HANG stall that many seconds after the result line
+    # is printed; STUB_REOPEN_SOURCE_STALL stalls before reopen-source writes.
     verb="${1:-}"; sid="${2:-}"
+    stall() { trap '' TERM; sleep "$1"; }
     case "$verb" in
       delete-source)
         [ -n "${STUB_DELETE_SOURCE_RC:-}" ] && { echo "gc: simulated delete-source failure" >&2; exit "${STUB_DELETE_SOURCE_RC}"; }
         echo "${STUB_DELETE_SOURCE_OUT:-result=already_clean source_bead_id=$sid matched_roots=0 matched_beads=0 closed=0 deleted=0 metadata_cleared=false}"
+        [ -n "${STUB_DELETE_SOURCE_HANG:-}" ] && stall "$STUB_DELETE_SOURCE_HANG"
         exit 0 ;;
       reopen-source)
         [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
+        [ -n "${STUB_REOPEN_SOURCE_STALL:-}" ] && stall "$STUB_REOPEN_SOURCE_STALL"
         tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
         jq -c --arg id "$sid" 'map(if .id == $id then
               (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
               | .status = "open" | .assignee = ""
             else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
         echo "result=reopened source_bead_id=$sid"
+        [ -n "${STUB_REOPEN_SOURCE_HANG:-}" ] && stall "$STUB_REOPEN_SOURCE_HANG"
         exit 0 ;;
       *) echo "gc stub: unsupported 'workflow $verb'" >&2; exit 2 ;;
     esac ;;
