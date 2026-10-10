@@ -18,7 +18,9 @@
 # guard, with gc, gh and escalate.sh stubbed:
 #   a bead that is not a merge-in child, and a mechanical bring-current, write
 #   nothing; a judgment on an approved PR files the visit FIRST, then
-#   re-requests and dismisses each standing approval; an unapproved PR, the
+#   re-requests and dismisses each standing approval, every one of an account
+#   that approved twice and one behind a later CHANGES_REQUESTED, re-requesting
+#   each account once; an unapproved PR, the
 #   city's own approval, and an already-answered situation dismiss nothing; a
 #   visit that does not land, unreadable reviews, an unresolved login, and a
 #   pr_url naming another PR dismiss nothing and exit 1; a dismissal that does
@@ -416,6 +418,23 @@ out=$(guard --bead MI2 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
 has "$out" "no approval stands to dismiss" "…finding nothing left to dismiss"
 eq "$(cat "$STUB_ESC_LOG")" "" "…and files no second visit"
+
+echo "# guard: every standing approval is dismissed, not only each account's latest"
+# A dismissed review drops out of the approval rule before each account's latest
+# is taken, so an older approval left standing would count again, and so would
+# one behind a later CHANGES_REQUESTED once pr-facts.sh dismisses that request.
+store "[$(mergein MI13), $(anchorrow AN1)]"
+reviews "$(approve human1 501),$(approve human1 504),$(approve human3 505),$(approve human3 506 CHANGES_REQUESTED)"
+fresh
+out=$(guard --bead MI13 --from "$A" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "it exits 0 once the visit holds the merge"
+has "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "an account's older approval is dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/504/dismissals" "…and its newer one"
+has "$(cat "$STUB_GH_LOG")" "reviews/505/dismissals" "an approval behind its author's later CHANGES_REQUESTED is dismissed too"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/506/dismissals" "…and the CHANGES_REQUESTED is left alone"
+eq "$(grep -c 'reviewers\[\]=human1' "$STUB_GH_LOG")" "1" "an account that approved twice is re-requested once"
+order_ok "reviewers\[\]=human1" "reviews/501/dismissals" && ok "…before its approvals are dismissed" || bad "the re-request must come before the dismissals"
+has "$out" "the approvals from human1 and human3 are dismissed" "the outcome names each account once"
 
 echo "# guard: a judgment bring-current on an unapproved PR dismisses nothing"
 store "[$(mergein MI3), $(anchorrow AN1)]"

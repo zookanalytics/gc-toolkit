@@ -39,7 +39,11 @@ REVIEW_VERDICT_DEF='
     latest_opinions($self) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
         approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") };
-  # The standing approvals themselves, one review per approving account.
+  # Every approval not yet dismissed, from each account other than $self, and
+  # not only the latest from each. This is the set a withdrawal dismisses. A
+  # dismissed review drops out before the latest is taken, so an older approval
+  # left standing would count again, and so would an approval behind a later
+  # CHANGES_REQUESTED from the same account once that request is dismissed.
   def standing_approvals($self):
-    [ latest_opinions($self)[] | select(.state == "APPROVED") ];
+    [ .[] | select((.user.login // "") != $self) | select(.state == "APPROVED") ];
 '

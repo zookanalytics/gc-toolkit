@@ -5,8 +5,9 @@
 #   (PRED)    review_verdict: each account other than the city takes its latest
 #             APPROVED or CHANGES_REQUESTED review; a dismissed review drops out
 #             before the latest is taken; a COMMENTED review is neither; a tie on
-#             the timestamp falls to the review id. standing_approvals names one
-#             review per approving account.
+#             the timestamp falls to the review id. standing_approvals names
+#             every outside approval not yet dismissed, and dismissing that set
+#             leaves no approver behind.
 #   (READERS) every reader of the rule sources this file and applies
 #             $REVIEW_VERDICT_DEF
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
@@ -35,6 +36,13 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 SELF="gc-city-bot"
 verdict() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'review_verdict($self)'; }
 approvals() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'[ standing_approvals($self)[] | .id ]'; }
+# The verdict after a withdrawal dismisses the standing approvals, and then after
+# every CHANGES_REQUESTED is dismissed too, the way pr-facts.sh clears a request
+# once its findings close.
+withdrawn() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'
+  [ standing_approvals($self)[] | .id ] as $ids
+  | map(if (.id as $i | any($ids[]; . == $i)) then .state = "DISMISSED" else . end)
+  | [ review_verdict($self), (map(if .state == "CHANGES_REQUESTED" then .state = "DISMISSED" else . end) | review_verdict($self)) ]'; }
 rv() { # id login state submitted_at
   printf '{"id":%s,"user":{"login":"%s"},"state":"%s","submitted_at":"%s"}' "$1" "$2" "$3" "$4"
 }
@@ -61,8 +69,11 @@ eq "$(verdict "[$(rv 2 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 1 human1 CHANG
    '{"veto":"","approver":"human1"}' "(PRED) a tie on the timestamp falls to the higher review id"
 
 echo "# the standing approvals"
-eq "$(approvals "[$(rv 1 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 3 human1 APPROVED 2026-08-22T00:00:00Z),$(rv 2 human2 APPROVED 2026-08-21T00:00:00Z),$(rv 4 $SELF APPROVED 2026-08-21T00:00:00Z),$(rv 5 human3 APPROVED 2026-08-20T00:00:00Z),$(rv 6 human3 CHANGES_REQUESTED 2026-08-23T00:00:00Z)]")" \
-   '[3,2]' "(PRED) one review per approving account, its latest, never the city's and never one a later CHANGES_REQUESTED replaced"
+STANDING="[$(rv 1 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 3 human1 APPROVED 2026-08-22T00:00:00Z),$(rv 2 human2 APPROVED 2026-08-21T00:00:00Z),$(rv 4 $SELF APPROVED 2026-08-21T00:00:00Z),$(rv 5 human3 APPROVED 2026-08-20T00:00:00Z),$(rv 6 human3 CHANGES_REQUESTED 2026-08-23T00:00:00Z),$(rv 7 human2 DISMISSED 2026-08-24T00:00:00Z)]"
+eq "$(approvals "$STANDING")" '[1,3,2,5]' \
+   "(PRED) every outside approval not yet dismissed: an account's older approval and one behind its later CHANGES_REQUESTED included, never the city's and never a dismissed review"
+eq "$(withdrawn "$STANDING")" '[{"veto":"human3","approver":""},{"veto":"","approver":""}]' \
+   "(PRED) dismissing the standing approvals leaves no approver, and none comes back once the later CHANGES_REQUESTED is dismissed"
 
 echo "# every reader sources the one definition"
 READERS="assets/scripts/merge.sh
