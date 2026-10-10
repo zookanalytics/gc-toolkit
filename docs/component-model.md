@@ -303,7 +303,8 @@ Design rule 1 of `specs/2026-08-rewrite/plan.md` holds that every component
 belongs to one of six workflows (work, review, merge, visit, feedback, patrol)
 or is a declared shared primitive. Below is that assignment for the tree as it
 stands: every order, formula, service, and `assets/scripts` entry a running
-city executes, with nothing unplaced and no row carrying any other value.
+city executes, and every GitHub workflow one of them dispatches, with nothing
+unplaced and no row carrying any other value.
 
 **What the index does not place.** Three exclusions, each mechanical:
 
@@ -350,7 +351,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
 | `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. It also keeps each walk's seen marks, what it saw of each anchor at its last visit, so an arm can put first the anchors that changed since. The paced arms source it, and `gctk merge` carries the same rotation. |
-| `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
+| `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. Where the base carries `.github/workflows/test-merged.yml`, it dispatches that workflow and lands the PR only on a passing `test-merged` status naming the base's current tip. |
+| `.github/workflows/test-merged.yml` | merge | Produces the verdict `merge.sh` lands a PR on. Dispatched for a PR whose merge is otherwise ready, it merges the PR's head into the base commit it was dispatched at, runs the `*.test.sh` suite there, and reports the result as the `test-merged` status on the head, naming that commit. |
 | `assets/scripts/review-verdict.sh` | merge | The approval rule as one jq definition: each outside account's latest approving or change-requesting review decides. `merge.sh` lands on it, `pr-facts.sh` brings only an approved PR's branch current by it, and `bring-current-guard.sh` reads the approvals a judgment-laden bring-current dismisses. |
 | `assets/scripts/bring-current-guard.sh` | merge | Keeps an approval from covering code it never saw. Run at a merge-in child's handoff, it classifies the bring-current as mechanical, which leaves the approval standing, or as judgment, which files a visit on the anchor and dismisses the approval. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |

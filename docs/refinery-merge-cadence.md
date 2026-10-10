@@ -131,7 +131,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
-   that the merge result keeps `generated/seed-audit` current, re-read the full
+   that the merge result keeps `generated/seed-audit` current and that the test
+   suite passes on it, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
@@ -183,11 +184,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    refusal of the transition's own write, which a bare `--set-metadata` on the
    same bead is not subject to.
 
-   The seed-audit check is the one gate here that is a property of the merge
-   rather than of the head. `generated/seed-audit` is rendered from the whole
-   source tree and committed per branch, so a PR carrying a render made at an
-   older base overwrites prompt inputs it never saw, and two PRs that touch no
-   common file still clobber each other. Every `check.<gate>` marker is a
+   The seed-audit check and the merged test below are the two gates here that
+   are properties of the merge rather than of the head. `generated/seed-audit`
+   is rendered from the whole source tree and committed per branch, so a PR
+   carrying a render made at an older base overwrites prompt inputs it never
+   saw, and two PRs that touch no common file still clobber each other. Every
+   `check.<gate>` marker is a
    bare lane state bound to no commit and settles at any head once green, so
    it stays green while the base moves underneath, the pre-commit hook is
    branch-local, a rebase replays commits without running it, and `-diff` in
@@ -208,6 +210,31 @@ the cadence — the arms run whether or not any refinery session is awake.
    they do; per-input records move only where the input moved. The record is
    two lines, path then hash, because git needs one unchanged line between two
    changes to merge them and neighbouring entries in a flat list leave none.
+
+   The merged test answers what the required `test` check cannot. That check
+   ran on the PR merged into its base as the base stood at the PR's last push:
+   a `pull_request` run tests the merge commit GitHub computed at its event,
+   and a re-run reuses that commit. Branch protection that does not require
+   branches to be up to date lets the PR merge on that result after the base
+   has moved, so a check that scans the whole tree, landed on the base after
+   the run, and a PR that violates it both arrive green and leave the base red.
+   Where the base branch carries `.github/workflows/test-merged.yml`, the arm
+   lands a PR only on that workflow's `test-merged` commit status for the
+   base's current tip. The workflow runs the suite on the head merged into the
+   base commit it was dispatched at, and its status description ends with that
+   commit. A head with no status for the tip gets a dispatch
+   (`gh workflow run test-merged.yml --ref <base> -f pr=<n> -f head=<oid>`)
+   and a pending status that records it, so later passes wait on the run,
+   recording `progressing`, rather than dispatch again. A pending status older
+   than `MERGED_TEST_STALE_SECS` (3600) is a run that never reported, and the
+   arm dispatches again. A failing status holds the merge, records `blocked`,
+   and files one visit per PR under `merged-test-gate.<n>`. The way out is to
+   bring the head branch current, fix what fails, and push, or to re-run a run
+   that failed for a reason outside the PR, since a re-run reports for the same
+   base commit. Each merge moves the tip, so the PRs ready on one base land one
+   at a time, each after a run against the tip the previous landing made. A
+   base branch without the workflow owes no merged test, which is the case for
+   every rig whose repository does not carry it.
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

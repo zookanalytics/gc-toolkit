@@ -1,0 +1,131 @@
+name: test-merged
+
+# Runs the pack's *.test.sh suite on a pull request's head merged into the
+# current tip of its base branch, and reports the result as the `test-merged`
+# commit status on the head. merge.sh dispatches it for a pull request whose
+# merge is otherwise ready, and lands the pull request only on a passing status
+# that names the base's current tip.
+# The required `test` check cannot answer this. A pull_request run tests the
+# merge commit GitHub computed at its triggering event, a re-run reuses that
+# commit, and main's ruleset does not require the run to have seen main's
+# current tip. A check that scans the whole tree can then land on main after
+# the run, and a pull request that violates it still merges green.
+# The run checks out the dispatched branch, so github.sha is the base commit it
+# tests. The status description ends with " at <that commit>", which merge.sh
+# compares against the base's tip; the status state carries the verdict.
+# The suite runs the pull request's own code, so its job holds a read-only
+# token, and a second job that runs none of it posts the status. The test job's
+# merge and suite steps continue on error, so a failing pull request reports a
+# failing status on its own head and leaves this run, which GitHub attaches to
+# the base commit, green.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: The pull request number, which names the run and its concurrency group
+        required: true
+        type: string
+      head:
+        description: The pull request's head commit, merged into the dispatched branch and given the status
+        required: true
+        type: string
+
+run-name: "test-merged PR #${{ inputs.pr }} at ${{ inputs.head }}"
+
+# A newer dispatch for the same pull request tests a newer base or head, and
+# merge.sh reads only the status for the base's current tip, so the older run's
+# result would never be read.
+concurrency:
+  group: test-merged-${{ inputs.pr }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test-merged:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      inputs: ${{ steps.inputs.outcome }}
+      merge: ${{ steps.merge.outcome }}
+      suite: ${{ steps.suite.outcome }}
+    steps:
+      - name: Check the inputs
+        id: inputs
+        env:
+          PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.head }}
+        run: |
+          case "$PR" in ''|*[!0-9]*) echo "::error::pr must be a pull request number, not '$PR'"; exit 1 ;; esac
+          printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+            || { echo "::error::head must be a full commit SHA, not '$HEAD_SHA'"; exit 1; }
+
+      # The merge needs the history back to the head's fork point.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge the head into the base
+        id: merge
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ inputs.head }}
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          git -c user.name=test-merged -c user.email=test-merged@users.noreply.github.com \
+            merge --no-ff --no-edit "$HEAD_SHA"
+
+      # The same gctk toolchain as tests.yml.
+      - uses: actions/setup-go@v5
+        if: steps.merge.outcome == 'success'
+        with:
+          go-version-file: services/gctk/go.mod
+          cache: false
+
+      # The runner serves this job alone, so the suite takes every core, as it
+      # does in tests.yml. run-tests.sh defaults to half of them.
+      - name: Run the *.test.sh suite in parallel
+        id: suite
+        if: steps.merge.outcome == 'success'
+        continue-on-error: true
+        run: bash tools/run-tests.sh -j "$(getconf _NPROCESSORS_ONLN)"
+
+  # A cancelled run reports nothing. A newer run for the same pull request
+  # reports in its place, and merge.sh dispatches again once a pending status
+  # has gone unanswered too long.
+  report:
+    needs: test-merged
+    if: ${{ !cancelled() && needs.test-merged.outputs.inputs == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Report the result on the head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head }}
+          BASE: ${{ github.ref_name }}
+          BASE_SHA: ${{ github.sha }}
+          MERGE: ${{ needs.test-merged.outputs.merge }}
+          SUITE: ${{ needs.test-merged.outputs.suite }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$MERGE" = failure ]; then
+            state=failure; verdict=conflicted
+          elif [ "$MERGE" = success ] && [ "$SUITE" = success ]; then
+            state=success; verdict=passed
+          elif [ "$MERGE" = success ] && [ "$SUITE" = failure ]; then
+            state=failure; verdict=failed
+          else
+            # The suite did not finish: the checkout or the toolchain failed,
+            # or the test job stopped part-way.
+            state=error; verdict="did not run"
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state="$state" -f context=test-merged \
+            -f description="$verdict when merged into $BASE at $BASE_SHA" \
+            -f target_url="$RUN_URL"

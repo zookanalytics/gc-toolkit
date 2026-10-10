@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -43,6 +44,17 @@ import (
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
+
+// The merged test: the workflow that runs the suite on a PR's head merged into
+// its base's current tip, and the commit status it reports on the head. A
+// pending status older than MERGED_TEST_STALE_SECS (default
+// mergedTestStaleSecs) is a run that never reported, and the arm dispatches
+// again; the bound covers the run's 30-minute job timeout plus its time queued.
+const (
+	mergedTestWorkflow  = "test-merged.yml"
+	mergedTestContext   = "test-merged"
+	mergedTestStaleSecs = 3600
+)
 
 // prFields is the pinned read's field set, PR_FIELDS in bd-lib.sh, which the
 // script and pr-facts.sh read it from. A re-read asks for the same set, so the
@@ -744,6 +756,61 @@ func (m *merger) handle(row *gcbd.Bead) {
 		}
 	}
 
+	// --- the test suite AT THE MERGE RESULT ----------------------------------------
+	// The required checks ran on this PR merged into its base as the base stood at
+	// the PR's last push, and branch protection that does not require branches to
+	// be up to date lets it merge on that result after the base has moved. Where
+	// the base branch carries the test-merged workflow, the merge waits on that
+	// workflow's status for the base's current tip, dispatching it when no status
+	// names the tip (merge.sh's arm of the same name).
+	mt := m.mergedTestState(base, headOid)
+	mtAt := "'" + base + "' at " + shortSha(mt.tip)
+	switch mt.state {
+	case "off":
+		// the base owes no merged test
+	case "passed":
+		fmt.Fprintf(m.stdout, "%s: PR#%s passed test-merged, its tests merged into %s (anchor %s)\n", mergeProg, num, mtAt, id)
+	case "running":
+		m.recordMachine(id, "progressing", headOid, aroute)
+		fmt.Fprintf(m.stdout, "%s: PR#%s is waiting on test-merged, its tests merged into %s; merge held (anchor %s)\n", mergeProg, num, mtAt, id)
+		m.held++
+		return
+	case "missing":
+		if mtErr, rc := runCombined("gh", "workflow", "run", mergedTestWorkflow, "--repo", m.originRepoQ, "--ref", base,
+			"-f", "pr="+num, "-f", "head="+headOid); rc == 0 {
+			if _, prc := m.ghOrigin("-X", "POST", "repos/"+m.originRepo+"/statuses/"+headOid, "-f", "state=pending",
+				"-f", "context="+mergedTestContext, "-f", "description=running when merged into "+base+" at "+mt.tip,
+				"-f", "target_url=https://"+m.originHost+"/"+m.originRepo+"/actions/workflows/"+mergedTestWorkflow); prc != 0 {
+				fmt.Fprintf(m.stderr, "%s: WARN PR#%s test-merged was dispatched but its pending status did not post; the next pass dispatches again\n", mergeProg, num)
+			}
+			m.recordMachine(id, "progressing", headOid, aroute)
+			fmt.Fprintf(m.stdout, "%s: PR#%s has no test-merged result for %s; dispatched test-merged; merge held (anchor %s)\n", mergeProg, num, mtAt, id)
+		} else {
+			fmt.Fprintf(m.stdout, "%s: PR#%s has no test-merged result for %s, and dispatching test-merged failed: %s; merge held (anchor %s)\n", mergeProg, num, mtAt, strings.ReplaceAll(mtErr, "\n", " "), id)
+		}
+		m.held++
+		return
+	case "failed":
+		m.recordBlocked(id, headOid, aroute, "its tests fail merged into '"+base+"' at "+mt.tip+"; bring '"+headRef+"' current with '"+base+"', fix what fails, and push")
+		shownURL := mt.url
+		if shownURL == "" {
+			shownURL = "no run linked"
+		}
+		fmt.Fprintf(m.stdout, "%s: PR#%s fails test-merged, its tests merged into %s (%s); merge held (anchor %s)\n", mergeProg, num, mtAt, shownURL, id)
+		visitURL := mt.url
+		if visitURL == "" {
+			visitURL = "the status links no run"
+		}
+		m.escalate("--subject", id, "--key", "merged-test-gate."+num,
+			"--message", "PR#"+num+" fails its tests merged into '"+base+"' at "+mt.tip+"; the merge is held.\n\nThe required test check ran on this pull request merged into '"+base+"' as it\nstood at the pull request's last push, and '"+base+"' has moved since. The\ntest-merged workflow ran the suite on the head merged into the current tip, and\nit did not pass: "+visitURL+". Bring '"+headRef+"' current\nwith '"+base+"', fix what fails, and push; the new head is tested again before it\nlands. If the run failed for a reason outside this pull request, re-run it: a\nre-run reports for the same base commit.")
+		m.held++
+		return
+	default:
+		fmt.Fprintf(m.stdout, "%s: PR#%s cannot tell whether its tests pass merged into '%s': %s; merge held (anchor %s)\n", mergeProg, num, base, mt.why, id)
+		m.held++
+		return
+	}
+
 	// --- terminal re-read: the FULL anchor-local authorization set ----------------
 	final, ok := m.anchorRow(id)
 	if !ok {
@@ -1121,6 +1188,98 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 	}
 	sort.Strings(out)
 	return "known", out
+}
+
+// mergedTest is merged_test_state's answer: state is off, passed, failed,
+// running, missing or unknown; tip is the base's current tip once read; url is
+// the run a failing status links; why says what an unknown read could not
+// answer.
+type mergedTest struct {
+	state, tip, url, why string
+}
+
+var reFullSha = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// mergedTestState is merge.sh's merged_test_state: the merged-test verdict for
+// head on branch. The branch owes none unless it carries the workflow, and a
+// read that does not answer is unknown, which the caller holds on. Statuses
+// come newest first, so the first one naming the tip is its verdict.
+func (m *merger) mergedTestState(branch, head string) mergedTest {
+	mt := mergedTest{state: "unknown"}
+	// gh answers a 404 with the error body on stdout, ignoring --jq, and a
+	// non-zero exit. Only that body tells a branch without the workflow from a
+	// read that failed.
+	probeRaw, prc := m.ghOrigin("repos/"+m.originRepo+"/contents/.github/workflows/"+mergedTestWorkflow+"?ref="+branch,
+		"--jq", `.type // ""`)
+	probe := strings.TrimRight(string(probeRaw), "\n")
+	if prc != 0 {
+		var body map[string]json.RawMessage
+		if json.Unmarshal([]byte(probe), &body) == nil && body != nil && jqAltString(body["status"]) == "404" {
+			mt.state = "off"
+		} else {
+			mt.why = "the workflow file on '" + branch + "' could not be read"
+		}
+		return mt
+	}
+	if probe != "file" {
+		mt.why = "the workflow file on '" + branch + "' could not be read"
+		return mt
+	}
+	tipRaw, trc := m.ghOrigin("repos/"+m.originRepo+"/branches/"+branch, "--jq", `.commit.sha // ""`)
+	tip := strings.TrimRight(string(tipRaw), "\n")
+	if trc != 0 || !reFullSha.MatchString(tip) {
+		mt.why = "the tip of '" + branch + "' could not be read"
+		return mt
+	}
+	mt.tip = tip
+	raw, rc := m.ghOrigin("repos/" + m.originRepo + "/commits/" + head + "/statuses?per_page=100")
+	if rc != 0 {
+		mt.why = "the statuses on " + head + " could not be read"
+		return mt
+	}
+	// Exactly one array, as the script's slurp demands: a body cut short or
+	// followed by anything is unreadable rather than read in part.
+	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
+	var rows []json.RawMessage
+	var extra json.RawMessage
+	if dec.Decode(&rows) != nil || rows == nil || dec.Decode(&extra) != io.EOF {
+		mt.why = "the statuses on " + head + " could not be read"
+		return mt
+	}
+	stale := envCount("MERGED_TEST_STALE_SECS", mergedTestStaleSecs)
+	for _, r := range rows {
+		var s map[string]json.RawMessage
+		if json.Unmarshal(r, &s) != nil || s == nil {
+			continue
+		}
+		var ctx string
+		if json.Unmarshal(s["context"], &ctx) != nil || ctx != mergedTestContext {
+			continue
+		}
+		if !strings.HasSuffix(jqAltString(s["description"]), " at "+tip) {
+			continue
+		}
+		var state string
+		_ = json.Unmarshal(s["state"], &state)
+		switch state {
+		case "success":
+			mt.state = "passed"
+		case "failure", "error":
+			mt.state = "failed"
+			mt.url = strings.TrimRight(jqAltString(s["target_url"]), "\n")
+		case "pending":
+			mt.state = "missing"
+			if t, err := time.Parse("2006-01-02T15:04:05Z", jqAltString(s["created_at"])); err == nil &&
+				time.Since(t).Seconds() <= float64(stale) {
+				mt.state = "running"
+			}
+		default:
+			mt.why = "the statuses on " + head + " could not be read"
+		}
+		return mt
+	}
+	mt.state = "missing"
+	return mt
 }
 
 // --- sibling-script helpers -----------------------------------------------------
