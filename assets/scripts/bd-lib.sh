@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, and the gating-PR read the merge and pr-facts arms share. Sourced,
-# never executed.
+# queries it, the one-write create every script files a stamped bead through,
+# and the gating-PR read the merge and pr-facts arms share. Sourced, never
+# executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -132,6 +133,87 @@ bd_live_children() {
     | group_by(.a)[]
     | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
     | @tsv' 2>/dev/null
+}
+
+# bd_create <metadata-json> <gc-bd-create-args...> — file one bead with its
+# metadata in the same write, and print its id.
+#
+# The metadata a bead is born with is what its readers select it by: its
+# task_kind, the anchor it hangs on, the key its producer dedups on. Written in
+# a second `update --set-metadata`, it is missing whenever that write fails or
+# the create's id never comes back. No reader can see such a bead, so nothing
+# closes it, and the producer's next run files a stamped twin beside it.
+# `gc bd create --metadata` lands the payload in the bead's own row insert, so
+# the bead exists with its metadata or not at all.
+#
+# <metadata-json> must be a JSON object with at least one key. Anything else is
+# refused before a create runs, so this helper never files a bead with no
+# metadata. The other arguments are `gc bd create`'s own: the title, -t, -d or
+# --body-file - (stdin reaches the create), --status, --notes, --db and the
+# rest. The helper adds --metadata and --json.
+#
+# The bead is read back from the store the create wrote, and every key must
+# read back with the value written. Values compare as text, because bd keeps a
+# create's string values as strings while a --set-metadata re-stamp of the same
+# key can store a number.
+#
+# Returns:
+#   0  filed, and every key read back. Prints the id.
+#   1  nothing a reader can find was filed. Either the payload was refused, or
+#      bd refused the create (its reason goes to stderr), or no id came back, or
+#      the bead read back carrying none of the payload's keys and was closed
+#      (gc.outcome=abandoned) so that no reader meets it. A create whose reply
+#      was lost can still have landed whole, so a caller that files again
+#      first looks for the bead the way its own dedup does.
+#   2  filed, but the read-back could not be made or did not show every key as
+#      written. Prints the id. The bead carries at least part of its metadata,
+#      so a caller holds off acting on it and retries on its next run.
+bd_create() {
+  local meta="${1:-}" db="" prev="" a reply id row verdict err
+  shift || true
+  printf '%s' "$meta" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1 \
+    || { echo "bd_create: refusing to file a bead without a metadata object; nothing filed" >&2; return 1; }
+  meta=$(printf '%s' "$meta" | jq -c . 2>/dev/null) \
+    || { echo "bd_create: could not normalize the metadata payload; nothing filed" >&2; return 1; }
+  # The read-back and the close go to the store the create wrote.
+  for a in "$@"; do
+    [ "$prev" = "--db" ] && db="$a"
+    case "$a" in --db=*) db="${a#--db=}" ;; esac
+    prev="$a"
+  done
+  reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  bd_cache_clear
+  id=$(printf '%s' "$reply" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  if [ -z "$id" ] || [ "$id" = "null" ]; then
+    err=$(printf '%s' "$reply" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+    echo "bd_create: bd create returned no id${err:+: $err}" >&2
+    return 1
+  fi
+  row=$(bd_json show "$id" ${db:+--db "$db"} </dev/null)
+  verdict=$(printf '%s' "$row" | jq -r --arg id "$id" --argjson m "$meta" '
+    if type == "array" and ((.[0].id // "") == $id) then
+      ((.[0].metadata // {}) | if type == "object" then . else {} end) as $got
+      | if ($m | to_entries | all(.[]; . as $e | ($got | has($e.key))
+              and ((($got[$e.key] // "") | tostring) == (($e.value // "") | tostring)))) then "landed"
+        elif ($m | keys | all(.[]; . as $k | ($got | has($k)) | not)) then "bare"
+        else "partial" end
+    else "unreadable" end' 2>/dev/null)
+  case "$verdict" in
+    landed)
+      printf '%s\n' "$id"
+      return 0 ;;
+    bare)
+      gc bd update "$id" ${db:+--db "$db"} --status=closed --set-metadata gc.outcome=abandoned \
+        --append-notes "Unmade by bd_create: this bead landed without the metadata its create carried, so no reader could find it. Its producer files it afresh." \
+        </dev/null >/dev/null 2>&1 \
+        || echo "bd_create: could not close $id, which landed without its metadata" >&2
+      echo "bd_create: $id landed without its metadata and was closed; nothing filed" >&2
+      return 1 ;;
+    *)
+      echo "bd_create: $id was filed but its metadata did not read back as written (${verdict:-unreadable})" >&2
+      printf '%s\n' "$id"
+      return 2 ;;
+  esac
 }
 
 # The gating-PR read. The merge arm (merge.sh) and the pr-facts arm
