@@ -1039,11 +1039,10 @@ keys = [
 #   situation recurred while a verdict stood (an integer string, absent reads as
 #   0, read to decide whether to re-raise) and when it last did (RFC-3339 UTC).
 #   Overwritten each recurrence, never cleared.
-# stale_escalated_at / stale_escalated_to — how liveness-sweep.sh bounds its
-#   re-raise of a stale-routed bead to once per interval: the pass timestamp it
-#   last escalated at (survives a restart) and the route it escalated to (kept
-#   rather than overwritten with a guess). Absent means never escalated. Not
-#   cleared.
+# stale_escalated_at / stale_escalated_to — RETIRED. Nothing writes or reads
+#   these: an anchor whose PR is open is a named wait however long the PR sits,
+#   so no pass escalates it for its age. Registered so that residue on a
+#   pre-retirement bead reads as known, not as a stray.
 # visit.recheck — a recheck command liveness-sweep.sh stamps on a visit, which
 #   converse-recheck-hook.sh and liveness-recheck.sh run to re-test the
 #   condition. A shell snippet.
