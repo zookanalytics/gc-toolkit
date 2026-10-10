@@ -14,7 +14,7 @@
 # pre-existing target failure filed a fresh P1, on every refinery, for as long as
 # the failure persisted. The dedup guard had never once run.
 #
-# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has five
+# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has six
 # load-bearing parts, and this test pins each of them:
 #   1. the REAL flag, `--title-contains` (a case-insensitive title substring);
 #   2. a SHAPE check on the result, so an unreadable bd — which also produces an
@@ -38,6 +38,12 @@
 #      failure observed on an integration branch. A readable bead is a
 #      NON-EMPTY array, and the default stands in only for a bead that was read
 #      and genuinely carries no target.
+#   6. a probe over EVERY status a live tracker can hold, passed as one comma
+#      list because a repeated --status keeps only its last value. A red
+#      persists while someone fixes it, so its tracker is usually in_progress,
+#      or blocked under a hold, and a probe blind to those statuses files a
+#      second P1 beside it. A CLOSED tracker does not count: a red that
+#      outlives a landed fix is new information and gets its own bead.
 #
 # This EXECUTES the real snippet extracted verbatim from the formula (between the
 # markers) against a fake `gc`, so the test cannot drift from the shipped
@@ -60,7 +66,15 @@ mkdir -p "$TMP/bin"
 # --- gc stub: models the reads/writes the dedup snippet performs. -------------
 #   gc runtime drain-ack   -> no-op (exit 0)
 #   gc bd list ... --json  -> emit a list per LIST_SCENARIO:
-#       dup        -> one open bug whose title contains the token
+#       dup        -> one bug whose title contains the token, in status
+#                     $TWIN_STATUS (default open). It is listed only when the
+#                     status filter the snippet passed admits that status, the
+#                     way bd filters: --status takes one comma list, a repeated
+#                     --status keeps only its last value, and a --status decides
+#                     alone even beside --all. --status all and a bare --all
+#                     admit every status, and with neither flag a closed or a
+#                     pinned bead is left out. Otherwise the result is the
+#                     readable empty array [].
 #       nodup      -> readable EMPTY result, i.e. the JSON array []
 #       unreadable -> EMPTY stdout, exit 0 — bd's fails-open behavior, which the
 #                     snippet must treat as UNKNOWN, never as "no duplicate"
@@ -94,8 +108,33 @@ case "$2" in
       echo "Error: unknown flag: --search" >&2
       exit 0
     fi
+    status=""; all=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status=*) status="${1#--status=}" ;;
+        --status|-s) status="${2:-}"; [ $# -gt 1 ] && shift ;;
+        --all) all=1 ;;
+      esac
+      shift
+    done
+    twin="${TWIN_STATUS:-open}"
+    listed=""
+    if [ "$status" = "all" ]; then
+      listed=1
+    elif [ -n "$status" ]; then
+      case ",$status," in *",$twin,"*) listed=1 ;; esac
+    elif [ -n "$all" ]; then
+      listed=1
+    else
+      case "$twin" in closed|pinned) ;; *) listed=1 ;; esac
+    fi
     case "${LIST_SCENARIO:-nodup}" in
-      dup)        printf '[{"id":"tk-dup01","title":"Pre-existing failure: test_widget_rebase (fails on main)"}]\n' ;;
+      dup)
+        if [ -n "$listed" ]; then
+          printf '[{"id":"tk-dup01","title":"Pre-existing failure: test_widget_rebase (fails on main)","status":"%s"}]\n' "$twin"
+        else
+          printf '[]\n'
+        fi ;;
       nodup)      printf '[]\n' ;;
       unreadable) : ;;   # empty stdout — bd fails open (error to stderr, nothing on stdout)
       badflag)    : ;;
@@ -150,12 +189,12 @@ sed -i.bak -e 's/<failing test name or error symbol>/test_widget_rebase/' \
   -e 's|<the check that failed, the package or target it ran in, and its raw output>|--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS|' "$BLK" \
   && rm -f "$BLK.bak"
 
-# run <list-scenario> [show-scenario] -> echo the snippet's exit code; leaves
-# $FAKE_META and $FAKE_BODY populated.
+# run <list-scenario> [show-scenario] [twin-status] -> echo the snippet's exit
+# code; leaves $FAKE_META and $FAKE_BODY populated.
 run() {
   : > "$FAKE_META"
   : > "$FAKE_BODY"
-  if LIST_SCENARIO="$1" SHOW_SCENARIO="${2:-target}" WORK=work-1 bash "$BLK" >/dev/null 2>&1; then
+  if LIST_SCENARIO="$1" SHOW_SCENARIO="${2:-target}" TWIN_STATUS="${3:-open}" WORK=work-1 bash "$BLK" >/dev/null 2>&1; then
     echo 0
   else
     echo "$?"
@@ -278,6 +317,28 @@ if grep -q '^CREATE_RAN$' "$FAKE_META"; then
 else
   ok "(G) unresolved work bead -> nothing filed"
 fi
+
+# (H) THE STATUS SET. A twin in any live status is the failure's tracker. The
+#     stub lists it only when the --status the snippet passed admits its
+#     status, so each case below pins one member of the set the probe sends.
+#     An open-only probe misses every case but open. in_progress (a worker is
+#     fixing the red) and blocked (a hold parks it) are the ones a re-observed
+#     red usually meets.
+for st in open in_progress blocked deferred hooked pinned; do
+  eq "$(run dup target "$st")" "0" "(H) $st twin -> snippet proceeds (exit 0)"
+  if grep -q '^CREATE_RAN$' "$FAKE_META"; then
+    bad "(H) filed a bug beside a $st twin — the probe's status set does not admit $st"
+  else
+    ok "(H) $st twin found -> no second bead filed"
+  fi
+done
+
+# (I) A CLOSED twin does not suppress the filing: a red that outlives a landed
+#     fix is new information. A probe widened to every status (--all, or a set
+#     that names closed) would read the closed bead as the tracker and file
+#     nothing.
+eq "$(run dup target closed)" "0" "(I) closed twin -> snippet proceeds (exit 0)"
+eq "$(grep -c '^CREATE_RAN$' "$FAKE_META")" "1" "(I) closed twin -> exactly one new bead filed"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

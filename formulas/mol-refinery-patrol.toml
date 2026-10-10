@@ -467,7 +467,13 @@ FAILLOG
 # --title-contains is the real flag (case-insensitive title substring).
 # NOT --search: bd has no such flag, and rejects it with "unknown flag" on
 # stderr while leaving stdout EMPTY — which reads as "no duplicate found".
-DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
+# The probe reads every status a live tracker can hold, in one comma list,
+# because a repeated --status keeps only its last value. A red persists while
+# someone fixes it, so the next gate to see it usually finds its tracker
+# in_progress, or blocked under a hold. Closed is left out, because a red that
+# outlives a landed fix is new information and gets its own bead.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+DUP_JSON=$(gc bd list --type=bug --status="$LIVE_STATUSES" --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
 # SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
 # so an unreadable list cannot be told from a genuine "no match" — and
 # guessing "no match" is precisely what files the duplicate. A readable
