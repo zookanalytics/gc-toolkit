@@ -281,6 +281,81 @@ out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
 has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
 has "$out" "beta=0" "…and runs the part it names"
 
+# harness_run_parts: a suite that declares parts, run directly, runs each part in
+# a process of its own, the way tools/run-tests.sh runs it. The fixture suite
+# records what each run was told, and its group one leaves state in its shell
+# and in its stub fixtures for group two to find. PARTS_FAIL and PARTS_CRASH
+# make a group fail an assertion, or exit before its tally.
+PARTS_DIR="$TMP/parts"; mkdir -p "$PARTS_DIR"
+export PARTS_HARNESS="$HERE/test-harness.sh" PARTS_STATE="$PARTS_DIR/runs"
+parts_fixture() { # <file> <head|late: where the declaration sits>
+  {
+    echo '#!/usr/bin/env bash'
+    [ "$2" = head ] && echo '# run-tests-parts: one two three'
+    echo 'set -uo pipefail'
+    [ "$2" = late ] && echo '# run-tests-parts: one two three'
+    cat <<'F'
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-parts-fixture.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+. "$PARTS_HARNESS"
+harness_init
+echo "${RUN_TESTS_PART-unset}|${RUN_TESTS_PARTS-unset}|$*" >> "$PARTS_STATE"
+if part one; then
+  LEFT_BY_ONE=1; echo '[]' > "$GH_DIR/left_by_one.json"
+  ok "one"
+fi
+if part two; then
+  eq "${LEFT_BY_ONE:-unset}" "unset" "two starts without the shell state one left"
+  if [ -e "$GH_DIR/left_by_one.json" ]; then bad "two reads the stub fixture one left"; else ok "two starts without the stub fixtures one left"; fi
+  [ "${PARTS_CRASH:-}" != two ] || exit 3
+fi
+if part three; then
+  ok "three"
+  [ "${PARTS_FAIL:-}" != three ] || bad "three fails as asked"
+fi
+echo
+echo "passed: $PASS  failed: $FAIL"
+[ "$FAIL" -eq 0 ]
+F
+  } > "$1"
+}
+parts_fixture "$PARTS_DIR/head.test.sh" head
+parts_fixture "$PARTS_DIR/late.test.sh" late
+# direct [NAME=value...] bash <suite> [arg...] — run a fixture with no part
+# named, as a person or the refinery runs a suite, whatever this shell exported.
+# Sets OUT, RC, RUNS (one part|parts|args line per run) and TALLY (the last line).
+direct() {
+  : > "$PARTS_STATE"
+  OUT="$(unset RUN_TESTS_PART RUN_TESTS_PARTS; env "$@" 2>&1)"; RC=$?
+  RUNS="$(tr '\n' ';' < "$PARTS_STATE")"; TALLY="$(printf '%s\n' "$OUT" | tail -n 1)"
+}
+direct bash "$PARTS_DIR/head.test.sh" x y
+eq "$RC" "0" "harness_run_parts: run directly, a suite with parts passes when every part does"
+eq "$RUNS" "one|one two three|x y;two|one two three|x y;three|one two three|x y;" \
+  "…running each declared part once, in order, told its part, every declared part and the suite's arguments"
+has "$OUT" "ok   - two starts without the stub fixtures one left" "…each in a process of its own, so no part reads the fixtures an earlier part left"
+has "$OUT" "ok   - two starts without the shell state one left" "…or the shell state"
+eq "$(printf '%s\n' "$OUT" | grep -cE '^passed: [0-9]+  failed: [0-9]+$')" "1" "…printing one tally line"
+eq "$TALLY" "passed: 4  failed: 0" "…last, summed over the parts"
+has "$OUT" "# part two: 2 passed, 0 failed" "…with each part's own count on a line of its own"
+direct PARTS_FAIL=three bash "$PARTS_DIR/head.test.sh"
+eq "$RC" "1" "harness_run_parts: a part that fails an assertion fails the run"
+has "$OUT" "FAIL - three fails as asked" "…printing that part's failure"
+has "$OUT" "# part three: 1 passed, 1 failed" "…in that part's count"
+eq "$TALLY" "passed: 4  failed: 1" "…and in the sum"
+direct PARTS_CRASH=two bash "$PARTS_DIR/head.test.sh"
+eq "$RC" "1" "harness_run_parts: a part that exits before its tally fails the run"
+has "$OUT" "FAIL - part two exited 3 with no failure counted" "…as one failure, naming the part and its exit"
+eq "$RUNS" "one|one two three|;two|one two three|;three|one two three|;" "…and the parts after it still run"
+eq "$TALLY" "passed: 2  failed: 1" "…their counts summed with it"
+direct RUN_TESTS_PART=two RUN_TESTS_PARTS="one two three" bash "$PARTS_DIR/head.test.sh"
+eq "$RUNS" "two|one two three|;" "harness_run_parts: a run told its part, as tools/run-tests.sh tells it, runs that part alone"
+hasnt "$OUT" "# ==== part" "…with no run per part under it"
+eq "$TALLY" "passed: 2  failed: 0" "…ending on the suite's own tally"
+direct bash "$PARTS_DIR/late.test.sh"
+eq "$RUNS" "unset|unset|;" "harness_run_parts: a declaration below the opening comment block is not one, so the suite runs once, every group in one process"
+has "$OUT" "FAIL - two reads the stub fixture one left" "…where a group reads the fixtures an earlier group left"
+eq "$RC" "1" "…and fails on them"
+
 # tomllib_python: each probe's PATH holds stand-in interpreters and a directory
 # with only the grep and sort the search runs, so no real Python on the host is
 # found. A stand-in answers the two questions the search asks: whether tomllib

@@ -6,6 +6,9 @@
 # JSON; tests assert on the logs, the store, and exit codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
 # exports STUB_* env the stubs read. No live city, network, gc, bd or gh.
+# Sourcing it only defines functions, except in a suite that declares run-tests
+# parts and is run directly: there it runs each part in a process of its own and
+# exits (harness_run_parts, at the end of this file).
 
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -1049,10 +1052,11 @@ STUB
 
 # Whether this run executes the named part of a suite that declares parts with
 # a `# run-tests-parts:` header (tools/run-tests.sh). The suite wraps each group
-# of sections in `if part <name>; then ... fi`. Run directly, with
-# RUN_TESTS_PART unset, every part runs. Under run-tests.sh only the run's own
-# part does, and a group under a name the header does not declare fails every
-# run, because no run would ever execute its sections.
+# of sections in `if part <name>; then ... fi`. Every run of such a suite names
+# its part in RUN_TESTS_PART, whether tools/run-tests.sh started it or a direct
+# run did (harness_run_parts, below), and executes only that part. A group under
+# a name the header does not declare fails every run, because no run would ever
+# execute its sections. With RUN_TESTS_PART unset, every group runs.
 part() { # <name>
   [ -n "${RUN_TESTS_PART:-}" ] || return 0
   if [ -n "${RUN_TESTS_PARTS:-}" ]; then
@@ -1084,3 +1088,70 @@ tomllib_python() {
   printf 'tomllib needs Python 3.11 or newer, and PATH has %s\n' "${found:-no python3}"
   return 1
 }
+
+# The parts a suite declares, read the way tools/run-tests.sh reads them: from
+# the opening comment block only, which ends at the first line that is neither a
+# comment nor blank, so a fixture further down that writes a declaration of its
+# own is not read as the suite's.
+harness_parts_of() { # <suite>
+  awk '/^#/ { if (sub(/^# run-tests-parts:[[:space:]]*/, "")) { print; exit } next }
+       /^[[:space:]]*$/ { next }
+       { exit }' "$1"
+}
+
+# Run a suite once per declared part, in declaration order, each run a process
+# of its own with RUN_TESTS_PART naming its part and RUN_TESTS_PARTS every
+# declared part, as tools/run-tests.sh runs it. A part's output goes to a file
+# rather than a pipe, so a background child the part leaves running cannot hold
+# the run open, and it is printed when the part ends. The part's own tally, its
+# last `passed: N  failed: M` line, is printed as a `# part <name>:` line
+# instead, and the run ends on one tally line summed over the parts. A part that
+# exits non-zero with no failure in its tally counts one, so that sum fails
+# whenever a part did.
+harness_run_parts() { # <suite> <parts> [<suite arg>...]
+  local suite="$1" logdir log tally rc i n m passed=0 failed=0
+  local -a parts=()
+  read -ra parts <<<"$2"
+  shift 2
+  logdir="$(mktemp -d "${TMPDIR:-/tmp}/harness-parts.XXXXXX")" || {
+    echo "FAIL - no temp directory for the parts' output"; return 1; }
+  for i in "${!parts[@]}"; do
+    log="$logdir/$i.log"
+    echo "# ==== part ${parts[$i]} (RUN_TESTS_PART=${parts[$i]}) ===="
+    rc=0
+    RUN_TESTS_PART="${parts[$i]}" RUN_TESTS_PARTS="${parts[*]}" \
+      "${BASH:-bash}" "$suite" "$@" >"$log" 2>&1 || rc=$?
+    tally="$(awk '/^passed: [0-9]+  failed: [0-9]+$/ { t = $0 } END { print t }' "$log")"
+    awk 'NR == FNR { if (/^passed: [0-9]+  failed: [0-9]+$/) last = FNR; next }
+         FNR != last' "$log" "$log"
+    if [ -n "$tally" ]; then
+      n="${tally#passed: }"; n="${n%% *}"; m="${tally##*failed: }"
+      echo "# part ${parts[$i]}: $n passed, $m failed"
+    else
+      n=0; m=0
+      echo "# part ${parts[$i]}: no passed/failed line"
+    fi
+    if [ "$rc" -ne 0 ] && [ "$m" -eq 0 ]; then
+      m=1; echo "FAIL - part ${parts[$i]} exited $rc with no failure counted"
+    fi
+    passed=$((passed + 10#$n)); failed=$((failed + 10#$m))
+  done
+  rm -rf "$logdir"
+  echo
+  echo "passed: $passed  failed: $failed"
+  [ "$failed" -eq 0 ]
+}
+
+# A suite that declares parts, run directly with RUN_TESTS_PART unset, runs each
+# part in a process of its own rather than every part in this one. A part then
+# starts from the suite's own setup, never from the temp files, stub fixtures or
+# shell state an earlier part left behind, so a direct run reports what
+# tools/run-tests.sh reports. This runs as the suite sources the harness, before
+# anything after its source line, and the process exits with the parts' result.
+if [ -z "${RUN_TESTS_PART:-}" ] && [ -f "$0" ]; then
+  HARNESS_PARTS="$(harness_parts_of "$0")"
+  if [ -n "$HARNESS_PARTS" ]; then
+    harness_run_parts "$0" "$HARNESS_PARTS" "$@"
+    exit $?
+  fi
+fi
