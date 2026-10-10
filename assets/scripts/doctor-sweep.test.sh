@@ -699,7 +699,7 @@ eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
 # guessed at.
 new_state dolt_probe_timeout
 : > "$STUB_LOG"
-export STUB_DOLT_SLEEP=3 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1
+export STUB_DOLT_SLEEP=3 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1 STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
 run
 has "$OUT" "state=started" "a health probe cut at its bound proceeds instead of deferring"
 has "$OUT" "note=Dolt health gate skipped: health probe gave no answer within 1s" "  ... and the report says the gate was skipped"
