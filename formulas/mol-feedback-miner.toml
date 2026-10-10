@@ -258,7 +258,7 @@ BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // emp
 
 # Non-atomic create→update: a crash between the two leaves an observation
 # without its provenance stamp, invisible to dedup. Accepted — low probability.
-gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --status=closed
+gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --status=closed
 echo "filed observation $BEAD ($KEY)"
 ```
 

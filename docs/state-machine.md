@@ -662,10 +662,9 @@ review's result set.
   review that read a mid-change diff would raise only the no-op rework the
   declination texts are full of.
   There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
-  would have bounded, and the runaway shapes it used to catch — a reviewer that
-  dies after claim, a rework child filed with its dependency edge reversed —
-  stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
-  stale-gate pass catches them, not a count on the check.
+  would have bounded, and the runaway shapes left — a reviewer that dies after
+  claim, a rework child filed with its dependency edge reversed — stop the PR
+  moving rather than spin the dispatcher.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR that is approved — a
   standing APPROVED review from an account other than the city's and no
   standing CHANGES_REQUESTED, the rule merge.sh lands on

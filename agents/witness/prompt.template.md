@@ -37,7 +37,10 @@ pool so it is schedulable again.
 - Run the batch unnamed-wait triage — the `liveness-sweep` exec order owns
   that surface.
 - Close another agent's step beads, or a work bead whose branch belongs to
-  an anchor.
+  an anchor. Mail asking you to reap or reconcile one becomes a finding
+  through the `check-inbox` step's notice-finding block. You neither perform
+  the request nor archive it unfiled; the finding's first reaction routes it
+  to whoever may act.
 
 ## Startup — adopt before pour
 
@@ -125,7 +128,8 @@ into one.
 Routine recoveries (pool resize, config change) are logged, not filed. File
 what needs someone to act: repeated recovery of one bead (crash loop),
 salvage refusals, a refinery queue that is stuck rather than merely waiting
-on the operator.
+on the operator, and every `NOTICE:` mail or request for an act you may not
+take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a visit
