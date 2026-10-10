@@ -1631,16 +1631,45 @@ bash -n "$SIGNOFF_SUT" && ok "converse-signoff.sh: valid bash" \
     || bad "converse-signoff.sh: valid bash" "bash -n failed"
 
 SO="$TMPD/so"; SOBIN="$SO/bin"; SOPACK="$SO/pack"; SOFOR="$SO/foreign"; SOCITY="$SO/city"; SOBARE="$SO/bare"
-mkdir -p "$SOBIN" "$SOPACK/assets/scripts" "$SOFOR" "$SOCITY/rigs/gc-toolkit/assets/scripts" "$SOBARE"
+SOST="$SO/state"   # one <id>.closed per demand a gate resolve or close landed on
+mkdir -p "$SOBIN" "$SOPACK/assets/scripts" "$SOFOR" "$SOCITY/rigs/gc-toolkit/assets/scripts" "$SOBARE" "$SOST"
 SOLOG="$SO/log"    # gc-helm.sh + lifecycle.sh calls, in order
-SOGC="$SO/gclog"   # gc bd gate/close calls
+SOGC="$SO/gclog"   # gc bd gate/close/update calls
 
 cat >"$SOBIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] || exit 2
+# The demand rows this store holds: a subject/anchor demand (SO_DEMAND, default
+# on — the explicit merge-hold case) and/or a demand on the visit
+# (SO_VISIT_DEMAND, default off — the conversation-wait case). SO_DEMAND_LIST
+# replaces both with a literal list, for the cases where sibling sittings hold
+# topic-keyed demands on one shared subject. SO_UNLISTED holds rows `bd show`
+# answers but the open listing leaves out, such as a demand an operator deferred.
+rows() {
+    if [ -n "${SO_DEMAND_LIST:-}" ]; then printf '%s\n' "$SO_DEMAND_LIST"; return; fi
+    items=""
+    [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","status":"open","metadata":{"gc.demand_for":"item-x"}}'
+    if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
+        [ -n "$items" ] && items="$items,"
+        items="$items"'{"id":"d-v","assignee":"","status":"open","metadata":{"gc.demand_for":"v-x"}}'
+    fi
+    printf '[%s]\n' "$items"
+}
+in_set() { case " ${2:-} " in *" $1 "*) return 0 ;; esac; return 1; }
+# A gate resolve or close lands unless the demand is in SO_STUCK, the store that
+# took the call and never wrote the close. A landed close reads back closed and
+# drops out of the open listing.
+land_close() { in_set "$1" "${SO_STUCK:-}" || : >"$SOST/$1.closed"; }
 case "${2:-}" in
     show)
-        case "${3:-}" in
+        id="${3:-}"
+        # SO_SHOW_FAIL: the read errors with no JSON. SO_MISSING: gc's not-found
+        # answer, a non-zero exit that still prints the not-found object.
+        if in_set "$id" "${SO_SHOW_FAIL:-}"; then echo "Error: invalid connection" >&2; exit 1; fi
+        if in_set "$id" "${SO_MISSING:-}"; then
+            echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
+        fi
+        case "$id" in
             v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
                     --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
                     '[{id:"v-x",metadata:(({"task_kind":"visit"}
@@ -1648,37 +1677,44 @@ case "${2:-}" in
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
-            *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
-                 else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
+            *)   row=$(rows | jq -c --arg id "$id" --argjson un "${SO_UNLISTED:-[]}" \
+                     '[(.[]?, $un[]) | select(.id == $id)] | .[0] // empty')
+                 if [ -n "$row" ]; then
+                     st=""; [ -e "$SOST/$id.closed" ] && st=closed
+                     printf '%s' "$row" | jq -c --arg st "$st" '[if $st == "" then . else .status = $st end]'
+                 elif [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "$id" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
+                 else jq -nc --arg id "$id" '[{id:$id,metadata:{}}]'; fi ;;
         esac ;;
     list)
-        # The demand list the discharge filters client-side: a subject/anchor demand
-        # (SO_DEMAND, default on — the explicit merge-hold case) and/or a demand on
-        # the visit (SO_VISIT_DEMAND, default off — the conversation-wait case).
-        # SO_DEMAND_LIST replaces both with a literal list, for the cases where
-        # sibling sittings hold topic-keyed demands on one shared subject.
-        if [ -n "${SO_DEMAND_LIST:-}" ]; then printf '%s\n' "$SO_DEMAND_LIST"
-        else
-            items=""
-            [ "${SO_DEMAND:-1}" = "1" ] && items='{"id":"d-x","assignee":"","metadata":{"gc.demand_for":"item-x"}}'
-            if [ "${SO_VISIT_DEMAND:-0}" = "1" ]; then
-                [ -n "$items" ] && items="$items,"
-                items="$items"'{"id":"d-v","assignee":"","metadata":{"gc.demand_for":"v-x"}}'
-            fi
-            printf '[%s]\n' "$items"
-        fi ;;
-    gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
-    close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
+        # SO_LIST_RC fails the listing outright. SO_LIST_RAW is printed instead at
+        # exit 0, for a listing that answers but does not parse.
+        if [ -n "${SO_LIST_RC:-}" ]; then echo "Error: search count issues: invalid connection" >&2; exit "$SO_LIST_RC"; fi
+        if [ -n "${SO_LIST_RAW+set}" ]; then printf '%s' "$SO_LIST_RAW"; exit 0; fi
+        closed=$(cd "$SOST" && ls 2>/dev/null | sed -n 's/\.closed$//p' | jq -R . | jq -sc .)
+        rows | jq -c --argjson c "$closed" '[.[]? | select((.id as $i | $c | index($i)) == null)]' ;;
+    gate)  printf 'GC: %s\n' "$*" >>"$SOGC"
+           [ "${SO_GATE_RC:-0}" = 0 ] && land_close "${4:-}"
+           exit "${SO_GATE_RC:-0}" ;;
+    close) printf 'GC: %s\n' "$*" >>"$SOGC"
+           [ "${SO_CLOSE_RC:-0}" = 0 ] && land_close "${3:-}"
+           exit "${SO_CLOSE_RC:-0}" ;;
     update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
     *) exit 2 ;;
 esac
 STUB
 chmod +x "$SOBIN/gc"
 so_helm() {   # <root> <marker> — a gc-helm.sh that logs each call with its root
+    # Its demand verb prints the `demand <id>` line callers read the id from, or
+    # exits SO_HELM_DEMAND_RC and prints nothing, as a demand that did not land.
     cat >"$1/assets/scripts/gc-helm.sh" <<HELM
 #!/usr/bin/env bash
 printf 'helm[$2] %s\n' "\$*" >>"\$SOLOG"
-case "\${1:-}" in takeaway|demand) exit 0 ;; *) exit 2 ;; esac
+case "\${1:-}" in
+    takeaway) exit 0 ;;
+    demand)   [ "\${SO_HELM_DEMAND_RC:-0}" = 0 ] || exit "\$SO_HELM_DEMAND_RC"
+              echo "demand \${SO_RESTATED:-d-s} blocks \$2 (by converse): \$3" ;;
+    *) exit 2 ;;
+esac
 HELM
     chmod +x "$1/assets/scripts/gc-helm.sh"
 }
@@ -1687,7 +1723,8 @@ so_helm "$SOCITY/rigs/gc-toolkit" CITY
 cat >"$SOPACK/assets/scripts/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 case "${1:-}" in
-    state)      printf '%s\n' "${STUB_STATE:-held}" ;;
+    state)      if [ -n "${STUB_STATE_RC:-}" ]; then echo "lifecycle: ${2:-} unreadable" >&2; exit "$STUB_STATE_RC"; fi
+                printf '%s\n' "${STUB_STATE:-held}" ;;
     transition) printf 'lc %s\n' "$*" >>"$SOLOG"; exit 0 ;;
     *) exit 2 ;;
 esac
@@ -1697,15 +1734,25 @@ chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
 # run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
 # non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
 # a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
-# GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs.
+# GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs, and the
+# store's closes too unless SO_KEEP=1 (a re-run against the store a first run
+# left behind).
 SOARGS=()
-SO_OUT=""; SO_RC=0
+SO_OUT=""; SO_RC=0; SO_KEEP=0
 run_so() {
     : >"$SOLOG"; : >"$SOGC"
+    [ "$SO_KEEP" = 1 ] || rm -f "$SOST"/*.closed
     SO_OUT="$(cd "$SOBARE" && env PATH="$SOBIN:$PATH" \
         GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" GIT_CEILING_DIRECTORIES="$TMPD" \
-        SOLOG="$SOLOG" SOGC="$SOGC" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
+        SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
     SO_RC=$?
+}
+# no_writes <label> — the run reached no writer: no gc-helm.sh or lifecycle.sh
+# call, and no gc bd gate, close or update.
+no_writes() {
+    if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then
+        bad "$1" "a write reached the store: $(cat "$SOLOG" "$SOGC" | tr '\n' '|')"
+    else ok "$1"; fi
 }
 
 echo "── --ruled yes: record on the subject, resolve the gate, release a held subject ──"
@@ -1885,6 +1932,112 @@ SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "
 SOARGS=(--visit v-x --outcome "o — p" --ruled yes --ruling r);    run_so; eq "$SO_RC" "2" "--ruled yes without --route is refused"
 SOARGS=(--visit v-x --outcome "o — p" --ruled no);                run_so; eq "$SO_RC" "2" "--ruled no without --still-owed is refused"
 SOARGS=(--visit v-x --ruled no --still-owed z);                   run_so; eq "$SO_RC" "2" "a missing --outcome is refused"
+
+# A degraded store answers a read with an error. Taken as an empty answer, the
+# demand listing found no demand, the discharge skipped a gate that still
+# blocked the subject, and the sign-off exited 0 with the hold open. Every read
+# the discharge depends on now runs before the first write and stops the
+# sign-off (exit 1) when it does not answer, so nothing is written and the
+# sitting re-runs instead of signing off.
+echo "── a demand listing that fails stops the sign-off before any write ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_LIST_RC=1
+eq "$SO_RC" "1" "a failed demand listing exits 1"
+case "$SO_OUT" in *"NOT SIGNED OFF"*) ok "…and says the sitting is not signed off" ;;
+                  *) bad "…and says the sitting is not signed off" "got: $SO_OUT" ;; esac
+no_writes "…and writes nothing, not even the subject's takeaway"
+
+echo "── a listing that exits 0 but does not parse stops it too ──"
+for raw in 'Error: search count issues: invalid connection' ''; do
+    run_so SO_LIST_RAW="$raw"
+    eq "$SO_RC" "1" "a listing that answered '${raw:-<nothing>}' exits 1"
+    no_writes "…and writes nothing"
+done
+
+echo "── a visit that does not read stops the sign-off ──"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_SHOW_FAIL=v-x SO_VISIT_DEMAND=1
+eq "$SO_RC" "1" "an unreadable visit exits 1"
+no_writes "…before any write, because its topic and gc.hold_demand scope the discharge"
+
+echo "── the demand gc.hold_demand names is read directly ──"
+# The listing holds open and in_progress rows only, so a stamped demand an
+# operator deferred was never discharged. Read by its id, it is.
+DEFERRED='[{"id":"d-v","assignee":"","status":"deferred","issue_type":"gate","await_type":"human","await_id":"gc-demand:v-x","metadata":{"gc.demand_for":"v-x"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_DEMAND=0 SO_HOLD_DEMAND=d-v SO_UNLISTED="$DEFERRED"
+eq "$SO_RC" "0" "a ruling on a deferred stamped demand exits 0"
+have "…and resolves the demand the listing leaves out" 'bd gate resolve d-v --reason approved' "$SOGC"
+have "…and stamps the ruling on it once it reads back closed" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_HOLD_DEMAND=d-v SO_SHOW_FAIL=d-v
+eq "$SO_RC" "1" "a stamped demand that does not read exits 1"
+no_writes "…and writes nothing"
+run_so SO_HOLD_DEMAND=d-gone SO_MISSING=d-gone
+eq "$SO_RC" "0" "a stamped demand that no longer exists blocks nothing, so the sign-off proceeds"
+have "…and still discharges what the listing holds" 'bd gate resolve d-x --reason approved' "$SOGC"
+
+echo "── a ruling stamps a demand only once its close reads back ──"
+# The incident shape: gate resolve fails, the close fallback fails, and the
+# ruling was stamped on a demand that still blocked, the open-but-settled shape
+# doctor/check-wait-is-an-edge reads as a discharged wait.
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_GATE_RC=1 SO_CLOSE_RC=1 SO_STUCK=d-x
+eq "$SO_RC" "1" "a demand neither resolve nor close could close exits 1"
+case "$SO_OUT" in *"DEMAND d-x DID NOT CLOSE"*) ok "…and names the demand" ;;
+                  *) bad "…and names the demand" "got: $SO_OUT" ;; esac
+lacks "…and stamps no ruling on it" 'takeaway d-x approved' "$SOLOG" \
+      "the ruling reached a demand that still blocks — open-but-settled"
+lacks "…and releases nothing" 'lc transition' "$SOLOG" "a held subject was released while its demand still blocks"
+lacks "…and stashes no close text on the visit" 'gc.pr_visit_summary' "$SOGC" \
+      "the sign-off ran past a demand it did not close"
+# A call can report success without the close landing, so the read-back decides.
+run_so SO_STUCK=d-x
+eq "$SO_RC" "1" "a resolve that exits 0 but leaves the demand open exits 1"
+lacks "…and stamps no ruling on it" 'takeaway d-x approved' "$SOLOG" \
+      "the exit status, not the read-back, decided the close"
+# Each demand is tried: one that closes gets its ruling, one that does not stops it.
+run_so SO_VISIT_DEMAND=1 SO_STUCK=d-x STUB_STATE=held
+eq "$SO_RC" "1" "a ruling that closes one demand of two exits 1"
+have "…the one that closed carries the ruling" 'helm[RIG] takeaway d-v approved --by converse --no-wait' "$SOLOG"
+lacks "…the one that did not carries none" 'takeaway d-x approved' "$SOLOG" \
+      "the ruling reached the demand whose close did not land"
+lacks "…and the held subject is not released" 'lc transition' "$SOLOG" "released while a demand still blocks"
+
+echo "── a cut-short re-states the wait before it closes the visit's demand ──"
+# Closed first, a visit demand whose re-state then failed left a re-run finding
+# neither demand, and the operator's open question was gone. The re-state now
+# lands first, so a re-run after a failed one finds the visit's demand again.
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_HELM_DEMAND_RC=4
+eq "$SO_RC" "1" "a re-state that does not land exits 1"
+lacks "…before the visit's demand is closed" 'gate resolve d-v' "$SOGC" \
+      "the visit demand was closed although the wait never re-stated on the subject"
+SO_KEEP=1
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1
+SO_KEEP=0
+eq "$SO_RC" "0" "the re-run against the same store signs off"
+have "…re-stating the wait on the subject" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+have "…and only then closing the visit's demand" 'gate resolve d-v' "$SOGC"
+run_so SO_DEMAND=0 SO_VISIT_DEMAND=1 SO_GATE_RC=1 SO_CLOSE_RC=1 SO_STUCK=d-v
+eq "$SO_RC" "1" "a visit demand that does not close exits 1"
+have "…with the wait already re-stated on the subject" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+lacks "…and no moved-wait note on the demand that did not close" 'takeaway d-v cut short' "$SOLOG" \
+      "the moved-wait note settled a demand that still gates the visit"
+
+echo "── a ruling reads the subject's lifecycle state before it writes ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so STUB_STATE_RC=2
+eq "$SO_RC" "1" "an unreadable lifecycle state exits 1"
+no_writes "…and writes nothing, since it cannot say whether to release"
+run_so STUB_STATE_RC=1
+eq "$SO_RC" "0" "a state lifecycle.sh refuses for another reason answers as not held"
+lacks "…so nothing is released" 'lc transition' "$SOLOG" "a subject whose state was refused was released"
+
+echo "── the exit contract is stated, and the settle step obeys it ──"
+have "the sign-off states what each exit means" 'Exit: 0 the trace is written and the hold discharged' "$SIGNOFF_SUT"
+have "…and that exit 1 forbids the sign-off" 'do NOT post the sign-off or close the visit' "$SIGNOFF_SUT"
+have "the settle step runs the sign-off as an if condition" 'if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh"' "$SK_SETTLE"
+have "…and stops without signing off when it fails" 'NOT signed off: a read failed, a demand did not close' "$SK_SETTLE"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
