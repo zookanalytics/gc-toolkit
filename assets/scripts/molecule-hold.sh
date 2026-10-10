@@ -24,12 +24,19 @@
 # holder, and that refusal is atomic over the whole update, so a
 # batched status+assignee call can lose the status too.
 #
+# The pool offers a step only when it is ready, unassigned and routed, so the
+# route that matters is the one on a bead nothing else holds back: the root, and
+# a step whose blockers inside the molecule are all closed. A step that waits
+# behind the held one cannot be offered while the hold stands, so it keeps its
+# route and loses only its claim, and lifting the hold resumes the chain as each
+# step becomes ready.
+#
 # Every route this script sets out to clear is load-bearing for the caller's
-# drain decision, not just for the log: callers drain on exit 0, and a molecule
-# still routed anywhere is re-offered however quiet its steps are. So any write
-# below the hold that fails exits 1, and a sibling whose route clear failed
-# keeps its assignee — the claim is the last thing holding it out of the pool's
-# `open + unassigned + routed` offer predicate.
+# drain decision, not just for the log: callers drain on exit 0, and a route
+# left on the root or on a step that is ready on its own re-offers the molecule
+# however quiet the rest of it is. So any write below the hold that fails exits
+# 1, and a sibling whose route clear failed keeps its assignee — the claim is the
+# last thing holding it out of the pool's offer.
 #
 # Callers: mol-polecat-work load-context's duplicate-dispatch arm; any polecat
 # arm that declines work it must not close.
@@ -305,24 +312,37 @@ fi
 
 # ── Quiesce the root's other steps. They are pre-assigned by the graph, so
 # they sit `open` and assigned inside the stranded-repair sweep's tier; a
-# drain-ack with them still assigned is what re-pools the molecule. Route
-# first, assignee second: the reverse order leaves a bead briefly
-# `open + unassigned + routed`, which is exactly the pool's offer predicate.
+# drain-ack with them still assigned is what re-pools the molecule. Every one
+# loses its claim.
+#
+# A step with a `blocks` edge to a member of this molecule that is not closed
+# waits: bd ready leaves it out, so the pool cannot offer it, and it keeps
+# gc.routed_to and gc.session_affinity. Every step behind the held one is such
+# a step. A step with no such blocker is ready on its own, and its route is all
+# that keeps the pool from offering it, so it is de-routed, route first and
+# assignee second: the reverse order leaves it briefly `open + unassigned +
+# routed`, which is exactly the pool's offer predicate. The listing takes
+# `blocked` too, because the held step and any other held member still block
+# the steps behind them. Only open and in_progress steps are quiesced.
 [ -n "$ROOT" ] || finish
 
-if ! SIB_JSON=$(bd_json_array list --status=open,in_progress --limit=0); then
+if ! SIB_JSON=$(bd_json_array list --status=open,in_progress,blocked --limit=0); then
   echo "$PROG: FATAL — could not enumerate sibling steps (bd list failed or returned a non-array); $TARGET is held, but its siblings' routes and claims are unproven and the molecule can still be re-offered" >&2
   QUIESCE_FAILED=1
   finish
 fi
 SIBLINGS=$(printf '%s' "$SIB_JSON" | jq -r --arg root "$ROOT" --arg self "$TARGET" '
-      .[]
-      | select((.metadata["gc.root_bead_id"] // "") == $root)
+      [ .[] | select((.metadata["gc.root_bead_id"] // "") == $root) ] as $mol
+      | (reduce ($mol[].id, $self) as $i ({}; .[$i] = true)) as $live
+      | $mol[]
       | select(.id != $self)
+      | select((.status // "") == "open" or (.status // "") == "in_progress")
       | select((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize") | not)
       | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
       | select(((.metadata["gc.routed_to"] // "") != "") or ((.assignee // "") != ""))
-      | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // "")]
+      | (if any(.dependencies[]? | select((.type // "") == "blocks") | (.depends_on_id // ""); $live[.] == true)
+         then "waits" else "ready" end) as $gate
+      | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // ""), $gate]
       | map(tostring) | join("\u001f")' 2>/dev/null)
 
 [ -n "$SIBLINGS" ] || finish
@@ -353,10 +373,10 @@ printf '%s\n' "$SIBLINGS" > "$ROWS" || {
 # $swho empty, skipping the unassign. 0x1F is not IFS-whitespace, so every empty
 # column still delimits, and bd_json's scrub strips 0x1F from field data so none
 # can carry one.
-while IFS=$'\x1f' read -r sid sstep srouted swho; do
+while IFS=$'\x1f' read -r sid sstep srouted swho sgate; do
   [ -n "${sid:-}" ] || continue
   QUIET=1
-  if [ -n "${srouted:-}" ]; then
+  if [ -n "${srouted:-}" ] && [ "${sgate:-}" != "waits" ]; then
     gc bd update "$sid" --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 \
       || { QUIET=0; echo "$PROG: FATAL — could not de-route sibling step $sid ($sstep); it re-offers" >&2; }
   fi
@@ -368,10 +388,12 @@ while IFS=$'\x1f' read -r sid sstep srouted swho; do
         || { QUIET=0; echo "$PROG: FATAL — could not unassign sibling step $sid ($sstep); the stranded-worker sweep can re-route it" >&2; }
     fi
   fi
-  if [ "$QUIET" = "1" ]; then
-    echo "$PROG: quiesced sibling step $sid ($sstep)"
-  else
+  if [ "$QUIET" = "0" ]; then
     QUIESCE_FAILED=1
+  elif [ "${sgate:-}" = "waits" ]; then
+    echo "$PROG: quiesced sibling step $sid ($sstep), route kept: it waits on an open step of this molecule"
+  else
+    echo "$PROG: quiesced sibling step $sid ($sstep)"
   fi
 done < "$ROWS"
 rm -f "$ROWS"

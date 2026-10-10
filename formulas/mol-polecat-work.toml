@@ -179,7 +179,7 @@ if [ -n "$WHY" ]; then
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
-  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id, clear gc.routed_to on it and on its gc.root_bead_id, and unassign the other steps under that root, clearing gc.routed_to only on one with no open blocker in the molecule, or the pool re-offers this step every cycle}"
   # The note is the bead's own record of the refusal. The hold reason on this
   # step carries the same text, so a note the store refuses is reported here
   # and the hold still runs.
@@ -213,9 +213,9 @@ fi
 
 **Hold this step; never close it.** Closing advances the workflow into
 workspace-setup, the branch-recreating step that destroys the live worker's
-uncommitted work. `molecule-hold.sh` sets the step `blocked` and clears the
-route on the step, on the molecule root, and on the root's other steps, which
-is the not-closed state that is also not claimable.
+uncommitted work. `molecule-hold.sh` sets the step `blocked`, clears the route
+on the step and on the molecule root, and clears the claims on the root's other
+steps, which is the not-closed state that is also not claimable.
 
 Leaving the step `open` instead is what respawns the pool. `open` is half the
 pool's offer predicate, so a fresh polecat claims the same step within minutes,
@@ -303,7 +303,7 @@ if [ -n "$OPEN_BLOCKERS" ]; then
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
-  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id, clear gc.routed_to on it and on its gc.root_bead_id, and unassign the other steps under that root, clearing gc.routed_to only on one with no open blocker in the molecule, or the pool re-offers this step every cycle}"
   gc bd update "$WORK_BEAD_ID" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" --set-metadata gc.deferred_assignee=""
   RELEASE_OK=0
   if [ -n "$POOL" ] && [ -x "$SCRIPTS/deferred-dispatch.sh" ] && "$SCRIPTS/deferred-dispatch.sh" arm "$WORK_BEAD_ID" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "bd-ready guard: blocked by $OPEN_BLOCKERS"; then

@@ -68,7 +68,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 48af9bb636e0eef6f3df93ec1ce9bc16e0b3aba88817a02a3d417e4ad4ac2ca7
 formulas/mol-polecat-work.toml
-bc68b63acadbe32c3ec5755bd6f7a307d7b0d7d2ce3a096ba39b9342f92c1c5f
+ba8e963ecc2b1cd7716f39b84c0d5b464991b0c081aa56b19daf6e5afae91687
 formulas/mol-refinery-patrol.toml
 9e39e5c9999dde4714235615b1e7ad96c11af70aa916288a79a7a9c8ef781b52
 formulas/mol-review-quorum-signoff.toml
@@ -80,7 +80,7 @@ formulas/mol-rig-demo.toml
 formulas/mol-validate-close.toml
 b0568e4af05fff39e5193e2b56aec6976e5288382cba68e01f5b9b1339719a51
 formulas/mol-validate.toml
-64b1045483c78aa8dfb6910c7d69946ed9039b9682057c93ae5400e40d6432b7
+19a123d0a82c30e8b5bd657efcb69ded7b892a4a8941f59ff8e81c7ef49a67c1
 formulas/mol-visit.toml
 0279f28992dc140d1ce95477287a0ee543c34660e5039de491bad5d4bb2ead84
 formulas/mol-witness-patrol.toml
@@ -138,7 +138,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 4cc4ec151e31b86d2d38f6d435d98361cc710274c5a1a884c23d45bbde434d69
 template-fragments/polecat-doctrine.template.md
-54d129dcdfef4299118ac99cbbef4f134aeaaa51e3c7594692a18402f3b2e4cd
+91f367dc8e4a249414e10c5afeb5f6daceffa1abea63796833d947fad7b836d2
 template-fragments/pool-worker-no-consent-ui.template.md
 bdecf75ec1e37c3a47c55f1cf186240e5f71d0d13abe0d6249e786f0997da517
 template-fragments/scratch-reclaim.template.md

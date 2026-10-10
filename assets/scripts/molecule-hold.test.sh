@@ -9,9 +9,16 @@
 #
 # What is exercised here:
 #   * the LOOP ANCHOR — a molecule shaped like the live one (claimed step, a
-#     routed root, five pre-assigned open siblings, a finalize step routed to
-#     the control-dispatcher). After the hold nothing in it is claimable and
+#     routed root, pre-assigned open siblings, a finalize step routed to the
+#     control-dispatcher). After the hold nothing in it is claimable and
 #     nothing is closed;
+#   * the WAITING STEPS — a step whose `blocks` edge names a member of the
+#     molecule that is not closed is outside bd ready, so the pool cannot offer
+#     it. It keeps its route and affinity and loses only its claim, while a step
+#     that is ready on its own is de-routed;
+#   * the LIFT — once the held step is returned to the pool and closes, the
+#     step behind it is ready and still routed, so the chain resumes with no
+#     hand-stamped route;
 #   * the ROOT — de-routing the step alone is not enough, because a routed root
 #     re-offers the molecule. The root's status and assignee stay untouched;
 #   * the SWEEP TIER — status is the load-bearing write, not the route clear.
@@ -23,9 +30,9 @@
 #     on an in_progress bead and the refusal rolls back the WHOLE update, so the
 #     blocking write must not carry an assignee. Status and route ship together;
 #     the assignee clear is a separate, later call;
-#   * the ORDER anchor — route first, assignee second. The reverse leaves a bead
-#     briefly `open + unassigned + routed`, which is exactly the offer predicate
-#     the hold exists to escape;
+#   * the ORDER anchor — on a step that is ready on its own, route first and
+#     assignee second. The reverse leaves it briefly `open + unassigned +
+#     routed`, which is exactly the offer predicate the hold exists to escape;
 #   * WORKFLOW-FINALIZE is never de-routed — it is the molecule's only path to
 #     retirement;
 #   * NOTHING IS EVER CLOSED, on any path, including the failure arms;
@@ -166,9 +173,9 @@ case "$verb" in
         --assignee=*) wassignee="${a#--assignee=}" ;;
       esac
     done
-    # The sibling enumeration is the only list of exactly open,in_progress with
-    # no assignee filter; discover() always pins an assignee. Fail only that one.
-    if [ "$wstatus" = "open,in_progress" ] && [ -z "$wassignee" ]; then
+    # The sibling enumeration is the only list of exactly open,in_progress,blocked
+    # with no assignee filter; discover() always pins an assignee. Fail only that one.
+    if [ "$wstatus" = "open,in_progress,blocked" ] && [ -z "$wassignee" ]; then
       if [ "${FAKE_LISTFAIL:-0}" = "1" ]; then
         echo "bd: cannot list (stub)" >&2
         exit 1
@@ -257,21 +264,46 @@ bassignee(){ jq -r --arg i "$1" '(.[] | select(.id == $i) | .assignee) // "<abse
 meta()     { jq -r --arg i "$1" --arg k "$2" '(.[] | select(.id == $i) | .metadata[$k]) // "<absent>"' "$FAKE_STORE"; }
 gclog()    { cat "$GC_LOG"; }
 
-# The live molecule shape: an in_progress claimed step, a routed root, four
-# pre-assigned open siblings, and a finalize step held by the dispatcher.
+# The live molecule shape: an in_progress claimed step, a routed root, a chain
+# of pre-assigned open steps that wait on it through the `blocks` edges the pour
+# writes, and a finalize step held by the dispatcher. s-side has no blocker in
+# the molecule, so it is ready on its own, as the first step of a parallel
+# branch is. `dependencies` is in the shape `bd list --json` returns.
 reset_store() {
   : > "$GC_LOG"; : > "$FAKE_UPDFAIL"; : > "$FAKE_UPDFAIL_ROUTE"; : > "$FAKE_UPDFAIL_ASSIGNEE"; : > "$FAKE_SHOWFAIL"
   cat > "$FAKE_STORE" <<STORE
 [
  {"id":"root-1","status":"in_progress","assignee":"","metadata":{"gc.routed_to":"$POOL","gc.input_convoy_id":"cv-1"}},
- {"id":"s-load","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"$STEP","gc.root_bead_id":"root-1","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
- {"id":"s-setup","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-1","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
- {"id":"s-impl","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-1","gc.routed_to":"$POOL"}},
- {"id":"s-submit","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1","gc.routed_to":"$POOL"}},
- {"id":"s-final","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-1","gc.routed_to":"core.control-dispatcher"}},
+ {"id":"s-load","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"$STEP","gc.root_bead_id":"root-1","gc.routed_to":"$POOL","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"s-load","depends_on_id":"root-1","type":"tracks"}]},
+ {"id":"s-setup","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-1","gc.routed_to":"$POOL","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"s-setup","depends_on_id":"root-1","type":"tracks"},{"issue_id":"s-setup","depends_on_id":"s-load","type":"blocks"}]},
+ {"id":"s-impl","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-1","gc.routed_to":"$POOL"},
+  "dependencies":[{"issue_id":"s-impl","depends_on_id":"root-1","type":"tracks"},{"issue_id":"s-impl","depends_on_id":"s-setup","type":"blocks"}]},
+ {"id":"s-submit","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1","gc.routed_to":"$POOL"},
+  "dependencies":[{"issue_id":"s-submit","depends_on_id":"root-1","type":"tracks"},{"issue_id":"s-submit","depends_on_id":"s-impl","type":"blocks"}]},
+ {"id":"s-side","status":"open","assignee":"$MINE","metadata":{"gc.step_ref":"mol-polecat-work.side-lane","gc.root_bead_id":"root-1","gc.routed_to":"$POOL","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"s-side","depends_on_id":"root-1","type":"tracks"}]},
+ {"id":"s-final","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-1","gc.routed_to":"core.control-dispatcher"},
+  "dependencies":[{"issue_id":"s-final","depends_on_id":"s-submit","type":"blocks"},{"issue_id":"s-final","depends_on_id":"s-side","type":"blocks"}]},
  {"id":"other-load","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"$STEP","gc.root_bead_id":"root-9","gc.routed_to":"$POOL"}}
 ]
 STORE
+}
+
+# offerable_routed — members of root-1 the pool could be offered right now:
+# open, unassigned, routed to a pool, and with every `blocks` blocker closed
+# (bd ready's test). A held molecule must have none.
+offerable_routed() {
+  jq -r '
+    (reduce .[] as $b ({}; .[$b.id] = ($b.status // "open"))) as $st
+    | [ .[]
+        | select((.metadata["gc.root_bead_id"] // "") == "root-1")
+        | select((.status // "open") == "open" and (.assignee // "") == "")
+        | select((.metadata["gc.routed_to"] // "") != "")
+        | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
+        | select(all(.dependencies[]? | select(.type == "blocks"); ($st[.depends_on_id] // "closed") == "closed"))
+        | .id ] | join(" ")' "$FAKE_STORE"
 }
 
 echo "== the loop anchor: a full molecule goes quiet, and nothing closes =="
@@ -291,13 +323,20 @@ eq "$(bstatus root-1)"  "in_progress" "the root's status is left to the finalize
 eq "$(bassignee root-1)" ""          "the root's assignee is untouched"
 
 for sib in s-setup s-impl s-submit; do
-  eq "$(meta "$sib" 'gc.routed_to')" "<absent>" "sibling $sib is de-routed"
-  eq "$(bassignee "$sib")"           ""         "sibling $sib is unassigned — an assigned open step is inside the stranded-repair sweep"
-  eq "$(bstatus "$sib")"             "open"     "sibling $sib keeps its status; the dependency edges already hold it"
+  eq "$(meta "$sib" 'gc.routed_to')" "$POOL" "waiting sibling $sib keeps its route — bd ready leaves it out while the step in front is open"
+  eq "$(bassignee "$sib")"           ""      "waiting sibling $sib is unassigned — an assigned open step is inside the stranded-repair sweep"
+  eq "$(bstatus "$sib")"             "open"  "waiting sibling $sib keeps its status; the dependency edges already hold it"
 done
-eq "$(meta s-setup 'gc.session_affinity')" "<absent>" "sibling session affinity is cleared with the route"
+eq "$(meta s-setup 'gc.session_affinity')" "require" "a waiting sibling keeps its session affinity, the shape the pour gave it"
+hasnt "$(gclog)" "bd update s-setup --unset-metadata gc.routed_to" "no route clear is written to a waiting sibling"
+
+eq "$(meta s-side 'gc.routed_to')" "<absent>" "the sibling that is ready on its own is de-routed — its route is all that kept the pool from offering it"
+eq "$(meta s-side 'gc.session_affinity')" "<absent>" "…and its session affinity is cleared with the route"
+eq "$(bassignee s-side)" "" "…and it is unassigned"
+eq "$(bstatus s-side)" "open" "…and it keeps its status"
 
 eq "$(meta s-final 'gc.routed_to')" "core.control-dispatcher" "workflow-finalize keeps its route — the molecule's only path to retirement"
+eq "$(offerable_routed)" "" "nothing in the held molecule is offerable: open, unassigned, routed and unblocked"
 
 eq "$(bstatus other-load)"   "in_progress"                    "another session's bead for the same step is untouched"
 eq "$(bassignee other-load)" "gc-toolkit__polecat-lx-other"   "another session's claim is untouched"
@@ -312,19 +351,74 @@ has   "$BLOCK_LINE" "blocked_reason" "the reason ships with the status"
 hasnt "$BLOCK_LINE" "--assignee" "the blocking write carries no assignee — the claim guard would roll the status back with it"
 
 echo "== order: route first, assignee second =="
-order_ok=1
-for id in s-setup s-impl s-submit; do
-  r=$(grep -n -- "bd update $id .*--unset-metadata gc.routed_to" "$GC_LOG" | head -1 | cut -d: -f1)
-  a=$(grep -n -- "bd update $id --assignee" "$GC_LOG" | head -1 | cut -d: -f1)
-  if [ -z "$r" ] || [ -z "$a" ] || [ "$r" -ge "$a" ]; then order_ok=0; echo "  ($id route=$r assignee=$a)"; fi
-done
-eq "$order_ok" "1" "every bead is de-routed before it is unassigned (the reverse is the offer predicate)"
+r=$(grep -n -- "bd update s-side .*--unset-metadata gc.routed_to" "$GC_LOG" | head -1 | cut -d: -f1)
+a=$(grep -n -- "bd update s-side --assignee" "$GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$r" ] && [ -n "$a" ] && [ "$r" -lt "$a" ]; then
+  ok "a step that is ready on its own is de-routed before it is unassigned (the reverse is the offer predicate)"
+else
+  bad "a step that is ready on its own is de-routed before it is unassigned (route=$r assignee=$a)"
+fi
 
 echo "== the step is out of the stranded-repair sweep tier =="
 eq "$(jq -r '[ .[] | select((.status == "open" or .status == "in_progress") and (.assignee // "") != "" and ((.metadata["gc.root_bead_id"] // "") == "root-1")) ] | length' "$FAKE_STORE")" \
    "0" "no step of the held molecule is left open-or-in_progress AND assigned"
-eq "$(jq -r '[ .[] | select(((.metadata["gc.root_bead_id"] // "") == "root-1") and ((.metadata["gc.routed_to"] // "") != "") and (((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize")) | not)) ] | length' "$FAKE_STORE")" \
-   "0" "no step of the held molecule is left routed, except finalize"
+
+# A lift returns the held step to the pool. gascity's stranded-worker repair frees
+# it from the drained session and stamps the session's template as gc.run_target,
+# and route recovery copies that back into gc.routed_to. A worker claims the step
+# and closes it. Played here as the writes they make, after which the step behind
+# the held one must be offerable as it stands, with nobody stamping a route.
+echo "== the lift: the step behind the held one resumes with its own route =="
+reset_store
+OUT=$("$SCRIPT" --step "$STEP" --reason "premise unclear" 2>&1); RC=$?
+eq "$RC" "0" "the hold lands"
+jq -c --arg p "$POOL" 'map(if .id == "s-load" then (.status = "open" | .assignee = "" | .metadata["gc.routed_to"] = $p) else . end)' \
+  "$FAKE_STORE" > "$TMP/s" && mv "$TMP/s" "$FAKE_STORE"
+eq "$(offerable_routed)" "s-load" "the lifted step is the one step on offer while it is open"
+jq -c 'map(if .id == "s-load" then .status = "closed" else . end)' \
+  "$FAKE_STORE" > "$TMP/s" && mv "$TMP/s" "$FAKE_STORE"
+eq "$(offerable_routed)" "s-setup" "once it closes, the next step is on offer — routed, unassigned and unblocked, with no route stamped by hand"
+eq "$(meta s-setup 'gc.session_affinity')" "require" "and it keeps the session affinity the pour gave it"
+eq "$(meta s-impl 'gc.routed_to')" "$POOL" "the step after it is still routed, ready for its turn"
+
+# Waiting means a `blocks` edge to a member of THIS molecule that is not closed:
+# that blocker cannot close while the held step stands, so the step stays out of
+# bd ready for the whole hold. Any other edge leaves the step ready, or lets it
+# become ready mid-hold, so it is de-routed as before.
+echo "== which siblings wait: only an open blocker inside the molecule keeps a route =="
+reset_store
+jq -c --arg m "$MINE" --arg p "$POOL" '
+  def step($id; $ref; $deps): {"id": $id, "status": "open", "assignee": $m,
+    "metadata": {"gc.step_ref": $ref, "gc.root_bead_id": "root-1", "gc.routed_to": $p},
+    "dependencies": [ $deps[] | {"issue_id": $id, "depends_on_id": ., "type": "blocks"} ]};
+  map(if .id == "s-submit" then .dependencies = [{"issue_id":"s-submit","depends_on_id":"s-ctl","type":"blocks"}]
+      elif .id == "s-impl" then del(.dependencies)
+      else . end)
+  + [ {"id":"s-ctl","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-1","gc.routed_to":"core.control-dispatcher"},
+       "dependencies":[{"issue_id":"s-ctl","depends_on_id":"s-setup","type":"blocks"}]},
+      {"id":"s-done","status":"closed","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.done-lane","gc.root_bead_id":"root-1"}},
+      {"id":"s-held2","status":"blocked","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.held-lane","gc.root_bead_id":"root-1","blocked_reason":"held earlier"}},
+      step("s-after-closed"; "mol-polecat-work.after-closed"; ["s-done"]),
+      step("s-after-foreign"; "mol-polecat-work.after-foreign"; ["other-load"]),
+      step("s-after-held"; "mol-polecat-work.after-held"; ["s-held2"]),
+      (step("s-related"; "mol-polecat-work.related-lane"; [])
+       | .dependencies = [{"issue_id": "s-related", "depends_on_id": "s-setup", "type": "related"}]) ]' \
+  "$FAKE_STORE" > "$TMP/s" && mv "$TMP/s" "$FAKE_STORE"
+OUT=$("$SCRIPT" --step "$STEP" --reason "which wait" 2>&1); RC=$?
+eq "$RC" "0" "the hold lands"
+eq "$(meta s-submit 'gc.routed_to')" "$POOL" "a step behind a control-dispatcher step of the molecule waits — the quiesce skips that blocker, the wait still counts it"
+eq "$(meta s-after-held 'gc.routed_to')" "$POOL" "a step behind a member held earlier waits — blocked is not closed"
+eq "$(meta s-after-closed 'gc.routed_to')" "<absent>" "a step whose only blocker is closed is ready on its own, and is de-routed"
+eq "$(meta s-after-foreign 'gc.routed_to')" "<absent>" "a step whose only open blocker is in another molecule is de-routed — that blocker can close while the hold stands"
+eq "$(meta s-impl 'gc.routed_to')" "<absent>" "a step listed with no dependencies is treated as ready on its own, and is de-routed"
+eq "$(meta s-related 'gc.routed_to')" "<absent>" "an edge that is not \`blocks\` holds nothing back from bd ready, so it is not a wait"
+for sib in s-submit s-after-held s-after-closed s-after-foreign s-impl s-related; do
+  eq "$(bassignee "$sib")" "" "$sib is unassigned either way"
+done
+eq "$(meta s-ctl 'gc.routed_to')" "core.control-dispatcher" "the control-dispatcher step itself is untouched"
+eq "$(bstatus s-held2)" "blocked" "a member held earlier is left as it is"
+eq "$(bassignee s-held2)" "gc-toolkit__polecat-lx-gone" "…claim included"
+eq "$(offerable_routed)" "" "and nothing in the molecule is offerable"
 
 echo "== an open+assigned sibling with no route is still unassigned (the empty route column must not collapse the split) =="
 reset_store
@@ -350,7 +444,7 @@ has "$OUT" "already blocked" "and says so"
 # claimable, so nothing else comes back to finish a quiesce that half-landed.
 echo "== idempotence repairs a quiesce that did not finish =="
 reset_store
-printf 'root-1\ns-impl\n' > "$FAKE_UPDFAIL"
+printf 'root-1\ns-impl\ns-side\n' > "$FAKE_UPDFAIL"
 OUT=$("$SCRIPT" --step "$STEP" --reason "first pass" 2>&1); RC=$?
 eq "$RC" "1" "the first pass reports the incomplete quiesce"
 eq "$(meta root-1 'gc.routed_to')" "$POOL" "and leaves the root routed"
@@ -359,8 +453,10 @@ OUT=$("$SCRIPT" --step "$STEP" --reason "second pass" 2>&1); RC=$?
 eq "$RC" "0" "the re-run over the already-blocked step exits 0 once the writes go through"
 has "$OUT" "already blocked" "it recognises the existing hold"
 eq "$(meta root-1 'gc.routed_to')" "<absent>" "and de-routes the root the first pass could not"
-eq "$(meta s-impl 'gc.routed_to')" "<absent>" "the sibling is de-routed too"
-eq "$(bassignee s-impl)" "" "and unassigned"
+eq "$(meta s-side 'gc.routed_to')" "<absent>" "the sibling that is ready on its own is de-routed too"
+eq "$(bassignee s-side)" "" "and unassigned"
+eq "$(bassignee s-impl)" "" "the waiting sibling is unassigned"
+eq "$(meta s-impl 'gc.routed_to')" "$POOL" "and keeps its route"
 eq "$(bstatus s-load)" "blocked" "the step is still blocked, not re-blocked into some other state"
 
 # The same repair through the hint path: --bead naming an already-blocked step
@@ -382,7 +478,8 @@ eq "$RC" "1" "a refused hold exits 1"
 has "$OUT" "still claimable" "the diagnostic names the consequence"
 eq "$(bstatus s-load)"             "in_progress" "the step is unchanged"
 eq "$(meta root-1 'gc.routed_to')" "$POOL"       "the ROOT is not de-routed by a hold that never landed"
-eq "$(meta s-setup 'gc.routed_to')" "$POOL"      "siblings are not quiesced by a hold that never landed"
+eq "$(meta s-side 'gc.routed_to')" "$POOL"       "siblings are not quiesced by a hold that never landed"
+eq "$(bassignee s-setup)"          "$MINE"       "and keep their claims"
 hasnt "$(gclog)" "--status=closed" "the failure arm closes nothing"
 
 echo "== fail-closed: a root that stays routed is not a hold =="
@@ -394,21 +491,21 @@ has "$OUT" "could not de-route root root-1" "the root that resisted is named"
 has "$OUT" "Do not drain" "and the caller is told what not to do"
 eq "$(bstatus s-load)"             "blocked" "the step is still held — the failure is downstream of the load-bearing write"
 eq "$(meta root-1 'gc.routed_to')" "$POOL"   "the root demonstrably still carries the route"
-eq "$(meta s-setup 'gc.routed_to')" "<absent>" "the siblings are still quiesced best-effort"
+eq "$(meta s-side 'gc.routed_to')" "<absent>" "the siblings are still quiesced best-effort"
+eq "$(bassignee s-setup)" "" "including the waiting ones"
 hasnt "$(gclog)" "--status=closed" "the incomplete-quiesce arm closes nothing"
 
 echo "== fail-closed: a sibling that stays routed keeps its claim =="
 reset_store
-printf 's-impl\n' > "$FAKE_UPDFAIL_ROUTE"
+printf 's-side\n' > "$FAKE_UPDFAIL_ROUTE"
 OUT=$("$SCRIPT" --step "$STEP" --reason "sibling route resists" 2>&1); RC=$?
 eq "$RC" "1" "an unquiesceable sibling exits 1"
-has "$OUT" "could not de-route sibling step s-impl" "the sibling that resisted is named"
+has "$OUT" "could not de-route sibling step s-side" "the sibling that resisted is named"
 eq "$(bstatus s-load)" "blocked" "the held step is still held"
-eq "$(meta s-impl 'gc.routed_to')" "$POOL" "and it demonstrably still carries the route"
-eq "$(bassignee s-impl)" "$MINE" "its claim is RETAINED — an unassigned routed step is exactly what the pool offers"
-hasnt "$(gclog)" "bd update s-impl --assignee" "the assignee clear is not even attempted once the route clear failed"
-eq "$(meta s-setup 'gc.routed_to')" "<absent>" "the other siblings are still quiesced"
-eq "$(bassignee s-setup)"           ""         "and still unassigned"
+eq "$(meta s-side 'gc.routed_to')" "$POOL" "and it demonstrably still carries the route"
+eq "$(bassignee s-side)" "$MINE" "its claim is RETAINED — an unassigned routed step is exactly what the pool offers"
+hasnt "$(gclog)" "bd update s-side --assignee" "the assignee clear is not even attempted once the route clear failed"
+eq "$(bassignee s-setup)" "" "the other siblings are still quiesced"
 hasnt "$(gclog)" "--status=closed" "the partial-quiesce arm closes nothing"
 
 echo "== fail-closed: a sibling that cannot be unassigned =="
@@ -417,7 +514,7 @@ printf 's-setup\n' > "$FAKE_UPDFAIL_ASSIGNEE"
 OUT=$("$SCRIPT" --step "$STEP" --reason "sibling claim resists" 2>&1); RC=$?
 eq "$RC" "1" "a sibling left open AND assigned exits 1 — the stranded-worker sweep re-routes it"
 has "$OUT" "could not unassign sibling step s-setup" "the sibling that resisted is named"
-eq "$(meta s-setup 'gc.routed_to')" "<absent>" "its route did come off"
+eq "$(meta s-setup 'gc.routed_to')" "$POOL" "a waiting sibling's route is never the write that failed: it stays"
 eq "$(bassignee s-setup)" "$MINE" "but the claim that puts it in the sweep tier is still there"
 eq "$(bassignee s-impl)"  ""      "the other siblings are still quiesced"
 
@@ -496,7 +593,8 @@ eq "$RC" "1" "an enumeration that cannot be staged exits 1 — its siblings keep
 eq "$(bstatus s-load)" "blocked" "the load-bearing write happened first"
 eq "$(meta root-1 'gc.routed_to')" "<absent>" "and the root is still de-routed"
 has "$OUT" "siblings keep the routes and claims" "the un-quiesced siblings are named, not silently skipped"
-eq "$(meta s-setup 'gc.routed_to')" "$POOL" "and they demonstrably still carry them"
+eq "$(meta s-side 'gc.routed_to')" "$POOL" "and they demonstrably still carry them"
+eq "$(bassignee s-setup)" "$MINE" "claims included"
 
 # ── The quiesce reads themselves can fail. bd_json swallows gc's exit through
 # the pipe, so a failed show/list once read as an empty result — an empty root

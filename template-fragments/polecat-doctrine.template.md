@@ -176,9 +176,9 @@ including the `auto_push=false` halt arm.
 When blocked, act — do not wait, and do not guess. Where the signal goes
 depends on who can answer it. Anything that ends in a hold and a drain needs a
 tracked, routed record filed first. That record is the visit `escalate.sh`
-opens, or a bead a query returns. The hold de-routes the whole molecule, so a
-hold with no such record behind it is a silent strand no reader is ever
-handed. Mail is not that record.
+opens, or a bead a query returns. The hold takes the whole molecule out of the
+pool's offer, so a hold with no such record behind it is a silent strand no
+reader is ever handed. Mail is not that record.
 
 The witness is your first responder for a question another agent can answer
 without you holding the bead: requirements unclear after checking the docs,
@@ -221,12 +221,15 @@ another branch already delivered. A step left `open` is claimable, so the pool
 hands it to a fresh polecat within minutes, that polecat re-derives your refusal
 and leaves it open again, and the cycle burns one pool slot per iteration until
 a human notices. So the hold sets the step `blocked`, which is not-closed and
-not-claimable, and clears the route on the step, on the molecule root, and on
-the root's other steps. Clearing the route without the `blocked` status does not
-stop the loop: the stranded-worker repair sweeps open steps assigned to a
-drained session and re-stamps a route on any it finds unrouted.
+not-claimable, clears the route on the step and on the molecule root, and clears
+the claims on the root's other steps. A step behind yours keeps its route,
+because the pool offers it only once your step closes, so lifting the hold
+resumes the chain. A step that is ready on its own loses its route as well.
+Clearing the route without the `blocked` status does not stop the loop: the
+stranded-worker repair sweeps open steps assigned to a drained session and
+re-stamps a route on any it finds unrouted.
 
-But a de-routed molecule with nothing tracking it is worse than the loop. It is
+But a held molecule with nothing tracking it is worse than the loop. It is
 a silent strand no query returns and no human is asked to clear. So the record
 comes first: `escalate.sh` files the visit that is the release path, and only on
 its success do you hold, and only on the hold's success do you drain:

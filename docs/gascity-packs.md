@@ -190,22 +190,30 @@ gets re-routed. The same two statuses gate drain-ack's assigned-work close gate
 three while still not being closed, so it holds the workflow without advancing
 it.
 
-`assets/scripts/molecule-hold.sh` is the writer. It blocks the step, clears the
-route on the step, on the molecule root — a routed root re-offers the molecule
-even with every step quiet — and on the root's other steps, skipping
-`workflow-finalize` so the graph can still retire. It closes nothing. The
-blocking write deliberately carries no assignee: bd's claim guard refuses
-`--assignee ""` on an `in_progress` bead and the refusal is atomic over the
-whole update, so batching the two loses the status change as well.
-Sibling claims are cleared afterwards, route first, because the reverse order
-leaves a bead briefly `open + unassigned + routed`, which is the offer predicate
-itself.
+`assets/scripts/molecule-hold.sh` is the writer. It blocks the step and clears
+the route on the step and on the molecule root — a routed root re-offers the
+molecule even with every step quiet. It closes nothing. The blocking write
+deliberately carries no assignee: bd's claim guard refuses `--assignee ""` on an
+`in_progress` bead and the refusal is atomic over the whole update, so batching
+the two loses the status change as well.
+
+The root's other steps lose their claims afterwards, except `workflow-finalize`
+and control-dispatcher steps, which keep their routes so the graph can still
+retire. Whether a step also loses its route depends on whether the pool could
+offer it. The pool offers only steps `bd ready` returns, and a step with a
+`blocks` edge to a member of the molecule that is not closed is not one of them.
+Every step behind the held one is such a step. It keeps `gc.routed_to` and
+`gc.session_affinity`, so once the hold is lifted and the held step closes, the
+next step is ready and routed and the chain resumes. A step with no such blocker
+is ready on its own, so the hold de-routes it, and does so before clearing its
+claim, because the reverse order leaves it briefly `open + unassigned + routed`,
+which is the offer predicate itself.
 
 It reports success only when all of that landed. The caller drains on exit 0,
-and a molecule still routed anywhere is re-offered however quiet its steps are,
-so a route that survived on the root or on a sibling exits non-zero instead. A
-sibling whose route clear failed keeps its claim, because unassigning it there
-writes the offer predicate rather than escaping it.
+and a route left on the root or on a step that is ready on its own re-offers the
+molecule however quiet the rest of it is, so a route that survived there exits
+non-zero instead. A step whose route clear failed keeps its claim, because
+unassigning it there writes the offer predicate rather than escaping it.
 
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.
