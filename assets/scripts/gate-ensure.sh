@@ -24,13 +24,14 @@
 # forbids it, refusing a second whole-diff review at a head already carrying a
 # recorded, non-superseded verdict — the durable backstop for the window between
 # the close and the fix unit and findings it files, which the transient
-# quiescence beads do not yet cover. A dispatch stamps metadata + a blocks edge
-# first (fail-closed), takes its body from review-dispatch-body.sh, then pours
-# formula and route in one call (gc sling <review-pool> <bead> --on mol-review),
-# pinned to the live head (signoff.sh binds the verdict) with fix_target_pool for
-# the rework route. An unstamped orphan is adopted by its title, never twinned;
-# a failed sling is never retried in-pass (a re-pour mints a second workflow
-# root). Reach carried by the pour ALONE is qualified before it counts: a review
+# quiescence beads do not yet cover. A dispatch files the review with its
+# metadata and its blocks edge in one create (bd_create, fail-closed), takes its
+# body from review-dispatch-body.sh, then pours formula and route in one call
+# (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
+# (signoff.sh binds the verdict) with fix_target_pool for the rework route. A
+# create whose reply is lost has still landed whole, so the next pass's stranded
+# arm re-slings it rather than filing a twin; a failed sling is never retried
+# in-pass (a re-pour mints a second workflow root). Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. There is no dispatch
@@ -1043,58 +1044,35 @@ STRAY
     # moving is caught by liveness-sweep.sh's stale-gate escalation, not a count
     # on the check.
 
-    # Orphan adoption BEFORE create: a bead this arm created whose stamp then
-    # failed carries the deterministic title but no anchor_bead — invisible to
-    # inflight_review, so re-creating would mint a twin every pass. Adopt it
-    # instead. The title carries the check name, so the orphan identity is
-    # per-check: with a multi-check baseline (correctness,triage) a sibling lane's
-    # half-stamped review is never adopted here and re-stamped with this lane's
-    # check_name onto a body the body-emitter wrote for the other check. An
-    # unreadable probe dispatches nothing (retry next pass).
-    RID_TITLE="Review branch $branch -> $target ($g):"
-    if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
-      echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    RID=$(printf '%s' "$orphans" | jq -r '
-      [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$RID" ]; then
-      echo "$PROG: $id adopting unstamped review orphan $RID for check '$g' (created by a prior pass whose stamp failed)"
-    else
-      body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
-      if [ -n "$body" ]; then
-        RID=$(printf '%s' "$body" \
-          | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      else
-        echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-        RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      fi
-    fi
-    if [ -z "$RID" ]; then
-      echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
-      skipped=$((skipped + 1)); continue
-    fi
+    # The review is filed whole. One create carries every key a reader selects
+    # it by and the blocks edge that holds the anchor, so no review exists that
+    # inflight_review cannot see. A create whose reply is lost has still landed
+    # whole, and the next pass finds it in flight and re-slings it as stranded.
     # reviewed_oid pins the dispatch head (signoff binds the verdict to it);
     # fix_target_pool routes a request-changes rework to the derived pool.
-    gc bd update "$RID" \
-      --set-metadata task_kind=review \
-      --set-metadata check_name="$g" \
-      --set-metadata anchor_bead="$id" \
-      --set-metadata review_branch="$branch" \
-      --set-metadata review_base="$target" \
-      --set-metadata review_pool="$REVIEW_POOL" \
-      ${head:+--set-metadata reviewed_oid="$head"} \
-      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
-    gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 \
-      || echo "$PROG: WARN could not attach review $RID as a blocks-dep of $id (anchor_bead persists the link)" >&2
-    # The anchor link is what lets the signoff find the check to stamp; verify it
-    # BEFORE the pour, or a claimed half-stamped review can never discharge.
-    got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
-    if [ "$got" != "$id" ]; then
-      echo "$PROG: WARN review $RID did not record anchor_bead=$id; not slung, merge stays held, retry next pass" >&2
+    RID_META=$(jq -nc --arg g "$g" --arg a "$id" --arg br "$branch" --arg tg "$target" \
+      --arg rp "$REVIEW_POOL" --arg oid "$head" --arg fp "$FIX_POOL" '
+      {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
+       review_base: $tg, review_pool: $rp}
+      + (if $oid == "" then {} else {reviewed_oid: $oid} end)
+      + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null)
+    RID_TITLE="Review branch $branch -> $target ($g): $title"
+    body=""
+    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
+    if [ -n "$body" ]; then
+      RID=$(printf '%s' "$body" | bd_create "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
+    else
+      echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
+      RID=$(bd_create "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
+    fi
+    if [ "$rid_rc" -ne 0 ]; then
+      # A review that did not read back as filed is not slung: its pour could
+      # run against a work order the bead does not carry.
+      if [ -n "$RID" ]; then
+        echo "$PROG: WARN review $RID did not read back as filed; not slung, merge stays held, retry next pass" >&2
+      else
+        echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
+      fi
       skipped=$((skipped + 1)); continue
     fi
     ge_mark_child "$id" "$RID"

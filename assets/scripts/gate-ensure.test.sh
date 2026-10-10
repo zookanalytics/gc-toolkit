@@ -26,7 +26,9 @@
 # — a live chain is in flight, a spent one is wedged, an unreadable one is held —
 # never counted in flight on sight; and converge after a hard sling failure; a
 # stranded review is NOT re-slung while a fix unit is in flight); the dispatch
-# shape (metadata + blocks edge, then gc sling --on mol-review with
+# shape (metadata and blocks edge in one create, read back before the pour, so
+# a lost create reply is re-slung as stranded and never twinned; then gc sling
+# --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass; no dispatch tally is
 # written, and there is no dispatch ceiling); merge_hold, and the cap's park
 # under it reading as the wedge; and the review-wedge escalation, shared by both
@@ -203,6 +205,9 @@ eq "$(meta "$rid" 'gc.execution_routed_to')" "$POOL" "the pour stamped gc.execut
 eq "$(meta "$rid" 'gc.routed_to')" "<absent>" "the pour retired gc.routed_to (never restored beside a live workflow)"
 eq "$(meta "$rid" review_pool)" "$POOL" "durable route copy stamped in the metadata stamp"
 grep -qxF "$rid|blocks|A1" "$STUB_DEPS" && ok "review blocks the anchor" || bad "blocks edge missing"
+eq "$(grep -c '^bd create Review branch' "$STUB_GC_LOG")" "1" "the review is filed by one create"
+has "$(grep '^bd create Review branch' "$STUB_GC_LOG")" "--deps blocks:A1" "…which carries the blocks edge onto the anchor"
+hasnt "$(grep "^bd update $rid" "$STUB_GC_LOG")" "--set-metadata" "…and no second write stamps the review's metadata"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formula is attached by an explicit gc sling --on (no default hijack)"
 hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no formula vars (the quorum pilot is opt-in)"
 eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the anchor — the ceiling is retired"
@@ -949,30 +954,41 @@ out=$(run)
 hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL rev-stray8 --on mol-review" "the stranded review is not re-routed against a mid-change diff"
 has "$out" "stranded review rev-stray8 but the anchor is quiesced (fix unit fix-r8 in flight); no re-sling" "…and the hold names the fix unit"
 
-echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
+echo "# a create whose reply is lost has still landed whole: the next pass re-slings it, never a twin"
+# The id never comes back, so nothing is poured this pass. The review carries its
+# identity and its blocks edge from the create, so the next pass's in-flight
+# probe finds it as stranded and re-slings that same bead.
 store "[$(anchor H1 pull_request correctness "" polecat/h1)]"
 oid h1 > "$GH_DIR/head_polecat_h1"
-out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-has "$out" "did not record anchor_bead=H1" "the failed stamp is reported (orphan left behind)"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "the orphan exists"
+: > "$STUB_DEPS"
+out=$(STUB_CREATE_GARBAGE=1 run)
+has "$out" "could not create the review bead for check 'correctness'" "the lost reply is reported and nothing is poured"
+eq "$(meta new-2 anchor_bead)|$(meta new-2 task_kind)|$(meta new-2 check_name)" "H1|review|correctness" "…yet the review landed with its identity"
+grep -qxF "new-2|blocks|H1" "$STUB_DEPS" && ok "…and holds its anchor through the edge it was born with" || bad "the lost-reply review carries no blocks edge"
 out=$(run)
-has "$out" "adopting unstamped review orphan new-2" "the next pass adopts the orphan by its deterministic title"
+has "$out" "had a STRANDED review new-2" "the next pass finds it in flight and re-slings it"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
-eq "$(meta new-2 anchor_bead)" "H1" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.execution_routed_to')" "$POOL" "…and poured"
 
-echo "# a sibling lane never adopts another check's orphan — the title key is per-check"
-# correctness,triage baseline on one anchor: the correctness lane creates a review
-# whose anchor_bead stamp fails (orphan), then the triage lane runs the same pass.
-# The orphan probe keys on the check-specific title, so triage does not adopt the
-# correctness orphan and re-stamp check_name=triage onto a body the emitter wrote
-# for correctness; it mints its own review. A shared title key would let it.
-store "[$(anchor X1 pull_request "correctness,triage" "" polecat/x1)]"
-oid x1 > "$GH_DIR/head_polecat_x1"
-out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-hasnt "$out" "adopting unstamped review orphan" "the triage lane does not adopt the correctness lane's orphan"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "each lane minted its own review — no cross-lane reuse"
-eq "$(jq '[.[] | select((.id | startswith("new-")) and (.metadata.check_name == "correctness"))] | length' "$STUB_STORE")" "1" "the correctness orphan keeps its own check_name, unclaimed by triage"
+echo "# a review whose metadata does not read back as filed is not slung"
+store "[$(anchor H2 pull_request correctness "" polecat/h2)]"
+oid h2 > "$GH_DIR/head_polecat_h2"
+: > "$STUB_GC_LOG"
+out=$(STUB_DROP_KEYS="new-2:review_pool" run); rc=$?
+eq "$rc" 0 "a short read-back leaves rc=0 (check armed, merge held)"
+has "$out" "review new-2 did not read back as filed; not slung" "the short read-back is reported"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is poured"
+eq "$(bstatus new-2)" "open" "…and the review is left as it landed"
+
+echo "# a review that lands with none of its metadata is closed, and the next pass files a whole one"
+store "[$(anchor H3 pull_request correctness "" polecat/h3)]"
+oid h3 > "$GH_DIR/head_polecat_h3"
+out=$(STUB_DROP_KEYS="new-2:task_kind,check_name,anchor_bead,review_branch,review_base,review_pool,reviewed_oid,fix_target_pool" run)
+has "$out" "could not create the review bead for check 'correctness'" "the bare landing reads as nothing filed"
+eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…and the bare bead is closed so no reader meets it"
+out=$(run)
+has "$out" "dispatched review new-3" "the next pass files a whole review"
+eq "$(jq '[.[] | select((.id | startswith("new-")) and .status != "closed")] | length' "$STUB_STORE")" "1" "…and exactly one review is live"
 
 echo "# a pour whose exec stamp does not read back is held, not dispatched"
 store "[$(anchor G1 pull_request correctness "" polecat/g1)]"
