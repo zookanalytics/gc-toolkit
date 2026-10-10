@@ -140,6 +140,13 @@ chmod +x "$TMP/helm"
 cat > "$TMP/proactive" <<'PA'
 #!/usr/bin/env bash
 printf 'PROACTIVE %s\n' "$*" >> "$FAKE_LOG"
+# `assignable` answers for a named agent addressed by assignee; FAKE_AGENT_GONE
+# models an agent the roster does not carry. Every other verb is `deliverable`.
+if [ "$1" = "assignable" ]; then
+  [ -n "${FAKE_AGENT_GONE:-}" ] && { printf 'no: no agent is registered as %s in this city\n' "$2"; exit 1; }
+  printf 'yes: %s is a registered, unsuspended named session\n' "$2"
+  exit 0
+fi
 [ -n "${FAKE_POOL_DEAD:-}" ] && { printf 'no: no agent is registered at %s in this city\n' "$2"; exit 1; }
 printf 'yes: %s is registered and unsuspended\n' "$2"
 exit 0
@@ -227,7 +234,8 @@ export FAKE_POOL_DEAD=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.nosuch
 eq "$RC" "2" "(ACTPOOL) a pool that cannot claim refuses the exit"
 hasnt "HELM" "$LOG" "(ACTPOOL) …and the bead is not released"
-has "Put it to the operator instead" "$ERR" "(ACTPOOL) …and the refusal names the exit that does work"
+has "address it with --assign" "$ERR" "(ACTPOOL) …and the refusal names the named-agent address before the operator"
+has "only when the next move is the operator's" "$ERR" "(ACTPOOL) …keeping the operator's exits for the operator's own move"
 unset FAKE_POOL_DEAD
 
 : > "$FAKE_LOG"; RC=0
@@ -241,6 +249,66 @@ ERR="$(env -u GC_RIG "$SCRIPT" tk-sub --disposition actionable --reason "r" --ta
 eq "$RC" "2" "(ACTRIG) with no GC_RIG and no --route it fails closed"
 eq "$(cat "$FAKE_LOG")" "" "(ACTRIG) …and writes nothing"
 has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would cost"
+
+# ── actionable --assign: work that is a named agent's own ────────────────────
+# A town-repo edit is mechanik's direct edit, and mechanik is a named agent: its
+# hook matches the bead's assignee and never reads gc.routed_to, so the exit
+# releases the bead TO it as its assignee instead of routing it to a pool.
+#   (ACTASSIGN)  the release carries --assign, not --route, and still says
+#                nothing waits; the record names the agent
+#   (ACTASSIGN)  the exit asks whether the agent's hook would offer the bead,
+#                and does not ask the pool question
+#   (ASSIGNNO)   an agent that cannot be handed the bead refuses the exit
+#   (ASSIGNBOTH) --route and --assign together are refused
+#   (ASSIGNRIG)  a named agent needs no GC_RIG to qualify it
+run tk-sub --disposition actionable --reason "the remedy is a city.toml edit, mechanik's direct edit" \
+    --takeaway "city.toml edit routed to mechanik" --assign gc-toolkit.mechanik
+eq "$RC" "0" "(ACTASSIGN) an actionable disposition addressed to a named agent succeeds"
+has "gc.first_reaction=actionable" "$LOG" "(ACTASSIGN) the choice is recorded as actionable"
+has "gc.first_reaction_target=gc-toolkit.mechanik" "$LOG" "(ACTASSIGN) …naming the agent it went to"
+has "HELM takeaway tk-sub city.toml edit routed to mechanik --by proactive --release --assign gc-toolkit.mechanik --no-wait" \
+    "$LOG" "(ACTASSIGN) the release hands the bead to the agent as its assignee, moving, in one call"
+hasnt "--route" "$LOG" "(ACTASSIGN) …and stamps no pool route beside the assignee"
+has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(ACTASSIGN) the exit asks whether the agent's hook would offer this bead"
+hasnt "PROACTIVE deliverable" "$LOG" "(ACTASSIGN) …and does not ask the pool question of a named agent"
+
+export FAKE_AGENT_GONE=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign mechanik
+eq "$RC" "2" "(ASSIGNNO) an agent its hook could never reach refuses the exit"
+has "PROACTIVE assignable mechanik tk-sub" "$LOG" "(ASSIGNNO) …on the agent's own answer"
+hasnt "UPDATE" "$LOG" "(ASSIGNNO) …before anything is written to the bead"
+hasnt "HELM" "$LOG" "(ASSIGNNO) …and the bead is not released"
+has "exact qualified name" "$ERR" "(ASSIGNNO) …and the refusal names the address form"
+unset FAKE_AGENT_GONE
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" \
+    --route gc-toolkit/gc-toolkit.polecat --assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNBOTH) --route beside --assign is refused"
+eq "$LOG" "" "(ASSIGNBOTH) …and nothing was written"
+has "not both" "$ERR" "(ASSIGNBOTH) …and the refusal says a bead takes one address"
+
+: > "$FAKE_LOG"; RC=0
+OUT="$(env -u GC_RIG "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik 2>"$TMP/err")" || RC=$?
+LOG="$(cat "$FAKE_LOG")"
+eq "$RC" "0" "(ASSIGNRIG) with no GC_RIG, an --assign still lands"
+has "--assign gc-toolkit.mechanik --no-wait" "$LOG" "(ASSIGNRIG) …because a named agent is addressed by its own name"
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --then-assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNEXIT) actionable refuses --then-assign, the blocked exit's flag"
+run tk-sub --disposition close --reason "r" --takeaway "t" --assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNEXIT) close refuses --assign: its closer is a pool"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1 --assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNEXIT) ruling refuses --assign: it waits on the operator"
+eq "$LOG" "" "(ASSIGNEXIT) …and nothing was written"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --then-assign gc-toolkit.mechanik
+eq "$RC" "2" "(ASSIGNEXIT) ruling refuses --then-assign: its wait is the operator's gate"
+eq "$LOG" "" "(ASSIGNEXIT) …and no gate was filed"
+
+: > "$FAKE_LOG"; RC=0
+OUT="$("$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --dry-run 2>"$TMP/err")" || RC=$?
+eq "$RC" "0" "(ASSIGNDRY) a dry run of the --assign exit succeeds"
+has "would release tk-sub to named agent gc-toolkit.mechanik" "$OUT" "(ASSIGNDRY) …and names the agent it would hand the bead to"
+hasnt "UPDATE" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …writing nothing"
 
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)      the release carries the wait as --waiting-on
@@ -382,6 +450,41 @@ has "PROACTIVE deliverable gc-toolkit/gc-toolkit.nosuchpool" "$LOG" \
     "(BLKROUTE) …the exit asks whether that pool can claim before arming"
 hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every reconcile pass"
 unset FAKE_POOL_DEAD FAKE_SHOW_JSON FAKE_DEPS_JSON
+
+# (BLKASSIGN) a town-repo edit that must wait on a rig change is held on that
+# change AND assigned to mechanik in the same release. An assigned bead reaches
+# its agent's hook only once bd reports it ready, so the edge is the gate and
+# nothing is armed: a deferred dispatch slings a pool, and a named agent is not
+# one.
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
+    --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik
+eq "$RC" "0" "(BLKASSIGN) a blocked disposition assigned to a named agent succeeds"
+has "gc.first_reaction_target=tk-blk1" "$LOG" "(BLKASSIGN) the record still names the wait"
+has "--release --waiting-on tk-blk1 --assign gc-toolkit.mechanik" "$LOG" \
+    "(BLKASSIGN) the wait and the assignee ride one release"
+hasnt "--no-wait" "$LOG" "(BLKASSIGN) …and the named wait is not called settled"
+hasnt "DEFERRED arm" "$LOG" "(BLKASSIGN) …and no deferred dispatch is armed for a named agent"
+has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(BLKASSIGN) the exit asks whether the agent's hook would offer the bead"
+
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat --then-assign gc-toolkit.mechanik
+eq "$RC" "2" "(BLKASSIGN) --then-route beside --then-assign is refused"
+eq "$LOG" "" "(BLKASSIGN) …and nothing was written"
+
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --assign gc-toolkit.mechanik
+eq "$RC" "2" "(BLKASSIGN) blocked refuses --assign, the actionable exit's flag"
+
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --dry-run
+eq "$RC" "0" "(BLKASSIGN) a dry run of the --then-assign exit succeeds"
+has "would wait tk-sub on: tk-blk1, assigned to gc-toolkit.mechanik" "$OUT" "(BLKASSIGN) …and names the agent the held bead goes to"
+hasnt "UPDATE" "$LOG" "(BLKASSIGN) …writing nothing"
+
+export FAKE_AGENT_GONE=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness
+eq "$RC" "2" "(BLKASSIGN) a --then-assign agent that cannot be handed the bead is refused"
+hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
+unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 
 # ── ruling: the human gate is the wait, filed by the exit itself ─────────────
 #   (RUL)      the exit files the gate through gc-helm.sh demand, the takeaway

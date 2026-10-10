@@ -43,6 +43,12 @@ change, not an implementation detail — amend this table in the same PR.
 | File an escalation | `assets/scripts/escalate.sh` (the refinery's merge path, `mol-dog-shutdown-dance`, a blocked polecat, a patrol emergency) | one open visit per `escalation_key` | mail (there is no mayor); duplicate an open key; send a RECURRING observation here — the dedup window is one open visit, and closing it reopens the window |
 | Send a `gh` write to a repository outside the rig's own origin | the operator, pasting the command themselves | the command parked on an `upstream-send` bead: `gh_command`, quoted and re-split to the original argv, naming its target with an explicit `--repo` | be sent by an agent, however routed; be prepared with an implicit repository, a `--body-file`, or two targets — none of those survive the paste ([outbound-sends.md](outbound-sends.md)) |
 
+## Powers over the city's own config
+
+| Power | Holder | Evidence required | May never |
+|---|---|---|---|
+| Edit the town repo: `city.toml`, `packs.lock`, and the rest of the city root outside every rig | mechanik, by direct edit. A bead whose remedy is such an edit is assigned to it (`assignee = gc-toolkit.mechanik`), and its hook offers the bead; a first reaction addresses it with `first-reaction-dispose.sh --assign` (or `--then-assign` behind a wait) | the edit is determinable from the bead, and it lands as one signed commit on the town repo's default branch | be routed to a pool: no pool works the town repo, because a polecat's worktree is cut from its own rig's repo; be parked on the operator as a ruling when the edit is determinable. A policy call over the city's config, such as resuming an order the operator paused, stays the operator's ruling |
+
 ## Powers over sessions
 
 | Power | Holder | Evidence required | May never |

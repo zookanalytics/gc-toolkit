@@ -44,7 +44,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
 | [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,797 | 6,949 |
-| [`proactive`](agents/proactive.md) | 12,437 | 3,109 |
+| [`proactive`](agents/proactive.md) | 12,882 | 3,220 |
 | [`refinery`](agents/refinery.md) | 11,265 | 2,816 |
 | [`witness`](agents/witness.md) | 15,920 | 3,980 |
 
@@ -65,7 +65,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,302 | 575 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,344 | 586 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |

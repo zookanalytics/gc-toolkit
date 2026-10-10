@@ -1442,6 +1442,132 @@ grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
   && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
   || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
 
+# ── takeaway --release --assign: release the bead TO a named agent ────────────
+# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# so work that is its own (a town-repo edit is mechanik's) is released to it as
+# its assignee, with no route. The stub reads a bead's assignee from the
+# assignees fixture, so a row there models an assignee that landed and its
+# absence models one that did not. Covered:
+#   (TOAGENT)      the assignee replaces the empty clear in the one release
+#                  write, and the route beside it stays empty
+#   (TOAGENTOK)    an assignee that reads back is written once, exit 0, and
+#                  the success line names the agent
+#   (TOAGENTREL)   --assign without --release is refused
+#   (TOAGENTBOTH)  --assign beside --route is refused before any write
+#   (TOAGENTDEAD)  an assignee that will not land is re-written once, then
+#                  fails the verb with the repair spelled out
+#   (TOAGENTBLK)   an open non-demand blocker refuses a bare --assign
+#   (TOAGENTWAIT)  …and a call that names its waits lands, edge and all
+#   (TOAGENTFOLD)  a closed anchor is refused on its disposition, quiesce kept
+AGENT="gc-toolkit.mechanik"
+cp "$TMP/assignees" "$TMP/assignees.orig"
+printf 'A-PARKED|%s\nA-BLOCKED|%s\n' "$AGENT" "$AGENT" >> "$TMP/assignees"
+: > "$TMP/updates"; : > "$TMP/routed"
+ARC=0
+sh "$SCRIPT" takeaway A-PARKED "actionable — a city.toml edit, mechanik's" \
+   --by proactive --release --assign "$AGENT" --no-wait >"$TMP/aout" 2>"$TMP/aerr" || ARC=$?
+ALINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$ALINE" in
+  *"--status=open --assignee=$AGENT --set-metadata gc.routed_to= "*) ok "(TOAGENT) the release assigns the bead to the named agent, with no route beside it" ;;
+  *) bad "(TOAGENT) the release write did not assign the agent with an empty route (got: ${ALINE:-<none>})" ;;
+esac
+case "$ALINE" in
+  *"--set-metadata gc.takeaway=actionable — a city.toml edit, mechanik's"*) ok "(TOAGENT) …in the write that carries the headline" ;;
+  *) bad "(TOAGENT) the headline split off the assign write: ${ALINE:-<none>}" ;;
+esac
+case "$ALINE" in
+  *"--set-metadata gc.proactive_reaction=1"*) ok "(TOAGENT) …and the completion proof" ;;
+  *) bad "(TOAGENT) the completion proof split off the assign write: ${ALINE:-<none>}" ;;
+esac
+case "$ALINE" in
+  *"--unset-metadata gc.session_name --unset-metadata gc.session_id"*) ok "(TOAGENT) …and the prior executor's session pins go with the old assignee" ;;
+  *) bad "(TOAGENT) the assign write kept the prior executor's pins: ${ALINE:-<none>}" ;;
+esac
+eq "$ARC" "0" "(TOAGENTOK) an assignee that reads back exits 0"
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(TOAGENTOK) …and is written once, with no repair"
+grep -q "released to $AGENT" "$TMP/aout" \
+  && ok "(TOAGENTOK) …and the success line names the agent" \
+  || bad "(TOAGENTOK) the success line lost the agent (stdout: $(cat "$TMP/aout"))"
+
+: > "$TMP/updates"
+RRC2=0
+sh "$SCRIPT" takeaway A-PARKED "no release" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || RRC2=$?
+eq "$RRC2" "2" "(TOAGENTREL) --assign without --release is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTREL) …and nothing was written"
+
+: > "$TMP/updates"
+BRC3=0
+sh "$SCRIPT" takeaway A-PARKED "both" --release --route "$POOL" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || BRC3=$?
+eq "$BRC3" "2" "(TOAGENTBOTH) --assign beside --route is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTBOTH) …and nothing was written"
+grep -q 'never both' "$TMP/aerr" \
+  && ok "(TOAGENTBOTH) …and the refusal says a bead takes one address" \
+  || bad "(TOAGENTBOTH) the refusal does not explain itself (stderr: $(cat "$TMP/aerr"))"
+
+# A-UNASSIGNED has no assignees row, so its assignee reads back empty however
+# often it is written: the store that will not take it.
+: > "$TMP/updates"
+DRC3=0
+sh "$SCRIPT" takeaway A-UNASSIGNED "dropped" --release --assign "$AGENT" --no-wait \
+   >"$TMP/aout" 2>"$TMP/aerr" || DRC3=$?
+eq "$(grep -c -- "--assignee=$AGENT" "$TMP/updates" || true)" "2" \
+   "(TOAGENTDEAD) an assignee that read back wrong is re-written once"
+grep -q "the assignee on A-UNASSIGNED read back as ''" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the miss is reported" \
+  || bad "(TOAGENTDEAD) the dropped assignee was silent (stderr: $(cat "$TMP/aerr"))"
+eq "$DRC3" "4" "(TOAGENTDEAD) an assignee that will not land is a verb runtime failure"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the failure says the bead reaches no agent" \
+  || bad "(TOAGENTDEAD) the persistent miss does not name its consequence (stderr: $(cat "$TMP/aerr"))"
+grep -q -- "--assignee $AGENT" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …with the by-hand repair spelled out" \
+  || bad "(TOAGENTDEAD) no repair spelled out (stderr: $(cat "$TMP/aerr"))"
+grep -q 'takeaway set on' "$TMP/aout" \
+  && bad "(TOAGENTDEAD) the verb reported success on an unassigned bead" \
+  || ok "(TOAGENTDEAD) …and success is not reported"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+KRC=0
+sh "$SCRIPT" takeaway A-BLOCKED "assigned — the fix is mechanik's" \
+   --release --assign "$AGENT" --no-wait >/dev/null 2>"$TMP/aerr" || KRC=$?
+eq "$KRC" "2" "(TOAGENTBLK) an open non-demand blocker refuses a bare --assign"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(TOAGENTBLK) …before any write"
+grep -q 'w-child' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …naming the blocker the work is on" \
+  || bad "(TOAGENTBLK) the blocker is unnamed (stderr: $(cat "$TMP/aerr"))"
+grep -q -- '--then-assign' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …and the blocked exit that names the wait" \
+  || bad "(TOAGENTBLK) no blocked-exit re-run named (stderr: $(cat "$TMP/aerr"))"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+WRC3=0
+sh "$SCRIPT" takeaway A-BLOCKED "held — mechanik edits once the child lands" \
+   --release --assign "$AGENT" --waiting-on w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
+eq "$WRC3" "0" "(TOAGENTWAIT) an --assign that names its wait lands"
+grep -qE "^bd update A-BLOCKED .*--assignee=$AGENT" "$TMP/updates" \
+  && ok "(TOAGENTWAIT) …assigned to the agent" \
+  || bad "(TOAGENTWAIT) the assignee was lost: $(cat "$TMP/updates")"
+grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
+  && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
+  || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/updates"
+FRC3=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "assign a disposed bead" --by proactive \
+   --release --assign "$AGENT" >"$TMP/aout" 2>"$TMP/aerr" || FRC3=$?
+eq "$FRC3" "4" "(TOAGENTFOLD) --assign on a closed anchor is a verb runtime failure"
+grep -q -- '--assignee' <<< "$(line_for CLOSED-A-FOLD)" \
+  && bad "(TOAGENTFOLD) a disposed bead was handed to an agent" \
+  || ok "(TOAGENTFOLD) …and the agent is never assigned"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTFOLD) …and the refusal says so" \
+  || bad "(TOAGENTFOLD) the refusal is unexplained (stderr: $(cat "$TMP/aerr"))"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(TOAGENTFOLD) …while the quiesce a fold still needs runs" \
+  || bad "(TOAGENTFOLD) the refusal took the quiesce with it"
+mv "$TMP/assignees.orig" "$TMP/assignees"
+
 # ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
 # whitespace collapse, before every side effect.
