@@ -87,9 +87,10 @@ push to an approved PR does not wait for a second approval. A standing
 CHANGES_REQUESTED from any other account vetoes the merge. `merge.sh` enforces
 this as a universal merge rule: it is armed for every PR and named by no
 `check_set` token (`gctk merge`, which `assets/scripts/merge.sh` execs), and
-GitHub branch protection is an extra layer, not the authority. The design child's checkpoint PR, each
-child's PR onto the integration branch, and the graduation PR all pass through
-it. The pattern's two gates are the two approvals that decide what moves next.
+GitHub branch protection is an extra layer, not the authority. The design
+child's checkpoint PR, each child's PR onto the integration branch, and the
+graduation PR all pass through it. The pattern's two gates are the two
+approvals that decide what moves next.
 
 The rule is the default branch's `gctk merge`, the binary the `gctk-build`
 order builds from the deployed pack the refinery runs, and it gates PRs onto an

@@ -767,9 +767,9 @@ grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candid
 # resolves too. The resolver's status set must be the pack's live-PR set
 # (open,in_progress,blocked,deferred,hooked,pinned), matching LIVE_STATUSES in
 # pr-facts.sh and mergeLiveStatuses in gctk merge; the narrow
-# open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS
-# is visible only to the widened query, so this is red before the fix (the narrow
-# query finds nothing and exits 4) and green after.
+# open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS is visible only to
+# the widened query, so this is red before the fix (the narrow query finds
+# nothing and exits 4) and green after.
 FAKE_PR_ROWS='[]'
 export FAKE_DEFERRED_ROWS='[{"id":"tk-defbead","status":"deferred","metadata":{"pr_number":"616","pr_url":"https://github.com/o/r/pull/616"}}]'
 run_resolve 616

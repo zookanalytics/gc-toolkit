@@ -547,12 +547,11 @@ resolve_live_subject() {
 # The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh,
 # mergeLiveStatuses in gctk merge): an anchor is live in deferred/hooked/pinned
 # too, so a narrower query would fail to resolve a PR whose bead sits in one of
-# those states. The number's
-# uniqueness holds only across EVERY live store, so any rig the search cannot
-# fully read refuses the whole resolution (exit 4) naming that ledger, rather
-# than resolve from the stores that answered while a dropped one may also record
-# the number: a rig with no .beads ledger to pin with --db, a list that exits
-# non-zero, and an answer that is not a JSON array.
+# those states. The number's uniqueness holds only across EVERY live store, so
+# any rig the search cannot fully read refuses the whole resolution (exit 4)
+# naming that ledger, rather than resolve from the stores that answered while a
+# dropped one may also record the number: a rig with no .beads ledger to pin
+# with --db, a list that exits non-zero, and an answer that is not a JSON array.
 _resolve_pr_reference() {
     _pr_num="$1"; _pr_url="$2"
     # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
