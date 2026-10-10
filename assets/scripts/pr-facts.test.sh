@@ -86,7 +86,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -528,6 +528,84 @@ eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another bl
 has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
 has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
 has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
+
+# The rest of the anchor's machine review scaffolding carries no branch, and each
+# piece holds a blocks edge on the anchor: a fix unit, the must-fix finding it
+# answers, a validation pass. Arm 10 retires them, but after this arm, so a close
+# attempted first is refused and escalated for a condition no person has to
+# clear. The close runs that sweep for its own anchor first. scafb seeds one
+# piece, with no branch so it is never a parked child; the store enforces the
+# blocks refusal, so a sweep that closed a finding before the fix unit blocking
+# it would leave the anchor's close refused.
+scafb() { # id anchor kind [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","title":"%s on %s","metadata":{"task_kind":"%s","anchor_bead":"%s"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2" "$3" "$2"
+}
+echo "# a disposed anchor blocked only by its review scaffolding closes on the first pass, with no visit"
+: > "$STUB_DEPS"
+store "[$(anchor F2s 136 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-s"'), $(scafb RWS F2s rework in_progress rig/gc-toolkit.polecat), $(scafb FS F2s finding), $(scafb VPS F2s validation)]"
+printf 'RWS|blocks|FS\nRWS|blocks|F2s\nFS|blocks|F2s\nVPS|blocks|F2s\n' > "$STUB_DEPS"
+printf '%s' "$(prview 136 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_136.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_ENFORCE_BLOCKS=1 run)
+eq "$(bstatus F2s)" "closed" "the anchor closes on the first pass"
+eq "$(meta F2s 'gc.superseded_by')" "tk-s" "…through the sanctioned terminal close"
+eq "$(bstatus RWS)" "closed" "the claimed fix unit is retired before it"
+eq "$(meta FS 'gc.outcome')" "moot" "…the must-fix finding about this diff is mooted"
+eq "$(bstatus VPS)" "closed" "…and the validation pass is retired"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated, so no pr-dispose-failed visit is filed"
+sw_ln=$(printf '%s\n' "$out" | grep -n "closed finding FS" | head -1 | cut -d: -f1)
+cl_ln=$(printf '%s\n' "$out" | grep -n "F2s — PR#136 closed out-of-band; auto-disposed" | head -1 | cut -d: -f1)
+{ [ -n "$sw_ln" ] && [ -n "$cl_ln" ] && [ "$sw_ln" -lt "$cl_ln" ]; } \
+  && ok "the scaffolding is retired before the close, in the same pass" \
+  || bad "the scaffolding must be retired before the close (sweep line '$sw_ln', close line '$cl_ln')"
+
+# A human review comment on a line the PR left unchanged can cite code the target
+# branch already carries. Closing the PR does not answer it, so the sweep carries
+# that finding forward to a bead of its own rather than mooting it, and the close
+# still lands.
+hfinding() { # id anchor locus comment-id
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"finding[human]: objection %s","description":"Locus: %s\\n\\nThe objection %s.","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.source":"human:op","finding.disposition":"must-fix","finding.comment_id":"%s"}}' \
+    "$1" "$1" "$3" "$1" "$2" "$4"
+}
+unchanged_line_comment() { # num comment-id
+  printf '[{"id":%s,"path":"docs/b.md","diff_hunk":"@@ -5,3 +5,3 @@\\n context\\n unchanged line"}]' "$2" > "$GH_DIR/comments_$1.json"
+}
+echo "# a finding that outlives the disposed diff is carried forward, and the close still lands"
+: > "$STUB_DEPS"
+store "[$(anchor F2u 137 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-u"'), $(hfinding FU F2u docs/b.md:7 702)]"
+printf 'FU|blocks|F2u\n' > "$STUB_DEPS"
+unchanged_line_comment 137 702
+printf '%s' "$(prview 137 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_137.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2u)" "closed" "the anchor's close lands"
+BUGU=$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FU") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$BUGU" "<none>" "the finding's objection is carried by a bead of its own"
+eq "$(meta FU 'gc.superseded_by')" "$BUGU" "…the finding closes pointed at it"
+eq "$(meta FU 'gc.outcome')" "<absent>" "…not mooted"
+eq "$(bstatus "$BUGU")" "open" "…and the carrier stays open"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated"
+
+echo "# a finding whose comment line does not read leaves the close for the next pass"
+: > "$STUB_DEPS"
+store "[$(anchor F2v 138 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-v"'), $(hfinding FV F2v docs/b.md:7 703)]"
+printf 'FV|blocks|F2v\n' > "$STUB_DEPS"
+unchanged_line_comment 138 703
+printf '%s' "$(prview 138 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_138.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_GH_LIST_RC=1 run)
+eq "$(bstatus F2v)" "open" "the anchor is not closed past a finding nobody could judge"
+eq "$(bstatus FV)" "open" "…the finding stays open"
+has "$out" "review scaffolding is not settled" "…the pass says why"
+hasnt "$(cat "$STUB_REHOME_LOG")" "--origin F2v" "…bead-rehome is not called on the anchor"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and nothing is escalated: the next pass retries"
+out=$(run)
+eq "$(bstatus F2v)" "closed" "the next pass, with the comments readable, closes the anchor"
+hasnt "$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FV") | .id ] | .[0] // "<none>"' "$STUB_STORE")" "<none>" "…carrying the finding forward"
+# A later section that reuses one of these PR numbers reads its comments as
+# feedback, so the fixtures go with the cases that wrote them.
+rm -f "$GH_DIR/comments_137.json" "$GH_DIR/comments_138.json"
 
 # A refused close escalates under pr-dispose-failed.<num>, and that visit tracks
 # the anchor. It reports this arm's own failed close and asks for the next pass's

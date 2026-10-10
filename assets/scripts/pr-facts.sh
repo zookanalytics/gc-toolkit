@@ -7,8 +7,9 @@
 # spends, since both are attempts at the one repair;
 # CLOSED-unmerged -> if the anchor carries a pre-recorded disposition
 # (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
-# bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
-# + escalate.sh visit; base moved -> retargeted +
+# bead-rehome.sh once its parked children, its machine review scaffolding
+# (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
+# otherwise abandoned + escalate.sh visit; base moved -> retargeted +
 # escalate (check markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
 # PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
@@ -174,6 +175,10 @@ RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
+# The retirement of a disposed anchor's machine review scaffolding, the same
+# sweep the cadence runs as arm 10. The close arm runs it for its one anchor
+# before that close, so the scaffolding's blocks edges do not refuse it.
+SCAFFOLDING_SWEEP="$SCRIPTS_DIR/scaffolding-sweep.sh"
 # The guarded visit close. Both visit retires below go through it, so a retired
 # visit carries gc.outcome and gc.outcome_reason, the board's outcome and headline
 # for a sitting that left no takeaway, and both stamps read back before the close.
@@ -1569,6 +1574,27 @@ $(printf '%s' "$kids" | jq -r --arg a "$id" --arg succ "$disp_succ" '
 CHILDREN_EOF
           else
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
+          fi
+        fi
+        # Retire the anchor's machine review scaffolding BEFORE its close, for
+        # the reason the children above go first. A fix unit, an open must-fix
+        # finding and a validation pass each hold a `blocks` edge on the anchor,
+        # so while one is open the close below is refused and escalated, for
+        # scaffolding that arm 10 retires later in this same pass. The sweep it
+        # runs here is arm 10's, scoped to this anchor, so both retire the same
+        # set: a finding about this diff is mooted, and one that can cite code
+        # the target branch already carries is carried forward as a bug of its
+        # own. When a finding's comment line does not read this pass (exit 3),
+        # or the scaffolding does not enumerate (exit 1), the close waits for the
+        # next pass rather than landing before the finding is judged. The
+        # children's writes above change what the sweep reads, so the pass's
+        # cached listings are dropped first.
+        if [ -x "$SCAFFOLDING_SWEEP" ]; then
+          bd_cache_clear
+          "$SCAFFOLDING_SWEEP" --anchor "$id"; src=$?
+          if [ "$src" -eq 1 ] || [ "$src" -eq 3 ]; then
+            echo "$PROG: $id — PR#$num disposition recorded but its review scaffolding is not settled (scaffolding-sweep rc=$src); retry next pass" >&2
+            skipped=$((skipped + 1)); continue
           fi
         fi
         # Retire this script's merge-path visits on the anchor BEFORE its close,
