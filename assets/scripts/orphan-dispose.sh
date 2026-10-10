@@ -119,6 +119,22 @@ read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 DEAD_DISPOSE="${GC_DEAD_MOLECULE_TOOL:-$HERE/dead-molecule-dispose.sh}"
 
+# The source arm's two `gc workflow` calls run under a hard bound. They are slow
+# rather than stuck: each scans every store in the city, and a healthy call takes
+# tens of seconds on a loaded host, so the bound sits well above that. Once
+# either command holds its per-bead lock, SIGTERM no longer stops it: the signal
+# only cancels a lock wait, and the work inside the lock runs to completion. A
+# TERM-only timeout would wait as long as the command does, so -k follows the
+# TERM with SIGKILL after a grace. The same deferral means a timeout exit (124,
+# or 137 after the KILL) does not prove the call wrote nothing, because the
+# command can finish its writes after the timer fires. So a timed-out
+# delete-source counts as failed, and a timed-out reopen-source is judged by
+# re-reading the bead.
+WORKFLOW_BOUND="${GC_ORPHAN_WORKFLOW_TIMEOUT:-180}"
+WORKFLOW_KILL_AFTER="${GC_ORPHAN_WORKFLOW_KILL_AFTER:-30}"
+run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout -k "$WORKFLOW_KILL_AFTER" "$WORKFLOW_BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
+timed_out() { [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
+
 BEAD_JSON="$(read_bead "$BEAD")"
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     echo "orphan-dispose: cannot read $BEAD — nothing disposed" >&2
@@ -315,6 +331,14 @@ verify() {
     return 0
 }
 
+# released_on_reread re-reads the bead and answers whether it reads released:
+# open and unassigned. The source arm asks it about a reopen-source that ran
+# past its bound, whose exit code cannot say whether the release landed.
+released_on_reread() {
+    read_bead "$BEAD" | jq -e 'type == "array" and length > 0
+        and .[0].status == "open" and ((.[0].assignee // "") == "")' >/dev/null 2>&1
+}
+
 ACTION=""
 DETAIL=""
 
@@ -437,33 +461,54 @@ case "$CLASS" in
         else
             ACTION="delegate-source-workflow"
             if [ "$APPLY" = "1" ]; then
-                if gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1; then
+                # A delete-source cut off by its bound counts as failed whatever
+                # it finished: reopen-source does not run, so the bead stays owned
+                # and comes back next cycle, where delete-source is idempotent.
+                run_bounded gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1
+                DS_RC=$?
+                if [ "$DS_RC" -eq 0 ]; then
                     note_landed delete-source
+                elif timed_out "$DS_RC"; then
+                    note_failed delete-source-timeout
                 else
                     note_failed delete-source
                 fi
-                case ",$FAILED," in
-                    *,delete-source,*) ;;
-                    *)
-                        if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
-                            note_landed reopen-source
-                            # reopen-source returns the bead to the pool but leaves the
-                            # session pins its dead claim stamped, so without this the
-                            # bead keeps naming that dead session as its owner and
-                            # orphan recovery re-detects it every cycle. verify catches a
-                            # pin that reports cleared and rolled back.
-                            clear_pins
-                            # reopen-source also preserves the route it finds, and the
-                            # dead session's own claim already emptied it, so the
-                            # reopened bead is unrouted and unofferable until the route
-                            # is put back from the durable execution stamp.
-                            restore_route
-                            verify
-                        else
-                            note_failed reopen-source
-                        fi
-                        ;;
-                esac
+                if [ "$DS_RC" -eq 0 ]; then
+                    run_bounded gc workflow reopen-source "$BEAD" >/dev/null 2>&1
+                    RS_RC=$?
+                    # A reopen-source cut off by its bound is judged by the bead.
+                    # One that reads open and unassigned is released, and its pins
+                    # and route are finished below exactly as after a clean exit,
+                    # with verify proving the result. One still in progress or
+                    # assigned was not released, so it is left as the call left
+                    # it, pins included, and stays owned for the next cycle.
+                    REOPENED=0
+                    if [ "$RS_RC" -eq 0 ]; then
+                        REOPENED=1
+                    elif timed_out "$RS_RC" && released_on_reread; then
+                        REOPENED=1
+                        DETAIL="reopen-source-past-bound"
+                    fi
+                    if [ "$REOPENED" = "1" ]; then
+                        note_landed reopen-source
+                        # reopen-source returns the bead to the pool but leaves the
+                        # session pins its dead claim stamped, so without this the
+                        # bead keeps naming that dead session as its owner and
+                        # orphan recovery re-detects it every cycle. verify catches a
+                        # pin that reports cleared and rolled back.
+                        clear_pins
+                        # reopen-source also preserves the route it finds, and the
+                        # dead session's own claim already emptied it, so the
+                        # reopened bead is unrouted and unofferable until the route
+                        # is put back from the durable execution stamp.
+                        restore_route
+                        verify
+                    elif timed_out "$RS_RC"; then
+                        note_failed reopen-source-timeout
+                    else
+                        note_failed reopen-source
+                    fi
+                fi
             fi
         fi
         ;;
