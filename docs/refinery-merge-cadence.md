@@ -429,9 +429,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    its own finding has closed if it has one, the comment is resolved: an answer
    leading with a check mark says what resolved it, and the comment trades its
    EYES reaction for THUMBS_UP. A finding ruled needs-you keeps its comment
-   awaiting a person, and a declined or deferred finding resolves its comment;
-   in both cases the finding's own owed reply is the answer, and it carries the
-   same glyph. An inline comment is answered in its thread. The thread is
+   awaiting a person while it is open, and a declined or deferred finding
+   resolves its comment; in both cases the finding's own owed reply is the
+   answer, and it carries the same glyph. A needs-you finding closes once its
+   visit has closed and no fix unit on its lane is in flight, and its comment
+   then resolves through its batch's bead like any other. An inline comment is answered in its thread. The thread is
    answered once every routed comment in it is resolved, by one reply naming
    each bead, and is resolved behind that reply. A review body or a Conversation
    comment has no thread, so a Conversation comment of the city's links to the

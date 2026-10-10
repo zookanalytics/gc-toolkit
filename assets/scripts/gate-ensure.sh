@@ -284,7 +284,7 @@ open_validation_pass() { # <anchor-id>
 # the log), quiesce_unanswered (the open must-fix findings no fix unit is
 # answering), and quiesce_unreadable (a probe could not answer — fail closed, hold
 # and retry next pass). The clauses, in order, first hold wins:
-#   (a) a fix unit in flight answering an open must-fix finding, ANY lane [finding.sh fix-in-flight]
+#   (a) a fix unit in flight answering an open must-fix or needs-you finding, ANY lane [finding.sh fix-in-flight]
 #   (b) a fix unit in flight resolving a finding on the anchor            [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays

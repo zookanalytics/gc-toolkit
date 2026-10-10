@@ -4598,6 +4598,15 @@ out=$(run)
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding deliberately holds the review changes-requested"
 hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested until the operator rules the visit"
 
+echo "# …and once its visit is ruled and the work answering it lands, the needs-you finding closes and the review clears"
+store "[$(anchor HRY 391 "$(wb_meta rework:HRCY)"), $(child HRCY closed), $(rfind HFY HRY 591 needs-you)]"
+printf '%s' "$(prview 391 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_391.json"
+threads 391 "$(hreview 391 591 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/391/reviews/591/dismissals" "a review whose needs-you finding has closed is dismissed"
+has "$(cat "$STUB_GH_LOG")" "settled by the ruling on its visit" "…and the dismiss message names the ruling that settled it"
+
 echo "# …a review already DISMISSED is left alone — its state is the idempotency"
 store "[$(anchor HR3 142 "$(wb_meta rework:HRC3)"), $(child HRC3 closed), $(rfind HF5 HR3 557 declined)]"
 printf '%s' "$(prview 142 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_142.json"

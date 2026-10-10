@@ -109,7 +109,8 @@
 # the block) and re-requests its author, per-review via finding.review_id so one
 # reviewer clears independently of another. A needs-you finding is the exception
 # that holds the review open on purpose: it stays open until the operator rules
-# its visit, so the review it belongs to is never auto-dismissed meanwhile. The
+# its visit and no fix unit on its lane is still in flight (finding.sh
+# close-answered), so the review it belongs to is never auto-dismissed meanwhile. The
 # confidence is the validator's, carried by the finding's closure, never a commit
 # oid, so a later push does not reopen it. A dismissal is not an approval: the
 # merge still gates on an explicit one.
@@ -4113,7 +4114,8 @@ WB_DECLINES
     # which is before the reply arm above delivers that answer, so closure alone does
     # not mean answered. A needs-you or still-unvalidated finding is open, so its
     # review is not yet clear — a needs-you finding deliberately holds the review
-    # changes-requested until the operator rules its visit.
+    # changes-requested until the operator rules its visit and the work their
+    # ruling calls for lands.
     if wrf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
       wrev_ready=$(printf '%s' "$wrf" | jq -rc '
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -4135,6 +4137,7 @@ WB_DECLINES
                                  + (if .disp == "declined" then "resolved by an accepted decline"
                                     elif .disp == "deferred" then "tracked as a follow-up for after the merge"
                                     elif .disp == "must-fix" then "addressed by a change"
+                                    elif .disp == "needs-you" then "settled by the ruling on its visit"
                                     else "resolved" end) ] } ]
           | .[] | select(.ready) | @base64' 2>/dev/null)
       while IFS= read -r wrr; do
