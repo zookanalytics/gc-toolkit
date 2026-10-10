@@ -40,7 +40,14 @@ case "$1 $2" in
   "order history")
       printf '%s\n' "$*" >> "${HIST_ARGS:-/dev/null}"
       rc="${HIST_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"
-      f="$HIST_DIR/$3.json"; if [ -f "$f" ]; then cat "$f"; else printf '{"entries":[]}'; fi ;;
+      # --since bounds the answer as the real history does: an entry carrying an
+      # "age" (seconds since it fired) is returned only inside the window. An
+      # entry with no age is always inside it.
+      since=0; prev=""
+      for a in "$@"; do [ "$prev" = "--since" ] && since="${a%s}"; prev="$a"; done
+      f="$HIST_DIR/$3.json"
+      if [ -f "$f" ]; then jq -c --argjson s "$since" '.entries |= map(select((.age // 0) < $s))' "$f"
+      else printf '{"entries":[]}'; fi ;;
   *) exit 0 ;;
 esac
 GC
@@ -97,9 +104,12 @@ eq "$RC" "0" "registered everywhere + fired inside the window is OK"
 has "$OUT" "condition-triggered" "the interval-less order is noted, not time-judged"
 ARGS=$(cat "$HIST_ARGS")
 has "$ARGS" "--limit 0" "the history read is unbounded (--limit 0 is load-bearing)"
-has "$ARGS" "tick --since 900s" "the window is max(3x60s, 15m) = the 15m floor"
-has "$ARGS" "citywide --since 900s" "a 5m order also floors at 15m"
+# This registry names no clock-driven trigger, so the rotation is empty and the
+# floor is the 30m minimum (assets/scripts/order-cadence.sh).
+has "$ARGS" "tick --since 1800s" "the window is max(3x60s, floor) = the 30m minimum floor"
+has "$ARGS" "citywide --since 1800s" "a 5m order also takes the floor"
 hasnt "$ARGS" "gated" "no history is read for a condition-triggered order"
+has "$OUT" "cadence floor 1800s" "the floor and its basis are stated"
 
 # --- 2. a rig importing the pack with a missing registration ----------------------
 cat > "$TMP/orders-missing.json" <<'EOF'
@@ -117,7 +127,7 @@ printf '{"entries":[{"rig":"alpha"}]}' > "$TMP/hist/tick.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a registered rig with no run inside the window is an ERROR"
 has "$OUT" "beta" "the stale rig is named"
-has "$OUT" "900s" "the window is stated"
+has "$OUT" "1800s" "the window is stated"
 printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 
 # --- 4. a suspended rig is not judged stale ----------------------------------------
@@ -312,6 +322,59 @@ EOF
 OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-skip" run_check); RC=$?
 eq "$RC" "0" "an order in the [orders] skip list is a NOTE, not an error"
 has "$OUT" "citywide: deliberately disabled" "the skipped order is noted"
+
+# --- 11. the floor is one trip of the dispatch rotation --------------------------
+# The supervisor fires at most max_dispatches_per_tick clock-driven orders per
+# pass, so a short-interval order fires once per trip around the rotation. With
+# the pack's three clock-driven registrations plus 67 others (70 in all) at the
+# default budget of 4, a trip is ceil(70/4) = 18 passes, and at 120s a pass the
+# floor is 2160s. A condition order takes no rotation slot.
+{
+    printf '{"orders":[{"name":"tick","rig":"alpha","trigger":"cooldown"},{"name":"tick","rig":"beta","trigger":"cooldown"},'
+    printf '{"name":"gated","rig":"alpha","trigger":"condition"},{"name":"gated","rig":"beta","trigger":"condition"},'
+    printf '{"name":"citywide","rig":"","trigger":"cooldown"}'
+    for i in $(seq 1 67); do printf ',{"name":"other-%s","rig":"","trigger":"cooldown"}' "$i"; done
+    printf ']}\n'
+} > "$TMP/orders-busy.json"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
+printf '{"entries":[{"rig":""}]}' > "$TMP/hist/citywide.json"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" run_check); RC=$?
+ARGS=$(cat "$HIST_ARGS")
+eq "$RC" "0" "a busy rotation with every order fresh is OK"
+has "$ARGS" "tick --since 2160s" "the floor is one trip of the rotation: ceil(70/4) passes at 120s"
+has "$ARGS" "citywide --since 2160s" "…and it is the window of a 5m order too"
+has "$OUT" "cadence floor 2160s: 70 clock-driven registration(s) at 4 per dispatch pass" "the derivation is stated"
+# A raised budget shortens the trip: ceil(70/8) = 9 passes is 1080s, under the
+# 30m minimum, so the minimum holds.
+mkdir -p "$TMP/city-budget8"
+printf '[orders]\nmax_dispatches_per_tick = 8\n' > "$TMP/city-budget8/city.toml"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" CITY_DIR="$TMP/city-budget8" run_check); RC=$?
+ARGS=$(cat "$HIST_ARGS")
+has "$ARGS" "tick --since 1800s" "a budget of 8 halves the trip, and the 30m minimum holds"
+has "$OUT" "at 8 per dispatch pass" "the budget city.toml sets is the one used"
+
+# --- 12. a gap longer than 900s but inside the trip is not a stopped order -------
+# Healthy 5m orders run up to about 18 minutes apart while the rotation is
+# saturated. The 900s window this replaced read such a gap as a stopped pass.
+printf '{"entries":[{"rig":"alpha","age":1200},{"rig":"beta","age":1200}]}' > "$TMP/hist/tick.json"
+printf '{"entries":[{"rig":"","age":1200}]}' > "$TMP/hist/citywide.json"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" run_check); RC=$?
+eq "$RC" "0" "orders last fired 1200s ago are live inside a 2160s trip"
+hasnt "$OUT" "has NOT fired" "…and no pass is called stopped"
+# A gap past the window is still a stopped pass.
+printf '{"entries":[{"rig":"alpha","age":1200},{"rig":"beta","age":2500}]}' > "$TMP/hist/tick.json"
+OUT=$(ORDERS_JSON="$TMP/orders-busy.json" run_check); RC=$?
+eq "$RC" "2" "a rig that last fired 2500s ago, past the 2160s window, is an ERROR"
+has "$OUT" "tick: registered on rig beta but has NOT fired there in the last 2160s" "…naming the rig and the window"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
+printf '{"entries":[{"rig":""}]}' > "$TMP/hist/citywide.json"
+
+# --- 13. the window is the shared definition, not a constant of this check -----
+if grep -qE '^[[:space:]]*FLOOR=[0-9]' "$CHECK"; then
+    bad "the check carries no floor constant of its own"
+else ok "the check carries no floor constant of its own"; fi
+grep -qF 'assets/scripts/order-cadence.sh' "$CHECK" && ok "the check sources assets/scripts/order-cadence.sh" \
+    || bad "the check sources assets/scripts/order-cadence.sh"
 
 echo
 echo "check-cadence-live: $PASS passed, $FAIL failed"
