@@ -14,9 +14,11 @@
 # span, an escape or a substitution is data: it neither ends the list nor
 # hides an expansion after it. Scope: fenced shell blocks in formula
 # TOMLs, agent prompt templates, startup fragments, skills, and named
-# paste-to-run docs runbooks. Rendered (generated/, base-snapshots/) and
-# frozen (specs/) trees are excluded. Fix: capture to a file and
-# `while IFS= read -r X`, or pipe into it.
+# paste-to-run docs runbooks. A block fenced as bash, sh or shell is shell,
+# and so is an untagged block, which some fragments and skills use for a
+# command. Rendered (generated/, base-snapshots/) and frozen (specs/) trees
+# are excluded. Fix: capture to a file and `while IFS= read -r X`, or pipe
+# into it.
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
 
 set -uo pipefail

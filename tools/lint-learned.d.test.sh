@@ -1500,6 +1500,24 @@ for n in 2 3 4 5 6 7; do
     has "$OUT" "params.toml:$n:" "params.toml line $n is reported"
 done
 
+# A block fenced as sh or shell is shell, and so is an untagged block.
+cat > "$TMP/formulas/tags.toml" <<'FIX'
+```sh
+for x in $LIST; do echo "$x"; done
+```
+```shell
+for x in $LIST; do echo "$x"; done
+```
+```
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/formulas/tags.toml"
+eq "$RC" 1 "sh, shell and untagged blocks are shell"
+for n in 2 5 8; do
+    has "$OUT" "tags.toml:$n:" "tags.toml line $n is reported"
+done
+
 echo "── formula-unquoted-for: what is not ──"
 
 # A quoted list, zsh's explicit \${=VAR} split, and a literal list are all fine;
@@ -1717,12 +1735,14 @@ done
 eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is, the commented-out loops included"
 
 # Scope excludes rendered and frozen trees even when they carry the defect: the
-# fix belongs in the source they render from or froze.
+# fix belongs in the source they render from or froze. lint-learned.d/ is
+# excluded too, because the text there states the rule.
 mkdir -p "$TMP/specs/b/formulas" "$TMP/generated/seed-audit/agents/a" \
-         "$TMP/base-snapshots/x/formulas"
+         "$TMP/base-snapshots/x/formulas" "$TMP/lint-learned.d/skills/s"
 for p in specs/b/formulas/f.toml \
          generated/seed-audit/agents/a/prompt.template.md \
-         base-snapshots/x/formulas/f.toml; do
+         base-snapshots/x/formulas/f.toml \
+         lint-learned.d/skills/s/SKILL.md; do
     cat > "$TMP/$p" <<'FIX'
 ```bash
 for x in $LIST; do echo "$x"; done
@@ -1731,8 +1751,9 @@ FIX
 done
 runf "$TMP/specs/b/formulas/f.toml" \
      "$TMP/generated/seed-audit/agents/a/prompt.template.md" \
-     "$TMP/base-snapshots/x/formulas/f.toml"
-eq "$RC" 0 "specs/, generated/, and base-snapshots/ are excluded"
+     "$TMP/base-snapshots/x/formulas/f.toml" \
+     "$TMP/lint-learned.d/skills/s/SKILL.md"
+eq "$RC" 0 "specs/, generated/, base-snapshots/ and lint-learned.d/ are excluded"
 
 # Docs are named one at a time, not matched by a docs/* glob — an ordinary doc
 # whose fenced example happens to hold an unquoted loop is illustrative, not a
