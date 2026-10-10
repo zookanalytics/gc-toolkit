@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the deacon patrol's backup-restorability check (tk-hef7t).
+# Hermetic test for the deacon patrol's backup-restorability check.
 #
 # The bug this guards: the dolt-health step used to key its backup verdict off
 # `backups.dolt_stale` from `gc dolt health --json`. That field renders ABSENT
@@ -230,7 +230,7 @@ mkdb nomanifest_inflight
 : > "$BACKUP_ROOT/nomanifest_inflight/iiii.darc"   # written now — no stamp
 
 # tie_chunk_first / tie_manifest_first: the manifest and the newest chunk share
-# an mtime SECOND (tk-40mlc). `stat -c %Y` / `-f %m` return whole seconds, so
+# an mtime SECOND. `stat -c %Y` / `-f %m` return whole seconds, so
 # sub-second ordering is invisible — the real lx case had the manifest 33 ms
 # NEWER than the last chunk and the check still saw a tie. Dolt commits the
 # manifest LAST, so a same-second tie means the commit landed in the same
@@ -257,7 +257,7 @@ mkdb tie_manifest_first
 # tie_uncommitted: the tightest form of the rule the tie must NOT weaken — a
 # chunk STRICTLY newer than the manifest, by a single second. A fix that let
 # the manifest win unconditionally, or that compared with any tolerance, would
-# read this as healthy. It is the torn-backup signature (tk-hef7t) and must
+# read this as healthy. It is the torn-backup signature and must
 # still FLAG. The manifest is 2 h old, well inside the 12 h staleness arm, so
 # only the trap arm can catch it.
 mkdb tie_uncommitted

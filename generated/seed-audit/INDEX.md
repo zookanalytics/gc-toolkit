@@ -7,7 +7,7 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 18 · formulas: 26
+- agents: 17 · formulas: 27
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -33,21 +33,20 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse`](agents/converse.md) | 34,583 | 8,645 |
-| [`converse-codex`](agents/converse-codex.md) | 34,583 | 8,645 |
-| [`converse-fable`](agents/converse-fable.md) | 34,583 | 8,645 |
-| [`converse-opus`](agents/converse-opus.md) | 34,583 | 8,645 |
-| [`deacon`](agents/deacon.md) | 13,533 | 3,383 |
+| [`converse-codex`](agents/converse-codex.md) | 36,510 | 9,127 |
+| [`converse-fable`](agents/converse-fable.md) | 36,510 | 9,127 |
+| [`converse-opus`](agents/converse-opus.md) | 36,510 | 9,127 |
+| [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
-| [`keeper`](agents/keeper.md) | 23,590 | 5,897 |
-| [`mechanik`](agents/mechanik.md) | 28,978 | 7,244 |
-| [`polecat`](agents/polecat.md) | 27,411 | 6,852 |
-| [`polecat-codex`](agents/polecat-codex.md) | 27,441 | 6,860 |
-| [`proactive`](agents/proactive.md) | 12,122 | 3,030 |
-| [`refinery`](agents/refinery.md) | 10,950 | 2,737 |
-| [`witness`](agents/witness.md) | 15,914 | 3,978 |
+| [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
+| [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
+| [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
+| [`polecat-codex`](agents/polecat-codex.md) | 27,797 | 6,949 |
+| [`proactive`](agents/proactive.md) | 12,437 | 3,109 |
+| [`refinery`](agents/refinery.md) | 11,265 | 2,816 |
+| [`witness`](agents/witness.md) | 16,229 | 4,057 |
 
 ## Formula recipes
 
@@ -60,6 +59,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,386 | 846 |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
@@ -84,7 +84,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,482 | 870 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,653 | 913 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
@@ -105,7 +105,6 @@ runs to re-prime after compaction.
 | claude | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | codex | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
-| converse | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |

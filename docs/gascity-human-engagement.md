@@ -262,12 +262,13 @@ cut back to a word boundary with an ellipsis if it is long; the body always
 carries what was typed, verbatim.
 
 **The bare CLI's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
-`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"` and its
-pool name is rig-qualified, so a topic that is not rig-specific still has to
-land somewhere. The CLI default is deliberately *not* inferred from cwd: the
-command is fired from wherever the operator happens to be sitting, and a
-destination that varies silently with the shell's directory is the worst
-failure mode an intake path can have.
+`GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"`: a
+sitting spawns from the `converse-<model>` template of the subject's own rig,
+so a topic that is not rig-specific still has to land somewhere. The CLI
+default is deliberately *not* inferred from cwd: the command is fired from
+wherever the operator happens to be sitting, and a destination that varies
+silently with the shell's directory is the worst failure mode an intake path
+can have.
 
 **The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
 message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
@@ -434,7 +435,7 @@ A parked subject whose routed work has all landed therefore returns as an
 ordinary unnamed wait in the sweep's batch triage visit, and the takeaway is
 never cleared: that stamp is the record of what the sitting concluded, and the
 visit is additive. What does not exist yet is the **push** — a visit filed
-straight back to the converse pool for a `gc.origin=operator` subject, carrying
+straight back onto the board for a `gc.origin=operator` subject, carrying
 the landed id set as its own dedup key. The batch visit is a queue a sitting
 works through; the push would be the subject's own conversation resuming.
 
@@ -531,8 +532,8 @@ question arrives as a conversation with framing and an owner. One visit per
 gate: the sweep records the visit it filed (or the sitting already standing
 for the gated bead) on the gate as `gc.gate_visit=<visit-id>`, and never
 re-offers a stamped gate — a sitting that ends with the gate still open (a
-benign close, a cut-short hold, an operator dismiss) must not re-spawn a
-session every cooldown; the return trip for a cut-short hold rides the
+benign close, a cut-short hold, an operator dismiss) must not re-file a
+visit every cooldown; the return trip for a cut-short hold rides the
 liveness sweep, as before. Stamping `gc.gate_visit=skip` on a gate before the
 sweep reaches it suppresses its visit, which is the operator's selection
 point when the default is too much; `gc bd update <gate> --unset-metadata
@@ -548,7 +549,7 @@ file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
 the reaction's takeaway as the question, and hold the subject on it. The topic
 keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
 already holds on the subject keeps its question. The sweep's next pass files the
-visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit, so a gated subject can wait up to one pass, a 5-minute cooldown, with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among
@@ -685,9 +686,9 @@ because live holds predate this and keep working.
 
 ## How a held sitting ends
 
-`agents/converse/agent.toml` sets `idle_timeout = "0"`, which takes this role
-off the idle ladder entirely: a template whose idle timeout is at or below zero
-is never registered with the idle tracker (`buildIdleTracker`,
+Every `converse-<model>` template sets `idle_timeout = "0"`, which takes a
+sitting off the idle ladder entirely: a template whose idle timeout is at or
+below zero is never registered with the idle tracker (`buildIdleTracker`,
 `cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
 all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
@@ -706,13 +707,14 @@ attached sitting whose visit already reads closed is left for a later pass, once
 it is no longer attended. A sitting whose visit is still OPEN — the operator
 walked away before any sign-off — is the harder, separate case, untouched here.
 
-Two runtime endings the idle setting does not own, and both still reach converse:
+Two endings the idle setting does not own:
 
-- **A pool session that has ENDED is still collected in about a minute** by the
-  `no-wake-reason` drain, a different clock on a different path, unaffected by
-  any idle setting. See *How a pane dies when no sitting is live*, below. A
-  manual converse session (the post-cutover shape) is exempt from
-  that cycling, so `converse-reap` above is what collects its settled sitting.
+- **A settled sitting is collected by the pack's reap, not by a runtime
+  clock.** A sitting is a manual session, which the awake set keeps for as
+  long as it is neither closed nor drained (`cmd/gc/compute_awake_set.go`), so
+  the `no-wake-reason` drain that collects an ended pool session in about a
+  minute never reaches it, and `converse-reap` above is what collects it. See
+  *How a pane dies when no sitting is live*, below.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The
   per-model converse templates run `wake_mode = "resume"`, so that restart
@@ -720,13 +722,16 @@ Two runtime endings the idle setting does not own, and both still reach converse
   discipline holds because the demand is the durable gate the board reads
   and the work blocks on, not because the thread is lost.
 
-The cost is real: a held visit nobody answers holds a `max_active_sessions`
-slot indefinitely, where an idle clock would recycle it. The bound is the
-pack default in `agents/converse/agent.toml`, and a rig raises it in
-`city.toml`. How many held visits it takes to fill the pool is therefore a
-per-rig number. `gc-helm dismiss` is the release valve, and converse puts it
-at the foot of every framing it posts as a copyable line, so ending a sitting
-is a switch in the thread rather than an errand the operator has to remember.
+The cost is real: a held visit nobody answers keeps its sitting's session
+running indefinitely, where an idle clock would recycle it. Nothing rations
+sittings either. `max_active_sessions` does not cap a manual session:
+`gc session new` checks no session count (`cmd/gc/cmd_session.go`), and the
+pool's scale-down drop paths skip a manual session
+(`cmd/gc/build_desired_state.go`), so every unanswered hold is one more live
+provider process (verified 2026-10-05). `gc-helm dismiss` is the release
+valve, and converse puts it at the foot of every framing it posts as a
+copyable line, so ending a sitting is a switch in the thread rather than an
+errand the operator has to remember.
 It is the verb rather than a bare `gc bd close` because a held visit is
 assigned to the session holding it, and a session restarted mid-hold closes
 under a different identity string than the one on the bead: bd refuses that
@@ -737,6 +742,13 @@ it can read as OPEN, so a visit closed without an outcome is one no re-run
 reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
 nothing to the subject: the subject's DONE row, once it closes, leaves the board
 only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
+
+`prefix+X` ends a sitting the same way from the keyboard, whether or not
+converse's copyable line is on screen. After a y/n confirm,
+`assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
+`gc session list`, refuses one that is not a converse sitting, and runs the
+argument-free dismiss under that session's identity, so dismiss itself infers
+which subject the sitting is on. Nothing is typed into the pane.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
@@ -758,7 +770,8 @@ that field:
   Reading the city's `wisp_ttl = "8h"` as the thing that collects
   conversations is a coincidence of two unrelated 8h values.
 - **The clock that ends a sitting is the agent's own `idle_timeout`** —
-  pack-owned config (`agents/converse/agent.toml`), not core policy.
+  pack-owned config (each `agents/converse-<model>/agent.toml`), not core
+  policy.
 - **"Idle" means the terminal produced no output.** The reconciler's
   `checkIdle` reads the provider's last activity, which for tmux is the
   most recent per-window `#{window_activity}` (`Tmux.rawSessionActivity`,
@@ -785,19 +798,18 @@ that field:
   pane's history. The per-model converse templates run `wake_mode =
   "resume"`, which replays the provider transcript across gaps far longer
   than the timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1),
-  so a restarted sitting comes back with its thread. Only the legacy
-  `converse` pool is `wake_mode = "fresh"`, which respawns a clean provider
-  session; there the thread is gone and the durable trace is what a fresh
-  respawn reads instead.
+  so a restarted sitting comes back with its thread. A resume that fails
+  comes back without it, and there the durable trace is what the respawn
+  reads instead.
 
 *Seam:* **nothing pack-owned runs at kill time**, so there is no
 warn-before-reap. The converse contract stamps the subject's takeaway when
 the hold *begins* (not only at close) because that stamp IS the demand —
 the gate the board reads and dependent work blocks on — so it has to land
-before the wait, not because a pane might be lost; a fresh respawn or a
-failed resume then still finds a dated record of what the sitting was
-waiting for. Every deliberate close of a **held** sitting ends with a
-sign-off block naming the outcome and the subject to look at next.
+before the wait, not because a pane might be lost; a failed resume then
+still finds a dated record of what the sitting was waiting for. Every
+deliberate close of a **held** sitting ends with a sign-off block naming the
+outcome and the subject to look at next.
 
 *Longevity is not the remedy, and taking the clock off is not longevity.*
 Raising `idle_timeout` only widens the window in which a dead thread looks
@@ -954,8 +966,8 @@ wake nudge that names the claimer directly rather than sending the
 session through the prompt's claim block passes no continuation group,
 which silently disables the out-of-group guard above on every wake.
 
-`agents/converse/agent.toml` holds that field empty, but emptiness is not
-what protects a held sitting. converse runs as a manual session, never
+Every `converse-<model>` template holds that field empty, but emptiness is not
+what protects a held sitting. A sitting runs as a manual session, never
 pool_managed, and all three claim backstops gate `governs()` on
 `pool_managed` (`cmd/gc/idle_nudge.go`, `cmd/gc/execution_backstop.go`), so
 no backstop nudge and no drain reaches a converse sitting whatever this field
@@ -1003,116 +1015,98 @@ Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
 `gc-rjtk1` is now resolved upstream.
 
 *This section is about a sitting that is still **held**.* A sitting that
-has **ended** leaves a live pane with no wake reason, and that pane dies
-on a different, much shorter clock — see
+has **ended** leaves a live pane, and that pane dies on a different path: the
+pack's own reap, on a five-minute cadence — see
 *How a pane dies when no sitting is live*, below. Reading this section as
 the complete account of how the operator's pane goes is what left the
 post-sitting window unguarded.
 
-## How a pane dies when no sitting is live (source-verified 2026-08-20)
+## How a pane dies when no sitting is live (source-verified 2026-10-05)
 
 The section above answers "what ends a **held** sitting". It is not the
 only way the operator's pane goes, and the other way is the one that has
-cost them words. Verified against the gascity source and this city's
-event/reconciler record after an operator lost an unsubmitted
-multi-paragraph reply (`tk-tufrw`); full evidence in
-`specs/tk-tufrw/teardown-input-loss.md`.
+cost them words: an operator lost an unsubmitted multi-paragraph reply to it
+(`tk-tufrw`; evidence in `specs/tk-tufrw/teardown-input-loss.md`, gathered
+while sittings ran in a pool and the runtime's drain took the pane).
 
 Once a sitting **ends** — the visit closed, the takeaway stamped, the
 sign-off posted — the session still has a live pane, and the thread the
-operator is reading is still on screen. What it no longer has is a wake
-reason of its own. `ComputeAwakeSet` finds none, and the reconciler's
-`if !shouldWake && target.alive` arm (`cmd/gc/session_reconciler.go`)
-begins a drain whose reason resolves to the `switch` default,
-**`no-wake-reason`**. Measured on 2026-08-20: the tick at 22:03:13Z saw
-`state: awake`, the same tick at 22:03:17Z recorded `state: draining`,
-and the stop landed at 22:04:15Z — a **~58-second** window.
+operator is reading is still on screen. No runtime clock takes that pane. A
+sitting is a manual session, and `ComputeAwakeSet` keeps a manual session in
+the desired set, under the reason `manual`, for as long as it is neither
+closed nor drained and its template is still configured
+(`cmd/gc/compute_awake_set.go`). So the `no-wake-reason` drain, which begins
+when a live session has no wake reason left, never begins for a sitting.
+Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout`
+or a `[session_sleep]` policy, and this city sets neither (`gc config show`,
+2026-10-05).
 
-**What holds the pane up in the meantime is not the operator.** The
-converse pool is demand-driven (`min_active_sessions = 0`), so a live
-session survives on the pool having open visits at all — anyone's. In
-this incident the operator's own visit had closed an hour earlier, and
-the pane outlived it only because an unrelated visit (`tk-lrylu`, a
-different subject entirely) stayed open; that one closed at 22:02:15Z and
-the drain began 58 seconds later. Do not read a still-present pane as
-evidence that the system knows you are there. It does not: neither the
-operator's attention nor anything they have typed is an input to the
-decision.
+**What takes the pane is the pack's own reap.** The `converse-reap` order
+(`orders/converse-reap.toml`, a five-minute cooldown) runs
+`assets/scripts/converse-reap.sh`, which closes every converse session whose
+visit reads closed or gone, unless the session is attached. Do not read a
+still-present pane as evidence that the system knows you are there. The
+session's manual origin is what holds the pane up, and a closed visit plus
+one unattached pass of the reap is what ends it. Neither the operator's
+attention nor anything they have typed is an input to either.
 
 Three things about that path are worth knowing before trusting a pane:
 
-- **Nothing is typed into the pane; the pane is taken whole.** The drain
-  signals through *metadata*, not keystrokes. `beginSessionDrainInfo`
-  only records the drain — it takes a `runtime.Provider` and ignores it
-  (`_ runtime.Provider`, `cmd/gc/session_wake.go`). One tick later, if
-  nothing cancelled, `advanceSessionDrainsWithSessionsTraced` sets
-  `GC_DRAIN_ACK=1` on the session, and says so in as many words: the
-  reconciler's Phase 1 drain-ack check "calls `sp.Stop()` for a clean
-  SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane." That
-  stop is `Provider.Stop` (`internal/runtime/tmux/adapter.go`) →
-  `KillSessionWithProcessesExcluding`
-  (`internal/runtime/tmux/tmux.go`): SIGTERM to the pane's whole
-  process tree with a grace window, SIGKILL to whatever survives it,
-  then `tmux kill-session`. `Provider.Interrupt` — the one API that
-  would put a `C-c` in the pane — is not on this path at all; the drain
-  code's only interrupt helper, `verifiedInterrupt`, has no caller
-  outside its own test. So the composer is never cleared first. The
-  draft is still sitting in the pane, intact, for the whole window, and
+- **Nothing is typed into the pane; the pane is taken whole.** The reap's
+  close is `gc session close`, which stops the runtime before it marks the
+  session closed (`Manager.CloseDetailed`, `internal/session/manager.go`).
+  That stop is `Provider.Stop` (`internal/runtime/tmux/adapter.go`) →
+  `KillSessionWithProcessesExcluding` (`internal/runtime/tmux/tmux.go`):
+  SIGTERM to the pane's whole process tree with a grace window, SIGKILL to
+  whatever survives it, then `tmux kill-session`. `Provider.Interrupt` — the
+  one API that would put a `C-c` in the pane — is not on this path. It is
+  the same stop the runtime's own drain ends in, and the drain code says so in
+  as many words: the reconciler's Phase 1 drain-ack check "calls sp.Stop()
+  for a clean SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane"
+  (`cmd/gc/session_wake.go`). So the composer is never cleared first. A draft
+  is still sitting in the pane, intact, until the pass that closes it, and
   then the pane is gone.
-- **Attachment protects, but it stops protecting at the ack.**
-  Attachment is a wake cause (`WakeCauseAttached`,
-  `internal/session/lifecycle_projection.go`), and `ComputeAwakeSet`
-  applies it as an override that wakes *even a drained session*
-  (`cmd/gc/compute_awake_set.go`), so an *attached* pane does not enter
-  this drain, and re-attaching during the first tick of one cancels it
-  — `no-wake-reason` is cancellable, so any wake reason that reappears
-  clears the ack and drops the drain. Two things eat that protection.
-  *First*, this city runs **one tmux client** switched between
-  per-agent sessions, so at most one session reports
-  `session_attached=1` at a time and every other live pane reads as
-  unattached; the idle ladder's attachment rung is on the `idle` path
-  only, and `no-wake-reason` never reaches it. *Second*, once
-  `GC_DRAIN_ACK` is set, the stop is decided by the
-  Phase 1 drain-ack consumer (`cmd/gc/session_reconciler.go`), whose
-  cancels are assigned work, a *structured* pending interaction, and a
-  config-drift-plus-recently-attached case — plain attachment on a
-  `no-wake-reason` ack is not one of them, so attaching late does not
-  call the kill off. And typing is not a cancel condition at any point
-  on this path: a pending *interaction* is a prompt the agent is blocked
-  on, not a half-written reply, and nothing in the decision reads the
+- **Attachment protects, but only the pane on screen.** The reap skips an
+  attached session, because attachment is the only signal the pack has that
+  someone is at a pane. This city runs **one tmux client** switched between
+  per-agent sessions, so at most one session reports `session_attached=1` at
+  a time and every other live pane reads as unattached. A settled sitting the
+  operator switched away from mid-draft is closed on the next pass. Typing is
+  not an input at any point: nothing in the reap or in the stop reads the
   pane's contents.
-- **The stop event's wording is misleading here.** It reads
+- **A pool session ends differently, and a sitting is outside it.** A pool
+  session left with no wake reason is drained as `no-wake-reason`: the
+  reconciler records the drain, sets `GC_DRAIN_ACK=1` on the session a tick
+  later, and the drain-ack consumer stops it, measured at about 58 seconds
+  after the last wake reason went (2026-08-20). That stop event reads
   `"drain acknowledged by agent"` even when the agent never ran
-  `gc runtime drain-ack`: the reconciler acks on its behalf
-  (`GC_DRAIN_ACK_SOURCE=reconciler`, `cmd/gc/session_wake.go`) and
-  `finalizeDrainAckStoppedSession` emits the same string either way. Do
-  not read that event as an agent decision.
+  `gc runtime drain-ack`, because the reconciler acks on its behalf
+  (`GC_DRAIN_ACK_SOURCE=reconciler`, `cmd/gc/session_wake.go`), so do not
+  read that event as an agent decision. A sitting's teardown is the reap's
+  `gc session close`, never this drain.
 
-*Seam:* the same one as the reap — **nothing pack-owned runs at kill
-time**, so the pack cannot capture pending input here. Ruled out with
-evidence in the determination: tmux `session-closed`/`pane-exited` hooks
-(fire after the pane is gone), a Claude Code `SessionEnd` hook (never receives the
-composer buffer), a cooldown order (multi-minute cadence against a
-~58-second window), and `pipe-pane` logging (a redrawing TUI makes the
-volume unusable). The capture has to live in the drain path upstream:
-filed as `gc-ze774`, with `gc-8g41r`'s `InputAreaState` — buffered-input
-detection over `tmux capture-pane` — as the primitive it should consume.
+*Seam:* the decision to end a settled sitting is pack-owned — it is
+`converse-reap.sh` — but the pack cannot read a pane's typed input, so the
+reap has nothing to check a draft against, and attachment is its only proxy.
+The input read is upstream: `gc-8g41r` landed `InputAreaState`, buffered-input
+detection over `tmux capture-pane`, as a library primitive, and `gc-ze774` is
+filed to make tearing down a session that holds unsubmitted input a hard no.
 
 **The operator's ruling on this (2026-08-20T22:21Z):** *"draining a
 session with typed text should be a hard no."* Pending input is a hard
-blocker on teardown, not something to capture on the way out — capture
-and warning are the fallback for a teardown that happens anyway. That
-prohibition is what `gc-ze774` is filed to implement; the pack has no
-part of it to build.
+blocker on teardown, not something to capture on the way out — capture and
+warning are the fallback for a teardown that happens anyway. The reap's close
+is a teardown under that ruling, and until the reap can read typed input,
+the attachment check is all that enforces it.
 
-**What follows for the pack.** Treat "the sitting ended" as the start of
-a short countdown on that pane, not as a quiet state. The existing
-lever still applies and is still the only one we own: the record has to
-be written before the pane matters — the takeaway stamped at hold time,
-the outcome appended as soon as a sitting settles anything, the sign-off
-posted at close. Nothing has changed about that. What is new is that the
-operator's *own* unsent words have no such protection, and until
-`gc-ze774` lands they are not durable anywhere.
+**What follows for the pack.** Treat "the sitting ended" as the start of a
+countdown on that pane, ending at the next unattached reap pass, not as a
+quiet state. The existing lever still applies and is still the only one we
+own: the record has to be written before the pane matters — the takeaway
+stamped at hold time, the outcome appended as soon as a sitting settles
+anything, the sign-off posted at close. What it does not protect is the
+operator's *own* unsent words, and until the reap can refuse a pane that
+holds them they are not durable anywhere.
 
 ## Watch items — moving now, re-verify before building on them
 

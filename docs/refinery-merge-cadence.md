@@ -19,7 +19,8 @@ runtime guarantees the arrangement depends on.
 **Boundaries.** The states the arms move an anchor through are
 [state-machine.md](state-machine.md). The refinery *agent*'s judgment calls
 (rejection, blocked, refused) live in `formulas/mol-refinery-patrol.toml` and
-are not driven by this order.
+are not driven by this order. That patrol's liveness has its own doctor check,
+`check-refinery-patrol-live`.
 
 ## Mechanism
 
@@ -372,7 +373,10 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 7. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
+   approved PR only, by the approval rule merge.sh lands on; the child's
+   handoff runs `bring-current-guard.sh`, which dismisses the approval and
+   files a visit when bringing the branch current took judgment), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no
@@ -409,28 +413,44 @@ the cadence — the arms run whether or not any refinery session is awake.
    The batch is watermarked only once that pass records the shape the validator
    reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
    edge holds.
-   A write-back sweep then answers the operator in the PR itself. On an anchor
-   carrying `pr_comment_disposition`, every comment at or below the recorded
-   watermark gets an EYES reaction, and once the bead that disposition names
-   closes, each thread holding one of the comments that bead answers gets one
-   reply naming the commit and is resolved behind that reply. The watermark is
-   cumulative and a disposition holds one batch at a time, so `pr_comment_batch`
-   carries the history it cannot: one `<disposition>|<floor>|<mark>` record per
-   batch, oldest first, written in the same transition that advances the
-   disposition. A thread belongs to every record whose range holds one of its
-   comments and whose disposition names a bead, and it is answered only once all
-   of them have landed, by one reply naming each. A record is dropped once its
-   batch has nothing left owing. The reactions are written first and bounded per
-   pass; when the cap or a failed write leaves one owing, that pass replies to
-   and resolves nothing, so no thread is answered over a comment still awaiting
-   its acknowledgement. A thread with a post after the city's own reply that is
-   not itself the city's own is left open, and so is one holding a comment above
+   A write-back sweep then answers the operator in the PR itself, marking each
+   routed comment as looked at, awaiting a person, or resolved. On an anchor
+   carrying `pr_comment_disposition`, every comment at or below its space's
+   watermark gets an EYES reaction. The watermarks are cumulative and a
+   disposition holds one batch at a time, so each id space keeps a ledger of the
+   batches routed under it: `pr_comment_batch` for inline comments,
+   `pr_review_batch` for review bodies, and `pr_issue_comment_batch` for
+   Conversation comments. A ledger holds one `<disposition>|<floor>|<mark>`
+   record per batch, oldest first, written in the same transition that advances
+   the disposition, and a comment's batch names the bead that answers it. While
+   that bead is a visit still open, the comment gets an answer that leads with a
+   question mark and names the visit. A rework child closes when it lands, and
+   a visit when the person closes it. Once the comment's bead has closed, and
+   its own finding has closed if it has one, the comment is resolved: an answer
+   leading with a check mark says what resolved it, and the comment trades its
+   EYES reaction for THUMBS_UP. A finding ruled needs-you keeps its comment
+   awaiting a person, and a declined or deferred finding resolves its comment;
+   in both cases the finding's own owed reply is the answer, and it carries the
+   same glyph. An inline comment is answered in its thread. The thread is
+   answered once every routed comment in it is resolved, by one reply naming
+   each bead, and is resolved behind that reply. A review body or a Conversation
+   comment has no thread, so a Conversation comment of the city's links to the
+   comments one bead answers and carries their answer. The routing arm leaves
+   out of a batch the feedback the review threads already answered: an inline
+   comment in a resolved thread with a later post of the city's, or a review
+   body whose every inline comment is one. Such feedback sits inside the
+   batch's range, but the batch's bead never saw it, so unless a finding names
+   it, it is acknowledged and never marked. A record is dropped once
+   every comment it covers carries its final mark. The reactions are written
+   first and bounded per pass; when the cap or a failed write leaves one owing,
+   that pass posts no answer, so no comment is answered before it is
+   acknowledged. A thread with a post after the city's own reply that is not
+   itself the city's own is left open, and so is one holding a comment above
    the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
-   every later pass. A `visit:` disposition earns the reaction but never a
-   reply, because no commit answered it. Idempotence is read back off GitHub,
-   so a repeat pass writes nothing and a failed write is retried by the next
-   one. The per-anchor walk runs under the arm's share of the pass budget,
+   every later pass. Idempotence is read back off GitHub, so a repeat pass
+   writes nothing and a failed write is retried by the next one.
+   The per-anchor walk runs under the arm's share of the pass budget,
    first the anchors that need action, then the rest in a rotation. Needing
    action is a PR that left the open list (a merge or a close to record), an
    approved PR the posture arm recorded `DIRTY` at its head with no rework child
@@ -441,15 +461,43 @@ the cadence — the arms run whether or not any refinery session is awake.
    each, so it rotates with the rest until the hold lifts. The marks live in
    `pr-facts.cursor.seen`, and a walk with none records them and puts nothing
    first for a change. The write-back sweep reads GitHub only for the anchors
-   carrying a disposition, at least four calls each, so it runs under the same
-   deadline in a rotation of its own
+   carrying a disposition or owed a finding post or answer (below), at least
+   four calls each, so it runs under the same deadline in a rotation of its own
    (`pr-facts.cursor.writeback`), with one anchor visited even on a pass whose
    walk spent the deadline. It visits first an anchor whose disposition, a
    watermark, or its live children changed since the sweep last visited it: a
-   batch routed, or the work answering one closing.
+   batch routed, or the work answering one closing. An anchor with no
+   disposition, there only for the findings its PR is owed, rotates with the
+   rest.
+   The same sweep carries each machine-lane finding ruled worth fixing
+   (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
+   file the diff touches becomes a file-level review comment on that file, and
+   any other locus becomes a Conversation comment. Once the finding closes, the
+   comment is answered with how it closed: the head that carries the fix and
+   the fix units that landed it, or the deferral's follow-up. The thread is then
+   resolved unless a post that is not the city's own has come after it, and a
+   Conversation comment is edited to carry the answer. A finding that closed
+   before it was posted, as a pre-open round's findings have, is posted with its
+   answer already in place. A human finding is never posted, because it already
+   sits on the PR where its raiser wrote it and is answered there. One
+   store-wide read of the findings serves the pass, and `finding.pr_comment` and
+   `finding.pr_answered` record each write, so an anchor whose findings are
+   settled costs no GitHub call; at most `WB_FINDING_CAP` posts and answers go
+   out per pass. A posted finding holds nothing, since a `must-fix` holds the
+   merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
+   they carry the city's mark and no feedback reader routes them or reads their
+   thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
+   which is how a later pass finds the finding's comment, and the BLOCKED
+   escalation does not count a thread that holds only the city's finding
+   comments.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`.
+   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
+   store. The arm lists the rig's open owned convoys first, then reads each
+   candidate's parent-child children and `tracks` targets, so a rig with no
+   owned integration convoy costs one read. A pass that answers every
+   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
+   reads nothing until that stamp is 15 minutes old.
 9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
@@ -494,9 +542,27 @@ the cadence — the arms run whether or not any refinery session is awake.
    rework dispatch that field names the TWIN's branch, so most verified no-op
    duplicates carry one. A bead somebody else owns — assigned,
    `in_progress`, a review bead, a step bead, or already pointed at a different
-   successor — is out of the population by construction. It runs after
-   review-sweep so a twin that arm 2 merged or arm 7 recorded on this pass is
-   disposable on the same tick.
+   successor — is out of the population by construction. A second pass needs
+   no marker: it closes a never-dispatched rework twin, an open rework child
+   for a review whose work a sibling child already carried and landed. The
+   twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
+   anchor on work nothing will run, and no other arm closes it. The pass
+   proves the twin was never dispatched two ways: its metadata records no
+   route, deferred dispatch, claim, worktree, commit or outcome, and no convoy
+   tracks it, which is the edge every pour mints. It requires the review to be
+   closed, since close_review is signoff.sh's last write. It requires a sibling
+   naming the same review and anchor to have landed: dispatched, not itself
+   disposed or retired, and either recording `work_outcome=shipped` or closed
+   with `rejection_reason` unset. signoff.sh stamps that field on every child.
+   The polecat unsets it when it resumes the branch, and the refinery unsets
+   it when it lands the child, merges it, or promotes it to an anchor of its
+   own. So a closed sibling counts only with `merge_result=merged`, or with
+   neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
+   hand close of a child whose polecat had begun still reads as a landing.
+   Closing the twin releases its blocks edge, and the
+   pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
+   branch's bead list. The arm runs after review-sweep so a twin that arm 2
+   merged or arm 7 recorded on this pass is disposable on the same tick.
 12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
@@ -629,6 +695,7 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
+| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

@@ -10,7 +10,9 @@
 # bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
 # + escalate.sh visit; base moved -> retargeted +
 # escalate (check markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING with no feedback owed -> file ONE
+# nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
+# PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
+# its posture and files nothing) -> file ONE
 # merge-in rework child while none is in flight, to the fix pool that brings the
 # branch current by MERGE (no branch shape is
 # rebased or force-pushed), stamped prepare_mode=merge and counted as
@@ -76,18 +78,29 @@
 # anchor, so the dedup reuses that pass while it stays open and a later batch
 # watermarks behind it rather than opening another; a pass on another lane never
 # rules the human findings.
-# After the dispatch arms, a write-back sweep gives the operator an
-# acknowledgement trail where they are already reading. An anchor carrying
-# pr_comment_disposition has a bead covering its comments, so every comment at
-# or below the recorded watermark gets an EYES reaction. Once that bead closes,
-# each thread holding one of the comments it answers gets one reply naming the
-# commit and is then resolved; the mark is cumulative, so that batch is bounded
-# below by pr_comment_batch and an earlier batch's unresolved thread is left
-# alone. The reactions are written first, and a pass that cannot finish them
-# replies to and resolves nothing, so no thread is answered over a comment still
-# awaiting its acknowledgement. A thread a human answered after the city's reply
-# is left open, and so is one holding a comment above the mark: no batch covers
-# that comment, so nothing has answered it yet.
+# After the dispatch arms, a write-back sweep shows the operator, where they are
+# already reading, which comments the city looked at, which wait on a person, and
+# which are handled. An anchor carrying pr_comment_disposition has a bead covering
+# its comments, so every comment at or below the recorded watermark gets an EYES
+# reaction. The mark is cumulative, so each id space keeps a ledger of the batches
+# routed under it (pr_comment_batch, pr_review_batch, pr_issue_comment_batch), and
+# a comment's batch names the bead that answers it. A comment whose batch went to
+# a visit that is still open gets a reply leading with a question mark that names
+# the visit. Once the batch's bead closes (the rework child landed, or the visit
+# closed) and the comment's own finding, if it has one, has closed, the comment is
+# resolved: a reply leading with a check mark says what resolved it, and its EYES
+# reaction is traded for THUMBS_UP. An inline comment is answered in its thread,
+# which is then resolved. A review body or a Conversation comment has no thread,
+# so a PR comment linking to it carries its answer. A needs-you finding waits on
+# a person through its own owed reply, and a declined or deferred one is handled
+# by its owed reply, so the batch never answers over either. Feedback the routing
+# arm left out of a batch because its review threads had already answered it sits
+# inside that batch's range all the same; it is acknowledged, and the batch's
+# bead never answers or marks it. The reactions are written first, and a pass
+# that cannot finish them posts no answer, so no comment is answered before it
+# is acknowledged. A thread a human answered after the city's reply is left
+# open, and so is one holding a comment above the mark: no batch covers that
+# comment, so nothing has answered it yet.
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
 # particular human review raised has closed — a must-fix fixed and landed, a
@@ -100,6 +113,19 @@
 # confidence is the validator's, carried by the finding's closure, never a commit
 # oid, so a later push does not reopen it. A dismissal is not an approval: the
 # merge still gates on an explicit one.
+# The sweep also carries each machine-lane finding ruled worth fixing (must-fix
+# or deferred) to the PR, where the merge is decided: a file-level review
+# comment when the finding's locus begins with a file the diff touches, a
+# Conversation comment otherwise. Once the finding closes, the comment is
+# answered with how it closed, the commit carrying the fix or the deferral's
+# follow-up, and its thread is resolved unless a post that is not the city's own
+# has come after it.
+# A human finding already sits on the PR where its raiser wrote it and is
+# answered there, so it is never posted again. A posted finding holds nothing:
+# a must-fix holds the merge through its own blocks edge. Its comments go
+# through pr-post.sh and carry the city's mark, so no feedback reader takes one
+# for feedback, and the BLOCKED arm does not count a thread holding only the
+# city's finding comments.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool>; --posture-only (the cheap pre-merge arm: record
@@ -358,23 +384,89 @@ anchor_decision_held() { # <anchor-id>
 PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
 # >>> pr-writeback-contract
-# The acknowledgement trail the operator reads in the PR. EYES marks a comment
-# the city picked up. The marker identifies our own reply, so a later pass can
-# tell one it already posted from a human's. Idempotence is read back off GitHub
-# (viewerHasReacted, this marker, isResolved) and never off a bead key, so a
-# write that failed is retried and a write that landed is never repeated.
+# The trail the operator reads in the PR. EYES marks a comment the city picked
+# up, and THUMBS_UP replaces it once the comment is resolved, so a handled
+# comment never still reads as merely looked at. GitHub's reaction set has no
+# check mark and no question mark, so the other two states are glyphs leading a
+# reply: a check mark for resolved, a question mark for awaiting a person.
+# The marker identifies our own reply, so a later pass can tell one it already
+# posted from a human's, and every reply carries it. A state reply also carries
+# a mark line naming its state (resolved, or awaiting:<visit>) and, on the
+# Conversation tab where no thread holds the comments it answers, their tokens
+# (r<review id>, i<issue comment id>). A finding's owed reply carries a line
+# naming the finding. Idempotence is read back off GitHub (viewerHasReacted,
+# these markers, isResolved) and never off a bead key, so a write that failed is
+# retried and a write that landed is never repeated.
 WB_REACTION="EYES"
+WB_RESOLVED_REACTION="THUMBS_UP"
 WB_MARKER="<!-- gc-writeback -->"
+WB_GLYPH_RESOLVED="✅"
+WB_GLYPH_AWAITING="❓"
+# A ruled machine finding the city posts to the PR carries
+# `<!-- gc-finding:<id> -->`, and the answer it posts once the finding closes
+# carries `<!-- gc-finding:<id>:answered -->`. A later pass finds the finding's
+# comment by it, and the BLOCKED arm reads the shared prefix to tell a thread the
+# write-back resolves itself from one a person has to. Both posts also carry the
+# city's mark, which pr-post.sh appends. Neither carries WB_MARKER, so the
+# reply-and-resolve plan never reads a finding's thread as one the city already
+# answered.
+WB_FINDING_MARKER="<!-- gc-finding:"
+# A first activation over every open PR would otherwise post each one's backlog
+# of ruled findings in a single pass, at the tail of a pass the arms after it
+# share a deadline with: each post costs a ledger read and a stamp, and GitHub
+# rate-limits a token that creates comments too quickly. Posts and answers past
+# the cap wait for the next pass.
+WB_FINDING_CAP=10
 # A first activation over a long-running PR would otherwise post one reaction per
 # outstanding comment in a single pass. It holds the batch's replies and
 # resolves back with the comments it defers, since a thread answered before its
 # comment is acknowledged claims the city acted on something it never showed it
-# had picked up. PR_FACTS_REACT_CAP overrides the cap. Anything but a positive
+# had picked up. A swap owed on a comment answered in an earlier pass draws on
+# the same cap. PR_FACTS_REACT_CAP overrides the cap. Anything but a positive
 # integer written without a leading zero keeps 50, because a cap of 0 would
 # hold every batch's answers forever.
 WB_REACT_CAP="${PR_FACTS_REACT_CAP:-50}"
 case "$WB_REACT_CAP" in *[!0-9]*|0*) WB_REACT_CAP=50 ;; esac
 # <<< pr-writeback-contract
+# >>> comment-batch-ledger
+# Each comment id space keeps a ledger of the batches routed under it:
+# pr_comment_batch for inline comments, pr_review_batch for review bodies, and
+# pr_issue_comment_batch for Conversation comments. A ledger is one
+# `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
+# first, joined by ";". The spaces draw ids from unrelated ranges, so a comment's
+# batch is looked up in its own space's ledger only. A routed batch extends the
+# newest record when it names the same disposition, and otherwise appends one
+# whose floor is the mark it replaces.
+WB_LEDGER_JQ='
+  def ledger_num: if test("^[0-9]+$") then tonumber else error("malformed record") end;
+  def ledger_records: [ split(";")[] | select(length > 0)
+    | split("|") | if length == 3 then . else error("malformed record") end
+    | { disp: .[0], lo: (.[1] | ledger_num), hi: (.[2] | ledger_num) } ];
+  def ledger_string: [ .[] | "\(.disp)|\(.lo)|\(.hi)" ] | join(";");
+  def ledger_route($disp; $lo; $hi):
+    if length > 0 and .[-1].disp == $disp
+    then .[0:-1] + [ .[-1] | .hi = ([ .hi, $hi ] | max) ]
+    else . + [ { disp: $disp, lo: $lo, hi: ([ $lo, $hi ] | max) } ] end;'
+# The review and Conversation ledgers record a batch only when it carries a
+# comment in their space; a malformed ledger exits non-zero.
+ledger_route_space() { # <ledger> <disposition> <floor> <mark>
+  jq -rn --arg batch "$1" --arg disp "$2" --argjson lo "$3" --argjson hi "$4" "$WB_LEDGER_JQ"'
+    $batch | ledger_records | (if $hi > $lo then ledger_route($disp; $lo; $hi) else . end)
+    | ledger_string' 2>/dev/null
+}
+# The records of a ledger at the kept indices. Exits 0 only when that drops a
+# record, so the caller writes a ledger only when it changed.
+ledger_keep() { # <ledger> <comma-joined indices, or "-">
+  local kept
+  [ -n "$2" ] && [ "$2" != "-" ] || return 1
+  kept=$(jq -rn --arg batch "$1" --arg keep "$2" '
+    ($keep | split(",") | map(tonumber)) as $ks
+    | [ $batch | split(";") | map(select(length > 0)) | to_entries[]
+        | select(.key as $k | ($ks | index($k)) != null) | .value ] | join(";")' 2>/dev/null) || return 1
+  [ -n "$kept" ] && [ "$kept" != "$1" ] || return 1
+  printf '%s' "$kept"
+}
+# <<< comment-batch-ledger
 
 gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
   local q="$1"; shift
@@ -420,12 +512,21 @@ review_threads_load() { # <pr-number>
   [ -n "$nodes" ] || return 1
   RT_NUM="$1"; RT_NODES="$nodes"
 }
-# Count of unresolved review threads in RT_NODES, as a non-negative integer. The
-# comment cut does not touch it. Non-zero without output on a projection that
-# does not yield one, and the BLOCKED arm below must not escalate a guessed cause.
+# Count of unresolved review threads in RT_NODES, as a non-negative integer. A
+# thread holding only the city's own finding comments is not counted: the
+# write-back resolves it once its finding closes, so it is no cause to ask a
+# person for. A human who writes in one makes it a thread like any other. The
+# comment cut does not touch the count: the city writes at most a finding's post
+# and its answer into a thread, so a thread cut at 100 comments holds someone
+# else's. Non-zero without output on a projection that does not yield one, and
+# the BLOCKED arm below must not escalate a guessed cause.
 unresolved_threads() {
   local n
-  n=$(printf '%s' "$RT_NODES" | jq '[ .[] | select((.isResolved // false) == false) ] | length' 2>/dev/null) || return 1
+  n=$(printf '%s' "$RT_NODES" | jq --arg self "$SELF_LOGIN" --arg since "$PSINCE" --arg fm "$WB_FINDING_MARKER" "$CITY_OWN_DEF"'
+    def finding_only: (.comments.nodes // []) as $cs
+      | ($cs | length) > 0
+        and all($cs[]; gc_city_own($self; $since) and ((.body // "") | contains($fm)));
+    [ .[] | select((.isResolved // false) == false) | select(finding_only | not) ] | length' 2>/dev/null) || return 1
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
   printf '%s' "$n"
 }
@@ -462,6 +563,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# The approval rule merge.sh lands on, REVIEW_VERDICT_DEF; the conflict arm
+# brings only an approved PR current.
+# shellcheck source=review-verdict.sh
+. "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -1009,8 +1114,11 @@ UTGATES
 # resolution time to place that comment before or after the resolve; the
 # write-back likewise reads a post after its own as a live conversation.
 # A thread resolved with no reply of ours answers nothing here, so a hand
-# resolution alone still routes. Only inline comments sit on a thread; a review
-# body and a Conversation comment carry none and stay on the mark.
+# resolution alone still routes. The write-back's awaiting answer (its mark line
+# names awaiting:<visit>) says only that the comments before it wait on a
+# person, so it is not a reply here either. Only inline comments sit on a
+# thread; a review body and a Conversation comment carry none and stay on the
+# mark.
 # The ids of the inline comments RT_NODES shows answered, as a JSON array of
 # numbers on stdout, comparable with the REST rows' `id`: in each resolved thread,
 # every comment up to and including the last reply of ours. The thread read's
@@ -1022,7 +1130,9 @@ answered_comment_ids() {
   printf '%s' "$RT_NODES" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     [ .[] | select((.isResolved // false) == true)
       | (.comments.nodes // []) as $cs
-      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since)) | .key ] | max) as $last
+      | ([ $cs | to_entries[] | select(.value | gc_city_own($self; $since))
+           | select((.value.body // "") | contains("<!-- gc-writeback-mark:awaiting:") | not)
+           | .key ] | max) as $last
       | select($last != null)
       | $cs[0:($last + 1)][] | (.fullDatabaseId // empty) | tonumber ]
     | unique' 2>/dev/null
@@ -1628,6 +1738,8 @@ MP_EOF
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
+  orbatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_batch // "") | tostring')
+  oibatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_batch // "") | tostring')
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
   case "$iwm" in ''|*[!0-9]*) iwm=0 ;; esac
@@ -1977,8 +2089,8 @@ REAP_EOF
   # guards the anchor is dispatchable, and what it owes decides how: with
   # unanswered feedback it falls through to the feedback arm below (whose
   # prepare_mode=merge child brings the branch current as it answers); otherwise
-  # this arm files the one merge-in child. The gate that splits the two sits just
-  # above the dedup.
+  # this arm files the one merge-in child, once the PR is approved. The gate that
+  # splits the two, and the approval gate after it, sit just above the dedup.
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
@@ -2056,8 +2168,39 @@ REAP_EOF
     # prepare_mode=merge child that brings this same branch current (a MERGE of
     # origin/$base on resume) as it answers, so a merge-in child here would only
     # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child.
+    # conflict with no feedback owed dispatches this arm's own merge-in child,
+    # and only on an approved PR.
     if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      # >>> conflict-arm-approval-gate
+      # The merge-in is filed only for an approved PR: a standing APPROVED review
+      # from an account other than the city's and no standing CHANGES_REQUESTED,
+      # by the same rule merge.sh lands on (review-verdict.sh).
+      # Each bring-current costs a polecat round and a fresh CI run, and it goes
+      # stale again whenever main moves, while a PR nobody approved cannot land
+      # however current its branch is. So its conflict waits for the approval,
+      # with its posture already recorded above. A merge-in child already open on
+      # the branch is left as it is. Reviews that did not read, or an unresolved
+      # acting login, prove no approval: nothing is filed and the next pass
+      # retries.
+      approval=""
+      if [ -n "$SELF_LOGIN" ] && [ -n "$revs_raw" ]; then
+        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
+          review_verdict($self)
+          | if .veto != "" then "veto:" + .veto elif .approver != "" then "approved" else "none" end' 2>/dev/null)
+      fi
+      case "$approval" in
+        approved) : ;;
+        veto:*)
+          echo "$PROG: $id — PR#$num conflicts but '${approval#veto:}' has a standing CHANGES_REQUESTED; no merge-in filed, the branch is brought current once the PR is approved"
+          skipped=$((skipped + 1)); continue ;;
+        none)
+          echo "$PROG: $id — PR#$num conflicts but no external approval stands; no merge-in filed, the branch is brought current once the PR is approved"
+          skipped=$((skipped + 1)); continue ;;
+        *)
+          echo "$PROG: $id — PR#$num conflicts but its reviews could not be read to prove an approval; no merge-in filed (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue ;;
+      esac
+      # <<< conflict-arm-approval-gate
       # Dedup on a LIVE child on this branch, in flight or parked — the child's own
       # metadata, no bookkeeping key on the anchor. A non-closed child owns the
       # branch: a live one is already bringing it current and a second would race
@@ -2634,23 +2777,28 @@ $CBODY"
     # answers these comments from the newer bead. The floor is the mark this
     # transition replaces, which is exactly the span this disposition covers.
     NBATCH=$(jq -rn --arg batch "$obatch" --arg disp "$DISP" \
-      --argjson lo "$cwm" --argjson hi "$max_c" '
-      def num: if test("^[0-9]+$") then tonumber else error("malformed record") end;
-      [ $batch | split(";")[] | select(length > 0)
-        | split("|") | if length == 3 then . else error("malformed record") end
-        | { disp: .[0], lo: (.[1] | num), hi: (.[2] | num) } ] as $rs
-      | ( if ($rs | length) > 0 and $rs[-1].disp == $disp
-          then $rs[0:-1] + [ $rs[-1] | .hi = ([ .hi, $hi ] | max) ]
-          else $rs + [ { disp: $disp, lo: $lo, hi: ([ $lo, $hi ] | max) } ] end )
-      | [ .[] | "\(.disp)|\(.lo)|\(.hi)" ] | join(";")' 2>/dev/null) || NBATCH=""
+      --argjson lo "$cwm" --argjson hi "$max_c" "$WB_LEDGER_JQ"'
+      $batch | ledger_records | ledger_route($disp; $lo; $hi) | ledger_string' 2>/dev/null) || NBATCH=""
     if [ -z "$NBATCH" ]; then
       echo "$PROG: WARN $id — PR#$num comment batch history is unreadable; NOT watermarking (a mark past a batch whose range was never recorded lets a later disposition answer these comments)" >&2
       skipped=$((skipped + 1)); continue
     fi
+    # The review bodies and the Conversation comments keep ledgers of their own,
+    # written in this same transition. Only a batch that carries comments in a
+    # space adds a record there, and the write-back marks no comment it cannot
+    # place in a batch.
+    xbatch=()
+    if ! NRBATCH=$(ledger_route_space "$orbatch" "$DISP" "$rwm" "$max_r") \
+       || ! NIBATCH=$(ledger_route_space "$oibatch" "$DISP" "$iwm" "$max_i"); then
+      echo "$PROG: WARN $id — PR#$num review or Conversation batch history is unreadable; NOT watermarking (a mark past a batch whose range was never recorded lets a later disposition answer these comments)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    [ "$NRBATCH" = "$orbatch" ] || xbatch+=(--set "pr_review_batch=$NRBATCH")
+    [ "$NIBATCH" = "$oibatch" ] || xbatch+=(--set "pr_issue_comment_batch=$NIBATCH")
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
          --set "pr_comment_watermark=$max_c" --set "pr_review_watermark=$max_r" \
          --set "pr_issue_comment_watermark=$max_i" \
-         --set "pr_comment_batch=$NBATCH" \
+         --set "pr_comment_batch=$NBATCH" ${xbatch[@]+"${xbatch[@]}"} \
          --set "pr_comment_disposition=$DISP" >/dev/null; then
       answered=$((answered + 1))
       echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c, issue $max_i)"
@@ -3058,7 +3206,8 @@ fi
 #
 # pr_comment_disposition is the honesty gate. It is written only once the routing
 # has read back, so an anchor carrying it has a bead that really does cover these
-# comments. An anchor without one costs a single ledger read and no GitHub call.
+# comments. An anchor without one costs a single ledger read and no GitHub call,
+# unless its PR is owed a ruled finding's post or answer (below).
 # The plan decides over WHOLE threads: it finds the city's own marker in one and
 # then asks whether a human has written since. A connection left at its first
 # page answers that from a fragment — it can miss a comment the city routed, and
@@ -3068,7 +3217,8 @@ fi
 # nested query, and neither carries a second cursor for it to choose between.
 # Every node carries its author, body and creation instant, and a thread comment
 # its review's submission: the facts gc_city_own reads to tell the city's own
-# post from feedback.
+# post from feedback. A thread comment also names its review, which ties a review
+# body to the inline comments it carries.
 #
 # Those reads cost at least four GitHub calls an anchor, so the sweep is paced
 # like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
@@ -3080,18 +3230,21 @@ WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
     pullRequest(number:$num){
       reviews(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{id databaseId state body author{login} submittedAt createdAt
+        nodes{id databaseId state body url author{login} submittedAt createdAt
           reactionGroups{content viewerHasReacted}}}}}}'
 # The Conversation tab is a third top-level connection, the same single-cursor
-# shape as the reviews read. Its comments carry no thread to resolve, so the
-# write-back only ever reacts to them — a routed one earns the same pickup EYES
-# an inline comment does, having been read into the work-order all the same.
+# shape as the reviews read. Its comments carry no thread to resolve, so a review
+# body or a Conversation comment is answered by a comment of our own here, which
+# links to the one it answers; the bodies are read so a later pass finds the
+# mark lines of the answers already posted. A ruled finding whose locus names no
+# file in the diff is posted here too, and the marker in its body is how a later
+# pass finds it again.
 WB_ISSUE_COMMENTS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$num){
       comments(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{id databaseId author{login} body createdAt
+        nodes{id databaseId body url author{login} createdAt
           reactionGroups{content viewerHasReacted}}}}}}'
 # A thread's own comments stay nested: one read covers every thread short enough
 # to fit, which is nearly all of them. Truncation is read off the COUNT rather
@@ -3105,26 +3258,54 @@ WB_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
         pageInfo{hasNextPage endCursor}
         nodes{id isResolved viewerCanResolve
           comments(first:100){nodes{id databaseId author{login} body createdAt
-            pullRequestReview{submittedAt}
+            pullRequestReview{databaseId submittedAt}
             reactionGroups{content viewerHasReacted}}}}}}}}'
 WB_THREAD_COMMENTS_QUERY='query($id:ID!,$endCursor:String){
   node(id:$id){... on PullRequestReviewThread{
     comments(first:100,after:$endCursor){
       pageInfo{hasNextPage endCursor}
       nodes{id databaseId author{login} body createdAt
-        pullRequestReview{submittedAt}
+        pullRequestReview{databaseId submittedAt}
         reactionGroups{content viewerHasReacted}}}}}}'
 # The nested `first:` above, named. A thread that comes back holding this many
 # comments is one the top-up has to re-read; change either without the other and
 # the long threads quietly stop being paged.
 WB_PAGE=100
 
-acked=0; replied=0; resolved=0
-# wowing collects the records that end an anchor's pass still owing a write, and
-# so have to survive into the next one.
-owe() { local i; for i in $(printf '%s' "$1" | tr ',' ' '); do
-  case " $wowing " in *" $i "*) : ;; *) wowing="$wowing $i" ;; esac
-done; }
+acked=0; replied=0; resolved=0; posted=0; swapped=0; fposted=0; fanswered=0; wfwrites=0; wfheld=0
+# The write-back's replies and answers post through these two: a reply into a
+# review thread, and a comment on the PR's Conversation tab. Both go through
+# pr-post.sh, which marks each answer as the city's own, so the routing arm never
+# reads one back as feedback. The ruled-finding arm below also calls pr-post.sh
+# directly, for the two posts whose new comment id it reads back (file-comment,
+# comment) and for the edit that answers a Conversation post in place.
+wb_thread_reply() { # <thread-id> <body>
+  "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$1" --body "$2" >/dev/null 2>&1
+}
+wb_pr_comment() { # <pr-number> <body>
+  "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$1" --body "$2" >/dev/null 2>&1
+}
+# Trade a resolved comment's EYES for THUMBS_UP: <node-id>:<add>:<remove>,
+# comma-joined, or "-". THUMBS_UP goes on first, so a pass that stops between the
+# two writes leaves both reactions on the comment, never neither.
+wb_swaps() {
+  local sw sid add rm
+  [ "${1:--}" != "-" ] || return 0
+  for sw in $(printf '%s' "$1" | tr ',' ' '); do
+    sid="${sw%%:*}"; add="${sw#*:}"; rm="${add#*:}"; add="${add%%:*}"
+    if [ "$add" = 1 ] && ! gh_graphql 'mutation($id:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$id,content:$c}){clientMutationId}}' \
+         -f id="$sid" -f c="$WB_RESOLVED_REACTION" >/dev/null; then
+      echo "$PROG: $wid — PR#$wnum could not mark $sid resolved; retry next pass" >&2
+      continue
+    fi
+    if [ "$rm" = 1 ] && ! gh_graphql 'mutation($id:ID!,$c:ReactionContent!){removeReaction(input:{subjectId:$id,content:$c}){clientMutationId}}' \
+         -f id="$sid" -f c="$WB_REACTION" >/dev/null; then
+      echo "$PROG: $wid — PR#$wnum could not retire the pickup reaction on $sid; retry next pass" >&2
+      continue
+    fi
+    swapped=$((swapped + 1))
+  done
+}
 # The early arms answer for the merge arm (--posture-only) or route feedback
 # early (--route-comments-only) and write nothing to GitHub; the full pass that
 # follows them carries the write-back.
@@ -3134,20 +3315,104 @@ elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_req
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
   WB_ANCHORS=""
 fi
+# The ruled machine findings each anchor still owes its PR, read once for the
+# whole sweep: one store-wide read costs what a single anchor's read does, and a
+# pass already running against its deadline cannot spend one per open PR. A
+# finding is owed a post when it is ruled must-fix or deferred and carries no
+# finding.pr_comment, and owed an answer once it has been posted and has closed
+# and carries no finding.pr_answered. Each stamp is written only after the
+# GitHub write it records, so an anchor whose findings are all settled costs no
+# GitHub call. A finding records its locus as the first line of its body
+# (finding.sh upsert), and the objection follows it.
+WB_FOWED="[]"
+if [ -n "$WB_ANCHORS" ] && [ "$WB_ANCHORS" != "[]" ]; then
+  if wbf_rows=$(bd_list --metadata-field task_kind=finding --status="$ALL_STATUSES"); then
+    wbf_ids=$(printf '%s' "$WB_ANCHORS" | jq -c '[ .[].id ]' 2>/dev/null) || wbf_ids="[]"
+    WB_FOWED=$(printf '%s' "$wbf_rows" | jq -c --argjson a "${wbf_ids:-[]}" '
+      def m($k): ((.metadata[$k] // "") | tostring);
+      [ .[]
+        | select(m("task_kind") == "finding")
+        | select(m("finding.lane") != "" and m("finding.lane") != "human")
+        | m("anchor_bead") as $ab
+        | select(($a | index($ab)) != null)
+        | m("finding.disposition") as $d
+        | (((.status // "open") | tostring | ascii_downcase) == "closed") as $closed
+        | (if m("finding.pr_comment") == ""
+           then (if $d == "must-fix" or $d == "deferred" then "post" else "" end)
+           elif $closed and m("finding.pr_answered") == "" then "answer"
+           else "" end) as $act
+        | select($act != "")
+        | ((.description // "") | tostring) as $desc
+        | { act: $act, id: .id, anchor: m("anchor_bead"), lane: m("finding.lane"), disp: $d, closed: $closed,
+            locus: ($desc | split("\n")[0] | if startswith("Locus: ") then .[7:] else "" end),
+            message: ($desc | if startswith("Locus: ") then sub("^Locus: [^\n]*\n*"; "") else . end
+                            | sub("\n*Raised by [^\n]* reviewing anchor [^\n]*$"; "")),
+            title: ((.title // "") | tostring | sub("^finding\\[[^]]*\\]: "; "")),
+            follow_up: m("finding.follow_up"), reply: m("finding.reply") } ]' 2>/dev/null) || WB_FOWED="[]"
+    [ -n "$WB_FOWED" ] || WB_FOWED="[]"
+  else
+    echo "$PROG: finding write-back skipped — could not read the findings (retry next pass)" >&2
+  fi
+fi
+# A posted finding's comment: who it is from, what it was ruled, and the
+# objection in the reviewer's own words, carrying the marker a later pass finds
+# it by. $ans is the answer when the finding has already closed: it takes the
+# place of what the ruling holds, and its own marker records the finding
+# answered, so a finding fixed before its PR opened is never shown as still
+# holding the merge.
+WB_FINDING_BODY='def clip($n): if length > $n then .[0:$n] + " [truncated]" else . end;
+  "**Finding from the \(.lane) review, ruled \(.disp)** (\(.id))\n"
+  + (if $ans != "" then "**Outcome:** \($ans)\n"
+     elif .disp == "must-fix" then "The merge waits for this to be fixed on the branch.\n"
+     elif .disp == "deferred" then "Not fixed in this PR; "
+       + (if .follow_up != "" then "follow-up \(.follow_up) carries it.\n" else "it is tracked as follow-up work.\n" end)
+     else "" end)
+  + (if .locus != "" then "Locus: `" + (.locus | gsub("`"; "")) + "`\n" else "" end)
+  + "\n" + ((if .message != "" then .message else .title end) | clip(8000))
+  + "\n\n" + $mk + .id + " -->"
+  + (if $ans != "" then "\n" + $mk + .id + ":answered -->" else "" end)'
+# The answer a closed finding is owed: for a must-fix, the head that carries the
+# fix and the fix units that landed it; for a deferral, its follow-up.
+WB_FINDING_ANSWER='if .disp == "must-fix" then "Addressed in \($head[0:8]) on this PR"
+    + (if $fus != "" then " (\($fus))" else "" end) + "."
+  elif .disp == "deferred" then
+    (if .reply != "" then .reply
+     elif .follow_up != "" then "Deferred: follow-up \(.follow_up) carries this after the merge."
+     else "Deferred: it is tracked as follow-up work after the merge." end)
+  elif .disp == "declined" then "Declined on review; no change was made."
+    + (if .reply != "" then " " + .reply else "" end)
+  else "Closed" + (if .disp != "" then " (\(.disp))" else "" end) + "." end'
+finding_answer() { # <owed-record-json> <head> — the answer text on stdout; empty = could not compose
+  local fus=""
+  if [ "$(printf '%s' "$1" | jq -r '.disp // ""' 2>/dev/null)" = "must-fix" ]; then
+    # The fix units that answered it are the beads blocking it.
+    fus=$(bd_json dep list "$(printf '%s' "$1" | jq -r '.id' 2>/dev/null)" --direction=down -t blocks \
+      | jq -r 'if type == "array" then [ .[]? | (.id // empty) ] | join(", ") else "" end' 2>/dev/null)
+  fi
+  printf '%s' "$1" | jq -r --arg head "$2" --arg fus "$fus" "$WB_FINDING_ANSWER" 2>/dev/null
+}
 WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
-wb_due=$(printf '%s' "${WB_ANCHORS:-[]}" | jq '[ .[]? | select(((.metadata.pr_comment_disposition // "") | tostring) != "") ] | length' 2>/dev/null)
+# The anchors the sweep reads GitHub for: those carrying a routed batch, and
+# those whose PR is owed a finding post or answer.
+wb_fanchors=$(printf '%s' "$WB_FOWED" | jq -c '[ .[].anchor ] | unique' 2>/dev/null) || wb_fanchors="[]"
+wb_due=$(printf '%s' "${WB_ANCHORS:-[]}" | jq --argjson fa "${wb_fanchors:-[]}" '
+  [ .[]? | select(((.metadata.pr_comment_disposition // "") | tostring) != ""
+                  or (.id as $i | ($fa | index($i)) != null)) ] | length' 2>/dev/null)
 pace_start "$WB_CURSOR" "$DEADLINE"
 pace_seen_start "${WB_CURSOR:+$WB_CURSOR.seen}"
 # --- write-back visit order: an anchor with something new to answer first --------
 # The sweep owes a write when a batch is routed (the disposition or a watermark
-# moves) or when work answering one closes (a rework child, a finding, a
-# validation pass leaves the anchor's live children). Its mark joins the
+# moves) or when work answering one closes (a rework child, a visit, a finding,
+# a validation pass leaves the anchor's live children). Its mark joins the
 # disposition, the three watermarks and the live child ids, so an anchor whose
 # mark moved since the sweep last visited it goes first, on
 # <cursor>.writeback.first, and the rest rotate on <cursor>.writeback.
 # <cursor>.writeback.seen holds the marks. A sweep with no marks yet records
 # them and puts nothing first; a child list that does not read leaves the sweep
-# a plain rotation that records no marks.
+# a plain rotation that records no marks. An anchor with no disposition is here
+# only for the ruled findings its PR is owed. It records no mark and rotates
+# with the rest, so a backlog of finding posts never queues ahead of an anchor
+# whose routed comments moved.
 wb_first=""; wb_rest=""; wb_first_n=0
 declare -A WB_MARK=()
 if [ -n "$WB_CURSOR" ] && [ -n "$WB_ANCHORS" ]; then
@@ -3194,7 +3459,15 @@ while IFS= read -r wtagged; do
   wid=$(printf '%s' "$wrow" | jq -r '.id // empty')
   [ -n "$wid" ] || continue
   disp=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_disposition // "") | tostring')
-  [ -n "$disp" ] || continue
+  wfown=""
+  if [ "$WB_FOWED" != "[]" ]; then
+    wfown=$(printf '%s' "$WB_FOWED" | jq -c --arg a "$wid" '[ .[] | select(.anchor == $a) ]' 2>/dev/null) || wfown=""
+    [ "$wfown" != "[]" ] || wfown=""
+  fi
+  # An anchor without a disposition has no human batch to acknowledge or answer,
+  # so it is here only for the ruled findings its PR is owed, and every arm below
+  # that answers a batch stands down on it.
+  [ -n "$disp" ] || [ -n "$wfown" ] || continue
   wnum=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_number // "") | tostring')
   case "$wnum" in ''|*[!0-9]*) continue ;; esac
   wcwm=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_watermark // "0") | tostring')
@@ -3215,32 +3488,32 @@ while IFS= read -r wtagged; do
   # THIS batch answered it, so a reply saying one did is not. The bead that does
   # answer it may not have closed yet, so the batch it covers has to outlive the
   # disposition that named it.
-  # pr_comment_batch is that history: one `<disposition>|<exclusive floor>|
-  # <inclusive mark>` record per batch, oldest first, joined by ";". Each record
+  # The batch ledgers are that history (comment-batch-ledger above). Each record
   # is written by the transition that routes its batch, so the range is durable
-  # before any later pass can route over it. What is left here is reconciliation:
-  # extend the standing record when the mark has moved under the same
-  # disposition, and mint one for an anchor whose disposition predates the
-  # history, whose single batch runs from zero. A record is dropped once its
-  # batch has nothing left owing, and the newest is kept whatever it owes,
-  # because its mark is the next batch's floor. The value is read back before it
-  # is trusted, the same shape as signoff_dismissed above, and an anchor whose
-  # history did not record reacts and answers nothing. It is written ahead of
-  # every GitHub read, so an unreadable PR cannot let a batch pass unobserved and
-  # leave the floor behind the mark.
+  # before any later pass can route over it. What is left here is reconciling
+  # the inline ledger: extend the standing record when the mark has moved under
+  # the same disposition, and mint one for an anchor whose disposition predates
+  # the history, whose single batch runs from zero. The review and Conversation
+  # ledgers are read and never reconciled, because only the routing transition
+  # knows which of their comments a batch carried; a comment they do not place
+  # is acknowledged and never marked. A record is dropped once its batch has
+  # nothing left owing, and the newest is kept whatever it owes, because its mark
+  # is the next batch's floor. The value is read back before it is trusted, the
+  # same shape as signoff_dismissed above, and an anchor whose history did not
+  # record reacts and answers nothing. It is written ahead of every GitHub read,
+  # so an unreadable PR cannot let a batch pass unobserved and leave the floor
+  # behind the mark.
   wbatch=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
-  wbwant=$(jq -rn --arg batch "$wbatch" --arg disp "$disp" --argjson cwm "$wcwm" '
-    def num: if test("^[0-9]+$") then tonumber else error("malformed record") end;
-    [ $batch | split(";")[] | select(length > 0)
-      | split("|") | if length == 3 then . else error("malformed record") end
-      | { disp: .[0], lo: (.[1] | num), hi: (.[2] | num) } ] as $rs
-    | ( [ 0, ($rs[] | .hi) ] | max ) as $floor
-    | ( if ($rs | length) > 0 and $rs[-1].disp == $disp
-        then $rs[0:-1] + [ $rs[-1] | .hi = ([ .hi, $cwm ] | max) ]
-        else $rs + [ { disp: $disp, lo: $floor, hi: ([ $floor, $cwm ] | max) } ] end )
-    | [ .[] | "\(.disp)|\(.lo)|\(.hi)" ] | join(";")' 2>/dev/null) || wbwant=""
+  wbwant=$(jq -rn --arg batch "$wbatch" --arg disp "$disp" --argjson cwm "$wcwm" "$WB_LEDGER_JQ"'
+    ($batch | ledger_records) as $rs
+    | $rs | ledger_route($disp; ([ 0, ($rs[] | .hi) ] | max); $cwm) | ledger_string' 2>/dev/null) || wbwant=""
+  wrbatch=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_review_batch // "") | tostring')
+  wibatch=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_issue_comment_batch // "") | tostring')
   wbatch_ok=1
-  if [ -z "$wbwant" ]; then
+  if [ -z "$disp" ]; then
+    wbatch_ok=0
+  elif [ -z "$wbwant" ] || ! jq -n --arg r "$wrbatch" --arg i "$wibatch" "$WB_LEDGER_JQ"'
+       [ ($r, $i) | ledger_records ]' >/dev/null 2>&1; then
     wbatch_ok=0
     echo "$PROG: $wid — PR#$wnum comment batch history is unreadable; acknowledging only, nothing replied or resolved this pass" >&2
   elif [ "$wbatch" != "$wbwant" ]; then
@@ -3285,44 +3558,74 @@ while IFS= read -r wtagged; do
   [ "$wstate" = "OPEN" ] || continue
   [ "$wdraft" != "true" ] || continue
 
-  # Has the work that answers each batch LANDED? Every record is asked for
+  # What answers each batch, and has it closed? Every record is asked for
   # itself, so a batch superseded before its bead closed is still answered by
-  # that bead. Only a rework child can name a commit; a visit is a human's to
-  # answer, so it earns the pickup reaction and never a reply. Resolving on the
-  # filing rather than the landing would close the thread while the fix is still
-  # unwritten.
-  wbrecs="[]"
+  # that bead. A rework child answers once it lands. An artifact fix unit (one
+  # demo-deliver closed on attach) carries its delivery evidence and lands no
+  # commit, so that evidence is what the answer cites; a commit fix unit lands at
+  # the PR head. The artifact flag keeps the answer from truncating a URL or
+  # claiming a commit the fix never made. A visit answers once the person closes
+  # it, and while it is open its comments wait on that person. A bead that does
+  # not read back is neither open nor closed, so its comments are acknowledged
+  # and nothing more. Answering on the filing rather than the landing would mark
+  # a comment resolved while its fix is still unwritten.
+  wled='{"c":[],"r":[],"i":[]}'
   if [ "$wbatch_ok" = 1 ]; then
-    while IFS='|' read -r rdisp rlo rhi; do
-      [ -n "${rdisp:-}" ] || continue
-      rchild=""; rlanded=""; rartifact=""
-      case "$rdisp" in
-        rework:*)
-          rchild="${rdisp#rework:}"
-          if [ -n "$rchild" ]; then
-            rcjson=$(gc bd show "$rchild" --json 2>/dev/null | scrub)
-            rcst=$(printf '%s' "$rcjson" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
-            if [ "$rcst" = "closed" ]; then
-              # An artifact fix unit (one demo-deliver closed on attach) carries its
-              # delivery evidence and lands no commit: that evidence IS its landed
-              # signal and what the reply cites. A commit fix unit lands at the PR
-              # head, cited as before. rartifact flags the form so the reply does
-              # not truncate a URL or claim a commit the fix never made.
-              rart=$(printf '%s' "$rcjson" | jq -r '.[0].metadata.artifact_url // ""' 2>/dev/null)
-              if [ -n "$rart" ]; then
-                rlanded="$rart"; rartifact="1"
-              elif [ -n "$whead" ]; then
-                rlanded="$whead"
-              fi
-            fi
-          fi ;;
-      esac
-      wbrecs=$(printf '%s' "$wbrecs" | jq -c --argjson lo "$rlo" --argjson hi "$rhi" \
-        --arg child "$rchild" --arg landed "$rlanded" --arg artifact "$rartifact" \
-        '. + [ { lo: $lo, hi: $hi, child: $child, landed: $landed, artifact: $artifact } ]')
+    wbeads='{}'
+    while IFS= read -r wd; do
+      [ -n "$wd" ] || continue
+      wbk="${wd%%:*}"; wbid="${wd#*:}"; wbst="unknown"; wbland=""; wbart=""; wbout=""
+      case "$wbk" in rework|visit) : ;; *) wbk="" ;; esac
+      if [ -n "$wbk" ] && [ -n "$wbid" ] && wbj=$(gc bd show "$wbid" --json 2>/dev/null | scrub) && [ -n "$wbj" ]; then
+        wbst=$(printf '%s' "$wbj" | jq -r --arg live "$LIVE_STATUSES" '
+          ((.[0].status // "") | tostring | ascii_downcase) as $s
+          | if $s == "closed" then "closed" elif ($live | split(",") | index($s)) != null then "open" else "unknown" end' 2>/dev/null) || wbst="unknown"
+        if [ "$wbst" = "closed" ] && [ "$wbk" = "rework" ]; then
+          wbland=$(printf '%s' "$wbj" | jq -r '.[0].metadata.artifact_url // ""' 2>/dev/null)
+          if [ -n "$wbland" ]; then wbart="1"; else wbland="$whead"; fi
+        elif [ "$wbst" = "closed" ]; then
+          wbout=$(printf '%s' "$wbj" | jq -r '(.[0].metadata["gc.outcome"] // "") | tostring' 2>/dev/null)
+        fi
+      fi
+      wbnew=$(printf '%s' "$wbeads" | jq -c --arg d "$wd" --arg k "$wbk" --arg b "$wbid" --arg s "$wbst" \
+        --arg l "$wbland" --arg a "$wbart" --arg o "$wbout" \
+        '.[$d] = { kind: $k, bead: $b, state: $s, landed: $l, artifact: $a, outcome: $o }' 2>/dev/null) \
+        && wbeads="$wbnew"
     done <<WB_RECORDS
-$(printf '%s' "$wbwant" | tr ';' '\n')
+$(printf '%s;%s;%s' "$wbwant" "$wrbatch" "$wibatch" | tr ';' '\n' | cut -d'|' -f1 | sort -u)
 WB_RECORDS
+    wled=$(jq -cn --arg c "$wbwant" --arg r "$wrbatch" --arg i "$wibatch" --argjson beads "$wbeads" "$WB_LEDGER_JQ"'
+      def placed: map(. + ($beads[.disp] // { kind: "", bead: "", state: "unknown", landed: "", artifact: "", outcome: "" }));
+      { c: ($c | ledger_records | placed), r: ($r | ledger_records | placed), i: ($i | ledger_records | placed) }' 2>/dev/null) \
+      || wled='{"c":[],"r":[],"i":[]}'
+  fi
+  # A comment's own finding has the last word over its batch. A finding ruled
+  # needs-you waits on a person through its own owed reply. A declined or
+  # deferred one is answered by its own owed reply. An open one is not yet
+  # validated as resolved. In none of those does the batch's bead answer the
+  # comment. A finding names the comment that raised it (finding.comment_id) and,
+  # through finding.review_id, the space it sits in: a review body's finding
+  # carries its own id there, an inline comment's carries its parent review's, and
+  # a Conversation comment's carries none. Findings that cannot be read leave
+  # every comment acknowledged and nothing marked this pass. The list reaches the
+  # plan as one jq argument, under the OS per-argument limit, so it carries
+  # whether a finding owes a reply and never the reply's text.
+  wfnd="[]"; wfnd_ok=0
+  if [ "$wbatch_ok" = 1 ] && wfrows=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+    wfnd=$(printf '%s' "$wfrows" | jq -c '[ .[]?
+        | select(((.metadata.task_kind // "") | tostring) == "finding")
+        | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+        | select(((.metadata["finding.comment_id"] // "") | tostring) != "")
+        | { cid: ((.metadata["finding.comment_id"]) | tostring),
+            rid: ((.metadata["finding.review_id"] // "") | tostring),
+            open: (((.status // "") | tostring | ascii_downcase) != "closed"),
+            disp: ((.metadata["finding.disposition"] // "") | tostring),
+            reply: (((.metadata["finding.reply"] // "") | tostring) != ""),
+            posted: ((.metadata["finding.reply_posted"] // "") | tostring) } ]' 2>/dev/null) \
+      && [ -n "$wfnd" ] && wfnd_ok=1 || wfnd="[]"
+  fi
+  if [ "$wbatch_ok" = 1 ] && [ "$wfnd_ok" != 1 ]; then
+    echo "$PROG: $wid — PR#$wnum findings unreadable; acknowledging only, nothing marked this pass" >&2
   fi
 
   wowner="${ORIGIN_REPO%%/*}"; wname="${ORIGIN_REPO#*/}"
@@ -3375,118 +3678,204 @@ WB_LONG_THREADS
   fi
 
   # One jq pass decides everything, so the shell below only performs writes.
-  #   R <node-id>                          react: routed, not yet reacted to
-  #   T <thread-id> <reply> <why> <body>   the thread, once the work of EVERY
-  #     <ready> <records>                  batch it holds has landed. why is ok,
-  #                                        live (a human answered after us), or
-  #                                        norights (cannot resolve). body is the
-  #                                        rendered reply naming each record by its
-  #                                        own landing form; ready is "-" until all
-  #                                        have landed, "ok" once they have.
+  # Every comment the city routed (a foreign comment at or below its space's mark)
+  # is in one of three states, read from its own finding first and then from its
+  # batch:
+  #   awaiting  its batch went to a visit that is still open, or its finding was
+  #             ruled needs-you and is still open
+  #   resolved  its batch's bead closed and its finding, if it has one, closed;
+  #             or its finding was declined or deferred and its owed reply answers it
+  #   looked    anything else: routed and acknowledged, not yet answered
+  # The routing arm leaves out of its batch what the review threads already
+  # answered: an inline comment in a resolved thread with a later reply of the
+  # city's, and a review body whose every inline comment is one. Such a comment
+  # sits inside the batch's range, but the batch's bead never saw it. Unless a
+  # finding names it, it stays looked when that later reply is not one of these
+  # answers.
+  # The lines it emits:
+  #   R <node-id>                       react EYES: routed, carrying neither reaction
+  #   T <thread> <reply> <why> <body> <swaps>
+  #                                     a thread whose routed comments are all
+  #                                     resolved. reply is 1 when one of them sits
+  #                                     after our last resolved answer, and body is
+  #                                     the answer naming the beads that resolved
+  #                                     them. why is ok, live (a human answered
+  #                                     after us), norights (cannot resolve), or
+  #                                     resolved (already, so only answered).
+  #   Q <thread> <visit> <body>         the awaiting answer for one open visit
+  #   P <mark> <tokens> <swaps> <body>  a Conversation-tab answer for the review
+  #                                     bodies and Conversation comments one bead
+  #                                     answers, or one open visit holds
+  #   S <swap>                          a resolved comment whose answer is posted
+  #   K <comment> <review> <issue>      per ledger, the records still owing a write
+  # A swap is <node-id>:<add THUMBS_UP>:<remove EYES>, comma-joined. Every field is
+  # non-empty, with "-" for none, because read collapses an empty tab field.
   # A comment ABOVE the watermark was never routed and earns nothing: reacting to
   # it would teach the operator that the mark means something it does not. It is
-  # still outstanding in the thread it sits in, so a thread holding one waits.
-  # Answering that thread from an older batch would resolve it over a request
-  # nothing has addressed, and a resolved thread is skipped by every later pass.
-  # A thread belongs to every record whose range holds one of its comments and
-  # whose disposition names a bead, and it is answered only once all of them have
-  # landed: one reply, naming each, over a thread with nothing left outstanding.
-  # A thread already carrying our reply marker stays in scope whatever its ids:
-  # we claimed it, and a resolve that failed behind a reply still has to be
-  # retried. Anyone who wrote after that marker makes the thread live, which is
-  # the reason reported for leaving it open. Foreign is the routing arm's own
-  # test: a post that is not the city's own (gc_city_own), whoever wrote it.
+  # still outstanding in the thread it sits in, so that thread waits, and is not
+  # answered or resolved over a request nothing has addressed.
+  # A thread is answered once every routed comment in it is resolved, in one
+  # reply naming each bead that answered by that bead's own landing form. A
+  # thread already carrying our answer stays in scope whatever its ids: we
+  # claimed it, and a resolve that failed behind a reply still has to be retried.
+  # A resolved comment posted after our last answer earns an answer of its own,
+  # and anyone who wrote after it otherwise makes the thread live, which is the
+  # reason reported for leaving it open. Foreign is the routing arm's own test: a
+  # post that is not the city's own (gc_city_own), whoever wrote it. A pass that
+  # could not read the findings reacts and marks nothing else.
   wplan=$(printf '%s' "$wview" | jq -r \
-    --arg self "$SELF_LOGIN" --arg since "$wsince" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
-    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" --argjson recs "$wbrecs" "$CITY_OWN_DEF"'
-    def reacted($rg): [ ($rg // [])[] | select(.content == $reaction and .viewerHasReacted) ] | length > 0;
+    --arg self "$SELF_LOGIN" --arg since "$wsince" --arg reaction "$WB_REACTION" --arg handled "$WB_RESOLVED_REACTION" \
+    --arg marker "$WB_MARKER" --arg gres "$WB_GLYPH_RESOLVED" --arg gwait "$WB_GLYPH_AWAITING" \
+    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" \
+    --argjson led "$wled" --argjson fnd "$wfnd" --argjson marking "$wfnd_ok" "$CITY_OWN_DEF"'
+    def rg($rgs; $c): [ ($rgs // [])[] | select(.content == $c and .viewerHasReacted) ] | length > 0;
     def foreign: gc_city_own($self; $since) | not;
-    ( [ .reviews[]
-        | select(foreign)
-        # the states max_r watermarks (COMMENTED + CHANGES_REQUESTED): a body-only
-        # veto advances pr_review_watermark and routes a child, so acknowledge it too
-        | select((.state // "") | IN("COMMENTED", "CHANGES_REQUESTED"))
-        | select(((.body // "") | gsub("[[:space:]]"; "")) != "")
-        | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $rwm)
-        | select(reacted(.reactionGroups) | not)
-        | "R\t" + .id ]
-    + [ .threads[] | (.comments.nodes // [])[]
-        | select(foreign)
-        | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $cwm)
-        | select(reacted(.reactionGroups) | not)
-        | "R\t" + .id ]
-    + [ .issue_comments[]
-        | select(foreign)
-        | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $iwm)
-        | select(reacted(.reactionGroups) | not)
-        | "R\t" + .id ]
-    + [ .threads[]
-        | . as $t | ($t.comments.nodes // []) as $cs
-        | select(($t.isResolved // false) == false)
-        | ([ $cs | to_entries[]
-             | select((.value.author.login // "") == $self)
-             | select(((.value.body // "") | contains($marker)))
-             | .key ] | max) as $mine
-        | [ $recs | to_entries[] | . as $r
-            | select($r.value.child != "")
-            | select([ $cs[] | select(foreign)
-                       | select((.databaseId // 0) > $r.value.lo
-                                and (.databaseId // 0) <= $r.value.hi) ] | length > 0)
-            | $r.key ] as $held
-        | (if ($held | length) > 0 then $held
-           elif $mine != null and ($recs | length) > 0 and $recs[-1].child != ""
-           then [ ($recs | length) - 1 ]
-           else [] end) as $own
-        | select(($own | length) > 0)
-        | [ $own[] | $recs[.] ] as $orecs
-        | (if $mine == null then 1 else 0 end) as $needreply
-        | (if $mine == null then 0
-           else [ $cs | to_entries[] | select(.key > $mine)
-                  | select(.value | foreign) ] | length
-           end) as $after
-        | ([ 0, ($recs[] | .hi) ] | max) as $mark
-        | (if $after > 0 then 0
-           else [ $cs[] | select(foreign) | select((.databaseId // 0) > $mark) ]
-                | length end) as $unrouted
-        # Ready only when every record this thread holds has landed and nothing
-        # above the mark is still unrouted; until then the thread waits.
-        | (if ([ $orecs[] | select(.landed == "") ] | length) > 0 or $unrouted > 0
-           then "-" else "ok" end) as $ready
-        # One reply names every record this thread holds, each by ITS OWN landing
-        # form: a commit fix unit by the head commit, an artifact fix unit by its
-        # delivered URL. Records that share a form and a landing are named
-        # together in one clause. A mixed-form thread thus never claims a commit a
-        # demo made, nor a demo a commit made — the per-record evidence collected
-        # above is rendered per record, not collapsed to the last one.
-        # Non-empty even when not ready: IFS=tab collapses an empty middle field,
-        # which would shift every field after it, so the unlanded case emits the
-        # same "-" sentinel $ready carries. The shell gates on $ready and never
-        # reads the body then.
-        | (if $ready == "-" then "-"
-           else [ $orecs
-                  | group_by([.artifact, .landed])[]
-                  | ([ .[].child ] | join(", ")) as $who
-                  | (if (.[0].artifact // "") == "1"
-                     then "Addressed by the demo delivered on this PR: " + .[0].landed + " (" + $who + ")."
-                     else "Addressed in " + (.[0].landed[0:8]) + " on this PR (" + $who + ")." end) ]
-                 | join(" ") end) as $body
-        | (if $after > 0 then "live"
-           elif (($t.viewerCanResolve // false) != true) then "norights"
-           else "ok" end) as $why
-        | "T\t" + $t.id + "\t" + ($needreply | tostring) + "\t" + $why
-          + "\t" + $body
-          + "\t" + $ready
-          + "\t" + ($own | map(tostring) | join(",")) ]
+    def ours: ((.author.login // "") == $self) and ((.body // "") | contains($marker));
+    # The mark lines one of our answers carries: its state, and on the
+    # Conversation tab the tokens of the comments it answers.
+    def marks: [ (.body // "") | scan("<!-- gc-writeback-mark:([^ >]+)((?: [ri][0-9]+)*) -->")
+      | { st: .[0], toks: (.[1] | split(" ") | map(select(length > 0))) } ];
+    # A reply of ours carrying neither a mark line nor a finding line answered
+    # the thread it sits in.
+    def legacy: ours and (((.body // "") | test("<!-- gc-writeback-(mark|finding):")) | not);
+    # A post that answers the comments above it in a resolved thread, as the
+    # routing arm reads them: a post of the city (gc_city_own), and not one of
+    # our own answers, whose mark lines say what they answered.
+    def covers: (foreign | not) and (ours | not);
+    def rec_at($s; $d): first($led[$s] | to_entries[] | select(.value.lo < $d and $d <= .value.hi) | .key) // null;
+    def fspace: if .rid != "" and .rid == .cid then "r" elif .rid != "" then "c" else "ci" end;
+    def finding_at($s; $d): ($d | tostring) as $k
+      | first($fnd[] | select(.cid == $k)
+              | select(fspace as $f | $f == $s or ($f == "ci" and ($s == "c" or $s == "i")))) // null;
+    # $off: the routing arm read this comment as already answered in its threads,
+    # so a batch whose range holds it did not carry it unless a finding names it.
+    def cstate($s; $d; $off):
+      finding_at($s; $d) as $f | rec_at($s; $d) as $ri
+      | (if $ri == null then null else $led[$s][$ri] end) as $r
+      | if $f != null and $f.open and $f.disp == "needs-you" then { st: "awaiting", by: "finding", ri: $ri }
+        elif $f != null and ($f.open | not) and ($f.disp == "declined" or $f.disp == "deferred") and $f.reply
+          then { st: "resolved", by: "finding", posted: ($f.posted == "1"), ri: $ri }
+        elif $r == null or ($f == null and $off) then { st: "looked", ri: null }
+        elif $r.kind == "visit" and $r.state == "open" then { st: "awaiting", by: "batch", visit: $r.bead, ri: $ri }
+        elif $r.state == "closed" and ($r.kind == "visit" or $r.landed != "") and ($f == null or ($f.open | not))
+          then { st: "resolved", by: "batch", disp: $r.disp, ri: $ri }
+        else { st: "looked", ri: $ri } end;
+    # One clause per form and landing, naming the beads that answered: a commit fix
+    # unit by the head it landed at, an artifact fix unit by its delivered URL, and
+    # a visit by its close. A mixed-form answer thus never claims a commit a demo
+    # made, nor a demo a commit made.
+    def resolved_text($rs):
+      [ $rs | unique_by(.disp) | group_by([ .kind, .artifact, .landed ])[]
+        | ([ .[].bead ] | join(", ")) as $who | .[0] as $h
+        | if $h.kind == "visit"
+          then "Resolved: " + ([ .[] | "visit " + .bead + " closed"
+                 + (if .outcome != "" then " (" + .outcome + ")" else "" end) ] | join(", ")) + "."
+          elif $h.artifact == "1" then "Resolved by the demo delivered on this PR: " + $h.landed + " (" + $who + ")."
+          else "Resolved in " + ($h.landed[0:8]) + " on this PR (" + $who + ")." end ]
+      | $gres + " " + join(" ");
+    def awaiting_text($v): $gwait + " Awaiting a person — visit " + $v + ".";
+    def ref: if .url != "" then .url elif .s == "r" then "review " + (.d | tostring) else "comment " + (.d | tostring) end;
+    # Add THUMBS_UP unless it is there; remove EYES when it is there, or when an R
+    # line adds it this pass (a comment carrying neither reaction).
+    def swap: .id + ":" + (if rg(.rgs; $handled) then "0" else "1" end) + ":"
+      + (if rg(.rgs; $reaction) or (rg(.rgs; $handled) | not) then "1" else "0" end);
+    def swaps: [ .[] | swap | select(endswith(":0:0") | not) ] | if length > 0 then join(",") else "-" end;
+    . as $v
+    # What the routing arm read as already answered in its threads, and so left
+    # out of the batch whose range holds it: an inline comment in a resolved
+    # thread with a covering post after it, and a review body whose every inline
+    # comment is one.
+    | (reduce ($v.threads[] | select(.isResolved // false) | (.comments.nodes // []) as $cs
+         | ([ $cs | to_entries[] | select(.value | covers) | .key ] | max) as $last
+         | select($last != null) | $cs[0:$last][] | (.databaseId // 0) | select(. > 0))
+         as $d ({}; .[$d | tostring] = true)) as $offc
+    | ([ $v.threads[] | (.comments.nodes // [])[]
+         | { r: ((.pullRequestReview.databaseId // 0) | tostring), d: ((.databaseId // 0) | tostring) }
+         | select(.r != "0") ]
+       | group_by(.r) | map(select(all(.[]; $offc[.d] == true)) | { key: .[0].r, value: true })
+       | from_entries) as $offr
+    | ([ $v.issue_comments[] | select(ours) | marks[] ]) as $tm
+    | ([ 0, ($led.c[] | .hi) ] | max) as $mark
+    | [ $v.threads[] | . as $t | ($t.comments.nodes // []) as $cs
+        | ([ $cs | to_entries[] | select(.value | ours)
+             | select((.value | marks | any(.st == "resolved")) or (.value | legacy)) | .key ] | max) as $mres
+        | (if $mres == null then 0
+           else [ $cs | to_entries[] | select(.key > $mres) | select(.value | foreign) ] | length end) as $after
+        | ($t.isResolved // false) as $tres | (($t.viewerCanResolve // false) == true) as $canres
+        | [ $cs | to_entries[] | .key as $k | .value
+            | select(foreign) | select((.databaseId // 0) > 0 and .databaseId <= $cwm)
+            | { id, s: "c", d: .databaseId, k: $k, rgs: (.reactionGroups // []),
+                mres: $mres, tres: $tres, canres: $canres, after: $after } + cstate("c"; .databaseId; ($offc[.databaseId | tostring] == true)) ] as $fc
+        | { id: $t.id, fc: $fc, held: [ $fc[] | select(.ri != null) ], mres: $mres, after: $after,
+            res: $tres, canres: $canres, sts: [ $cs[] | select(ours) | marks[] | .st ],
+            unr: ([ $cs[] | select(foreign) | select((.databaseId // 0) > $mark) ] | length) } ] as $T
+    | ([ $v.reviews[] | select(foreign)
+         # the states max_r watermarks (COMMENTED + CHANGES_REQUESTED): a body-only
+         # veto advances pr_review_watermark and routes a child, so acknowledge it too
+         | select((.state // "") | IN("COMMENTED", "CHANGES_REQUESTED"))
+         | select(((.body // "") | gsub("[[:space:]]"; "")) != "")
+         | select((.databaseId // 0) > 0 and .databaseId <= $rwm)
+         | { id, s: "r", d: .databaseId, url: (.url // ""), rgs: (.reactionGroups // []) } ]
+       + [ $v.issue_comments[] | select(foreign)
+         | select((.databaseId // 0) > 0 and .databaseId <= $iwm)
+         | { id, s: "i", d: .databaseId, url: (.url // ""), rgs: (.reactionGroups // []) } ]
+       | map(. + cstate(.s; .d; (.s == "r" and $offr[.d | tostring] == true)) + { tok: (.s + (.d | tostring)) })) as $tops
+    | ([ $T[] | .fc[] ] + $tops) as $items
+    | def tmarked($st; $tok): any($tm[]; .st == $st and ((.toks | index($tok)) != null));
+      # Is the answer that resolves this comment already posted?
+      def answered: if .by == "finding" then .posted
+        elif .s == "c" then (.mres != null and .k < .mres)
+        else tmarked("resolved"; .tok) end;
+      def final: .st == "resolved" and answered and rg(.rgs; $handled) and (rg(.rgs; $reaction) | not)
+        and (.by == "finding" or .s != "c" or .tres or .after > 0 or (.canres | not));
+    ( [ $items[] | select((rg(.rgs; $reaction) or rg(.rgs; $handled)) | not) | "R\t" + .id ]
+    + (if $marking != 1 then [] else
+        [ $T[] | . as $x
+          | [ $x.held[] | select(.st == "resolved" and .by == "batch") ] as $bres
+          | (($x.held | length) > 0 and all($x.held[]; .st == "resolved") and ($bres | length) > 0) as $ready
+          | (($x.res | not) and ($x.held | length) == 0 and $x.mres != null and ($led.c | length) > 0
+             and ($led.c[-1] | .state == "closed" and (.kind == "visit" or .landed != ""))) as $claimed
+          | select($ready or $claimed)
+          | [ $bres[] | select($x.mres == null or .k > $x.mres) ] as $pend
+          | (if ($pend | length) > 0 then 1 else 0 end) as $reply
+          # A resolved thread is answered only for a comment no answer covers yet,
+          # and is never resolved again.
+          | select(($x.res | not) or $reply == 1)
+          | (if $reply == 1 then 0 else $x.after end) as $after
+          | select($after > 0 or $x.unr == 0)
+          | (if $x.res then "resolved" elif $after > 0 then "live"
+             elif ($x.canres | not) then "norights" else "ok" end) as $why
+          | "T\t" + $x.id + "\t" + ($reply | tostring) + "\t" + $why
+            + "\t" + (if $reply == 1 then resolved_text([ $pend[] | $led.c[.ri] ]) else "-" end)
+            + "\t" + ($pend | swaps) ]
+      + [ $T[] | . as $x
+          | [ $x.held[] | select(.st == "awaiting" and .by == "batch") | .visit ] | unique[]
+          | select(("awaiting:" + .) as $m | ($x.sts | index($m)) == null)
+          | "Q\t" + $x.id + "\t" + . + "\t" + awaiting_text(.) ]
+      + [ [ $tops[] | select(.st == "awaiting" and .by == "batch") | select(tmarked("awaiting:" + .visit; .tok) | not) ]
+          | group_by(.visit)[]
+          | "P\tawaiting:" + .[0].visit + "\t" + ([ .[].tok ] | join(" ")) + "\t-\t"
+            + awaiting_text(.[0].visit) + " In reply to " + ([ .[] | ref ] | join(", ")) + "." ]
+      + [ [ $tops[] | select(.st == "resolved" and .by == "batch") | select(tmarked("resolved"; .tok) | not) ]
+          | group_by(.disp)[]
+          | "P\tresolved\t" + ([ .[].tok ] | join(" ")) + "\t" + swaps + "\t"
+            + resolved_text([ .[] | $led[.s][.ri] ]) + " In reply to " + ([ .[] | ref ] | join(", ")) + "." ]
+      + [ $items[] | select(.st == "resolved") | select(answered) | swap | select(endswith(":0:0") | not) | "S\t" + . ]
+      + [ "K\t" + ([ "c", "r", "i" ] | map(. as $s | ($led[$s] | length) as $n
+          | if $n == 0 then "-" else
+              [ range(0; $n) | . as $k
+                | select($k == $n - 1 or any($items[]; .s == $s and .ri == $k and (final | not)))
+                | tostring ] | join(",") end) | join("\t")) ]
+      end)
     ) | .[]' 2>/dev/null) && wplan_ok=1 || { wplan=""; wplan_ok=0; }
 
   # The reaction is what shows the operator a comment was picked up. A pass that
-  # cannot finish the batch's reactions leaves every reply and resolve to the
-  # pass that can, so no thread is answered over a comment still awaiting one.
+  # cannot finish the batch's reactions leaves every answer to the pass that can,
+  # so no comment is answered before it is acknowledged.
   wreacts=$(printf '%s' "$wplan" | grep -c '^R	' 2>/dev/null) || wreacts=0
   case "$wreacts" in ''|*[!0-9]*) wreacts=0 ;; esac
-  wtees=$(printf '%s' "$wplan" | awk -F'\t' '$1 == "T" && $6 != "-" { n++ } END { print n + 0 }') || wtees=0
+  wtees=$(printf '%s' "$wplan" | grep -c '^[TQP]	' 2>/dev/null) || wtees=0
   case "$wtees" in ''|*[!0-9]*) wtees=0 ;; esac
-  wowing=""
   wack_ok=1
   if [ "$wreacts" -gt "$WB_REACT_CAP" ]; then
     wack_ok=0
@@ -3511,26 +3900,26 @@ WB_REACTIONS
   if [ "$wack_ok" != 1 ] && [ "$wtees" -gt 0 ]; then
     echo "$PROG: $wid — PR#$wnum still has comments awaiting their pickup reaction; nothing replied or resolved this pass" >&2
   fi
-  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5 a6; do  # a3: ok|live|norights; a4: reply body; a5: ready ("-"=unlanded)
+  # Each answer is posted with the marker and its mark line on lines of their
+  # own. A resolved answer's comments trade EYES for THUMBS_UP once it lands.
+  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4 a5; do  # a2: reply; a3: ok|live|norights|resolved; a4: body; a5: swaps
     [ "${act:-}" = "T" ] || continue
-    # A tab is IFS whitespace, so read collapses runs of it: every field the plan
-    # emits has to be non-empty, and "-" is a batch whose work has not landed.
-    if [ "$a5" = "-" ] || [ "$wack_ok" != 1 ]; then owe "$a6"; continue; fi
+    [ "$wack_ok" = 1 ] || continue
     if [ "$a2" = "1" ]; then
-      # The plan rendered the body with each record's own landing form; post it
-      # once over the thread, the marker on its own line.
-      wbody="${a4:-Addressed on this PR (no bead recorded).}
-$WB_MARKER"
-      if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$a1" --body "$wbody" >/dev/null 2>&1; then
+      if wb_thread_reply "$a1" "$a4
+$WB_MARKER
+<!-- gc-writeback-mark:resolved -->"; then
         replied=$((replied + 1))
+        wb_swaps "$a5"
       else
         echo "$PROG: $wid — PR#$wnum could not reply on thread $a1; NOT resolving it (retry next pass)" >&2
-        owe "$a6"; continue
+        continue
       fi
     fi
     # A human who answered our reply is still using the thread; resolving it
     # would close a live conversation, which is theirs to end, not ours.
     case "$a3" in
+      resolved) continue ;;
       live) echo "$PROG: $wid — PR#$wnum thread $a1 has a reply after ours; left unresolved"; continue ;;
       norights) echo "$PROG: $wid — PR#$wnum thread $a1 is not resolvable by this identity; left unresolved" >&2; continue ;;
     esac
@@ -3539,29 +3928,73 @@ $WB_MARKER"
       resolved=$((resolved + 1))
     else
       echo "$PROG: $wid — PR#$wnum could not resolve thread $a1; retry next pass" >&2
-      owe "$a6"
     fi
   done <<WB_PLAN
 $wplan
 WB_PLAN
+  # An awaiting answer leaves its thread open: the person it names still owes
+  # the ruling.
+  while IFS="$(printf '\t')" read -r act a1 a2 a3; do  # a1: thread; a2: visit; a3: body
+    [ "${act:-}" = "Q" ] || continue
+    [ "$wack_ok" = 1 ] || continue
+    if wb_thread_reply "$a1" "$a3
+$WB_MARKER
+<!-- gc-writeback-mark:awaiting:$a2 -->"; then
+      replied=$((replied + 1))
+    else
+      echo "$PROG: $wid — PR#$wnum could not post the awaiting answer on thread $a1; retry next pass" >&2
+    fi
+  done <<WB_AWAITING
+$wplan
+WB_AWAITING
+  while IFS="$(printf '\t')" read -r act a1 a2 a3 a4; do  # a1: mark; a2: tokens; a3: swaps; a4: body
+    [ "${act:-}" = "P" ] || continue
+    [ "$wack_ok" = 1 ] || continue
+    if wb_pr_comment "$wnum" "$a4
+$WB_MARKER
+<!-- gc-writeback-mark:$a1 $a2 -->"; then
+      posted=$((posted + 1))
+      wb_swaps "$a3"
+    else
+      echo "$PROG: $wid — PR#$wnum could not post the $a1 answer for $a2; retry next pass" >&2
+    fi
+  done <<WB_POSTS
+$wplan
+WB_POSTS
+  # A comment whose answer is already posted but which still carries EYES or
+  # lacks THUMBS_UP: its swap failed, or its answer was posted without one.
+  # These are reaction writes like the pickup's, so they draw on the same
+  # per-pass cap, and the comments it defers are swapped by the next pass.
+  while IFS="$(printf '\t')" read -r act a1; do
+    [ "${act:-}" = "S" ] || continue
+    [ "$wack_ok" = 1 ] || continue
+    [ "$wdone" -lt "$WB_REACT_CAP" ] || continue
+    wdone=$((wdone + 1))
+    wb_swaps "$a1"
+  done <<WB_SWAPS
+$wplan
+WB_SWAPS
 
   # --- a human objection owes its raiser an answer on the PR -------------------
   # Every ruling a human finding takes, bar an open must-fix the fix unit answers
   # in code, owes its raiser a visible answer stamped as finding.reply against the
   # row it answers (finding.comment_id): a declined finding's overrule, a deferred
   # finding's follow-up id, or a needs-you finding's visit id. This posts that
-  # answer into the raiser's thread. A declined or deferred finding is settled, so
-  # the thread is resolved behind the reply and no open thread holds the merge; a
-  # needs-you finding is NOT settled — the operator still owes a ruling — so its
-  # thread is left unresolved and the review holds the merge until they give it.
-  # The operator re-raises a decline by re-reviewing — the content key re-adopts
-  # the closed finding as a fresh one and pr-facts re-opens the human validation
-  # pass — so resolving forecloses no re-raise. Idempotent: finding.reply_posted
-  # marks a finding answered, and a thread already carrying our marker is never
-  # doubled. Only a pass that read the threads cleanly acts, the same $wplan_ok
-  # gate the plan above turns on. Reads live + closed, because a needs-you finding
-  # owes its reply while still open.
-  if [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+  # answer into the raiser's thread, or, for a review body or a Conversation
+  # comment, onto the Conversation tab with a link to the comment it answers. A
+  # declined or deferred finding is settled: its answer leads with the check mark,
+  # the thread is resolved behind it, and no open thread holds the merge. A
+  # needs-you finding is NOT settled, since the operator still owes a ruling: its
+  # answer leads with the question mark, its thread is left unresolved, and the
+  # review holds the merge until they give it. The operator re-raises a decline
+  # by re-reviewing — the content key re-adopts the closed finding as a fresh one
+  # and pr-facts re-opens the human validation pass — so resolving forecloses no
+  # re-raise. Idempotent: finding.reply_posted marks a finding answered, and an
+  # answer carrying this finding's line, or a reply of ours carrying neither a
+  # mark line nor a finding line, is never doubled. Only a pass that read the threads cleanly
+  # acts, the same $wplan_ok gate the plan above turns on. Reads live + closed,
+  # because a needs-you finding owes its reply while still open.
+  if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
     wdrows=$(printf '%s' "$wdf" | jq -rc '.[]?
         | select(((.metadata.task_kind // "") | tostring) == "finding")
         | select(((.metadata["finding.lane"] // "") | tostring) == "human")
@@ -3570,6 +4003,7 @@ WB_PLAN
         | select(((.metadata["finding.reply"] // "") | tostring) != "")
         | select(((.metadata["finding.reply_posted"] // "") | tostring) == "")
         | { id: .id, cid: ((.metadata["finding.comment_id"] // "") | tostring),
+            rid: ((.metadata["finding.review_id"] // "") | tostring),
             reply: ((.metadata["finding.reply"]) | tostring), disp: $disp } | @base64' 2>/dev/null)
     while IFS= read -r wdrow; do
       [ -n "$wdrow" ] || continue
@@ -3577,33 +4011,50 @@ WB_PLAN
       wdfid=$(printf '%s' "$wdj" | jq -r '.id // empty')
       [ -n "$wdfid" ] || continue
       wdcid=$(printf '%s' "$wdj" | jq -r '.cid // empty')
+      wdrid=$(printf '%s' "$wdj" | jq -r '.rid // empty')
       wddisp=$(printf '%s' "$wdj" | jq -r '.disp // empty')
-      wdbody="$(printf '%s' "$wdj" | jq -r '.reply')
-$WB_MARKER"
+      wdglyph="$WB_GLYPH_RESOLVED"; [ "$wddisp" = "needs-you" ] && wdglyph="$WB_GLYPH_AWAITING"
+      wdreply="$wdglyph $(printf '%s' "$wdj" | jq -r '.reply')"
+      wdline="<!-- gc-writeback-finding:$wdfid -->"
       # The thread whose originating comment is the one this finding answers. An
       # inline comment's databaseId is the reviewThread's; a review-body or
       # Conversation objection matches none, and is answered on the PR itself.
       wdtid=$(printf '%s' "$wview" | jq -r --arg c "$wdcid" '
         [ .threads[] | select((.comments.nodes // []) | any(((.databaseId // 0) | tostring) == $c)) | .id ] | .[0] // empty' 2>/dev/null)
       if [ -z "$wdtid" ]; then
-        if "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --body "$wdbody" >/dev/null 2>&1; then
+        # A review body's finding carries its own id as finding.review_id; any
+        # other finding no thread holds was raised in the Conversation.
+        wdref=$(printf '%s' "$wview" | jq -r --arg c "$wdcid" --arg r "$wdrid" '
+          (if $r != "" and $r == $c then .reviews else .issue_comments end)
+          | [ .[]? | select(((.databaseId // 0) | tostring) == $c) | (.url // "") | select(. != "") ] | .[0] // empty' 2>/dev/null)
+        [ -z "$wdref" ] || wdreply="$wdreply In reply to $wdref."
+        if printf '%s' "$wview" | jq -e --arg self "$SELF_LOGIN" --arg l "$wdline" '
+             any(.issue_comments[]?; ((.author.login // "") == $self) and ((.body // "") | contains($l)))' >/dev/null 2>&1; then
+          gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
+        elif wb_pr_comment "$wnum" "$wdreply
+$WB_MARKER
+$wdline"; then
           gc bd update "$wdfid" --set-metadata finding.reply_posted=1 >/dev/null 2>&1 || true
           replied=$((replied + 1))
         else
-          echo "$PROG: $wid — PR#$wnum could not post the declined-finding reply for $wdfid; retry next pass" >&2
+          echo "$PROG: $wid — PR#$wnum could not post the owed reply for $wdfid; retry next pass" >&2
         fi
         continue
       fi
-      # Already answered on this thread? Our own marker there means a prior pass
-      # replied but did not get to mark or resolve; pick up where it stopped.
+      # Already answered on this thread? This finding's line there means a prior
+      # pass replied but did not get to mark or resolve; pick up where it stopped.
       wdreplied=0
-      if printf '%s' "$wview" | jq -e --arg t "$wdtid" --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" '
+      if printf '%s' "$wview" | jq -e --arg t "$wdtid" --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg l "$wdline" '
            [ .threads[] | select(.id == $t) | (.comments.nodes // [])[]
-             | select((.author.login // "") == $self) | select((.body // "") | contains($m)) ] | length > 0' >/dev/null 2>&1; then
+             | select((.author.login // "") == $self) | (.body // "")
+             | select(contains($l) or (contains($m) and (test("<!-- gc-writeback-(mark|finding):") | not))) ]
+           | length > 0' >/dev/null 2>&1; then
         wdreplied=1
       fi
       if [ "$wdreplied" = 0 ]; then
-        if "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$wdtid" --body "$wdbody" >/dev/null 2>&1; then
+        if wb_thread_reply "$wdtid" "$wdreply
+$WB_MARKER
+$wdline"; then
           replied=$((replied + 1)); wdreplied=1
         else
           echo "$PROG: $wid — PR#$wnum could not reply the decline for $wdfid on thread $wdtid; retry next pass" >&2
@@ -3654,7 +4105,7 @@ WB_DECLINES
   # this. Dismissal is not approval: the merge still gates on an explicit one. Only
   # a pass that read the threads cleanly acts, the same $wplan_ok gate the reply
   # and resolve arms above turn on.
-  if [ "$wplan_ok" = 1 ]; then
+  if [ -n "$disp" ] && [ "$wplan_ok" = 1 ]; then
     # Every finding on this anchor that names a review, open and closed, grouped by
     # that review. A review is answered when every one of its findings is closed and
     # every declined or deferred finding has had its owed reply posted
@@ -3751,18 +4202,200 @@ WB_REVIEW_CLEARS
     fi
   fi
 
+  # --- a ruled machine finding is posted where the operator reads the PR --------
+  # Each finding this anchor owes (WB_FOWED, above) is posted once and answered
+  # once it closes, and each write is stamped after it lands. It is posted as a
+  # file-level review comment when its locus begins with a file the PR's diff
+  # touches, the only path GitHub anchors a review comment to, and as a
+  # Conversation comment otherwise. Its answer names the commit carrying the fix
+  # or the deferral's follow-up. A finding that has already closed is posted with
+  # its answer in place, so nothing on the PR shows it still holding the merge.
+  # One that closes after it was posted is answered by a reply in its thread, or,
+  # since a Conversation comment has no thread, by an edit that puts the answer
+  # in place. An answered thread is resolved unless a post that is not the
+  # city's own has come after it, which leaves that conversation to whoever
+  # wrote it. The markers are read back before any write, so a post whose stamp
+  # did not land is recorded rather than repeated, and a thread opened this pass
+  # is resolved by the next one, which can read it back. A posted finding whose
+  # comment is gone from the PR has nothing left to answer. Only a pass that read
+  # the threads cleanly acts.
+  if [ -n "$wfown" ] && [ "$wplan_ok" = 1 ] && [ -n "$whead" ]; then
+    wffiles=""; wffiles_rc=""
+    while IFS= read -r wfrow; do
+      [ -n "$wfrow" ] || continue
+      wfj=$(printf '%s' "$wfrow" | base64 -d 2>/dev/null) || continue
+      wfid=$(printf '%s' "$wfj" | jq -r '.id // empty' 2>/dev/null)
+      wfact=$(printf '%s' "$wfj" | jq -r '.act // empty' 2>/dev/null)
+      [ -n "$wfid" ] && [ -n "$wfact" ] || continue
+      # Where the finding already sits: the city's own comment carrying its
+      # marker, in a review thread or the Conversation. A post after it that is
+      # not the city's own is someone writing in the thread, whoever wrote it,
+      # the same test the plan above reads a thread's later replies by.
+      wfat=$(printf '%s' "$wview" | jq -c --arg self "$SELF_LOGIN" --arg since "$wsince" \
+          --arg m "$WB_FINDING_MARKER$wfid -->" --arg am "$WB_FINDING_MARKER$wfid:answered -->" "$CITY_OWN_DEF"'
+        def mine($k): gc_city_own($self; $since) and ((.body // "") | contains($k));
+        ( [ .threads[] | . as $t | ($t.comments.nodes // []) as $cs
+            | ([ $cs | to_entries[] | select(.value | mine($m)) | .key ] | first) as $at
+            | select($at != null)
+            | { kind: "thread", db: (($cs[$at].databaseId // 0) | tostring), thread: $t.id,
+                resolved: ($t.isResolved // false), canres: ($t.viewerCanResolve // false),
+                answered: any($cs[]; mine($am)),
+                after: ([ $cs | to_entries[] | select(.key > $at)
+                          | select(.value | gc_city_own($self; $since) | not) ] | length) } ]
+        + [ .issue_comments[] | select(mine($m))
+            | { kind: "issue", db: ((.databaseId // 0) | tostring), answered: mine($am) } ] )
+        | .[0] // { kind: "" }' 2>/dev/null) || wfat=""
+      if [ -z "$wfat" ]; then
+        echo "$PROG: $wid — PR#$wnum could not tell whether finding $wfid is on the PR; nothing written for it (retry next pass)" >&2
+        continue
+      fi
+      wfkind=$(printf '%s' "$wfat" | jq -r '.kind // ""')
+      wfdb=$(printf '%s' "$wfat" | jq -r '.db // ""')
+      wfanswered=$(printf '%s' "$wfat" | jq -r '.answered // false')
+      case "$wfact" in
+        post)
+          if [ -n "$wfkind" ]; then
+            gc bd update "$wfid" --set-metadata finding.pr_comment="$wfdb" >/dev/null 2>&1 \
+              || echo "$PROG: $wid — PR#$wnum finding $wfid is on the PR but its stamp did not record; retry next pass" >&2
+            continue
+          fi
+          if [ "$wfwrites" -ge "$WB_FINDING_CAP" ]; then wfheld=$((wfheld + 1)); continue; fi
+          # The files the diff touches, names only. A file the PR removes is left
+          # out: GitHub anchors no review comment to it, and a post refused every
+          # pass would never land.
+          if [ -z "$wffiles_rc" ]; then
+            if wffiles=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$wnum/files?per_page=100" \
+                 --jq '.[] | select((.status // "") != "removed") | .filename' 2>/dev/null); then
+              wffiles=$(printf '%s' "$wffiles" | jq -Rsc 'split("\n") | map(select(length > 0))' 2>/dev/null)
+              [ -n "$wffiles" ] && wffiles_rc=0 || wffiles_rc=1
+            else
+              wffiles_rc=1
+            fi
+          fi
+          if [ "$wffiles_rc" != 0 ]; then
+            echo "$PROG: $wid — PR#$wnum file list unreadable; finding $wfid not posted (retry next pass)" >&2
+            continue
+          fi
+          # The longest diff path the locus begins with, ending where a path cannot.
+          wfpath=$(printf '%s' "$wffiles" | jq -r --arg l "$(printf '%s' "$wfj" | jq -r '.locus // ""')" '
+            ($l | sub("^[\\s`]+"; "")) as $l
+            | [ .[]? | tostring | select(. != "") | . as $p
+                | select(($l | startswith($p))
+                         and (($l | length) == ($p | length)
+                              or ($l[($p | length):(($p | length) + 1)] | test("^[^A-Za-z0-9._/-]")))) ]
+            | max_by(length) // empty' 2>/dev/null)
+          wfans=""
+          if [ "$(printf '%s' "$wfj" | jq -r '.closed')" = "true" ]; then
+            wfans=$(finding_answer "$wfj" "$whead")
+            [ -n "$wfans" ] || continue
+          fi
+          wfbody=$(printf '%s' "$wfj" | jq -r --arg mk "$WB_FINDING_MARKER" --arg ans "$wfans" "$WB_FINDING_BODY" 2>/dev/null)
+          [ -n "$wfbody" ] || continue
+          wfwrites=$((wfwrites + 1))
+          # Through pr-post.sh, like every city post: its mark is what keeps the
+          # finding's own comment from reading back as feedback. The new comment's
+          # id comes back in gh's output, the created comment for a file and the
+          # comment's URL for the Conversation.
+          if [ -n "$wfpath" ]; then
+            wfwhere="on $wfpath"
+            wfout=$("$PR_POST" file-comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --commit "$whead" \
+              --path "$wfpath" --body "$wfbody" 2>/dev/null); wfrc=$?
+            wfnew=$(printf '%s' "$wfout" | jq -r '.id // empty' 2>/dev/null)
+          else
+            wfwhere="to the Conversation"
+            wfout=$("$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$wnum" --body "$wfbody" 2>/dev/null); wfrc=$?
+            wfnew=$(printf '%s\n' "$wfout" | grep -Eo '#issuecomment-[0-9]+' | tail -1 | tr -cd '0-9')
+          fi
+          if [ "$wfrc" != 0 ]; then
+            echo "$PROG: $wid — PR#$wnum could not post finding $wfid $wfwhere; retry next pass" >&2
+            continue
+          fi
+          fposted=$((fposted + 1))
+          echo "$PROG: $wid — PR#$wnum posted finding $wfid $wfwhere"
+          case "$wfnew" in
+            ''|*[!0-9]*)
+              echo "$PROG: $wid — PR#$wnum finding $wfid posted, but its comment id did not read back; the next pass records it off its marker" >&2
+              continue ;;
+          esac
+          # A Conversation comment posted with its answer in place owes nothing
+          # more; a thread still owes its resolve.
+          if [ -n "$wfans" ] && [ -z "$wfpath" ]; then
+            gc bd update "$wfid" --set-metadata finding.pr_comment="$wfnew" --set-metadata finding.pr_answered=1 >/dev/null 2>&1
+          else
+            gc bd update "$wfid" --set-metadata finding.pr_comment="$wfnew" >/dev/null 2>&1
+          fi || echo "$PROG: $wid — PR#$wnum finding $wfid posted but its stamp did not record; the next pass reads the marker back" >&2
+          ;;
+        answer)
+          if [ -z "$wfkind" ]; then
+            echo "$PROG: $wid — PR#$wnum finding $wfid was posted, but its comment is gone from the PR; nothing left to answer"
+            gc bd update "$wfid" --set-metadata finding.pr_answered=gone >/dev/null 2>&1 || true
+            continue
+          fi
+          wfans=""
+          if [ "$wfanswered" != "true" ]; then
+            if [ "$wfwrites" -ge "$WB_FINDING_CAP" ]; then wfheld=$((wfheld + 1)); continue; fi
+            wfans=$(finding_answer "$wfj" "$whead")
+            [ -n "$wfans" ] || continue
+          fi
+          wfwrote=0
+          if [ "$wfkind" = "thread" ]; then
+            wftid=$(printf '%s' "$wfat" | jq -r '.thread // ""')
+            if [ -n "$wfans" ]; then
+              wfwrites=$((wfwrites + 1))
+              if ! wb_thread_reply "$wftid" "$wfans
+$WB_FINDING_MARKER$wfid:answered -->"; then
+                echo "$PROG: $wid — PR#$wnum could not answer finding $wfid on thread $wftid; NOT resolving it (retry next pass)" >&2
+                continue
+              fi
+              wfwrote=1
+            fi
+            if [ "$(printf '%s' "$wfat" | jq -r '.after // 0')" != "0" ]; then
+              echo "$PROG: $wid — PR#$wnum thread $wftid has a reply after finding $wfid; answered, left unresolved"
+            elif [ "$(printf '%s' "$wfat" | jq -r '.resolved')" != "true" ] \
+                 && [ "$(printf '%s' "$wfat" | jq -r '.canres')" = "true" ]; then
+              if gh_graphql 'mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' \
+                   -f t="$wftid" >/dev/null; then
+                resolved=$((resolved + 1)); wfwrote=1
+              else
+                echo "$PROG: $wid — PR#$wnum answered finding $wfid but could not resolve thread $wftid; retry next pass" >&2
+                continue
+              fi
+            fi
+          elif [ -n "$wfans" ]; then
+            wfbody=$(printf '%s' "$wfj" | jq -r --arg mk "$WB_FINDING_MARKER" --arg ans "$wfans" "$WB_FINDING_BODY" 2>/dev/null)
+            [ -n "$wfbody" ] || continue
+            wfwrites=$((wfwrites + 1))
+            if ! "$PR_POST" edit --repo "$ORIGIN_REPO_Q" --comment "$wfdb" --body "$wfbody" >/dev/null 2>&1; then
+              echo "$PROG: $wid — PR#$wnum could not answer finding $wfid on its Conversation comment; retry next pass" >&2
+              continue
+            fi
+            wfwrote=1
+          fi
+          [ "$wfwrote" = 0 ] || fanswered=$((fanswered + 1))
+          gc bd update "$wfid" --set-metadata finding.pr_answered=1 >/dev/null 2>&1 \
+            || echo "$PROG: $wid — PR#$wnum finding $wfid answered but its stamp did not record; the next pass reads the answer back" >&2
+          ;;
+      esac
+    done <<WB_FINDINGS
+$(printf '%s' "$wfown" | jq -r '.[] | @base64' 2>/dev/null)
+WB_FINDINGS
+  fi
+
   # The plan is this pass's own read of GitHub, so a plan that could not be built
-  # retires nothing.
-  if [ "$wbatch_ok" = 1 ] && [ "$wplan_ok" = 1 ]; then
-    wbkeep=$(jq -rn --arg batch "$wbwant" --arg owing "$wowing" '
-      ( $batch | split(";") | map(select(length > 0)) ) as $rs
-      | ( $owing | split(" ") | map(select(length > 0)) ) as $ow
-      | [ $rs | to_entries[] | . as $e
-          | select($e.key == (($rs | length) - 1) or ($ow | index($e.key | tostring)) != null)
-          | $e.value ] | join(";")' 2>/dev/null) || wbkeep=""
-    if [ -n "$wbkeep" ] && [ "$wbkeep" != "$wbwant" ]; then
-      gc bd update "$wid" --set-metadata pr_comment_batch="$wbkeep" >/dev/null 2>&1
-    fi
+  # retires nothing. Its K line names, per ledger, the records to keep: the
+  # newest, and every one covering a comment whose final state that read did not
+  # show (answered, THUMBS_UP on, EYES off, its thread done). A record whose
+  # last write lands this pass is retired by the next pass's read.
+  wkeep=$(printf '%s\n' "$wplan" | awk -F'\t' '$1 == "K" { print $2 "\t" $3 "\t" $4; exit }')
+  if [ "$wbatch_ok" = 1 ] && [ "$wplan_ok" = 1 ] && [ -n "$wkeep" ]; then
+    IFS="$(printf '\t')" read -r wkc wkr wki <<WB_KEEP
+$wkeep
+WB_KEEP
+    wkset=()
+    wbkeep=$(ledger_keep "$wbwant" "$wkc") && wkset+=(--set-metadata "pr_comment_batch=$wbkeep")
+    wbkeep=$(ledger_keep "$wrbatch" "$wkr") && wkset+=(--set-metadata "pr_review_batch=$wbkeep")
+    wbkeep=$(ledger_keep "$wibatch" "$wki") && wkset+=(--set-metadata "pr_issue_comment_batch=$wbkeep")
+    [ "${#wkset[@]}" -eq 0 ] || gc bd update "$wid" "${wkset[@]}" >/dev/null 2>&1
   fi
 done <<WB_ROWS
 $(printf '%s\n' "$wb_first" | awk 'NF { print "first\t" $0 }')
@@ -3770,7 +4403,7 @@ $(printf '%s\n' "$wb_rest" | awk 'NF { print "rest\t" $0 }')
 WB_ROWS
 pace_end
 if [ -n "$CURSOR$DEADLINE" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-  wpaced="write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments ($wb_first_n with something new first)"
+  wpaced="write-back visited $PACE_VISITED of ${wb_due:-?} anchors with routed comments or owed findings ($wb_first_n with something new first)"
   if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
     wpaced="$wpaced before the deadline"
     [ -z "$PACE_RESUME_AT" ] || wpaced="$wpaced; the next pass resumes at $PACE_RESUME_AT"
@@ -3778,6 +4411,7 @@ if [ -n "$CURSOR$DEADLINE" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1
   fi
   echo "$PROG: $wpaced"
 fi
+[ "$wfheld" -eq 0 ] || echo "$PROG: $wfheld finding post(s) or answer(s) wait for the next pass (cap $WB_FINDING_CAP per pass)" >&2
 
 if [ "$POSTURE_ONLY" = 1 ]; then
   echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped; $pkept unchanged since the basis they were derived from, $pread read per PR"
@@ -3793,6 +4427,6 @@ elif [ "$ROUTE_ONLY" = 1 ]; then
   # refinery-reconcile reports a non-zero but never holds merge on it.
   echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $posted conversation answers posted, $swapped comments marked resolved, $fposted findings posted, $fanswered findings answered, $skipped skipped"
 fi
 exit 0
