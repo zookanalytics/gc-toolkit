@@ -35,6 +35,10 @@ set -u
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# A holder that takes a fold's anchor_bead is joined to that anchor first.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)/bd-lib.sh}" \
+  || { echo "visit-close: cannot source bd-lib.sh beside this script" >&2; exit 2; }
 
 VISIT=""; OUTCOME=""; REASON=""; SUBJECT=""; INTO=""; FORCE=0
 die() { echo "visit-close: $1" >&2; exit 2; }
@@ -98,9 +102,11 @@ fi
 # first or it lifts unheld. A PR-comment visit (pr-facts.sh) stamps pr_number,
 # pr_url and anchor_bead, and merge.sh holds the PR's merge while that visit
 # stays open carrying pr_number. pr_number is the key merge.sh reads; pr_url
-# qualifies the repository; anchor_bead rides along. The transfer gates the
-# close the way the outcome stamps above do: read pr_number back on the holder,
-# and refuse the close if it did not land.
+# qualifies the repository; anchor_bead rides along once the holder is joined to
+# the anchor (bd_anchor_link), so the holder is one of the anchor's children by
+# its edge as well as its metadata, or by neither. The transfer gates the close
+# the way the outcome stamps above do: read pr_number back on the holder, and
+# refuse the close if it did not land.
 if [ "$OUTCOME" = "folded" ]; then
   PRNUM=$(meta_now "$VISIT" pr_number)
   if [ -n "$PRNUM" ]; then
@@ -117,7 +123,13 @@ if [ "$OUTCOME" = "folded" ]; then
     ANCHOR=$(meta_now "$VISIT" anchor_bead)
     XFER=(--set-metadata "pr_number=$PRNUM")
     [ -n "$PRURL" ]  && XFER+=(--set-metadata "pr_url=$PRURL")
-    [ -n "$ANCHOR" ] && XFER+=(--set-metadata "anchor_bead=$ANCHOR")
+    if [ -n "$ANCHOR" ]; then
+      if bd_anchor_link "$ANCHOR" "$INTO"; then
+        XFER+=(--set-metadata "anchor_bead=$ANCHOR")
+      else
+        echo "visit-close: WARN could not join $INTO to anchor $ANCHOR, so anchor_bead does not ride the fold; pr_number still carries the merge hold" >&2
+      fi
+    fi
     gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true
     if [ "$(meta_now "$INTO" pr_number)" != "$PRNUM" ]; then
       gc bd update "$INTO" "${XFER[@]}" >/dev/null 2>&1 || true

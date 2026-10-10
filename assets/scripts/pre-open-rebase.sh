@@ -278,7 +278,11 @@ while IFS= read -r row; do
         elif ((($x.assignee // "") | tostring) != "") then "ok"
         elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
         else "restamp" end' 2>/dev/null)
-    if [ "$dneed" = "restamp" ]; then
+    if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
+      # The join lands before the marker, so a marker never stands on a child
+      # the anchor's edge read cannot reach.
+      echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
+    elif [ "$dneed" = "restamp" ]; then
       # `gc bd update` returns 0 without writing (the claim guard is one such
       # path), so the exit code cannot prove the marker landed. Read both keys
       # back and re-stamp once, claiming it only when it persists; the next pass
@@ -306,6 +310,7 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts but $frozen holds it with rebase_hold (operator gate); no rework dispatched"
     held=$((held + 1)); continue
   fi
+  FIX_JOINED=""
   if [ -n "$stranded" ]; then
     FIX="$stranded"
     echo "$PROG: $id re-routing stranded rework $FIX for '$branch' (a prior pass's route stamp did not land)"
@@ -325,12 +330,21 @@ while IFS= read -r row; do
     if [ -n "$FIX" ]; then
       echo "$PROG: $id adopting unstamped rework orphan $FIX for '$branch' (created by a prior pass whose stamp failed)"
     else
-      FIX=$(gc bd create "$FIX_TITLE base moved, the branch no longer merges" -t task --json 2>/dev/null \
+      FIX=$(bd_create_child "$id" "$FIX_TITLE base moved, the branch no longer merges" -t task --json 2>/dev/null \
         | scrub | jq -r '.id // empty' 2>/dev/null)
+      FIX_JOINED=1
     fi
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  # The child is joined to the anchor before its role marker lands: a create
+  # carries the edge (bd_create_child), and a stranded or adopted child is
+  # joined here. A failed join stamps nothing, so no marked child sits where
+  # the anchor's edge read cannot see it.
+  if [ -z "$FIX_JOINED" ] && ! bd_anchor_link "$id" "$FIX"; then
+    echo "$PROG: $id could not join rework $FIX to the anchor; left unstamped and unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # The route is stamped separately, after prepare_mode reads back. A dropped

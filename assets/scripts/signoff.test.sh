@@ -142,11 +142,13 @@ case "${1:-}" in
     # refuses only invalid JSON and stores any other document as given. The stub
     # also refuses a document that is not an object: it holds no key a
     # --metadata-field query can match, so a caller that sends one fails here.
-    cmeta='{}'
+    # --deps <type:id> rides the insert too, as an edge row from the new bead.
+    cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --metadata=*) cmeta="${1#--metadata=}" ;;
+        --deps) shift; cdeps="$cdeps ${1:-}" ;;
       esac
       shift || true
     done
@@ -163,6 +165,7 @@ case "${1:-}" in
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -172,9 +175,23 @@ case "${1:-}" in
     # A row is "<dependent>|<blocker>|<type>", matching the real binary:
     # `dep add A B` is "A depends on B", `dep S --blocks D` is "D depends on S",
     # --direction=down lists what an id depends on and =up lists what depends
-    # on it. Model these backwards and a reversed edge reads as correct.
+    # on it, every type unless -t names one, each row carrying dependency_type.
+    # Model these backwards and a reversed edge reads as correct.
     case "${1:-}" in
-      add) printf '%s|%s|%s\n' "$2" "$3" "${4#--type=}" >> "$DEPS"; echo "dep added" ;;
+      add)
+        # --file <path|->: newline-delimited {"from","to","type"} edges.
+        if [ "${2:-}" = "--file" ]; then
+          if [ "${3:-}" = "-" ]; then lines=$(cat); else lines=$(cat "${3:-}"); fi
+          printf '%s\n' "$lines" | jq -r 'select(type == "object") | "\(.from)|\(.to)|\(.type // "blocks")"' >> "$DEPS"
+          echo "deps added"
+        else
+          a="${2:-}"; b="${3:-}"; ty=""; shift 3 || true
+          while [ $# -gt 0 ]; do
+            case "$1" in --type=*) ty="${1#--type=}" ;; --type|-t) shift; ty="${1:-}" ;; esac
+            shift || true
+          done
+          printf '%s|%s|%s\n' "$a" "$b" "$ty" >> "$DEPS"; echo "dep added"
+        fi ;;
       list)
         shift; id="$1"; shift
         dir=""; typ=""
@@ -187,12 +204,12 @@ case "${1:-}" in
         first=1
         while IFS='|' read -r f t ty; do
           [ -n "$f" ] || continue
-          [ "$ty" = "$typ" ] || continue
+          [ -z "$typ" ] || [ "$ty" = "$typ" ] || continue
           other=""
           if [ "$dir" = "down" ] && [ "$f" = "$id" ]; then other="$t"; fi
           if [ "$dir" = "up" ] && [ "$t" = "$id" ]; then other="$f"; fi
           [ -n "$other" ] || continue
-          row=$(jq -c --arg id "$other" '(.[] | select(.id == $id)) // {"id":$id,"metadata":{}}' "$STORE")
+          row=$(jq -c --arg id "$other" --arg ty "$ty" '((.[] | select(.id == $id)) // {"id":$id,"metadata":{}}) + {dependency_type: $ty}' "$STORE")
           [ "$first" = 1 ] || out="$out,"
           out="$out$row"; first=0
         done < "$DEPS"

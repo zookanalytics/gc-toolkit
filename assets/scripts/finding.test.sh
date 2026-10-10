@@ -438,15 +438,18 @@ gc bd update "$HH" --set-metadata finding.disposition=must-fix >/dev/null
 out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
 eq "$rc" "1" "a machine lane's fix unit does not answer an edge-less human finding"
 eq "$out" "$HH" "…so the human finding is reported unanswered"
-# pr-facts.sh files the human batch's fix unit: task_kind=rework, no source_review_bead.
+# pr-facts.sh files the human batch's fix unit: task_kind=rework, no source_review_bead,
+# born joined to the anchor by its edge.
 store "$(jq -c '. + [{"id":"fuHh","status":"open","assignee":"","title":"Address review comments","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancH","source_review":"5000"}}]' "$STUB_STORE")"
+printf '%s\n' 'fuHh|related|tk-ancH' >> "$STUB_DEPS"
 out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
 eq "$rc" "0" "the human batch's fix unit answers the edge-less human finding"
 eq "$out" "fuHh open $HH" "…matched by lane"
-# A read that fails is never "no fix unit".
-STUB_DEP_GARBAGE=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+# A read that fails is never "no fix unit": the finding's blockers (read down
+# from it), and the anchor's children (read up from the anchor).
+STUB_DEP_GARBAGE="--direction=down" "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable blocker read exits 2"
-STUB_LIST_FAIL=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+STUB_DEP_GARBAGE="--direction=up" "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable finding read exits 2"
 
 # ---------------------------------------------------------------------------

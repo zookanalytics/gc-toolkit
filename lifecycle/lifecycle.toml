@@ -613,13 +613,17 @@ keys = [
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
-# anchor_bead — the gating anchor a review, rework, finding or visit child
-#   names, so every reader can enumerate an anchor's children by
+# anchor_bead — the gating anchor a review, rework, finding, validation or visit
+#   child names. The child also carries a `related` edge onto the anchor, and a
+#   reader enumerates an anchor's children through that edge, keeping the
+#   dependents whose anchor_bead names it (bd-lib.sh bd_anchor_children); an
+#   anchor none of whose children carries the edge yet is read by
 #   `--metadata-field anchor_bead=<id>`. Written by gate-ensure.sh, finding.sh,
-#   review-outcome.sh, signoff.sh and pr-facts.sh. Empty on a child is the
-#   unstamped-orphan signal those readers adopt; on a review bead signoff.sh
-#   falls back to the up `blocks` edge and refuses the verdict if none resolves.
-#   Never cleared. A bead id.
+#   review-outcome.sh, signoff.sh, pr-facts.sh, pre-open-rebase.sh and
+#   visit-close.sh, each on a child already joined to the anchor. Empty on a
+#   child is the unstamped-orphan signal those readers adopt; on a review bead
+#   signoff.sh falls back to the up `blocks` edge and refuses the verdict if none
+#   resolves. Never cleared. A bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.

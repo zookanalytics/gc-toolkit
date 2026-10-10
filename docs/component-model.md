@@ -98,6 +98,28 @@ The `task_kind` **key** is registered in `lifecycle/lifecycle.toml`; its
 **values** are not a closed enum, and the live store carries kinds no pack code
 writes.
 
+### An anchor's children
+
+A bead that hangs off an anchor (a review, a rework child, a finding, a
+validation pass, a visit) names the anchor in `anchor_bead` and carries a
+`related` edge onto it. The edge is how a reader finds the children: one
+`gc bd dep list <anchor> --direction=up` read, where a
+`--metadata-field anchor_bead=<id>` query has no index to use and reads every
+bead in the statuses it asks for. `anchor_bead` is what makes a dependent a
+child. The read keeps the dependents whose `anchor_bead` names the anchor, so a
+convoy tracking the anchor is not a child, and a bead moved to another anchor
+leaves the old one's set with its old edge still in place.
+
+`assets/scripts/bd-lib.sh` holds the read (`bd_anchor_children`) and both
+writes. A child is created joined to its anchor, the edge riding the create
+(`bd_create_child`), and an existing bead is joined before `anchor_bead` is
+stamped on it (`bd_anchor_link`), so no bead carries `anchor_bead` without the
+edge the readers follow. An anchor none of whose children carries the edge yet
+is read by its metadata instead, and is joined in one write by the first read
+that covers every status. `related` holds nothing: it gates neither `bd ready`
+nor a close, and the merge hold stays on the `blocks` edges read down from the
+anchor.
+
 ---
 
 ## 2. The lifecycle, as counts

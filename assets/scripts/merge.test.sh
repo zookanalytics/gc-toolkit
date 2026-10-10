@@ -1293,7 +1293,8 @@ store "[$(anchor DE1 128), $(rev DE1)]"
 printf '%s' "$(prview 128 OPEN CLEAN)" > "$GH_DIR/pr_view_128.json"
 approved 128
 : > "$STUB_GH_LOG"
-out=$(STUB_DEP_PARTIAL=1 "$SUT" 2>&1)
+# The blocker probe reads down from the anchor; the lane read up stays readable.
+out=$(STUB_DEP_PARTIAL="--direction=down" "$SUT" 2>&1)
 has "$out" "PR#128 dependency probe unreadable; merge held" "a failed dependency probe holds the merge"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
@@ -1325,7 +1326,7 @@ store "[$(anchor TR3 132), $(rev TR3)]"
 printf '%s' "$(prview 132 OPEN CLEAN)" > "$GH_DIR/pr_view_132.json"
 approved 132
 : > "$STUB_GH_LOG"
-out=$(STUB_DEP_TRAILING=1 "$SUT" 2>&1)
+out=$(STUB_DEP_TRAILING="--direction=down" "$SUT" 2>&1)
 has "$out" "PR#132 dependency probe unreadable; merge held" "a dependency probe with bytes after its array holds the merge"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 

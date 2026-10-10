@@ -40,11 +40,23 @@ mkdir -p "$BIN"
 #               fold hold-transfer's silent drop)
 #   FAIL_CLOSE  the close logs but the status never becomes closed
 #   NEED_FORCE  a plain close is refused; only a --force close takes
+#   FAIL_DEP    an edge write is refused (the holder cannot be joined)
+# The anchor graph reads answer an anchor with no children yet, and an edge
+# write is logged as "dep add <child> <anchor> ...".
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
+    list) echo '[]' ;;
+    dep)
+        case "$id" in
+            list) echo '[]' ;;
+            add)
+                printf 'dep %s\n' "${*:3}" >>"$LOG"
+                [ -z "${FAIL_DEP:-}" ] || exit 1 ;;
+            *) exit 2 ;;
+        esac ;;
     update)
         printf 'update %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_STAMP:-}" ] && exit 0
@@ -227,6 +239,19 @@ has "pr_number is stamped on the holder" 'update v-hold --set-metadata pr_number
 is "the holder carries pr_number after the fold" "$(meta_of v-hold pr_number)" "559"
 is "the holder carries pr_url after the fold" "$(meta_of v-hold pr_url)" "https://github.com/o/r/pull/559"
 is "the holder carries anchor_bead after the fold" "$(meta_of v-hold anchor_bead)" "tk-anchor"
+has "the holder is joined to the anchor by its edge" 'dep add v-hold tk-anchor --type related' "$LOG"
+has "the folded visit closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── fold: a holder that cannot be joined to the anchor still takes the merge hold, without anchor_bead ──"
+reset
+seed_meta v-x pr_number 559
+seed_meta v-x anchor_bead tk-anchor
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_DEP=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a fold whose holder cannot be joined still exits 0" "$RC" "0"
+is "the holder carries pr_number, the merge hold" "$(meta_of v-hold pr_number)" "559"
+is "the holder takes no anchor_bead it has no edge for" "$(meta_of v-hold anchor_bead)" ""
 has "the folded visit closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
 
 echo "── fold: a transfer that will not read back refuses the close (exit 5) ──"

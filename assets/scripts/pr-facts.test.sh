@@ -994,7 +994,8 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0"
 echo "# …and an unreadable blocker list holds the dispatch, the safe side for a rewrite (tk-nak6pb)"
 store "[$(anchor FBK3 98)]"
 printf '%s' "$(prview 98 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_98.json"
-STUB_DEP_GARBAGE=1
+# The blocker list reads down from the anchor; its children read up stays readable.
+STUB_DEP_GARBAGE="--direction=down"
 out=$(run)
 STUB_DEP_GARBAGE=""
 has "$out" "the anchor is held by an unreadable blocker (a merge is held on it); no rework dispatched" "an unreadable edge list fails closed"
@@ -4974,6 +4975,8 @@ has "$out" "(0 with something new first)" "once visited, it rotates with the res
 bmut KP3 '.status = "closed"'
 bmut KP3 '.metadata.anchor_bead = "WP3"'
 bmut KP2 '.metadata.anchor_bead = "WP2"'
+# A child joins its anchor by its edge as well as anchor_bead (bd_anchor_link).
+printf '%s\n' 'KP3|related|WP3' 'KP2|related|WP2' >> "$STUB_DEPS"
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
 has "$out" "(1 with something new first)" "a live child appearing on WP2 moves its mark"
 bmut KP2 '.status = "closed"'
@@ -5213,6 +5216,7 @@ echo "# full walk: a PR that left the open list or changed since the last visit 
 store "[$(anchor FW1 361), $(anchor FW2 362),
         $(anchor FW3 363 ',"pr_posture":"approved@sha-363@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-363"'),
         {\"id\":\"FW3-rw\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Merge main into PR#363\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"FW3\",\"branch\":\"polecat/x363\"}}]"
+printf '%s\n' 'FW3-rw|related|FW3' >> "$STUB_DEPS"
 for n in 361 362; do printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
 printf '%s' "$(prview 363 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_363.json"
 open_prs "$(open_node 361)" "$(open_node 362)" "$(open_node 363 DIRTY APPROVED)"

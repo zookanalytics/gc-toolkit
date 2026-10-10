@@ -448,7 +448,7 @@ echo "$PROG: liveness: pr=$PR_LIVENESS convoy=$CONVOY_LIVENESS husk=$HUSK_LIVENE
 # above; this scans ALIVE. A wedge here means the auto-close is not running, so
 # escalate.sh's one-open-visit-per-subject dedup is the whole bound: re-raising
 # each pass until it clears is correct, not noise.
-WEDGE_BLK="$TMP/wedge-blk.json"; WEDGE_FU="$TMP/wedge-fu.json"
+WEDGE_BLK="$TMP/wedge-blk.json"; WEDGE_FU="$TMP/wedge-fu.json"; WEDGE_UP="$TMP/wedge-up.json"
 wedged_fix_escalations() {
     local rows row fid anchor lane amr n_all n_live census c_live c_landed edgeless body out filed=0
     rows=$(jq -c '[ .[] | select((.metadata.task_kind // "") == "finding")
@@ -475,12 +475,23 @@ wedged_fix_escalations() {
             [ "${n_live:-1}" -eq 0 ] || continue
         else
             # No edge at all. The landed fix shows only in the lane's fix-unit
-            # census (anchor_bead + task_kind=rework), read by metadata because the
-            # fix-unit->anchor edge is itself sometimes absent. A fix unit LANDED
-            # with none still live is the wedge; a live fix unit (fix in flight) or
-            # no fix unit (unanswered objection) is not. --status carries closed
-            # because a landed fix unit is closed and a bare query is open-only.
-            bd_read "$WEDGE_FU" list --metadata-field anchor_bead="$anchor" --status=open,in_progress,blocked,deferred,hooked,pinned,closed --limit=0 --json || continue
+            # census (the anchor's task_kind=rework children), read as the anchor's
+            # children rather than its blocks edges because the fix-unit->anchor
+            # blocks edge is itself sometimes absent. A fix unit LANDED with none
+            # still live is the wedge; a live fix unit (fix in flight) or no fix
+            # unit (unanswered objection) is not. Every status is read because a
+            # landed fix unit is closed. The children are the anchor's dependents
+            # naming it in anchor_bead (bd-lib.sh's anchor graph, read here under
+            # this sweep's --db pin); an anchor none of whose children carries the
+            # related edge yet is read by its anchor_bead metadata instead.
+            bd_read "$WEDGE_UP" dep list "$anchor" --direction=up --json || continue
+            if jq -e --arg a "$anchor" 'any(.[]; (.dependency_type // "") == "related"
+                   and (((.metadata.anchor_bead // "") | tostring) == $a))' "$WEDGE_UP" >/dev/null 2>&1; then
+                jq -c --arg a "$anchor" '[ .[] | select(((.metadata.anchor_bead // "") | tostring) == $a) ]' \
+                    "$WEDGE_UP" > "$WEDGE_FU" 2>/dev/null || continue
+            else
+                bd_read "$WEDGE_FU" list --metadata-field anchor_bead="$anchor" --status=open,in_progress,blocked,deferred,hooked,pinned,closed --limit=0 --json || continue
+            fi
             census=$(jq -r --arg lane "$lane" '
               [ .[] | select((.metadata.task_kind // "") == "rework")
                     | select(if $lane == "human" then (.metadata.source_review_bead // "") == "" else (.metadata.source_review_bead // "") != "" end) ] as $fus
