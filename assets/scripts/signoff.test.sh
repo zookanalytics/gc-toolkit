@@ -987,19 +987,18 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 eq "$(grep -c 'tk-anc|vp-open|blocks' "$STUB_DEPS")" "1" "exactly one validation-pass edge holds the anchor — no duplicate accrued"
 eq "$(meta vp-open reviewed_oid)" "$OID_OLD" "the reused pass keeps the head it opened at — a validator mid-rule is not moved"
 
-echo "# request-changes adopts a same-title unstamped orphan instead of minting a twin"
-# A prior attempt that created the bead but never stamped its shape leaves an
-# orphan the lane probe cannot see; it is adopted by exact title and stamped
-# into shape rather than twinned into a second anchor blocker.
-reset "$ANCHOR_PR" ',{"id":"vp-orphan","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+echo "# the validation pass is filed whole: its shape and its blocks edge ride the create"
+# A create whose reply is lost has then still landed where the lane probe finds
+# it, so the retry reuses it (the reuse case above) rather than minting a twin.
+reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes exits 0"
-has "$out" "adopting unstamped validation-pass orphan vp-orphan" "the unstamped orphan is adopted by title"
-hasnt "$(cat "$STUB_CREATED")" "Validate" "no twin pass is minted"
-eq "$(meta vp-orphan task_kind)" "validation" "the adopted orphan is stamped into shape"
-eq "$(meta vp-orphan check_name)" "correctness" "…with the lane"
-eq "$(meta vp-orphan anchor_bead)" "tk-anc" "…and the anchor"
-has "$(cat "$STUB_DEPS")" "tk-anc|vp-orphan|blocks" "…and it is hung on the anchor"
+VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
+VPC=$(grep "^bd create Validate PR#42" "$STUB_GC_LOG")
+has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'"}' \
+  "the pass's shape rides its create"
+has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
+hasnt "$(grep "^bd update $VP" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a different lane's open pass is not reused — one pass per lane"
 reset "$ANCHOR_PR" ',{"id":"vp-arch","status":"open","assignee":"","metadata":{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"arch","reviewed_oid":"'"$OID_HEAD"'"},"notes":""}'
