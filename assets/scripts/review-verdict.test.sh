@@ -12,7 +12,8 @@
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
 # A reader with a private copy drifts silently: the merge gate and the arm that
 # brings a branch current would then disagree about which PRs are approved. The
-# behavioral half lives beside each reader (merge.test.sh, pr-facts.test.sh).
+# behavioral half lives beside each reader (pr-facts.test.sh), and
+# merge.test.sh holds gctk merge's own statement of the rule to this one.
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -65,8 +66,7 @@ eq "$(approvals "[$(rv 1 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 3 human1 APP
    '[3,2]' "(PRED) one review per approving account, its latest, never the city's and never one a later CHANGES_REQUESTED replaced"
 
 echo "# every reader sources the one definition"
-READERS="assets/scripts/merge.sh
-assets/scripts/pr-facts.sh
+READERS="assets/scripts/pr-facts.sh
 assets/scripts/bring-current-guard.sh"
 for r in $READERS; do
     f="$ROOT/$r"

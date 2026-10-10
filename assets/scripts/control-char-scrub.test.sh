@@ -50,7 +50,7 @@ hosts() {
 }
 
 echo "── 1. the canonical block ──"
-CANON_HOST="$SDIR/merge.sh"
+CANON_HOST="$SDIR/escalate.sh"
 BLOCK="$(extract "$CANON_HOST")"
 if [ -n "$BLOCK" ]; then ok "block present in $(basename "$CANON_HOST")"
 else bad "block present in $(basename "$CANON_HOST")" "no marked block"; fi
@@ -71,8 +71,8 @@ while IFS= read -r f; do
 done < <(hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
-if [ "$COPIES" -ge 27 ]; then ok "copy census $COPIES ≥ 27"
-else bad "copy census $COPIES ≥ 27" "copies disappeared — was the helper inlined again?"; fi
+if [ "$COPIES" -ge 81 ]; then ok "copy census $COPIES ≥ 81"
+else bad "copy census $COPIES ≥ 81" "copies disappeared — was the helper inlined again?"; fi
 
 echo "── 3. the byte set, executed ──"
 # Feed every C0 byte plus DEL through the extracted block and name the

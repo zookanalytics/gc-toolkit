@@ -13,9 +13,9 @@
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
 # its own error rather than being buried beside an intended disable.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
-# the one this checkout describes: lifecycle.sh execs it and has no other
-# implementation, and orders that fire on schedule can still be running logic
-# several commits old.
+# the one this checkout describes: lifecycle.sh and merge.sh exec it and have
+# no other implementation, and orders that fire on schedule can still be
+# running logic several commits old.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -233,9 +233,9 @@ done <<< "$order_rows"
 # design and the state self-heals on the next tick; what an operator needs is to
 # see it, and the board's PACK row is where a persistent one shows up.
 #
-# A MISSING binary is an error, like an order that never runs: lifecycle.sh has
-# nothing else to exec, so every lifecycle transition is refused until the
-# gctk-build order publishes one.
+# A MISSING binary is an error, like an order that never runs: lifecycle.sh and
+# merge.sh have nothing else to exec, so every lifecycle transition and every
+# merge pass is refused until the gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -254,7 +254,7 @@ tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
 elif [ ! -x "$gctk_bin" ]; then
-    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh execs it and has no other implementation, so every lifecycle transition is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and merge.sh exec it and have no other implementation, so every lifecycle transition and every merge pass is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
 else

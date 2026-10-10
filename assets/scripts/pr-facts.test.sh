@@ -4202,14 +4202,6 @@ out=$(STUB_ISSUE_LIST_RC=1 run)
 has "$out" "feedback history unreadable" "the unreadable Conversation read defers the pass"
 eq "$(meta IC3 pr_posture)" "<absent>" "…and records no clean posture over the unread comment"
 
-echo "# required-contexts-for is one block, shared byte-for-byte with merge.sh"
-# The red-check arm routes on the same gating set merge.sh holds a merge on, so
-# the two carry one copy of the resolver between markers; drift would let the
-# cadence route on a different set than the merge holds on.
-rcf() { awk '/^[[:space:]]*# >>> required-contexts-for[[:space:]]*$/{inb=1;next} /^[[:space:]]*# <<< required-contexts-for[[:space:]]*$/{inb=0} inb' "$1"; }
-[ -n "$(rcf "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
-eq "$(rcf "$HERE/pr-facts.sh")" "$(rcf "$HERE/merge.sh")" "…byte-identical to merge.sh's copy"
-
 echo "# a red required check -> ONE rework child to the fix pool"
 # When a required check has terminally failed on a PR that every other arm has
 # waved through, this arm files one rework child. `test` is required by branch

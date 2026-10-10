@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/merge.sh — the single writer of merged truth.
+# Hermetic test for the merge arm, the single writer of merged truth:
+# assets/scripts/merge.sh and the `gctk merge` it execs.
 # Covers: the happy path (pinned read, --squash --match-head-commit, ONE
 # lifecycle transition closing with merged_sha); every validate hold in order
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
@@ -17,7 +18,10 @@
 # pass into one visit a person can claim; and the reads that fail closed when
 # they stop partway (a cut-short reviews or threads stream, a list or dep probe
 # that exited non-zero after printing an array or printed unreadable bytes
-# after it).
+# after it); the hand-off from merge.sh to the binary, and the refusal when no
+# binary resolves; and the two rules the arm shares with the shell readers, each
+# run through both over the same fixtures: the required-check set (pr-facts.sh's
+# red-check arm) and the approval rule (review-verdict.sh).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,10 +30,15 @@ trap 'rm -rf "$TMP"' EXIT
 
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
-# merge.sh's shell records every landing through lifecycle.sh, which execs
-# gctk, and the same build is the gctk arm's binary.
+# merge.sh execs gctk and has nothing else to run.
 harness_build_gctk
 harness_init
+# harness_init has recorded why there is no binary. Every assertion below goes
+# through it, so running them would only repeat that one failure.
+if [ -z "$GCTK_BUILT" ]; then
+    echo "passed: $PASS  failed: $FAIL"
+    exit 1
+fi
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
@@ -95,13 +104,10 @@ openpr() { # num [login:STATE ...]
 openprs() { local IFS=,; printf '[%s]' "$*" > "$GH_DIR/open_prs.json"; }
 paced_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{ print $3 }' | awk '!seen[$0]++' | paste -sd, -; }
 
-# TWO ARMS, ONE BODY. The merge writer exists twice during the gctk migration —
-# `gctk merge` (services/gctk) and the shell fallback in merge.sh — and a caller
-# cannot tell which answered. So every assertion below runs against both: arm
-# "shell" forces merge's fallback with GCTK_FALLBACK=merge, arm "gctk" reaches
-# the freshly built binary through merge.sh, which also proves the preference
-# wiring. GCTK_BIN names that build in both arms, because the shell records
-# every landing through lifecycle.sh, and lifecycle.sh has no fallback.
+# ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. merge.sh execs `gctk merge`
+# (services/gctk) and has no other implementation. The body below drives every
+# assertion through merge.sh against the binary this suite built, so it is the
+# port's acceptance bar and also proves the exec wiring.
 suite() {
 
 echo "# happy path"
@@ -1652,63 +1658,204 @@ rm -f "$GH_DIR/open_prs.json"
 
 }
 
-# An arm proves nothing about which implementation answered unless the hand-off
-# is checked directly. merge's stdout is byte-identical across the two, so a
-# sentinel on the resolved path is the discriminator: it names itself, the
-# subcommand it was handed, and the helper directory the binary resolves its
-# siblings in.
+suite
+
+# The hand-off itself, checked with a sentinel on the resolved path: it names
+# itself, the arguments it was handed, and the helper directory the binary
+# resolves its siblings in.
+echo "# merge.sh execs gctk"
 SENTINEL="$TMP/sentinel-gctk"
 printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
 chmod +x "$SENTINEL"
+out=$(GCTK_BIN="$SENTINEL" "$SUT" --deadline 9 --cursor "$TMP/cursor" 2>&1)
+has "$out" "SENTINEL-GCTK merge --deadline 9 --cursor $TMP/cursor" "merge.sh execs \$GCTK_BIN with the merge subcommand and its arguments"
+has "$out" "dir=$SD" "…exporting its own directory as GCTK_SCRIPTS_DIR"
+# The city chain itself is gctk-resolve.test.sh's. This is the one shape most
+# callers have — an agent session names its city by GC_CITY_PATH alone —
+# reached through merge.sh with GCTK_BIN unset.
+CITY="$TMP/city"
+mkdir -p "$CITY/.gc/services/gctk/bin"
+cp "$SENTINEL" "$CITY/.gc/services/gctk/bin/gctk"
+out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$CITY" "$SUT" 2>&1)
+has "$out" "SENTINEL-GCTK merge" "GC_CITY_PATH alone resolves the deployed binary through merge.sh"
 
-echo "## arm: shell fallback (GCTK_FALLBACK=merge)"
-export GCTK_FALLBACK=merge
-suite
-# With a binary named, merge.sh keeps the call, and the landing it records
-# still reaches that binary through lifecycle.sh.
-store "[$(anchor SF1 133), $(rev SF1)]"
-printf '%s' "$(prview 133 OPEN CLEAN)" > "$GH_DIR/pr_view_133.json"
-approved 133
-out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
-hasnt "$out" "SENTINEL-GCTK merge" "GCTK_FALLBACK=merge keeps merge.sh on its shell with a binary named"
-has "$out" "SENTINEL-GCTK lifecycle transition SF1 --to merged" "…and the shell records the landing through lifecycle.sh, which execs that binary"
-rm -f "$GH_DIR/pr_view_133.json" "$GH_DIR/reviews_133.json"
-unset GCTK_FALLBACK
+# Run directly, the binary has no merge.sh to name the helper directory. It
+# refuses the pass rather than resolving every helper as a bare name through
+# PATH. A named directory that lacks a helper is the body's case.
+store "[$(anchor SD1 129), $(rev SD1)]"
+printf '%s' "$(prview 129 OPEN CLEAN)" > "$GH_DIR/pr_view_129.json"
+approved 129
+: > "$STUB_GH_LOG"
+out=$(env -u GCTK_SCRIPTS_DIR "$GCTK_BUILT" merge 2>&1); rc=$?
+eq "$rc" 1 "gctk merge run without GCTK_SCRIPTS_DIR exits 1"
+has "$out" "GCTK_SCRIPTS_DIR is unset" "…naming the missing directory"
+has "$out" "NOTHING is merged this pass" "…and saying nothing merged"
+eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
+out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
+has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
 
-echo
-echo "## arm: gctk merge (reached through merge.sh)"
-if [ -n "$GCTK_BUILT" ]; then
-    export GCTK_BIN="$GCTK_BUILT"
-    suite
-    out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
-    has "$out" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
-    has "$out" "dir=$SD" "…exporting its own directory as GCTK_SCRIPTS_DIR"
-    # The city chain itself is gctk-resolve.test.sh's. This is the one shape
-    # most callers have — an agent session names its city by GC_CITY_PATH alone —
-    # reached through merge.sh with GCTK_BIN unset.
-    CITY="$TMP/city"
-    mkdir -p "$CITY/.gc/services/gctk/bin"
-    cp "$SENTINEL" "$CITY/.gc/services/gctk/bin/gctk"
-    out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$CITY" "$SUT" 2>&1)
-    has "$out" "SENTINEL-GCTK merge" "GC_CITY_PATH alone resolves the deployed binary through merge.sh"
+# --- no binary: the pass is refused, named, and nothing is read or merged -------
+# merge.sh has no other implementation, so a pass it cannot hand to a binary
+# exits 1, which refinery-reconcile.sh logs as the merge arm's failure, with a
+# message that names what is missing. The approved, green PR stays unmerged.
+echo "# no binary to exec"
+store "[$(anchor NB1 134), $(rev NB1)]"
+printf '%s' "$(prview 134 OPEN CLEAN)" > "$GH_DIR/pr_view_134.json"
+approved 134
+: > "$STUB_GH_LOG"; : > "$STUB_GC_LOG"
+out=$(GCTK_BIN=none "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "GCTK_BIN=none refuses the pass (exit 1)"
+has "$out" "merge: GCTK_BIN=none names no binary, and gctk merge is the only implementation" "…and says why"
+eq "$(cat "$STUB_GH_LOG")" "" "…reading no PR"
+eq "$(grep -c '' "$STUB_GC_LOG" || true)" "0" "…and making no gc call"
+eq "$(bstatus NB1)" "open" "…so the approved, green PR is not merged"
+# A fresh city: the gctk-build order has not published a binary yet. The same
+# refusal covers a city whose builds have never succeeded.
+FRESH="$TMP/fresh-city"
+mkdir -p "$FRESH"
+out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$FRESH" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "a city with no binary yet refuses the pass (exit 1)"
+has "$out" "merge: no gctk binary at $FRESH/.gc/services/gctk/bin/gctk" "…naming where the binary belongs"
+has "$out" "gctk-build order" "…and the order that publishes it"
+eq "$(cat "$STUB_GH_LOG")" "" "…reading no PR"
+eq "$(bstatus NB1)" "open" "…and merging nothing"
+rm -f "$GH_DIR/pr_view_134.json" "$GH_DIR/reviews_134.json"
 
-    # Run directly, the binary has no merge.sh to name the helper directory. It
-    # refuses the pass rather than resolving every helper as a bare name through
-    # PATH. A named directory that lacks a helper is the shared body's case.
-    store "[$(anchor SD1 129), $(rev SD1)]"
-    printf '%s' "$(prview 129 OPEN CLEAN)" > "$GH_DIR/pr_view_129.json"
-    approved 129
-    : > "$STUB_GH_LOG"
-    out=$(env -u GCTK_SCRIPTS_DIR "$GCTK_BUILT" merge 2>&1); rc=$?
-    eq "$rc" 1 "gctk merge run without GCTK_SCRIPTS_DIR exits 1"
-    has "$out" "GCTK_SCRIPTS_DIR is unset" "…naming the missing directory"
-    has "$out" "NOTHING is merged this pass" "…and saying nothing merged"
-    eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
-    out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
-    has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
-else
-    bad "gctk was not built, so the gctk merge port was NOT exercised, and this suite is its acceptance bar"
-fi
+# --- the rules gctk merge shares with the shell readers ------------------------
+# pr-facts.sh routes a red required check on the set gctk merge holds an UNSTABLE
+# PR on, and pr-facts.sh and bring-current-guard.sh judge approval by the rule
+# gctk merge lands on. The shell readers carry their own copy of each:
+# pr-facts.sh's marked required-contexts-for block, and review-verdict.sh's jq
+# definition. So each fixture below goes through both, and each case names the
+# answer as well, so the two cannot agree on a wrong one.
+
+echo "# the required-check set: pr-facts.sh's resolver and gctk merge read one set"
+# gctk merge shows its set in its UNSTABLE hold: with no check in the rollup,
+# every required context is MISSING, listed in byte order, and an unreadable set
+# and an empty one each have a line of their own. A case's want string joins the
+# contexts with commas, so no fixture context carries one.
+RCF_BLOCK=$(awk '/^[[:space:]]*# >>> required-contexts-for[[:space:]]*$/{inb=1;next} /^[[:space:]]*# <<< required-contexts-for[[:space:]]*$/{inb=0} inb' "$HERE/pr-facts.sh")
+if [ -n "$RCF_BLOCK" ]; then ok "pr-facts.sh carries the marked required-contexts-for block"
+else bad "pr-facts.sh carries the marked required-contexts-for block"; fi
+# A gh that fails the one api read GH_FAIL_PATH names the way a real failure can
+# look: a well-formed body with a non-zero exit, which only the exit code tells
+# apart from an answer. Every other call is the harness stub's.
+mkdir -p "$TMP/ghfail"
+cat > "$TMP/ghfail/gh" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ -n "\${GH_FAIL_PATH:-}" ] && [ "\$a" = "\$GH_FAIL_PATH" ]; then
+    case "\$a" in */rules/branches/*) printf '[]' ;; *) printf '{"name":"main"}' ;; esac
+    exit 1
+  fi
+done
+exec "$BIN/gh" "\$@"
+EOF
+chmod +x "$TMP/ghfail/gh"
+# pr-facts.sh's answer for main, under pr-facts.sh's own shell options: the
+# state, then each context on a line of its own, in byte order.
+rcf_shell() {
+  ( set +o pipefail
+    # shellcheck disable=SC2034  # read by the block eval'd below
+    ORIGIN_REPO="zook/gc-toolkit"
+    gh_api_origin() { gh api --hostname github.com "$@"; }
+    eval "$RCF_BLOCK"
+    required_contexts_for main
+    printf '%s\n' "$REQ_STATE"
+    printf '%s\n' "$REQ_CONTEXTS" | sed '/^$/d' | LC_ALL=C sort )
+}
+rcf_case() { # <num> <label> <want: unknown | known:<ctx>,...> <rules-json|-> <branch-json|-> [<api path that fails>]
+  local num="$1" label="$2" want="$3" rules="$4" branch="$5" fail="${6:-}" got st ctx line
+  rm -f "$GH_DIR/rules_main.json" "$GH_DIR/branch_main.json"
+  [ "$rules" = - ] || printf '%s' "$rules" > "$GH_DIR/rules_main.json"
+  [ "$branch" = - ] || printf '%s' "$branch" > "$GH_DIR/branch_main.json"
+  got=$(PATH="$TMP/ghfail:$PATH" GH_FAIL_PATH="$fail" rcf_shell)
+  st=$(printf '%s\n' "$got" | head -n 1)
+  ctx=$(printf '%s\n' "$got" | tail -n +2)
+  if [ "$st" = known ]; then
+    eq "known:$(printf '%s\n' "$ctx" | sed '/^$/d' | paste -sd, -)" "$want" "pr-facts.sh reads $label as $want"
+  else
+    eq "$st" "$want" "pr-facts.sh reads $label as $want"
+  fi
+  case "$st" in
+    unknown) line="merge: PR#$num is UNSTABLE and the required-check set for 'main' is unreadable; merge held" ;;
+    known)
+      if [ -z "$ctx" ]; then line="merge: PR#$num is UNSTABLE but no required check on 'main' is red"
+      else line="merge: PR#$num is UNSTABLE and a REQUIRED check is not green at sha-$num: $(printf '%s\n' "$ctx" | sed 's/$/(MISSING)/' | paste -sd' ' -); merge held"; fi ;;
+    *) line="<pr-facts.sh answered no state>" ;;
+  esac
+  store "[$(anchor "RQ$num" "$num"), $(rev "RQ$num")]"
+  printf '%s' "$(prview "$num" OPEN UNSTABLE ',"statusCheckRollup":[]')" > "$GH_DIR/pr_view_$num.json"
+  approved "$num"
+  out=$(PATH="$TMP/ghfail:$PATH" GH_FAIL_PATH="$fail" "$SUT" 2>&1)
+  has "$out" "$line" "…and gctk merge holds on the same set"
+  rm -f "$GH_DIR/rules_main.json" "$GH_DIR/branch_main.json" "$GH_DIR/pr_view_$num.json" "$GH_DIR/reviews_$num.json"
+}
+rcf_case 301 "rulesets and classic protection together" "known:build,deploy (prod),lint,test" \
+  '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"required_status_checks":[{"context":"test"},{"context":"lint","integration_id":15368}]}},{"type":"pull_request","parameters":{"required_approving_review_count":1,"required_review_thread_resolution":true}},{"type":"deletion"}]' \
+  '{"name":"main","protected":true,"protection":{"enabled":true,"required_status_checks":{"enforcement_level":"everyone","contexts":["build","test"],"checks":[{"context":"build","app_id":null},{"context":"deploy (prod)","app_id":15368}]}}}'
+rcf_case 302 "an unprotected branch with no rulesets" "known:" \
+  '[]' '{"name":"main","protected":false,"protection":{"enabled":false,"required_status_checks":{"enforcement_level":"off","contexts":[],"checks":[]}}}'
+rcf_case 303 "empty and absent contexts" "known:" \
+  '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":""},{"integration_id":1}]}}]' \
+  '{"name":"main","protection":{"required_status_checks":{"contexts":[""],"checks":[{"app_id":1}]}}}'
+rcf_case 304 "contexts that differ only in case" "known:B,a,b" \
+  '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"b"},{"context":"B"},{"context":"a"}]}}]' -
+rcf_case 305 "a rules answer that is not a list" "unknown" \
+  '{"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}' -
+rcf_case 306 "a branch answer with no name" "unknown" \
+  - '{"message":"Branch not found","status":"404"}'
+rcf_case 307 "bytes after the rules list" "unknown" '[]garbage' -
+rcf_case 308 "a rules read that fails" "unknown" - - "repos/zook/gc-toolkit/rules/branches/main"
+rcf_case 309 "a branch read that fails" "unknown" - - "repos/zook/gc-toolkit/branches/main"
+
+echo "# the approval rule: review-verdict.sh and gctk merge reach one verdict"
+# gctk merge shows its verdict at its approval gate: it merges an approved,
+# green, CLEAN PR, holds a vetoed one naming the reviewer, and holds one with no
+# outside approval. The review histories are review-verdict.test.sh's cases.
+# shellcheck source=review-verdict.sh
+. "$HERE/review-verdict.sh" || bad "review-verdict.sh sources beside this suite"
+rvw() { # id login state submitted_at
+  printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"sha-0","submitted_at":"%s"}' "$1" "$2" "$3" "$4"
+}
+verdict_case() { # <num> <label> <want: veto:<login> | approver:<login> | none> <reviews-json>
+  local num="$1" label="$2" want="$3" reviews="$4" id="AV$1" v veto approver got line
+  v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" "$REVIEW_VERDICT_DEF"'review_verdict($self)')
+  veto=$(printf '%s' "$v" | jq -r '.veto // ""')
+  approver=$(printf '%s' "$v" | jq -r '.approver // ""')
+  if [ -n "$veto" ]; then got="veto:$veto"; elif [ -n "$approver" ]; then got="approver:$approver"; else got="none"; fi
+  eq "$got" "$want" "review-verdict.sh judges $label as $want"
+  case "$got" in
+    veto:*)     line="merge: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED" ;;
+    approver:*) line="merge: merged + recorded $id" ;;
+    *)          line="merge: PR#$num no external APPROVED review stands" ;;
+  esac
+  store "[$(anchor "$id" "$num"), $(rev "$id")]"
+  printf '%s' "$(prview "$num" OPEN CLEAN)" > "$GH_DIR/pr_view_$num.json"
+  printf '%s' "$reviews" > "$GH_DIR/reviews_$num.json"
+  out=$("$SUT" 2>&1)
+  has "$out" "$line" "…and gctk merge reaches the same verdict"
+  rm -f "$GH_DIR/pr_view_$num.json" "$GH_DIR/reviews_$num.json"
+}
+T0=2026-08-20T00:00:00Z; T1=2026-08-21T00:00:00Z
+verdict_case 311 "no reviews" "none" '[]'
+verdict_case 312 "an outside approval" "approver:human1" "[$(rvw 1 human1 APPROVED $T0)]"
+verdict_case 313 "the city's own approval" "none" "[$(rvw 1 "$STUB_SELF_LOGIN" APPROVED $T0)]"
+verdict_case 314 "a dismissed approval" "none" "[$(rvw 1 human1 DISMISSED $T0)]"
+verdict_case 315 "a later CHANGES_REQUESTED from the approver" "veto:human1" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human1 CHANGES_REQUESTED $T1)]"
+verdict_case 316 "a later approval from the account that requested changes" "approver:human1" \
+  "[$(rvw 1 human1 CHANGES_REQUESTED $T0),$(rvw 2 human1 APPROVED $T1)]"
+verdict_case 317 "another account's CHANGES_REQUESTED beside an approval" "veto:human2" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human2 CHANGES_REQUESTED $T1)]"
+verdict_case 318 "a later dismissed review from the approver" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human1 DISMISSED $T1)]"
+verdict_case 319 "a later COMMENTED review from the approver" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human1 COMMENTED $T1)]"
+verdict_case 320 "a tie on the timestamp, which the higher review id breaks" "approver:human1" \
+  "[$(rvw 2 human1 APPROVED $T0),$(rvw 1 human1 CHANGES_REQUESTED $T0)]"
+verdict_case 321 "two accounts requesting changes" "veto:human2" \
+  "[$(rvw 1 human3 CHANGES_REQUESTED $T0),$(rvw 2 human2 CHANGES_REQUESTED $T0)]"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
