@@ -63,6 +63,9 @@ scrub() { tr -d '\000-\037'; }
 warn() { echo "review-outcome: $*" >&2; }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# The review beads on an anchor are its children, read through its edges.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "review-outcome: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # The one resolver of the check index: the anchor-wide supersede asks it for
 # every declared lane (`--through merge` spans all phases), which drops the
 # non-lanes none/off and the approval merge rule in one place.
@@ -91,8 +94,7 @@ USAGE
 # read so a caller never mistakes an unreadable store for "nothing backs the lane".
 backing_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select((($m.task_kind // "") | tostring) == "review")
@@ -117,8 +119,7 @@ backing_ids() { # <anchor> <lane>
 # line; exit 2 when the store would not read.
 stranded_ids() { # <anchor> <lane> <title>
   local anchor="$1" lane="$2" title="$3" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" --arg title "$title" '
     [ .[] | (.metadata // {}) as $m
           | select(((.status // "") | tostring | ascii_downcase) != "closed")
@@ -164,8 +165,7 @@ EOF
 # would not read so a caller never mistakes an unreadable store for "nothing stands".
 superseding_review_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select((($m.task_kind // "") | tostring) == "review")
@@ -247,7 +247,8 @@ cmd_back_lane() {
   fi
 
   # Atomic birth: the outcome is created closed, carrying every stamp
-  # lane-state.sh keys on and the note, in one write. A refused create leaves
+  # lane-state.sh keys on, the note and its edge onto the anchor
+  # (bd_create_child), in one write. A refused create leaves
   # nothing behind, and a create whose reply is lost has still filed a whole
   # backing, so no attempt leaves a bare bead that a retry cannot find.
   local meta id
@@ -255,7 +256,7 @@ cmd_back_lane() {
     '{task_kind: "review", anchor_bead: $ab, check_name: $ln, reviewed_oid: $oid,
       signoff_verdict: "approve", "gc.outcome": "recorded"}' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not compose the approve outcome for lane $lane on $anchor"; exit 2; }
-  id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
+  id=$(bd_create_child "$anchor" "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
     | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 
   # Read back the shape lane-state.sh keys on: a bead that did not close, or lost

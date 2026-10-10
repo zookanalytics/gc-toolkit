@@ -487,13 +487,13 @@ close_review() {
 # shape or edge that does not read back exits non-zero.
 ensure_validation_pass() {
   local rows vpass vtitle vctx vbody vmeta vfix vblk orphans
-  if ! rows=$(bd_list --metadata-field anchor_bead="$ANCHOR" \
-       --metadata-field task_kind=validation --metadata-field check_name="$CHECK_NAME" \
-       --status="$LIVE_STATUSES"); then
+  if ! rows=$(bd_anchor_children "$ANCHOR" "$LIVE_STATUSES"); then
     warn "validation-pass probe for lane $CHECK_NAME on $ANCHOR is unreadable; review left open for a retry"
     exit 2
   fi
-  vpass=$(printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null)
+  vpass=$(printf '%s' "$rows" | jq -r --arg l "$CHECK_NAME" '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation")
+          | select(((.metadata.check_name // "") | tostring) == $l) | .id ] | .[0] // empty' 2>/dev/null)
   if [ -n "$POST_OPEN" ]; then
     vtitle="Validate PR#$PR_NUMBER $CHECK_NAME review @ $REVIEWED_OID"
     vctx="a $CHECK_NAME review batch on PR#$PR_NUMBER at $REVIEWED_OID"
@@ -521,10 +521,10 @@ ensure_validation_pass() {
       vbody=""
       [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
       if [ -n "$vbody" ]; then
-        vpass=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+        vpass=$(printf '%s' "$vbody" | bd_create_child "$ANCHOR" "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
       else
         warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
-        vpass=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+        vpass=$(bd_create_child "$ANCHOR" "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
       fi
     fi
     if [ -z "$vpass" ]; then
@@ -539,6 +539,13 @@ ensure_validation_pass() {
   # it opened at rather than a validator mid-rule being moved under it.
   vmeta=$(bd_json show "$vpass")
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
+  # A pass about to take anchor_bead is joined to the anchor first (a fresh one
+  # carries the edge from its create, an adopted orphan does not), so the stamp
+  # never lands on a pass the anchor's children read cannot see.
+  if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
+    warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
+    exit 2
+  fi
   vfix=()
   [ "$(row_meta "$vmeta" task_kind)" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
   [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")
@@ -850,6 +857,7 @@ fi
 # owns. Fail closed: an unreadable query cannot be told from "no prior child", and
 # a create on that ambiguity is the double-file this guard prevents, so leave the
 # review open for a retry instead.
+FIX_JOINED=""
 if PRIOR_CHILDREN=$(bd_list --metadata-field "source_review_bead=$REVIEW_BEAD" --status="$LIVE_STATUSES"); then
   FIX_BEAD=$(printf '%s' "$PRIOR_CHILDREN" | jq -r --arg r "$REVIEW_BEAD" '
       [ .[]? | select((.metadata.source_review_bead // "") == $r) ]
@@ -890,18 +898,28 @@ else
   # back, or a run that ends before the work-order stamp below, leaves a child
   # carrying no key any reader matches on. One write cannot: the child and its
   # identity land together or not at all. The full work order is stamped and
-  # read back below, on a fresh child and an adopted one alike.
+  # read back below, on a fresh child and an adopted one alike. The edge onto
+  # the anchor rides the same create (bd_create_child).
   FIX_IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg r "$REVIEW_BEAD" \
     '{task_kind: "rework", anchor_bead: $a, source_review_bead: $r}' 2>/dev/null)
   if [ -z "$FIX_IDENTITY" ]; then
     warn "could not build the rework child's identity metadata; review left open for a retry"
     exit 2
   fi
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+  FIX_BEAD=$(bd_create_child "$ANCHOR" "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
   if [ -z "$FIX_BEAD" ]; then
     warn "the rework child create returned no id; review left open for a retry, which adopts the child by source_review_bead=$REVIEW_BEAD if the create landed"
     exit 2
   fi
+  FIX_JOINED=1
+fi
+
+# An adopted child is joined to the anchor before the work order re-stamps its
+# anchor_bead, so the stamp never lands on a child the anchor's children read
+# cannot see. A fresh child carries the edge from its create.
+if [ -z "$FIX_JOINED" ] && ! bd_anchor_link "$ANCHOR" "$FIX_BEAD"; then
+  warn "rework child $FIX_BEAD could not be joined to anchor $ANCHOR; review left open for a retry"
+  exit 2
 fi
 
 # The stamped fields ARE the work order: branch/target say what to resume and

@@ -379,7 +379,8 @@ has "$out" "quiesced (fix unit fix-q6 is open, answering must-fix finding find-q
 echo "# an unreadable read of a must-fix finding's blockers holds the dispatch, fail-closed"
 store "[$(anchor Q7 pull_request correctness "" polecat/q7), $(mustfix find-q7 Q7)]"
 oid q7 > "$GH_DIR/head_polecat_q7"
-out=$(STUB_DEP_GARBAGE=1 run)
+# Only the reads down a bead's edges fail: the anchor's children still read.
+out=$(STUB_DEP_GARBAGE="--direction=down" run)
 has "$out" "quiescence probe unreadable" "a finding whose blockers cannot be read holds the dispatch"
 has "$out" "0 reviews dispatched" "…so nothing is dispatched"
 
@@ -933,7 +934,7 @@ eq "$(bstatus find-oc1)" "closed" "an unvalidated finding on a closed anchor is 
 echo "# …and an unreadable quiescence probe holds the dispatch, fail-closed"
 store "[$(anchor R1u pull_request correctness "" polecat/r1u)]"
 oid r1u > "$GH_DIR/head_polecat_r1u"
-out=$(STUB_DEP_GARBAGE=1 run)
+out=$(STUB_DEP_GARBAGE="--direction=down" run)
 has "$out" "quiescence probe unreadable" "the unreadable fix-unit ledger names the quiescence hold"
 has "$out" "0 reviews dispatched" "…and nothing is dispatched"
 
@@ -1347,7 +1348,11 @@ store "[$(anchor R30 pre_open_gate none "" polecat/r30 "$GE_SETTLED"),
         $(anchor R20 pre_open_gate none "" polecat/r20 "$GE_SETTLED")]"
 CUR="$TMP/gate.cursor"; rm -f "$CUR" "$CUR".*
 pace() { : > "$STUB_GC_LOG"; "$SUT" --default correctness --fix-pool "$FIXP" --cursor "$CUR" "$@" 2>&1; }
-visits() { grep -o 'anchor_bead=[A-Za-z0-9]*' "$STUB_GC_LOG" | sed 's/^anchor_bead=//' | awk '!seen[$0]++' | paste -sd, -; }
+# An anchor's visit reads its children: through its edges, or by its anchor_bead
+# metadata while none of them carries the edge. The one edge read across every
+# anchor that orders the walk names no single anchor and is not a visit.
+visits() { grep -o -E 'anchor_bead=[A-Za-z0-9]+|^bd dep list [A-Za-z0-9]+ --direction=up' "$STUB_GC_LOG" \
+  | sed -E 's/^anchor_bead=//; s/^bd dep list ([A-Za-z0-9]+) --direction=up/\1/' | awk '!seen[$0]++' | paste -sd, -; }
 out=$(pace --deadline 1); rc=$?
 eq "$rc" 0 "a pass its deadline stopped exits 0"
 has "$out" "visited 1 of 3 gating anchors (0 needing action first) before the deadline; the next pass resumes at R20" "a passed deadline still visits one anchor, then names where the next pass resumes"
@@ -1412,6 +1417,7 @@ rm -f "$CUR" "$CUR".*
 pace --deadline "$(( $(date +%s) + 600 ))" >/dev/null
 rm -f "$CUR" "$CUR.first"
 jq -c '. + [{"id":"VP-G20","status":"open","title":"validation pass","metadata":{"task_kind":"validation","anchor_bead":"G20","check_name":"human"}}]' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+printf '%s\n' 'VP-G20|related|G20' >> "$STUB_DEPS"
 out=$(pace --deadline 1)
 eq "$(visits)" "G20,G10" "the anchor whose children moved goes first"
 has "$out" "(1 needing action first)" "…counted as needing action"
@@ -1454,7 +1460,8 @@ has "$out" "(1 needing action first)" "the lifted hold puts its anchor first"
 echo "# a child list that does not read keeps the stamp and verdict rules and records no marks"
 store "[$(anchor J10 pre_open_gate none "" polecat/j10 "$GE_SETTLED"), $(anchor J20 pre_open_gate "" "" polecat/j20 "$GE_SETTLED")]"
 rm -f "$CUR" "$CUR".*
-out=$(STUB_LIST_FAIL_ON="--has-metadata-key" pace --deadline "$(( $(date +%s) + 600 ))")
+# The one edge read across both anchors fails; each anchor's own reads do not.
+out=$(STUB_DEP_GARBAGE="J10 J20" pace --deadline "$(( $(date +%s) + 600 ))")
 has "$out" "live children did not read" "the unreadable child list is reported"
 has "$out" "(1 needing action first)" "…the anchor owing a stamp still goes first"
 [ -s "$CUR.seen" ] && bad "marks were recorded without the child list they are built from" || ok "…and no mark is recorded"

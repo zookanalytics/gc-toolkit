@@ -183,7 +183,7 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 # answer; the caller holds the dispatch.
 inflight_review() { # <anchor-id> <check>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" '
     [ .[]
       | select(((.metadata.task_kind // "") | tostring) == "review")
@@ -217,7 +217,7 @@ inflight_review() { # <anchor-id> <check>
 # here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
     [ .[]
       | (.metadata // {}) as $m
@@ -261,7 +261,7 @@ open_rework_child() { # <anchor-id>
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r '
     .[] | select(((.metadata.task_kind // "") | tostring) == "validation") | .id' 2>/dev/null
 }
@@ -573,7 +573,13 @@ ge_mark_child() {
 }
 if [ -n "$CURSOR" ]; then
   ge_kids_ok=0
-  if kid_lines=$(bd_live_children); then
+  GE_ANCHOR_IDS=()
+  while IFS= read -r ge_aid; do
+    [ -n "$ge_aid" ] && GE_ANCHOR_IDS+=("$ge_aid")
+  done <<GE_IDS
+$(printf '%s' "$ROWS" | jq -r '.id // empty' 2>/dev/null)
+GE_IDS
+  if kid_lines=$(bd_live_children ${GE_ANCHOR_IDS[@]+"${GE_ANCHOR_IDS[@]}"}); then
     ge_kids_ok=1
     while IFS=$'\t' read -r ka kids _krw; do
       [ -n "$ka" ] && GE_KIDS["$ka"]="$kids"
@@ -1051,6 +1057,12 @@ STRAY
     # half-stamped review is never adopted here and re-stamped with this lane's
     # check_name onto a body the body-emitter wrote for the other check. An
     # unreadable probe dispatches nothing (retry next pass).
+    #
+    # The review is joined to the anchor BEFORE anchor_bead is stamped: a create
+    # carries the edge (bd_create_child), and an adopted orphan is joined first.
+    # So a stamp that lands always lands on a joined review, and a failed join
+    # leaves an orphan the next pass adopts again, never a stamped review that
+    # inflight_review cannot see.
     RID_TITLE="Review branch $branch -> $target ($g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
@@ -1060,16 +1072,20 @@ STRAY
       [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
     if [ -n "$RID" ]; then
       echo "$PROG: $id adopting unstamped review orphan $RID for check '$g' (created by a prior pass whose stamp failed)"
+      if ! bd_anchor_link "$id" "$RID"; then
+        echo "$PROG: $id could not join review orphan $RID to the anchor; dispatching nothing (merge stays held, retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
     else
       body=""
       [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
-          | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
+          | bd_create_child "$id" "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       else
         echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-        RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
+        RID=$(bd_create_child "$id" "$RID_TITLE $title" -t task --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       fi
     fi
