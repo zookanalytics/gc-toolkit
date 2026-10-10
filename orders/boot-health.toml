@@ -5,12 +5,14 @@
 # forces a full context reload and delivery to a fresh-wake singleton is
 # unreliable) and it files no warrants. The dog pool exists again, but
 # boot-health deliberately does not file warrants: a false nudge-death
-# diagnosis must not kill a healthy deacon. Interval 2m against a deacon whose
-# own backoff caps at 300s, so it never fires before several full deacon cycles.
+# diagnosis must not kill a healthy deacon. Interval 5m against a deacon that
+# waits 600s between patrol cycles. The report thresholds in boot-health.sh are
+# wall-clock (WISP_FRESH, REPORT_AFTER), so the interval sets how often the
+# deacon is read, not how long it must stay cold before a report.
 [order]
 description = "Detect a wedged deacon mechanically and report it; no nudge, no warrant"
 trigger = "cooldown"
-interval = "2m"
+interval = "5m"
 exec = "$PACK_DIR/assets/scripts/boot-health.sh"
 scope = "city"
 timeout = "90s"

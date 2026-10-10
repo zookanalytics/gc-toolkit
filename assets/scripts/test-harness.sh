@@ -85,6 +85,7 @@ harness_init() {
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
+  export STUB_DELETE_SOURCE_HANG="" STUB_REOPEN_SOURCE_HANG="" STUB_REOPEN_SOURCE_STALL=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
   # behaviour every existing suite relies on); a file path serves that roster;
   # STUB_SESSION_LIST_RC models the read the liveness guard must fail closed on.
@@ -161,20 +162,28 @@ case "$sub" in
     # for a store that does carry the linkage. reopen-source performs the real
     # mutation: workflow_id and the session-affinity keys cleared, route
     # preserved, status open, assignee empty.
+    # A stall ignores SIGTERM, as the real commands do once they hold their
+    # per-bead lock, so only a SIGKILL ends it early. STUB_DELETE_SOURCE_HANG
+    # and STUB_REOPEN_SOURCE_HANG stall that many seconds after the result line
+    # is printed; STUB_REOPEN_SOURCE_STALL stalls before reopen-source writes.
     verb="${1:-}"; sid="${2:-}"
+    stall() { trap '' TERM; sleep "$1"; }
     case "$verb" in
       delete-source)
         [ -n "${STUB_DELETE_SOURCE_RC:-}" ] && { echo "gc: simulated delete-source failure" >&2; exit "${STUB_DELETE_SOURCE_RC}"; }
         echo "${STUB_DELETE_SOURCE_OUT:-result=already_clean source_bead_id=$sid matched_roots=0 matched_beads=0 closed=0 deleted=0 metadata_cleared=false}"
+        [ -n "${STUB_DELETE_SOURCE_HANG:-}" ] && stall "$STUB_DELETE_SOURCE_HANG"
         exit 0 ;;
       reopen-source)
         [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
+        [ -n "${STUB_REOPEN_SOURCE_STALL:-}" ] && stall "$STUB_REOPEN_SOURCE_STALL"
         tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
         jq -c --arg id "$sid" 'map(if .id == $id then
               (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
               | .status = "open" | .assignee = ""
             else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
         echo "result=reopened source_bead_id=$sid"
+        [ -n "${STUB_REOPEN_SOURCE_HANG:-}" ] && stall "$STUB_REOPEN_SOURCE_HANG"
         exit 0 ;;
       *) echo "gc stub: unsupported 'workflow $verb'" >&2; exit 2 ;;
     esac ;;
@@ -595,27 +604,41 @@ case "$sub" in
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment)
-        # The post lands in the PR's write-back fixture as a Conversation comment
-        # under the acting login, when that fixture exists, so a caller that reads
-        # its own posts back is idempotent because it found its write. databaseId
-        # 0 keeps it out of every react filter, as the thread-reply stub's does.
-        # STUB_PR_COMMENT_RC models a post the API refuses.
+        # A Conversation comment, the post pr-post.sh's comment verb makes. On a
+        # PR with a threads fixture it MUTATES what the next reads serve: the
+        # comment joins .issue_comments there and issue_comments_<n>.json under
+        # STUB_SELF_LOGIN, so a caller that reads its own posts back is
+        # idempotent because it found its write, and its URL is printed the way
+        # gh prints it, so a caller reading the new comment's id back gets one.
+        # Its databaseId is 9000 plus the fixture's comment count, clear of the
+        # ids the suites pick. On a PR with no threads fixture nothing reads the
+        # post back. STUB_PR_COMMENT_RC models a post the API refuses;
+        # STUB_PR_COMMENT_QUIET makes it land and print nothing, so the caller
+        # cannot read the new id back.
         [ "${STUB_PR_COMMENT_RC:-0}" = "0" ] || exit "${STUB_PR_COMMENT_RC:-0}"
         n="${1:-}"; shift || true
-        cb=""
+        b=""; rq=""
         while [ $# -gt 0 ]; do
-          case "$1" in --body) shift; cb="${1:-}" ;; --body=*) cb="${1#--body=}" ;; esac
+          case "$1" in
+            --body) shift; b="${1:-}" ;;
+            --body=*) b="${1#--body=}" ;;
+            --repo) shift; rq="${1:-}" ;;
+          esac
           shift || true
         done
-        f="$G/threads_$n.json"
-        if [ -s "$f" ]; then
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
-          jq --arg b "$cb" --arg self "${STUB_SELF_LOGIN:-}" '
-            .issue_comments = ((.issue_comments // []) + [{
-              id: ("IC-post-" + ((.issue_comments // []) | length | tostring)), databaseId: 0,
-              author: {login: $self}, body: $b, reactionGroups: []}])' "$f" > "$t" && mv "$t" "$f"
-        fi
         printf 'PRCOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
+        f="$G/threads_$n.json"
+        [ -s "$f" ] || exit 0
+        db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
+        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" '
+          .issue_comments = ((.issue_comments // []) + [{ id: "FI-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }])
+        ' "$f" > "$t" && mv "$t" "$f"
+        r="$G/issue_comments_$n.json"
+        [ -s "$r" ] || echo '[]' > "$r"
+        jq -c --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" \
+          '. + [{ id: $db, user: {login: $self}, body: $b }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        [ -n "${STUB_PR_COMMENT_QUIET:-}" ] || echo "https://${rq:-github.com/zook/gc-toolkit}/pull/$n#issuecomment-$db"
         exit 0 ;;
       ready)   exit "${STUB_PR_READY_RC:-0}" ;;
       edit)
@@ -680,13 +703,14 @@ case "$sub" in
       *) echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
   api)
-    path=""; jqexpr=""; gqvars='{}'; gqquery=""
+    path=""; jqexpr=""; gqvars='{}'; gqquery=""; method=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --hostname) shift ;;
         --jq) shift; jqexpr="${1:-}" ;;
         --paginate) : ;;
-        -X) shift ;;
+        -X|--method) method="${2:-}"; shift ;;
+        --method=*) method="${1#--method=}" ;;
         -f|-F)
           kv="${2:-}"; shift
           k="${kv%%=*}"; v="${kv#*=}"
@@ -829,6 +853,61 @@ case "$sub" in
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
       esac
     fi
+    # The REST comment writes, over the same PR fixtures the reads serve: a
+    # review comment on a whole file (pr-post.sh file-comment) opens a thread in
+    # threads_<n>.json and joins the comments_<n>.json list, and an edit
+    # (pr-post.sh edit) rewrites a Conversation comment in place in both. The
+    # Conversation comment itself is `gh pr comment`, above. Each write MUTATES
+    # what the next read serves, so a pass that posted twice shows two comments
+    # rather than looking idempotent. A new comment's databaseId is 9000 plus
+    # the fixture's comment count, clear of the ids the suites pick.
+    case "${method:-GET}:$path" in
+      POST:*/pulls/*/comments)
+        [ "${STUB_FCOMMENT_RC:-0}" = "0" ] || exit "${STUB_FCOMMENT_RC:-0}"
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        f="$G/threads_$n.json"
+        [ -s "$f" ] || echo '{"reviews":[],"threads":[],"issue_comments":[]}' > "$f"
+        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        p=$(printf '%s' "$gqvars" | jq -r '.path // ""')
+        db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
+        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
+          .threads = ((.threads // []) + [{ id: "FT-\($n)-\($db)", isResolved: false, viewerCanResolve: true, path: $p,
+            comments: { nodes: [{ id: "FC-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }] } }])
+        ' "$f" > "$t" && mv "$t" "$f"
+        r="$G/comments_$n.json"
+        [ -s "$r" ] || echo '[]' > "$r"
+        jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
+          '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
+          "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
+        out="{\"id\":$db}"
+        if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+        exit 0 ;;
+      PATCH:*/issues/comments/*)
+        [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
+        cid="${path##*/issues/comments/}"
+        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        hit=""
+        for cand in "$G"/threads_*.json; do
+          [ -s "$cand" ] || continue
+          jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 || continue
+          hit="$cand"; break
+        done
+        [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
+        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        jq --arg c "$cid" --arg b "$b" '.issue_comments = ((.issue_comments // []) | map(if ((.databaseId // 0) | tostring) == $c then .body = $b else . end))' \
+          "$hit" > "$t" && mv "$t" "$hit"
+        n="${hit##*/threads_}"; n="${n%.json}"
+        r="$G/issue_comments_$n.json"
+        if [ -s "$r" ]; then
+          jq -c --arg c "$cid" --arg b "$b" 'map(if ((.id // 0) | tostring) == $c then .body = $b else . end)' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        fi
+        printf 'ICEDIT %s\n' "$cid" >> "${STUB_GH_LOG:?}"
+        out="{\"id\":$cid}"
+        if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+        exit 0 ;;
+    esac
     out=""
     case "$path" in
       user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
@@ -877,6 +956,13 @@ case "$sub" in
         # unreadable one on the output alone — only the exit code says which.
         [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
         case "$path" in *comments*) f="$G/comments_$n.json" ;; *) f="$G/reviews_$n.json" ;; esac
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */pulls/*/files*)
+        # The files a PR's diff touches. An absent fixture is a diff naming no
+        # file; STUB_FILES_RC fails the read.
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        [ -z "${STUB_FILES_RC:-}" ] || exit "$STUB_FILES_RC"
+        f="$G/files_$n.json"
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */issues/*/comments*)
         # The Conversation tab, a separate REST space from the /pulls comment

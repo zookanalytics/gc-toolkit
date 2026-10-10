@@ -7,7 +7,7 @@
 # A nudge is the ONLY action — never kill, never file a warrant. Signatures
 # are provider-agnostic (extend via $QUOTA_PARK_MATCH); recovery polls rather
 # than sleeping until the banner's stated reset (a manual reset lands early).
-# Callers: the quota-park-nudge exec order (3m cadence); the deacon/witness
+# Callers: the quota-park-nudge exec order (5m cadence); the deacon/witness
 # patrols read the closed-field `--status` surface INSTEAD of the pane.
 # See docs/quota-park-recovery.md.
 set -euo pipefail
@@ -51,9 +51,13 @@ BACKOFF_CAP="${QUOTA_PARK_BACKOFF_CAP:-900}"
 ESCALATE_AFTER="${QUOTA_PARK_ESCALATE_AFTER:-7200}"
 ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
-# How long this order's findings stay authoritative for `--status` (the sweep
-# runs every 3m; ten minutes is three missed cycles).
-STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-600}"
+# How long this order's findings stay authoritative for `--status`. The
+# controller fires a bounded number of clock-driven orders per tick
+# (orders.max_dispatches_per_tick), so on a loaded host passes of a 5m order
+# can land more than fifteen minutes apart. Past this window a parked session's
+# `yes` becomes `unknown`, which puts it back on the patrols' normal warrant
+# path, so thirty minutes leaves room for one slow gap and a missed pass.
+STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-1800}"
 
 # A pane is peeked only when the session list cannot vouch for it (see
 # list_vouches). ACTIVE_WITHIN: a pane that printed this recently is working,
@@ -283,7 +287,7 @@ num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
 num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
-num_min "$STALE_AFTER"    1 || STALE_AFTER=600
+num_min "$STALE_AFTER"    1 || STALE_AFTER=1800
 num_min "$ACTIVE_WITHIN"  1 || ACTIVE_WITHIN=60
 num_min "$REPEEK_AFTER"   0 || REPEEK_AFTER=3600
 
@@ -693,7 +697,7 @@ while IFS=$'\t' read -r id alias out_at nudge_in_at; do
     checked=$((checked + 1))
 
     # A failed/empty peek proves nothing, and the clean branch DELETES the
-    # episode — only a successful peek may end one. Keep state; retry in 3m.
+    # episode — only a successful peek may end one. Keep state; retry next cycle.
     peek_rc=0
     pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || peek_rc=$?
     if [ "$peek_rc" -ne 0 ] || [ -z "$pane" ]; then
@@ -780,7 +784,7 @@ while IFS=$'\t' read -r id alias out_at nudge_in_at; do
         unconfirmed_now=$((unconfirmed_now + 1))
         echo "quota-park-nudge: nudge UNCONFIRMED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age"), paced as attempt $((attempts + unconfirmed))"
     else
-        # Fast rejection: nothing delivered, nothing paced; retry in 3m.
+        # Fast rejection: nothing delivered, nothing paced; retry next cycle.
         echo "quota-park-nudge: nudge FAILED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age")"
     fi
 
