@@ -25,9 +25,9 @@
 # dependency edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only; an UNKNOWN,
 # which is GitHub still computing it, read again within one budget per pass);
-# generated/seed-audit current at the MERGE RESULT (the tree `git merge-tree`
-# writes is re-rendered, so a render the merge would leave stale holds and
-# escalates rather than landing). The FULL
+# no generated/seed-audit render made stale at the MERGE RESULT (the tree `git
+# merge-tree` writes is re-rendered, so a render the merge would leave stale
+# holds and escalates rather than landing). The FULL
 # anchor-local authorization set is re-read immediately before the merge; any
 # mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
