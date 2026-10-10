@@ -25,7 +25,7 @@
 [order]
 description = "File one converse visit per open human gate on its gated bead, recorded as gc.gate_visit (opt out with gc.gate_visit=skip; unset it to re-offer)"
 trigger = "cooldown"
-interval = "2m"
+interval = "5m"
 timeout = "120s"
 exec = "$PACK_DIR/assets/scripts/gate-visit-sweep.sh"
 scope = "rig"

@@ -110,7 +110,7 @@ Usage:
   stands per subject and topic, so a re-run refreshes the reaction's gate
   rather than filing a second, and a demand a sitting already holds on the
   subject is left alone. orders/gate-visit-sweep files the visit that resolves
-  the gate on its next pass (a 2-minute cooldown), so the subject waits up to
+  the gate on its next pass (a 5-minute cooldown), so the subject waits up to
   one pass with a gate and no visit.
   --visit (ruling, recommend) holds the subject on a visit the caller already
   filed instead, and files no gate.

@@ -59,7 +59,7 @@ finding() { # id anchor [disposition] [lane]
     "$1" "$2" "${3:-must-fix}" "${4:-correctness}" "${4:-correctness}"
 }
 # An anchor like pre(), but targeting integration/<convoy> instead of main — the
-# owned-convoy checkpoint tk-6bji7k.9 marks with a banner and a base: label.
+# owned-convoy checkpoint marked with a banner and a base: label.
 pre_int() { # id branch convoy
   pre "$1" "$2" | jq -c --arg t "integration/$3" '.metadata.merged_target=$t'
 }

@@ -241,10 +241,12 @@ The loop, every visit:
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
-   stamps `gc.outcome=folded` and its board-visible reason, and closes:
+   moves this visit's merge-hold keys (`pr_number`, `pr_url`, `anchor_bead`) to
+   `$HOLDER` so a PR's merge stays held after this visit closes, stamps
+   `gc.outcome=folded` and its board-visible reason, and closes:
    ```bash
    "$CONV/visit-close.sh" --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome folded --reason "folded into $HOLDER"
+     --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
@@ -398,10 +400,38 @@ Rules:
   field of each `formulas/*.toml` in the rig checkout, and name the
   formula you chose when you frame the choice. File the work bead as a
   sibling and wire the wait exactly as step 7 says.
+- **Which route — a bare visit, a plain work bead, or a design-convoy.**
+  Decide with the questions under "Choosing a design-convoy" below. When they
+  point at a design-convoy, recommend `mol-design-convoy`: the
+  `gc.recommended_formula` stamp the operator Accepts and slings like any other
+  subject formula.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+
+## Choosing a design-convoy
+
+A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
+one initiative. A design child lands its doc on the convoy's integration branch,
+implementation builds there, and the whole unit graduates to the default branch
+as one reviewed PR. Choose the route for a follow-up by asking, in order:
+
+1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
+   or decision the operator owns, with nothing to build, has nothing to
+   dispatch.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
+   unit and the design gate catches a wrong shape before it is built. No: a
+   plain work bead on the default one-child convoy, one PR to the default
+   branch.
+
+`design_gated` defaults to `true`, which holds implementation until the operator
+approves the design's PR. `docs/design-convoy.md` describes the gates and when
+all-in-one (`--var design_gated=false`) fits.
+
 
 
 ## Context discipline
@@ -489,10 +519,12 @@ visit, say) keeps that format. Operator-initiated form: the
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns
@@ -569,6 +601,7 @@ gc bd update "$OBS" \
   --set-metadata "obs.directive=<standing or diff>" \
   --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   --set-metadata gc.outcome=recorded \
+  --set-metadata gc.work_outcome=no-op \
   --status=closed
 ```
 

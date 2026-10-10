@@ -523,7 +523,7 @@ and topic, so a re-run after a partial refreshes that gate rather than filing a
 second, and a demand a converse sitting already holds on the bead keeps its own
 question. The gate is the escalation's state, and a visit is how it resolves:
 `orders/gate-visit-sweep.toml` files the visit on the bead on its next pass, a
-2-minute cooldown, so for up to one pass the bead waits on a gate with no visit.
+5-minute cooldown, so for up to one pass the bead waits on a gate with no visit.
 You file no visit here. The gate resolves when the operator answers it:
 Accept resolves it as it runs the recommended mol, and a sitting resolves it when
 the operator rules.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for gc-visit-open.sh — the operator-origin visit intake
-# (tk-4ojka). Runs the REAL script (via `sh`, as shipped) with `gc`,
+# Hermetic test for gc-visit-open.sh — the operator-origin visit intake.
+# Runs the REAL script (via `sh`, as shipped) with `gc`,
 # `gc-helm.sh` and `gc-proactive.sh` stubbed on PATH — no live city, Dolt,
 # network, or sessions.
 #
@@ -49,7 +49,7 @@
 #               the DESIGNED input, not an edge case. Passing it through as the
 #               title made it the one input guaranteed to fail: `bd create`
 #               refuses a title over 500 bytes, so a 579-character topic filed
-#               nothing at all (tk-wp50s, hit live). The title is a derived
+#               nothing at all (hit live). The title is a derived
 #               label; the BODY is where the operator's words have to survive.
 #   (WHY)       a create refused for a stated reason must relay that reason.
 #               Keeping only .id off the response reported every refusal as
@@ -63,7 +63,7 @@
 #               matches beads that merely quote it. That key is what
 #               a parked-disposition sweep selects on to decide whether a
 #               parked subject is owed a visit back once its routed work
-#               lands (tk-2cyxo), so a missing stamp costs the return trip.
+#               lands, so a missing stamp costs the return trip.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -133,7 +133,7 @@ case "$1 ${2:-}" in
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
     # The argv line above flattens the title and body into one blob. Record
-    # each as its own exact value too: the title is precisely what tk-wp50s is
+    # each as its own exact value too: the title is precisely what this case is
     # about, and "the paragraph survived verbatim" is an assertion about the
     # body alone.
     prev=""; title=""
@@ -460,7 +460,7 @@ done
 # matches beads that merely QUOTE it. gc.origin=operator is the key a
 # parked-disposition sweep selects on to decide whether a parked subject is
 # owed a visit back once its routed work lands — without it such a sweep
-# cannot see the subject at all (tk-2cyxo).
+# cannot see the subject at all.
 run no "why is dolt wedging under load"
 has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
   "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"
@@ -657,7 +657,7 @@ has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
 # response threw all of it away and reported every refusal as "returned no id",
 # so the operator was told the ledger returned nothing when in fact it had
 # refused for a stated, fixable reason — and went looking for a broken data
-# plane instead of a long title (tk-wp50s).
+# plane instead of a long title.
 : > "$FAKE_CALLS"
 set +e
 LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
@@ -692,7 +692,7 @@ eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
 eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 
 # --- (RIGWHY) this script's own enumerate_rigs names WHICH failure it hit -----
-# The same defect as gc-helm.sh's (tk-lzdty half 2), in this script's hand-rolled
+# The same defect as gc-helm.sh's, in this script's hand-rolled
 # copy — and worse here, because it piped `gc rig list` STRAIGHT into jq. A
 # pipeline reports the LAST command's status, so gc's exit code was discarded
 # structurally, not just by a `|| true`, and its stderr went to /dev/null. A
