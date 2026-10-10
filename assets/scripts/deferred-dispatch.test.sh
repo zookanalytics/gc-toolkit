@@ -46,8 +46,15 @@
 #     snapshot handed to jq as one argv value dies past the kernel per-argument
 #     cap, which silently strands the whole backlog; the fixture is sized to
 #     prove the old argv pass fails before asserting the SUT survives it;
+#   * the PASS LOCK — a pass that overlaps one in flight exits 0 having read and
+#     slung nothing, so two overlapping passes make one sling; a holder past the
+#     stall bound fails the pass, and a lock that cannot be taken refuses it;
+#   * the PASS BUDGET — a pass starts a sling only while a full allowance is
+#     left, on a clock the test controls, and reports the beads it left armed
+#     and untouched; a dry run takes no lock and spends no budget;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
-#     mean the cadence that consumes these records was quietly un-shipped;
+#     mean the cadence that consumes these records was quietly un-shipped, and
+#     its timeout is bounded by the budget below it and the stall bound above;
 #   * SCRATCH CLEANUP — every verb that stages a temp file leaves none behind.
 #
 # No live city, Dolt, network, gc or bd — only jq, stubs, and a tmpdir.
@@ -254,6 +261,20 @@ if [ "${1:-}" = "sling" ]; then
     if [ -n "${STUB_SLING_MARKER_LOG:-}" ]; then
         jq -r --arg id "${2:-}" '(.[] | select(.id == $id) | .metadata["gc.dispatch_when_ready_slung"]) // "<absent>"' "${STUB_STORE:?}" >> "$STUB_SLING_MARKER_LOG"
     fi
+    # A sling's duration on the test's clock (the date stub), so a pass spends its
+    # budget at a rate the test sets rather than at the host's load.
+    if [ -n "${STUB_CLOCK:-}" ] && [ -n "${STUB_SLING_SECS:-}" ]; then
+        printf '%s\n' "$(( $(cat "$STUB_CLOCK") + STUB_SLING_SECS ))" > "$STUB_CLOCK"
+    fi
+    # The first sling under STUB_SLING_HOLD waits for its release file, so a test
+    # can catch a pass mid-sling. Later slings pass straight through: a second pass
+    # that got past the lock would sling at once and be counted, not hang the suite.
+    if [ -n "${STUB_SLING_HOLD:-}" ] && [ ! -e "$STUB_SLING_HOLD.taken" ]; then
+        : > "$STUB_SLING_HOLD.taken"
+        : > "$STUB_SLING_HOLD.started"
+        i=0
+        while [ ! -e "$STUB_SLING_HOLD.release" ] && [ "$i" -lt 2400 ]; do sleep 0.05; i=$((i + 1)); done
+    fi
     exit "${STUB_SLING_RC:-0}"
 fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
@@ -277,7 +298,15 @@ done
 printf '%s\t%s\n' "$subject" "$key" >> "${ESC_CALLS:?}"
 echo "escalate: filed visit tk-visit1 on $subject [$key]"
 ESC
-chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh"
+# date stub: the epoch form the pass budget reads comes from $STUB_CLOCK when a
+# test sets it; every other form reaches the real date.
+export STUB_REAL_DATE; STUB_REAL_DATE="$(command -v date)"
+cat > "$BIN/date" <<'DATE'
+#!/usr/bin/env bash
+if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%s" ]; then cat "$STUB_CLOCK"; exit 0; fi
+exec "${STUB_REAL_DATE:?}" "$@"
+DATE
+chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/date"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
@@ -286,12 +315,25 @@ export ESC_CALLS="$TMP/escalate.log"
 export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
+# The pass lock lives under this run's tmpdir, never the pack state dir a live
+# order holds, and the knobs a shell may carry do not settle any assertion. The
+# suite runs unpaced: on the real clock a loaded host can spend the default
+# budget inside one case, so only the budget cases, on the test's clock, set one.
+export DEFERRED_DISPATCH_STATE_DIR="$TMP/state"
+export DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
+unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE \
+    DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS DEFERRED_DISPATCH_LOCK_STALL_SECS 2>/dev/null || true
 
 store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
+await() { # <file> — bounded wait for a sentinel to appear
+    local i=0
+    while [ ! -e "$1" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done
+    [ -e "$1" ]
+}
 
 # --- ARM ---------------------------------------------------------------------
 echo "# arm"
@@ -607,7 +649,7 @@ has "$out" "DISPATCHABLE NOW (own blockers clear" "list flags the cascade-held a
 # --- the N+1 fix: a full pass costs a bounded number of bd reads --------------
 # The stall this script's finding named: own_blocks_cleared ran a `bd dep list`
 # per waiting arm and the reconcile loop ran a `bd show` per candidate, so a full
-# pass scaled with the armed set and overran the reconcile order's 120s budget —
+# pass scaled with the armed set and overran the reconcile order's timeout —
 # the pass was killed before it dispatched, and an owed arm silently starved. A
 # pass must now resolve every candidate's own blockers and read every candidate's
 # fields WITHOUT a per-bead call: blocker ids come off the snapshot's own edges,
@@ -837,6 +879,173 @@ has "$(cat "$STUB_BD_LOG")" "--db $TMP/explicit/.beads" "an explicit --db overri
 hasnt "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "and the rig-root default is not also passed"
 unset STUB_BD_LOG
 
+# --- the pass lock: one pass per rig at a time --------------------------------
+# Two passes over one store sling the same ready bead twice: two input convoys
+# for one work bead. The controller's tracking gate can be closed under a pass
+# still running, so the pass holds its own lock. The first pass here is caught
+# inside its sling, with b-1's unproven marker already stamped. A second pass
+# that got past the lock would list the store, read that marker as a dead
+# attempt, and sling b-1 again: two slings where the lock allows one.
+echo "# a pass that overlaps one in flight skips without reading or slinging"
+LOCK_PROVEN=0
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+export STUB_BD_LOG="$TMP/bd-lock.log"; : > "$STUB_BD_LOG"
+HOLD="$TMP/hold"; rm -f "$HOLD".*
+# Launched as a simple command, so $! is the pass itself.
+STUB_SLING_HOLD="$HOLD" "$SUT" reconcile > "$TMP/first-pass.out" 2>&1 &
+first=$!
+if await "$HOLD.started"; then
+    reads_before="$(wc -l < "$STUB_BD_LOG" | tr -d ' ')"
+    out="$(GC_ORDER_OUTCOME_FILE="$TMP/outcome-skip.json" "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a pass that overlaps one in flight exits 0 — the cadence is firing, not failing"
+    has "$out" "already in flight" "and says a pass is in flight"
+    eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "in one line"
+    eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "$reads_before" "the skipped pass reads nothing from the store"
+    eq "$(jq -r '.outcome' "$TMP/outcome-skip.json" 2>/dev/null)" "skipped" "and declares the run skipped to the controller"
+    : > "$HOLD.release"
+    wait "$first"; rc=$?
+    eq "$rc" 0 "the pass holding the lock finishes clean"
+    n="$(slings)"
+    eq "$n" "1" "two overlapping passes make exactly one sling"
+    [ "$n" = 1 ] && LOCK_PROVEN=1
+    has "$(cat "$TMP/first-pass.out")" "1 dispatched" "the pass holding the lock completes its dispatch"
+else
+    bad "the first pass never reached its sling (fixture wedged)"
+    : > "$HOLD.release"; wait "$first" 2>/dev/null
+fi
+unset STUB_BD_LOG
+
+# The lock below is held by the test, standing in for a pass of rig-a.
+echo "# the lock is per rig, a dry run takes none, and a stalled holder fails the pass"
+mkdir -p "$TMP/state/rig-a"
+( exec 9>>"$TMP/state/rig-a/pass.lock"
+  flock -n 9 || exit 1
+  : > "$TMP/rig-a-held"
+  i=0
+  while [ ! -e "$TMP/rig-a-release" ] && [ "$i" -lt 2400 ]; do sleep 0.05; i=$((i + 1)); done ) &
+holder=$!
+if await "$TMP/rig-a-held"; then
+    printf '%s %s\n' "$holder" "$(date -u +%s)" > "$TMP/state/rig-a/pass.holder"
+    store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+    out="$(GC_RIG=rig-a "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a pass of the rig whose lock is held exits 0"
+    has "$out" "already in flight (pid $holder" "naming the holder"
+    eq "$(slings)" "0" "and slings nothing"
+    out="$(GC_RIG=rig-a "$SUT" reconcile --dry-run 2>&1)"; rc=$?
+    eq "$rc" 0 "a dry run while a pass holds the lock exits 0"
+    has "$out" "DRY-RUN would sling: gc sling --rig rig-a rig/pool b-1" "and still lists what a pass would sling"
+    eq "$(slings)" "0" "without slinging"
+    printf '%s %s\n' "$holder" 1 > "$TMP/state/rig-a/pass.holder"
+    out="$(GC_RIG=rig-a DEFERRED_DISPATCH_LOCK_STALL_SECS=60 "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 1 "a holder past the stall bound fails the pass instead of skipping it"
+    has "$out" "nothing is dispatching" "saying the cadence has stopped"
+    eq "$(slings)" "0" "and slings nothing"
+    out="$(GC_RIG=rig-b "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a pass of another rig is not held by this rig's lock"
+    eq "$(head -1 "$STUB_SLING_LOG")" "--rig rig-b rig/pool b-1" "and makes its sling"
+else
+    bad "the rig-a lock fixture never took the lock"
+fi
+: > "$TMP/rig-a-release"; wait "$holder" 2>/dev/null
+
+echo "# a lock that cannot be taken refuses the pass before it reads the store"
+# Both ways the lock goes missing: a lock file the pass cannot create, and no
+# flock on PATH at all. Nothing else carries single-flight, so a pass that ran
+# anyway would be the second slinger the lock exists to prevent.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+mkdir -p "$TMP/state-nolock/_unscoped/pass.lock"
+export STUB_BD_LOG="$TMP/bd-nolock.log"; : > "$STUB_BD_LOG"
+out="$(DEFERRED_DISPATCH_STATE_DIR="$TMP/state-nolock" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a lock file the pass cannot create fails the pass"
+has "$out" "single-flight UNGUARDED" "naming the guarantee it could not take"
+eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "0" "before any read of the store"
+eq "$(slings)" "0" "and slings nothing"
+# Permissions cannot hide flock from `command -v`, which skips a non-executable
+# hit and keeps searching PATH, so this PATH carries the stubs and every tool the
+# pass reaches for before its lock, and no flock.
+NOFLOCK="$TMP/noflock"; mkdir -p "$NOFLOCK"
+for c in bash dirname tr cat jq mkdir mktemp rm wc; do
+    p="$(PATH="${PATH#"$BIN":}" command -v "$c" 2>/dev/null)" && ln -sf "$p" "$NOFLOCK/$c"
+done
+out="$(PATH="$BIN:$NOFLOCK" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass with no flock on PATH fails"
+has "$out" "flock not found" "naming the missing tool"
+eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "0" "before any read of the store"
+eq "$(slings)" "0" "and slings nothing"
+unset STUB_BD_LOG
+
+# --- the pass budget: no sling the timeout would cut short ---------------------
+# The order's timeout kills a pass wherever it stands, and a sling killed
+# mid-flight leaves its input convoy with no workflow and spends one of the
+# bead's attempts. So a pass starts a sling only while a full allowance is left
+# in its budget. The clock is the test's: each sling advances it STUB_SLING_SECS.
+echo "# a pass starts no sling once less than one allowance of its budget is left"
+FOUR_READY='[
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
+ {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
+ {"id":"b-3","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
+ {"id":"b-4","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+store "$FOUR_READY"
+CLOCK="$TMP/clock"; printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-partial.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass its budget stops exits 0 — the beads it left are owed, not failed"
+eq "$(slings)" "2" "a 100s budget with a 30s allowance starts two 40s slings"
+eq "$(cut -d' ' -f2 "$STUB_SLING_LOG" | paste -sd, -)" "b-1,b-2" "in listing order"
+has "$out" "pass budget spent" "the pass says its budget stopped it"
+has "$out" "left 2 ready bead(s) armed for the next pass: b-3 b-4" "and names the beads it left"
+has "$out" "2 left for the next pass" "the summary counts them"
+for b in b-3 b-4; do
+    eq "$(meta "$b" gc.dispatch_when_ready)" "rig/pool" "$b keeps its arm"
+    eq "$(meta "$b" gc.dispatch_when_ready_slung)" "<absent>" "$b carries no slung marker"
+    eq "$(meta "$b" gc.dispatch_when_ready_fail_count)" "<absent>" "$b has no attempt counted against its cap"
+done
+eq "$(jq -r '.outcome' "$TMP/outcome-partial.json" 2>/dev/null)" "partial" "the pass declares itself partial to the controller"
+eq "$(jq -r '[.scopes[].scope] | join(",")' "$TMP/outcome-partial.json" 2>/dev/null)" "b-3,b-4" "naming each bead it left"
+: > "$STUB_SLING_LOG"; printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(cut -d' ' -f2 "$STUB_SLING_LOG" | paste -sd, -)" "b-3,b-4" "the next pass slings the beads the last one left"
+has "$out" "0 left for the next pass" "and leaves nothing"
+
+echo "# with no knob set, the shipped budget and allowance pace the pass"
+# 420s and 90s: two 200s slings start, and the third would begin with 20s left.
+store "$FOUR_READY"
+printf '1000\n' > "$CLOCK"
+out="$( (unset DEFERRED_DISPATCH_PASS_BUDGET_SECS DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS
+         STUB_CLOCK="$CLOCK" STUB_SLING_SECS=200 "$SUT" reconcile) 2>&1)"; rc=$?
+eq "$(slings)" "2" "the default budget starts two 200s slings"
+has "$out" "2 left for the next pass" "and leaves the other two"
+
+echo "# a pass whose budget is spent before its first sling slings nothing and says what it left"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(slings)" "0" "and slings nothing"
+has "$out" "1 left for the next pass" "it counts the bead it left"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "with no attempt counted against its cap"
+
+echo "# a zero budget is unpaced, and a dry run spends no budget"
+store "$FOUR_READY"
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=1000 DEFERRED_DISPATCH_PASS_BUDGET_SECS=0 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "4" "a zero budget slings every ready bead however long each sling takes"
+has "$out" "0 left for the next pass" "and leaves nothing"
+store "$FOUR_READY"
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile --dry-run 2>&1)"; rc=$?
+eq "$(printf '%s\n' "$out" | grep -c 'DRY-RUN would sling: gc sling rig/pool b-')" "4" "a dry run lists every bead a pass would sling, whatever the budget"
+hasnt "$out" "pass budget spent" "and spends none of it"
+eq "$(slings)" "0" "without slinging"
+
+echo "# a pass that leaves nothing declares nothing"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+: > "$TMP/outcome-full.json"
+GC_ORDER_OUTCOME_FILE="$TMP/outcome-full.json" "$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "1" "the pass slings its ready bead"
+[ -s "$TMP/outcome-full.json" ] && bad "a complete pass wrote an outcome declaration: $(cat "$TMP/outcome-full.json")" \
+    || ok "a complete pass leaves the controller's outcome file empty"
+
 # --- positive control over the shipped cadence -------------------------------
 # The arm is only half the mechanism: without the order nothing consumes these
 # records and the hold is stranded one layer down instead of in an agent's head.
@@ -851,6 +1060,53 @@ if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then
     bad "the order does not opt out of the single-flight gate (no_work_gate is set)"
 else
     ok "the order does not opt out of the single-flight gate"
+fi
+# The timeout, bounded by the numbers this script owns. A pass spends its first
+# minutes listing the armed set, so a timeout inside the 2m window leaves it no
+# room to sling, and above that window a tracking-sweep watchdog can reopen the
+# controller's gate under a running pass, so a wider timeout stands on the pass
+# lock proven above. The pass budget sits at least one sling allowance below the
+# timeout, so the last sling a pass starts can run for twice its allowance before
+# the kill. The lock-stall bound sits above it, so a pass still running never
+# reads as a wedged one.
+SWEEP_WINDOW=120
+to="$(awk -F'"' '/^[[:space:]]*timeout[[:space:]]*=/{print $2}' "$ORDER")"
+to_secs=""
+case "$to" in
+    [0-9]*s) to_secs="${to%s}" ;;
+    [0-9]*m) to_secs=$(( ${to%m} * 60 )) ;;
+esac
+case "$to_secs" in ''|*[!0-9]*) to_secs="" ;; esac
+PB="$(sed -n 's/^PASS_BUDGET_SECS="\${DEFERRED_DISPATCH_PASS_BUDGET_SECS:-\([0-9][0-9]*\)}"$/\1/p' "$SUT")"
+SA="$(sed -n 's/^SLING_ALLOWANCE_SECS="\${DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS:-\([0-9][0-9]*\)}"$/\1/p' "$SUT")"
+STALL="$(sed -n 's/^LOCK_STALL_SECS="\${DEFERRED_DISPATCH_LOCK_STALL_SECS:-\([0-9][0-9]*\)}"$/\1/p' "$SUT")"
+if [ -z "$to_secs" ]; then
+    bad "order timeout \"$to\" is unparseable, so nothing can be bounded against it"
+else
+    if [ "$to_secs" -le "$SWEEP_WINDOW" ]; then
+        bad "timeout $to leaves a pass no room to sling after it lists the armed set"
+    elif [ "$LOCK_PROVEN" = 1 ]; then
+        ok "timeout $to outruns the ${SWEEP_WINDOW}s tracking-sweep window, and the pass lock (proven above) carries single-flight"
+    else
+        bad "timeout $to outruns the ${SWEEP_WINDOW}s tracking-sweep window and the pass lock is unproven — a swept tracking bead is a second pass"
+    fi
+    case "$PB" in ''|*[!0-9]*) PB="" ;; esac
+    case "$SA" in ''|*[!0-9]*) SA="" ;; esac
+    if [ -z "$PB" ] || [ -z "$SA" ]; then
+        bad "the pass budget or sling allowance default is unreadable, so it cannot be bounded against the timeout"
+    elif [ "$SA" -lt "$PB" ] && [ $(( PB + SA )) -le "$to_secs" ]; then
+        ok "the ${PB}s pass budget sits at least one ${SA}s sling allowance below the $to timeout"
+    else
+        bad "the ${PB}s pass budget and ${SA}s sling allowance do not fit the $to timeout — the last sling a pass starts can be killed mid-flight"
+    fi
+    case "$STALL" in
+        ''|*[!0-9]*) bad "the lock-stall default is unreadable, so it cannot be bounded against the timeout" ;;
+        *) if [ "$STALL" -gt "$to_secs" ]; then
+               ok "the ${STALL}s lock-stall bound sits above the $to timeout"
+           else
+               bad "the ${STALL}s lock-stall bound is not above the $to timeout — a pass still running reads as a wedged one"
+           fi ;;
+    esac
 fi
 
 # ── scratch cleanup ─────────────────────────────────────────────────────────

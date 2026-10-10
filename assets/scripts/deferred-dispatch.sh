@@ -26,6 +26,11 @@
 # Per-bead best-effort (one bad bead never skips the rest; the next cooldown
 # retries), but a failure to ENUMERATE exits non-zero — an unreadable queue
 # must never read as an empty one.
+#
+# A reconcile pass holds a per-rig pass lock for its whole life, so two passes
+# never sling the same bead, and it starts a sling only while its pass budget
+# can still cover one, so the order's timeout does not kill it mid-sling. The
+# ready beads past the budget wait, still armed, for the next pass.
 set -u
 
 # >>> control-char-scrub
@@ -72,6 +77,46 @@ K_FAILS="gc.dispatch_when_ready_fail_count"
 MAX_SLING_FAILURES="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
 case "$MAX_SLING_FAILURES" in ''|*[!0-9]*) MAX_SLING_FAILURES=3 ;; esac
 
+# The pass budget, in seconds from the start of the pass (0 = unpaced). The
+# order's timeout kills a pass wherever it stands, and a sling killed mid-flight
+# has already minted its input convoy, leaves it with no workflow, and spends
+# one of the bead's attempts. So a pass starts a sling only while at least one
+# sling's allowance is left in the budget, and leaves the remaining ready beads
+# armed and untouched for the next pass. The budget sits at least one allowance
+# below the order's timeout, so the last sling a pass starts can run for twice
+# its allowance before the timeout lands. deferred-dispatch.test.sh holds both
+# numbers against orders/deferred-dispatch.toml.
+PASS_BUDGET_SECS="${DEFERRED_DISPATCH_PASS_BUDGET_SECS:-420}"
+case "$PASS_BUDGET_SECS" in ''|*[!0-9]*) PASS_BUDGET_SECS=420 ;; esac
+PASS_BUDGET_SECS=$((10#$PASS_BUDGET_SECS))
+SLING_ALLOWANCE_SECS="${DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS:-90}"
+case "$SLING_ALLOWANCE_SECS" in ''|*[!0-9]*) SLING_ALLOWANCE_SECS=90 ;; esac
+SLING_ALLOWANCE_SECS=$((10#$SLING_ALLOWANCE_SECS))
+
+# The pass lock. Two passes over one store sling the same ready bead twice: two
+# input convoys for one work bead, and its attempt count bumped twice. The
+# controller's open-tracking gate holds only while a run's tracking bead stays
+# open, and a sweep can close that bead under a pass still running: the core
+# order-tracking-sweep order at its stale-after, and the controller watchdog 2m
+# after dispatch on a gc build that does not extend that window to the order's
+# timeout. So a pass takes a non-blocking exclusive flock before it reads
+# anything and holds it for its whole life. The lock depends on no bead
+# surviving. gc sling and gc bd inherit the descriptor, so it is held for as long
+# as anything the pass started is live, and the kernel releases it on any exit,
+# SIGKILL included. It is keyed per rig like the order, and lives in the pack
+# state dir the order's env names; the override lets the hermetic test point it
+# at a tmpdir.
+RIG_KEY="$(printf '%s' "${GC_RIG:-}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+case "$RIG_KEY" in ''|.|..) RIG_KEY=_unscoped ;; esac
+STATE_DIR="${DEFERRED_DISPATCH_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/deferred-dispatch}/$RIG_KEY"
+# A holder older than this is not a slow pass, because the order's timeout would
+# have killed it: something the pass started still owns the descriptor, and
+# nothing is dispatching. It sits above the order's timeout, so a pass that is
+# still running never reads as a wedged one.
+LOCK_STALL_SECS="${DEFERRED_DISPATCH_LOCK_STALL_SECS:-900}"
+case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
+LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
+
 # The store, pinned: `gc bd` resolves its ledger from the invoking rig and
 # ignores BEADS_DIR, so an unpinned read in the rig-scoped order env answers
 # about whatever rig gc resolves rather than the one the pass is for.
@@ -99,6 +144,7 @@ bd_() {
 }
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+now_epoch() { date -u +%s; }
 
 actor() { printf '%s' "${GC_AGENT:-${BEADS_ACTOR:-${USER:-unknown}}}"; }
 
@@ -129,6 +175,12 @@ Verbs:
              has failed to finalize MAX_SLING_FAILURES times rather than leak a
              convoy per pass. Driven by orders/deferred-dispatch.toml (cooldown,
              scope="rig").
+             A pass holds the rig's pass lock for its whole life; one that
+             finds it held exits 0 without reading the store. It starts a sling
+             only while DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS (90) of its
+             DEFERRED_DISPATCH_PASS_BUDGET_SECS (420, 0 = unpaced) are left, and
+             leaves the rest armed for the next pass. --dry-run takes no lock
+             and spends no budget.
 
 --sling-arg is repeatable and is passed through to `gc sling` verbatim after the
 target and bead, e.g. --sling-arg --on --sling-arg mol-pr-from-issue.
@@ -147,21 +199,20 @@ show_bead() { # id -> single bead object on stdout, or nothing (rc 1)
 }
 
 # The armed-set snapshot armed_rows already read, reused instead of a `bd show`
-# per bead. That per-bead read summed past the reconcile order's 120s budget once
+# per bead. That per-bead read summed past the reconcile order's timeout once
 # the armed set grew (with the per-bead dep-list, the other half of the same
 # N+1), so a full pass was killed before it dispatched and owed arms silently
 # starved. The snapshot carries every field a caller reads here (status,
 # assignee, metadata), so nothing is lost but freshness, and the pass reads it
 # consistently: the slung marker and the fail count are written only by this pass
-# (the order is single-flight, rig-scoped), so the snapshot is authoritative for
+# (it holds the rig's pass lock), so the snapshot is authoritative for
 # them; status was already read from the snapshot for the closed-retire; and
 # merge_result and assignee are now read from it too, one pass staler than the
 # prior fresh per-bead show. A bead delivered or claimed in the pass window is
 # therefore acted on from the pass-start view — at worst one redundant sling
 # before the next pass retires it from its own snapshot — and the fail-count cap
-# bounds a redundant sling that never finalizes. The pass is now seconds, not
-# minutes, so that window is small. The file is pre-scrubbed, so a raw C0 byte
-# cannot abort the read.
+# bounds a redundant sling that never finalizes. The file is pre-scrubbed, so a
+# raw C0 byte cannot abort the read.
 bead_from_cache() { # all_json_file id -> single bead object on stdout, or nothing (rc 1)
     local f="$1" id="$2" out
     out="$(jq -c --arg id "$id" 'map(select(.id == $id)) | (.[0] // empty)' "$f" 2>/dev/null)" || return 1
@@ -368,7 +419,7 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
 
 # The own-blockers-clear gate (the second-chance dispatch gate), resolved for a
 # whole candidate set in a BOUNDED number of reads rather than a `bd dep list`
-# per bead. The per-bead form summed past the reconcile order's 120s budget as
+# per bead. The per-bead form summed past the reconcile order's timeout as
 # the armed set grew, so a full pass was killed before it dispatched and owed
 # arms silently starved — the N+1 this replaces. The blocker ids come off the
 # snapshot's OWN dependency edges (`bd list --json` already carries them in the
@@ -527,6 +578,54 @@ cmd_list() {
 }
 
 # --- reconcile ---------------------------------------------------------------
+# Take the pass lock on fd 9 and record this pass as its holder. Returns 0
+# holding it, 1 when another pass holds it inside the stall bound, 2 when the
+# holder is past the stall bound, and 3 when no lock can be taken: no flock on
+# PATH, or a lock file this pass cannot create or open. LOCK_NOTE names the
+# holder for 1 and 2 and the cause for 3.
+take_pass_lock() {
+    local lock="$STATE_DIR/pass.lock" holder="$STATE_DIR/pass.holder"
+    local held_pid="" held_since="" elapsed=""
+    LOCK_NOTE=""
+    if ! command -v flock >/dev/null 2>&1; then
+        LOCK_NOTE="flock not found on PATH"; return 3
+    fi
+    if ! mkdir -p "$STATE_DIR" 2>/dev/null || ! ( : >> "$lock" ) 2>/dev/null; then
+        LOCK_NOTE="cannot create $lock"; return 3
+    fi
+    exec 9>>"$lock" || { LOCK_NOTE="cannot open $lock"; return 3; }
+    if flock -n 9; then
+        printf '%s %s\n' "$$" "$(now_epoch)" > "$holder" 2>/dev/null || true
+        return 0
+    fi
+    [ -r "$holder" ] && read -r held_pid held_since < "$holder"
+    case "$held_since" in
+        ''|*[!0-9]*) ;;
+        *) elapsed=$(( $(now_epoch) - held_since )) ;;
+    esac
+    LOCK_NOTE="pid ${held_pid:-unknown}${elapsed:+, ${elapsed}s elapsed}"
+    if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then return 2; fi
+    return 1
+}
+
+sling_fits_budget() { # -> 0 while at least one sling's allowance is left in the pass budget
+    [ "$PASS_BUDGET_SECS" -gt 0 ] || return 0
+    [ $(( PASS_T0 + PASS_BUDGET_SECS - $(now_epoch) )) -ge "$SLING_ALLOWANCE_SECS" ]
+}
+
+# The controller keeps an exec order's output only when it exits non-zero, so a
+# pass that exits 0 having skipped its work, or left some of it, also says so in
+# the per-run file the controller names in GC_ORDER_OUTCOME_FILE. The controller
+# records that declaration as an order.skipped event. Each id after the reason
+# is a bead the pass left armed for the next one.
+declare_outcome() { # <skipped|partial> <reason> [<bead-id>...]
+    [ -n "${GC_ORDER_OUTCOME_FILE:-}" ] || return 0
+    local outcome="$1" reason="$2"; shift 2
+    jq -nc --arg o "$outcome" --arg r "$reason" \
+        '{outcome: $o, reason: $r, scopes: [$ARGS.positional[] | {scope: ., reason: "pass budget spent"}]}' \
+        --args "$@" > "$GC_ORDER_OUTCOME_FILE" 2>/dev/null || true
+}
+
 sling_bead() { # id target args_json -> rc
     local id="$1" target="$2" args_json="$3" a
     local -a extra=()
@@ -557,6 +656,28 @@ cmd_reconcile() {
         shift || true
     done
 
+    PASS_T0="$(now_epoch)"
+    # A dry run writes nothing and slings nothing, so it takes no lock and spends
+    # no budget: it lists every bead a pass would sling, with or without a pass
+    # in flight.
+    if [ "$DRY_RUN" != 1 ]; then
+        local lock_rc=0
+        take_pass_lock || lock_rc=$?
+        case "$lock_rc" in
+            0) ;;
+            1)
+                echo "$PROG: a reconcile pass is already in flight ($LOCK_NOTE) — skipping this tick"
+                declare_outcome skipped "a reconcile pass is already in flight ($LOCK_NOTE)"
+                return 0 ;;
+            2)
+                echo "$PROG: reconcile: the pass lock has been held past ${LOCK_STALL_SECS}s ($LOCK_NOTE) — the pass is wedged and nothing is dispatching" >&2
+                return 1 ;;
+            *)
+                echo "$PROG: reconcile: single-flight UNGUARDED ($LOCK_NOTE) — refusing to read or sling without the pass lock" >&2
+                return 1 ;;
+        esac
+    fi
+
     local rows all_cache
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; rows="$REPLY"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; all_cache="$REPLY"
@@ -564,7 +685,8 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0
+    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0 left=0
+    local -a left_ids=()
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
     local id status ready owncleared json target args_json assignee slung rc merge_result fails
@@ -710,6 +832,16 @@ cmd_reconcile() {
             capped=$((capped + 1)); continue
         fi
 
+        # The pass budget. Past it, the bead keeps its arm exactly as it found it,
+        # with no marker and no attempt counted, and the next pass slings it. The
+        # retires and reports for the rest of the armed set still run.
+        if [ "$DRY_RUN" != 1 ] && ! sling_fits_budget; then
+            if [ "$left" = 0 ]; then
+                echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings this pass"
+            fi
+            left=$((left + 1)); left_ids+=("$id"); continue
+        fi
+
         # Its own blockers are clear but bd held it unready through a blocked or
         # deferred ancestor (the parent-child cascade) — say why a not-ready bead
         # is being slung, so the pass log is legible.
@@ -764,7 +896,11 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
-    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $failed failed (of $expected armed)"
+    if [ "$left" -gt 0 ]; then
+        echo "$PROG: left $left ready bead(s) armed for the next pass: ${left_ids[*]}"
+        declare_outcome partial "pass budget spent: $left ready bead(s) left armed for the next pass" "${left_ids[@]}"
+    fi
+    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
 }
 

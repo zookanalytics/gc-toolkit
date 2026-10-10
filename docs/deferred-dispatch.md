@@ -106,8 +106,9 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 `orders/deferred-dispatch.toml` — a `cooldown` exec order at `scope =
 "rig"`, so each importing rig reconciles its own store on its own clock,
-and the dispatcher's open-tracking gate gives each rig its own
-single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
+one pass at a time (see
+[One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
+Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 - **dispatches** every armed open bead whose own `blocks` edges have all
   closed — the ones `bd` reports ready, and also the ones bd holds unready
@@ -128,7 +129,8 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when the bead
   is still blocked, when someone holds it by `assignee`, when the sling
-  fails, or when the recorded arguments are malformed;
+  fails, when the recorded arguments are malformed, or when the pass has
+  spent its budget;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
   at a non-`open` live status. The record is kept, because the hold may
   yet clear, but it is counted apart from `waiting` and reported rather
@@ -187,6 +189,62 @@ arm whose own `blocks` edges have all closed but that has stayed open and
 armed past the reconcile window, or one armed at a non-open status the pass can
 never dispatch — a dispatch silently not firing, surfaced before a human has to
 notice it days later.
+
+## One pass at a time, inside the timeout
+
+Two passes over one store would sling the same ready bead twice, which
+mints two input convoys for one work bead and bumps its attempt count
+twice. The controller's open-tracking gate keeps a second run from
+starting only while the first run's tracking bead stays open, and a sweep
+can close that bead under a pass that is still running. The core
+`order-tracking-sweep` order closes any tracking bead older than its
+`--stale-after` (10m). On a gc build that does not extend the window to the
+order's timeout, the controller watchdog closes it 2m after dispatch. So
+the pass carries its own lock:
+
+- Before it reads the store, `reconcile` takes a non-blocking exclusive
+  `flock` on `<GC_PACK_STATE_DIR>/deferred-dispatch/<rig>/pass.lock` and
+  records its pid and start time in `pass.holder` beside it. The lock
+  depends on no bead surviving.
+- `gc sling` and `gc bd` inherit the descriptor, so the lock is held for as
+  long as anything the pass started is live. The kernel releases it on any
+  exit, `SIGKILL` included.
+- A pass that finds the lock held prints one line and exits 0 without
+  listing or slinging. Under the order it also declares the run `skipped`
+  in the file the controller names in `GC_ORDER_OUTCOME_FILE`, which the
+  controller records as an `order.skipped` event. The controller keeps an
+  exit-0 run's output nowhere else.
+- A holder older than `DEFERRED_DISPATCH_LOCK_STALL_SECS` (900s) is not a
+  slow pass, because the order's timeout would have killed it. That pass
+  exits 1, so `order.failed` reports the wedge.
+- A pass that cannot take the lock at all exits 1 before it reads the
+  store. That covers `flock` missing from `PATH` and a lock file the pass
+  cannot create or open. Nothing else carries single-flight, so a pass that
+  ran anyway would be the second slinger the lock exists to prevent.
+
+The order's `timeout` kills a pass wherever it stands. A sling killed
+mid-flight has already minted its input convoy, leaves it with no
+workflow, and spends one of the bead's attempts. So a pass measures a
+budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
+0 = unpaced), and starts a sling only while at least
+`DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
+point it starts no sling. Each remaining ready bead keeps its arm as the
+pass found it, with no marker and no attempt counted, and the next pass
+slings it. The pass names the beads it left, counts them as `left for the
+next pass` in its summary, and declares the run `partial`. The retires and
+reports for the rest of the armed set still run.
+
+The budget sits at least one allowance below the timeout, so the last
+sling a pass starts can run for twice its allowance before the timeout
+lands. The stall bound sits above the timeout, so a pass that is still
+running never reads as a wedged one. `deferred-dispatch.test.sh` reads
+these numbers from the files that set them and asserts both pairs. A city
+override that lowers the order's `timeout` has to lower the budget in its
+`env` as well.
+
+`--dry-run` writes nothing and slings nothing, so it takes no lock and
+spends no budget. It lists every bead a pass would sling, whether or not a
+pass is in flight.
 
 ## What this does not do
 

@@ -3,13 +3,22 @@
 # `deferred-dispatch.sh arm` records the owed dispatch ON the bead and this
 # order slings each armed bead once `bd` reports it ready. Exec, not a formula:
 # one `bd list` + one sling per ready bead needs no LLM. Rig-scoped: one pass
-# per importing rig against its own store; the runtime's open-tracking gate is
-# the single-flight guard, so keep `timeout` under the tracking sweep's
-# stale-after (10m). Tune interval from city.toml [[orders.overrides]].
+# per importing rig against its own store.
+# Single-flight is the runtime's open-tracking gate plus a per-rig pass lock the
+# script holds for the life of a pass. The gate holds only while a run's
+# tracking bead stays open, and a controller sweep can close that bead under a
+# pass still running, so never set no_work_gate and never drop the lock.
+# `timeout` gives a pass room to list the armed set, which can take two minutes
+# on a loaded store, and then finish several slings of 30-80s each. The script's
+# pass budget (DEFERRED_DISPATCH_PASS_BUDGET_SECS) starts no sling it cannot
+# finish before the timeout and leaves the rest armed for the next pass, so an
+# override that lowers `timeout` has to lower that budget in its env too.
+# deferred-dispatch.test.sh asserts the budget sits below this timeout and the
+# script's lock-stall bound above it. Tune from city.toml [[orders.overrides]].
 [order]
 description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first"
 trigger = "cooldown"
 interval = "5m"
-timeout = "120s"
+timeout = "600s"
 exec = "$PACK_DIR/assets/scripts/deferred-dispatch.sh reconcile"
 scope = "rig"
