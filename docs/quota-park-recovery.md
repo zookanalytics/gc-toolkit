@@ -123,7 +123,7 @@ wedged during the very incidents this order recovers from. Unbounded, one hung
 capped at `QUOTA_PARK_CALL_TIMEOUT` (a wedged one is skipped, not fatal) and the
 pass as a whole at `QUOTA_PARK_SWEEP_BUDGET`, after which the remainder defers
 to the next cycle rather than overlapping it — reported in the summary line, not
-silently. Same `run_bounded` idiom as `assets/scripts/merge.sh`.
+silently.
 
 **And the bound is a hard one where the host allows it.** `timeout N` sends
 SIGTERM and then *waits*: a child free to ignore the signal runs as long as it

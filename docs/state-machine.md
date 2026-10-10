@@ -574,10 +574,12 @@ summary, and lists `base: integration` beside `status:` in its own colour.
 Checks say whether one review passed. **`pr.machine`** says what the merge cadence
 can do with the anchor as a whole on its next pass, so a reader learns whether an
 anchor is moving without re-implementing two scripts' predicates. Declared in
-`lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh` and
-`merge.sh` through `lifecycle.sh` at the points where each already reaches the
-verdict, from `pre_open_gate` onward — most wedged anchors have no PR number yet,
-so a key written only for open pull requests would miss the majority of them.
+`lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh`
+through `lifecycle.sh`, and by `merge.sh` through the lifecycle writer that
+`gctk merge` runs in-process, at the points where each already reaches the
+verdict, from `pre_open_gate` onward — most wedged anchors have no PR number
+yet, so a key written only for open pull requests would miss the majority of
+them.
 
 | Value | Meaning |
 |---|---|

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # gc-gctk-build.test.sh — the gctk build order's script, on the questions that
-# decide whether lifecycle.sh has a binary to exec. lifecycle.sh execs gctk and
-# has no other implementation, so a build the city cannot perform has to show
-# up as a failed build rather than as a quiet tick.
+# decide whether lifecycle.sh and merge.sh have a binary to exec. Both exec gctk
+# and have no other implementation, so a build the city cannot perform has to
+# show up as a failed build rather than as a quiet tick.
 #   (TOOLLESS) a build owed with no Go toolchain is a FAILED build: exit 1 and a
 #              last_build_rc=1 record, under --deploy too, so the board's PACK
 #              row reports it

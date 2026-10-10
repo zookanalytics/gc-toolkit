@@ -3,14 +3,15 @@
 # request carries a standing approval from an account other than the city's, and
 # whether a standing request for changes vetoes it.
 #
-# Sourced (never executed) by the readers that act on a PR's approval: merge.sh
-# (the universal approval merge rule and the visit order that predicts it),
+# Sourced (never executed) by the shell readers that act on a PR's approval:
 # pr-facts.sh (the conflict arm brings a branch current only for an approved
 # PR) and bring-current-guard.sh (an approved PR whose bring-current took
 # judgment loses the approval). One definition, no copies:
 # review-verdict.test.sh fails when a reader stops sourcing this file or
-# carries a rule of its own. The Go port of merge.sh (services/gctk) states the
-# same rule natively, and merge.test.sh runs every approval case against both.
+# carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
+# reviewVerdict) states the same rule natively for the universal approval merge
+# rule and the visit order that predicts it, and merge.test.sh runs both over
+# the same review histories and fails when their verdicts differ.
 #
 # The input is a list of reviews in the REST shape that
 # `GET /repos/{owner}/{repo}/pulls/{n}/reviews` returns: `.user.login`,

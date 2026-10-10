@@ -544,9 +544,10 @@ resolve_live_subject() {
 # bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
 # --metadata-field mangles a numeric value into non-JSON here. A URL additionally
 # pins the repo, so a bare number several repos share is disambiguated by it.
-# The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
-# an anchor is live in deferred/hooked/pinned too, so a narrower query would
-# fail to resolve a PR whose bead sits in one of those states. The number's
+# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh,
+# mergeLiveStatuses in gctk merge): an anchor is live in deferred/hooked/pinned
+# too, so a narrower query would fail to resolve a PR whose bead sits in one of
+# those states. The number's
 # uniqueness holds only across EVERY live store, so any rig the search cannot
 # fully read refuses the whole resolution (exit 4) naming that ledger, rather
 # than resolve from the stores that answered while a dropped one may also record

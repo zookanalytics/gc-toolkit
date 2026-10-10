@@ -235,9 +235,10 @@ gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
 SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
 
 # Which status checks actually gate <branch>. The red-check arm routes on the
-# same set merge.sh holds a merge on, so this is a byte-identical copy of
-# merge.sh's function between the markers below; a test proves the two never
-# drift.
+# same set gctk merge holds a merge on (requiredContextsFor in
+# services/gctk/internal/cli/merge.go). merge.test.sh runs the function between
+# the markers below and gctk merge over the same fixtures and fails when the two
+# read different sets.
 REQ_STATE=""; REQ_CONTEXTS=""
 # >>> required-contexts-for
 required_contexts_for() { # <branch>
@@ -316,7 +317,7 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person owes an answer here
 # routine hygiene only when the anchor is otherwise heading to merge. An anchor a
 # live blocker holds is not: a plain depends-on edge on another PR, an in-flight
 # review, a demand a person owes. Rebasing under one performs work the merge is
-# already held on ("a dep-edge holder holds regardless" — merge.sh), one horn of a
+# already held on (gctk merge holds on any dep-edge blocker), one horn of a
 # decision the operator has not made, or a head moved out from under a live
 # review. takeaway_is_holding catches the demand; a closed demand on an anchor
 # still blocked by an ordinary prerequisite does not read there, and this reads
@@ -563,8 +564,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
-# The approval rule merge.sh lands on, REVIEW_VERDICT_DEF; the conflict arm
-# brings only an approved PR current.
+# The approval rule the merge lands on, REVIEW_VERDICT_DEF; the conflict arm
+# brings only an approved PR current. gctk merge states the rule natively, and
+# merge.test.sh holds the two to one verdict.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
@@ -1429,7 +1431,7 @@ while IFS= read -r tagged; do
     fi
   fi
 
-  # --- pinned identity read (merge.sh's field set, plus labels) -----------------
+  # --- pinned identity read (the merge arm's field set, plus labels) ------------
   if [ "$SHORT" = 1 ]; then
     PR_JSON="${OPEN_PR[$num]}"
   else
@@ -2174,7 +2176,7 @@ REAP_EOF
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
-      # by the same rule merge.sh lands on (review-verdict.sh).
+      # by the rule review-verdict.sh defines, the one the merge lands on.
       # Each bring-current costs a polecat round and a fresh CI run, and it goes
       # stale again whenever main moves, while a PR nobody approved cannot land
       # however current its branch is. So its conflict waits for the approval,

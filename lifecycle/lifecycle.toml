@@ -88,7 +88,8 @@ meaning = "no commits on branch; routed to human"
 status = "open"
 meaning = "a sitting is waiting on an operator decision; routed to human"
 
-# Transitions. Every edge names its writer; lifecycle.sh performs the write.
+# Transitions. Every edge names its writer; the lifecycle writer performs the
+# write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
 from = "unanchored"
@@ -202,7 +203,8 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # it does not hide its author's older approval. No check.approval marker and no
 # check_set token arm or opt out of it; GitHub branch protection is an extra
 # layer, not the authority. Declaration only, like the rest of this section (the
-# rule lives in merge.sh).
+# rule lives in gctk merge's reviewVerdict, and in review-verdict.sh for the
+# shell readers).
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -335,7 +337,7 @@ machine_key = "pr.machine"
 machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
-writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
+writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
 
 [dated_keys]
 # Keys in the shape <value>@<oid>@<since>. The queue the helm board renders is

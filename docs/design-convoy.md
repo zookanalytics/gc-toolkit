@@ -86,16 +86,17 @@ it was given and stands across later pushes until someone dismisses it, so a
 push to an approved PR does not wait for a second approval. A standing
 CHANGES_REQUESTED from any other account vetoes the merge. `merge.sh` enforces
 this as a universal merge rule: it is armed for every PR and named by no
-`check_set` token (`assets/scripts/merge.sh`), and GitHub branch protection is
-an extra layer, not the authority. The design child's checkpoint PR, each
+`check_set` token (`gctk merge`, which `assets/scripts/merge.sh` execs), and
+GitHub branch protection is an extra layer, not the authority. The design child's checkpoint PR, each
 child's PR onto the integration branch, and the graduation PR all pass through
 it. The pattern's two gates are the two approvals that decide what moves next.
 
-The rule is the default branch's `merge.sh`, the copy the refinery runs from
-its deployed pack, and it gates PRs onto an integration branch as well. An
-integration branch's own copy of `merge.sh` can predate the rule. The refinery
-never runs that copy, and a convoy that changes no `merge.sh` leaves the default
-branch's version in place when it graduates.
+The rule is the default branch's `gctk merge`, the binary the `gctk-build`
+order builds from the deployed pack the refinery runs, and it gates PRs onto an
+integration branch as well. An integration branch's own copy of `services/gctk`
+can predate the rule. The refinery never runs a build of that copy, and a convoy
+that changes nothing under `services/gctk` leaves the default branch's version
+in place when it graduates.
 
 **Gate 1, the design checkpoint** (design-gated only). The design child's doc
 lands on the integration branch through a checkpoint PR onto that branch, and

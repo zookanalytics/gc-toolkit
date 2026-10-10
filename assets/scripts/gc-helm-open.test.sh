@@ -765,8 +765,9 @@ grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candid
 
 # (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
 # resolves too. The resolver's status set must be the pack's live-PR set
-# (open,in_progress,blocked,deferred,hooked,pinned), matching pr-facts.sh:247 and
-# merge.sh:126; the narrow open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS
+# (open,in_progress,blocked,deferred,hooked,pinned), matching LIVE_STATUSES in
+# pr-facts.sh and mergeLiveStatuses in gctk merge; the narrow
+# open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS
 # is visible only to the widened query, so this is red before the fix (the narrow
 # query finds nothing and exits 4) and green after.
 FAKE_PR_ROWS='[]'

@@ -770,7 +770,7 @@ STRAY
   # already derives each lane as green (settled) or short of green; these two
   # flags keep that answer instead of discarding it at the end of the iteration.
   #
-  # The cap's wedge — shared with merge.sh's is_held arm — is evaluated once
+  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
   # HERE, per anchor, not inside the per-check loop: the park sits on the
   # anchor's own merge_hold, not on any one lane, so a fully green capped
   # anchor (one check hand-greened, or all of them) must still record the

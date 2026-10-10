@@ -86,10 +86,10 @@ func TestJqHasToStringMirrorsHasThenToString(t *testing.T) {
 
 // A re-read of an UNKNOWN merge state may differ from the pinned read only in
 // the mergeability facts, and the hold names every other field that changed.
-// The comparison is gh_pr_view_settled's jq `!=`, so key order and number
+// The comparison is jq's `!=` on the decoded values, so key order and number
 // spelling are no change, and a key one read lacks reads as null. Each want is
-// what that jq prints for the same two reads.
-func TestChangedFieldsMirrorsTheScriptsComparison(t *testing.T) {
+// what jq prints for the same two reads.
+func TestChangedFieldsComparesAsJqDoes(t *testing.T) {
 	row := func(raw string) map[string]json.RawMessage {
 		var r map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &r); err != nil {
@@ -123,8 +123,8 @@ func TestJqAltStringMirrorsAlternativeThenToString(t *testing.T) {
 }
 
 // MERGE_STATE_REREADS and MERGE_STATE_REREAD_SECS take their default unless the
-// value is all digits, as bd-lib.sh's case guard does, so a negative or garbled
-// value cannot lift the pass's re-read budget.
+// value is all digits, so a negative or garbled value cannot lift the pass's
+// re-read budget.
 func TestEnvCountTakesTheDefaultUnlessAllDigits(t *testing.T) {
 	for _, tc := range []struct {
 		val  string
@@ -141,9 +141,8 @@ func TestEnvCountTakesTheDefaultUnlessAllDigits(t *testing.T) {
 
 // A binary run without GCTK_SCRIPTS_DIR refuses the pass: every helper would be
 // a bare name, found through PATH if at all. A named directory is not refused
-// for a helper it lacks, because merge.sh has no such pass-level check. A
-// missing helper fails where it is called, and the pass still records a PR
-// that has already merged (merge.test.sh pins that in both arms).
+// for a helper it lacks: a missing helper fails where it is called, and the
+// pass still records a PR that has already merged (merge.test.sh pins that).
 func TestHelperDirProblemRefusesOnlyAnUnsetDirectory(t *testing.T) {
 	if p := helperDirProblem(""); !strings.Contains(p, "GCTK_SCRIPTS_DIR is unset") {
 		t.Errorf("unset dir: problem = %q, want the unset diagnosis", p)
@@ -232,10 +231,10 @@ func TestAnchorRowReadsTheStoreNotTheSupervisorCache(t *testing.T) {
 	}
 }
 
-// merge.sh's loop: --deadline and --cursor each take the argument after them,
-// even one that looks like a flag, and anything else is passed over. A flag
-// that ends the arguments reads as empty.
-func TestMergePaceArgsReadsTheFlagsAsMergeShDoes(t *testing.T) {
+// --deadline and --cursor each take the argument after them, even one that
+// looks like a flag, and anything else is passed over. A flag that ends the
+// arguments reads as empty.
+func TestMergePaceArgsTakesTheArgumentAfterEachFlag(t *testing.T) {
 	for _, tc := range []struct {
 		args             []string
 		deadline, cursor string
