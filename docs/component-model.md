@@ -359,7 +359,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize; leaves reviews, human visits, and the anchor itself alone. No merge authority. |
+| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize, and carries a finding that can cite code the target branch already carries forward to a bug bead instead of mooting it. `pr-facts.sh` runs it for one anchor before consummating that anchor's PR-close disposition. Leaves reviews, human visits, operator freezes, and the anchor itself alone. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches, and of never-dispatched rework twins whose same-review sibling landed, via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR current with its anchor — the branch-beads section, the `pr-summary` region a rework moved past, and the title composed from the anchor's. Writes only PR bodies and titles. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |

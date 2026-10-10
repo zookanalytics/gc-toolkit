@@ -515,18 +515,27 @@ the cadence — the arms run whether or not any refinery session is awake.
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
    machine review scaffolding does not close with it: the validation pass, the
    finding beads, and the rework/fix-unit beads stay open, each holding a
-   `blocks` edge on the anchor or on a rework that blocks it, and each holding
-   gate-ensure's quiescence, so the disposed anchor stands stuck behind work that
-   will never land. Nothing else retires them on a disposal: `close-answered`
-   keys on a fix LANDING, and `review-sweep` on an anchor already closed. This
-   arm closes each `task_kind=validation|finding|rework` bead whose `anchor_bead`
-   names a disposed, non-merged anchor — `gc.outcome=moot`, the reason appended,
-   read back — findings before the reworks they block so a rework's close is not
-   refused the same pass. It leaves `task_kind=review` to review-sweep and
-   `task_kind=visit` to the human side, and never closes the anchor itself: that
-   is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh` while a human
-   visit is owed — which clearing the machine scaffolding here lets land once no
-   visit is. A merged anchor is a landing, never a disposal, and is skipped.
+   `blocks` edge on the anchor (a fix unit also blocks the must-fix findings it
+   answers), and each holding gate-ensure's quiescence, so the disposed anchor
+   stands stuck behind work that will never land. Nothing else retires them on a
+   disposal: `close-answered` keys on a fix LANDING, and `review-sweep` on an
+   anchor already closed. This arm closes each
+   `task_kind=validation|finding|rework` bead whose `anchor_bead` names a
+   disposed, non-merged anchor — `gc.outcome=moot`, the reason appended, read
+   back — reworks before the findings they block so a finding's close is not
+   refused the same pass. A finding is mooted only when it objects to the
+   disposed diff. A human review comment on a line the PR left unchanged can
+   cite code the target branch already carries, so its finding is carried
+   forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
+   inline comments are read once per anchor that carries such a candidate. It
+   leaves `task_kind=review` to review-sweep, `task_kind=visit` to the human
+   side, and a `rebase_hold` freeze to the operator, and never closes the anchor
+   itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
+   while a human visit is owed — which clearing the machine scaffolding here
+   lets land once no visit is. Arm 7 runs this same sweep with `--anchor` for
+   the one anchor whose PR-close disposition it is consummating, just before
+   that close, so the close lands in the pass that reads the closed PR. A
+   merged anchor is a landing, never a disposal, and is skipped.
 11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
