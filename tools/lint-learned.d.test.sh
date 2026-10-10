@@ -12,7 +12,7 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded.
+# id-read-unguarded, create-then-stamp.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -1913,6 +1913,121 @@ plantpp "$TMP/pp-exempt/specs/record.md" <<'FIX'
 FIX
 runpp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh" "$TMP/pp-exempt/specs/record.md"
 eq "$RC" 0 "pr-post.sh, lint-learned.d/ and specs/ are skipped"
+
+echo "── create-then-stamp: what is a finding ──"
+
+# Fixtures spell the create @CREATE@ and the stamp flag @STAMP@, for the reason
+# the other detectors use placeholders: the runner scans this file too.
+DET_CS="$HERE/lint-learned.d/create-then-stamp.sh"
+[ -x "$DET_CS" ] || { echo "no detector at $DET_CS"; exit 1; }
+runcs() { OUT="$("$DET_CS" "$@" 2>&1)"; RC=$?; }
+plantcs() { sed -e 's/@CREATE@/bd create/g' -e 's/@STAMP@/--set-metadata/g' > "$1"; }
+
+# The shapes a bare create followed by its stamp takes: the id read straight
+# off the create, a continued create whose reply a second substitution reads
+# the id out of, a wrapper inside a function, and a stamp on a continued line.
+plantcs "$TMP/cs-stamp.sh" <<'FIX'
+#!/usr/bin/env bash
+X=$(gc @CREATE@ "t" -t task --json | jq -r '.id')
+gc bd update "$X" @STAMP@ task_kind=review
+V_JSON=$(gc @CREATE@ -t task --title "visit: s" \
+  -d "body" --json)
+V=$(printf '%s' "$V_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end')
+gc bd update "$V" @STAMP@ "gc.routed_to=human" \
+  @STAMP@ task_kind=visit
+f() {
+  local id
+  id=$(gc_bd create "t" --json | jq -r .id)
+  [ -n "$id" ] && gc bd update "${id}" --status=closed @STAMP@ k=v
+}
+FIX
+runcs "$TMP/cs-stamp.sh"
+eq "$RC" 1 "a file that stamps a bare create's bead exits 1"
+has "$OUT" "cs-stamp.sh:3:" "a stamp on the id read off the create is reported"
+has "$OUT" "cs-stamp.sh:7:" "a stamp on an id read out of the create's reply is reported"
+has "$OUT" "cs-stamp.sh:12:" "a wrapper create inside a function is tracked to its stamp"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "and nothing else is"
+has "$OUT" "create-then-stamp" "the finding names the rule"
+has "$OUT" "at line 2 " "the finding names the create's line"
+has "$OUT" "fix: carry the keys on the create" "the finding names the fix"
+
+# A formula recipe is run as written: a fenced create whose body spans lines,
+# then its stamp, is a finding.
+plantcs "$TMP/cs-recipe.toml" <<'FIX'
+description = """
+Prose may say gc @CREATE@ then gc bd update $X @STAMP@ and it is not a finding.
+```bash
+OBS_JSON=$(gc @CREATE@ "obs: x" -t task -d "## Statement
+a body over two lines" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r '.id // empty')
+gc bd update "$OBS" @STAMP@ task_kind=observation --status=closed
+```
+"""
+FIX
+runcs "$TMP/cs-recipe.toml"
+eq "$RC" 1 "a fenced recipe that stamps its bare create exits 1"
+has "$OUT" "cs-recipe.toml:7:" "the fenced stamp is reported past a multi-line body"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "prose outside a fence is not"
+
+echo "── create-then-stamp: what is not ──"
+
+# A create that carries its metadata may be followed by any write; a bead the
+# variable no longer holds, a write with no stamp, a stamp in another command,
+# and the shape held as data (a message, a comment, a here-doc) are clean.
+plantcs "$TMP/cs-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(gc @CREATE@ "t" -t task --metadata "$META" --json | jq -r '.id')
+gc bd update "$A" @STAMP@ gc.routed_to=pool
+B=$(gc @CREATE@ "t" --json | jq -r '.id')
+B="$reused"
+gc bd update "$B" @STAMP@ k=v
+C=$(gc @CREATE@ "t" --json | jq -r '.id')
+gc bd update "$C" --status=closed --append-notes "done"
+gc bd update "$OTHER" @STAMP@ k=v
+gc bd update "$C" --status=open && gc bd update "$D" @STAMP@ k=v
+echo "repair: gc bd update $C @STAMP@ k=v"
+# gc bd update "$C" @STAMP@ k=v
+cat <<EOF
+gc bd update "$C" @STAMP@ k=v
+EOF
+E=$(bd_create "$META" "t" -t task)
+gc bd update "$E" @STAMP@ k=v
+g() { F=$(gc @CREATE@ "t" --json | jq -r .id); }
+h() { gc bd update "$F" @STAMP@ k=v; }
+FIX
+runcs "$TMP/cs-clean.sh"
+eq "$RC" 0 "stamped creates, reassigned and other ids, unstamped writes, data and another function are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+# A fence boundary ends the recipe, so a create in one fence does not reach a
+# stamp in the next.
+plantcs "$TMP/cs-fences.md" <<'FIX'
+```bash
+X=$(gc @CREATE@ "t" --json | jq -r .id)
+```
+
+```bash
+gc bd update "$X" @STAMP@ k=v
+```
+FIX
+runcs "$TMP/cs-fences.md"
+eq "$RC" 0 "a create and a stamp in separate fences are clean"
+
+echo "── create-then-stamp: scope ──"
+
+mkdir -p "$TMP/cs-scope/specs/tk-x" "$TMP/cs-scope/generated/agents" "$TMP/cs-scope/lint-learned.d"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/specs/tk-x/repro.sh"
+cp "$TMP/cs-recipe.toml" "$TMP/cs-scope/generated/agents/recipe.toml"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/lint-learned.d/other-detector.sh"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/stamp.go"
+runcs "$TMP/cs-scope/specs/tk-x/repro.sh" "$TMP/cs-scope/generated/agents/recipe.toml" \
+    "$TMP/cs-scope/lint-learned.d/other-detector.sh" "$TMP/cs-scope/stamp.go" "$TMP/cs-scope/missing.sh"
+eq "$RC" 0 "specs/, generated/, the detector directory, other file types and missing paths are skipped"
+
+echo "── create-then-stamp: a detector that cannot scan says so ──"
+OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_CS" "$TMP/cs-stamp.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan it" "and says which file it could not scan"
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"

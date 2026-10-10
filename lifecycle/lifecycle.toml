@@ -616,10 +616,14 @@ keys = [
 # anchor_bead — the gating anchor a review, rework, finding or visit child
 #   names, so every reader can enumerate an anchor's children by
 #   `--metadata-field anchor_bead=<id>`. Written by gate-ensure.sh, finding.sh,
-#   review-outcome.sh, signoff.sh and pr-facts.sh. Empty on a child is the
-#   unstamped-orphan signal those readers adopt; on a review bead signoff.sh
-#   falls back to the up `blocks` edge and refuses the verdict if none resolves.
-#   Never cleared. A bead id.
+#   review-outcome.sh, signoff.sh, pr-facts.sh, pre-open-rebase.sh and
+#   visit-close.sh. A review, rework, finding or validation child carries it
+#   from the create that files it (tools/lint-learned.d/create-then-stamp.sh
+#   holds that), so no child exists without it; pr-facts.sh stamps it onto the
+#   visit escalate.sh files for unengaged review threads. pr-facts.sh's
+#   red-check arm still adopts an open child of its own title whose anchor_bead
+#   is empty. On a review bead signoff.sh falls back to the up `blocks` edge and
+#   refuses the verdict if none resolves. Never cleared. A bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.
