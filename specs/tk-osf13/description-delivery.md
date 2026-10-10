@@ -102,10 +102,13 @@ design, so neither is observable at runtime):
 - `cut -c` truncates per **line**, so it does not bound a multi-line
   description at all. Only a whole-payload cap (`head -c`) does.
 
-`doctor/check-work-context-hook` guards the wiring, and scores code with
-comments stripped — both the hook and the check explain these traps in
-prose, so a comment-inclusive grep would score the explanation as the
-fix and stay green after the code line was deleted.
+`doctor/check-work-context-hook` guards the wiring by running it: it
+copies the polecat agent's overlay into a scratch work dir, runs the
+PostToolUse command that overlay registers for Bash on a simulated claim
+of a formula step with a stub `gc`, and requires the work bead's
+description back as `additionalContext`. The simulated claim arrives in
+the object shape, so a missing unescape fails the check; the size cap is
+exercised only by the behavior test.
 
 **Scope limits, stated plainly.** The overlay is Claude-only, so the
 `polecat-codex` pool (`provider = "codex"`) is unaffected; the hook
