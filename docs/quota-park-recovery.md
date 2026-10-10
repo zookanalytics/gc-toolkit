@@ -20,10 +20,11 @@ Bug: `tk-al95k`.
 ## Mechanism
 
 `orders/quota-park-nudge.toml` runs `assets/scripts/quota-park-nudge.sh` every
-3m, `scope = "city"` — no LLM, no agent, no wisp. For each session the
+5m, `scope = "city"` — no LLM, no agent, no wisp. For each session the
 controller believes is alive (`state=active`, not `attached` — a human at the
-pane can act for themselves), it captures the pane tail and calls it **parked**
-when all of these hold:
+pane can act for themselves), it captures the pane tail, unless the session
+list vouches for that pane (below), and calls it **parked** when all of these
+hold:
 
 - a provider limit banner matches in the last 12 lines (`QUOTA_PARK_TAIL_LINES`)
   — below a real banner there is only prompt chrome, so a match further up is
@@ -66,15 +67,15 @@ Refusing that immediate retry is only half of it, because the same ambiguity
 outlives the cycle. A nudge whose bound expired is recorded as **unconfirmed**:
 it advances the retry pacing (`last_try`, and the doubling exponent) without
 being counted as a delivery in `attempts`, the figure the escalation reports to
-a human. Left out of both, as an earlier version did, the next 3m pass reads
+a human. Left out of both, as an earlier version did, the next 5m pass reads
 `attempts=0`, treats a session it may well have just nudged as never nudged,
 skips the backoff and sends the second resume message anyway — the duplicate
 simply arrives one cycle later. Paced, not muted: once the window elapses the
 retry does go out, since an unconfirmed nudge may equally well never have
 landed. A fast rejection is different and is *not* paced — nothing was
-delivered, so the next cycle retries in 3m and cannot duplicate.
+delivered, so the next cycle retries in 5m and cannot duplicate.
 
-Two selection rules are load-bearing enough to state on their own:
+Three selection rules are load-bearing enough to state on their own:
 
 **Liveness is `.state`, never `.running`.** `running` is null for an active
 session during controller churn, so a `running == true` filter drops exactly
@@ -82,6 +83,38 @@ the live sessions it means to select — and a quota-parked one in that state
 would never be peeked at all. The helm's owner-liveness join keys off `.state`
 for the same reason (`assets/scripts/gc-helm.sh`, with a `running: null` case
 pinned in `tools/helm-surface-fixture.sh`); this order follows it.
+
+**A pane is peeked only when the session list cannot vouch for it.** A pass
+reads `gc session list` once, and every `gc session peek` is a CLI call of its
+own. The list's `last_active` is the time of each pane's last output, with gc's
+own keystroke echo discounted, and it settles most sessions without a peek in
+one of two ways. A pane that printed within `QUOTA_PARK_ACTIVE_WITHIN` (60s) of
+the list read is working, not sitting idle under a banner. A pane with no output
+since this order last read it clean, and quiet when that read was taken, still
+shows the screen that was read. The list vouches for neither unless three things
+also hold. Nothing sits at the session's state path, because an episode is
+always peeked. The pane was read clean within `QUOTA_PARK_REPEEK_AFTER` (1h).
+No nudge has been delivered since the list behind that read
+(`last_nudge_delivered_at`), because the echo discount also swallows a banner
+printed within gascity's `pokeEcho` (3s) of a nudge. A session the list vouches
+for is classified, so `--status` answers `no` for it. One whose output time is
+missing, zero, unparseable or later than the list read is always peeked.
+
+The read must be taken while the pane is quiet because of when the discount
+lands. For `pokeGrace` (15s) after a keystroke, `last_active` still counts gc's
+echo. After that, if nothing has printed later than `pokeEcho` past the
+keystroke, it falls back to the time before it, and any output inside that
+`pokeEcho` goes with it. A read of a pane that printed just before the list may
+sit inside that window. A pane quiet for `QUOTA_PARK_ACTIVE_WITHIN` has none
+open, so a read of it records that the pane was quiet, and "no output since" is
+then a fact about its screen. The reads are kept in `.pane-reads`, one
+`<session-id> <list-time> <quiet>` line per session, rewritten every pass.
+
+`QUOTA_PARK_REPEEK_AFTER` bounds the one gap left. A keystroke gc sends without
+stamping a nudge delivery, answered by a banner within `pokeEcho`, leaves
+`last_active` where it was, and nothing else on the list moves. Every pane is
+read at least that often, so such a park waits at most that long for its first
+nudge. `QUOTA_PARK_REPEEK_AFTER=0` peeks every pane on every pass.
 
 **Every `gc` call is bounded.** The order runner applies no timeout of its own,
 and these calls go through the runtime and Dolt — the layers most likely to be
@@ -114,7 +147,7 @@ on. `gc session list` returns a stable order and every hung peek costs a whole
 `CALL_TIMEOUT`, so a sweep that always starts at the top pays for the same
 unreadable prefix first on every cycle and defers the same tail on every cycle —
 eight slow sessions at the defaults (8 × 15s = the 120s budget) and the rest of
-the city is never inspected at all, while the summary line reports a healthy 3m
+the city is never inspected at all, while the summary line reports a healthy 5m
 sweep over it. The starving prefix and the parked agent behind it are exactly
 the sessions this order exists for, so this is the bug eating itself.
 
@@ -135,7 +168,7 @@ rare shape for a filename. A bare `rm -f "$STATE_DIR/<id>"` is therefore not
 "end the episode" but "delete whatever is at that name" — reproduced during
 review with an unrelated regular file at `$STATE_DIR/lx-clean`, destroyed by one
 clean sweep. The week-old prune below already had a narrow ownership test;
-what it did not have was the every-three-minutes paths using it. Now all three
+what it did not have was the every-five-minutes paths using it. Now all three
 share one: directly in `STATE_DIR`, a regular file and not a symlink, named like
 the ids we write (`safe_id`), carrying this order's own marker as its first line.
 Anything failing one of them is somebody else's and is left alone.
@@ -248,7 +281,7 @@ patrols read it through a closed-field surface:
 $ quota-park-nudge.sh --status lx-gsnfk
 heartbeat_age=48
 heartbeat_fresh=1
-stale_after=600
+stale_after=1800
 session=lx-gsnfk quota_park=yes detector_class=possessive-limit age_s=8400 parked_for=2h20m attempts=5 unconfirmed=0 escalated=1 last_seen_age=48 reason=-
 ```
 
@@ -262,7 +295,7 @@ The verdict a patrol acts on:
 | `quota_park` | Meaning | Patrol action |
 |---|---|---|
 | `yes` | Confirmed parked within `STALE_AFTER`, and being nudged | **Defer** the warrant this cycle, logged. A bounded defer, not a standing suppression |
-| `no` | This order **classified that session** within `STALE_AFTER` and found no park (or it is excluded from recovery) | Normal warrant path |
+| `no` | This order **classified that session** within `STALE_AFTER`, from its pane or from the session list, and found no park (or it is excluded from recovery) | Normal warrant path |
 | `unknown` | No verdict to give; `reason` says which kind of nothing | Normal warrant path — see below |
 
 `unknown` is the field that keeps this honest, and it is deliberately not folded
@@ -443,7 +476,9 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call, a fraction allowed (e.g. `0.5`), rounded up to a whole second where `timeout(1)` parses only whole seconds; `0` disables the bound |
 | `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM, a fraction allowed (rounded up like `CALL_TIMEOUT` where `timeout(1)` is integer-only); must be > 0 (`timeout -k 0` is accepted and would silently restore the soft bound) |
 | `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers, a fraction allowed and honored on any host (it runs on the sweep clock, not `timeout(1)`); `0` disables |
-| `QUOTA_PARK_STALE_AFTER` | `600` | how long `--status` treats a sweep and a sighting as evidence; must be ≥ 1 |
+| `QUOTA_PARK_STALE_AFTER` | `1800` | how long `--status` treats a sweep and a sighting as evidence: room for one slow gap and a missed pass, since the controller's per-tick dispatch budget can hold a 5m order's passes more than fifteen minutes apart; must be ≥ 1 |
+| `QUOTA_PARK_ACTIVE_WITHIN` | `60` | seconds since a pane's last output within which the session list counts it as working, and the quiet a pane read needs before "no output since" vouches for it; must be ≥ 1, and below `pokeGrace` (15) a read can land inside gc's echo window |
+| `QUOTA_PARK_REPEEK_AFTER` | `3600` | the longest the session list vouches for a pane before it is peeked again; `0` peeks every pane every pass |
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |
 
 Every numeric knob above is validated once, up front, and falls back to its
@@ -463,15 +498,15 @@ bad backoff bypasses backoff (`[: oops: integer expression expected` reads as
 in a tuning knob must not be able to switch off city-wide recovery quietly.
 
 The floor is why `0` is not simply "an integer, therefore fine". Zero is the
-documented off switch for exactly three knobs — `CALL_TIMEOUT` (unbounded
-calls), `SWEEP_BUDGET` (no per-pass budget) and `ESCALATE_AFTER` (never
-escalate) — and those keep a floor of `0`. Everywhere else zero is a typo that
-disables recovery while looking deliberate: `TAIL_LINES=0` makes `tail -n 0`
-print nothing, so nothing is ever detected as parked; `PEEK_LINES=0` empties
-every capture, which reads as an unreadable pane; `BACKOFF_BASE=0` or
-`BACKOFF_CAP=0` collapses the retry window and nudges every parked pane on every
-sweep, forever. Those knobs have a floor of `1` and fall back exactly as they do
-for `oops`.
+documented off switch for exactly four knobs — `CALL_TIMEOUT` (unbounded
+calls), `SWEEP_BUDGET` (no per-pass budget), `ESCALATE_AFTER` (never escalate)
+and `REPEEK_AFTER` (peek every pane every pass) — and those keep a floor of `0`.
+Everywhere else zero is a typo that disables recovery while looking
+deliberate: `TAIL_LINES=0` makes `tail -n 0` print nothing, so nothing is ever
+detected as parked; `PEEK_LINES=0` empties every capture, which reads as an
+unreadable pane; `BACKOFF_BASE=0` or `BACKOFF_CAP=0` collapses the retry window
+and nudges every parked pane on every sweep, forever. Those knobs have a floor
+of `1` and fall back exactly as they do for `oops`.
 
 The three pattern knobs are validated the same way and for a sharper reason:
 `grep` answers a malformed ERE with rc 2, and every test in the sweep reads a
@@ -490,13 +525,13 @@ everything would leave the whole city unrecovered from a typo.
 existing symlink or FIFO. `QUOTA_PARK_STATE_DIR` is a shared runtime directory
 whose location is an override, and every path under it is named by a session id,
 so an entry planted beside our state would have this order writing wherever it
-points — as the order's user, on every 3m sweep — and a FIFO would block the
+points — as the order's user, on every 5m sweep — and a FIFO would block the
 open, hanging a sweep that is otherwise carefully bounded. Every write (episode
-state, `.heartbeat`, `.sweep-cursor`, `.sweep-coverage`) goes to a `mktemp` file
-created `O_EXCL` and is then `rename(2)`d into place, which replaces the
-directory entry whatever type it is. Reads refuse to follow a symlink for the
-same reason, so a planted link reads as *no state* and is destroyed by the next
-write rather than being parsed as this order's own record.
+state, `.heartbeat`, `.sweep-cursor`, `.sweep-coverage`, `.pane-reads`) goes to
+a `mktemp` file created `O_EXCL` and is then `rename(2)`d into place, which
+replaces the directory entry whatever type it is. Reads refuse to follow a
+symlink for the same reason, so a planted link reads as *no state* and is
+destroyed by the next write rather than being parsed as this order's own record.
 
 The week-old cleanup of the state directory is deliberately narrow for the same
 "this is a city-scoped order" reason: `QUOTA_PARK_STATE_DIR` is an override and
@@ -516,9 +551,10 @@ measure: mtime says when the file was last written, `last_seen` says when a swee
 last confirmed the park.
 
 The order's own non-episode files live there as well: `.sweep-cursor` (where the
-next pass starts), `.heartbeat` (that a pass ran, and what it saw) and
-`.sweep-coverage` (which sessions it classified). Every name begins with a dot,
-which `safe_id` rejects — so no session can be given a state file that collides
+next pass starts), `.heartbeat` (that a pass ran, and what it saw),
+`.sweep-coverage` (which sessions it classified) and `.pane-reads` (which panes
+it read clean, and when). Every name begins with a dot, which `safe_id`
+rejects — so no session can be given a state file that collides
 with one, the prune never considers them as episodes, and `--status` never
 reports one as a parked session. The same is true of the `.qpn-tmp.<pass>.*`
 files the atomic writes go through; a pass killed between the `mktemp` and the
@@ -537,6 +573,6 @@ silently as a broken detector, and no other test in the pack reads that file.
 
 The bug report preferred a controller-side fix, because it would cover every
 agent class and not depend on patrol cadence. A city-scoped exec order has both
-properties — it sweeps every session on its own 3m clock, independent of any
+properties — it sweeps every session on its own 5m clock, independent of any
 agent — and it lives in this pack, where the Go controller does not. If quota
 handling later moves into the controller, this order is the thing to retire.

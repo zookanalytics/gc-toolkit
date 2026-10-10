@@ -6,10 +6,11 @@
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
 # `gc.dispatch_when_ready` (armed, so the deferred-dispatch reconcile order
-# slings it the moment bd reports it ready). A blocked work bead with NEITHER
-# is the "unrouted-and-remember" anti-pattern: when its blocker closes it
-# becomes ready and no queue is offered it, so it waits on a person to notice
-# and route it by hand.
+# slings it the moment bd reports it ready). Both keys come from the one
+# definition of a dispatch path, assets/scripts/dispatch-path.sh, which this
+# check sources. A blocked work bead with NEITHER is the "unrouted-and-remember"
+# anti-pattern: when its blocker closes it becomes ready and no queue is offered
+# it, so it waits on a person to notice and route it by hand.
 #
 # `gc.execution_routed_to` is NOT a dispatch path: it is execution provenance
 # for workflow/control-dispatch flows, not a queue a worker or the pool-demand
@@ -73,6 +74,15 @@ WORK_TYPES=" bug feature task chore spike "
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from stranded work."
+    exit 1
+}
+# What counts as a dispatch path, from the one definition shared with the
+# proactive scan and check-step-terminal. Exposes $DISPATCH_PATH_JQ. An
+# unsourceable one warns: without it no bead can be told to have a dispatch path.
+# shellcheck source=../../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a routed or armed bead cannot be told from stranded work."
     exit 1
 }
 
@@ -157,9 +167,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/standing/step/workflow-topology/demand; not a
-    # merge anchor; an allowlisted work issue_type), AND carrying no route, AND
-    # not armed.
-    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ"'
+    # merge anchor; an allowlisted work issue_type), AND carrying no dispatch
+    # path (has_dispatch_path: no route and no arm).
+    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
@@ -171,8 +181,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
-        | select(($m["gc.routed_to"] // "") == "")
-        | select(($m["gc.dispatch_when_ready"] // "") == "")
+        | select(($b | has_dispatch_path) | not)
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),

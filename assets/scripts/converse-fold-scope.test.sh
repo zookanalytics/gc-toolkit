@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # converse-fold-scope.test.sh — regression test for the converse role's
-# fold-on-concurrent-hold check (pattern tk-ogsok; precedent:
+# fold-on-concurrent-hold check (precedent:
 # converse-signoff.test.sh, liveness-sweep-delta.test.sh).
 #
 # The bug: the check keyed two per-visit decisions off the SHARED
@@ -14,8 +14,7 @@
 #      situation B, because they share a bucket. A's decision is dropped
 #      and the fold reads as correct dedup.
 #   2. MUTUAL FOLD — both live sessions see each other, both fold, and
-#      the subject ends with ZERO sittings. Recorded live: su-331y and
-#      su-s1if under group su-vehr, the rule firing both ways.
+#      the subject ends with ZERO sittings, the rule firing both ways.
 #
 # Neither is a knowledge gap, so neither is fixable by telling the role
 # to be careful: an agent that follows the contract exactly still drops
@@ -342,7 +341,7 @@ printf '%s' "$(visit v-two sub sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
 is "no store read resolves no holder" "$(holder v-two sub)" ""
 
 echo "── an EMPTY continuation group never folds across subjects ──"
-# tk-tu5g3. The claim reports the gc.continuation_group STAMP, and the stamp
+# The claim reports the gc.continuation_group STAMP, and the stamp
 # lands empty on a minority of visits. With an empty $SUBJECT both filters
 # stop discriminating — every empty-group visit matches the first, and a
 # keyless topic falls back to $s and matches the second — and the lowest-id
@@ -508,7 +507,7 @@ esac
 # blocks from the same prompt, so the hold-arm gate rides the harness the fold
 # block built — same stub `gc`, same fixtures dir.
 #
-# The defect (tk-3vbus7): step 1's action=hold arm skipped the premise re-check
+# The defect: step 1's action=hold arm skipped the premise re-check
 # on the action=hold verdict ALONE. But `gc hook --claim` returns
 # existing_assignment (→ action=hold) for ANY bead already assigned to this
 # session identity, including a claim that died BEFORE step 2 ever ran. The gate
@@ -563,7 +562,7 @@ hv_demand() { # demand-id subject-id — a sibling open demand naming the subjec
 }
 
 echo "── a claim that died before step 5 leaves no trace: re-check the premise ──"
-# The observed shape (tk-fzvjw7): an escalate visit under a standing scope whose
+# The observed shape: an escalate visit under a standing scope whose
 # replacement claim found no gc.hold_demand on the visit.
 hv_reset
 hv_visit v-dead

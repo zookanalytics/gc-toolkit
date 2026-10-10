@@ -260,7 +260,10 @@ queries stop returning an anchor the moment it is answered, so the second pass
 is the only thing that gives a closed one a row. It bands `DONE`, which sorts
 below every live band, and stays there until the window ages it out. The band
 carries no per-row state: nothing retires a row early, so a row leaves only once
-it has been closed longer than the window. The collapse to a stateless band:
+it has been closed longer than the window. A visit or demand is the exception.
+Once it closes, a wrapper whose subject is on the board takes no row of its own,
+because the subject's row stands for the attention it carried
+(`board.foldWrappers`). The collapse to a stateless band:
 `specs/tk-7cb4l2/collapse.md`; the layout-stability rule and the tradeoff the
 window accepts: `specs/tk-ghlg1e/layout-stability.md`.
 
@@ -1388,9 +1391,10 @@ GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 
 helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
 Homebrew installs icu4c keg-only, off cgo's default search path, so a bare
-`go build` or `go test` there needs it named first:
+`go build`, `go test` or `go vet` there needs it named first:
 `export CGO_CPPFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib"`.
-`gc-helm-build.sh` adds both flags itself.
+`gc-helm-build.sh` and `tools/lint.sh` add both flags themselves, through
+`assets/scripts/icu4c-cgo.sh`.
 
 Discovery env:
 

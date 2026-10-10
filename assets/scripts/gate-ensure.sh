@@ -36,8 +36,7 @@
 # situation key rather than holding the anchor in silence. There is no dispatch
 # ceiling: quiescence forbids the redundant round the ceiling used to bound, and
 # the runaway shapes left — a reviewer that dies after claim, a fix unit filed
-# with its edge reversed — stop the PR moving and are caught by
-# liveness-sweep.sh's stale-gate pass, not by a count on the check.
+# with its edge reversed — stop the PR moving rather than spin the dispatcher.
 # A lane entering validating — an open task_kind=validation bead on the anchor
 # (quiescence clause c), opened by pr-facts.sh on a human feedback batch or the
 # machine-review path — gets mol-validate dispatched ONTO that pass so the
@@ -1039,9 +1038,7 @@ STRAY
     # Quiescence above forbids the redundant round, so there is no budget left to
     # bound and no anchor carries a dispatch tally. The runaway shapes that remain
     # — a reviewer that dies after claim, a fix unit filed with its edge reversed
-    # — stop the PR moving rather than spin the dispatcher, and a PR that stops
-    # moving is caught by liveness-sweep.sh's stale-gate escalation, not a count
-    # on the check.
+    # — stop the PR moving rather than spin the dispatcher.
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
     # failed carries the deterministic title but no anchor_bead — invisible to

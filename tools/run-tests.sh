@@ -11,7 +11,7 @@
 # Usage:
 #   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q] [PATH ...]
 #
-#   -j, --jobs N       concurrent runs (default: $TEST_JOBS or nproc)
+#   -j, --jobs N       concurrent runs (default: $TEST_JOBS or half the cores)
 #   -t, --timeout SECS per-run wall limit, 0 disables (default: $TEST_TIMEOUT or 900)
 #       --retry N      serial re-runs for a run that failed in parallel
 #                      (default: $TEST_RETRY or 1); --no-retry sets 0
@@ -65,13 +65,25 @@
 # the group is killed once the file's own process exits so the child cannot
 # outlive the file that spawned it.
 #
+# The suite yields to whatever else the host runs, such as a city's agents and
+# their bead calls. A file forks a stub for every gc and bd call it makes, so at
+# one job per core a few suites running at once leave the rest of the host
+# waiting for the CPU. The default is therefore half the cores, at least one.
+# The count is the first one nproc, getconf or sysctl reports; stock macOS has
+# no nproc. Every run of the parallel wave starts at a niceness 10 above the
+# caller's, and at ionice's lowest best-effort level where ionice can set it;
+# macOS has no ionice. A host with nothing else to serve, such as a CI runner,
+# passes -j to use every core.
+#
 # Isolation still cannot stop a sibling from saturating the host, so a file can
 # fail under -j for a reason that is not its own: an assertion reads a killed
 # command's 143 where it expected a real exit. After the parallel wave each
 # failed file is re-run serially, where no sibling competes with it. A file that
 # then passes was a parallel-contention false failure and counts as a pass; only
 # a file that fails serially too is a real failure. --no-retry (or --retry 0)
-# reports the raw parallel result.
+# reports the raw parallel result. A serial re-run keeps the caller's priority.
+# It runs alone, so it cannot crowd the host, and a file the wave's lower
+# priority slowed past its timeout is not slowed the same way again.
 #
 # Every file runs with commit and tag signing off, added after any
 # GIT_CONFIG_COUNT entries the caller already exported. A test that commits
@@ -99,7 +111,18 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 2
 ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" || {
   echo "run-tests: not inside a git repository ($HERE)" >&2; exit 2; }
 
-JOBS="${TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+# half_the_cores — the default job count (see the header). A count no tool
+# reports leaves the floor of one.
+half_the_cores() {
+  local n
+  n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  n=$(( 10#$n / 2 ))
+  [ "$n" -ge 1 ] || n=1
+  printf '%s\n' "$n"
+}
+
+JOBS="${TEST_JOBS:-$(half_the_cores)}"
 TIMEOUT="${TEST_TIMEOUT:-900}"
 RETRY="${TEST_RETRY:-1}"
 LIST_ONLY=0
@@ -400,11 +423,21 @@ PASS=0; FAIL=0
 declare -a FAILED=()
 done_n=0; next=0; inflight=0
 
+# The command every run of the parallel wave starts through (see the header).
+# ionice is tried once here, so a kernel or sandbox that refuses the class drops
+# it instead of failing every run.
+declare -a LOW_PRIORITY=(nice -n 10)
+if ionice -c 2 -n 7 true >/dev/null 2>&1; then
+  LOW_PRIORITY+=(ionice -c 2 -n 7)
+fi
+
 # Start one run in the background, under the timeout, its output to its log. A
 # part's run is told which part it is and which parts its file declares; a run
-# of a whole file gets neither, whatever the caller exported.
-spawn() { # <run-index>
+# of a whole file gets neither, whatever the caller exported. Any words after
+# the index are a command the run starts through, such as LOW_PRIORITY.
+spawn() { # <run-index> [<command>...]
   local t="${RUN_FILE[$1]}" part="${RUN_PART[$1]}" log="$LOGDIR/$1.log"
+  shift
   (
     cd "$ROOT" || exit 2
     if [ -n "$part" ]; then
@@ -413,16 +446,16 @@ spawn() { # <run-index>
       unset RUN_TESTS_PART RUN_TESTS_PARTS
     fi
     if [ "$TIMEOUT" -gt 0 ]; then
-      exec timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
+      exec "$@" timeout -k 5 -s TERM "$TIMEOUT" bash "$t"
     else
-      exec bash "$t"
+      exec "$@" bash "$t"
     fi
   ) >"$log" 2>&1 &
 }
 
 launch() {
   local idx="$1" pid
-  spawn "$idx"
+  spawn "$idx" "${LOW_PRIORITY[@]}"
   pid=$!
   PID_IDX[$pid]="$idx"; PID_START[$pid]="$SECONDS"
 }
@@ -445,9 +478,9 @@ finish() {
   unset 'PID_IDX[$pid]' 'PID_START[$pid]'
 }
 
-# Re-run one run serially (no sibling jobs), reusing the same timeout and
-# process-group reap as the parallel path. Used after the parallel wave to tell
-# a parallel-contention false failure from a real one.
+# Re-run one run serially (no sibling jobs) at the caller's priority, reusing
+# the same timeout and process-group reap as the parallel path. Used after the
+# parallel wave to tell a parallel-contention false failure from a real one.
 rerun_serial() {
   local idx="$1" pid rc
   spawn "$idx"

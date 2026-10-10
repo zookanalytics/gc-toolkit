@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for the prefix+b Helm picker (tk-00o34c). helm-svc board exits
+# Hermetic tests for the prefix+b Helm picker. helm-svc board exits
 # 3 on a failed gather and prints why. These pin that the picker keeps both: a
 # failed board reaches the operator as a message carrying the reason, and an
 # empty board still reads as empty.

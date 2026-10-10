@@ -34,7 +34,7 @@
 
 set -uo pipefail
 
-FIX='fix: post through assets/scripts/pr-post.sh comment|review|reply|edit (learned rule: pr-post-bypass)'
+FIX='fix: post through assets/scripts/pr-post.sh comment|review|reply|edit|file-comment (learned rule: pr-post-bypass)'
 WHY='carries no city mark, so pr-facts.sh reads it back as feedback and routes the city'"'"'s own words into rework'
 
 # A line worth a closer look: a gh call, a gh_api wrapper, or a mutation name.
