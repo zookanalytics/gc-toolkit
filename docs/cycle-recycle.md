@@ -15,6 +15,19 @@ The implementation is a Claude Code `Stop` hook at
 agent's work dir by the `overlay_dir = "overlays/cycle-recycle"` patches in
 `pack.toml`. This document is the policy behind it.
 
+## Scope
+
+**Mandate.** The automatic context recycle of the long-running patrol roles:
+what fires it, when it defers, what it does at the boundary, how its
+capability is checked, and the invariants the hook keeps.
+
+**Boundaries.** This is the policy, and the hook script is the implementation.
+A handoff the operator asks for is the `handoff` skill's
+(`skills/handoff/SKILL.md`). What becomes of the retiring session's scratch is
+[scratch-reclaim.md](scratch-reclaim.md). The rule against consent UI from any
+heartbeat agent, of which the hook is one instance, is
+`template-fragments/heartbeat-no-consent-ui.template.md`.
+
 ## Why a hook and not an instruction
 
 The prose version of this rule used to live in the patrol formulas as

@@ -1,3 +1,8 @@
+---
+name: Per-role threads design (tk-1zd25)
+description: The design and change set for per-role threads, which generalized the mechanik-thread Role+Thread primitive to a mayor-thread, fixed the mechanik-thread scope mismatch, and bound Ctrl-B + a to spawn a thread of the current pane's role.
+---
+
 # Per-role threads: smart binding, first-prompt seed, scope match (`tk-1zd25`)
 
 **Bead:** `tk-1zd25` (child of epic `tk-j2vir`)

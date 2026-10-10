@@ -1,3 +1,8 @@
+---
+name: Escalation marching orders
+description: The strategic context for operational work on the escalation pack (tk-px5od), covering the agreed consult shape, the principles and anti-patterns, what was chosen not to do, and what comes next. Read it after docs/foundation.md and before writing a skill, template, or surface for this work.
+---
+
 # Escalation — Marching Orders for Downstream Agent Work
 
 > **For the next agent:** this doc gives you the strategic context to do

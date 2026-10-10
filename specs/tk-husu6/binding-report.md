@@ -1,3 +1,8 @@
+---
+name: Binding report for the bead-host agent and durable bead-session link (tk-husu6)
+description: What Phase 1 of bead-universe v1 shipped, namely the bead-host agent, the gc bead-host command, and the metadata-only one-to-one link between a bead and its session, with the binding contract, the reverse-search caveat, and the operator's live checklist.
+---
+
 # Binding report: bead-host agent + durable 1:1 bead↔session link (`tk-husu6`)
 
 **Bead:** `tk-husu6` — *Binding: bead-host agent + durable 1:1 bead↔session link*

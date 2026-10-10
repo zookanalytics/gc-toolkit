@@ -1,5 +1,6 @@
 ---
 title: "feat: Attention Canvas — spatial operator dashboard (backend spine → working canvas)"
+description: The implementation plan for the Attention Canvas, a pack-local web console that renders the gc-helm board as a persistent spatial canvas. It sets out requirements, key technical decisions, implementation units, alternatives, risks, and scope boundaries for the design epic tk-eemvf.
 status: active
 date: 2026-06-30
 deepened: 2026-06-30

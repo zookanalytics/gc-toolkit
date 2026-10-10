@@ -1,3 +1,8 @@
+---
+name: PR#788 operator review dispositions
+description: How each thread of the operator's review of PR#788 was answered, by keeping doctrine in the proactive prompt template and mechanics in mol-first-reaction so each rule states once.
+---
+
 # PR#788 operator review dispositions
 
 Review 5258073554 (johnzook, `changes_requested`) left four inline threads on

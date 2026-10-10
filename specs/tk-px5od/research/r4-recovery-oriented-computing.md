@@ -1,3 +1,8 @@
+---
+name: R4 Recovery-oriented computing and cheap-restart patterns
+description: Research report R4 for the escalation work (tk-px5od), on recovery-oriented computing, crash-only software, and their SRE descendants, mapped onto agent sessions. Its caveat is that a reviewer's attention is finite and cannot be restarted, so cheap restart without root-cause discipline is an anti-pattern.
+---
+
 # R4: Recovery-Oriented Computing and Cheap-Restart Patterns for AI-Assisted Development
 
 ## Summary

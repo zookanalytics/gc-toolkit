@@ -1,3 +1,8 @@
+---
+name: V5 inversions within the pack
+description: Validation report V5 for the escalation work (tk-px5od), which applies recovery-oriented computing's framing inversion to the pack's own assumptions and judges which inversions yield insight. It recommends treating a borrowing as suspect rather than default, and measuring the no-consult path.
+---
+
 # V5 — Inversions Within: ROC's Framing Move Applied to the Pack
 
 > **Status: drafting.** Recovery-Oriented Computing did not just propose

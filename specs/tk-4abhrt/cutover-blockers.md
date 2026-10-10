@@ -1,3 +1,8 @@
+---
+name: Converse cutover blockers (tk-4abhrt)
+description: Why the first converse cutover plan, to spawn and pin a session per filed visit, failed three premises against gascity source and the live ledger, and the design decision that was owed before implementation. The cutover that followed the ruling is cutover.md.
+---
+
 # converse cutover (tk-4abhrt): three premises fail against source and live state
 
 The 3/3 cutover asks for one orchestration that, "on a converse visit being

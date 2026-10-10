@@ -1,3 +1,8 @@
+---
+name: Bead-Universe Operating Model PRD (draft)
+description: The draft PRD that restates decision bead tk-yrio as problem, goals, non-goals, constraints, and open questions for the bead-universe review and design legs. Read human-clarifications.md first, since the operator's gate rulings amend it.
+---
+
 # PRD: The Bead-Universe Operating Model (gc-toolkit)
 
 > **Provenance.** This PRD is a *distillation* of decision bead **tk-yrio** (revision 3,
