@@ -12,6 +12,14 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# The census phases its pre-open gates against review-checks.toml; the SUT runs
+# in place, so by default it would read the live pack's index and classify these
+# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
+# missing file so the census takes its pre-phase drop and these fixtures are
+# judged on their lane names alone, hermetically. The phase-aware path has its
+# own case at the end, with a controlled index.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
+
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
@@ -44,7 +52,26 @@ case "$sub" in
         if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
         exit 0 ;;
       *--status=closed*)
-        if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then cat "$PRIOR_VISITS"; fi
+        # Model the server-side --metadata-field KEY=VALUE narrow: the store
+        # returns only rows whose metadata[KEY] equals VALUE. A stamp-keyed
+        # query (gc.continuation_group=<subject>) therefore hides a visit whose
+        # stamp landed empty — the refile-guard defect. Without this the mock
+        # would serve every prior regardless of the field, so a stamp-only query
+        # and a task_kind query are indistinguishable and the bug cannot repro.
+        if [ -n "${PRIOR_VISITS:-}" ] && [ -f "${PRIOR_VISITS:-}" ]; then
+          mf=""; prev=""
+          for a in "$@"; do
+            [ "$prev" = "--metadata-field" ] && { mf="$a"; break; }
+            case "$a" in --metadata-field=*) mf="${a#--metadata-field=}"; break ;; esac
+            prev="$a"
+          done
+          if [ -n "$mf" ]; then
+            jq --arg k "${mf%%=*}" --arg v "${mf#*=}" \
+               '[.[] | select(((.metadata // {})[$k] // "") == $v)]' "$PRIOR_VISITS"
+          else
+            cat "$PRIOR_VISITS"
+          fi
+        fi
         exit "${GC_LIST_RC:-0}" ;;
       *blocked,deferred*) cat "${FAKE_WIDEN:-/dev/null}" 2>/dev/null || printf '[]'; exit 0 ;;
       *open,in_progress*) cat "$FAKE_LIVE"; exit 0 ;;
@@ -85,9 +112,8 @@ chmod +x "$TMP/bin/gc"
 
 # gh stub: only zook/gc-toolkit answers, with #521/#522 open (so #520 merged and
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
-# It serves $GH_PRS verbatim, which is how a test ages a PR: the sweep asks for
-# url,updatedAt and reads both, so a stub that answered only url would classify
-# every PR ageless and hide the case these tests are about.
+# It serves $GH_PRS verbatim, an updatedAt on every row, so a test can date the
+# open PRs and show that no age changes how their anchors classify.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -n "${GH_FAIL:-}" ] && exit 1
@@ -176,6 +202,7 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-inputconvoy","title":"input convoy for c-plain","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
   {"id":"c-slingconvoy","title":"sling-c-plain","issue_type":"convoy"},
   {"id":"c-synthconvoy","title":"a machine convoy under another name","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"c-synthconvoy-bool","title":"a machine convoy whose gc.synthetic reads back as a boolean","issue_type":"convoy","metadata":{"gc.synthetic":true}},
   {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan to catch","issue_type":"convoy","metadata":{}},
   {"id":"c-titletalk","title":"input convoy for tk-x never closes","issue_type":"bug","metadata":{}},
   {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}},
@@ -186,21 +213,21 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-husk-step-2","title":"implement","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
   {"id":"c-live-step","title":"a step of an in-flight workflow","issue_type":"task","metadata":{"gc.root_bead_id":"root-live"}},
   {"id":"c-noconvoy-step","title":"a step whose root names no convoy","issue_type":"task","metadata":{"gc.root_bead_id":"root-noconvoy"}},
-  {"id":"c-rootvisit-step","title":"a step of a root under a live stall visit","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}},
+  {"id":"c-rootvisit-step","title":"a step of a root a live visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"root-underconversation"}},
   {"id":"c-parented","title":"a parent whose child is still open","issue_type":"epic","metadata":{}},
   {"id":"c-trackslive","title":"tracks a not-closed bead","issue_type":"task","metadata":{},"dependencies":[{"depends_on_id":"m-live","type":"tracks"}]}
 ]
 JSON
 # LIVE carries: the standing sweep subject, the visits (v-2 is the su-ab9je
-# empty-stamp shape), the stall visit, the live molecule that names conv-live,
-# and the open demand on c-demand-live. blocked-child gates c-parented via the
-# reverse parent-child index.
+# empty-stamp shape, v-root tracks a workflow root), the live molecule that
+# names conv-live, and the open demand on c-demand-live. blocked-child gates
+# c-parented via the reverse parent-child index.
 cat > "$TMP/live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
   {"id":"v-1","status":"open","title":"visit: c-ingroup","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
-  {"id":"v-stall","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"subj-stalled","stall_root":"root-underconversation"}},
   {"id":"v-2","status":"open","title":"visit: c-trackedvisit","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]},
+  {"id":"v-root","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"root-underconversation"},"dependencies":[{"issue_id":"v-root","depends_on_id":"root-underconversation","type":"tracks"}]},
   {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.input_convoy_id":"conv-live"}},
   {"id":"d-open","status":"open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"c-demand-live"}},
   {"id":"child-open","status":"open","title":"an open child of c-parented","metadata":{},"dependencies":[{"depends_on_id":"c-parented","type":"parent-child"}]}
@@ -296,7 +323,7 @@ for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
             c-demand-live c-demand-widen \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
-            c-slingconvoy c-synthconvoy c-wisp-order c-husk-step-1 c-husk-step-2 \
+            c-slingconvoy c-synthconvoy c-synthconvoy-bool c-wisp-order c-husk-step-1 c-husk-step-2 \
             c-rootvisit-step c-parented c-trackslive; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
@@ -372,7 +399,7 @@ eq "$(cat "$ESC_CALLS")" "" "an edge-only visit (empty stamp) still reads as liv
 
 echo "── the re-file guard suppresses only a dispositioned identical SET ──"
 NEWKEY="$(printf '%s' "$EXPECT_SURVIVORS" | tr ',' '\n' | sort | paste -sd, -)"
-prior() { printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s"}}]' "$3" "$1" "$2" > "$TMP/prior.json"; }
+prior() { printf '[{"id":"%s","metadata":{"task_kind":"visit","gc.outcome":"%s","sweep.new_ids":"%s","gc.continuation_group":"tk-subject"}}]' "$3" "$1" "$2" > "$TMP/prior.json"; }
 prior dispositioned "$NEWKEY" v-done
 PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
 eq "$(cat "$ESC_CALLS")" "" "the same NEW set, already dispositioned, is not re-filed"
@@ -387,6 +414,20 @@ prior dispositioned "$NEWKEY" v-failed
 PRIOR_VISITS="$TMP/prior.json" GC_LIST_RC=1 run_sweep ABSENT
 eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
    "a failing closed-visit listing files, even when what it printed matches"
+# The empty-stamp shape: a dispositioned prior identified ONLY by its tracks
+# edge still suppresses. The stamp-keyed server query could not see it and
+# re-filed a settled agenda; the edge-union resolution (visit_covers) does.
+printf '[{"id":"v-edge-done","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":""},"dependencies":[{"issue_id":"v-edge-done","depends_on_id":"tk-subject","type":"tracks"}]}]' \
+    "$NEWKEY" > "$TMP/prior.json"
+PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "" "an empty-stamp, edge-only dispositioned prior still suppresses the re-file"
+# …and visit_covers must DISCRIMINATE by subject: a dispositioned prior with the
+# same set but covering a DIFFERENT subject (no edge here, stamp names another)
+# is not this subject's prior, so it files.
+printf '[{"id":"v-elsewhere","metadata":{"task_kind":"visit","gc.outcome":"dispositioned","sweep.new_ids":"%s","gc.continuation_group":"some-other-subject"}}]' \
+    "$NEWKEY" > "$TMP/prior.json"
+PRIOR_VISITS="$TMP/prior.json" run_sweep ABSENT
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a dispositioned prior on a DIFFERENT subject does not suppress this one"
 
 echo "── fail-safe: an unreadable listing aborts, files nothing, keeps the baseline ──"
 GC_READY_FAIL=1 run_sweep "old-baseline"
@@ -411,85 +452,33 @@ grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
     && ok "a failed anchor read keeps the step a candidate (reported)" \
     || bad "failed anchor read hides nothing" "$(cat "$BASELINE_FILE")"
 
-echo "── a PR-gated anchor is a named wait only while its PR MOVES ──"
-# The defect: an anchor parked on a PR that stopped is invisible to every pass.
-# The PR names the wait, so it is not an unnamed wait and the batch visit skips
-# it; nothing else looks. It has to become its own escalation, on the anchor.
+echo "── a PR-gated anchor is a named wait however long its PR sits ──"
+# An open PR names its anchor's wait, and the operator's review of it has no
+# deadline. With both open PRs dated a year back the pass classifies exactly as
+# it does with fresh ones: the anchors stay gated, the one visit filed is the
+# batch visit, and nothing is stamped on an anchor.
+pass_funnel() { printf '%s' "$OUT" | grep 'funnel:' || true; }
 gh_prs 0 0
-run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "a moving PR stays gated" "escalated anyway: $(cat "$ESC_CALLS")" \
-    || ok "a PR updated today stays gated — nothing escalated"
-
-gh_prs 9 0
-run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" "a PR idle past the threshold escalates exactly once"
-grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
-    && ok "…with the ANCHOR as subject and one stable key" || bad "stale subject/key" "$(cat "$ESC_CALLS")"
-grep -q 'c-pr-case' "$ESC_CALLS" \
-    && bad "the sibling PR that is still moving is untouched" "c-pr-case escalated too" \
-    || ok "the sibling PR that is still moving is untouched"
-grep -q 'bd update c-pr-open --set-metadata stale_escalated_at=' "$GC_CALLS" \
-    && ok "…and the anchor is stamped stale_escalated_at" || bad "stale_escalated_at stamp" "$(cat "$GC_CALLS")"
-grep -q 'stale_escalated_to=gc-toolkit.converse' "$GC_CALLS" \
-    && ok "…and stale_escalated_to records the route escalate.sh reported" \
-    || bad "stale_escalated_to stamp" "$(cat "$GC_CALLS")"
-grep -q '9 day' "$ESC_BODIES" && ok "the body states how long the PR has been idle" || bad "body age" "$(cat "$ESC_BODIES")"
-grep -q 'pull/521' "$ESC_BODIES" && ok "…and names the PR" || bad "body names the PR" "$(cat "$ESC_BODIES")"
-case ",$(cat "$BASELINE_FILE")," in
-    *",c-pr-open,"*) bad "a stale gate is never doubled into the batch" "it entered the baseline too" ;;
-    *) ok "a stale gate is escalated alone, never also batched as an unnamed wait" ;;
+run_sweep ABSENT
+FRESH_FUNNEL="$(pass_funnel)"
+case "$FRESH_FUNNEL" in
+    *" gated "*) ok "control: the fresh-PR pass reports a gated class" ;;
+    *) bad "control: the fresh-PR pass reports a gated class" "funnel: ${FRESH_FUNNEL:-<none>}" ;;
 esac
-
-echo "── the dedup is the anchor's own stamp, so a wiped state dir cannot lose it ──"
-# run_sweep deletes the state directory on every call, which IS the recycle the
-# /tmp marker file could not survive: here the ONLY thing that can suppress a
-# second escalation is durable bead state.
-stamp_pr_open() { jq --arg t "$1" 'map(if .id == "c-pr-open" then .metadata.stale_escalated_at = $t else . end)' \
-    "$TMP/ready.json" > "$TMP/ready-stamped.json"; }
-gh_prs 9 0
-stamp_pr_open "$(iso_ago 1)"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "a stamped anchor inside the floor is not re-raised" "re-escalated: $(cat "$ESC_CALLS")" \
-    || ok "a stamped anchor inside the floor is not re-raised, fresh state dir and all"
-grep -q "inside the 3d floor" <<< "$OUT" && ok "…and the pass says so" || bad "floor line" "$OUT"
-
-stamp_pr_open "$(iso_ago 5)"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
-   "past the floor the same anchor is raised again — bounded retry, not once-forever"
-
-stamp_pr_open "not-a-timestamp"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
-   "an unreadable stamp re-raises rather than muting the anchor forever"
-
-echo "── an unverifiable age reports, and a failed escalation stamps nothing ──"
-printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
-    "$(iso_ago 0)" > "$TMP/gh-prs.json"
-run_sweep "$EXPECT_SURVIVORS"
-grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
-    && ok "a PR GitHub gave no updatedAt for is REPORTED, never held" || bad "ageless PR" "$(cat "$ESC_CALLS")"
-grep -q 'no readable last-update time' "$ESC_BODIES" \
-    && ok "…and the body says the age is unknown instead of inventing one" || bad "ageless body" "$(cat "$ESC_BODIES")"
-
-gh_prs 9 0
-GH_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "an unread PR set escalates no stale gate" "escalated on data it never read" \
-    || ok "an unread PR set escalates no stale gate — the bead falls to the batch instead"
-
-ESC_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
-grep -q stale_escalated "$GC_CALLS" \
-    && bad "a failed escalation stamps nothing" "stamped anyway: $(grep stale_escalated "$GC_CALLS")" \
-    || ok "a failed escalation stamps nothing — the next pass retries it"
-
-rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"; : > "$GC_CALLS"; : > "$ESC_CALLS"
-bash "$SCRIPT" --dry-run >/dev/null 2>&1
-eq "$(cat "$ESC_CALLS")" "" "--dry-run escalates no stale gate"
-grep -q stale_escalated "$GC_CALLS" && bad "--dry-run stamps no anchor" "it stamped one" \
-    || ok "--dry-run stamps no anchor"
+gh_prs 400 400
+run_sweep ABSENT
+eq "$RC" "0" "the pass completes over year-old PRs"
+eq "$(pass_funnel)" "$FRESH_FUNNEL" "every class counts as it does with fresh PRs"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "$EXPECT_SURVIVORS" \
+   "…and the unnamed set is the one fresh PRs give"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
+   "the one visit filed is the batch visit — no anchor is escalated for its PR's age"
+grep -Eq 'c-pr-(open|case)' "$ESC_BODIES" \
+    && bad "neither PR-gated anchor is listed as an unnamed wait" "$(cat "$ESC_BODIES")" \
+    || ok "neither PR-gated anchor is listed as an unnamed wait"
+grep -q 'bd update c-pr-' "$GC_CALLS" \
+    && bad "nothing is stamped on a PR-gated anchor" "$(grep 'bd update c-pr-' "$GC_CALLS")" \
+    || ok "nothing is stamped on a PR-gated anchor"
 gh_prs 0 0
 
 echo "── the standing subject is created on first run, idempotently ──"
@@ -651,32 +640,66 @@ grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
 
+echo "── the phase-aware census asks the resolver, with a controlled index ──"
+# A real index (not the missing-file fallback the rest of this file uses):
+# correctness reads the diff (pre-open), demo needs the preview (open-as-draft).
+# codex is declared NOWHERE — a legacy token the resolver defaults to pre-open,
+# the case the old re-implemented phase filter DROPPED, classing a green
+# legacy-token anchor as un-gated and flagging it.
+PH_IDX="$TMP/phase-index.toml"
+printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
+printf '%s\n' '[
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
+]' > "$TMP/ph-ready.json"
+GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
+eq "$RC" "0" "the phase-aware pass completes"
+# Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
+# (resolver default, not dropped) and its green read as converged; the open-as-draft
+# demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
+# The mixed-case lane reads its marker under the token's own case (check.Arch), the
+# key signoff stamps, so it reads green rather than flagged.
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
+   "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
+
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is
 # in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
 # a visit bead left in the ready set by that gone session. The live-held subject
 # stays covered; the dead-held subject and the stranded visit bead return to the
-# census. Self-contained fixtures — the suite above clobbers the shared ones.
+# census. Two more visits track workflow ROOTS, so the ready steps under them are
+# covered through gc.root_bead_id by the same holder test. Self-contained
+# fixtures — the suite above clobbers the shared ones.
 cat > "$TMP/hl-ready.json" <<'JSON'
 [
   {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
   {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}},
+  {"id":"hl-live-root-step","title":"a step of a root a live-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-live-root"}},
+  {"id":"hl-dead-root-step","title":"a step of a root a dead-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-dead-root"}}
 ]
 JSON
 cat > "$TMP/hl-live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
   {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
-  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
+  {"id":"hl-v-liveroot","status":"in_progress","title":"visit: hl-live-root","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-liveroot","depends_on_id":"hl-live-root","type":"tracks"}]},
+  {"id":"hl-v-deadroot","status":"in_progress","title":"visit: hl-dead-root","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-deadroot","depends_on_id":"hl-dead-root","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$TMP/hl-widen.json"
+printf '%s\n' '[{"id":"hl-live-root","metadata":{}}]' > "$TMP/show/hl-live-root.json"
+printf '%s\n' '[{"id":"hl-dead-root","metadata":{}}]' > "$TMP/show/hl-dead-root.json"
 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
 case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
 case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
 case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held visit's root over-surfaces" "hl-live-root-step surfaced though its root's visit is held by lx-live-1" ;; *) ok "a step whose root a live-held visit tracks stays out of the census" ;; esac
+case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held visit tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
 
 echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
 # A sitting that lingers in the list as closed/archived is dead, per helm's
@@ -714,7 +737,7 @@ case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl
 echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
 GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
-for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj; do
+for hidden in hl-dead-subj hl-ready-deadvisit hl-live-subj hl-dead-root-step hl-live-root-step; do
   case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
 done
 

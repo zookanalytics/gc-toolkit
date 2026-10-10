@@ -164,10 +164,10 @@ ensure_base_labels() { ensure_group "$BASE_LABEL_PREFIX" "$BASE_VALUES"   "$BASE
 # caller leaves the label as it is.
 #
 # The binary is resolved as lifecycle.sh resolves it — an explicit $GCTK_BIN,
-# else the city's deployed build — but with no version-drift fallback, because
-# there is none to fall back to: a binary too old to carry `pr-status` exits
-# non-zero on the unknown subcommand, which reads as "could not derive" and
-# leaves the label untouched until the build order catches up.
+# else the city's deployed build — and, as there, it is not compared against the
+# checkout: a binary too old to carry `pr-status` exits non-zero on the unknown
+# subcommand, which reads as "could not derive" and leaves the label untouched
+# until the build order catches up.
 resolve_gctk() { # succeed with GCTK_BIN naming an executable, else fail
   if [ -z "${GCTK_BIN:-}" ]; then
     local city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-pour-text-current (I9, tk-5w3boh). Real
+# Hermetic test for doctor/check-pour-text-current (I9). Real
 # throwaway git repos plus a stub `gc` on PATH; no live city, Dolt, network.
 # Exercised: every ERROR arm with a positive control each; the fail-open case
 # (a stale remote-tracking ref makes the naive behind-count read 0, so it must
@@ -23,6 +23,9 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esa
 
 mkdir -p "$TMP/bin" "$TMP/beads"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
 # Timestamps are computed, never hardcoded: every threshold in the check is a
 # distance from NOW, and a frozen literal would drift across it.

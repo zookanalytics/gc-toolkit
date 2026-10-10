@@ -1,0 +1,19 @@
+# review-workspace-reap — remove the on-disk workspaces of reviews that have
+# ended. A review keeps its worktree and scratch in a directory named for its
+# review bead, and its terminal step removes that directory when the review ends
+# there. This pass takes the ones whose review closed some other way, after a
+# crash, a drain, or a close by another writer such as review-sweep. Each
+# checkout left behind counts against the per-uid tmpfs quota.
+#
+# City scope: every rig's reviews share one temp directory, and the bead each
+# workspace is named for lives in its own rig's store. A pass removes only what
+# no review still needs, so a skipped pass costs only the reclaim the next pass
+# takes.
+[order]
+description = "Remove the workspaces of closed reviews, and gc-review scratch idle past the horizon"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/review-workspace.sh reap"
+timeout = "300s"
+scope = "city"
+idempotent = true

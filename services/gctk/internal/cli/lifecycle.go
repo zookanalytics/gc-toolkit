@@ -12,11 +12,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
-// `gctk lifecycle` is the port of assets/scripts/lifecycle.sh: THE writer of
-// anchor lifecycle transitions. The CLI is contract-preserving — same verbs,
-// same flags, same exit codes, same stdout grammar — because its callers
-// (pr-open, merge, pr-facts, mol-refinery-patrol) treat it as an opaque command
-// and must not notice which language answers.
+// `gctk lifecycle` is THE writer of anchor lifecycle transitions, and the only
+// implementation of assets/scripts/lifecycle.sh, which execs it. The CLI is the
+// script's contract — same verbs, same flags, same exit codes, same stdout
+// grammar — because its callers (pr-open, merge, pr-facts, mol-refinery-patrol)
+// invoke lifecycle.sh as an opaque command.
 //
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 // 2 post-write verification mismatch (or unreadable bead).
@@ -225,7 +225,7 @@ type transitionOpts struct {
 // token is a malformed invocation and returns an error: the empty string it
 // would otherwise take drops --expect's compare-and-swap guard, so a truncated
 // command must fail rather than transition unguarded. An explicitly supplied
-// empty argument (--assignee '' clears the assignee) is a real token and is
+// empty argument (--assignee "" clears the assignee) is a real token and is
 // preserved.
 func parseTransition(args []string) (transitionOpts, error) {
 	var o transitionOpts
@@ -312,6 +312,27 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	if !o.closeIt && lifecycle.IsClosedState(o.to) {
 		fmt.Fprintf(stderr, "%s: --to %s requires --close — a closed state must close in the same atomic write, or the bead is left open+%s\n", prog, o.to, o.to)
 		return 1
+	}
+	// `merged` carries the evidence its own definition names: lifecycle.toml
+	// declares [states.merged] meaning = "landed; merged_sha recorded". Require
+	// that sha in the same atomic write, so the state cannot be entered with no
+	// landing to point at — the closed-implies-landed violation
+	// doctor/check-closed-implies-landed reports after the fact, refused here at
+	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh, the
+	// gctk merge port, mol-refinery-patrol) passes --set merged_sha=<oid>. What
+	// this refuses is a bead that never had a PR: it is no merge anchor, and it
+	// closes with a plain `gc bd close`, not a false landing.
+	if o.to == "merged" {
+		haveSha := false
+		for _, s := range o.sets {
+			if k, v := kv(s); k == "merged_sha" && v != "" {
+				haveSha = true
+			}
+		}
+		if !haveSha {
+			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead that never had a PR has not landed and is no merge anchor: with merge_result absent, close it with a plain 'gc bd close %s', not --to merged\n", prog, id)
+			return 1
+		}
 	}
 	// A human state is a bead waiting on a person, so it must name one. An
 	// omitted --route takes the default; an EMPTY one is the write that leaves a

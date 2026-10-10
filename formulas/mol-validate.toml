@@ -225,12 +225,12 @@ dependency edge by hand:
   ```
 - **deferred** — a real objection, but fixing it now introduces risk or might
   break something, so it becomes tracked later-work. `finding.sh` files a
-  follow-up bead carrying the objection and your `--reason`, hangs its provenance
-  onto the anchor, records the follow-up id as the reply the raiser's PR thread
-  receives, and closes the finding. The follow-up is the claimable later-work;
-  once the finding closes it holds neither the merge nor the review. Always give a
-  `--reason` — it is the whole justification for deferring, and it rides into both
-  the follow-up and the raiser's thread.
+  follow-up bead carrying the objection and your `--reason`, gates it behind the
+  anchor so it dispatches once the anchor merges, records the follow-up id as the
+  reply the raiser's PR thread receives, and closes the finding. The follow-up is
+  the claimable later-work; once the finding closes it holds neither the merge
+  nor the review. Always give a `--reason` — it is the whole justification for
+  deferring, and it rides into both the follow-up and the raiser's thread.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring, and what the follow-up must do>"
   ```

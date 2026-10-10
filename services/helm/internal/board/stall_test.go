@@ -1,19 +1,20 @@
 package board
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
 
-// preOpenGateAnchor builds a merge anchor parked at the pre-open codex gate, last
-// touched `days` ago — the shape the stall signal reads. mergeAnchor defaults
-// merge_result to pull_request and updated_at to fixtureNow, so both are
-// overridden here.
+// preOpenGateAnchor builds a merge anchor parked at pre_open_gate under the
+// default check_set, no lane green yet, last touched `days` ago — the shape the
+// stall signal reads. mergeAnchor defaults merge_result to pull_request and
+// updated_at to fixtureNow, so both are overridden here.
 func preOpenGateAnchor(id string, days int, extra map[string]string, blockers ...Blocker) Anchor {
 	md := map[string]string{
 		"merge_result": mergeResultPreOpenGate,
-		"check_set":    checkSetCodex,
+		"check_set":    "correctness,triage",
 	}
 	for k, v := range extra {
 		md[k] = v
@@ -23,11 +24,11 @@ func preOpenGateAnchor(id string, days int, extra map[string]string, blockers ..
 	return a
 }
 
-// TestPreOpenCodexGateStallFires: the bare held shape — past the threshold, no
-// live review — is owed, ELEVATED out of the LOW floor, carries its age on the
-// owed clock, and names the codex gate instead of "in the merge cadence". The
-// three cases cover the reasons the NEEDS line reports.
-func TestPreOpenCodexGateStallFires(t *testing.T) {
+// TestPreOpenCheckStallFires: the bare held shape — past the threshold, no live
+// review — is owed, ELEVATED out of the LOW floor, carries its age on the owed
+// clock, and names the first lane that is not green instead of "in the merge
+// cadence". The three cases cover the reasons the NEEDS line reports.
+func TestPreOpenCheckStallFires(t *testing.T) {
 	cases := []struct {
 		id       string
 		blockers []Blocker
@@ -35,7 +36,7 @@ func TestPreOpenCodexGateStallFires(t *testing.T) {
 	}{
 		{"tk-never", nil, "no review has run"},
 		{"tk-find", []Blocker{{ID: "tk-rw", Title: "Rework branch polecat/tk-find: address pre-open findings", Status: "open"}}, "findings open"},
-		{"tk-radv", []Blocker{{ID: "tk-rv", Title: "Review branch polecat/tk-radv -> main", Status: "closed"}}, "reviewed, not advanced"},
+		{"tk-radv", []Blocker{{ID: "tk-rv", Title: "Review branch polecat/tk-radv -> main (correctness): fix the thing", Status: "closed"}}, "reviewed, not advanced"},
 	}
 	for _, c := range cases {
 		a := preOpenGateAnchor(c.id, 5, nil, c.blockers...)
@@ -43,13 +44,13 @@ func TestPreOpenCodexGateStallFires(t *testing.T) {
 		tile := mustTile(t, b, c.id)
 
 		if !tile.Owed {
-			t.Errorf("%s: a stalled pre-open codex gate is the operator's move — owed", c.id)
+			t.Errorf("%s: a stalled pre-open check is the operator's move — owed", c.id)
 		}
 		if tile.Severity != SevElevated {
 			t.Errorf("%s: severity = %q, want ELEVATED out of the LOW floor", c.id, tile.Severity)
 		}
-		if !strings.Contains(tile.Needs, "codex gate stalled") || !strings.Contains(tile.Needs, c.reason) {
-			t.Errorf("%s: needs = %q, want the codex-gate stall naming %q", c.id, tile.Needs, c.reason)
+		if !strings.HasPrefix(tile.Needs, "correctness check stalled — ") || !strings.Contains(tile.Needs, c.reason) {
+			t.Errorf("%s: needs = %q, want the correctness-check stall naming %q", c.id, tile.Needs, c.reason)
 		}
 		if tile.Needs == "in the merge cadence" || strings.HasPrefix(tile.Needs, "position unknown") {
 			t.Errorf("%s: needs must not keep the mis-framed phrase, got %q", c.id, tile.Needs)
@@ -68,15 +69,90 @@ func TestPreOpenCodexGateStallFires(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateLiveVsDeadReview is the discriminating pair: two anchors
+// TestPreOpenCheckStallNamesFirstUngreenLane: every lane the check_set declares
+// holds the PR, so a green lane does not settle the anchor while another lane is
+// not green, and the NEEDS line names the first lane, in declared order, that
+// is not. The legacy codex lane and a lane the check index does not declare are
+// lanes like any other.
+func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
+	cases := []struct {
+		name  string
+		extra map[string]string
+		want  string
+	}{
+		{
+			name:  "default set, no lane green",
+			extra: nil,
+			want:  "correctness check stalled — no review has run",
+		},
+		{
+			name:  "correctness green, triage not",
+			extra: map[string]string{"check.correctness": checkGreen},
+			want:  "triage check stalled — no review has run",
+		},
+		{
+			name: "triage widened the set: correctness and triage green, arch not",
+			extra: map[string]string{
+				"check_set":         "correctness,triage,arch",
+				"check.correctness": checkGreen,
+				"check.triage":      checkGreen,
+			},
+			want: "arch check stalled — no review has run",
+		},
+		{
+			name: "a later lane green does not settle an earlier one",
+			extra: map[string]string{
+				"check_set":    "correctness,triage,arch",
+				"check.triage": checkGreen,
+				"check.arch":   checkGreen,
+			},
+			want: "correctness check stalled — no review has run",
+		},
+		{
+			name:  "legacy codex anchor",
+			extra: map[string]string{"check_set": "codex"},
+			want:  "codex check stalled — no review has run",
+		},
+		{
+			name:  "a lane the index does not declare still holds the PR",
+			extra: map[string]string{"check_set": "shellcheck"},
+			want:  "shellcheck check stalled — no review has run",
+		},
+		{
+			name: "a marker that is not a bare green does not settle its lane",
+			extra: map[string]string{
+				"check.correctness": "exception@abc123",
+				"check.triage":      checkGreen,
+			},
+			want: "correctness check stalled — no review has run",
+		},
+		{
+			name:  "approval is not a pre-open lane, even listed first",
+			extra: map[string]string{"check_set": "approval,correctness"},
+			want:  "correctness check stalled — no review has run",
+		},
+	}
+	for _, c := range cases {
+		a := preOpenGateAnchor("tk-lane", 5, c.extra)
+		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-lane")
+		if tile.Needs != c.want {
+			t.Errorf("%s: needs = %q, want %q", c.name, tile.Needs, c.want)
+		}
+		if !tile.Owed || tile.Severity != SevElevated {
+			t.Errorf("%s: a stalled lane is owed and ELEVATED: owed=%v sev=%q", c.name, tile.Owed, tile.Severity)
+		}
+	}
+}
+
+// TestPreOpenCheckLiveVsDeadReview is the discriminating pair: two anchors
 // identical but for one fact — whether the session behind the routed review is
 // live. Both read pr.machine=progressing, whose position phrase is "in the merge
 // cadence"; the signal splits them on liveness, surfacing the routed review no
 // live session is draining as a stall.
-func TestPreOpenCodexGateLiveVsDeadReview(t *testing.T) {
+func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 	review := func(assignee string) Blocker {
 		return Blocker{
-			ID: "tk-review", Title: "Review branch polecat/tk-gate -> main", Status: "open",
+			ID: "tk-review", Title: "Review branch polecat/tk-gate -> main (correctness): fix the thing", Status: "open",
 			RoutedTo: "gc-toolkit/gc-toolkit.polecat-codex", Assignee: assignee,
 		}
 	}
@@ -107,8 +183,8 @@ func TestPreOpenCodexGateLiveVsDeadReview(t *testing.T) {
 	if !dt.Owed || dt.Severity != SevElevated {
 		t.Errorf("a routed review no live session is draining is a stall: owed=%v sev=%q", dt.Owed, dt.Severity)
 	}
-	if !strings.Contains(dt.Needs, "codex gate stalled") {
-		t.Errorf("the dead-pool hold names the gate, got %q", dt.Needs)
+	if !strings.HasPrefix(dt.Needs, "correctness check stalled") {
+		t.Errorf("the dead-pool hold names the lane, got %q", dt.Needs)
 	}
 	// The reason reads a review has run (the routed child), not never-reviewed.
 	if !strings.Contains(dt.Needs, "reviewed, not advanced") {
@@ -116,11 +192,12 @@ func TestPreOpenCodexGateLiveVsDeadReview(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateStallDoesNotFire: every shape that must NOT surface as a
-// stall. A fresh hold, a green gate, and a recorded wedge each keep their own
-// position phrase.
-func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
+// TestPreOpenCheckStallDoesNotFire: every shape that must NOT surface as a
+// stall. A fresh hold, every lane green, a recorded wedge, and a check_set that
+// declares no lane each keep their own position phrase.
+func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 	wedgedAt := fixtureNow.Add(-120 * time.Hour)
+	const unknown = "position unknown — the merge cadence has recorded none"
 	cases := []struct {
 		name      string
 		anchor    Anchor
@@ -131,13 +208,44 @@ func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 			name:      "fresh hold below the threshold",
 			anchor:    preOpenGateAnchor("tk-fresh", 1, nil),
 			wantOwed:  false,
-			wantNeeds: "position unknown — the merge cadence has recorded none",
+			wantNeeds: unknown,
 		},
 		{
-			name:      "the gate marker is a bare green — the PR is about to open",
-			anchor:    preOpenGateAnchor("tk-green", 5, map[string]string{"check.codex": checkGreen}),
+			name: "every lane is a bare green — the PR is about to open",
+			anchor: preOpenGateAnchor("tk-green", 5, map[string]string{
+				"check.correctness": checkGreen,
+				"check.triage":      checkGreen,
+			}),
 			wantOwed:  false,
-			wantNeeds: "position unknown — the merge cadence has recorded none",
+			wantNeeds: unknown,
+		},
+		{
+			name: "a widened set with every lane green",
+			anchor: preOpenGateAnchor("tk-wide", 5, map[string]string{
+				"check_set":         "correctness,triage,arch,pm",
+				"check.correctness": checkGreen,
+				"check.triage":      checkGreen,
+				"check.arch":        checkGreen,
+				"check.pm":          checkGreen,
+			}),
+			wantOwed:  false,
+			wantNeeds: unknown,
+		},
+		{
+			name:      "a legacy codex anchor gone green",
+			anchor:    preOpenGateAnchor("tk-codex", 5, map[string]string{"check_set": "codex", "check.codex": checkGreen}),
+			wantOwed:  false,
+			wantNeeds: unknown,
+		},
+		{
+			name: "lane names are read with their whitespace stripped",
+			anchor: preOpenGateAnchor("tk-ws", 5, map[string]string{
+				"check_set":         " correctness , triage ",
+				"check.correctness": checkGreen,
+				"check.triage":      checkGreen,
+			}),
+			wantOwed:  false,
+			wantNeeds: unknown,
 		},
 		{
 			name:      "a recorded wedge already owns the row",
@@ -146,16 +254,34 @@ func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 			wantNeeds: "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 		},
 		{
-			name:      "not the codex gate set",
-			anchor:    preOpenGateAnchor("tk-other", 5, map[string]string{"check_set": "shellcheck"}),
+			name:      "check_set none is the checkless opt-out",
+			anchor:    preOpenGateAnchor("tk-none", 5, map[string]string{"check_set": "none"}),
 			wantOwed:  false,
-			wantNeeds: "position unknown — the merge cadence has recorded none",
+			wantNeeds: unknown,
+		},
+		{
+			name:      "the opt-out is case-insensitive",
+			anchor:    preOpenGateAnchor("tk-off", 5, map[string]string{"check_set": "OFF"}),
+			wantOwed:  false,
+			wantNeeds: unknown,
+		},
+		{
+			name:      "approval alone declares no pre-open lane",
+			anchor:    preOpenGateAnchor("tk-appr", 5, map[string]string{"check_set": "approval"}),
+			wantOwed:  false,
+			wantNeeds: unknown,
+		},
+		{
+			name:      "an empty check_set awaits the default stamp",
+			anchor:    preOpenGateAnchor("tk-empty", 5, map[string]string{"check_set": " , "}),
+			wantOwed:  false,
+			wantNeeds: unknown,
 		},
 	}
 	for _, c := range cases {
 		b := BuildBoard([]Anchor{c.anchor}, fixtureNow, false, nil, Facts{})
 		tile := mustTile(t, b, c.anchor.ID)
-		if strings.Contains(tile.Needs, "codex gate stalled") {
+		if strings.Contains(tile.Needs, "check stalled") {
 			t.Errorf("%s: the stall must not fire, got needs %q", c.name, tile.Needs)
 		}
 		if tile.Owed != c.wantOwed {
@@ -167,11 +293,43 @@ func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateStallYieldsToStrongerSurfacing: a takeaway or a human route
+// TestCheckLanes pins the lane rule merge.sh and pr-open.sh apply to a
+// check_set (lanes_of, and the gates_of pr-summary-region.sh defines): comma
+// split, every whitespace character stripped, empty tokens and the
+// none/off/approval tokens dropped case-insensitively, and each surviving name
+// kept in its declared order and case.
+func TestCheckLanes(t *testing.T) {
+	cases := []struct {
+		checkSet string
+		want     []string
+	}{
+		{"correctness,triage", []string{"correctness", "triage"}},
+		{" correctness , triage ", []string{"correctness", "triage"}},
+		{"correctness,,triage,", []string{"correctness", "triage"}},
+		{"corr ect\tness", []string{"correctness"}},
+		{"codex", []string{"codex"}},
+		{"correctness,approval,arch", []string{"correctness", "arch"}},
+		{"none,correctness", []string{"correctness"}},
+		{"Correctness,Triage", []string{"Correctness", "Triage"}},
+		{"", nil},
+		{" , ", nil},
+		{"none", nil},
+		{"NONE", nil},
+		{"off", nil},
+		{"Approval", nil},
+	}
+	for _, c := range cases {
+		if got := checkLanes(c.checkSet); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("checkLanes(%q) = %q, want %q", c.checkSet, got, c.want)
+		}
+	}
+}
+
+// TestPreOpenCheckStallYieldsToStrongerSurfacing: a takeaway or a human route
 // already carries the row's NEEDS, so the stall defers rather than renaming it.
 // A human-routed signoff-cap park and a converse takeaway each carry their own
 // NEEDS, and the human route also owns the band.
-func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
+func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	// A converse sitting parked it: gathered as the parked kind, carrying its
 	// takeaway as the NEEDS sentence.
 	parked := preOpenGateAnchor("tk-parked", 5, map[string]string{"gc.takeaway": "waiting on the upstream decision"})
@@ -188,7 +346,7 @@ func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
 	b := BuildBoard([]Anchor{parked, human}, fixtureNow, false, nil, Facts{})
 
 	pk := mustTile(t, b, "tk-parked")
-	if strings.Contains(pk.Needs, "codex gate stalled") {
+	if strings.Contains(pk.Needs, "check stalled") {
 		t.Errorf("a parked row keeps its takeaway, got %q", pk.Needs)
 	}
 	if pk.Needs != "waiting on the upstream decision" {
@@ -196,7 +354,7 @@ func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
 	}
 
 	hm := mustTile(t, b, "tk-human")
-	if strings.Contains(hm.Needs, "codex gate stalled") {
+	if strings.Contains(hm.Needs, "check stalled") {
 		t.Errorf("a human-routed row keeps its own finding, got %q", hm.Needs)
 	}
 	if !hm.Owed || hm.Severity != SevElevated {
@@ -204,13 +362,13 @@ func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateStallYieldsToOpenDemand: an open demand already owns the
-// row and names the operator's actual question, so the stall must not overwrite
-// it with the gate's generic wording. The row renders `asking: <title>`, not
-// `codex gate stalled`, even though every other stall precondition holds — past
-// the threshold, no live review. This is the row shape the stall guard's
+// TestPreOpenCheckStallYieldsToOpenDemand: an open demand already owns the row
+// and names the operator's actual question, so the stall must not overwrite it
+// with the stall's generic wording. The row renders `asking: <title>`, not
+// `correctness check stalled`, even though every other stall precondition holds
+// — past the threshold, no live review. This is the row shape the stall guard's
 // `ask == nil` clause protects.
-func TestPreOpenCodexGateStallYieldsToOpenDemand(t *testing.T) {
+func TestPreOpenCheckStallYieldsToOpenDemand(t *testing.T) {
 	demand := Blocker{
 		ID: "tk-ask", Title: "operator: which rig owns the shared fixture?",
 		Status: "open", IssueType: "decision",
@@ -218,7 +376,7 @@ func TestPreOpenCodexGateStallYieldsToOpenDemand(t *testing.T) {
 	a := preOpenGateAnchor("tk-demand", 5, nil, demand)
 	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-demand")
 
-	if strings.Contains(tile.Needs, "codex gate stalled") {
+	if strings.Contains(tile.Needs, "check stalled") {
 		t.Errorf("an open demand owns the row; the stall must not overwrite it, got %q", tile.Needs)
 	}
 	if tile.Needs != "asking: operator: which rig owns the shared fixture?" {
@@ -229,14 +387,14 @@ func TestPreOpenCodexGateStallYieldsToOpenDemand(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateLiveReviewNotRouted: a real mol-review child is not stamped
+// TestPreOpenCheckLiveReviewNotRouted: a real mol-review child is not stamped
 // with gc.routed_to — `gc sling` leaves it open and puts the in-flight state on
 // the workflow, visible only through Facts.Inflight — so the live suppression
 // recognizes it by the cadence title and the live workflow behind it, not by the
-// route. A live review moving the gate is a healthy hold, not a stall.
-func TestPreOpenCodexGateLiveReviewNotRouted(t *testing.T) {
+// route. A live review moving a check is a healthy hold, not a stall.
+func TestPreOpenCheckLiveReviewNotRouted(t *testing.T) {
 	// No RoutedTo: the route lives on the workflow, not the child.
-	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main", Status: "open"}
+	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main (correctness): fix the thing", Status: "open"}
 	a := preOpenGateAnchor("tk-live", 5, nil, review)
 	f := Facts{
 		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-lx-run"}},
@@ -244,10 +402,10 @@ func TestPreOpenCodexGateLiveReviewNotRouted(t *testing.T) {
 	}
 	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, f), "tk-live")
 
-	if strings.Contains(tile.Needs, "codex gate stalled") {
+	if strings.Contains(tile.Needs, "check stalled") {
 		t.Errorf("a live review workflow with no route is a healthy hold, not a stall; got %q", tile.Needs)
 	}
 	if tile.Owed {
-		t.Error("a pre-open gate a live review is moving is not the operator's move — not owed")
+		t.Error("a pre-open check a live review is moving is not the operator's move — not owed")
 	}
 }

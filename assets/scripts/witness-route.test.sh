@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for the two witness-patrol blocks that stamp an address:
-# warrant-file (the dog pool) and bug-dispatch (the polecat pool).
+# warrant-file (the dog pool) and bug-dispatch (the polecat pool). It also holds
+# every step of the formula to the rule that no address is built without the
+# resolver; refinery-stuck-escalate.test.sh runs the queue read that resolves.
 #
 # The witness files to agents at two different scopes, and the qualifier one
 # needs is exactly the qualifier the other must not carry. Both blocks are run
@@ -49,6 +51,16 @@ for pair in "warrant-file:$WARRANT" "bug-dispatch:$BUG"; do
   has "$body" 'resolve-route.sh' "$name resolves its address"
   eq "$(stray "$body")" "" "$name renders no address it does not resolve"
 done
+
+echo "# no step anywhere in the formula builds an address it does not resolve"
+# The same rule holds for every step, the stamps above and the refinery queue
+# read alike: a query by an address no agent holds returns a valid empty array.
+# Outside the resolver and a diagnostic, the token appears only where a pour
+# forwards the variable to the next patrol wisp.
+FORMULA_STRAY=$(grep -n '{{binding_prefix}}' "$TOML" \
+  | sed "s/--var binding_prefix='{{binding_prefix}}'//g" \
+  | grep '{{binding_prefix}}' | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true)
+eq "$FORMULA_STRAY" "" "every {{binding_prefix}} in the formula is resolved, a diagnostic, or forwarded to the next pour"
 
 # The rig root the blocks probe first, holding a copy of the real resolver so
 # $SCRIPTS resolution is exercised without reaching the live tree.

@@ -71,8 +71,7 @@ func TestUnknownArgumentIsRefused(t *testing.T) {
 // A value-taking flag with no following token is a malformed invocation and is
 // refused. The empty string it would otherwise take drops --expect's
 // compare-and-swap guard, so `--to pull_request --expect` with nothing after it
-// would transition unguarded. lifecycle.sh hangs on this input instead (its
-// `shift 2` underflows at $# = 1); a refusal is the behavior worth keeping.
+// would transition unguarded.
 func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 	for _, flag := range []string{
 		"--to", "--expect", "--set", "--set-dated", "--unset",
@@ -91,8 +90,8 @@ func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 }
 
 // An explicitly supplied empty argument is a real token, not a missing one, and
-// is preserved: --assignee '' clears the assignee (a request the atomic update
-// must carry) and --expect '' parses to the empty expectation the guard reads as
+// is preserved: --assignee "" clears the assignee (a request the atomic update
+// must carry) and --expect "" parses to the empty expectation the guard reads as
 // no compare-and-swap. Only the total absence of a following token is malformed.
 func TestExplicitEmptyArgumentIsPreserved(t *testing.T) {
 	o, err := parseTransition([]string{"--to", "merged", "--expect", "", "--assignee", "", "--close"})
@@ -148,6 +147,10 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"undeclared state", []string{"b-1", "--to", "nowhere"}, "is not a declared state"},
 		{"close on a non-closed state", []string{"b-1", "--to", "abandoned", "--close"}, "not a closed state"},
 		{"closed state without --close", []string{"b-1", "--to", "merged"}, "requires --close"},
+		// `merged` means "landed; merged_sha recorded", so the sha rides the same
+		// atomic write; a bead that never had a PR closes with a plain gc bd close.
+		{"--to merged without a merged_sha", []string{"b-1", "--to", "merged", "--close"}, "requires --set merged_sha"},
+		{"--to merged with an empty merged_sha", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha="}, "requires --set merged_sha"},
 		{"--set merge_result", []string{"b-1", "--to", "pull_request", "--set", "merge_result=x"}, "written by --to"},
 		{"--set gc.routed_to", []string{"b-1", "--to", "pull_request", "--set", "gc.routed_to=x"}, "route via --route"},
 		{"--set gc.takeaway", []string{"b-1", "--to", "abandoned", "--set", "gc.takeaway=x"}, "written by --takeaway"},

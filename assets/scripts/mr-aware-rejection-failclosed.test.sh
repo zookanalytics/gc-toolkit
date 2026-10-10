@@ -51,18 +51,27 @@ eq "$NBLOCKS" "2" "both rejection arms carry the mr-aware-rejection block"
 
 for i in 1 2; do
   [ -s "$TMP/block-$i.sh" ] || { bad "block $i extracted"; continue; }
-  grep -q '[\]' "$TMP/block-$i.sh" \
-    && bad "block $i backslash-free (TOML would eat it)" \
-    || ok "block $i backslash-free (TOML would eat it)"
+  case "$(cat "$TMP/block-$i.sh")" in
+    *\\*) bad "block $i backslash-free (TOML would eat it)" ;;
+    *)    ok  "block $i backslash-free (TOML would eat it)" ;;
+  esac
   sed -e "s|{{binding_prefix}}|gc-toolkit.|g" "$TMP/block-$i.sh" > "$TMP/run-$i.sh"
   bash -n "$TMP/run-$i.sh" && ok "block $i is valid bash" || bad "block $i is valid bash"
 done
+# Positive control: a backslash-free run of the guard above proves nothing
+# unless the guard still discriminates. Pin that `case … in *\\*` catches a
+# literal backslash on this host, so a green suite is never a vacuous pass.
+printf 'x\\y\n' > "$TMP/backslash-control"
+case "$(cat "$TMP/backslash-control")" in
+  *\\*) ok  "backslash guard detects a backslash (not vacuous)" ;;
+  *)    bad "backslash guard is vacuous — a literal backslash went undetected" ;;
+esac
 
 # --- Stubs. ---------------------------------------------------------------------
 # gc: bd show answers $FAKE_META (or nothing when FAKE_BD_FAILS=1); drain-ack
 # is recorded. lifecycle.sh: records its argv, lives under a fake rig root so
 # the block's candidate resolution finds it.
-mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
+mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts" "$TMP/rig-nopr/assets/scripts"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -70,6 +79,7 @@ case "$1 $2" in
   "bd show") [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 1
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update") shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "agent list") printf '%s' "${FAKE_AGENTS:-}"; exit 0 ;;
 esac
 exit 0
 GC
@@ -78,20 +88,29 @@ cat > "$TMP/rig/assets/scripts/lifecycle.sh" <<'LC'
 printf 'LIFECYCLE|%s\n' "$*" >> "$FAKE_LOG"
 exit 0
 LC
-chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/lifecycle.sh"
+# The repool proves the polecat route through the sibling pool-route.sh; the real
+# script runs here against the stubbed `gc agent list` ($FAKE_AGENTS). A second
+# rig root carries lifecycle.sh but NOT pool-route.sh, for the fail-closed case
+# where the route cannot be proved at all.
+cp "$HERE/pool-route.sh" "$TMP/rig/assets/scripts/pool-route.sh"
+cp "$TMP/rig/assets/scripts/lifecycle.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
+chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/lifecycle.sh" \
+         "$TMP/rig/assets/scripts/pool-route.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
 export PATH="$TMP/bin:$PATH"
 
-# run <block#> <meta-json|-> [rig-root] -> "<rc>|<log>"
+# run <block#> <meta-json|-> [rig-root] [agents-json] [gc-rig] -> "<rc>|<log>"
 run() {
   : > "$TMP/log"
   local rc=0 fails=0 meta="$2"
   [ "$meta" = "-" ] && { fails=1; meta='{}'; }
   # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
   # fallback cannot resolve the real repo and shadow the stub lifecycle.sh.
+  # GC_RIG defaults empty and the roster unreadable, so pool-route.sh returns the
+  # bare pool name UNVERIFIED and the existing cases keep asserting that name.
   ( cd "$TMP" && \
-    WORK=tk-work REJECT_REASON="conflict with main" GC_RIG="" \
+    WORK=tk-work REJECT_REASON="conflict with main" GC_RIG="${5-}" \
     GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_LOG="$TMP/log" \
+    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_AGENTS="${4-}" FAKE_LOG="$TMP/log" \
     bash "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -125,6 +144,32 @@ for i in 1 2; do
     || ok "block $i: no direct bead writes (lifecycle.sh is the writer)"
 done
 
+# --- The repool proves the route before it stamps it. ---------------------------
+# Both blocks are byte-identical (asserted above), so the route gate is exercised
+# once. pool-route.sh qualifies the bare pool name with GC_RIG and proves it
+# against the live agent set: a rejection repooled to a name no pool claims sits
+# unclaimed with a rejection_reason nobody reads, which is the strand it gates.
+echo "── route gate ──"
+
+# Readable roster that carries the polecat pool + a rig to qualify into: the
+# repool routes to the proven, rig-qualified identity, not the bare name.
+eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}' gc-toolkit)" \
+   "0|LIFECYCLE|transition tk-work --to unanchored --assignee  --route gc-toolkit/gc-toolkit.polecat --set rejection_reason=conflict with main;" \
+   "readable roster + GC_RIG -> repool routes to the proven rig-qualified pool"
+
+# Readable roster that does NOT carry the polecat pool: the route is refused, so
+# the block fails closed (drains, leaves the bead with the refinery) rather than
+# stamp an address nothing claims.
+eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"}]}' gc-toolkit)" \
+   "1|DRAIN;" \
+   "readable roster, no polecat identity -> fail closed (no unclaimable repool)"
+
+# pool-route.sh absent from the pack: the route cannot be proved, so the block
+# fails closed rather than repool to an unvalidated address.
+eq "$(run 1 '{}' "$TMP/rig-nopr")" \
+   "1|DRAIN;" \
+   "pool-route.sh missing -> fail closed, never repools unproven"
+
 # --- One reading of the merge strategy. -----------------------------------------
 # handle-failures decides whether the branch survives a rejection; merge-push
 # decides whether a PR is opened for it. Two readings can disagree, and the
@@ -156,9 +201,10 @@ awk '
   && ok "the rejection arm carries the branch decision" \
   || bad "the rejection arm carries the branch decision"
 for b in strategy-1 strategy-2 branch-keep; do
-  grep -q '[\]' "$TMP/$b.sh" \
-    && bad "$b is backslash-free (TOML would eat it)" \
-    || ok "$b is backslash-free (TOML would eat it)"
+  case "$(cat "$TMP/$b.sh")" in
+    *\\*) bad "$b is backslash-free (TOML would eat it)" ;;
+    *)    ok  "$b is backslash-free (TOML would eat it)" ;;
+  esac
 done
 
 # git: records the branch delete. Everything else fails, so the block's

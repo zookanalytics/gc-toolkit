@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the city web terminal's attach guard (tk-rbf9r).
+# Hermetic test for the city web terminal's attach guard.
 #
 # WHAT IS BEING GUARDED. ttyd runs with `-a/--url-arg`, so the browser's query
 # string becomes the argv of the attach command, and with `-W`, so the resulting
@@ -117,7 +117,7 @@ refuses() {
 
 echo "--- the default target: today's behaviour, preserved ---"
 
-# The pre-tk-rbf9r invocation was `gc session attach gc-toolkit.mayor` with no
+# The original invocation was `gc session attach gc-toolkit.mayor` with no
 # argument at all, and that is what a client sends when it names no session.
 attaches "[gc-toolkit.mayor]" "(A) no argument attaches the default"
 

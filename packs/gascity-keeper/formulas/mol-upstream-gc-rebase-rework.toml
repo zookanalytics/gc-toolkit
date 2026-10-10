@@ -199,7 +199,7 @@ FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD | jq -R . | jq -s .)
 gc bd update {{issue}} \
     --set-metadata classification=mechanical \
     --set-metadata files_changed="$FILES_CHANGED" \
-    --notes "Mechanical rework of $TARGET_SHA. Files: $(printf '%s' "$FILES_CHANGED" | jq -r '. | join(", ")')"
+    --append-notes "Mechanical rework of $TARGET_SHA. Files: $(printf '%s' "$FILES_CHANGED" | jq -r '. | join(", ")')"
 ```
 
 ### dropped-absorbed
@@ -218,7 +218,7 @@ git reset --hard HEAD
 
 gc bd update {{issue}} \
     --set-metadata classification=dropped-absorbed \
-    --notes "Upstream already provides this behavior or supersedes the commit. Recommended action: git rebase --skip. Rationale: <one to three sentences>."
+    --append-notes "Upstream already provides this behavior or supersedes the commit. Recommended action: git rebase --skip. Rationale: <one to three sentences>."
 ```
 
 ### judgment-required
@@ -240,7 +240,7 @@ gc bd update {{issue}} \
     --set-metadata classification=judgment-required \
     --set-metadata files_changed="$FILES_CHANGED" \
     --set-metadata judgment_summary="<one to three sentences describing the design call you made and the alternatives considered>" \
-    --notes "Judgment-required rework of $TARGET_SHA. See metadata.judgment_summary."
+    --append-notes "Judgment-required rework of $TARGET_SHA. See metadata.judgment_summary."
 ```
 
 ### infeasible
@@ -253,7 +253,7 @@ your reason surfaced:
 gc bd update {{issue}} \
     --set-metadata classification=infeasible \
     --set-metadata infeasible_reason="<concise one-liner: missing dep / scope too broad / context exhausted / operator input needed>" \
-    --notes "Infeasible: <full explanation with what's blocking and what the operator should consider>."
+    --append-notes "Infeasible: <full explanation with what's blocking and what the operator should consider>."
 ```
 
 **4. Close the rework bead and nudge the keeper:**

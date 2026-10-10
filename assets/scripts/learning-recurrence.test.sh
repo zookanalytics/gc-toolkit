@@ -17,7 +17,8 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has()   { if grep -qF -- "$2" <<< "$1"; then ok "$3"; else bad "$3 (missing '$2')"; fi; }
 hasnt() { if grep -qF -- "$2" <<< "$1"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
-ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ; }
+ago()     { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | todate'; }
+day_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | strftime("%Y-%m-%d")'; }
 
 # --- stub gc --------------------------------------------------------------
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -95,7 +96,7 @@ mislabelled() { # id created_at category — carries the label, not the kind
 
 # --- fixture pack checkout ------------------------------------------------
 REPO="$TMP/repo"; mkdir -p "$REPO/template-fragments" "$REPO/docs"
-ADOPTED=$(date -u -d "-30 days" +%Y-%m-%d)
+ADOPTED=$(day_ago 30)
 cat > "$REPO/template-fragments/learned-conventions-polecat.template.md" <<MD
 {{ define "learned-conventions-polecat" }}
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
@@ -193,7 +194,7 @@ eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].si
 # same-day evidence predates the merge as often as it follows it.
 REPO2="$TMP/repo2"; mkdir -p "$REPO2/template-fragments"
 TODAY=$(date -u +%Y-%m-%d)
-TWO_DAYS_AGO=$(date -u -d "-2 days" +%Y-%m-%d)
+TWO_DAYS_AGO=$(day_ago 2)
 cat > "$REPO2/template-fragments/learned-conventions-polecat.template.md" <<MD
 {{ define "learned-conventions-polecat" }}
 <!-- rule:tk-today src:audit:tk-test adopted:$TODAY -->

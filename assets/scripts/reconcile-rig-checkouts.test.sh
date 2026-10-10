@@ -29,6 +29,9 @@ SCRIPT="$HERE/reconcile-rig-checkouts.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-reconcile-rig-checkouts-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -91,8 +94,8 @@ case "$1" in
       update)
         id="$1"; shift; key=""
         while [ $# -gt 0 ]; do [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"; shift; done
-        [ -n "$key" ] && sed -i "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" ;;
-      close) sed -i "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" ;;
+        [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
+      close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
   session) : ;;
 esac

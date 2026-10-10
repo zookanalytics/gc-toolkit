@@ -3,12 +3,12 @@
 # (converse-capability.sh). rig_carries_converse reads the import-resolved roster
 # `gc agent list --json` reports, keyed on rig NAME; it never globs a checkout.
 #
-# The regression this pins (tk-353e79): a rig that obtains converse by IMPORTING
+# The regression this pins: a rig that obtains converse by IMPORTING
 # the pack carries no agents/converse-* under its own checkout, yet the roster
-# registers <rig>/gc-toolkit.converse. A checkout glob refuses every such rig; the
-# roster affirms it. The predicate must agree with the roster — so a rig PRESENT
-# in a readable roster is capable and a rig ABSENT from one is not, while an
-# unreadable/malformed/empty roster fails open (a degraded data plane is not a
+# registers <rig>/gc-toolkit.converse-<model>. A checkout glob refuses every such
+# rig; the roster affirms it. The predicate must agree with the roster — so a rig
+# PRESENT in a readable roster is capable and a rig ABSENT from one is not, while
+# an unreadable/malformed/empty roster fails open (a degraded data plane is not a
 # dead zone).
 #
 # Hermetic: a stub `gc` on PATH serves `agent list` from a per-case roster; no
@@ -55,14 +55,13 @@ export ROSTER=""
 command -v rig_carries_converse >/dev/null 2>&1 \
     || { echo "converse-capability.test: sourcing defined no rig_carries_converse" >&2; exit 1; }
 
-# A roster registering converse (base + variants) for each named rig. Built the
+# A roster registering converse sitting templates for each named rig. Built the
 # way `gc agent list --json` renders it: an object with an .agents array of
 # {qualified_name} entries.
 roster_converse_for() {
     jq -n --arg rigs "$*" '{agents:
         [ ($rigs | split(" ")[] | select(length > 0)) as $r
-          | {qualified_name: ($r + "/gc-toolkit.converse")},
-            {qualified_name: ($r + "/gc-toolkit.converse-opus")},
+          | {qualified_name: ($r + "/gc-toolkit.converse-opus")},
             {qualified_name: ($r + "/gc-toolkit.converse-codex")} ]}'
 }
 
@@ -89,17 +88,20 @@ is "an HQ/city root absent from the roster is NOT capable" "$(cap loomington)" 1
 
 # --- the match is converse-specific and variant-aware -------------------------
 
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"}]}'
-is "a base-only converse entry is capable" "$(cap gc-toolkit)" 0
-
 export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-opus"}]}'
-is "a model-variant-only converse entry is capable" "$(cap gc-toolkit)" 0
+is "a single sitting template is capable" "$(cap gc-toolkit)" 0
+
+# engage spawns only a converse-<model> template, so a bare gc-toolkit.converse
+# entry offers no sitting to spawn and must not read as capable.
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"}]}'
+is "a bare converse entry with no sitting template is NOT capable" "$(cap gc-toolkit)" 1
 
 export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive"}]}'
 is "a proactive-only rig is NOT converse-capable" "$(cap gc-toolkit)" 1
 
-# The "/" in the key stops one rig name matching another it is a prefix of.
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse"}]}'
+# The "/" in the key stops one rig name matching another it is a prefix of. The
+# entry is a real sitting template, so only the rig segment can refuse it.
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse-opus"}]}'
 is "a rig name that is a prefix of another is NOT matched" "$(cap gc-toolkit)" 1
 
 # --- fail open on an unreadable roster ----------------------------------------

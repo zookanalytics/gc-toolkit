@@ -15,8 +15,7 @@ operator's session title.
 Re-read the visit body. Its stated conditions ARE the premise, often
 bulleted literally — *"no `triage.hold` and no `gc.takeaway` on the
 root"*, *"its frontier is [...] UNASSIGNED"*. Check each one still
-holds, on the subject and on whatever bead the premise is about (a
-stalled-workflow visit names that bead in its own `stall_root`):
+holds, on the subject and on whatever bead the premise is about:
 ```bash
 gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
   | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'

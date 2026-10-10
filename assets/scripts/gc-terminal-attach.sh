@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The city web terminal's attach target: the one place a URL-supplied session
-# name becomes a `gc session attach` (tk-rbf9r).
+# name becomes a `gc session attach`.
 #
 # WHY THIS EXISTS. The city runs one ttyd for the helm board's terminal tile:
 #
@@ -56,7 +56,7 @@
 # Hermetic regression test: assets/scripts/gc-terminal-attach.test.sh
 set -euo pipefail
 
-# The session attached when the client names none. This is the pre-tk-rbf9r
+# The session attached when the client names none. This is the formerly
 # hardcoded target; the env override exists so another city can set its own and
 # so the test can drive it, and it is NOT client-reachable (ttyd passes the
 # query string as argv, never as environment).
@@ -115,7 +115,7 @@ fi
 REQUESTED="${1-}"
 
 # No argument, or the empty argument ttyd synthesises for a bare `?arg=`:
-# attach the default exactly as the pre-tk-rbf9r invocation did. Note this path
+# attach the default exactly as the original invocation did. Note this path
 # touches neither jq nor the session list, so the terminal still comes up on a
 # city where those are unavailable.
 if [ -z "$REQUESTED" ]; then

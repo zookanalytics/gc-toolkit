@@ -323,7 +323,7 @@ SIBLINGS=$(printf '%s' "$SIB_JSON" | jq -r --arg root "$ROOT" --arg self "$TARGE
       | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
       | select(((.metadata["gc.routed_to"] // "") != "") or ((.assignee // "") != ""))
       | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // "")]
-      | @tsv' 2>/dev/null)
+      | map(tostring) | join("\u001f")' 2>/dev/null)
 
 [ -n "$SIBLINGS" ] || finish
 
@@ -346,7 +346,14 @@ printf '%s\n' "$SIBLINGS" > "$ROWS" || {
   finish
 }
 
-while IFS=$'\t' read -r sid sstep srouted swho; do
+# The jq above joins the row with the unit separator (0x1F); match it here. A tab
+# will not do: routed_to and assignee are empty-tolerant and tab is IFS-whitespace,
+# so a run of empty columns collapses and shifts a later field left — an
+# unrouted-but-assigned sibling would read its assignee into $srouted and leave
+# $swho empty, skipping the unassign. 0x1F is not IFS-whitespace, so every empty
+# column still delimits, and bd_json's scrub strips 0x1F from field data so none
+# can carry one.
+while IFS=$'\x1f' read -r sid sstep srouted swho; do
   [ -n "${sid:-}" ] || continue
   QUIET=1
   if [ -n "${srouted:-}" ]; then

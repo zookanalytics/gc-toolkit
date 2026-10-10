@@ -5,14 +5,23 @@
 # `gc session new converse-opus <visit>`: that is an origin=manual session,
 # which is not pool_managed, so the pool execution backstop never governs it and
 # a pane held open for a conversation is not reaped by a no-nudge drain.
+# Session-ending mechanics (what ends a held sitting when no clock does, and how
+# the converse-reap order collects the settled session) are verified in
+# docs/gascity-human-engagement.md; read that before tuning.
 scope = "rig"
 provider = "claude"
-option_defaults = { model = "opus" }
+option_defaults = { model = "claude-opus-5-5" }
 # Share the converse role's prompt rather than carry a copy; a variant differs
-# from its siblings only in provider and model.
-prompt_template = "agents/converse/prompt.template.md"
-# A rig worktree so the sitting's gh/git resolve to the rig it serves, not the
-# city repo the .gc tree sits in (as base converse documents).
+# from its siblings only in provider and model. The prompt lives in
+# agents/_converse/, which defines no agent: the pack loader skips a directory
+# under agents/ whose name starts with `_`. Retiring any one variant is then a
+# plain directory delete that leaves the prompt the others read in place.
+prompt_template = "agents/_converse/prompt.template.md"
+# A rig worktree, not a plain dir under the city tree: the sitting shells gh/git
+# to inspect the rig's PRs and branches, and those tools resolve the repo from
+# the working directory. Under .gc/agents/ that resolves to the city repo the
+# .gc tree sits in, not the rig this sitting serves. worktree-setup.sh cuts the
+# checkout from the rig root, as the polecat/proactive/refinery pools already do.
 work_dir = ".gc/worktrees/{{.Rig}}/converse-opus/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 # resume carries the conversation across suspend, pin, and every wake; a fresh
@@ -20,8 +29,45 @@ pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.Wo
 wake_mode = "resume"
 # The operator attaches to the sitting.
 attach = true
-# Sittings are opened by hand, never spawned by demand: min 0 starts nothing,
-# and max is only a ceiling on how many run at once.
+# Empty on purpose, and empty is not what protects a sitting. A sitting runs as
+# a manual (spawn-on-engagement) session, never pool_managed, and all three
+# claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
+# execution_backstop.go), so none of them fires against a held sitting whatever
+# this field holds. The manual origin is the exemption. Empty is also not a
+# uniform "skip": the three claim backstops split on an empty nudge. Only the
+# execution backstop drains on it: gascity's shared empty-content path
+# (nudge_backstop.go) runs its exhausted action, the tracked drain that
+# releases the claim. The pool-claim backstop substitutes a default claim nudge
+# and re-delivers instead. The continuation backstop's exhausted action is a
+# no-op. Neither of those drains. So for a pool_managed session emptiness
+# drains only through the execution backstop, and a sitting, never
+# pool_managed, is reached by none of it.
+# Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
+# of that prompt is the claim block, so a fresh sitting claims with no
+# keystrokes. A provider that takes no prompt argument gets the prompt prepended
+# to this field, and prepending to an empty field still delivers it, so the
+# precondition is the prompt rather than prompt_mode. A prompt that stops
+# opening with the claim block leaves nothing to start the turn.
+# Non-empty text does not arm a backstop here; it feeds that launch delivery.
+# The text must then name converse-claim.sh (the claimer — the scoped claim
+# lives there, never the raw `gc hook --claim`), and it must send the session
+# back through the prompt's step-1 block instead of naming the script alone. A
+# bare invocation passes no group, so the out-of-group guard reads "first claim
+# of a session: any group" on every wake — and the action=hold verdict, which is
+# what stops a nudge from ending a live sitting, is read in that block and
+# nowhere else. Keep it at peer length; fixes go in the prompt or a script.
+nudge = ""
+# 0 keeps this template off the idle reap; any positive value re-arms it. Idle
+# is measured from terminal output, and an operator reading a held thread
+# produces none. A sitting ends when its visit closes — the agent's own
+# sign-off, or the operator's bare `gc-helm dismiss` (it infers the subject) —
+# and the `converse-reap` order then closes the settled, unattached session.
+# Why, and the ending this does not reach (an OPEN visit the operator walked
+# away from): docs/gascity-human-engagement.md.
+idle_timeout = "0"
+# Sittings are opened by hand, never spawned by demand: min 0 starts nothing.
+# max_active_sessions does not ration them: `gc session new` checks no session
+# count, and the pool's scale-down drop paths skip a manual session.
 min_active_sessions = 0
 max_active_sessions = 8
 # A bounded lifetime refreshes the provider's cached credential before it can

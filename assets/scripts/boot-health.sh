@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# boot-health — is the deacon stuck? Three mechanical reads, no LLM, no action.
+# boot-health — is the deacon stuck? Mechanical reads, no LLM, no action.
 # REPORT-ONLY BY DESIGN (2026-08-08 audit): nudging an idle deacon costs more
 # than a boot cycle (~84k tokens), 4 of 5 nudges never landed (session fence
 # mismatch on a fresh-wake session), and a failed nudge would let the shutdown
 # dance kill a healthy deacon — the dog pool exists, but boot-health
 # deliberately files no warrants. See orders/boot-health.toml.
-# PRECEDENCE (tk-uz3de): the patrol-wisp age measures WORK COMPLETED and wins;
+# PRECEDENCE: the patrol-wisp age measures WORK COMPLETED and wins;
 # the pane (busy marker, movement hash with digits normalized out — timers
-# advance on their own) is a FALLBACK, consulted only when the wisp ledger
-# cannot be read.
+# advance on their own) is a FALLBACK, deciding only when the wisp ledger
+# cannot be read. So the wisp is read first, and a fresh one ends the pass
+# with no pane read at all; otherwise one peek both proves the deacon exists
+# and supplies the pane facts.
 set -euo pipefail
 
 DEACON="${BOOT_HEALTH_DEACON:-gc-toolkit.deacon}"
@@ -17,7 +19,7 @@ REPORT_TO="${BOOT_HEALTH_REPORT_TO:-human}"
 # Thresholds. WISP_FRESH is ~2.6-3 observed deacon cycles of margin (a wisp is
 # already event_timeout old when its cycle starts; max healthy age is a full
 # cycle). COUPLED to mol-deacon-patrol's event_timeout — change one, re-derive
-# the other (tk-2qa85), or this becomes a permanent false-positive generator.
+# the other, or this becomes a permanent false-positive generator.
 WISP_FRESH="${BOOT_HEALTH_WISP_FRESH:-3600}"       # wisp newer than this = healthy
 REPORT_AFTER="${BOOT_HEALTH_REPORT_AFTER:-1800}"   # cold this long = mail once
 REPORT_EVERY="${BOOT_HEALTH_REPORT_EVERY:-21600}"  # re-mail a CONTINUING episode
@@ -27,7 +29,18 @@ PEEK_LINES="${BOOT_HEALTH_PEEK_LINES:-30}"
 CALL_TIMEOUT="${BOOT_HEALTH_CALL_TIMEOUT:-15}"
 KILL_AFTER="${BOOT_HEALTH_KILL_AFTER:-5}"
 
-BUSY_RE="${BOOT_HEALTH_BUSY:-esc to interrupt|ctrl.{0,2}c to (stop|interrupt)}"
+# Busy markers: both CLIs print these while mid-turn. Held as one single-quoted
+# literal, because a `}` inside ${VAR:-default} closes the expansion early.
+DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
+BUSY_RE="${BOOT_HEALTH_BUSY:-$DEFAULT_BUSY}"
+# grep exits 2 on a pattern it rejects, and the busy test reads that as "not
+# busy", so an override grep rejects gives way to the default markers.
+BUSY_RC=0
+grep -Eq -- "$BUSY_RE" </dev/null >/dev/null 2>&1 || BUSY_RC=$?
+if [ "$BUSY_RC" -gt 1 ]; then
+    echo "boot-health: BOOT_HEALTH_BUSY is not a valid ERE — using the default busy markers"
+    BUSY_RE="$DEFAULT_BUSY"
+fi
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime/packs/gc-toolkit}"
@@ -64,7 +77,7 @@ else
 fi
 
 # The probe form: a failed read is an empty one (no evidence). Right for
-# reads, WRONG for the mail — see the three-way split in step 5.
+# reads, WRONG for the mail — see the three-way split in step 7.
 gc_call() { gc_call_rc "$@" 2>/dev/null || true; }
 
 # --- state (a file not starting with $STATE_MAGIC is not ours) ---------------
@@ -98,28 +111,10 @@ save_state() {
 # Recovery closes the episode: next coldness is a NEW episode and reports again.
 clear_state() { pane_hash="$1"; cold_since=0; last_report=0; save_state; }
 
-# --- 0. does the deacon exist? ----------------------------------------------
-# If not, the controller restarts it. Not our question.
-PANE1="$(gc_call gc session peek "$DEACON" --lines 1)"
-[ -n "$PANE1" ] || exit 0
-
-# --- 1. pane: reduce to two facts, DECIDE nothing here (see step 3) ----------
-PANE="$(gc_call gc session peek "$DEACON" --lines "$PEEK_LINES")"
-
-# Here-string, never a pipe into grep -q (tk-zfjg9: SIGPIPE + pipefail reads
-# a busy deacon as idle).
-PANE_BUSY=0
-if grep -qiE -- "$BUSY_RE" <<< "$PANE"; then PANE_BUSY=1; fi
-
-# Digits normalized out before hashing: a bigger timer is not movement.
-NEW_HASH="$(printf '%s' "$PANE" | tr -d '0-9' | cksum | awk '{print $1}')"
-PANE_MOVED=0
-if [ -n "$pane_hash" ] && [ "$NEW_HASH" != "$pane_hash" ]; then PANE_MOVED=1; fi
-
-# --- 2. patrol wisp ----------------------------------------------------------
+# --- 1. patrol wisp ----------------------------------------------------------
 # Three ways this query false-empties against a healthy deacon, all closed:
 # --include-infra is REQUIRED (patrol wisps are issue_type=molecule, excluded
-# by default — lx-ody8m); NO --status filter (a just-poured wisp is `open`;
+# by default); NO --status filter (a just-poured wisp is `open`;
 # in_progress reports [] across the burn window; bd list already excludes
 # closed rows); the STORE is pinned via --db (see WISP_DB). --limit=0 lifts
 # the 50-row cap. `status` is read off the row, never filtered on.
@@ -145,22 +140,44 @@ if [ -n "$WISPS" ]; then
         NEWEST="${WISP_ROW%%$'\t'*}"
         WISP_STATUS="${WISP_ROW#*$'\t'}"
         if [ -n "$NEWEST" ]; then
-            T="$(date -d "$NEWEST" +%s 2>/dev/null || echo "")"
+            # jq reads this UTC form the same on every host; date(1) needs -d
+            # on GNU and -j -f on BSD.
+            T="$(jq -rn --arg t "$NEWEST" '$t | fromdateiso8601' 2>/dev/null)" || T=""
             [ -n "$T" ] && WISP_AGE=$((NOW - T))
         fi
     fi
 fi
 
-# --- 3. adjudicate: work-completion first, pane only as fallback -------------
-# (a) a FRESH wisp = healthy, whatever the pane shows (the tk-uz3de fix).
+# --- 2. a FRESH wisp = healthy, whatever the pane would show -----------------
+# Read no pane: work completed is the answer, and no pane fact can change it.
+# The stored pane hash goes with the episode, so the next pane read starts a
+# new movement baseline.
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
-    clear_state "$NEW_HASH"   # wisp young: cycling normally, whatever its status
+    clear_state ""            # wisp young: cycling normally, whatever its status
     exit 0
 fi
 
-# (b) ledger READ, wisp stale/absent: a busy pane must NOT rescue this —
+# --- 3. does the deacon exist? The pane read is the answer -------------------
+# An empty read means no deacon, and the controller restarts it — not our
+# question; a failed read is an empty one, so it reads the same.
+PANE="$(gc_call gc session peek "$DEACON" --lines "$PEEK_LINES")"
+[ -n "$PANE" ] || exit 0
+
+# --- 4. pane: reduce to two facts, DECIDE nothing here (see step 5) ----------
+# Here-string, never a pipe into grep -q (SIGPIPE + pipefail reads
+# a busy deacon as idle).
+PANE_BUSY=0
+if grep -qiE -- "$BUSY_RE" <<< "$PANE"; then PANE_BUSY=1; fi
+
+# Digits normalized out before hashing: a bigger timer is not movement.
+NEW_HASH="$(printf '%s' "$PANE" | tr -d '0-9' | cksum | awk '{print $1}')"
+PANE_MOVED=0
+if [ -n "$pane_hash" ] && [ "$NEW_HASH" != "$pane_hash" ]; then PANE_MOVED=1; fi
+
+# --- 5. adjudicate a wisp that is not fresh: pane only as fallback -----------
+# (a) ledger READ, wisp stale/absent: a busy pane must NOT rescue this —
 #     "pane moving + no work" is the wedged-runtime signature; fall through.
-# (c) ledger NOT read: no evidence about the deacon — fall back to the pane.
+# (b) ledger NOT read: no evidence about the deacon — fall back to the pane.
 if [ "$WISP_READ_OK" -eq 0 ]; then
     if [ "$PANE_BUSY" -eq 1 ]; then
         clear_state ""            # mid-turn: unambiguous, and cheapest to detect
@@ -175,7 +192,7 @@ if [ "$WISP_READ_OK" -eq 0 ]; then
     exit 0
 fi
 
-# --- 4. cold -----------------------------------------------------------------
+# --- 6. cold -----------------------------------------------------------------
 # Ledger read, wisp stale or absent, pane overridden. Start (or continue) the
 # clock. A first cold pass only records — one observation is not evidence.
 pane_hash="$NEW_HASH"
@@ -183,7 +200,7 @@ pane_hash="$NEW_HASH"
 COLD=$((NOW - cold_since))
 [ "$COLD" -ge "$REPORT_AFTER" ] || { save_state; exit 0; }
 
-# --- 5. report ---------------------------------------------------------------
+# --- 7. report ---------------------------------------------------------------
 # Once per episode, then at REPORT_EVERY while it persists, so a genuine wedge
 # does not go silent after one mail and a flapping deacon does not spam.
 DUE=0
@@ -217,7 +234,7 @@ context, not the trigger (tk-uz3de).
 
   patrol wisp     $AGE_TXT
   freshness gate  ${WISP_FRESH}s
-  cold since      $(date -u -d "@$cold_since" '+%Y-%m-%dT%H:%M:%SZ')
+  cold since      $(jq -rn --argjson s "$cold_since" '$s | todateiso8601' 2>/dev/null)
   pane            $PANE_MOVE_TXT; $PANE_BUSY_TXT
 
 This order does NOT nudge or file warrants. Escalation is deliberately a human

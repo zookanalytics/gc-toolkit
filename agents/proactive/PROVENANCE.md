@@ -12,7 +12,7 @@ Components 5-6). A proactive worker takes one bead, gives it a cheap first
 reaction (read the body, write a first-reaction card to the notes, then
 dispose: route the bead to the pool that does that work, recommend an action for
 the operator to trigger, hold it on the bead it waits for, route a confident
-no-op to a validating closer, or file a visit for the operator's judgment), and
+no-op to a validating closer, or put it to the operator as a human gate), and
 drains. It is the city's first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue

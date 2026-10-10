@@ -55,6 +55,30 @@ A `tracks` edge is non-blocking. So the gate holds only this bead's finalization
 it never consults the bead's readiness, and it never reaches the bead's children.
 A visit on an epic holds the epic's own close and leaves every child free to move.
 
+### The caller's own escalation
+
+`finalize-gate.sh check <bead-id> --except-key <escalation-key>` names the
+situation key under which the caller files, through `escalate.sh`, its report of
+a refused finalization of this bead. That report asks for the retry, so holding
+the retry on it would keep the bead from ever finalizing once the obstruction it
+reported had cleared. A visit is excepted only when all of these hold:
+
+- it carries that `escalation_key`;
+- it is stamped for this bead (`gc.continuation_group`);
+- nobody is engaged in it. It is open, with no assignee and no bound session
+  (`gc.session_name`).
+
+That last test is the helm board's engagement test (`engagedVisit` in
+`services/helm/internal/board/derive.go`). Engage binds a visit's assignee while
+the visit is still open, so an open visit with an assignee is already engaged.
+Every visit filed under the key for this bead is excepted alike, twins included.
+A visit a person has engaged holds like any other, and so does every visit under
+another key.
+
+The gate reads each visit once. A person who engages an excepted visit after that
+read, while the finalization it allowed is under way, finds the bead finalized.
+The caller leaves that visit for them to conclude.
+
 ## Fail closed
 
 A tracker list that does not read, or does not answer with a JSON array, refuses
@@ -72,6 +96,10 @@ a squash-merge, a close — cannot be taken back.
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused
   close leaves. The release is to conclude the open visit, then re-run.
+  `bead-rehome.sh --except-key <escalation-key>` hands the key to the gate's
+  exception. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when it
+  retries a pre-recorded PR-close disposition, and retracts the visits filed
+  under it as moot once the close lands.
 
 `assets/scripts/lifecycle.sh` closes only into `merged`, and on the merge path
 that close is the bookkeeping that runs after the irreversible merge — so the

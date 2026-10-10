@@ -21,6 +21,8 @@
 #      call (gh --repo, git -C <root>) — and then declares a `# worktree-exempt:`
 #      marker naming why. The marker makes the exception deliberate and visible;
 #      its absence on a city-tree rig agent is the bug this test exists to catch.
+#
+# run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."

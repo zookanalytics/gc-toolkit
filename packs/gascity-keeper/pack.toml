@@ -33,6 +33,16 @@ schema = 2
 # `[[rigs.patches]]` blocks for the gascity rig alongside
 # `[rigs.imports.gascity-keeper]`.
 
+# template-fragments/ also holds symlinks to the three root-pack
+# fragments the keeper prompt composes (watch-dispatched-work,
+# work-quality-base, work-quality-system), so the text keeps one
+# source. In the gascity rig both packs are composed and either copy
+# renders the same bytes. Outside a city nothing composes them:
+# `gc lint` there loads only the linted pack's own fragments, and the
+# links are what resolve the keeper prompt. A root fragment the keeper
+# prompt starts composing needs a link here too, or standalone lint
+# reports `template "<name>" not defined`.
+
 # For the broader gc-toolkit install context (importing gc-toolkit,
 # `[[rigs.overrides]]`, verification with `gc doctor`), see
 # `docs/install.md` in the gc-toolkit repo root.

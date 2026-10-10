@@ -14,7 +14,7 @@
 [order]
 description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome every open, unassigned bead whose until targets have all closed"
 trigger = "cooldown"
-interval = "2m"
+interval = "5m"
 timeout = "120s"
 exec = "$PACK_DIR/assets/scripts/deferred-dispatch.sh reconcile"
 scope = "rig"

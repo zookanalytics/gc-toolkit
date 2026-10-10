@@ -116,6 +116,20 @@ case "$sub" in
           *) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
         esac ;;
       list)
+        # The demand read is the one list that passes --include-gates: it
+        # answers the open human gate $FAKE_DEMAND on the subject until a
+        # resolve or close of it is recorded, and $FAKE_DEMAND_LIST_FAILS fails
+        # that read alone.
+        case " $* " in
+          *" --include-gates "*)
+            [ -n "${FAKE_DEMAND_LIST_FAILS:-}" ] && exit 1
+            if [ -n "${FAKE_DEMAND:-}" ] && [ ! -e "$FAKE_OUTCOME_DIR/$FAKE_DEMAND.resolved" ]; then
+              jq -n --arg d "$FAKE_DEMAND" --arg s "$FAKE_SUBJECT_ID" \
+                '[{id:$d, status:"open", assignee:"", issue_type:"gate", await_type:"human",
+                   metadata:{"gc.demand_for":$s}}]'
+            else printf '[]\n'; fi
+            exit 0 ;;
+        esac
         case "${FAKE_LIST_MODE:-ok}" in
           notarray) printf '{"not":"an array"}\n'; exit 0 ;;
           fail)     exit 1 ;;
@@ -128,7 +142,18 @@ case "$sub" in
             '[{id:$v, status:$st, assignee:$as,
                metadata:{task_kind:"visit","gc.continuation_group":$s,"gc.session_name":$se}}]'
         else printf '[]\n'; fi ;;
-      close)  printf '%s\n' "$*" >> "$FAKE_CALLS" ;;
+      close)
+        printf '%s\n' "$*" >> "$FAKE_CALLS"
+        [ -z "${FAKE_DEMAND_STUCK:-}" ] && : > "$FAKE_OUTCOME_DIR/$3.resolved" ;;
+      gate)
+        # `bd gate resolve <id>`: recorded, and the gate reads closed after it
+        # unless $FAKE_DEMAND_STUCK (a resolve that reports success and leaves
+        # the gate open) or $FAKE_RESOLVE_REFUSED (a pre-gate demand that
+        # `gate resolve` refuses, closed by `bd close` instead).
+        printf '%s\n' "$*" >> "$FAKE_CALLS"
+        [ -n "${FAKE_RESOLVE_REFUSED:-}" ] && { echo "Error: $4 is not a gate issue" >&2; exit 1; }
+        [ -z "${FAKE_DEMAND_STUCK:-}" ] && : > "$FAKE_OUTCOME_DIR/$4.resolved"
+        exit 0 ;;
       update)
         printf '%s\n' "$*" >> "$FAKE_CALLS"
         # Persist the dismiss stamps so `bd show` reads them back: gc.outcome to
@@ -216,6 +241,76 @@ grep -q "bd close $VIS" <<< "$CALLS" \
 # One awk pass — no `grep | head`, whose SIGPIPE trips pipefail and aborts the run.
 order_ok="$(awk -v v="$VIS" '/^sling /{s=NR} $0 ~ ("^bd close " v){c=NR} END{print (s>0 && c>0 && s<c) ? "yes" : "no"}' <<< "$CALLS")"
 eq "$order_ok" "yes" "(DISPATCH) sling happens BEFORE the dismiss"
+grep -q '^bd gate resolve' <<< "$CALLS" \
+  && bad "(DISPATCH) a subject held on its visit alone carries no demand, so nothing is resolved (calls: $CALLS)" \
+  || ok "(DISPATCH) a subject with no open demand resolves nothing"
+
+# --- (GATE) the recommendation reached the operator as a human gate ------------
+# A first reaction's recommend exit holds the subject on a human gate rather than
+# on its visit, so dismissing the visit releases nothing: Accept is the
+# operator's answer, and it resolves the gate before the dismiss. Left open, the
+# gate would hold the dispatched work out of bd ready with no visit left to
+# re-offer it.
+export FAKE_DEMAND="tk-gate1"
+run_accept "$SUBJ"
+eq "$RC" "0" "(GATE) accepting a gate-held recommendation exits 0"
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+  && ok "(GATE) resolves the subject's human gate with the answer" || bad "(GATE) gate resolved (calls: $CALLS)"
+gate_order="$(awk -v v="$VIS" '/^sling /{s=NR} /^bd update .*--unset-metadata gc.recommended_formula/{m=NR} /^bd gate resolve /{g=NR} $0 ~ ("^bd close " v){c=NR} END{print (s>0 && m>s && g>m && c>g) ? "yes" : "no"}' <<< "$CALLS")"
+eq "$gate_order" "yes" "(GATE) sling, then the dispatch record, then the gate, then the dismiss"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(GATE) dismisses the visit once the gate resolved" || bad "(GATE) visit dismissed (calls: $CALLS)"
+
+# --- (GATESTUCK) a gate that is still open after its resolve -> refuse the dismiss
+# The re-read after the resolve is what proves it: a dismiss over an open gate
+# would leave the dispatched work blocked with no visit to bring it back.
+export FAKE_DEMAND_STUCK=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(GATESTUCK) a gate still open after its resolve fails closed (exit 4)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(GATESTUCK) must NOT dismiss the visit over an open gate (calls: $CALLS)" \
+  || ok "(GATESTUCK) the visit is not dismissed"
+grep -q 'tk-gate1 is still open' <<< "$ERR" \
+  && ok "(GATESTUCK) names the gate that is still open" || bad "(GATESTUCK) message (err: $ERR)"
+grep -q 'resumes here without dispatching again' <<< "$ERR" \
+  && ok "(GATESTUCK) …and says a re-run resumes without a second dispatch" || bad "(GATESTUCK) resume message (err: $ERR)"
+unset FAKE_DEMAND_STUCK
+
+# --- (GATELEGACY) a demand filed before demands were gates ---------------------
+# `gate resolve` refuses an issue_type=decision demand, which is closed on the
+# same terms instead, the way converse-signoff.sh discharges one.
+export FAKE_RESOLVE_REFUSED=1
+run_accept "$SUBJ"
+eq "$RC" "0" "(GATELEGACY) a pre-gate demand is closed instead and accept completes"
+grep -q "^bd close tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+  && ok "(GATELEGACY) closes the demand on the same terms" || bad "(GATELEGACY) demand closed (calls: $CALLS)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(GATELEGACY) …and dismisses the visit" || bad "(GATELEGACY) visit dismissed (calls: $CALLS)"
+unset FAKE_RESOLVE_REFUSED
+
+# --- (GATEUNREAD) the demand read fails -> refuse the dismiss -------------------
+# An unread store is not proof that nothing is owed on the subject.
+export FAKE_DEMAND_LIST_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(GATEUNREAD) an unreadable demand listing fails closed (exit 4)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(GATEUNREAD) must NOT dismiss on an unread demand state (calls: $CALLS)" \
+  || ok "(GATEUNREAD) the visit is not dismissed"
+grep -q 'could not read its demands' <<< "$ERR" \
+  && ok "(GATEUNREAD) names the unread demand state" || bad "(GATEUNREAD) message (err: $ERR)"
+unset FAKE_DEMAND_LIST_FAILS
+
+# --- (GATERESUME) dispatched, visit gone, gate still open -> resolve it ---------
+# A prior run's resolve did not land and the visit was closed by hand since. The
+# resume must not call that done: it resolves the gate, and still never slings.
+export FAKE_FORMULA="" FAKE_DISPATCHED="$FORMULA"; FAKE_VISIT=""
+run_accept "$SUBJ"
+eq "$RC" "0" "(GATERESUME) a dispatched subject with no visit and an open gate exits 0"
+grep -q '^bd gate resolve tk-gate1' <<< "$CALLS" \
+  && ok "(GATERESUME) resolves the gate the prior run left open" || bad "(GATERESUME) gate resolved (calls: $CALLS)"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(GATERESUME) must NOT sling again (calls: $CALLS)" || ok "(GATERESUME) does not sling again"
+unset FAKE_DISPATCHED FAKE_DEMAND; export FAKE_FORMULA="$FORMULA" FAKE_VISIT=1
 
 # --- (MARK) a landed Accept strips the live recommendation and records the dispatch
 # So a later open visit on the subject cannot re-offer Accept for a formula that

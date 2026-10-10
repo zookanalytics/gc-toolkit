@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # liveness-recheck.test.sh — the liveness-sweep visit body is a SNAPSHOT, and
-# the sitting that reads it is entitled to a corrected census (bead tk-gvas6).
+# the sitting that reads it is entitled to a corrected census.
 #
 # THE DEFECT. classify writes its census into the visit body at pass time; the
 # converse sitting reads that body whenever the visit is claimed, which is
 # routinely a day or more later, and nothing re-checked it in between. Measured
-# on visit 8 of tk-hok6w (visit tk-3qeq0): the pass cut 2026-08-12T00:10Z, the
-# sitting read it ~41.5h later, and FIVE of the ten new candidates had merged
-# AND deployed in the interval (tk-1u8mi #316, tk-7g37t #322, tk-xesf6 #325,
-# tk-5ttye #328, tk-pe1hd #332 — the headline P0). 60% of that body was wrong on
-# arrival. A sitting that trusts such a body routes already-merged work and
-# burns a polecat on a no-op — already on this scope's record (visit 4 routed
-# tk-yjtf, closed as a no-op 30 minutes later).
+# once: the sitting read the census ~41.5h after the pass cut it, and FIVE of
+# the ten new candidates had merged AND deployed in the interval — 60% of that
+# body was wrong on arrival. A sitting that trusts such a body routes
+# already-merged work and burns a polecat on a no-op, as this scope's record
+# already shows.
 #
 # WHAT THIS PINS, in the two halves the fix has:
 #
@@ -33,9 +31,10 @@
 #   2. THE WIRING that makes it fire. liveness-sweep.sh stamps the id lists
 #      and the visit.recheck PATH (covered by liveness-sweep.test.sh); here the
 #      converse loop's claim-time hook is asserted to read `visit.recheck` as a
-#      PATH and run it, never to eval a command string, and the stamp key /
-#      standing-kinds list are pinned against liveness-sweep.sh so the writer
-#      and the reader cannot drift apart.
+#      PATH and run it, never to eval a command string, and the stamp key is
+#      pinned against liveness-sweep.sh so the writer and the reader cannot
+#      drift apart. Every kind in the shared standing-kinds list re-checks as
+#      standing.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
 
@@ -43,7 +42,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
-PROMPT="$ROOT/agents/converse/prompt.template.md"
+PROMPT="$ROOT/agents/_converse/prompt.template.md"
 # The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
 # the hook script, which reads the visit.recheck stamp as a path and runs it.
 PREP="$ROOT/skills/converse-prep/SKILL.md"
@@ -189,6 +188,29 @@ printf '%s' "$T" | grep -q "a sitting ended here" \
     && ok "its bucket says the takeaway is a record, not a wait" \
     || bad "its bucket says the takeaway is a record, not a wait" "no recorded bucket in the report"
 
+echo "── every kind in the shared standing-kinds list re-checks as standing ──"
+# The re-check and liveness-sweep.sh both read their standing kinds from
+# assets/scripts/standing-kinds.sh, so they cannot disagree about which records
+# are held by design. standing-kinds.test.sh asserts that both source it; here
+# each listed kind runs through the re-check itself. The kinds are read from the
+# shared definition, so a kind added there is covered with no edit to this file.
+# shellcheck source=standing-kinds.sh
+. "$ROOT/assets/scripts/standing-kinds.sh"
+KINDS="$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')"
+[ -n "$KINDS" ] && ok "the shared definition lists the standing kinds" \
+    || bad "the shared definition lists the standing kinds" "standing_kinds read back empty"
+SB='[]'; SR='[]'; SIDS=""
+for k in $KINDS; do
+    SB="$(printf '%s' "$SB" | jq -c --argjson b "$(bead "s-$k" open "$(jq -nc --arg k "$k" '{task_kind: $k}')")" '. + [$b]')"
+    SR="$(printf '%s' "$SR" | jq -c --arg id "s-$k" '. + [{id: $id}]')"
+    SIDS="${SIDS:+$SIDS,}s-$k"
+done
+printf '%s' "$SB" > "$STUB_BEADS"; printf '%s' "$SR" > "$STUB_READY"
+C="$("$SCRIPT" --ids "$SIDS" --json 2>/dev/null)"
+for k in $KINDS; do
+    eq "$(verdict_of "$C" "s-$k")" "standing" "a task_kind=$k record re-checks as standing"
+done
+
 echo "── an assignee alone marks a bead worked, and closed beats every other signal ──"
 jq -nc --argjson b "[
   $(bead b-assigned open   '{}')
@@ -288,6 +310,18 @@ eq "$(printf '%s' "$C" | jq -r '.subject')" "tk-subject"           "the subject 
 "$SCRIPT" tk-visit 2>/dev/null | grep -q "2026-08-12T00:10:00Z" \
     && ok "the report leads with the census cut" \
     || bad "the report leads with the census cut" "no pass timestamp in the header"
+# 1786493400 is that cut, 2026-08-12T00:10:00Z. The script reads the clock
+# between the two samples taken here, so its age matches what one of them
+# gives. HST10 is ten hours behind UTC, so a parse that read the cut as local
+# time would be ten hours out.
+age_at() { awk -v a=1786493400 -v b="$1" 'BEGIN { printf "%.1fh", (b - a) / 3600 }'; }
+T0=$(date -u +%s)
+AGE=$(TZ=HST10 "$SCRIPT" tk-visit --json 2>/dev/null | jq -r '.age')
+T1=$(date -u +%s)
+case "$AGE" in
+    "$(age_at "$T0")"|"$(age_at "$T1")") ok "the census reports how long ago the cut was ($AGE)" ;;
+    *) bad "the census reports how long ago the cut was" "got '$AGE' want '$(age_at "$T0")'" ;;
+esac
 
 echo "── an id in both lists is counted once, as NEW (the agenda outranks the background) ──"
 jq -nc '[{metadata: {"sweep.new_ids": "b-idle", "sweep.carried_ids": "b-idle,b-held"}}]' > "$STUB_VISIT"
@@ -378,21 +412,6 @@ echo "── a visit with no stamp runs nothing and says nothing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
 OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
-
-echo "── the standing-record list agrees across the sweep and the re-check ──"
-# The other string that has to agree across two files, read out of each side for
-# the same reason as the stamp key above (bead tk-rw2ra). These two cannot share
-# code — one is a jq program inside a TOML formula description, the other this
-# standalone script — and a drifted pair fails INVISIBLY in both directions: the
-# sweep stops filing an idiom the re-check still calls idle, or the re-check
-# holds one the sweep is still filing, and either way the disagreement shows up
-# only as a bead a sitting cannot disposition.
-kinds_of() { sed -n 's/.*def standing_kinds: *\(\[[^]]*\]\);.*/\1/p' "$1" | head -1 | tr -d ' '; }
-F_KINDS="$(kinds_of "$SWEEP")"
-[ -n "$F_KINDS" ] && ok "the sweep names a standing_kinds list" \
-    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $SWEEP"
-eq "$(kinds_of "$SCRIPT")" "$F_KINDS" \
-   "the standing records the sweep excludes are the ones the re-check holds"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"

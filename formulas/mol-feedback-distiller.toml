@@ -204,6 +204,7 @@ pending exceeds {{distill_max_age_days}} days (an unparseable timestamp
 forces the trickle guard OPEN, not shut).
 
 ```bash
+# >>> distiller-cadence-gate
 N=$(jq 'length' "$PENDING")
 URGENT=$(jq '[.[] | select(((.metadata["obs.endorsed"] // "") == "operator")
                         or ((.metadata["obs.directive"] // "") == "standing"))] | length' "$PENDING")
@@ -211,7 +212,7 @@ NOW=$(date -u +%s)
 OLDEST=$(jq -r '[.[] | (.created_at // .created // empty)] | sort | first // empty' "$PENDING")
 AGE_D=0
 if [ -n "$OLDEST" ]; then
-  if OLDEST_S=$(date -u -d "$OLDEST" +%s 2>/dev/null); then AGE_D=$(( (NOW - OLDEST_S) / 86400 )); else AGE_D=$(( {{distill_max_age_days}} + 1 )); fi
+  if OLDEST_S=$(jq -rn --arg t "$OLDEST" '$t | fromdateiso8601' 2>/dev/null); then AGE_D=$(( (NOW - OLDEST_S) / 86400 )); else AGE_D=$(( {{distill_max_age_days}} + 1 )); fi
 elif [ "$N" -gt 0 ]; then
   AGE_D=$(( {{distill_max_age_days}} + 1 ))
 fi
@@ -226,6 +227,7 @@ else
   # retirement pass (inputs: the fragments on disk) still runs every run.
   echo '[]' > "$PENDING"
 fi
+# <<< distiller-cadence-gate
 ```
 
 ## 4. Vetoed-PR sweep (the D6 meta-loop's input)
@@ -327,7 +329,9 @@ ones from this rig's open beads (an unreadable listing aborts the run,
 `--outcome fail`, exit — same fail-safe as step 1). Seed a new pattern
 bead per new cluster:
 ```bash
-PATTERN=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json | jq -r '.id // .[0].id')
+PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --json)
+PATTERN=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$PATTERN" ] || { CREATE_ERR=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "could not seed the pattern bead${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 gc bd update "$PATTERN" --set-metadata task_kind=feedback-pattern
 ```
 
@@ -480,7 +484,7 @@ BODY="## Rule
 ## Target
 - convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
 - profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
-- work-quality  -> template-fragments/work-quality-<class>.template.md (cap {{work_quality_entry_cap}} per fragment); the standard the artifact is held to, no operator observation required. A universal standard goes to work-quality-base (composed by every authoring role); a class-specific one goes to the fragment(s) of the class(es) it impacts. Classes: polecats (polecat, polecat-codex), human (converse and its per-model variants), system (deacon, mechanik, proactive, witness, refinery, keeper). A standard about changing a repo does not reach the human class.
+- work-quality  -> template-fragments/work-quality-<class>.template.md (cap {{work_quality_entry_cap}} per fragment); the standard the artifact is held to, no operator observation required. A universal standard goes to work-quality-base (composed by every authoring role); a class-specific one goes to the fragment(s) of the class(es) it impacts. Classes: polecats (polecat, polecat-codex), human (the converse-opus, converse-fable and converse-codex sittings), system (deacon, mechanik, proactive, witness, refinery, keeper). A standard about changing a repo does not reach the human class.
 - review-rubric -> formulas/mol-review.toml, step review, What to check; its anchor goes in that file's TOML comment ledger above the step, never in the step description (rendered text a reviewer reads)
 - exemplar      -> template-fragments/learning-exemplars.template.md (cap {{exemplar_cap}})
 - learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor and no inventory row: the rubric is the loop's own method, not an adopted rule the retirement pass judges
@@ -493,8 +497,9 @@ BODY="## Rule
 ## Reasoning
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
-BEAD=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json | jq -r '.id // .[0].id')
-[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { echo "WARN: could not create prompt-update bead for $PATTERN; skipping" >&2; continue; }
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json)
+BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 # target=main + merge_strategy=mr ride the standard pool worker -> refinery
 # pipeline; routing (stamp, don't sling) IS the dispatch.
 gc bd update "$BEAD" --set-metadata task_kind=prompt-update --set-metadata target=main --set-metadata merge_strategy=mr --set-metadata gc.routed_to="$POOL"
@@ -538,10 +543,12 @@ SUBJECT="$PATTERN"
 # >>> gate-visit
 # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
 POOL="human"
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
-  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json | jq -r '.id // .[0].id')
+VISIT_JSON=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
+  -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json)
+VISIT=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-  || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
+  || { CREATE_ERR=$(printf '%s' "$VISIT_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+       echo "gate-visit: bd create returned no id${CREATE_ERR:+: $CREATE_ERR} — stop, address what bd reported, and re-run this block; do not improvise another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit"

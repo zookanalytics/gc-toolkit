@@ -41,8 +41,8 @@ formula = "mol-dog-shutdown-dance"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix, including trailing dot when bound."
-default = ""
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: it renders the dog route (this prefix plus `dog`) named in this dance's warrant contract, and an empty prefix renders a bare dog address that no agent holds."
+default = "gc-toolkit."
 
 [[steps]]
 id = "receive-warrant"

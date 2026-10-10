@@ -53,9 +53,17 @@ WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty'
 If `WORKTREE` is non-empty and points to an existing directory, `cd`
 there and skip to step 2. Otherwise:
 ```bash
-git fetch --prune origin
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
-git worktree add "$WORKTREE_PATH" --detach "origin/{{base_branch}}"
+# >>> upstream-sync-worktree-add
+# The worktree belongs to this rig's checkout (not the upstream rig step 2
+# fetches), named by path so the session's cwd cannot pick the repo. An empty
+# root would let `git -C ""` follow cwd, so an unresolvable rig fails closed.
+OWN_RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$OWN_RIG_ROOT" ] || OWN_RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$OWN_RIG_ROOT" ] || { echo "workspace-setup: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+git -C "$OWN_RIG_ROOT" fetch --prune origin
+git -C "$OWN_RIG_ROOT" worktree add "$WORKTREE_PATH" --detach "origin/{{base_branch}}"
+# <<< upstream-sync-worktree-add
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
 ```
@@ -63,11 +71,12 @@ gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
 **2. Fetch upstream rig** (fresh, so the report reflects current upstream):
 ```bash
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
-git -C "$RIG_ROOT" fetch --prune origin
+[ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" fetch --prune origin
 ```
 
 If `{{upstream_rig}}` is not registered in this city (the `select` prints
-empty and the fetch fails loudly), record the failure and abort — the
+empty, so the line exits non-zero instead of letting `git -C ""` fetch the
+current directory's repository), record the failure and abort — the
 `--status=open` + reassign + `gc.routed_to` triplet keeps the bead from
 stranding `in_progress` on this drained session:
 ```bash
@@ -82,7 +91,7 @@ gc bd update {{issue}} \
     --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
     --set-metadata gc.takeaway_settled= \
-    --notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
+    --append-notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
 gc runtime drain-ack
 exit 1
 ```
@@ -136,7 +145,7 @@ if [ ! -x "$SCRIPT" ]; then
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
         --set-metadata gc.takeaway_settled= \
-        --notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
+        --append-notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
     gc runtime drain-ack
     exit 1
 fi
@@ -174,7 +183,7 @@ else
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
         --set-metadata gc.takeaway_settled= \
-        --notes "$(cat <<EOF
+        --append-notes "$(cat <<EOF
 Sync script failed.
 
 Stderr:
@@ -204,7 +213,7 @@ copy, then close.
 filesystem access needed):
 ```bash
 REPORT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.report_file')
-gc bd update {{issue}} --notes "$(cat "$REPORT_FILE")"
+gc bd update {{issue}} --append-notes "$(cat "$REPORT_FILE")"
 ```
 
 **2. Optionally mail the report:**

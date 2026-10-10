@@ -17,6 +17,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-polecat-work.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-workspace-setup-worktree-test.XXXXXX")"
+# git lists a worktree by its resolved path, so every path is built on a
+# resolved root and compares to git's as a string, a TMPDIR behind a symlink
+# (as macOS's is) included.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -75,13 +79,11 @@ CWD="$TMP/elsewhere"
 mk_repo "$RIG"
 mk_repo "$CWD"
 
-# in_wt_list <repo> <path> -> yes|no. Compares by realpath so a symlinked
-# $TMPDIR does not turn a real match into a miss.
+# in_wt_list <repo> <path> -> yes|no, an exact match against the paths git lists.
 in_wt_list() {
-  local want found=no p
-  want="$(realpath -m "$2" 2>/dev/null || echo "$2")"
+  local found=no p
   while IFS= read -r p; do
-    [ "$(realpath -m "$p" 2>/dev/null || echo "$p")" = "$want" ] && found=yes
+    [ "$p" = "$2" ] && found=yes
   done < <(git -C "$1" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
   echo "$found"
 }

@@ -21,6 +21,9 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-prep-worktree-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Host signing of commits and tags must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -39,9 +42,20 @@ fence shared-branch-push-mode  > "$TMP/push.sh"
 [ -s "$TMP/merge.sh" ] && ok "shared-branch-merge-mode extracted" || bad "shared-branch-merge-mode extracted"
 [ -s "$TMP/push.sh" ]  && ok "shared-branch-push-mode extracted"  || bad "shared-branch-push-mode extracted"
 for b in merge push; do
-  grep -q '[\]' "$TMP/$b.sh" && bad "$b block backslash-free (TOML would eat it)" || ok "$b block backslash-free (TOML would eat it)"
+  case "$(cat "$TMP/$b.sh")" in
+    *\\*) bad "$b block backslash-free (TOML would eat it)" ;;
+    *)    ok  "$b block backslash-free (TOML would eat it)" ;;
+  esac
   bash -n "$TMP/$b.sh" && ok "$b block is valid bash" || bad "$b block is valid bash"
 done
+# Positive control: a backslash-free run of the guard above proves nothing
+# unless the guard still discriminates. Pin that `case … in *\\*` catches a
+# literal backslash on this host, so a green suite is never a vacuous pass.
+printf 'x\\y\n' > "$TMP/backslash-control"
+case "$(cat "$TMP/backslash-control")" in
+  *\\*) ok  "backslash guard detects a backslash (not vacuous)" ;;
+  *)    bad "backslash guard is vacuous — a literal backslash went undetected" ;;
+esac
 # The whole point: no bare checkout/rebase/merge/switch that would move cwd HEAD.
 grep -Eq 'git (checkout|switch|rebase|merge)( |$)' "$TMP/merge.sh" \
   && bad "merge block never runs a bare HEAD-moving git in cwd" \

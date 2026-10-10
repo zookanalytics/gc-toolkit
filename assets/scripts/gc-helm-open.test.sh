@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the gc-helm `open` subject-existence gate (tk-ujwvt).
+# Hermetic test for the gc-helm `open` subject-existence gate.
 #
 # THE BUG: `gc-helm open <bead-id>` resolved the id PREFIX to a rig, pointed bd
 # at that rig's ledger, and then filed a visit — never confirming the bead
@@ -82,7 +82,7 @@ case "$1 ${2:-}" in
     esac ;;
   "bd list")
     # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
-    # FAKE_VISIT_EDGE=1 emits the su-ab9je shape instead (bead tk-d6ddn): the
+    # FAKE_VISIT_EDGE=1 emits the su-ab9je shape instead: the
     # gc.continuation_group stamp landed EMPTY and only the tracks edge names the
     # subject. Rendered in the `gc bd list` key pair (.type + .depends_on_id),
     # which is the shape this call returns.
@@ -166,7 +166,7 @@ grep -q 'engage tk-visit0' <<< "$OUT" \
   && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
 
 # --- (HELDEDGE) the su-ab9je shape: stamp EMPTY, tracks edge intact ------------
-# bead tk-d6ddn. A visit records its subject twice and only the edge proved
+# A visit records its subject twice and only the edge proved
 # reliable; keyed on the stamp alone this verb files the duplicate it exists to
 # prevent — and this is the OPERATOR's front door, so the duplicate is filed by
 # hand, on a subject a converse session is still holding.
@@ -394,6 +394,23 @@ case "$CALLS" in
   *)          bad "(LONGREASON) the full reason was lost from the body (calls: $CALLS)" ;;
 esac
 
+# --- (WIDEREASON) a reason in 4-byte characters still fits bd's byte cap ------
+# bd caps a title at 500 BYTES, so a tail at the codepoint cap overruns it when
+# every character is 4 bytes wide; the headline is cut to a byte budget too.
+: > "$FAKE_CALLS"
+set +e
+sh "$SCRIPT" open tk-real1 --reason "$(printf '\360\237\230\200%.0s' $(seq 1 200))" >/dev/null 2>"$TMP/err"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(WIDEREASON) a reason in 4-byte characters still files the visit"
+TITLE="${CALLS#*--title }"; TITLE="${TITLE%% -d *}"
+TITLE_BYTES=$(printf '%s' "$TITLE" | wc -c)
+if [ "$TITLE_BYTES" -le 500 ]; then
+  ok "(WIDEREASON) the title fits bd's 500-byte cap ($TITLE_BYTES bytes)"
+else
+  bad "(WIDEREASON) the title overruns bd's 500-byte cap ($TITLE_BYTES bytes)"
+fi
+
 # --- (CREATEFAIL) a real create failure surfaces bd's error, not a jq crash ----
 # bd reports a failed create as an {"error":…} object, and the subject bead has
 # already resolved by this point. open surfaces bd's own message for such a
@@ -456,13 +473,13 @@ grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
   || bad "(RIGTIMEOUT) shipped default changed — a one-shot verb must not inherit the board budget"
 
 # --- (RIGWHY) enumerate_rigs names WHICH failure it hit ----------------------
-# THE BUG (tk-lzdty half 2): every unhappy reading of `gc rig list` ended in one
+# THE BUG: every unhappy reading of `gc rig list` ended in one
 # sentence — "could not enumerate rigs (gc rig list returned nothing)" — and
 # exit 3. `|| true` threw away the exit status and `2>/dev/null` threw away the
 # stderr, so a timeout kill, a wedged data plane, unparseable output and a city
 # that genuinely has no rigs were indistinguishable. Four different operator
 # moves, one string. On the CLI that is a bad message; behind the web board's
-# open button (tk-66rwg) the exit code plus that string is the ENTIRE signal the
+# open button the exit code plus that string is the ENTIRE signal the
 # browser gets, so all four render as the same dead end.
 #
 # Each case below drives ONE cause through the real script and asserts the
@@ -548,7 +565,7 @@ eq "$RIGWHY_RC" "0" "(RIGWHY) a well-formed rig list still enumerates and files"
 # MUTATION CHECK (static): the evidence the taxonomy is built on must still be
 # captured. If either of these reverts to the old discard-everything form, the
 # cases above keep passing only because the stub is cooperative — so assert the
-# source directly. See tk-lzdty.
+# source directly.
 grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
   && ok "(RIGWHY-EVIDENCE) gc's stderr is captured, not sent to /dev/null" \
   || bad "(RIGWHY-EVIDENCE) stderr capture removed — messages will lose their 'why'"

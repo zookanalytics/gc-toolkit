@@ -132,6 +132,11 @@ hasnt "$OUT" "state=started" "  ... the run dir is the start guard"
 await_run
 run
 has "$OUT" "state=complete" "the pass after it finishes collects the payload"
+eq "$(field "$OUT" finished_at)" "$(cat "$STATE/current/finished_at")" \
+  "  ... carrying the second the sweep finished"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -ge 0 ] && [ "$AGE" -le 60 ]; then ok "  ... and the payload's age, counted from that second"
+else bad "  ... and the payload's age, counted from that second (got '$AGE')"; fi
 eq "$(field "$OUT" rc)" "1" "  ... rc 1 is doctor's normal findings-exist exit, not a failure"
 eq "$(field "$OUT" checks)" "3" "  ... counts the checks"
 eq "$(field "$OUT" findings)" "2" "  ... counts what is not ok"
@@ -181,6 +186,100 @@ if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ 
   else bad "the transient user service records a numeric pid (got '$PID')"; fi
   await_run
 fi
+export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
+
+# --- a finished sweep is collected only while its payload is current --------
+# A payload describes the city at the second its sweep finished, and a patrol
+# that stopped for hours reaches it late. Each run here is written by hand the
+# way the wrapper leaves a finished one: an rc, a finished_at second, and a
+# whole payload with findings in it, so a collect that ignored the age would
+# report them as complete.
+seed_finished() { # <started_at> <finished_at> <rc>
+  mkdir -p "$STATE/current"
+  printf '%s' "$1" > "$STATE/current/started_at"
+  printf '%s' "$2" > "$STATE/current/finished_at"
+  payload_ok "$STATE/current/payload.json"
+  printf '%s' "$3" > "$STATE/current/rc"
+}
+export STUB_PAYLOAD="$TMP/payload.json" STUB_RC=1 STUB_SLEEP=0
+
+new_state stale
+: > "$STUB_LOG"
+FIN=$(( $(date +%s) - 3601 ))
+# The window and cadence stamps the run's own start left behind.
+printf '%s' "$(( FIN - 600 ))" > "$STATE/window-start"
+printf '%s' "$(( FIN - 600 ))" > "$STATE/last-start"
+printf '1'                     > "$STATE/attempts"
+printf '%s' "$(( FIN - 600 ))" > "$CADENCE/last-start"
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run
+has "$OUT" "state=stale" "a sweep that finished more than an interval ago is stale, never complete"
+hasnt "$OUT" "payload=" "  ... it names no payload, so no filter reads its findings"
+hasnt "$OUT" "findings=" "  ... and counts none"
+eq "$(field "$OUT" finished_at)" "$FIN" "  ... it says when the sweep finished"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -gt 3600 ]; then ok "  ... and how long ago, past the interval"
+else bad "  ... and how long ago, past the interval (got '$AGE')"; fi
+eq "$(field "$OUT" interval)" "3600" "  ... and the interval it was held to"
+eq "$(cat "$STATE/last-outcome")" "stale" "  ... recording last-outcome=stale"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starting nothing in the same pass"
+printf '%s\n' "$OUT" > "$TMP/report-stale"
+run
+has "$OUT" "state=started" "the next pass starts a fresh sweep in its place"
+await_run
+run
+has "$OUT" "state=complete" "  ... which is collected as current"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... from one real sweep, not the stale run read again"
+AGE=$(field "$OUT" age)
+if [ "$AGE" -le 60 ]; then ok "  ... its age counted from its own finish"
+else bad "  ... its age counted from its own finish (got '$AGE')"; fi
+
+# A failed run that old is stale too: its failure is not a current one.
+new_state stale_failed
+FIN=$(( $(date +%s) - 3601 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 2
+run
+has "$OUT" "state=stale" "a failed run that finished more than an interval ago is stale, not a current failure"
+hasnt "$OUT" "rc=" "  ... and carries no exit code to file"
+
+# Just inside the interval the same run is current.
+new_state fresh_finish
+FIN=$(( $(date +%s) - 3500 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run
+has "$OUT" "state=complete" "a sweep that finished inside the interval is collected complete"
+eq "$(field "$OUT" finished_at)" "$FIN" "  ... carrying when it finished"
+eq "$(field "$OUT" findings)" "2" "  ... and its findings"
+
+# The bound is the configured interval, not a fixed hour: 2000s is current at
+# the default and stale at 1800.
+new_state stale_knob
+FIN=$(( $(date +%s) - 2000 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+OUT=$(GC_DOCTOR_SWEEP_INTERVAL=1800 "$SUT")
+has "$OUT" "state=stale" "at a 1800s interval a sweep that finished 2000s ago is stale"
+eq "$(field "$OUT" interval)" "1800" "  ... held to the configured interval"
+
+# An unreadable finished_at is aged from started_at, which is never later, so
+# the fallback can only overstate the age.
+new_state stale_nofinish
+seed_finished "$(( $(date +%s) - 4000 ))" "not-a-time" 1
+run
+has "$OUT" "state=stale" "an unreadable finished_at is aged from an old started_at, so the run is stale"
+eq "$(field "$OUT" finished_at)" "unknown" "  ... and the report says the finish is unknown"
+new_state fresh_nofinish
+seed_finished "$(( $(date +%s) - 100 ))" "not-a-time" 1
+run
+has "$OUT" "state=complete" "  ... while a recent start with an unreadable finish still collects"
+
+# --status reports a stale run and leaves it for the pass that advances.
+new_state stale_status
+FIN=$(( $(date +%s) - 3601 ))
+seed_finished "$(( FIN - 600 ))" "$FIN" 1
+run --status
+has "$OUT" "state=stale" "--status reports a stale run as stale"
+if [ -e "$STATE/current/collected" ]; then bad "  ... without collecting it"; else ok "  ... without collecting it"; fi
+if [ -e "$STATE/last-outcome" ]; then bad "  ... or recording an outcome"; else ok "  ... or recording an outcome"; fi
 export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
 
 # --- a malformed interval still sweeps hourly -------------------------------
@@ -714,6 +813,12 @@ has "$SNIP_OUT" "read-state=complete" "  ... state=complete is readable"
 has "$SNIP_OUT" "read-payload=$TMP/payload.json" "  ... and the payload path survives"
 has "$SNIP_OUT" "read-rc=0" "  ... with rc 0"
 
+# The runner's own stale report, read through the shipped snippet: it names no
+# payload, so the filter after the table has nothing to read.
+snippet_run "$TMP/report-stale" 0
+has "$SNIP_OUT" "read-state=stale" "the runner's stale report reads through the snippet as state=stale"
+eq "$(sed -n 's/^read-payload=//p' <<< "$SNIP_OUT")" "" "  ... with no payload path for the filter"
+
 # The decision table is asserted against the states the RUNNER can emit, not a
 # list copied here: a state added to the script fails this until the step says
 # what the deacon owes for it.
@@ -739,6 +844,13 @@ if grep -qE '^- .*`blocked`.*FAILED scan' <<< "$STEP"; then
   ok "  ... and routes blocked to the failed-scan arm"
 else
   bad "  ... but blocked is not routed to the failed-scan arm"
+fi
+# `stale` is a finished sweep whose payload is too old to file, so it belongs
+# with the states that carry nothing to filter.
+if grep -qE '^- `stale`: there is no payload' <<< "$STEP"; then
+  ok "  ... and routes stale to a no-payload arm, so an old sweep files nothing"
+else
+  bad "  ... but stale is not routed to a no-payload arm"
 fi
 if grep -qE '^- Any other state.*FAILED scan' <<< "$STEP"; then
   ok "  ... with a catch-all for a state it does not name"

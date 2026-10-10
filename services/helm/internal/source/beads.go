@@ -84,8 +84,8 @@ type BeadsSource struct {
 //
 // The two edge reads are BATCHED, not per-anchor: one round-trip resolves the
 // relations of a whole set of anchors. GetDependencyRecordsForIssues reads the
-// OUTBOUND edges an anchor owns (a convoy's `tracks` members; a decision, human,
-// parked or merge bead's `blocks` waits), keyed by the querying issue id.
+// OUTBOUND edges an anchor owns (a convoy's `tracks` members; the `blocks` waits
+// of every kind [needsWaitingEdges] lists), keyed by the querying issue id.
 // GetDependentRecordsForIssues reads the INBOUND edges — an anchor's
 // parent-child children, whose edge points child->parent — keyed by the target
 // id. Both return raw edge rows; [BeadsSource.hydrate] fetches the far-end

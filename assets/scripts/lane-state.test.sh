@@ -35,26 +35,28 @@ store "[$ANCHOR,$(review closed approve superseded)]"
 if green --anchor tk-anc --lane correctness --no-remote; then bad "a superseded approve still derived green"; else ok "a superseded approve does not derive green"; fi
 
 # ---------------------------------------------------------------------------
-# Legacy bead: no verdict stamp, gc.outcome=recorded still backs the lane.
+# A close with no signoff_verdict names no verdict — recorded is stamped on
+# every close, approve and request-changes alike — so it backs no lane locally,
+# whatever its gc.outcome.
 # ---------------------------------------------------------------------------
 store "[$ANCHOR,$(review closed '' recorded)]"
-if green --anchor tk-anc --lane correctness --no-remote; then ok "a legacy no-verdict recorded review derives green"; else bad "legacy recorded review did not derive green"; fi
+if green --anchor tk-anc --lane correctness --no-remote; then bad "a no-verdict recorded review derived green from local backing"; else ok "a no-verdict recorded review is not local backing"; fi
 
-# A superseded legacy bead loses gc.outcome=recorded, so it does not back.
 store "[$ANCHOR,$(review closed '' superseded)]"
-if green --anchor tk-anc --lane correctness --no-remote; then bad "a superseded legacy bead still derived green"; else ok "a superseded legacy bead does not derive green"; fi
+if green --anchor tk-anc --lane correctness --no-remote; then bad "a no-verdict superseded review derived green"; else ok "a no-verdict superseded review is not local backing"; fi
+
+# The GitHub-approval fallback still greens it: recorded is not a local verdict,
+# but an operator's APPROVED review is independent evidence that backs every lane.
+printf '[{"state":"APPROVED","id":7}]' > "$GH_DIR/reviews_42.json"
+store "[$ANCHOR,$(review closed '' recorded)]"
+if green --anchor tk-anc --lane correctness; then ok "a no-verdict-backed lane greens only via the GitHub-approval fallback"; else bad "the GitHub-approval fallback did not green a no-verdict-backed lane"; fi
+rm -f "$GH_DIR/reviews_42.json"
 
 # ---------------------------------------------------------------------------
-# A closed review carrying no reviewed_oid is not local backing. A recorded
-# verdict naming no reviewed commit is a stale or legacy row that cannot green
-# the lane on its own, whether it carries an approve verdict or the legacy
-# recorded stamp. The GitHub-approval fallback is still free to supply
-# independent evidence.
+# The reviewed_oid clause guards a local backing bead: an approve naming no
+# reviewed commit is a stale row that cannot green the lane on its own. The
+# GitHub-approval fallback is still free to supply independent evidence.
 # ---------------------------------------------------------------------------
-NO_OID_LEGACY='{"id":"rv-1","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-anc","gc.outcome":"recorded"}}'
-store "[$ANCHOR,$NO_OID_LEGACY]"
-if green --anchor tk-anc --lane correctness --no-remote; then bad "a legacy recorded review with no reviewed_oid derived green from local backing"; else ok "a legacy recorded review with no reviewed_oid is not local backing"; fi
-
 NO_OID_APPROVE='{"id":"rv-1","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-anc","signoff_verdict":"approve","gc.outcome":"recorded"}}'
 store "[$ANCHOR,$NO_OID_APPROVE]"
 if green --anchor tk-anc --lane correctness --no-remote; then bad "an approve verdict with no reviewed_oid derived green from local backing"; else ok "an approve verdict with no reviewed_oid is not local backing"; fi

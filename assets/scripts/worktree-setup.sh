@@ -4,9 +4,13 @@
 # Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]
 #
 # Ensures <target-dir> is a git worktree of the rig repo, on a per-target
-# branch cut from the remote default-branch tip. Called from agent pre_start
-# (agents/*/agent.toml) before the session exists, so the agent starts IN the
-# worktree. Existing worktrees are left alone; --sync fast-forwards them.
+# branch cut from the remote default-branch tip, with the bead redirect and
+# local excludes an agent needs (provision_worktree). Called from agent
+# pre_start (agents/*/agent.toml) before the session exists, so the agent
+# starts IN the worktree. An existing worktree is never re-created: it gets
+# whatever provisioning it lacks, and --sync fast-forwards a branch to its
+# upstream and moves a detached HEAD to the default-branch tip when no commit
+# or tracked change can be lost (sync_detached).
 
 set -eu
 
@@ -14,6 +18,67 @@ RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--
 WT="${2:?missing target-dir}"
 AGENT="${3:?missing agent-name}"
 SYNC="${4:-}"
+
+# What an agent needs in its worktree beyond the checkout: the bead redirect,
+# submodule config, and the runtime excludes. Every write is skipped when it is
+# already in place, so this runs after a fresh add and on every later run. A
+# worktree an earlier run left half-built is completed by the next one: git
+# keeps the worktree when a checkout hook fails the add, and a run killed
+# between the add and these writes leaves the same state. Only a linked
+# worktree (.git is a file) is provisioned. A main checkout's .beads is the
+# rig's own store, not a pointer to one, so it never gets a redirect.
+provision_worktree() {
+    [ -f "$WT/.git" ] || return 0
+
+    # Bead redirect for filesystem beads. A non-empty one is kept, so a
+    # deliberate redirect survives.
+    mkdir -p "$WT/.beads"
+    if [ ! -s "$WT/.beads/redirect" ]; then
+        echo "$RIG_ROOT/.beads" > "$WT/.beads/redirect"
+    fi
+
+    git -C "$WT" submodule init 2>/dev/null || true
+
+    # Runtime ignores live in git metadata (--git-path resolves the exclude file
+    # for linked-worktree layouts), never in the tracked .gitignore. A worktree
+    # whose git metadata git cannot find has no exclude file to write, and git
+    # cannot stage anything from it either.
+    EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude) || return 0
+    case "$EXCLUDE" in
+        /*) ;;
+        *) EXCLUDE="$WT/$EXCLUDE" ;;
+    esac
+    mkdir -p "$(dirname "$EXCLUDE")"
+    touch "$EXCLUDE"
+
+    MARKER="# Gas City worktree infrastructure (local excludes)"
+    if ! grep -qF "$MARKER" "$EXCLUDE" 2>/dev/null; then
+        if [ -s "$EXCLUDE" ] && [ "$(tail -c 1 "$EXCLUDE" 2>/dev/null || true)" != "" ]; then
+            printf '\n' >> "$EXCLUDE"
+        fi
+        printf '%s\n' "$MARKER" >> "$EXCLUDE"
+    fi
+
+    append_exclude ".beads/redirect"
+    append_exclude ".beads/hooks/"
+    append_exclude ".beads/formulas/"
+    append_exclude ".runtime/"
+    append_exclude ".logs/"
+    append_exclude "worktrees/"
+    append_exclude "__pycache__/"
+    append_exclude ".claude/"
+    append_exclude ".codex/"
+    append_exclude ".gemini/"
+    append_exclude ".opencode/"
+    append_exclude ".github/hooks/"
+    append_exclude ".github/copilot-instructions.md"
+    append_exclude "state.json"
+}
+
+append_exclude() {
+    PATTERN="$1"
+    grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+}
 
 rebase_in_progress() {
     for STATE in rebase-merge rebase-apply; do
@@ -42,6 +107,11 @@ sync_worktree() {
 
     git -C "$WT" fetch origin 2>/dev/null || true
 
+    if ! git -C "$WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
+        sync_detached
+        return 0
+    fi
+
     # Fast-forward only, never replay local commits: a `pull --rebase` replays
     # shed commits onto every fetched tip and parks the worktree mid-rebase.
     UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
@@ -49,6 +119,53 @@ sync_worktree() {
 
     # A branch that cannot fast-forward is left as it stands, by design.
     git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 || true
+}
+
+# A detached HEAD has no upstream, so the fast-forward never moves it, and the
+# agent would run that commit's files on every later start. It moves to the
+# remote default tip only when no commit or tracked change can be lost: the
+# tracked tree is clean and HEAD is already an ancestor of the tip. It lands on
+# its per-target branch, tracking the default branch, so the next sync takes
+# the fast-forward path. That branch is reset only when the tip already
+# contains it; when it holds commits the tip lacks, or another worktree has it
+# checked out, the worktree is detached at the tip instead. A worktree that
+# cannot move safely stays where it is, and one stderr line names it and the
+# reason.
+sync_detached() {
+    DEFAULT_REF=$(git -C "$WT" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || DEFAULT_REF=""
+    if [ -z "$DEFAULT_REF" ]; then
+        sync_skipped "origin/HEAD is unset, so there is no default branch to move to"
+        return 0
+    fi
+    TARGET=${DEFAULT_REF#refs/remotes/}
+    if ! DIRTY=$(git -C "$WT" status --porcelain --untracked-files=no 2>/dev/null); then
+        sync_skipped "git status failed"
+        return 0
+    fi
+    if [ -n "$DIRTY" ]; then
+        sync_skipped "it has uncommitted changes to tracked files"
+        return 0
+    fi
+    if ! git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
+        sync_skipped "HEAD has commits that are not on $TARGET"
+        return 0
+    fi
+
+    BRANCH=$(branch_name)
+    if ! git -C "$WT" show-ref --verify --quiet "refs/heads/$BRANCH" \
+        || git -C "$WT" merge-base --is-ancestor "refs/heads/$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+        if GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --track -B "$BRANCH" "$DEFAULT_REF" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    if ERR=$(GIT_LFS_SKIP_SMUDGE=1 git -C "$WT" checkout -q --detach "$DEFAULT_REF" 2>&1); then
+        return 0
+    fi
+    sync_skipped "git checkout $TARGET failed: $(printf '%s\n' "$ERR" | head -n 1)"
+}
+
+sync_skipped() {
+    printf 'worktree-setup: not syncing %s (detached HEAD): %s\n' "$WT" "$1" >&2
 }
 
 branch_name() {
@@ -153,8 +270,9 @@ adopt_orphan_stages() {
 }
 adopt_orphan_stages || true
 
-# Idempotent: an existing worktree is only synced.
+# Idempotent: an existing worktree is provisioned and synced, never re-created.
 if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
+    provision_worktree
     sync_worktree
     exit 0
 fi
@@ -210,50 +328,7 @@ if [ -n "$STAGE" ]; then
 fi
 trap - EXIT HUP INT TERM
 
-# Bead redirect for filesystem beads.
-mkdir -p "$WT/.beads"
-echo "$RIG_ROOT/.beads" > "$WT/.beads/redirect"
-
-git -C "$WT" submodule init 2>/dev/null || true
-
-# Runtime ignores live in git metadata (--git-path resolves the exclude file
-# for linked-worktree layouts), never in the tracked .gitignore.
-EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude)
-case "$EXCLUDE" in
-    /*) ;;
-    *) EXCLUDE="$WT/$EXCLUDE" ;;
-esac
-mkdir -p "$(dirname "$EXCLUDE")"
-touch "$EXCLUDE"
-
-MARKER="# Gas City worktree infrastructure (local excludes)"
-if ! grep -qF "$MARKER" "$EXCLUDE" 2>/dev/null; then
-    if [ -s "$EXCLUDE" ] && [ "$(tail -c 1 "$EXCLUDE" 2>/dev/null || true)" != "" ]; then
-        printf '\n' >> "$EXCLUDE"
-    fi
-    printf '%s\n' "$MARKER" >> "$EXCLUDE"
-fi
-
-append_exclude() {
-    PATTERN="$1"
-    grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
-}
-
-append_exclude ".beads/redirect"
-append_exclude ".beads/hooks/"
-append_exclude ".beads/formulas/"
-append_exclude ".runtime/"
-append_exclude ".logs/"
-append_exclude "worktrees/"
-append_exclude "__pycache__/"
-append_exclude ".claude/"
-append_exclude ".codex/"
-append_exclude ".gemini/"
-append_exclude ".opencode/"
-append_exclude ".github/hooks/"
-append_exclude ".github/copilot-instructions.md"
-append_exclude "state.json"
-
+provision_worktree
 sync_worktree
 
 exit 0

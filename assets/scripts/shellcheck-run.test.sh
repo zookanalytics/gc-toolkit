@@ -4,11 +4,14 @@
 # The defect it guards against: a caller that cannot run shellcheck reports a
 # clean run anyway. So the load-bearing assertions are the fail-closed one (exit
 # 3 when no shellcheck is on PATH, never 0) and the findings pass-through (exit 1
-# is not swallowed into 0).
+# is not swallowed into 0). The repo's .shellcheckrc is guarded too: without it,
+# a lint run from the repo root cannot open a file a suite sources, and reports
+# a variable that only the sourced file exports as unused.
 #
 # Hermetic: the wrapper is invoked with PATH pointing at a stub bin, so whether
-# it finds a shellcheck is the test's to decide. `shellcheck` is a fake whose
-# presence and exit code the test controls; no real shellcheck is required.
+# it finds a shellcheck is the test's to decide. In A-D `shellcheck` is a fake
+# whose presence and exit code the test controls. E runs the real shellcheck
+# from the host on a fixture tree under $TMP, and is skipped without one.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -74,6 +77,41 @@ run_sut "$FIXTURE"
 # --- D: no files -> usage error (exit 2). ------------------------------------
 run_sut
 [ "$rc" -eq 2 ] && ok "no files: usage error (exit 2)" || bad "no files: expected 2, got $rc"
+
+# --- E: the repo's .shellcheckrc lets the real runner read a sourced file. ----
+# A suite assigns a variable that only the file it sources exports. Run from the
+# tree root, the way tools/lint.sh runs from the repo root, shellcheck sees the
+# variable as used only when it resolves source=lib.sh from the suite's own
+# directory and reads lib.sh. --norc is the control: the same run without any rc
+# reports the variable unused, so the clean run is the rc's doing.
+REAL_SHELLCHECK="$(command -v shellcheck || true)"
+if [ -z "$REAL_SHELLCHECK" ]; then
+  echo "skip - .shellcheckrc source resolution (no shellcheck on this host)"
+else
+  TREE="$TMP/tree"; REAL="$TMP/realbin"
+  mkdir -p "$TREE/sub" "$REAL"
+  ln -s "$REAL_SHELLCHECK" "$REAL/shellcheck"
+  cp "$HERE/../../.shellcheckrc" "$TREE/.shellcheckrc" \
+    && ok "the repo root carries a .shellcheckrc" || bad "no .shellcheckrc at the repo root"
+  printf '#!/usr/bin/env bash\nexport LIB_FLAG=""\n' > "$TREE/sub/lib.sh"
+  cat > "$TREE/sub/suite.sh" <<'EOF'
+#!/usr/bin/env bash
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "$HERE/lib.sh"
+LIB_FLAG=1
+EOF
+  run_real() {  # extra env is set by the caller
+    if (cd "$TREE" && PATH="$REAL" "$BASH_BIN" "$SUT" sub/suite.sh) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
+  }
+  run_real
+  [ "$rc" -eq 0 ] && ok "rc: a variable the sourced file exports is not reported unused" \
+    || bad "rc: expected a clean run, got $rc: $(tr -s '\n' ' ' < "$TMP/out")"
+  SHELLCHECK_OPTS=--norc run_real
+  [ "$rc" -eq 1 ] && grep -q 'SC2034' "$TMP/out" \
+    && ok "control: without the rc the same variable is reported unused (SC2034)" \
+    || bad "control: expected SC2034 with --norc, got $rc: $(tr -s '\n' ' ' < "$TMP/out")"
+fi
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"

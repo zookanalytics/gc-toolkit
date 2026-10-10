@@ -27,6 +27,8 @@
 #     it prints a partial warning inside the budget instead of being abandoned;
 #   - no check bounding a probe by any other means.
 # Hermetic: reads the repo and stubs gc; no city, no network.
+#
+# run-tests-scope: tree
 
 set -u
 

@@ -14,8 +14,8 @@
 # Absence is therefore a claim to be earned: resolve the prefix to a rig
 # through `gc rig list --json`, ask THAT rig's store by path, and report
 # absent only when it answers. `gc bd --db <path>/.beads` is the form that
-# pins a store, and the only one that reaches the HQ store, which no `--rig`
-# value names.
+# pins a store, and the one form that reaches every store, the HQ store
+# included, which no `--rig` value names.
 #
 # The owning store answers a bare id as an exact-or-prefix match, so its answer
 # is a verdict only about THIS id when the id is exact. A hit whose id is longer

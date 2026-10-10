@@ -138,7 +138,8 @@ BRANCH_NAME="<branch-name>"   # from `as <branch>`, else empty
 META=$(jq -n --arg shas "$SHAS" --arg keeper "$GC_AGENT" --arg branch "$BRANCH_NAME" \
   '{commit_sha:$shas, requesting_keeper:$keeper}
    + (if $branch == "" then {} else {branch_name:$branch} end)')
-BEAD=$(gc bd create "Prep upstream PR ($(printf '%s' "$SHAS" | wc -w | tr -d ' ') commits)" \
+SHA_COUNT=$(printf '%s' "$SHAS" | wc -w | tr -d ' ')
+BEAD=$(gc bd create "Prep upstream PR ($SHA_COUNT commits)" \
   -t task --metadata "$META" --json | jq -r '.id')
 gc sling gascity/gc-toolkit.polecat "$BEAD" --on mol-upstream-gc-pr-prep \
   --var commit_sha="$SHAS" \

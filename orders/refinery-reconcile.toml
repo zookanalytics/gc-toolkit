@@ -1,25 +1,26 @@
 # refinery-reconcile — the merge cadence, controller-owned. Runs the arms
-# (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
-# convoy-graduate, review-sweep, scaffolding-sweep, duplicate-sweep) once per
-# tick. The
+# (pr-facts --posture-only, merge, pr-open, pr-facts --route-comments-only,
+# pre-open-rebase, gate-ensure, pr-facts, convoy-graduate, review-sweep,
+# scaffolding-sweep, duplicate-sweep, pr-stack) once per tick. The
 # dispatcher's open-tracking gate keys on
 # ScopedName() (refinery-reconcile:rig:<rig>) and is the first half of
 # single-flight — never set no_work_gate, that flag opts out of exactly that
 # gate. It is not the whole of it: the controller watchdog closes any tracking
 # bead older than 2m, well inside this timeout, so the driver holds a per-rig
-# flock that a swept bead cannot reopen. `timeout` now bounds how long a wedged
+# flock that a swept bead cannot reopen. `timeout` bounds how long a wedged
 # pass can hold that lock, and raising it above the watchdog window is safe only
 # while the lock stands (assets/scripts/refinery-reconcile.test.sh asserts the
 # pair). It is bounded from above too: a pass killed part-way loses its later
-# arms, and every arm is a run of store subprocesses whose cost moves with host
-# load rather than with queue size, so the budget has to cover the slow end of
-# that range. Above the runner's own lock-stall bound a legitimately slow pass
-# would be reported as a wedge, so the two move together — the same suite
-# asserts that pair. scope=rig: one registration, store, identity and clock per
-# importing rig; per-rig values are derived inside the runner from GC_RIG.
+# arms, and an arm that walks the gating set costs time in proportion to the
+# set, at a per-anchor rate that moves with host load, so the budget has to
+# cover the slow end of both. Above the runner's own lock-stall bound a
+# legitimately slow pass would be reported as a wedge, so the two move together
+# — the same suite asserts that pair. scope=rig: one registration, store,
+# identity and clock per importing rig; per-rig values are derived inside the
+# runner from GC_RIG.
 # Tune the interval from city.toml [[orders.overrides]], not here.
 [order]
-description = "Refinery merge cadence: ensure checks, open pre-open PRs, land approved PRs, record external PR facts, graduate convoys"
+description = "Refinery merge cadence: land approved PRs, open pre-open PRs, ensure checks, record external PR facts, graduate convoys"
 trigger = "cooldown"
 interval = "60s"
 timeout = "600s"

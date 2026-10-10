@@ -11,10 +11,12 @@
 # gate-ensure) enumerate --status=open, so one claimed or held into any other
 # live status drops out of every one of them until the claim resolves. The
 # open-scoped scan misses that end-state for the same reason the cadence does, so
-# a second probe reads the non-open live statuses to report it. Finally, no open
-# bead carries a metadata key from the deleted healer-bookkeeping registry —
-# those keys have no writer any more, so their presence means a retired repair
-# pass is still writing state.
+# a second probe reads the non-open live statuses to report it. No open bead
+# carries a metadata key from the deleted healer-bookkeeping registry — those
+# keys have no writer any more, so their presence means a retired repair pass is
+# still writing state. Finally, no live bead carries a key the registry retired
+# together with every reader (RETIRED_KEYS), whose presence is state nothing
+# acts on any more.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -56,6 +58,17 @@ enum_str=$(printf '%s' "$states_json" | jq -r 'join(", ")')
 
 # Keys deleted from the metadata registry along with their healer writers.
 HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless_flagged|close_failures|close_escalated|gate_verdict_condemned)$'
+# Keys retired from the metadata registry together with every reader, and what a
+# live bead still carrying one leaves undone. They are read on every live status,
+# because the bead most likely to carry one is a visit, which is in_progress
+# while a sitting holds it.
+RETIRED_KEYS=(stall_root)
+retired_consequence() { # <key> <value>
+    case "$1" in
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them" ;;
+        *) printf '%s' "nothing reads it" ;;
+    esac
+}
 
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -204,6 +217,34 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
     fi
 
+    for rk in "${RETIRED_KEYS[@]}"; do
+        rraw=$(run_bounded gc bd list --db "$rig_path/.beads" \
+            --status open,in_progress,blocked,deferred,hooked,pinned \
+            --has-metadata-key "$rk" --json --limit 0 2>/dev/null); rrc=$?
+        if [ "$rrc" -ne 0 ] || [ -z "$rraw" ]; then
+            warnings+=("$label: could not list live beads carrying the retired key $rk in $rig_path/.beads (rc=$rrc) — the retired-key check did NOT run for this store")
+            continue
+        fi
+        rrows=$(printf '%s' "$rraw" | scrub | jq -r --arg k "$rk" '
+            def clean: tostring | gsub("[[:cntrl:]]"; " ");
+            .[]? | ((.metadata // {})[$k] // "" | clean) as $v
+            | select($v != "")
+            | [((.id // "?") | clean), ((.status // "") | clean), $v] | join("\u001f")' 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            warnings+=("$label: the live-bead listing for the retired key $rk from $rig_path/.beads could not be parsed — the retired-key check did NOT run for this store")
+            continue
+        fi
+        [ -n "$rrows" ] || continue
+        if ! printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
+            warnings+=("$label: could not stage the retired-key enumeration for $rk (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
+            continue
+        fi
+        while IFS=$'\037' read -r id st val; do
+            [ -n "$id" ] || continue
+            errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"). Discharge that by hand, then clear the key: gc bd update $id --unset-metadata $rk")
+        done < "$ENUM_TMP/retired"
+    done
+
     [ -n "$rows" ] || continue
     if ! printf '%s\n' "$rows" > "$ENUM_TMP/rows"; then
         warnings+=("$label: could not stage the state-space enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
@@ -237,6 +278,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every open bead's merge_result is a declared state, every detached-state anchor is open and rests unheld and offered to no pool, and no deleted healer key survives"
+echo "OK: every open bead's merge_result is a declared state, every detached-state anchor is open and rests unheld and offered to no pool, no deleted healer key survives, and no live bead carries a retired key"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

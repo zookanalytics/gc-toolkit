@@ -14,7 +14,7 @@
 # it. The exclusions carve out the legitimate HQ
 # residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
-# standing subject (task_kind=triage-subject or feedback-pattern) is a
+# standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
 # held-by-design escalation host, not work; a `human` route or a task_kind=visit
 # is an operator-queue decision; a `deacon-ledger` label is a daily digest; a
 # `debt` label or a `gc doctor:` title is a doctor/tech-debt advisory record. An
@@ -40,10 +40,16 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 # HQ store must still be caught.
 INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request","step","convoy","startup-health-episode"]'
 
-# Standing-subject task_kinds: a held-by-design host for escalation or feedback
-# state, not work anyone claims. Mirrors standing_kinds in
-# assets/scripts/liveness-sweep.sh.
-STANDING_KINDS='["triage-subject","feedback-pattern"]'
+# Standing-record task_kinds: a held-by-design host for escalation or feedback
+# state, not work anyone claims. The one definition, shared with the liveness
+# sweep and the proactive scan, exposes $STANDING_KINDS_JQ. An unsourceable one
+# warns: without it a standing record would read as marooned work.
+# shellcheck source=../../assets/scripts/standing-kinds.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
+    echo "cannot determine whether the HQ store holds marooned work"
+    printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from marooned work."
+    exit 1
+}
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -132,7 +138,7 @@ if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
     detail "could not list open beads in $STORE (rc=$rc) — the HQ store was NOT checked; an unreadable store is not proof it is clean.${list_err:+ \`gc bd list\` stderr: $list_err}"
     exit 1
 fi
-rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjson standing "$STANDING_KINDS" --argjson city_routes "$CITY_ROUTES" '
+rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES" "$STANDING_KINDS_JQ"'
     .[]? | . as $b
     | (($b.issue_type // "") | tostring) as $t
     | (($b.metadata // {})) as $m
@@ -146,7 +152,7 @@ rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjs
     | select($as == "")                               # unassigned — not already claimed
     | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
     | select(($labels | index("warrant")) == null)    # not a warrant (city machinery a rig never works)
-    | select(($standing | index($tk)) == null)        # not a held-by-design standing subject
+    | select(($b | is_standing_kind) | not)           # not a held-by-design standing record
     | select($tk != "visit")                          # not an operator-queue converse visit
     | select($rt != "human")                          # not an operator-queue decision routed to a person
     | select(($labels | index("deacon-ledger")) == null)  # not a daily digest
