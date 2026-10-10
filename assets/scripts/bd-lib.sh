@@ -160,7 +160,8 @@ bd_list() {
 # metadata instead, and migrated: its anchor_bead children, every status, are
 # joined in one `dep add --file` write, which bd commits as one transaction, so
 # no anchor reads with some of its children joined and others missing.
-# bd_anchor_link migrates an anchor before it joins a new child to it.
+# bd_anchor_link migrates an anchor before it joins a new child to it, and
+# tools/anchor-edges-backfill.sh joins any child a live anchor is still missing.
 ANCHOR_EDGE_TYPE=related
 _BD_ANCHOR_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
@@ -281,6 +282,30 @@ bd_anchor_link() {
   _bd_anchor_link_now "$@"; rc=$?
   _bd_cache_drop dep list "${1:-}" --direction=up
   return "$rc"
+}
+
+# bd_anchor_backfill <anchor> [--check] — read the anchor_bead children of
+# <anchor>, every status, and join each one its edge read does not reach, in one
+# write. Unlike bd_anchor_link it reads the metadata of a migrated anchor too,
+# so it also joins a child some writer filed without the edge. Prints the ids it
+# joined, or with --check the ids it would join and joins nothing, one per line.
+# Exit 1 = the write did not land; 2 = a read did not answer.
+bd_anchor_backfill() {
+  local GC_RECONCILE_BD_CACHE=""
+  local anchor="${1:-}" check="${2:-}" up kids missing
+  [ -n "$anchor" ] || return 2
+  up=$(_bd_anchor_up "$anchor") || return 2
+  kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 2
+  missing=$(jq -rn --arg a "$anchor" \
+      --argjson on "$(printf '%s' "$up" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null || echo null)" \
+      --argjson kids "$(printf '%s' "$kids" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null || echo null)" '
+    if ($on | type) != "array" or ($kids | type) != "array" then error("unreadable")
+    else $kids | unique | .[] | . as $k | select($k != "" and $k != $a and (any($on[]; . == $k) | not))
+    end' 2>/dev/null) || return 2
+  [ -n "$missing" ] || return 0
+  printf '%s\n' "$missing"
+  [ "$check" = --check ] && return 0
+  _bd_anchor_stamp "$anchor" "$kids" "$up" || return 1
 }
 
 # bd_create_child <anchor> <gc bd create args...> — `gc bd create` for a bead
