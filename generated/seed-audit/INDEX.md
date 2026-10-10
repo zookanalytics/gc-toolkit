@@ -30,8 +30,8 @@ covers that dimension.
 
 | agent | bytes | est. tokens |
 |---|---:|---:|
-| [`claude`](agents/claude.md) | 5,876 | 1,469 |
-| [`codex`](agents/codex.md) | 5,876 | 1,469 |
+| [`claude`](agents/claude.md) | 5,999 | 1,499 |
+| [`codex`](agents/codex.md) | 5,999 | 1,499 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
 | [`converse-codex`](agents/converse-codex.md) | 36,510 | 9,127 |
 | [`converse-fable`](agents/converse-fable.md) | 36,510 | 9,127 |
@@ -39,7 +39,7 @@ covers that dimension.
 | [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
-| [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
+| [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
 | [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
 | [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
@@ -62,7 +62,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
-| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
+| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
 | [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,302 | 575 |
