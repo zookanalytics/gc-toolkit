@@ -15,6 +15,19 @@ The implementation is a Claude Code `PreToolUse` hook at
 `assets/scripts/gh-origin-guard.sh`, registered for every claude-provider agent
 by the overlays in `pack.toml`.
 
+## Scope
+
+**Mandate.** The boundary the guard holds on the `gh` commands an agent types:
+which writes it refuses, how it resolves a write's target and the repositories
+a session owns, the mark it requires on a post, and how it is wired to every
+claude-provider agent.
+
+**Boundaries.** What an agent does with a write the guard refuses is
+[outbound-sends.md](outbound-sends.md). Posts made from inside the pack's
+scripts are held to the mark by `tools/lint-learned.d/pr-post-bypass.sh`, not
+by this hook, and how the city tells its own posts from feedback is
+[state-machine.md](state-machine.md#operator-feedback).
+
 ## What it refuses
 
 Five write verbs: `gh issue create`, `gh issue comment`, `gh pr create`,
