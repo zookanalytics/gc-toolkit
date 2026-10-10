@@ -12,15 +12,10 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded.
+# id-read-unguarded, doc-filing.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
-#
-# doc-filing is covered too. Its fixture runs use a copy of the detector,
-# which reads its gap list from beside itself. One section reads the
-# repository's own gap list instead, because that list is data the tree has to
-# keep true.
 
 set -u
 
@@ -780,22 +775,18 @@ has "$OUT" "continued.md:2:" "and reported where it opened"
 
 # ── doc-filing ──────────────────────────────────────────────────────────
 #
-# The detector reads paths relative to the repository root and its gap list
-# from its own directory. So the fixture runs use a copy of it inside a
-# fixture root, beside a fixture list.
+# The detector reads paths relative to the repository root, so every run
+# starts in a fixture root.
 DET_DF="$HERE/lint-learned.d/doc-filing.sh"
 [ -x "$DET_DF" ] || { echo "no detector at $DET_DF"; exit 1; }
 DF="$TMP/doc-filing"
-mkdir -p "$DF/tools/lint-learned.d"
-cp "$DET_DF" "$DF/tools/lint-learned.d/doc-filing.sh"
-rundf() { OUT="$(cd "$DF" && tools/lint-learned.d/doc-filing.sh "$@" 2>&1)"; RC=$?; }
+mkdir -p "$DF"
+rundf() { OUT="$(cd "$DF" && "$DET_DF" "$@" 2>&1)"; RC=$?; }
 # page <path> — write a fixture page from stdin under the fixture root.
 page() { mkdir -p "$DF/$(dirname "$1")" && cat > "$DF/$1"; }
-gaps() { cat > "$DF/tools/lint-learned.d/doc-filing.gaps"; }
 
 echo "── doc-filing: what is a finding ──"
 
-gaps < /dev/null
 page docs/new.md <<'MD'
 ---
 name: New
@@ -977,40 +968,8 @@ rundf "${DF_GOOD[@]}" docs/notes.txt README.md services/helm/docs/guide.md gener
 eq "$RC" 0 "pages carrying their tier's part, and paths outside the tiers, are clean"
 eq "$OUT" "" "a clean run prints nothing"
 
-echo "── doc-filing: the gap list ──"
-
-gaps <<'GAPS'
-# A comment line and a blank line are not entries.
-
-docs/new.md
-  specs/tk-a/notes.md
-docs/good.md
-specs/tk-b/plain.md
-# docs/fenced.md
-docs/topic
-docs/fenced.md.old
-GAPS
-rundf docs/new.md specs/tk-a/notes.md docs/good.md specs/tk-b/plain.md docs/fenced.md docs/topic/nested.md
-eq "$RC" 1 "a listed page that has its part fails the run"
-hasnt "$OUT" "docs/new.md:" "a listed docs/ page with no Scope is not reported"
-hasnt "$OUT" "specs/tk-a/notes.md:" "a listed specs/ page with no description is not reported, whitespace around its entry aside"
-has "$OUT" "docs/good.md:1: has a \"## Scope\" section now, so delete line 5 of tools/lint-learned.d/doc-filing.gaps" \
-    "a listed page that gained its Scope must leave the list, and the finding names its line"
-has "$OUT" "specs/tk-b/plain.md:1: has a frontmatter description now, so delete line 6 of" \
-    "a listed page that gained its description must leave it too"
-has "$OUT" "docs/fenced.md:1: no \"## Scope\"" \
-    "a commented-out entry lists nothing, and neither does a longer path that starts with the page's"
-has "$OUT" "docs/topic/nested.md:1: no \"## Scope\"" "an entry names one page, never a directory or a prefix"
-eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is reported"
-
-rm "$DF/tools/lint-learned.d/doc-filing.gaps"
-rundf docs/new.md
-eq "$RC" 1 "with no gap list, no page is exempt"
-has "$OUT" "docs/new.md:1: no \"## Scope\"" "and the page is reported"
-
 echo "── doc-filing: a check that cannot read says so ──"
 
-gaps < /dev/null
 chmod 000 "$DF/docs/good.md"
 if [ -r "$DF/docs/good.md" ]; then
     ok "an unreadable page (not exercised: this user can read anything)"
@@ -1022,96 +981,12 @@ else
 fi
 chmod 644 "$DF/docs/good.md"
 
-chmod 000 "$DF/tools/lint-learned.d/doc-filing.gaps"
-if [ -r "$DF/tools/lint-learned.d/doc-filing.gaps" ]; then
-    ok "an unreadable gap list (not exercised: this user can read anything)"
-else
-    rundf docs/good.md
-    eq "$RC" 2 "an unreadable gap list is an error, never a pass"
-    has "$OUT" "cannot read the gap list" "and says so"
-fi
-chmod 644 "$DF/tools/lint-learned.d/doc-filing.gaps"
-
 mkdir -p "$TMP/doc-filing-bin"
 printf '#!/bin/sh\nexit 3\n' > "$TMP/doc-filing-bin/awk"
 chmod +x "$TMP/doc-filing-bin/awk"
-OUT="$(cd "$DF" && PATH="$TMP/doc-filing-bin:$PATH" tools/lint-learned.d/doc-filing.sh docs/new.md 2>&1)"; RC=$?
+OUT="$(cd "$DF" && PATH="$TMP/doc-filing-bin:$PATH" "$DET_DF" docs/new.md 2>&1)"; RC=$?
 eq "$RC" 2 "a scan that fails is an error, never a pass"
 has "$OUT" "the page scan failed" "and says so"
-
-echo "── doc-filing: the repository's own gap list ──"
-
-# The pages the list held when it was written. It may only lose them: an
-# entry outside this set is a page that joined later, the one way the list
-# could grow.
-DF_STARTED='docs/authority-map.md
-docs/cycle-recycle.md
-docs/dolt-reclaim.md
-docs/foundation.md
-docs/gh-origin-guard.md
-docs/install.md
-docs/product-goals.md
-docs/quota-park-recovery.md
-docs/scratch-reclaim.md
-docs/worktree-reclaim.md
-specs/bead-universe/beads-created.md
-specs/bead-universe/human-clarifications.md
-specs/bead-universe/prd-draft.md
-specs/bead-universe/prd-review.md
-specs/tk-0tdy7/pilot-learnings.md
-specs/tk-1zd25/design.md
-specs/tk-2qa85/patrol-cadence-reaim.md
-specs/tk-3d0uh/proactive-report.md
-specs/tk-4abhrt/cutover-blockers.md
-specs/tk-4abhrt/cutover.md
-specs/tk-6d0vb.1/composable-check-options.md
-specs/tk-eemvf/2026-06-30-001-feat-attention-canvas-plan.md
-specs/tk-eemvf/design/attention-canvas-design-brief.md
-specs/tk-eemvf/design/how-to.md
-specs/tk-husu6/binding-report.md
-specs/tk-mw3bso/operator-review-dispositions.md
-specs/tk-oml75/spike-report.md
-specs/tk-oqmc7/reachability-report.md
-specs/tk-px5od/ideation.md
-specs/tk-px5od/marching-orders.md
-specs/tk-px5od/research-log.md
-specs/tk-px5od/research/r1-toyota-production-system.md
-specs/tk-px5od/research/r2-cheap-prototyping.md
-specs/tk-px5od/research/r3-cheap-photography-curation.md
-specs/tk-px5od/research/r4-recovery-oriented-computing.md
-specs/tk-px5od/research/r5-amazon-coe.md
-specs/tk-px5od/research/v1-red-team.md
-specs/tk-px5od/research/v2-ai-native-prior-art.md
-specs/tk-px5od/research/v3-skeptic.md
-specs/tk-px5od/research/v4-ai-native-inventions.md
-specs/tk-px5od/research/v5-inversions-within.md
-specs/tk-px5od/research/v6-inversions-against-field.md
-specs/tk-px5od/research/v7-hidden-metrics.md
-specs/tk-px5od/roadmap.md
-specs/tk-px5od/selection-menu.md'
-DF_ROOT="$(cd "$HERE/.." && pwd)"
-DF_LIVE=()
-if [ -f "$DF_ROOT/tools/lint-learned.d/doc-filing.gaps" ]; then
-    while IFS= read -r e || [ -n "$e" ]; do
-        e="${e#"${e%%[![:space:]]*}"}"
-        e="${e%"${e##*[![:space:]]}"}"
-        case "$e" in '' | '#'*) continue ;; esac
-        DF_LIVE+=("$e")
-    done < "$DF_ROOT/tools/lint-learned.d/doc-filing.gaps"
-fi
-joined=""
-gone=""
-for e in ${DF_LIVE[@]+"${DF_LIVE[@]}"}; do
-    case $'\n'"$DF_STARTED"$'\n' in *$'\n'"$e"$'\n'*) ;; *) joined+=" $e" ;; esac
-    [ -f "$DF_ROOT/$e" ] || gone+=" $e"
-done
-eq "$joined" "" "every entry was on the list as it started, so the list only shrinks"
-eq "$gone" "" "every entry names a page in the tree"
-if [ "${#DF_LIVE[@]}" -gt 0 ]; then
-    OUT="$(cd "$DF_ROOT" && tools/lint-learned.d/doc-filing.sh "${DF_LIVE[@]}" 2>&1)"; RC=$?
-    eq "$OUT" "" "every listed page still lacks its part, so no entry is stale"
-    eq "$RC" 0 "and the detector passes the list"
-fi
 
 echo "── zsh-colon-modifier: what is a finding ──"
 

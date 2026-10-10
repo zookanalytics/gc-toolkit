@@ -31,14 +31,6 @@ Skipping the *documentation* of a hazard is different and is allowed: a
 detector ignores its own directory and the specs describing the bug it hunts,
 because that text states the rule rather than breaks it.
 
-A detector may also name known violations it does not report, when their fix
-is not the next editor's to make. doc-filing is one: writing an existing
-`docs/` page's Scope charters the page, a human editorial act
-(docs/file-structure.md), so the pages that lack their part are named in
-`doc-filing.gaps` beside it. Each entry is a defect, not an exempt category.
-The detector reports an entry whose page has its part, and the test suite
-refuses an entry the list did not start with, so the list only shrinks.
-
 Guidance that fails the test is still real guidance. It belongs in the prose
 that instructs agents — the operator profile, the work-quality fragments, and
 the learned-conventions fragments — where an author reads it with the case in
@@ -63,5 +55,4 @@ no longer earns its keep produces a PR deleting the detector. A detector that
 fails the admission test retires on that ground alone, and the same PR puts
 its content back into prose if the prose does not already carry it.
 
-Non-executables here (this README, `doc-filing.gaps`) are data, not
-detectors.
+Non-executables here (this README) are data, not detectors.

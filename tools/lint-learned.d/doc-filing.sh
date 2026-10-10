@@ -14,26 +14,15 @@
 # authoritative, and owned, and a record of one piece of work belongs in
 # specs/<bead-id>/. The finding names both.
 #
-# doc-filing.gaps, beside this script, names pages that lack their part and
-# are not reported, one repo-relative path per line. Writing a listed docs/
-# page's Scope charters it, which is a human editorial act, so the check
-# cannot hand that job to whoever next edits the page. The list only shrinks.
-# A listed page that has its part is a finding until its line is deleted, and
-# tools/lint-learned.d.test.sh fails a line that names no page or names one
-# outside the set the list started as.
-#
 # Paths are read relative to the repository root, which is how
 # tools/lint-learned.sh passes them.
 #
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 a page or the
-# gap list that could not be read, or a scan that failed.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 a page that
+# could not be read, or a scan that failed.
 
 set -uo pipefail
 
 export LC_ALL=C
-
-GAPS="$(dirname -- "${BASH_SOURCE[0]}")/doc-filing.gaps"
-GAPS_NAME="tools/lint-learned.d/doc-filing.gaps"
 
 NO_SCOPE="no \"## Scope\" section. A page belongs in docs/ only if it is durable, authoritative, and owned, and its Scope says what it covers and where its edges are. A record of one piece of work, such as one component's design, belongs in specs/<bead-id>/ instead. The author decides which this page is (docs/file-structure.md: \"Inside docs/\", \"The Scope section\") (learned rule: doc-filing)"
 NO_DESC="no frontmatter description. A spec page opens with a --- block whose description says why the page exists, which is what makes a bead's record findable (docs/file-structure.md: \"Frontmatter\") (learned rule: doc-filing)"
@@ -107,26 +96,6 @@ END {
 AWK
 )
 
-listed=$'\n'
-if [ -e "$GAPS" ]; then
-    if [ ! -r "$GAPS" ]; then
-        echo "$GAPS_NAME: cannot read the gap list, so no page can be checked (doc-filing)"
-        exit 2
-    fi
-    while IFS= read -r entry || [ -n "$entry" ]; do
-        entry="${entry#"${entry%%[![:space:]]*}"}"
-        entry="${entry%"${entry##*[![:space:]]}"}"
-        case "$entry" in '' | '#'*) continue ;; esac
-        listed+="$entry"$'\n'
-    done < "$GAPS"
-fi
-
-is_listed() { case "$listed" in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
-
-gap_line() {
-    P="$1" awk '{ e = $0; sub(/^[ \t]+/, "", e); sub(/[ \t\r]+$/, "", e) } e == ENVIRON["P"] { print NR; exit }' "$GAPS"
-}
-
 # awk reads an operand shaped like `name=value` as an assignment, so every
 # page goes to it with a ./ prefix.
 pages=()
@@ -153,14 +122,10 @@ if [ "${#pages[@]}" -gt 0 ]; then
         page="${page#./}"
         [ -n "$page" ] || continue
         case "$page" in
-            docs/*) has="$scope"; part='a "## Scope" section'; missing="$NO_SCOPE" ;;
-            *) has="$desc"; part='a frontmatter description'; missing="$NO_DESC" ;;
+            docs/*) has="$scope"; missing="$NO_SCOPE" ;;
+            *) has="$desc"; missing="$NO_DESC" ;;
         esac
-        if is_listed "$page"; then
-            [ "$has" = 1 ] || continue
-            echo "$page:1: has $part now, so delete line $(gap_line "$page") of $GAPS_NAME, which only shrinks (learned rule: doc-filing)"
-            found=1
-        elif [ "$has" != 1 ]; then
+        if [ "$has" != 1 ]; then
             echo "$page:1: $missing"
             found=1
         fi
