@@ -7,9 +7,6 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 17 · formulas: 27
-- input manifest: `SOURCES.txt`
-
 ## Scope
 
 **Mandate.** What text each agent and formula in this pack renders to, as a
@@ -26,27 +23,30 @@ covers that dimension.
 
     assets/scripts/render-seed-audit.sh
 
+Byte and token counts print on request, with the change since a base revision
+when one is named, and are not committed:
+
+    assets/scripts/render-seed-audit.sh --sizes [<base-rev>]
+
 ## Agent prompts
 
-| agent | bytes | est. tokens |
-|---|---:|---:|
-| [`claude`](agents/claude.md) | 5,876 | 1,469 |
-| [`codex`](agents/codex.md) | 5,876 | 1,469 |
-| [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 36,510 | 9,127 |
-| [`converse-fable`](agents/converse-fable.md) | 36,510 | 9,127 |
-| [`converse-opus`](agents/converse-opus.md) | 36,510 | 9,127 |
-| [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
-| [`demo`](agents/demo.md) | 1,778 | 444 |
-| [`dog`](agents/dog.md) | 2,359 | 589 |
-| [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
-| [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
-| [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
-| [`polecat-codex`](agents/polecat-codex.md) | 27,797 | 6,949 |
-| [`proactive`](agents/proactive.md) | 12,437 | 3,109 |
-| [`refinery`](agents/refinery.md) | 11,265 | 2,816 |
-| [`witness`](agents/witness.md) | 15,920 | 3,980 |
+- [`claude`](agents/claude.md)
+- [`codex`](agents/codex.md)
+- [`control-dispatcher`](agents/control-dispatcher.md)
+- [`converse-codex`](agents/converse-codex.md)
+- [`converse-fable`](agents/converse-fable.md)
+- [`converse-opus`](agents/converse-opus.md)
+- [`deacon`](agents/deacon.md)
+- [`demo`](agents/demo.md)
+- [`dog`](agents/dog.md)
+- [`gemini`](agents/gemini.md)
+- [`keeper`](agents/keeper.md)
+- [`mechanik`](agents/mechanik.md)
+- [`polecat`](agents/polecat.md)
+- [`polecat-codex`](agents/polecat-codex.md)
+- [`proactive`](agents/proactive.md)
+- [`refinery`](agents/refinery.md)
+- [`witness`](agents/witness.md)
 
 ## Formula recipes
 
@@ -56,39 +56,35 @@ carrying it. `gc formula list` answers city-wide and offers all of them at every
 scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 "not found in search paths" from anywhere else.
 
-| formula | scope | bytes | est. tokens |
-|---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,386 | 846 |
-| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
-| [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
-| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
-| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,302 | 575 |
-| [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
-| [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
-| [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
-| [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,179 | 1,544 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
-| [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
-| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
-| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,448 | 1,112 |
-| [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
-| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
-| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
-| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
-| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
-| [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
-| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
-| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,637 | 909 |
-
-Token counts are `bytes / 4`, the estimator the measurements this artifact was
-built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
-to bill anyone.
+| formula | scope |
+|---|---|
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` |
+| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` |
+| [`mol-do-work`](formulas/mol-do-work.md) | `city` |
+| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` |
+| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` |
+| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` |
+| [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` |
+| [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` |
+| [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` |
+| [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` |
+| [`mol-review`](formulas/mol-review.md) | `city` |
+| [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` |
+| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` |
+| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` |
+| [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` |
+| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` |
+| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` |
+| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` |
+| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
+| [`mol-validate`](formulas/mol-validate.md) | `city` |
+| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` |
+| [`mol-visit`](formulas/mol-visit.md) | `city` |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` |
 
 ## Resolved fragment composition
 

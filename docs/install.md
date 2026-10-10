@@ -215,23 +215,25 @@ Confirm the native roster is present — `polecat`, `polecat-codex`,
 `refinery`, `witness`, `deacon`, `dog`, `converse-opus`, `converse-fable`,
 `converse-codex`, `mechanik` — with no gastown entries.
 
-### First render of the seed audit
+### The seed audit's upkeep
 
-`generated/seed-audit/` ships empty; render it once per clone, which also
-wires the pre-commit hook that keeps it current:
+`generated/seed-audit/` is committed rendered. Wire the pre-commit hook that
+keeps it current once per clone:
 
 ```bash
 assets/scripts/render-seed-audit.sh --install-hook
 ```
 
-Until then `check-seed-audit-current` warns rather than errors.
+Until then `check-seed-audit-current` warns rather than errors, and so it does
+for a clone that carries no render yet.
 
 The hook keeps a branch current against its own base, which is not the same as
 keeping the landing branch current: the artifact is rendered from the whole
 source tree, so a PR whose render predates a prompt input the base has since
 gained lands over that input. `merge.sh` refuses such a merge, using
-`render-seed-audit.sh --check-merge` over the tree `git merge-tree` writes, so
-merges on this rig need git 2.38 or newer.
+`render-seed-audit.sh --check-merge`, which renders the tree `git merge-tree`
+writes. So the host that runs the refinery's merges needs `gc` on its PATH and
+git 2.38 or newer.
 
 ### Smoke test
 

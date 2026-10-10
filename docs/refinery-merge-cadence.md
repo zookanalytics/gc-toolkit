@@ -131,7 +131,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
-   that the merge result keeps `generated/seed-audit` current, re-read the full
+   that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
@@ -193,21 +193,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    branch-local, a rebase replays commits without running it, and `-diff` in
    `.gitattributes` keeps the clobber out of the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
-   `render-seed-audit.sh --check-merge` re-hashes the merged tree's inputs and
-   compares them against `generated/seed-audit/SOURCES.txt` in that same tree.
-   That costs hashes rather than a render, and needs no `gc` binary. A drifting
-   input, or a probe that cannot answer, holds the merge and files one visit per
-   PR under `seed-audit-merge-gate.<n>`, naming the inputs that moved. Nothing
-   is routed from here: the way out is to bring the head branch current with
-   its base, re-render, and push.
+   `render-seed-audit.sh --check-merge` renders the tree `git merge-tree`
+   writes, with the renderer that tree carries. A file passes when the merge
+   commits it exactly as rendered. A file that fails that test still passes
+   when the merge leaves it as the base commits it and it renders the same on
+   the base as on the merge: the base was already stale there, so the check
+   reports it as the base's own staleness and holds nothing on it. That second
+   test needs a render of the base too, which runs only when some file fails
+   the first, so a check costs one render or two, and needs `gc` on the
+   refinery's host. Any other file, or a probe that cannot answer, holds the
+   merge and files one visit per PR under `seed-audit-merge-gate.<n>`, naming
+   each file and why it failed. Nothing is routed from here: the way out is to
+   bring the head branch current with its base, re-render, and push.
 
-   That manifest is one record per input rather than one digest over all of
-   them, and the shape is what keeps this artifact out of the queue's way. A
-   repo-global value in a per-branch committed file moves on every seed-input
-   edit, so two PRs touching two unrelated agents collide on it whatever else
-   they do; per-input records move only where the input moved. The record is
-   two lines, path then hash, because git needs one unchanged line between two
-   changes to merge them and neighbouring entries in a flat list leave none.
+   What the artifact commits is chosen to stay out of the queue's way. A line
+   that moves on every edit to one agent's prompt, committed beside the lines
+   of every other agent, collides two PRs that touched two unrelated agents
+   whatever else they do. So `generated/seed-audit/` holds the renders and an
+   `INDEX.md` that moves only when the pack's composition moves, and byte and
+   token counts print on request (`render-seed-audit.sh --sizes`).
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of

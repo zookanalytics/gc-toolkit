@@ -1,36 +1,40 @@
 #!/usr/bin/env bash
 # Tests for the properties generated/seed-audit and its renderer have to hold.
-# Two are about the artifact at a merge: --check-merge refuses a merge whose
-# result would land a stale artifact, and the artifact's committed shape lets two
-# branches that moved different inputs merge at all. Real git, no stubs: both are
+# Two are about the artifact at a merge: --check-merge refuses a merge that lands
+# a file it does not render, and the artifact's committed shape lets two
+# branches that re-rendered different agents merge at all. Real git: both are
 # questions about trees, and stubbing git would leave the merge itself
-# unexercised. Three are about the renderer: the gcq wrapper pins its working
-# directory so the render resolves the synthetic city and not one discovered from
-# the cwd it was invoked in, the render is one tree however TMPDIR spells the
-# scratch directory, and INDEX.md's byte column holds the bare number whichever
-# wc counted it. Three are refusals: --install-hook will not shadow a
-# hand-installed hook, a render fails when an agent the pack owns renders the
-# builtin worker prompt, and a render fails when the throwaway city's path
-# survives the substitution. The cases that render run against a stub `gc` on
-# PATH, so no real `gc`, no city and no network are involved; the fixture's own
-# copy of the renderer is only ever asked for a manifest, and the hermeticity
-# check reads the renderer's text.
+# unexercised. Two are about sizes: --sizes prints them, against a base revision
+# when given one, and nothing commits them. Three are about the renderer: the gcq
+# wrapper pins its working directory so the render resolves the synthetic city
+# and not one discovered from the cwd it was invoked in, the render is one tree
+# however TMPDIR spells the scratch directory, and a byte count reads as the bare
+# number whichever wc counted it. Three are refusals: --install-hook will not
+# shadow a hand-installed hook, a render fails when an agent the pack owns
+# renders the builtin worker prompt, and a render fails when the throwaway
+# city's path survives the substitution. Every render runs against a stub `gc`
+# on PATH that answers from the files of the pack it is asked about, so a render
+# is a function of the tree rendered and no real `gc`, city or network is
+# involved; the hermeticity check reads the renderer's text.
 #
-# Covers: the clobber (a base that moved an input against a head whose render
-# predates it) with the offending input named; the current case; a merge result
-# carrying no audit; a head that widens the input set, which must be read under
-# ITS definition and not this checkout's; a symlinked input, recorded under its
-# own path and hashed through the link; the delegation itself, asserted on the
-# argv the merged tree's renderer receives; the three cannot-tell exits
-# (unresolvable rev, missing manifest, conflicting merge); the merge shape,
-# against a control carrying the repo-global line the manifest replaced; the
-# gcq wrapper's cwd pin; the hook install's refusal, for a hand-installed hook
-# and for a listing that fails, against a control holding only a sample hook;
-# the builtin-fallback guard, which holds the pack's own agents and not a
-# builtin provider's; a TMPDIR spelled with a trailing slash, by its physical
-# path and through a symlink, each against the tree a plain one renders; a city
-# spelling no needle names, which fails the render; and a wc that pads its
-# count, against the host's.
+# Covers, for the merge gate: a head that moves a render input without
+# re-rendering, named with its reason; a head that commits the fresh render,
+# judged on one render; a base already stale in a file the head leaves alone,
+# reported as base's and not held; a hand-edited render; an agent added without
+# its render and one removed with its render kept; a head that changes the
+# renderer, judged by the renderer it ships, against a control rendered by this
+# checkout's; no gc on PATH; a merge result that does not render; a merge result
+# carrying no audit, and the stub tree before a first render; the cannot-tell
+# exits (unresolvable rev, conflicting merge, missing revs, no scratch dir); and
+# the merge shape, against a control carrying the per-agent size rows the index
+# no longer commits. For the renderer and sizes: what INDEX.md carries and
+# SOURCES.txt's absence; --sizes with and without a base; the gcq wrapper's cwd
+# pin; the hook install's refusal, for a hand-installed hook and for a listing
+# that fails, against a control holding only a sample hook; the builtin-fallback
+# guard, which holds the pack's own agents and not a builtin provider's; a TMPDIR
+# spelled with a trailing slash, by its physical path and through a symlink, each
+# against the tree a plain one renders; a city spelling no needle names, which
+# fails the render; and a wc that pads its count, against the host's.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,146 +48,216 @@ export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=fal
 PASS=0; FAIL=0
 
 SUT="$HERE/render-seed-audit.sh"
-R="$TMP/repo"
 
-sources_of() { bash "$1/assets/scripts/render-seed-audit.sh" --root "$1" --print-sources; }
-write_audit() { # <repo> — the artifact a render at this tree would commit
-    mkdir -p "$1/generated/seed-audit"
-    printf '# Seed audit\n\n- input manifest: `SOURCES.txt`\n' > "$1/generated/seed-audit/INDEX.md"
-    sources_of "$1" > "$1/generated/seed-audit/SOURCES.txt"
+# ------------------------------------------------ a gc that renders from files
+#
+# The render runs every gc call through `env -i` from inside the synthetic city,
+# so the stub receives no environment and finds the pack it is asked about the
+# way gc does, from the city's own city.toml: the pack this repo imports is the
+# first absolute source there. Each answer is then read from that pack's files.
+# Every call logs the pack it answered for, which is how a case counts the trees
+# one check rendered.
+STUB="$TMP/stub-gc"
+mkdir -p "$STUB"
+BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-first workflow'
+cat > "$STUB/gc" <<STUB
+#!/usr/bin/env bash
+[ "\${1:-}" = --city ] && shift 2
+root="\$(sed -n 's|^source = "\(/[^"]*\)"\$|\1|p' city.toml | head -1)"
+printf '%s\n' "\$root" >> "$STUB/roots.log"
+agents() { local d; for d in "\$root"/agents/*/; do [ -f "\$d/agent.toml" ] && basename "\$d"; done; }
+case "\$1 \${2:-}" in
+    "config show")  agents | while IFS= read -r a; do printf '[[agent]]\nname = "%s"\n' "\$a"; done ;;
+    "agent list")   { agents; echo claude; } | sed 's/.*/{"name":"&"}/' | paste -s -d, - \
+                        | sed 's/.*/{"agents":[&]}/' ;;
+    "formula list") for f in "\$root"/formulas/*.toml; do [ -f "\$f" ] && basename "\$f" .toml; done ;;
+    "formula show") cat "\$root/formulas/\$3.toml" ;;
+    "prime claude") printf '%s\n' "$BUILTIN_WORKER" ;;
+    "prime "*)      "$STUB/spell-city" < "\$root/agents/\$2/prompt.template.md" ;;
+    *)              exit 1 ;;
+esac
+STUB
+chmod +x "$STUB/gc"
+# A prompt can name the city the way a real prime does. @@CITY@@ is gc's
+# spelling of the path --city was given, which is gascity's
+# pathutil.NormalizePathForCompare: cleaned, symlinks resolved, and the darwin
+# /private/tmp and /private/var aliases collapsed. @@FOREIGN@@ is a spelling no
+# rule derives, the city's own directory names under a root the render never
+# saw. gcq runs every call from the city, so the working directory names it.
+cat > "$STUB/spell-city" <<'STUB'
+#!/usr/bin/env bash
+city="$(pwd -P)"
+if [ "$(uname -s)" = Darwin ]; then
+    case "$city" in /private/tmp/*|/private/var/*) city="${city#/private}" ;; esac
+fi
+foreign="/elsewhere/$(basename "$(dirname "$city")")/$(basename "$city")"
+sed -e "s|@@CITY@@|$city|g" -e "s|@@FOREIGN@@|$foreign|g"
+STUB
+chmod +x "$STUB/spell-city"
+
+# A PATH with no gc anywhere on it. The directories that hold one are dropped,
+# and git and tar keep a link of their own in case they shared one of them.
+without_gc() {
+    local d out="$TMP/no-gc" IFS=:
+    mkdir -p "$TMP/no-gc"
+    ln -sf "$(command -v git)" "$TMP/no-gc/git"
+    ln -sf "$(command -v tar)" "$TMP/no-gc/tar"
+    for d in $PATH; do [ -x "$d/gc" ] || out="$out:$d"; done
+    printf '%s\n' "$out"
 }
-on() { # <branch> — check out a branch with no residue from the last one
-    git -C "$R" checkout -q "$1" && git -C "$R" clean -qfd
-}
-commit() { git -C "$R" add -A && git -C "$R" commit -q -m "$1"; }
-check_merge() { bash "$SUT" --root "$R" --check-merge "$1" "$2" 2>&1; }
 
 # ---------------------------------------------------------------- the fixture
 #
-# c0 is the shape a pack has before its first render: sources, the renderer, no
-# artifact. `base` moves a prompt input off c0 and commits no render — the state
-# a bypassed hook, a host without `gc`, or a replayed commit leaves behind. Every
-# other branch answers that base.
-mkdir -p "$R/agents" "$R/template-fragments" "$R/assets/scripts"
+# c0 is the shape a pack has before its first render: sources and the renderer,
+# no artifact. `base` renders it, so base is current, and every branch below
+# answers base unless it says otherwise.
+R="$TMP/repo"
+mkdir -p "$R/agents/alpha" "$R/agents/beta" "$R/formulas" "$R/assets/scripts"
 cp "$SUT" "$R/assets/scripts/render-seed-audit.sh"
 printf 'name = "fixture"\n' > "$R/pack.toml"
-printf '# agent a\n' > "$R/agents/a.md"
-printf 'fragment v1\n' > "$R/template-fragments/x.md"
-printf 'fragment v1\n' > "$R/template-fragments/y.md"
+for a in alpha beta; do
+    printf 'name = "%s"\n' "$a" > "$R/agents/$a/agent.toml"
+    printf '# %s doctrine\n' "$a" > "$R/agents/$a/prompt.template.md"
+done
+printf 'formula = "mol-x"\n' > "$R/formulas/mol-x.toml"
 git -C "$R" init -q -b c0
 git -C "$R" config user.email test@example.invalid
 git -C "$R" config user.name "test"
-commit c0
 
+on() { # <branch> — check out a branch with no residue from the last one
+    git -C "$R" checkout -q "$1" && git -C "$R" clean -qfd
+}
+branch() { on "$1" && git -C "$R" checkout -q -b "$2"; } # <from> <new>
+commit() { git -C "$R" add -A && git -C "$R" commit -q --allow-empty -m "$1"; }
+# The render a commit would carry, made by the renderer in the tree itself.
+render() { PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --jobs 1 >/dev/null 2>&1; }
+check_merge() { : > "$STUB/roots.log"; PATH="$STUB:$PATH" bash "$SUT" --root "$R" --check-merge "$1" "$2" 2>&1; }
+renders() { LC_ALL=C sort -u "$STUB/roots.log" | grep -c .; } # trees the last check rendered
+edit_prompt() { printf '%s\n' "$2" >> "$R/agents/$1/prompt.template.md"; } # <agent> <line>
+
+commit "sources, no audit yet"
 git -C "$R" checkout -q -b base
-printf 'fragment v2\n' > "$R/template-fragments/x.md"
-commit "move a prompt input, render nothing"
+render; commit "render the audit"
 
-echo "# a render made before the base moved is STALE at the merge"
-git -C "$R" checkout -q -b stale c0
-write_audit "$R"
-commit "establish the audit at the old base"
-out=$(check_merge base stale); rc=$?
-eq "$rc" 1 "the clobber exits 1"
-has "$out" "would be STALE at the merge of stale into base" "the verdict names both sides"
-has "$out" "template-fragments/x.md" "the input the render never saw is named"
-hasnt "$out" "template-fragments/y.md" "…and the input that did not move is not"
+# ------------------------------------------------------------- the merge gate
+echo "# a head that moves a render input without re-rendering is held"
+branch base moved
+edit_prompt alpha "moved by the head"
+commit "move alpha's prompt, render nothing"
+out=$(check_merge base moved); rc=$?
+eq "$rc" 1 "the unrendered input exits 1"
+has "$out" "would be STALE at the merge of moved into base" "the verdict names both sides"
+has "$out" "agents/alpha.md (the merge changes its render but keeps the copy base commits)" \
+    "the file whose render moved is named, with why"
+hasnt "$out" "agents/beta.md" "…and a file whose render did not move is not"
 has "$out" "assets/scripts/render-seed-audit.sh && git add generated/seed-audit" "the remedy is spelled out"
 
-echo "# a render made at the base is current"
-on base; git -C "$R" checkout -q -b fresh
-write_audit "$R"
-commit "render at the base"
+echo "# a head that commits the fresh render is current, on one render"
+branch base fresh
+edit_prompt alpha "moved and rendered"
+render; commit "move alpha's prompt and render it"
 out=$(check_merge base fresh); rc=$?
-eq "$rc" 0 "a current artifact exits 0"
+eq "$rc" 0 "a fresh render exits 0"
 has "$out" "seed audit is current at the merge of fresh into base" "…and says so"
+eq "$(renders)" 1 "…having rendered the merge result alone, since every file matched it"
 
-echo "# a merge result carrying no audit has nothing to keep current"
-out=$(check_merge base base); rc=$?
-eq "$rc" 0 "no artifact in the merge result exits 0"
-has "$out" "carries no seed audit" "…as a stated fact, not a silent pass"
+echo "# a base that is already stale holds no head that leaves the file alone"
+branch base stale-base
+edit_prompt beta "moved on the base, never rendered"
+commit "the base moves beta's prompt without rendering"
+branch stale-base bystander
+mkdir -p "$R/docs"; printf 'a doc\n' > "$R/docs/d.md"
+commit "touch nothing the audit renders"
+out=$(check_merge stale-base bystander); rc=$?
+eq "$rc" 0 "the base's own staleness does not hold the merge"
+has "$out" "the merge of bystander into stale-base makes no render stale" "…which is what the verdict says"
+hasnt "$out" "seed audit is current" "…without calling a tree current that is not"
+has "$out" "stale-base is already stale in these files" "…and the staleness is reported as the base's"
+has "$out" "agents/beta.md" "…naming the stale file"
+eq "$(renders)" 2 "…which took a render of the base as well"
 
-echo "# the stub tree a pack carries before its first render is MISSING, not stale"
-on base; git -C "$R" checkout -q -b stub
-mkdir -p "$R/generated/seed-audit"
-printf 'rendered on first install\n' > "$R/generated/seed-audit/README.md"
-commit "the pre-render stub"
-out=$(check_merge base stub); rc=$?
-eq "$rc" 0 "a stub carrying neither INDEX.md nor SOURCES.txt exits 0"
-has "$out" "carries no seed audit" "…for the stated reason, not by falling through a file test"
+echo "# a hand-edited render is held"
+branch base hand-edit
+printf 'a line no render writes\n' >> "$R/generated/seed-audit/agents/alpha.md"
+commit "edit a rendered file by hand"
+out=$(check_merge base hand-edit); rc=$?
+eq "$rc" 1 "a hand-edited render exits 1"
+has "$out" "agents/alpha.md (the merge commits a copy that is neither base's nor its render)" \
+    "…naming the file and why"
 
-echo "# the input set is the MERGED TREE's to define, not this checkout's"
-# A head that widens digest_inputs records SOURCES.txt under the wider set. Read
-# with this checkout's older definition it would look stale for a reason that is
-# not the clobber, so the mode must ask the tree under test.
-on base; git -C "$R" checkout -q -b widened
-mkdir -p "$R/docs"; printf 'doc\n' > "$R/docs/d.md"
+echo "# agents added and removed are judged by the same rule"
+branch base added
+mkdir -p "$R/agents/gamma"
+printf 'name = "gamma"\n' > "$R/agents/gamma/agent.toml"
+printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
+commit "add an agent, render nothing"
+out=$(check_merge base added); rc=$?
+eq "$rc" 1 "an agent added without its render exits 1"
+has "$out" "agents/gamma.md (rendered, but the merge does not commit it)" "…naming the missing render"
+has "$out" "INDEX.md (the merge changes its render" "…and the index that lists it"
+branch base removed
+git -C "$R" rm -rq agents/beta
+commit "remove an agent, keep its render"
+out=$(check_merge base removed); rc=$?
+eq "$rc" 1 "an agent removed with its render kept exits 1"
+has "$out" "agents/beta.md (committed, but nothing renders it)" "…naming the orphaned render"
+
+echo "# a head that changes the renderer is judged by the renderer it ships"
+branch base new-renderer
 python3 - "$R/assets/scripts/render-seed-audit.sh" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = 'find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \\'
-assert s.count(old) == 1, "fixture patch no longer matches digest_inputs"
-open(p, "w").write(s.replace(old, old[:-1] + '"$root/docs" \\'))
+old = "# Agent Seed Audit\n"
+assert s.count(old) == 1, "fixture patch no longer matches the INDEX.md title"
+open(p, "w").write(s.replace(old, "# Agent Seed Audit, as the head renders it\n"))
 PY
-write_audit "$R"
-commit "widen the input set and re-render"
-out=$(check_merge base widened); rc=$?
-eq "$rc" 0 "a widened input set is not a clobber"
-mt=$(git -C "$R" merge-tree --write-tree base widened)
-mkdir -p "$TMP/mt" && git -C "$R" archive --format=tar "$mt" | tar -x -C "$TMP/mt"
-theirs=$(bash "$TMP/mt/assets/scripts/render-seed-audit.sh" --root "$TMP/mt" --print-sources)
-ours=$(bash "$SUT" --root "$TMP/mt" --print-sources)
-if [ "$ours" != "$theirs" ]; then ok "control: this checkout's renderer disagrees, so the delegation is load-bearing"
-else bad "control: both renderers agree, so this case proves nothing"; fi
+render; commit "change what the renderer writes, and render with it"
+out=$(check_merge base new-renderer); rc=$?
+eq "$rc" 0 "a render made by the renderer the head ships is current"
+mt=$(git -C "$R" merge-tree --write-tree base new-renderer)
+mkdir -p "$TMP/mt" && git -C "$R" archive --format=tar -o "$TMP/mt.tar" "$mt" && tar -x -f "$TMP/mt.tar" -C "$TMP/mt"
+PATH="$STUB:$PATH" bash "$SUT" --root "$TMP/mt" --out "$TMP/mt-ours" --jobs 1 >/dev/null 2>&1
+if cmp -s "$TMP/mt-ours/INDEX.md" "$TMP/mt/generated/seed-audit/INDEX.md"; then
+    bad "control: this checkout's renderer agrees, so the case above proves nothing"
+else ok "control: this checkout's renderer renders that tree differently"; fi
 
-echo "# a symlinked input is recorded under its own path, hashed through the link"
-on base; git -C "$R" checkout -q -b linked
-mkdir -p "$R/packs/p/template-fragments"
-ln -s ../../../template-fragments/x.md "$R/packs/p/template-fragments/x.md"
-record_of() { sources_of "$R" | grep -A1 -xF "$1" | sed -n 2p; }
-eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/x.md" | cut -d' ' -f1)" \
-    "the link is an input, hashed as the file it resolves to"
-ln -sfn ../../../template-fragments/y.md "$R/packs/p/template-fragments/x.md"
-eq "$(record_of packs/p/template-fragments/x.md)" "$(sha256sum "$R/template-fragments/y.md" | cut -d' ' -f1)" \
-    "…and a link moved to another file moves its record"
+echo "# a merge result carrying no audit has nothing to keep current"
+out=$(check_merge c0 c0); rc=$?
+eq "$rc" 0 "no artifact in the merge result exits 0"
+has "$out" "carries no seed audit" "…as a stated fact, not a silent pass"
+eq "$(renders)" 0 "…and renders nothing"
 
-echo "# the merged tree's renderer is asked for a manifest, never a render"
-on base; git -C "$R" checkout -q -b stubbed
-LOG="$TMP/renderer.log"; : > "$LOG"
-STUBBED_MANIFEST="$TMP/stubbed.txt"
-sources_of "$R" > "$STUBBED_MANIFEST"
-cat > "$R/assets/scripts/render-seed-audit.sh" <<STUB
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$LOG"
-cat "$STUBBED_MANIFEST"
-STUB
+echo "# the stub tree a pack carries before its first render is MISSING, not stale"
+branch c0 stub
 mkdir -p "$R/generated/seed-audit"
-printf '# Seed audit\n' > "$R/generated/seed-audit/INDEX.md"
-cp "$STUBBED_MANIFEST" "$R/generated/seed-audit/SOURCES.txt"
-commit "record what the gate asks the renderer for"
-out=$(check_merge base stubbed); rc=$?
-eq "$rc" 0 "the manifest the merged tree reports is the one compared"
-has "$(cat "$LOG")" "--print-sources" "the merged tree's renderer was asked for a manifest"
-hasnt "$(cat "$LOG")" "--check" "…and was never asked to render or self-check"
+printf 'rendered on first install\n' > "$R/generated/seed-audit/README.md"
+commit "the pre-render stub"
+out=$(check_merge c0 stub); rc=$?
+eq "$rc" 0 "a stub carrying no INDEX.md exits 0"
+has "$out" "carries no seed audit" "…for the stated reason, not by falling through a file test"
 
 echo "# cannot-tell exits 2 rather than passing"
-on base; git -C "$R" checkout -q -b nomanifest
-write_audit "$R"
-rm "$R/generated/seed-audit/SOURCES.txt"
-commit "an audit that records no manifest"
-out=$(check_merge base nomanifest); rc=$?
-eq "$rc" 2 "an audit with no SOURCES.txt exits 2"
-has "$out" "commits no SOURCES.txt" "…and says why"
+out=$(PATH="$(without_gc)" "$BASH" "$SUT" --root "$R" --check-merge base fresh 2>&1); rc=$?
+eq "$rc" 2 "a host with no gc exits 2"
+has "$out" "gc is not on PATH" "…and says why"
+
+branch base unrenderable
+mkdir -p "$R/agents/delta"
+printf 'name = "delta"\n' > "$R/agents/delta/agent.toml"
+commit "an agent with no prompt template, which the render refuses"
+out=$(check_merge base unrenderable); rc=$?
+eq "$rc" 2 "a merge result that does not render exits 2"
+has "$out" "could not render the merge of unrenderable into base" "…naming what did not render"
+has "$out" "agents/delta" "…and quoting the render's own reason"
 
 out=$(check_merge base no-such-branch); rc=$?
 eq "$rc" 2 "an unresolvable rev exits 2"
 has "$out" "names no commit" "…and says which"
 
-on c0; git -C "$R" checkout -q -b conflicting
-printf 'fragment v3\n' > "$R/template-fragments/x.md"
-write_audit "$R"
-commit "move the same input the base moved"
-out=$(check_merge base conflicting); rc=$?
+branch base conflicting
+edit_prompt alpha "a different line where fresh added its own"
+render; commit "move the input fresh moved, another way"
+out=$(check_merge fresh conflicting); rc=$?
 eq "$rc" 2 "a conflicting merge exits 2"
 has "$out" "does not merge into" "…rather than reporting on a tree that cannot exist"
 
@@ -198,44 +272,79 @@ has "$out" "mktemp failed" "…naming the cause, not the tar failure downstream 
 
 # ------------------------------------------------ the shape that has to merge
 #
-# The gate above is only half of what the artifact owes the merge queue. A
-# repo-global line in a per-branch committed file moves on EVERY seed-input
-# edit, so two pull requests touching two unrelated inputs collide there
-# unconditionally and each landing forces a rebase of everything still open.
-# The two inputs here are neighbours in sort order, which is the case a flat
-# `<hash>  <path>` list still loses: git needs one unchanged line between two
-# changes, and adjacent entries leave none.
-echo "# two branches that moved different inputs merge"
+# The gate above is only half of what the artifact owes the merge queue. A line
+# that moves on every edit to one agent's prompt, committed beside lines that
+# move for every other agent, collides two pull requests that touched two
+# unrelated agents. Neighbouring agents are the case that loses: git needs one
+# unchanged line between two changes, and adjacent rows leave none.
+echo "# two branches that re-render two different agents merge"
 two_branches() { # <suffix> <extra-line-writer> — returns 0 when the merge is clean
-    local sfx="$1" extra="$2" b
-    # The two branches have to MODIFY the artifact, which means a base that
-    # already carries one: git calls add/add a whole-file conflict whatever the
-    # content, and a fixture branching off the pre-render tree would pass the
-    # control for a reason that has nothing to do with the line shape.
-    on c0; git -C "$R" checkout -q -B "shape-base-$sfx" c0
-    write_audit "$R"; "$extra" "$R"
-    commit "establish the audit"
-    for b in x y; do
-        on "shape-base-$sfx"; git -C "$R" checkout -q -B "edit-$b-$sfx" "shape-base-$sfx"
-        printf 'moved by %s\n' "$b" > "$R/template-fragments/$b.md"
-        write_audit "$R"
-        "$extra" "$R"
-        commit "move template-fragments/$b.md"
+    local sfx="$1" extra="$2" a
+    # The two branches have to MODIFY the extra lines, which means a base that
+    # already carries them: two branches that each add them conflict as add/add
+    # whatever the lines say.
+    branch base "shape-base-$sfx"
+    "$extra" "$R"; commit "the shape under test"
+    for a in alpha beta; do
+        branch "shape-base-$sfx" "edit-$a-$sfx"
+        edit_prompt "$a" "moved by edit-$a"
+        render; "$extra" "$R"
+        commit "move and render $a"
     done
-    git -C "$R" merge-tree --write-tree "edit-x-$sfx" "edit-y-$sfx" >/dev/null 2>&1
+    git -C "$R" merge-tree --write-tree "edit-alpha-$sfx" "edit-beta-$sfx" >/dev/null 2>&1
 }
 no_extra() { :; }
-add_global_line() { printf -- '- source digest: `%s`\n' \
-    "$(sources_of "$1" | sha256sum | cut -d' ' -f1)" >> "$1/generated/seed-audit/INDEX.md"; }
+add_size_rows() { local a; for a in alpha beta; do
+    printf '| `%s` | %s |\n' "$a" "$(wc -c < "$1/generated/seed-audit/agents/$a.md" | tr -d ' ')" \
+        >> "$1/generated/seed-audit/INDEX.md"; done; }
 
-if two_branches shape no_extra; then ok "adjacent inputs, one record each: the merge is clean"
-else bad "adjacent inputs still collide — the artifact re-serializes the merge queue"; fi
+if two_branches shape no_extra; then ok "neighbouring agents re-rendered on two branches: the merge is clean"
+else bad "two re-rendered agents collide — the artifact re-serializes the merge queue"; fi
 
-# The control proves the fixture can fail: the same two branches, with the one
-# repo-global line this artifact was cured of added back.
-if two_branches control add_global_line; then
-    bad "control: a repo-global digest line merged, so the case above proves nothing"
-else ok "control: the repo-global digest line these two never touched conflicts"; fi
+# The control proves the fixture can fail: the same two branches, with a size
+# row per agent added back to the index.
+if two_branches control add_size_rows; then
+    bad "control: per-agent size rows merged, so the case above proves nothing"
+else ok "control: the per-agent size rows these two each moved conflict"; fi
+
+# ------------------------------------------------------- the committed shape
+echo "# the index carries composition only, and no manifest is written"
+on base
+idx="$(cat "$R/generated/seed-audit/INDEX.md")"
+has "$idx" '- [`alpha`](agents/alpha.md)' "the index links each agent"
+has "$idx" '| [`mol-x`](formulas/mol-x.md) | `city` |' "…and each formula, with its scope"
+hasnt "$idx" '| bytes |' "…but carries no byte column"
+hasnt "$idx" 'est. tokens' "…no token column"
+hasnt "$idx" 'agents: ' "…no count line"
+hasnt "$idx" 'SOURCES.txt' "…and names no manifest"
+if [ -e "$R/generated/seed-audit/SOURCES.txt" ]; then bad "a render writes SOURCES.txt"
+else ok "a render writes no SOURCES.txt"; fi
+
+# ----------------------------------------------------------------- the sizes
+echo "# --sizes prints each render's bytes and tokens, and commits nothing"
+on fresh
+out=$(PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --sizes --jobs 1 2>&1); rc=$?
+eq "$rc" 0 "--sizes exits 0"
+has "$out" '| `alpha` | 36 | 9 |' "…printing each agent's bytes and estimated tokens"
+has "$out" '| `mol-x` | 18 | 4 |' "…and each formula's"
+has "$out" '| **total** | 18 | 4 |' "…with the total for each kind"
+eq "$(git -C "$R" status --porcelain)" "" "…and leaves the working tree as it was"
+
+echo "# --sizes <rev> prints the change since that revision"
+out=$(PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --sizes base --jobs 1 2>&1); rc=$?
+eq "$rc" 0 "--sizes <rev> exits 0"
+has "$out" 'change since base' "…naming the revision"
+has "$out" '| `alpha` | 36 | 9 | +19 | +5 |' "…with the change on the row that moved"
+has "$out" '| `beta` | 16 | 4 | 0 | 0 |' "…and none on the row that did not"
+on added
+out=$(PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --sizes base --jobs 1 2>&1); rc=$?
+has "$out" '| `gamma` (added) | 17 | 4 | +17 | +4 |' "an agent the base lacks is marked added"
+on removed
+out=$(PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --sizes base --jobs 1 2>&1); rc=$?
+has "$out" '| `beta` (removed) | 0 | 0 | -16 | -4 |' "…and one the head lacks, removed"
+out=$(PATH="$STUB:$PATH" bash "$R/assets/scripts/render-seed-audit.sh" --sizes no-such-rev 2>&1); rc=$?
+eq "$rc" 2 "--sizes against a revision that names nothing exits 2"
+has "$out" "names no commit" "…and says so"
 
 # ------------------------------------------------ the renderer's cwd hermeticity
 #
@@ -291,53 +400,19 @@ eq "$(git -C "$H" config --get core.hooksPath)" "assets/hooks" "…and points co
 # An agent this pack owns that renders the builtin worker prompt fails the render,
 # while a builtin-provider agent may render it. Which agents the pack owns comes
 # from its agent.toml files, and that list has to come out the same under BSD and
-# GNU find: an empty list holds no agent to the rule. A stub gc on PATH answers
-# the render's calls, so this needs no real gc, no city and no network. The stub
-# receives no environment through the render's env -i, so it reads what each
-# agent primes to from files.
+# GNU find: an empty list holds no agent to the rule.
 echo "# a pack agent that renders the builtin worker prompt fails the render"
 P="$TMP/render-pack"
-mkdir -p "$P/agents/alpha" "$TMP/stub-gc"
+mkdir -p "$P/agents/alpha" "$P/formulas"
 printf 'name = "fixture"\n' > "$P/pack.toml"
 printf 'name = "alpha"\n' > "$P/agents/alpha/agent.toml"
-printf '# alpha doctrine\n' > "$P/agents/alpha/prompt.template.md"
-BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-first workflow'
-cat > "$TMP/stub-gc/gc" <<STUB
-#!/usr/bin/env bash
-[ "\${1:-}" = --city ] && shift 2
-case "\$1 \${2:-}" in
-    "config show")  printf '[[agent]]\nname = "alpha"\n' ;;
-    "agent list")   printf '{"agents":[{"name":"alpha"},{"name":"claude"}]}\n' ;;
-    "formula list") printf 'mol-fixture\n' ;;
-    "formula show") printf '# mol-fixture\n' ;;
-    "prime alpha")  "$TMP/stub-gc/spell-city" < "$TMP/stub-gc/alpha.txt" ;;
-    "prime claude") printf '%s\n' "$BUILTIN_WORKER" ;;
-    *)              exit 1 ;;
-esac
-STUB
-chmod +x "$TMP/stub-gc/gc"
-# alpha's prompt names the city the way a real prime does. @@CITY@@ is gc's
-# spelling of the path --city was given, which is gascity's
-# pathutil.NormalizePathForCompare: cleaned, symlinks resolved, and the darwin
-# /private/tmp and /private/var aliases collapsed. @@FOREIGN@@ is a spelling no
-# rule derives, the city's own directory names under a root the render never
-# saw. gcq runs every call from the city, so the working directory names it.
-cat > "$TMP/stub-gc/spell-city" <<'STUB'
-#!/usr/bin/env bash
-city="$(pwd -P)"
-if [ "$(uname -s)" = Darwin ]; then
-    case "$city" in /private/tmp/*|/private/var/*) city="${city#/private}" ;; esac
-fi
-foreign="/elsewhere/$(basename "$(dirname "$city")")/$(basename "$city")"
-sed -e "s|@@CITY@@|$city|g" -e "s|@@FOREIGN@@|$foreign|g"
-STUB
-chmod +x "$TMP/stub-gc/spell-city"
-render_stub() { PATH="$TMP/stub-gc:$PATH" bash "$SUT" --root "$P" --out "$TMP/render-out" --jobs 1 2>&1; }
+printf 'formula = "mol-fixture"\n' > "$P/formulas/mol-fixture.toml"
+render_stub() { PATH="$STUB:$PATH" bash "$SUT" --root "$P" --out "$TMP/render-out" --jobs 1 2>&1; }
 
-printf '# alpha doctrine\n' > "$TMP/stub-gc/alpha.txt"
+printf '# alpha doctrine\n' > "$P/agents/alpha/prompt.template.md"
 out=$(render_stub); rc=$?
 eq "$rc" 0 "control: the pack agent renders its own doctrine and the builtin claude its builtin prompt"
-printf '%s\n' "$BUILTIN_WORKER" > "$TMP/stub-gc/alpha.txt"
+printf '%s\n' "$BUILTIN_WORKER" > "$P/agents/alpha/prompt.template.md"
 out=$(render_stub); rc=$?
 eq "$rc" 2 "the pack agent rendering the builtin worker prompt fails the render"
 has "$out" "FAILED agent alpha (rendered a builtin fallback prompt" "…and names the agent and the reason"
@@ -356,9 +431,9 @@ D="$(cd "$TMP" && pwd)/scratch"
 mkdir -p "$D"
 ln -s "$D" "$TMP/scratch-link"
 render_under() { # <TMPDIR> <out>
-    TMPDIR="$1" PATH="$TMP/stub-gc:$PATH" bash "$SUT" --root "$P" --out "$2" --jobs 1 2>&1
+    TMPDIR="$1" PATH="$STUB:$PATH" bash "$SUT" --root "$P" --out "$2" --jobs 1 2>&1
 }
-printf '# alpha doctrine\ncity: @@CITY@@/city.toml\n' > "$TMP/stub-gc/alpha.txt"
+printf '# alpha doctrine\ncity: @@CITY@@/city.toml\n' > "$P/agents/alpha/prompt.template.md"
 out=$(render_under "$D" "$TMP/city-plain"); rc=$?
 eq "$rc" 0 "control: a render under a plain TMPDIR succeeds"
 has "$(cat "$TMP/city-plain/agents/alpha.md" 2>/dev/null)" "city: [[CITY-ROOT]]/city.toml" \
@@ -376,38 +451,32 @@ for spelling in "a trailing slash|$D/" "its physical path|$(cd "$D" && pwd -P)" 
 done
 
 echo "# a spelling of the city that no needle names fails the render"
-printf '# alpha doctrine\ncity: @@FOREIGN@@/city.toml\n' > "$TMP/stub-gc/alpha.txt"
+printf '# alpha doctrine\ncity: @@FOREIGN@@/city.toml\n' > "$P/agents/alpha/prompt.template.md"
 out=$(render_under "$D" "$TMP/city-foreign"); rc=$?
 eq "$rc" 2 "a city path that survives the substitution fails the render"
 has "$out" "FAILED agent alpha (the throwaway city path survived normalization)" "…naming the agent"
 has "$out" "city: /elsewhere/" "…and quoting the line that carries the path"
 if [ -e "$TMP/city-foreign" ]; then bad "…but it wrote a tree anyway"; else ok "…and writes no tree"; fi
 
-# ------------------------------------------------ the INDEX.md byte column
+# ------------------------------------------------ a byte count, however wc pads it
 #
 # BSD wc pads its count with leading blanks and GNU wc prints it bare. The
 # stand-in pads on either host, so the case exercises the BSD shape under GNU
 # too, and the row assertion holds on a host whose own wc pads.
-echo "# a padded wc count reaches INDEX.md as the bare number"
+echo "# a padded wc count reaches the sizes table as the bare number"
 mkdir -p "$TMP/padding-wc"
 cat > "$TMP/padding-wc/wc" <<STUB
 #!/usr/bin/env bash
 printf '%8s\n' "\$("$(command -v wc)" "\$@" | tr -d ' ')"
 STUB
 chmod +x "$TMP/padding-wc/wc"
-printf '# alpha doctrine\n' > "$TMP/stub-gc/alpha.txt"
-out=$(render_under "$D" "$TMP/wc-host"); rc=$?
-eq "$rc" 0 "control: a render with the host's wc succeeds"
-out=$(TMPDIR="$D" PATH="$TMP/padding-wc:$TMP/stub-gc:$PATH" \
-    bash "$SUT" --root "$P" --out "$TMP/wc-padded" --jobs 1 2>&1); rc=$?
-eq "$rc" 0 "a render with a padding wc succeeds"
-has "$(cat "$TMP/wc-padded/INDEX.md" 2>/dev/null)" '| [`alpha`](agents/alpha.md) | 17 | 4 |' \
-    "…and its INDEX.md row carries the bare byte count"
-if diff -r "$TMP/wc-host" "$TMP/wc-padded" > /dev/null 2>&1; then
-    ok "…the same tree as the render with the host's wc"
-else
-    bad "…a tree that differs from the host wc's: $(diff -r "$TMP/wc-host" "$TMP/wc-padded" 2>&1 | head -4)"
-fi
+printf '# alpha doctrine\n' > "$P/agents/alpha/prompt.template.md"
+host=$(TMPDIR="$D" PATH="$STUB:$PATH" bash "$SUT" --root "$P" --sizes --jobs 1 2>&1); rc=$?
+eq "$rc" 0 "control: --sizes with the host's wc succeeds"
+padded=$(TMPDIR="$D" PATH="$TMP/padding-wc:$STUB:$PATH" bash "$SUT" --root "$P" --sizes --jobs 1 2>&1); rc=$?
+eq "$rc" 0 "--sizes with a padding wc succeeds"
+has "$padded" '| `alpha` | 17 | 4 |' "…and its row carries the bare byte count"
+eq "$padded" "$host" "…the same table as the host's wc prints"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
