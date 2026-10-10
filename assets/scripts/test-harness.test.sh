@@ -104,6 +104,28 @@ eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
 if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
 eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
 
+# --deps lands its edges with the bead, oriented the way real bd orients each
+# spelling (probed against bd 1.3.1): blocks:<id> makes <id> depend on the new
+# bead; a bare id, depends-on:<id> and blocked-by:<id> make the new bead depend
+# on <id> through a blocks edge; any other <type>:<id> makes the new bead depend
+# on <id> with that type. The rows read back through the dep stub's own queries.
+store '[{"id":"tk-anc","status":"open","assignee":"","title":"a","notes":"","metadata":{}},{"id":"tk-sub","status":"open","assignee":"","title":"s","notes":"","metadata":{}}]'
+: > "$STUB_DEPS"
+gc bd create "review" -t task --metadata '{"task_kind":"review"}' --deps "blocks:tk-anc" --json >/dev/null
+eq "$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | join(",")')" "new-3" \
+  "create --deps blocks:<id>: the new bead blocks <id>"
+gc bd create "visit" -t task --deps "tracks:tk-sub" --json >/dev/null
+eq "$(gc bd dep list new-4 --direction=down -t tracks --json | jq -r '[.[].id] | join(",")')" "tk-sub" \
+  "create --deps tracks:<id>: the new bead tracks <id>"
+gc bd create "waits" -t task --deps "tk-sub" --json >/dev/null
+gc bd create "waits2" -t task --deps "blocked-by:tk-sub" --json >/dev/null
+gc bd create "waits3" -t task --deps="depends-on:tk-sub" --json >/dev/null
+eq "$(gc bd dep list tk-sub --direction=up -t blocks --json | jq -r '[.[].id] | sort | join(",")')" "new-5,new-6,new-7" \
+  "create --deps <id>, blocked-by:<id> and depends-on:<id>: each new bead is blocked by <id>"
+gc bd create "two" -t task --deps "blocks:tk-anc,discovered-from:tk-sub" --json >/dev/null
+eq "$(gc bd dep list new-8 --direction=down -t discovered-from --json | jq -r '[.[].id] | join(",")')|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" \
+  "tk-sub|new-3,new-8" "create --deps takes a comma list, each entry its own edge"
+
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an
 # unassigned bead or the actor's own closes plainly, and `bd update

@@ -220,6 +220,30 @@ case "$sub" in
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
+# Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
+# child A parent-childs parent B). Dependency orientation per type:
+# blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
+# depends_on=B).
+#
+# Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
+# type. Re-adding a pair with the type it already carries is a no-op that
+# exits 0; asking for any other type is refused with exit 1 and writes
+# nothing. The reversed pair is a different pair. Every edge writer (`dep`,
+# and `create --deps`) stores through dep_put, so no write through the stub
+# leaves two edges on one pair, a state bd refuses to create.
+dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
+  local issue="$1" on="$3" have
+  [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
+  have=$(awk -F'|' -v i="$issue" -v d="$on" '
+    { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
+      if (ri == i && rd == d) { print $2; exit } }' "$D")
+  if [ -z "$have" ]; then
+    printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$D"
+  elif [ "$have" != "$2" ]; then
+    echo "Error: dependency $issue -> $on already exists with type \"$have\" (requested \"$2\"); remove it first with 'bd dep remove' then re-add" >&2
+    return 1
+  fi
+}
 case "$verb" in
   show)
     [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "gc: simulated show failure" >&2; exit 1; }
@@ -392,8 +416,12 @@ case "$verb" in
     # list leaves the bead at the default open. STUB_CREATE_FAIL refuses the
     # create outright. STUB_CREATE_GARBAGE lets it land and answers with a
     # reply no JSON reader parses, the shape of a create whose id is lost.
+    # --deps lands its edges with the bead, read the way bd reads them: a bare
+    # id, depends-on:<id> and blocked-by:<id> make the new bead depend on <id>
+    # (a blocks edge from <id>), blocks:<id> makes <id> depend on the new bead,
+    # and any other <type>:<id> makes the new bead depend on <id> with that type.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -403,6 +431,8 @@ case "$verb" in
         --status=*) cstatus="${1#--status=}" ;;
         --notes) shift; cnotes="${1:-}" ;;
         --notes=*) cnotes="${1#--notes=}" ;;
+        --deps) shift; cdeps="$cdeps,${1:-}" ;;
+        --deps=*) cdeps="$cdeps,${1#--deps=}" ;;
       esac
       shift || true
     done
@@ -424,6 +454,17 @@ case "$verb" in
            else $m end) as $meta
       | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
       "$S" > "$tmp" && mv "$tmp" "$S"
+    old_ifs="$IFS"; IFS=','
+    for spec in $cdeps; do
+      [ -n "$spec" ] || continue
+      case "$spec" in
+        blocks:*) dep_put "$nid" blocks "${spec#blocks:}" ;;
+        depends-on:*|blocked-by:*) dep_put "${spec#*:}" blocks "$nid" ;;
+        *:*) dep_put "$nid" "${spec%%:*}" "${spec#*:}" ;;
+        *) dep_put "$spec" blocks "$nid" ;;
+      esac
+    done
+    IFS="$old_ifs"
     if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else printf '{"id":"%s"}\n' "$nid"; fi
     ;;
   close)
@@ -450,31 +491,8 @@ case "$verb" in
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
-    # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
-    # child A parent-childs parent B). Dependency orientation per type:
-    # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
-    # depends_on=B). Queries honor --direction (down = follow the id's own
-    # dependency rows; up = rows depending on the id) and -t/--type.
-    #
-    # Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
-    # type. Re-adding a pair with the type it already carries is a no-op that
-    # exits 0; asking for any other type is refused with exit 1 and writes
-    # nothing. The reversed pair is a different pair. Both writers below store
-    # through dep_put, so no write through the stub leaves two edges on one
-    # pair, a state bd refuses to create.
-    dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
-      local issue="$1" on="$3" have
-      [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
-      have=$(awk -F'|' -v i="$issue" -v d="$on" '
-        { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
-          if (ri == i && rd == d) { print $2; exit } }' "$D")
-      if [ -z "$have" ]; then
-        printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$D"
-      elif [ "$have" != "$2" ]; then
-        echo "Error: dependency $issue -> $on already exists with type \"$have\" (requested \"$2\"); remove it first with 'bd dep remove' then re-add" >&2
-        return 1
-      fi
-    }
+    # Queries honor --direction (down = follow the id's own dependency rows; up
+    # = rows depending on the id) and -t/--type. Writes store through dep_put.
     case "${1:-}" in
       list)
         [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
