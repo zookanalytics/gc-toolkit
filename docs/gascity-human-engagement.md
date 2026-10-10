@@ -582,14 +582,16 @@ shepherd sitting simply omits the flag, and the PR stays on the merge track. The
 sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
 the visit demand always, the anchor demand only when the explicit hold was taken.
 
-A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
-conversation wait cannot ride the closing visit — a demand left on a closed visit
-is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
-— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
-the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved. The moved wait carries
-the sitting's topic, so it refreshes this sitting's own demand on the anchor and
-never a sibling sitting's.
+A cut-short sign-off (`--ruled no`) is the one other time a sitting's question
+holds the merge. The conversation wait cannot ride the closing visit — a demand
+left on a closed visit is a gate `gate-visit-sweep` names on stderr forever and
+no return trip re-offers — so `converse-signoff.sh` moves it onto the ANCHOR:
+the liveness sweep re-offers the next sitting from `gc.demand_for=<anchor>`, and
+the merge holds until the abandoned question is answered or the demand is
+resolved. The moved wait carries the sitting's topic, so it refreshes this
+sitting's own demand on the anchor and never a sibling sitting's. A ruled
+sign-off that answers `--rework` holds the merge too, through the rework child's
+`blocks` edge, until the rework lands.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that

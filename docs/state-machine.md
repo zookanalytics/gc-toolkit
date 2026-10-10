@@ -653,14 +653,16 @@ review's result set.
   `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
-- **Ruling** (operator, via converse): `converse-signoff.sh --rework` has
-  `converse-rework.sh` file the same fix unit through `rework-child.sh`,
-  sourced by `source_ruling_bead=<visit>` in place of a verdict's
-  `source_review_bead`: `task_kind=rework`, the anchor's branch resumed, a
-  `blocks` edge holding the merge. A ruling on a published PR so becomes demand
-  the refinery lands rather than prose nobody reads. It clears no check marker,
-  so the lanes stand as they were when the child lands. converse never pushes
-  code; the molecule does.
+- **Ruling** (operator, via converse): a ruled sign-off on an open-PR subject
+  must answer whether the ruling changes what the branch must contain
+  (`converse-signoff.sh --rework` or `--no-rework`), and one that answers
+  neither is refused. On `--rework`, `converse-rework.sh` files the same fix
+  unit through `rework-child.sh`, sourced by `source_ruling_bead=<visit>` in
+  place of a verdict's `source_review_bead`: `task_kind=rework`, the anchor's
+  branch resumed, a `blocks` edge holding the merge. A ruling on a published PR
+  so becomes demand the refinery lands rather than prose nobody reads. It clears
+  no check marker, so the lanes stand as they were when the child lands.
+  converse never pushes code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full

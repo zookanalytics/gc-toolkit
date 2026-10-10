@@ -29,20 +29,24 @@
 #     [--subject <id>] [--ruled yes|no] \
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--ruling "<one line>"] [--still-owed "<≤140 chars>"] [--route <rig>/<agent>|human] \
-#     [--rework]
+#     [--rework | --no-rework]
 #   --outcome is required. --ruled defaults to `no`. --ruled yes requires
 #   --ruling and --route; --ruled no requires --still-owed. --subject defaults
 #   to the subject the visit records (its tracks edge, else its
 #   gc.continuation_group stamp); with neither, the sign-off refuses and writes
 #   nothing.
-#   --rework (with --ruled yes): the ruling makes an already-published PR stale,
-#     so file the rework demand against the subject anchor — the review verdict's
-#     rework child, sourced by this visit — instead of only resolving the demand.
-#     The filing runs before every other write, and when it does not land
-#     nothing else is written.
+#   --rework | --no-rework (with --ruled yes): whether the ruling changes what an
+#     already-published PR's branch must contain. --rework files the rework
+#     demand against the subject anchor, the fix unit a review verdict files,
+#     sourced by this visit, and --no-rework records that the branch stands. A
+#     ruled sign-off on a subject at merge_result=pull_request must give one; it
+#     is refused, with nothing written, when it gives neither. The filing runs
+#     before every other write, and when it does not land nothing else is
+#     written.
 # Exit: 0 the sign-off may proceed, once any write it reports as failed is
 #   repaired; 1 --rework did not file and no trace was written — do NOT post
-#   the sign-off or close the visit; 2 usage, nothing written.
+#   the sign-off or close the visit; 2 refused before any write: usage, or a
+#   ruled sign-off on an open PR that answered neither --rework nor --no-rework.
 set -u
 
 # >>> control-char-scrub
@@ -60,7 +64,7 @@ RULED=no
 RULING=""
 STILL_OWED=""
 ROUTE=""
-REWORK=0
+REWORK=""
 WAIT=()
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
@@ -81,7 +85,8 @@ while [ $# -gt 0 ]; do
     --ruling)     shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
     --still-owed) shift; [ $# -gt 0 ] || die "--still-owed needs a value"; STILL_OWED="$1" ;;
     --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
-    --rework)     REWORK=1 ;;
+    --rework)     [ "${REWORK:-yes}" = yes ] || die "--rework and --no-rework answer one question; give one"; REWORK=yes ;;
+    --no-rework)  [ "${REWORK:-no}" = no ]   || die "--rework and --no-rework answer one question; give one"; REWORK=no ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -99,8 +104,8 @@ if [ "$RULED" = yes ]; then
 else
   [ -n "$STILL_OWED" ] || die "--ruled no requires --still-owed (what the subject still waits on)"
 fi
-if [ "$REWORK" = 1 ] && [ "$RULED" != yes ]; then
-  die "--rework requires --ruled yes (the rework demand follows a ruling that settled the question)"
+if [ -n "$REWORK" ] && [ "$RULED" != yes ]; then
+  die "--rework and --no-rework require --ruled yes (they answer what a ruling changes)"
 fi
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
@@ -116,6 +121,21 @@ if [ -z "$SUBJECT" ]; then
   SUBJECT=$(printf '%s' "$V" | jq -r "$VISIT_IDENTITY_JQ"'(.[0] // {}) | visit_subject' 2>/dev/null || true)
 fi
 [ -n "$SUBJECT" ] || die "no subject: --subject was not given and visit $VISIT names none (no tracks edge, no gc.continuation_group stamp); nothing was written — re-run with --subject <id>"
+# A ruling that changes what an open PR's branch must contain is demand on that
+# PR, and nothing but --rework turns it into demand: unfiled, the ruling lands
+# only in notes nothing reads, and the PR keeps reading ready against a head the
+# ruling has outdated. Only the sitting knows a ruling's consequence, so a ruled
+# sign-off on an open PR must answer the question either way, and one that gives
+# no answer is refused before any write. A subject that will not read cannot be
+# told from an open PR, so it is refused the same way.
+if [ "$RULED" = yes ] && [ -z "$REWORK" ]; then
+  SUBJECT_ROW=$(gc bd show "$SUBJECT" --json 2>/dev/null | scrub)
+  printf '%s' "$SUBJECT_ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+    || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework or --no-rework"
+  if [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.[0].metadata.merge_result // ""')" = pull_request ]; then
+    die "$SUBJECT is an open PR (merge_result=pull_request), so a --ruled yes sign-off must say whether the ruling changes what its branch must contain; nothing was written. Re-run with --rework to file the rework, or --no-rework if the branch stands"
+  fi
+fi
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
 # on a shared standing-scope bucket (same subject, distinct escalation_key)
 # keeps its own demand: this sign-off neither resolves it nor overwrites its
@@ -129,10 +149,8 @@ DEMAND_TOPIC=()
 # must contain, while the PR still reads review-ready against a head that
 # predates it. --rework turns that ruling into the rework demand a review verdict
 # files — a fix unit that blocks the anchor and resumes its branch — sourced by
-# this visit instead of a verdict. It is the sitting's explicit opt-in, because
-# only the sitting knows a ruling's consequence reaches the open PR. The filing
-# is independent of the demand discharge below: a ruling with no prior hold
-# still needs its rework.
+# this visit instead of a verdict. The filing is independent of the demand
+# discharge below: a ruling with no prior hold still needs its rework.
 # The filing runs before every other write and fails the sign-off closed. Filed
 # first, the child's blocks edge already holds the merge when the discharge
 # resolves a merge hold this sitting took, so the hold passes to the edge with no
@@ -144,7 +162,7 @@ DEMAND_TOPIC=()
 # converse-rework.sh adopts a child an earlier attempt filed rather than minting
 # a second.
 REWORK_FILED=""
-if [ "$RULED" = yes ] && [ "$REWORK" = 1 ]; then
+if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
   CR=""
   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$cand/assets/scripts/converse-rework.sh" ] && { CR="$cand/assets/scripts/converse-rework.sh"; break; }

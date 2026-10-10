@@ -54,7 +54,7 @@ if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
      --ruled no --still-owed "<what is still owed, ≤140 chars>"
      # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
      # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
-     # --rework    (with --ruled yes) the ruling makes the subject's open PR stale
+     # --rework | --no-rework   (with --ruled yes; required on an open-PR subject)
 then
   : # the trace ran — fix any write it reports failed, then post the sign-off below
 else
@@ -69,20 +69,23 @@ starts shut, so `--ruled no` re-states the wait rather than dropping it;
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
 
-**Add `--rework` when a `--ruled yes` ruling makes an already-published
-PR stale** — the ruling changes what the branch must contain, but the PR
-still reads review-ready against a head that predates it. It files the
-rework demand a review verdict would file, a fix unit that blocks the
-subject anchor and resumes its branch, sourced by this visit. Without it
-the ruling lands only in notes nothing reads, and the stale PR keeps
-reading ready. It files before the sign-off writes anything else. A
-rework that does not file stops the sign-off there, and the script exits
-non-zero. No trace is written and every demand this sitting filed still
-stands, so a merge hold you took still holds the PR. Re-run once the
-cause is repaired, and the re-run adopts a child an earlier attempt
-filed. It applies only to an open-PR subject. On any other subject, file
-the ruling's consequence as work the way the routing rule below says,
-and re-run without `--rework`.
+**On a `--ruled yes` sign-off whose subject is an open PR
+(`merge_result=pull_request`), answer whether the ruling changes what the
+branch must contain.** Pass `--rework` when it does: the PR still reads
+review-ready against a head that predates the ruling. It files the rework
+demand a review verdict would file, a fix unit that blocks the subject
+anchor and resumes its branch, sourced by this visit. Pass `--no-rework`
+when the branch stands as it is. Given neither on an open-PR subject, the
+sign-off refuses and writes nothing, because a ruling whose rework is
+never filed lands only in notes nothing reads while the stale PR keeps
+reading ready. The rework files before the sign-off writes
+anything else. A rework that does not file stops the sign-off there, and
+the script exits non-zero. No trace is written and every demand this
+sitting filed still stands, so a merge hold you took still holds the PR.
+Re-run once the cause is repaired, and the re-run adopts a child an
+earlier attempt filed. `--rework` applies only to an open-PR subject. On
+any other subject, file the ruling's consequence as work the way the
+routing rule below says, and re-run without `--rework`.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

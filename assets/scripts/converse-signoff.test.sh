@@ -1648,8 +1648,13 @@ case "${2:-}" in
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
-            *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
-                 else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
+            # SO_MERGE_RESULT puts the subject in a lifecycle state (pull_request
+            # is an open PR); SO_SUBJECT_UNREADABLE makes it a read that fails.
+            *)   if [ -n "${SO_SUBJECT_UNREADABLE:-}" ]; then echo '{"error":"no issues found"}'
+                 elif [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:({"gc.takeaway":"prior"}+(if $mr=="" then {} else {merge_result:$mr} end))}]'
+                 else jq -nc --arg id "${3:-}" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:(if $mr=="" then {} else {merge_result:$mr} end)}]'; fi ;;
         esac ;;
     list)
         # The demand list the discharge filters client-side: a subject/anchor demand
@@ -1946,6 +1951,46 @@ else ok "…and writes nothing"; fi
 
 have "the settle skill gates the sign-off on the script's exit" \
      'if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh"' "$SK_SETTLE"
+
+# A ruled sign-off on an open PR must answer the rework question. A ruling whose
+# rework is never filed lands only in notes nothing reads while the PR keeps
+# reading ready, so a forgotten flag is refused rather than read as no rework.
+echo "── a ruled sign-off on an open PR must answer --rework or --no-rework ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "2" "a ruled sign-off on an open PR that answers neither is refused"
+case "$SO_OUT" in *"--rework"*"--no-rework"*) ok "…naming both answers" ;;
+                  *) bad "…naming both answers" "got: $SO_OUT" ;; esac
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…and writes nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…and writes nothing, so a merge hold this sitting took still holds"; fi
+run_so SO_MERGE_RESULT=pull_request SO_TAKEAWAY=0
+eq "$SO_RC" "2" "…whether or not the subject carries an earlier takeaway"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --no-rework)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "--no-rework answers it, and the sign-off proceeds"
+lacks "…filing no rework" 'REWORK: ' "$SOGC" "--no-rework ran converse-rework.sh"
+have "…while the discharge still resolves the merge hold" 'bd gate resolve d-x --reason approved' "$SOGC"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "--rework answers it, and the sign-off proceeds"
+have "…filing the rework against the open PR, sourced by this visit" \
+     'REWORK: --anchor item-x --ruling-bead v-x --ruling approved' "$SOGC"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_MERGE_RESULT=pre_open_gate
+eq "$SO_RC" "0" "a subject that is not an open PR needs no answer"
+lacks "…and files no rework" 'REWORK: ' "$SOGC" "a sign-off without --rework ran converse-rework.sh"
+run_so SO_SUBJECT_UNREADABLE=1
+eq "$SO_RC" "2" "a subject that will not read is refused as an open PR would be"
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…writing nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…writing nothing"; fi
+
+SOARGS=(--visit v-x --outcome "o — p" --ruled no --still-owed z --no-rework); run_so; eq "$SO_RC" "2" "--no-rework without --ruled yes is refused"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r --route human --rework --no-rework)
+run_so; eq "$SO_RC" "2" "--rework with --no-rework is refused"
+have "the settle skill teaches the forced answer" '--no-rework' "$SK_SETTLE"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
