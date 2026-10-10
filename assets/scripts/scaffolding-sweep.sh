@@ -163,7 +163,7 @@ finding_scope() {
   local num marker
   SCOPE="diff"; SCOPE_WHY=""
   case "$3" in human:*) : ;; *) SCOPE_WHY="A machine-lane finding objects only to the diff it reviewed."; return 0 ;; esac
-  case "$5" in */*) : ;; *) SCOPE_WHY="Its locus names no file, so it objects to the PR as a whole."; return 0 ;; esac
+  [ -n "$5" ] || { SCOPE_WHY="Its locus names no file, so it objects to the PR as a whole."; return 0; }
   num=$(row_meta "$2" pr_number)
   if [ -z "$4" ]; then
     SCOPE="outlives"
@@ -222,24 +222,29 @@ carry_forward() {
 # --- the live scaffolding population, in close order ---------------------------
 # One row per bead: id, anchor, kind, rebase_hold, and for a finding the source,
 # comment id and the file its locus names (the locus up to its first space or
-# colon, any #fragment dropped). Fields are joined by the unit separator, not a
-# tab: `read` merges a run of tabs into one delimiter, and an empty middle field
-# would shift every field after it. Reworks come first, then findings, then
-# validation passes: a fix unit blocks the findings it answers, so closing it
-# first means a finding's close is not refused this pass by a rework still open.
-# task_kind=review is left to arm 9 and task_kind=visit to the human side, so
-# neither is read here. An unreadable enumeration fails loudly rather than
+# colon, any #fragment dropped). pr-facts.sh files a human finding's locus as
+# `PR review` for a review body, `PR conversation` for a Conversation comment,
+# and `<path>[:<line>]` for an inline comment, so the first two, and a finding
+# with no Locus line, name no file. Fields are joined by the unit separator,
+# not a tab: `read` merges a run of tabs into one delimiter, and an empty middle
+# field would shift every field after it. Reworks come first, then findings,
+# then validation passes: a fix unit blocks the findings it answers, so closing
+# it first means a finding's close is not refused this pass by a rework still
+# open. task_kind=review is left to arm 9 and task_kind=visit to the human side,
+# so neither is read here. An unreadable enumeration fails loudly rather than
 # reporting a false empty, because "could not tell" is never "none".
 US=$(printf '\037')
 ROW_JQ='.[] | select(((.metadata.task_kind // "") | tostring) == $k)
-  | ((.description // "") | tostring | (split("\n")[0] // "") | ltrimstr("Locus: ")) as $loc
+  | ((.description // "") | tostring | (split("\n")[0] // "")
+     | if startswith("Locus: ") then .[7:] else "" end) as $loc
   | [ ((.id // "") | tostring),
       ((.metadata.anchor_bead // "") | tostring),
       $k,
       ((.metadata.rebase_hold // "") | tostring),
       ((.metadata["finding.source"] // "") | tostring),
       ((.metadata["finding.comment_id"] // "") | tostring),
-      ($loc | capture("^(?<p>[^ \\t:]*)") | .p | sub("#.*$"; "")) ]
+      (if $loc == "PR review" or $loc == "PR conversation" then ""
+       else ($loc | capture("^(?<p>[^ \\t:]*)") | .p | sub("#.*$"; "")) end) ]
   | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")'
 CANDS=""
 if [ -n "$ANCHOR_ONLY" ]; then

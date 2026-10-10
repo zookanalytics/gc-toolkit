@@ -180,10 +180,10 @@ hfind() { # id anchor locus [comment-id]
 }
 # The bead that carries <finding>'s objection forward, if one was filed.
 carrier() { jq -r --arg f "$1" '[ .[] | select((.metadata["gc.supersedes"] // "") == $f) | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
-# PR #<n>'s inline review comments: 501 sits on an added line, 502 on a line the
-# diff left unchanged.
+# PR #<n>'s inline review comments: 501 sits on an added line, and 502 and 504
+# on lines the diff left unchanged, 504 in a file at the repository root.
 comments() { # num
-  printf '[{"id":501,"path":"assets/scripts/a.sh","diff_hunk":"@@ -10,3 +10,4 @@\\n context\\n+added line"},{"id":502,"path":"docs/b.md","diff_hunk":"@@ -5,3 +5,3 @@\\n context\\n unchanged line"}]' > "$GH_DIR/comments_$1.json"
+  printf '[{"id":501,"path":"assets/scripts/a.sh","diff_hunk":"@@ -10,3 +10,4 @@\\n context\\n+added line"},{"id":502,"path":"docs/b.md","diff_hunk":"@@ -5,3 +5,3 @@\\n context\\n unchanged line"},{"id":504,"path":"README.md","diff_hunk":"@@ -1,3 +1,3 @@\\n context\\n unchanged line"}]' > "$GH_DIR/comments_$1.json"
 }
 PRD() { printf ',%s,"pr_number":"%s"' "$DISP" "$1"; }   # a disposed anchor with a PR
 
@@ -276,6 +276,19 @@ run >/dev/null
 hasnt "$(carrier FNI)" "<none>" "a finding that recorded no comment id is carried forward"
 has "$(jq -r --arg b "$(carrier FNI)" '.[] | select(.id == $b) | .description' "$STUB_STORE")" "records no comment id" "…saying why"
 hasnt "$(carrier FNP)" "<none>" "a finding on an anchor that records no PR is carried forward"
+
+echo "# a file at the repository root is a file; a Conversation comment, or no locus at all, names none"
+store "[$(hfind FRT AP6 README.md:2 504),$(hfind FCV AP6 'PR conversation' 905),$(hfind FNL AP6 x | jq -c '.description = "The objection FNL, filed with no Locus line."'),$(anchor AP6 pull_request "$(PRD 45)")]"
+comments 45
+out=$("$SUT" --anchor AP6 2>&1); rc=$?
+eq "$rc" 0 "the pass exits 0"
+BUGR=$(carrier FRT)
+hasnt "$BUGR" "<none>" "a comment on an unchanged line of a root-level file is carried forward, not mooted as an objection to the whole PR"
+eq "$(meta FRT gc.superseded_by)" "$BUGR" "…the finding closes pointed at the bead that carries it"
+eq "$(meta FCV gc.outcome)" "moot" "a Conversation comment objects to the PR as a whole, and is mooted"
+has "$(notes FCV)" "names no file" "…and the note says so"
+eq "$(meta FNL gc.outcome)" "moot" "a finding with no Locus line names no file, and is mooted"
+eq "$(carrier FNL)" "<none>" "…with nothing carried forward from its first line"
 
 echo "# an unreadable comment list leaves the finding for the next pass"
 store "[$(hfind FUR AP5 docs/b.md:7 502),$(hfind FUM AP5 'PR review' 900),$(anchor AP5 pull_request "$(PRD 44)")]"
