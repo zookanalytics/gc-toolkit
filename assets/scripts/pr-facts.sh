@@ -150,6 +150,23 @@ PROG="pr-facts"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# True when the fix unit a feedback batch was routed to has CLOSED: a rework
+# child closes when its branch lands, a visit when a person resolves it. That
+# close is the city's exchange with the operator moving off `outstanding` — the
+# reply is there to look at. A bare head move is NOT it: a merge-in of the base
+# branch or an operator's own push leaves the routed child open, and reading the
+# head alone would call such a move an answer. Mirrors the write-back sweep's
+# own landed test, which reads the same close off the same disposition.
+conversation_fix_landed() {
+  case "$1" in
+    rework:?* | visit:?*) : ;;
+    *) return 1 ;;
+  esac
+  local _st
+  _st=$(gc bd show "${1#*:}" --json 2>/dev/null | scrub \
+    | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+  [ "$_st" = "closed" ]
+}
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The single writer of the workflow-owned `status:` PR label. The full pass is its
 # authoritative reconcile: it runs for every open anchor and already mutates the
@@ -383,6 +400,16 @@ anchor_decision_held() { # <anchor-id>
 # Listed in the precedence the derivation applies, strongest human signal first.
 PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
+# >>> pr-conversation-vocabulary
+# Mirrors lifecycle/lifecycle.toml [conversation]; pr-facts.test.sh fails on drift.
+# The values this script records against the watermarks. asking is the demand
+# edge and carries no key; covered waits on a comment-to-bead link nothing
+# writes yet — neither is recorded here. conv is set only from these literals,
+# so the derivation needs no runtime membership guard; this list exists for the
+# drift check, which eval's the block and compares it to lifecycle.toml.
+# shellcheck disable=SC2034  # read by pr-facts.test.sh's drift check, not here
+PR_CONVERSATIONS="quiet outstanding answered"
+# <<< pr-conversation-vocabulary
 # >>> pr-writeback-contract
 # The trail the operator reads in the PR. EYES marks a comment the city picked
 # up, and THUMBS_UP replaces it once the comment is resolved, so a handled
@@ -1732,14 +1759,31 @@ MP_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  posture=""; conv=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; revs_open=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
-  cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
-  rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
-  iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
-  obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
-  orbatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_batch // "") | tostring')
-  oibatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_batch // "") | tostring')
+  # One read of every anchor-metadata key this block needs, not a jq fork per
+  # key — the pass runs for every open anchor every 60s. Joined on the unit
+  # separator (never valid inside these values) and split on the same, so an
+  # empty field keeps its slot instead of collapsing the way a tab or
+  # default-IFS split would.
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m < <(
+    printf '%s' "$row" | jq -r '[
+        (.metadata.pr_comment_watermark // ""),
+        (.metadata.pr_review_watermark // ""),
+        (.metadata.pr_issue_comment_watermark // ""),
+        (.metadata["pr.conversation"] // ""),
+        (.metadata.pr_comment_disposition // ""),
+        (.metadata.pr_comment_batch // ""),
+        (.metadata.pr_review_batch // ""),
+        (.metadata.pr_issue_comment_batch // ""),
+        (.metadata.pr_posture // ""),
+        (.metadata.pr_merge_state // "")
+      ] | map(tostring) | join("\u001f")')
+  # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
+  # key minus its instant), have_cv just the value. The derivation reads the
+  # value; the record below compares the value@head to skip a no-op write.
+  have_cvh=""; case "$have_c" in *@*@*) have_cvh="${have_c%@*}" ;; esac
+  have_cv="${have_cvh%@*}"
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
   case "$iwm" in ''|*[!0-9]*) iwm=0 ;; esac
@@ -1857,6 +1901,29 @@ MP_EOF
       [ "$max_c" -ge "$cwm" ] || max_c="$cwm"
       [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
       [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
+      # quiet is a statement about the COMPLETE raw lists, not the feedback
+      # maxima above — those keep only COMMENTED/CHANGES_REQUESTED bodies (max_r)
+      # and drop a dismissed review's inline comments and what its thread answered
+      # (max_c reads cmts_open), so a dismissed objection or an "approve, but
+      # rename X" would read as no feedback. quiet means no human utterance in ANY
+      # of the three spaces (state-model.md), so count every entry across the raw
+      # lists that is not the city's own post, by the same gc_city_own the
+      # feedback readers apply, with each inline comment dated by its review's
+      # submission the way live_comments dates it. The maxima drive only the
+      # watermark compare below. A count that does not read leaves any_human
+      # empty, and the derivation then records nothing rather than quiet.
+      any_human=$({ printf '%s\n' "$revs_raw"; printf '%s\n' "$cmts_raw"; printf '%s\n' "$icmts_raw"; } \
+        | jq -n --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+            (input) as $revs | (input) as $cmts | (input) as $icmts
+          | ([ $revs[] | select(((.submitted_at // "") | tostring) != "")
+               | { key: ((.id // 0) | tostring), value: (.submitted_at | tostring) } ]
+             | from_entries) as $submitted
+          | [ $revs[],
+              ($cmts[] | ($submitted[((.pull_request_review_id // "") | tostring)] // "") as $at
+                       | if $at != "" then . + { gc_review_submitted_at: $at } else . end),
+              $icmts[]
+            | select(gc_city_own($self; $since) | not) ] | length' 2>/dev/null)
+      case "$any_human" in ''|*[!0-9]*) any_human="" ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # An unmarked review posted under OUR OWN login before the cutover leaves
       # unresolved finding threads arm 7 never counts — it reads them as the city's
@@ -1888,16 +1955,54 @@ MP_EOF
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
+      # --- conversation position: where the exchange with the operator stands --
+      # Read off the watermarks and the durable routing disposition, not a prior
+      # recorded position. quiet is nothing said. outstanding is an utterance
+      # above its space's watermark, or a batch routed to a fix unit that has not
+      # closed yet — the city still working it, held outstanding rather than
+      # collapsed to quiet. answered is that fix unit CLOSED
+      # (conversation_fix_landed): a rework child lands, or a visit is resolved,
+      # so the reply is there to look at. A bare head move is NOT answered — a
+      # merge-in of the base or an operator push leaves the child open.
+      # The disposition lands in the SAME transition as the watermark it routes
+      # past, so outstanding re-derives from it even when the pr.conversation
+      # write was dropped: a routed-but-unanswered comment never decays to
+      # unknown. A caught-up anchor with NO disposition and no carried position
+      # has nothing to assert and stays unknown — conv left empty records nothing,
+      # and the board renders an unrecorded position as unknown. Unanswered
+      # feedback is tested before quiet, so feedback above a watermark never reads
+      # quiet whatever the utterance count says, and an unread count says nothing.
+      if [ "$unanswered" = 1 ]; then
+        conv="outstanding"
+      elif [ -z "$any_human" ]; then
+        conv=""
+      elif [ "$any_human" = 0 ]; then
+        conv="quiet"
+      elif [ "$have_cv" = "answered" ]; then
+        conv="answered"
+      elif [ -n "$adisp" ]; then
+        if conversation_fix_landed "$adisp"; then conv="answered"; else conv="outstanding"; fi
+      elif [ "$have_cv" = "outstanding" ]; then
+        conv="outstanding"
+      else
+        conv=""
+      fi
     fi
   fi
   case " $PR_POSTURES " in
     *" $posture "*) : ;;
     *) [ -z "$posture" ] || { echo "$PROG: $id — refusing to record undeclared posture '$posture'" >&2; posture=""; } ;;
   esac
-  have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
+  # Posture and conversation are both head-pinned and re-pinned together on every
+  # push, so ONE transition records both: merge.sh reads the posture, the board
+  # reads the conversation, and a pass that moved neither writes neither
+  # (lifecycle skips a no-op, and the shell skips the call below when nothing
+  # changed). `pinned` tracks the POSTURE alone — a conversation-only write that
+  # fails still leaves a current posture for merge.sh, which is what
+  # --posture-only reports in its exit code.
+  PC_SETS=(); wrote_p=""; wrote_c=""
   if [ -n "$posture" ]; then
     want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
-    have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
     # pr_posture is a dated key: its review_required value starts an owed clock,
     # so the recorded value carries the instant as a third component and
     # lifecycle.sh preserves it while the posture and the head both hold. Only a
@@ -1907,11 +2012,27 @@ MP_EOF
     case "$have_p" in *@*@*) have_pv="${have_p%@*}" ;; esac
     if [ "$have_pv" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
       pinned=1
-    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           --set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
-      pinned=1
-      postured=$((postured + 1))
-      echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+    else
+      PC_SETS+=(--set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m"); wrote_p="$want_p"
+    fi
+  fi
+  # The conversation rides the same transition on every full or routing pass, and
+  # it MUST: --route-comments-only advances the watermark in its routing arm later
+  # this pass, so a record deferred past that arm would see unanswered=0 with no
+  # prior position and write nothing — outstanding would never land for a comment
+  # routed pre-merge. Record it here, before the route arm consumes unanswered,
+  # never gated on ROUTE_ONLY. --posture-only is the one pass that stops below
+  # without recording (it answers only for merge.sh, which ignores the key). conv
+  # is set only from the literals the vocabulary declares, so no membership guard
+  # is needed — pr-facts.test.sh checks the vocabulary against lifecycle.toml; conv
+  # non-empty implies a resolved head (the derivation above only ran under one).
+  if [ "$POSTURE_ONLY" != 1 ] && [ -n "$conv" ] && [ "$have_cvh" != "$conv@$head_oid" ]; then
+    PC_SETS+=(--set-dated "pr.conversation=$conv@$head_oid"); wrote_c="$conv@$head_oid"
+  fi
+  if [ ${#PC_SETS[@]} -gt 0 ]; then
+    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
+      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); }
+      echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}"
       # The posture value is where a review on the PR lands: an approval, a
       # comment, a change request, or a dismissal. A pass that changes it
       # re-derives the status: label now rather than leaving it for the full
@@ -1919,10 +2040,11 @@ MP_EOF
       # reports UNKNOWN while it computes a PR's mergeability, so most posture
       # writes are a merge state moving into or out of UNKNOWN, often for dozens
       # of open PRs in one arm. Keying on them would buy a derivation per PR in
-      # that arm, and the full pass reconciles those.
-      [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
+      # that arm, and the full pass reconciles those. A conversation-only write
+      # moves no label input.
+      [ -z "$wrote_p" ] || [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
     else
-      echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
+      echo "$PROG: $id posture/conversation record failed for PR#$num; retry next pass" >&2
     fi
   fi
   # merge.sh validates the posture recorded here and never asks GitHub, so an
