@@ -43,7 +43,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
-  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, model, and, for a new visit, skill; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a visit with the Architect). --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
@@ -69,14 +69,24 @@ once the reconciler has started it;
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
 visits and offers engage-existing or a new visit, prompts a new visit's starter
-(a numbered seed, Enter for none, or free text sent verbatim), and prompts the
-model as a numbered choice over the configured variants. Any command-line value
+(a numbered seed, Enter for none, or free text sent verbatim), prompts the
+model as a numbered choice over the configured variants, and for a new visit
+asks for a skill (Enter for none, ? to list them). Any command-line value
 pre-fills and skips its prompt (--subject/positional, --reason/--template,
---model); --no-input reverts to the flag-driven one-shot behavior. Starter seeds
-live in assets/scripts/gc-helm-engage-starters.sh. A --reason or --template with
-a SUBJECT files a new visit carrying that opener and engages it even when one is
-parked, passing --allow-duplicate through to open and --body the opener as the
-claim-time brief. With no starter, an existing parked visit is engaged and a
+--model, --skill); --no-input reverts to the flag-driven one-shot behavior.
+Starter seeds and the lens brief live in assets/scripts/gc-helm-engage-starters.sh.
+--skill <name> takes any skill on the sitting's roster (gc skill list --agent
+<rig>/gc-toolkit.converse-<model>), a bare name resolving to its one full
+match (review-arch to gc-toolkit.review-arch). The new visit's brief tells the
+sitting to load that skill, read the subject through it, and leave the
+skill's final writes, such as a review verdict, to the bead it was written
+for; a --reason or --template opener follows the brief. It is refused on an
+explicit visit id, whose brief is already written, and on a name the roster
+does not carry; a roster that will not read seeds the name unverified. A
+--reason, --template or --skill with a SUBJECT files a new visit carrying that
+opener and engages it even when one is parked, passing --allow-duplicate
+through to open and --body the opener as the claim-time brief. With no
+starter, an existing parked visit is engaged and a
 fresh one is filed only when the subject has none. A --reason with an explicit
 visit id is refused, because a new visit needs a subject and the reason would
 otherwise be dropped. The summary and prompts print on stdout; a single [debug]
@@ -2593,7 +2603,7 @@ cmd_accept() {
 }
 
 # ── engage: decision helpers (UI-reusable) ──────────────────────────
-# The four engage decisions — subject, visit, starter, model — resolved from
+# The five engage decisions — subject, visit, starter, model, skill — resolved from
 # durable state, factored out of the prompt loop so a later helm UI can drive
 # the same logic. The prompt_* wrappers add the one terminal read; the
 # list/find/seed helpers touch no terminal. Prompts print to the foreground
@@ -2655,6 +2665,63 @@ engage_find_visits() {
 engage_starter_list() { sh "$STARTERS_TOOL" list 2>/dev/null || true; }
 # engage_starter_seed <key> <subject> — the seed body with the subject filled in.
 engage_starter_seed() { sh "$STARTERS_TOOL" seed "$1" "$2" 2>/dev/null || true; }
+# engage_lens_brief <skill> <subject> [opener] — the brief that seeds a sitting
+# with the skill as its lens on the subject, the opener following it verbatim.
+engage_lens_brief() { sh "$STARTERS_TOOL" lens "$1" "$2" "${3:-}" 2>/dev/null || true; }
+
+# engage_skill_roster <rig> <model> — the skills a converse-<model> sitting in
+# the rig carries, read from `gc skill list --agent` for the same
+# <rig>/gc-toolkit.converse-<model> address converse-capability.sh reads. That
+# is the agent's effective view, so a skill only the rig imports counts and a
+# skill another rig imports does not. Sets ENGAGE_SKILL_ROSTER (full names, one
+# per line, deduped, since the listing repeats a skill the city and the rig both
+# import) and ENGAGE_SKILL_ROSTER_OK (1 on a readable answer, 0 when gc did not
+# answer or answered malformed). Memoized per rig and model: the skill prompt
+# lists the roster, then resolves a typed name against it.
+engage_skill_roster() {
+    [ "${_esr_key:-}" = "$1/$2" ] && return 0
+    _esr_key="$1/$2"; ENGAGE_SKILL_ROSTER=""; ENGAGE_SKILL_ROSTER_OK=0
+    _esr_json=$(with_timeout "${GC_ROSTER_TIMEOUT:-15}" gc skill list --agent "$1/gc-toolkit.converse-$2" --json 2>/dev/null | scrub || true)
+    [ -n "$_esr_json" ] || return 0
+    if _esr_names=$(printf '%s' "$_esr_json" | jq -r '
+            if type == "object" and (.entries | type == "array")
+            then [ .entries[] | objects | (.name // "") | strings | select(. != "") ] | unique | .[]
+            else error("not a skill roster") end' 2>/dev/null); then
+        ENGAGE_SKILL_ROSTER="$_esr_names"; ENGAGE_SKILL_ROSTER_OK=1
+    fi
+}
+
+# engage_resolve_skill <rig> <model> <name> — resolve a typed skill name against
+# that roster. A full name matches itself, and a bare name matches the one full
+# name ending in ".<name>", so review-arch reaches gc-toolkit.review-arch. Sets
+# ENGAGE_SKILL_STATE to ok (ENGAGE_SKILL_NAME is the full name), ambiguous or
+# unknown (ENGAGE_SKILL_MATCHES lists the candidates, or the whole roster), or
+# unread when the roster did not read. unread fails OPEN, as engage_valid_model
+# does for the same failure: ENGAGE_SKILL_NAME keeps the typed name, and the
+# brief tells the sitting to say so if it cannot load it. The caller has already
+# held the name to letters, digits, dots and hyphens, so awk -v reads it as-is.
+engage_resolve_skill() {
+    ENGAGE_SKILL_NAME=""; ENGAGE_SKILL_MATCHES=""
+    engage_skill_roster "$1" "$2"
+    if [ "$ENGAGE_SKILL_ROSTER_OK" != 1 ]; then
+        ENGAGE_SKILL_STATE=unread; ENGAGE_SKILL_NAME="$3"; return 0
+    fi
+    _ers_hits=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk -v q="$3" '$0 == q')
+    if [ -z "$_ers_hits" ]; then
+        _ers_hits=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" \
+            | awk -v q=".$3" 'length($0) > length(q) && substr($0, length($0) - length(q) + 1) == q')
+    fi
+    _ers_n=$(printf '%s' "$_ers_hits" | grep -c . || true)
+    if [ "$_ers_n" -eq 1 ]; then
+        ENGAGE_SKILL_STATE=ok; ENGAGE_SKILL_NAME="$_ers_hits"
+    elif [ "$_ers_n" -gt 1 ]; then
+        ENGAGE_SKILL_STATE=ambiguous
+        ENGAGE_SKILL_MATCHES=$(printf '%s\n' "$_ers_hits" | tr '\n' ' ' | sed 's/ *$//')
+    else
+        ENGAGE_SKILL_STATE=unknown
+        ENGAGE_SKILL_MATCHES=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | tr '\n' ' ' | sed 's/ *$//')
+    fi
+}
 
 # engage_search_subjects <query> — open non-visit beads whose title contains the
 # query, one "<id>\t<title>" row each. The subject prompt's title search, split
@@ -2806,6 +2873,49 @@ engage_prompt_model() {
     _epm_pick=$(printf '%s' "$_epm_map" | awk -v n="$_epm_reply" '$1==n{print $2}')
     if [ -n "$_epm_pick" ]; then ENGAGE_MODEL="$_epm_pick"; else printf '  (no such choice; keeping Opus)\n'; ENGAGE_MODEL=opus; fi
     return 0
+}
+
+# engage_prompt_skill <rig> <model> — the optional skill a NEW visit seeds its
+# sitting with as a lens on the subject. Enter is none. A name resolves as
+# engage_resolve_skill does, ? lists the roster numbered, and a number picks from
+# that list. A name that does not resolve is asked again rather than refused.
+# Sets ENGAGE_SKILL (the full name, or empty for none).
+engage_prompt_skill() {
+    ENGAGE_SKILL=""
+    while :; do
+        printf '  Skill — Enter = none · a skill name, e.g. review-arch · ? lists them › '
+        IFS= read -r _epk_in || return 1
+        _epk_in=$(printf '%s' "$_epk_in" | sed 's/^ *//; s/ *$//')
+        case "$_epk_in" in
+            "") return 0 ;;
+            "?")
+                engage_skill_roster "$1" "$2"
+                if [ -n "$ENGAGE_SKILL_ROSTER" ]; then
+                    printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk '{ printf "    [%d] %s\n", NR, $0 }'
+                elif [ "$ENGAGE_SKILL_ROSTER_OK" = 1 ]; then
+                    printf '    (this sitting carries no skills)\n'
+                else
+                    printf '    (no skill list could be read for this sitting; a typed name is seeded unverified)\n'
+                fi
+                continue ;;
+            *[!0-9]*) ;;
+            *)
+                engage_skill_roster "$1" "$2"
+                _epk_pick=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk -v n="$_epk_in" 'NR == n')
+                if [ -n "$_epk_pick" ]; then ENGAGE_SKILL="$_epk_pick"; return 0; fi
+                printf '  (no skill numbered %s; ? lists them)\n' "$_epk_in"
+                continue ;;
+        esac
+        case "$_epk_in" in
+            *[!A-Za-z0-9._-]*) printf '  (a skill name is letters, digits, dots and hyphens; ? lists them)\n'; continue ;;
+        esac
+        engage_resolve_skill "$1" "$2" "$_epk_in"
+        case "$ENGAGE_SKILL_STATE" in
+            ok|unread) ENGAGE_SKILL="$ENGAGE_SKILL_NAME"; return 0 ;;
+            ambiguous) printf '  "%s" matches %s; type one in full\n' "$_epk_in" "$ENGAGE_SKILL_MATCHES" ;;
+            *) printf '  no skill "%s" on this sitting; ? lists them\n' "$_epk_in" ;;
+        esac
+    done
 }
 
 # engage_prompt_rig — numbered selection over the rigs that carry a converse
@@ -2977,13 +3087,18 @@ engage_new_subject_cleanup() {
 # union open/dismiss match), and a subject with none gets one filed (parked to
 # the board) so a picked subject still engages.
 #
-# --model selects the tier (opus default, else fable or codex). --no-attach
-# spawns and assigns without attaching — the board picker uses it, then the
-# operator attaches from the session picker, the way a pool sitting was reached
-# before. Attached (the default), the operator lands in the sitting directly.
+# --model selects the tier (opus default, else fable or codex). --skill seeds
+# the sitting with a skill as its lens on the subject, any skill the sitting
+# carries. The lens brief is the new visit's body, the claim-time brief a
+# sitting on any model reads, so the skill rides the visit across a reclaim or
+# a re-engage with no per-skill template. --no-attach spawns and assigns
+# without attaching — the board picker uses it, then the operator attaches from
+# the session picker, the way a pool sitting was reached before. Attached (the
+# default), the operator lands in the sitting directly.
 cmd_engage() {
     bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
     engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
+    engage_skill=""; engage_skill_set=0
     # Interactive decisions carried into the visit-resolution and output below.
     engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
     # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
@@ -3001,6 +3116,9 @@ cmd_engage() {
             --template=*) engage_template="${1#--template=}"; shift ;;
             --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
                          engage_template="$1"; shift ;;
+            --skill=*)   engage_skill="${1#--skill=}"; engage_skill_set=1; shift ;;
+            --skill)     shift; [ $# -gt 0 ] || { echo "$PROG: engage: --skill requires a value" >&2; exit 2; }
+                         engage_skill="$1"; engage_skill_set=1; shift ;;
             --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; engage_subject_flag=1; shift ;;
             --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
                          [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
@@ -3021,6 +3139,16 @@ cmd_engage() {
         echo "$PROG: engage: --reason and --template both set the opening message — pass only one." >&2
         exit 2
     fi
+    # A skill name is letters, digits, dots and hyphens. An empty or malformed
+    # --skill is refused here, before anything is read or filed, and the charset
+    # is what lets the name reach the brief's substitution and awk unescaped.
+    if [ "$engage_skill_set" = 1 ]; then
+        case "$engage_skill" in
+            ""|*[!A-Za-z0-9._-]*)
+                echo "$PROG: engage: --skill '$engage_skill' is not a skill name (letters, digits, dots and hyphens, e.g. review-arch)." >&2
+                exit 2 ;;
+        esac
+    fi
 
     # Interactive is the DEFAULT on a TTY; --no-input reverts to the flag-driven,
     # one-shot behavior for scripts/CI. GC_HELM_ASSUME_TTY is a test seam that
@@ -3030,9 +3158,10 @@ cmd_engage() {
         engage_interactive=1
     fi
     # A pre-filled --reason/--template already commits to a new visit with that
-    # opener, so the interactive visit/starter prompts are skipped for it.
+    # opener, and --skill to a new visit carrying its lens brief, so the
+    # interactive visit/starter prompts are skipped for any of them.
     starter_prefilled=0
-    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ] || [ -n "$engage_skill" ]; then starter_prefilled=1; fi
 
     # --rig names the rig a NEW subject is created in; an existing subject's rig
     # comes from its id prefix, so --rig is meaningless there. Refuse rather than
@@ -3134,6 +3263,15 @@ cmd_engage() {
         visit_subject=$(printf '%s' "$bead_row" | jq -r "$VISIT_IDENTITY_JQ"'visit_subject' 2>/dev/null || true)
     fi
 
+    # --skill writes a NEW visit's brief, and a visit's body is written once, at
+    # filing. An explicit visit id names a visit whose brief already exists, so
+    # the skill has nowhere to go; refuse before any prompt, and point at the
+    # subject form that files a visit carrying the lens.
+    if [ -n "$engage_skill" ] && [ "$bead_kind" = "visit" ]; then
+        echo "$PROG: engage: --skill seeds a NEW visit's brief, which needs a subject — but '$bead' is an explicit visit id, and its brief is already written. Engage its subject with --skill instead: $PROG engage ${visit_subject:-<subject>} --skill $engage_skill. Nothing spawned." >&2
+        exit 2
+    fi
+
     # Ground the operator in the bead they picked, before the visit or model
     # prompt: a typed id, PR number, or URL carries nothing of the bead on its
     # own, and a title search drops all but the title once a match is chosen.
@@ -3215,6 +3353,36 @@ cmd_engage() {
     fi
     template="converse-$engage_model"
 
+    # Skill: offered interactively only when a NEW visit is being filed, since an
+    # existing visit's brief is already written. It comes after the model because
+    # the roster is that sitting's own: <rig>/gc-toolkit.converse-<model>.
+    if [ -z "$engage_skill" ] && [ "$engage_interactive" = 1 ] && [ "$bead_kind" != "visit" ] \
+        && { [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; }; then
+        engage_prompt_skill "$rig" "$engage_model" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        engage_skill="$ENGAGE_SKILL"
+    fi
+    # The lens brief becomes the new visit's body, ahead of any opener (a seed's
+    # body, a typed opener, or --reason), and the skill leads the visit's title
+    # tail so the board row says whose view the sitting brings. An unreadable
+    # roster seeds the typed name unverified, as an unconfirmable --model spawns.
+    if [ -n "$engage_skill" ]; then
+        engage_resolve_skill "$rig" "$engage_model" "$engage_skill"
+        case "$ENGAGE_SKILL_STATE" in
+            ok) engage_skill="$ENGAGE_SKILL_NAME" ;;
+            unread)
+                echo "$PROG: engage: could not read the skill list for $rig/gc-toolkit.$template, so '$engage_skill' is seeded unverified; the sitting says so in its framing if it cannot load it." >&2 ;;
+            ambiguous)
+                echo "$PROG: engage: --skill '$engage_skill' matches more than one skill ($ENGAGE_SKILL_MATCHES); name one in full. Nothing spawned." >&2
+                exit 2 ;;
+            *)
+                echo "$PROG: engage: unknown --skill '$engage_skill': a $template sitting in rig '$rig' carries ${ENGAGE_SKILL_MATCHES:-no skills}. Nothing spawned." >&2
+                exit 2 ;;
+        esac
+        engage_body=$(engage_lens_brief "$engage_skill" "$bead" "${engage_body:-$engage_reason}")
+        [ -n "$engage_body" ] || { echo "$PROG: engage: $STARTERS_TOOL did not produce the lens brief for '$engage_skill'. Nothing spawned." >&2; exit 3; }
+        engage_reason="${engage_skill##*.} lens${engage_reason:+: $engage_reason}"
+    fi
+
     # Resolve the sitting's visit. A visit picked off the board is itself the
     # visit; a subject resolves to the open visits tracking it (engage_find_visits
     # at file scope), and a subject with none gets one filed (open parks it to the
@@ -3253,10 +3421,11 @@ cmd_engage() {
         # block does not misreport a freshly filed visit as a pre-existing one.
         filed_fresh=0
         candidates=$(engage_find_visits "$bead")
-        # A --reason, a --template, or an interactive "new visit"
-        # (engage_file_new) files a fresh visit and engages it — even when the
-        # subject already has one; cmd_open's --allow-duplicate marks that
-        # deliberate, and --body carries the starter as the claim-time brief.
+        # A --reason, a --template, a --skill (whose title tail is a reason), or
+        # an interactive "new visit" (engage_file_new) files a fresh visit and
+        # engages it — even when the subject already has one; cmd_open's
+        # --allow-duplicate marks that deliberate, and --body carries the
+        # starter or lens brief as the claim-time brief.
         # With none of those, an existing visit is engaged and only a subject
         # with none has a visit filed.
         if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
@@ -3636,7 +3805,8 @@ cmd_engage() {
     # On the visit-id path $bead IS the visit, so name the subject it tracks
     # rather than repeat the visit id back as its own "for".
     _eng_for="$bead"; [ "$bead_kind" = "visit" ] && [ -n "$visit_subject" ] && _eng_for="$visit_subject"
-    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$_eng_for"
+    _eng_with=""; [ -n "$engage_skill" ] && _eng_with=" with ${engage_skill##*.}"
+    printf '✓ %s%s on %s visit %s for %s\n' "$template" "$_eng_with" "$_eng_which" "$VISIT" "$_eng_for"
     printf '  attach: gc session attach %s\n' "$sid"
     # `engage <subject>` with no --reason binds a visit that already existed, which
     # may be narrower or already-purposed than the fresh discussion the operator

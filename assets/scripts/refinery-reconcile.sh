@@ -426,12 +426,14 @@ pace_args pr-facts
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
-# convoy to the refinery; the order env does not supply GC_AGENT).
+# convoy to the refinery; the order env does not supply GC_AGENT). Its stamp in
+# the rig's state dir holds it to one complete pass per 15 minutes.
 if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
   log "-- (8) convoy-graduate: DISABLED (integration_auto_land=false)"
 else
   ( export GC_AGENT="$AGENT"
-    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" ) \
+    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" \
+      --stamp "$STATE_DIR/convoy-graduate.stamp" ) \
     || FAILED="${FAILED}convoy-graduate rc=$?; "
 fi
 
