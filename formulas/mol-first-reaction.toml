@@ -30,6 +30,14 @@ gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
 step.
 """
 formula = "mol-first-reaction"
+# A reaction annotates its subject and then hands it on through its disposition,
+# so it is not the subject's dispatch surface. Starting it therefore leaves any
+# pool route on the subject in place (gascity formula spec v2,
+# retain_input_routes). tools/gc-proactive.sh refuses to react to a subject that
+# already has a route or an arm, because the pool or the arm that serves it could
+# dispatch the subject mid-reaction. A gc whose formula compiler does not read
+# the key ignores it and retires the subject's route when the workflow starts.
+retain_input_routes = true
 
 [requires]
 formula_compiler = ">=2.0.0"
