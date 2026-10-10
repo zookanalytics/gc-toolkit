@@ -461,12 +461,35 @@ the cadence — the arms run whether or not any refinery session is awake.
    each, so it rotates with the rest until the hold lifts. The marks live in
    `pr-facts.cursor.seen`, and a walk with none records them and puts nothing
    first for a change. The write-back sweep reads GitHub only for the anchors
-   carrying a disposition, at least four calls each, so it runs under the same
-   deadline in a rotation of its own
+   carrying a disposition or owed a finding post or answer (below), at least
+   four calls each, so it runs under the same deadline in a rotation of its own
    (`pr-facts.cursor.writeback`), with one anchor visited even on a pass whose
    walk spent the deadline. It visits first an anchor whose disposition, a
    watermark, or its live children changed since the sweep last visited it: a
-   batch routed, or the work answering one closing.
+   batch routed, or the work answering one closing. An anchor with no
+   disposition, there only for the findings its PR is owed, rotates with the
+   rest.
+   The same sweep carries each machine-lane finding ruled worth fixing
+   (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
+   file the diff touches becomes a file-level review comment on that file, and
+   any other locus becomes a Conversation comment. Once the finding closes, the
+   comment is answered with how it closed: the head that carries the fix and
+   the fix units that landed it, or the deferral's follow-up. The thread is then
+   resolved unless a post that is not the city's own has come after it, and a
+   Conversation comment is edited to carry the answer. A finding that closed
+   before it was posted, as a pre-open round's findings have, is posted with its
+   answer already in place. A human finding is never posted, because it already
+   sits on the PR where its raiser wrote it and is answered there. One
+   store-wide read of the findings serves the pass, and `finding.pr_comment` and
+   `finding.pr_answered` record each write, so an anchor whose findings are
+   settled costs no GitHub call; at most `WB_FINDING_CAP` posts and answers go
+   out per pass. A posted finding holds nothing, since a `must-fix` holds the
+   merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
+   they carry the city's mark and no feedback reader routes them or reads their
+   thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
+   which is how a later pass finds the finding's comment, and the BLOCKED
+   escalation does not count a thread that holds only the city's finding
+   comments.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
