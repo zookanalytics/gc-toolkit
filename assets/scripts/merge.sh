@@ -785,7 +785,10 @@ while IFS= read -r tagged; do
       if [ -n "$REQ_CONTEXTS" ]; then
         rollup=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
         req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -Rs 'split("\n") | map(select(length > 0))' 2>/dev/null)
-        notgreen=$(printf '%s' "$rollup" | jq -r --argjson req "${req_json:-[]}" '
+        # An empty notgreen means every required check is green. A rollup jq
+        # cannot evaluate, or one holding no JSON value (-e), is cleared, so it
+        # holds below as unreadable.
+        notgreen=$(printf '%s' "$rollup" | jq -er --argjson req "${req_json:-[]}" '
           def name_of: (.name // .context // "");
           def green:
             if ((.conclusion // "") | tostring | length) > 0
@@ -798,7 +801,7 @@ while IFS= read -r tagged; do
               | if ($hits | length) == 0 then "\($c)(MISSING)"
                 elif ([ $hits[] | select(green | not) ] | length) > 0 then "\($c)(RED)"
                 else empty end ]
-          | join(" ")' 2>/dev/null)
+          | join(" ")' 2>/dev/null) || rollup=""
         if [ -z "$rollup" ] || [ -z "$req_json" ]; then
           echo "$PROG: PR#$num is UNSTABLE and the check rollup is unreadable; merge held (anchor $id)"
           held=$((held + 1)); continue
