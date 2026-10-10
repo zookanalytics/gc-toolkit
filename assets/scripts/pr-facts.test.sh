@@ -2008,6 +2008,31 @@ printf '[{"id":7400,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/
 out=$(run)
 eq "$(meta CU pr.conversation)" "<absent>" "a caught-up anchor with no prior position records nothing, reading unknown on the board"
 
+echo "# conversation axis — an unmarked review under our login past the cutover is an utterance, never quiet"
+# gc_city_own reads a post under the city's login as the city's own only when it
+# carries a mark or predates the provenance cutover. An unmarked review after the
+# cutover is a model or operator review run on the city's account, so someone
+# spoke and the PR is not quiet. An empty-bodied approval is not feedback, so
+# nothing sits above a watermark and nothing was routed: the position stays
+# unrecorded, which the board renders as unknown.
+store "[$(anchor CK 77 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 77 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_77.json"
+printf '[{"id":7700,"user":{"login":"gc-city-bot"},"state":"APPROVED","body":"","commit_id":"sha-77","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_77.json"
+echo '[]' > "$GH_DIR/comments_77.json"
+echo '[]' > "$GH_DIR/issue_comments_77.json"
+out=$(run)
+has "$out" "posture approved@sha-77" "the pass read the PR, so the conversation was derived, not skipped"
+eq "$(meta CK pr.conversation)" "<absent>" "an unmarked review under our login past the cutover is an utterance: not quiet"
+
+echo "# conversation axis — the city's own marked post is not an utterance: still quiet"
+store "[$(anchor CC 78 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 78 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_78.json"
+echo '[]' > "$GH_DIR/reviews_78.json"
+echo '[]' > "$GH_DIR/comments_78.json"
+printf '[{"id":7800,"user":{"login":"gc-city-bot"},"body":"Demo video for this PR.\\n\\n<!-- gc:city -->","created_at":"2026-10-07T03:00:00Z"}]' > "$GH_DIR/issue_comments_78.json"
+out=$(run)
+eq "$(meta_pinned CC pr.conversation)" "quiet@sha-78" "the city's own marked post leaves the PR quiet"
+
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
 printf '%s' "$(prview 62 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
