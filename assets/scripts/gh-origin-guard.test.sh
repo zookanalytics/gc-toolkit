@@ -688,6 +688,12 @@ mkrepo "$SANDBOX/wwwup" "$OURS_URL"
 git -C "$SANDBOX/wwwup" remote add upstream "https://www.github.com/get-convex/agent.git"
 printf '%s' "$(run "$SANDBOX/wwwup" "gh issue create --title 'x'")" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("aimed at github.com/get-convex/agent")' >/dev/null 2>&1 \
     && ok "an upstream on www.github.com is github.com" || bad "an upstream on www.github.com is github.com" "not refused as github.com/get-convex/agent"
+# gh drops only a lowercase www., before it lowercases the host, so it reads a
+# remote on WWW.github.com as on the forge www.github.com. Logged in to
+# github.com alone, gh passes over that remote and writes to the next one.
+mkrepo "$SANDBOX/wwwcaps" "$THEIRS_URL"
+git -C "$SANDBOX/wwwcaps" remote add upstream "https://WWW.github.com/zookanalytics/gc-toolkit.git"
+denied  "our repository on WWW.github.com is not read as ours" "$SANDBOX/wwwcaps" "gh issue create --title 'x'"
 # gh reads the remote name in a gh-resolved key as the text between its first
 # two dots, so a mark on my.fork marks the remote named my.
 mkrepo "$SANDBOX/dotted" "$OURS_URL"

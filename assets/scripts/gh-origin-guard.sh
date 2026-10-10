@@ -120,11 +120,13 @@ origin_of() {
 # OWNER/REPO value means that repository on the remote's host. With no remote
 # marked, and no terminal to ask in, it takes the first remote in that order.
 # A remote whose URL names no repository is skipped. Before choosing, gh
-# narrows the remotes by forge, using the hosts it is logged in to, or GH_HOST
-# alone when that is set.
+# narrows the remotes by forge. It keeps GH_HOST's alone when that is set.
+# Logged in to exactly one forge, it keeps that forge's when there are any.
+# Otherwise it keeps those of every forge it is logged in to and of github.com.
 # That is gh's own configuration, which this guard does not read, so it chooses
 # twice, among every remote and among the remotes on the forge the call uses,
-# and answers only when the two choices agree.
+# and answers only when the two choices agree. Agreement settles gh's choice
+# except when gh is logged in to exactly one forge and it is not the call's.
 wd_repo() {
     { [ -n "${1:-}" ] && [ -d "$1" ]; } || return 0
     _wr_rv=$(git -C "$1" remote -v 2>/dev/null) || return 0
@@ -158,7 +160,10 @@ function ghurl(u,   rest, auth, path, p, seg, name) {
         auth = substr(auth, 1, p - 1)
     }
     if (auth == "") return ""
-    auth = tolower(auth); sub(/^www\./, "", auth)
+    # gh drops a lowercase www. before it lowercases the rest of the host
+    # (normalizeHostname in internal/ghrepo), so WWW.github.com is a host of
+    # its own.
+    sub(/^www\./, "", auth); auth = tolower(auth)
     sub(/^\/+/, "", path); sub(/\/+$/, "", path)
     if (split(path, seg, "/") != 2) return ""
     name = seg[2]; sub(/\.git$/, "", name)

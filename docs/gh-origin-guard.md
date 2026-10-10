@@ -136,14 +136,19 @@ is marked, and the guard measures that repository, not `origin`.
 
 `gh` skips a remote whose URL names no repository, such as a local path, and
 reads a remote's push URL when its fetch URL names none. Before choosing, it
-narrows the remotes by forge, using the hosts it is logged in to, or `GH_HOST`
-alone when that is set. The guard does not read `gh`'s login configuration, so
+narrows the remotes by forge. With `GH_HOST` set, it keeps the remotes on that
+forge alone. Logged in to exactly one forge, it keeps the remotes on that forge
+when there are any. Otherwise it keeps the remotes on every forge it is logged
+in to and on `github.com`. The guard does not read `gh`'s login configuration, so
 it makes the choice twice: among every remote, and among the remotes on the
 forge the call uses, which is `GH_HOST` or else `github.com`. The two agree in
 any checkout whose remotes all live on that forge. When they disagree, the
 repository `gh` writes to depends on configuration the guard does not read, and
-the write is refused. An SSH host alias counts as a forge of its own, because
-the guard reads a remote's host as written.
+the write is refused. When they agree, `gh` makes the same choice, except when
+`gh` is logged in to exactly one forge and it is not the forge the call uses.
+`gh` then keeps only the remotes on its one forge, so the guard can clear a
+write that `gh` sends to one of them. An SSH host alias counts as a forge of its
+own, because the guard reads a remote's host as written.
 
 The guard reads a remote URL the way `gh` does, but it does not follow every
 form Go's URL parser accepts. A URL carrying a percent escape, a query, or a
