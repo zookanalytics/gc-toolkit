@@ -282,8 +282,8 @@ Two more exclusions are structural, not kind-based:
 instances get NEW ids on restart, so pattern-matching an assignee against a
 template false-negatives forever. Build the identity->state map ONCE per
 cycle, before the first bead is read, keyed on id / name / session_name /
-alias / agent_name / configured_named_identity. Stream both blobs through
-temp files, never --argjson (ARG_MAX):
+alias / agent_name / configured_named_identity. Stream the list through a
+temp file, never --argjson (ARG_MAX):
 ```bash
 # >>> liveness-map-guard
 # Builds the map and answers the ONE question the fail safe asks: did the map
@@ -292,37 +292,29 @@ temp files, never --argjson (ARG_MAX):
 # runs once per cycle with no bead in scope, so no bead's owner can reach the
 # decision.
 SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
-SESSION_BEADS=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
-trap 'rm -f "$SESSIONS_RAW" "$SESSION_BEADS" 2>/dev/null' EXIT
+trap 'rm -f "$SESSIONS_RAW" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
-gc bd list --type=session --label=gc:session --include-infra --all --json --limit=0 > "$SESSION_BEADS" 2>/dev/null || true
-# The session list is the load-bearing source. A non-object, or an object with
+# The session list is the map's only source. A non-object, or an object with
 # no .sessions array, is the READ failing, which is a different fact from a
 # city that reports no sessions.
 SESSIONS_OK=0
 if jq -e 'type == "object" and (.sessions | type) == "array"' "$SESSIONS_RAW" >/dev/null 2>&1; then
   SESSIONS_OK=1
 fi
-# Normalize both sources to a shape the builder cannot fail on, so MAP_COUNT is
-# a number on every path and the trip below is decided by SESSIONS_OK rather
-# than by how the builder happened to die. The session beads contribute keys
-# when they can and are never required: an unusable answer from them
-# contributes nothing rather than failing the cycle.
+# Normalize the list to a shape the builder cannot fail on, so MAP_COUNT is a
+# number on every path and the trip below is decided by SESSIONS_OK rather than
+# by how the builder happened to die.
 [ "$SESSIONS_OK" = "1" ] || printf '{"sessions":[]}' > "$SESSIONS_RAW"
-jq -e 'type == "array"' "$SESSION_BEADS" >/dev/null 2>&1 || printf '[]' > "$SESSION_BEADS"
-LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" --slurpfile b "$SESSION_BEADS" '
+LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" '
   def kv($st): [ .id, .name, .session_name, .alias, .agent_name, .configured_named_identity ]
     | map(select(type == "string" and . != "")) | map({key: ., value: $st});
-  # Bead keys first, session-list keys second: from_entries lets the later
-  # entry win, which keeps the authoritative source authoritative.
-  [ (($b[0] // [])[] | kv(.status // "active")) ]
-  + [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
+  [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
   | add // {} | from_entries' 2>/dev/null) || LIVENESS_MAP=""
 MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null) || MAP_COUNT=""
 # Ordered by authority, and total: a count that is not a number means the
-# builder died behind a source that read fine, which is still a map that
-# cannot be trusted. Falling through to an empty MAP_TRIP would skip the
+# builder died behind a session list that read fine, which is still a map
+# that cannot be trusted. Falling through to an empty MAP_TRIP would skip the
 # fail safe on an unusable map, so the two assignments above absorb their own
 # failure: under `set -e` an abort would leave MAP_TRIP unset, and unset reads
 # as no trip.
@@ -335,7 +327,7 @@ else
     0)           MAP_TRIP="liveness map empty" ;;
   esac
 fi
-rm -f "$SESSIONS_RAW" "$SESSION_BEADS"
+rm -f "$SESSIONS_RAW"
 trap - EXIT INT TERM HUP
 # <<< liveness-map-guard
 ```
@@ -355,10 +347,15 @@ the fail safe. Closed sessions are excluded from `gc session list` on every
 path by design, so a bead naming a session that has since closed always
 resolves absent and `--state=closed` never returns a row. That is permanent,
 not drift, and it is the orphan signal the classification below prescribes.
-The session beads answer with an empty array on a healthy city, because
-`gc bd list` drops `issue_type=session` outright, so an empty second source is
-not an empty map either. A map that omits sessions you can name is the steady
-state this step is built to read.
+A map that omits sessions you can name is the steady state this step is built
+to read.
+
+The map holds no closed session, and the classification below orphans
+`absent` and `closed` alike. Closed sessions are recorded as session beads in
+the city store, a set that grows with every session the city runs, so a map
+that held them would cost a whole-history scan on every rig each cycle.
+Closed keys would also keep the map populated when the session list comes
+back empty, and that cycle would no longer trip `liveness map empty`.
 
 Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
 exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved
