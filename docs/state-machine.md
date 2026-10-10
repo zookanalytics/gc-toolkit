@@ -627,7 +627,7 @@ sequenceDiagram
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
   C->>G: pr-open.sh — gh pr create when every check in check_set reads green
   C->>G: merge.sh — validate, merge --match-head-commit
-  C->>L: close + merged_sha, one lifecycle.sh call
+  C->>L: close + merged_sha, one lifecycle transition (gctk merge, in-process)
 ```
 
 ## Rejection and rework loops
