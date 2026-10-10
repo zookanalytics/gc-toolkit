@@ -7,7 +7,9 @@
 #   A. Subject core — title, status, priority, issue_type, task_kind, assignee;
 #      routing (gc.routed_to, gc.execution_routed_to); anchor state when the
 #      bead carries a merge_result (merge_result, pr_number, branch,
-#      merged_target); the first_reaction fields; gc.origin; and the distilled
+#      merged_target); the first_reaction fields (gc.reacted_by, the reaction
+#      bead whose write-back landed, and the gc.first_reaction* record a reaction
+#      before reaction beads left); gc.origin; and the distilled
 #      gc.takeaway headline (with gc.takeaway_settled). The free-text body is
 #      never parsed.
 #   D. Context edges, shown but never gating — the parent, the relates-to edges,
@@ -240,6 +242,7 @@ SUBJECT_CORE=$(printf '%s' "$SUBJ" | jq -c '
         merged_target: ($m["merged_target"] // null)
       } else null end),
     first_reaction: {
+        reacted_by: ($m["gc.reacted_by"] // null),
         reaction: ($m["gc.first_reaction"] // null),
         at: ($m["gc.first_reaction_at"] // null),
         reason: ($m["gc.first_reaction_reason"] // null),
@@ -363,8 +366,11 @@ if [ -n "$TA" ]; then
   SETTLED=$(g '.subject.takeaway_settled // ""')
   printf '  Takeaway    %s%s\n' "$TA" "$(case "$SETTLED" in ""|null|0) ;; *) printf '  [settled]' ;; esac)"
 fi
+FRB=$(g '.subject.first_reaction.reacted_by // ""')
 FR=$(g '.subject.first_reaction.reaction // ""')
-if [ -n "$FR" ]; then
+if [ -n "$FRB" ]; then
+  printf '  First react by %s\n' "$FRB"
+elif [ -n "$FR" ]; then
   FRT=$(g '.subject.first_reaction.target // ""')
   printf '  First react %s%s\n' "$FR" "$( [ -n "$FRT" ] && printf ' → %s' "$FRT")"
 fi

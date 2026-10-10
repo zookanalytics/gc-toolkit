@@ -2,16 +2,18 @@
 # patrol-finding.sh — one durable BEAD per distinct patrol finding.
 # A patrol observes something wrong and files it here. The bead is deduped on
 # a situation key, so a finding that recurs updates the bead it already has
-# instead of filing a second one, and a proactive first reaction
-# (formulas/mol-first-reaction.toml) reads it and picks the disposition: route
-# it to a pool, hold it on an edge, or file the visit.
+# instead of filing a second one, and a proactive first reaction reads it and
+# picks the disposition: route it to a pool, hold it on an edge, hand a
+# confident no-op to a validating closer, or put it to the operator as a human
+# gate.
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
 #                     [--priority <n>] [--rig <rig>] [--no-react] [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml.
 # The visit is not this path's exit. A finding needing the operator's judgment
-# gets there through the reaction's `ruling` disposition, which files the visit
-# inline (the gate-visit block in formulas/mol-first-reaction.toml). A patrol
+# gets there through the reaction's `ruling` or `recommend` disposition, which
+# files a human gate on it, and orders/gate-visit-sweep files that gate's visit.
+# A patrol
 # calls assets/scripts/escalate.sh directly only for an emergency it cannot
 # express as a bead.
 # Exit: 0 filed or already tracked · 1 could not file/verify · 2 usage
@@ -411,8 +413,9 @@ fi
 
 # ── Hand it to the first reaction ────────────────────────────────────
 # The reaction is what disposes the finding: routed to a pool, held on an
-# edge, or escalated to the operator as a visit. A sling that cannot land is
-# not a failure of the filing — gc.proactive=1 is the standing opt-in the
+# edge, handed to a validating closer, or put to the operator as a human gate.
+# A reaction that cannot be filed is not a failure of the filing —
+# gc.proactive=1 is the standing opt-in the
 # next `gc-proactive.sh scan --sling` sweep reads, so the bead is reacted to
 # either way, just later.
 [ -n "$NO_REACT" ] && exit 0

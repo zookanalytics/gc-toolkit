@@ -520,9 +520,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
    anchor on work nothing will run, and no other arm closes it. The pass
    proves the twin was never dispatched two ways: its metadata records no
-   route, deferred dispatch, claim, worktree, commit or outcome, and no convoy
-   tracks it, which is the edge every pour mints. It requires the review to be
-   closed, since close_review is signoff.sh's last write. It requires a sibling
+   route, deferred dispatch, claim, worktree, commit or outcome other than
+   `no-op`, and no convoy tracks it, which is the edge every pour mints. It
+   requires the review to be closed, since close_review is signoff.sh's last
+   write. It requires a sibling
    naming the same review and anchor to have landed: dispatched, not itself
    disposed or retired, and either recording `work_outcome=shipped` or closed
    with `rejection_reason` unset. signoff.sh stamps that field on every child.
@@ -531,9 +532,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    own. So a closed sibling counts only with `merge_result=merged`, or with
    neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
    hand close of a child whose polecat had begun still reads as a landing.
-   Closing the twin releases its blocks edge, and the
-   pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
-   branch's bead list. The arm runs after review-sweep so a twin that arm 2
+   The twin then records `gc.work_outcome=no-op`, the statement that it
+   pushed nothing: `bead-rehome.sh`'s duplicate evidence accepts it beside the
+   work-order `branch` signoff.sh stamped on the twin, and it keeps the twin
+   off pr-stack.sh's bead list for the branch. A close that is held leaves the
+   twin in this pass, and the next pass finishes it. Closing the twin releases
+   its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
 12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that

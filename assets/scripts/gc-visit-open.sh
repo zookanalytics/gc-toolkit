@@ -8,14 +8,15 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED slings mol-first-reaction (framing card; a reaction that puts the
+# PREFERRED files a first reaction (framing card; a reaction that puts the
 # topic to the operator files a human gate, and gate-visit-sweep files that
 # gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
-# a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction (gc-helm react exit 5)
-# or a live workflow already drives it (exit 6), so the sling is a no-op that
-# dispatches nothing: nothing would file the visit, so this does.
+# a reaction routed into a downed pool waits invisibly; today's tool always says
+# yes), and when the subject already has an open first reaction or a live owner
+# owns it (gc-helm react exit 5) or a live workflow already drives it (exit 6),
+# so react is a no-op that files nothing: nothing would file the visit, so this
+# does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
@@ -385,7 +386,7 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a slung first reaction actually be picked up? ─
+# ── Path selection: can a filed first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
@@ -406,8 +407,8 @@ if [ -n "$REACT" ]; then
     # The reaction owns visit creation from here; a second visit would split
     # the conversation.
     if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
-        printf '%s: subject %s — first reaction slung (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
-        printf '       The reaction writes a framing card and files the visit; it is not filed yet.\n'
+        printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+        printf '       The reaction writes a framing card, and when it puts the topic to you the visit is filed for it; it is not filed yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
     else
@@ -415,20 +416,21 @@ if [ -n "$REACT" ]; then
     fi
     # No reaction was dispatched, so nothing downstream will file the visit —
     # fall through and file it directly; a conversation beats a bead nobody is
-    # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
-    # slung nothing because a first reaction happens once) and exit 6 the
-    # live-workflow no-op (the guard slung nothing because a reaction never races
-    # work in flight), both distinct from a real sling failure: name the actual
-    # cause so the visit body the converse session reads is accurate.
+    # coming to. gc-helm react exit 5 is the already-reacting no-op (the guard
+    # filed nothing because a first reaction happens once at a time, or a live
+    # owner owns it) and exit 6 the live-workflow no-op (the guard filed nothing
+    # because a reaction never races work in flight), both distinct from a real
+    # failure to file: name the actual cause so the visit body the converse
+    # session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
-        REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the visit directly"
+        REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the visit directly"
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the visit directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     else
-        note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
-        REACT_WHY="no: the first-reaction sling failed"
+        note "$PROG: filing the first reaction FAILED — falling back to filing the visit directly"
+        REACT_WHY="no: filing the first reaction failed"
     fi
 fi
 

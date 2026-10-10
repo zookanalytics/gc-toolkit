@@ -13,14 +13,17 @@
 # does nothing — an unreadable listing (exit 1, loud) and an absent disposal
 # writer. For the never-dispatched rework twin pass: the disposal releases the
 # anchor's merge hold and the finding's edge, on synthetic fixtures and on a
-# replay of a real orphan and its landed twin; every never-dispatched proof
-# (dispatch metadata, an assignee, a convoy tracking it, a deferred dispatch
-# armed as the live counter-case is) and every landing proof (closed with its
-# rejection_reason gone and dispatched, or shipped; not disposed, retired,
-# no-op or on another anchor; a promotion to an anchor of its own counts only
-# once merged) refuses on its own; the review-open hold; a
-# prior pointer finished or refused; the earliest-filed of two landed
-# siblings; and idempotence.
+# replay of a real orphan and its landed twin; the twin records
+# gc.work_outcome=no-op before the disposal, which bead-rehome's duplicate
+# evidence reads beside the twin's work-order branch; every never-dispatched
+# proof (dispatch metadata, an assignee, a convoy tracking it, a deferred
+# dispatch armed as the live counter-case is) and every landing proof (closed
+# with its rejection_reason gone and dispatched, or shipped; not disposed,
+# retired, no-op or on another anchor; a promotion to an anchor of its own
+# counts only once merged) refuses on its own; the review-open hold; a prior
+# pointer finished or refused; the earliest-filed of two landed siblings;
+# idempotence; a held close finished on the next pass; and a no-op stamp that
+# did not land refusing the disposal.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,10 +39,14 @@ SUT="$SD/duplicate-sweep.sh"
 export GC_RIG="gc-toolkit"
 
 # Stub disposal writer, standing in for bead-rehome.sh: stamps the pointer
-# pair and closes, which is the shape the real script guarantees. Its knobs
-# are the two partial states the real one can leave behind — REHOME_NO_CLOSE
-# (pointer stamped, close refused: its documented exit 5) and REHOME_NO_STAMP
-# (a write that reported success and did not land).
+# pair and closes, which is the shape the real script guarantees. It models the
+# real script's duplicate evidence on the origin: work_outcome=no-op under
+# either spelling, or no outcome and no work-product key, or the close is
+# refused (exit 7) with nothing written. Each call is logged with the outcome
+# the origin carried when it was called. Its knobs are the two partial states
+# the real one can leave behind — REHOME_NO_CLOSE (pointer stamped, close
+# refused: its documented exit 5) and REHOME_NO_STAMP (a write that reported
+# success and did not land).
 REHOME_LOG="$TMP/rehome.log"; : > "$REHOME_LOG"
 cat > "$SD/bead-rehome.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -53,7 +60,18 @@ while [ $# -gt 0 ]; do
   esac
   shift || true
 done
-S="${STUB_STORE:?}"; tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-duplicate-sweep-test.XXXXXX")"
+S="${STUB_STORE:?}"
+outcome=$(jq -r --arg id "$origin" '.[] | select(.id == $id)
+  | (.metadata // {}) | (.["gc.work_outcome"] // .work_outcome // "")' "$S")
+work=$(jq -r --arg id "$origin" '.[] | select(.id == $id) | (.metadata // {}) as $m
+  | ["branch","work_dir","gc.work_dir","pr_number","pr_url","merge_result","gc.work_commit"][]
+  | select((($m[.]) // "") | tostring | . != "")' "$S")
+printf 'origin-outcome=%s\n' "${outcome:-<absent>}" >> "${REHOME_LOG:?}"
+if [ "$outcome" != "no-op" ] && { [ -n "$outcome" ] || [ -n "$work" ]; }; then
+  echo "bead-rehome (stub): a duplicate close needs $origin to have done no work" >&2
+  exit 7
+fi
+tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-duplicate-sweep-test.XXXXXX")"
 if [ -z "${REHOME_NO_STAMP:-}" ]; then
   jq -c --arg id "$origin" --arg s "$succ" 'map(if .id == $id then
       .metadata["gc.superseded_by"] = $s
@@ -337,11 +355,13 @@ eq "$(meta O1 gc.superseded_by)" "L1" "…pointed at the sibling that landed"
 eq "$(meta O1 gc.superseded_by_store)" "rig:gc-toolkit" "…with the store recorded"
 eq "$(live_blockers A1)" "" "the anchor's merge hold is released"
 eq "$(live_blockers F1)" "" "…and so is the finding the twin blocked"
-eq "$(meta O1 duplicate_of)" "L1" "the closed twin is marked duplicate_of, which pr-stack reads to keep it off the branch's bead list"
+eq "$(meta O1 gc.work_outcome)" "no-op" "the closed twin records gc.work_outcome=no-op, which pr-stack reads to keep it off the branch's bead list"
+eq "$(meta O1 duplicate_of)" "<absent>" "…and the pass writes no duplicate_of"
 a=$(rehome_args)
 has "$a" "--origin O1" "the disposal names the twin as the origin"
 has "$a" "--successor L1" "…the landed sibling as the successor"
 has "$a" "--kind duplicate" "…as a duplicate"
+has "$a" "origin-outcome=no-op" "…with the no-op stamp already on the twin, where bead-rehome's evidence reads it"
 has "$a" "answers the same review R1 on anchor A1" "the reason names the shared review and anchor"
 has "$a" "was dispatched (gc.execution_routed_to=gc-toolkit/gc-toolkit.polecat) and is closed" "…how the sibling's landing was proved"
 has "$a" "O1 was never dispatched" "…and why the twin carried no work"
@@ -568,17 +588,16 @@ out=$(REHOME_NO_CLOSE=1 run)
 eq "$(bstatus O1)" "open" "the twin stays open"
 has "$out" "O1 was NOT disposed" "the refusal is reported"
 has "$out" "1 write(s) held for retry" "…and counted apart from the disposals"
-eq "$(meta O1 duplicate_of)" "<absent>" "…and it is not marked, so it stays in the twin pass"
+eq "$(meta O1 gc.work_outcome)" "no-op" "…carrying the no-op stamp, which is no dispatch evidence"
 run >/dev/null
-eq "$(bstatus O1)" "closed" "the next pass finishes the disposal its pointer names"
-eq "$(meta O1 duplicate_of)" "L1" "…and marks it then"
+eq "$(bstatus O1)" "closed" "so the next pass finishes the disposal its pointer names"
 
-echo "# a marker that does not stick after the close is reported"
+echo "# a no-op stamp that does not stick refuses the disposal"
 twin_scene
 out=$(STUB_UPDATE_FAIL="O1" run)
-eq "$(bstatus O1)" "closed" "the disposal itself stands"
-has "$out" "1 duplicate(s) disposed" "…and is counted"
-has "$out" "duplicate_of=L1 did not stick" "…while the missing marker is reported"
+eq "$(bstatus O1)" "open" "bead-rehome's evidence refuses a twin whose no-op stamp did not land"
+eq "$(meta O1 gc.superseded_by)" "<absent>" "…and nothing is stamped on it"
+has "$out" "O1 was NOT disposed" "…and the refusal is reported"
 
 echo "# both passes run in one invocation"
 scene "[$(dup D1 T1 open '{"work_outcome":"no-op"}'),$(twin T1 closed),$(anchor A1),$(review R1),$(orphan O1 R1 A1),$(landed L1 R1 A1)]"

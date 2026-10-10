@@ -18,11 +18,12 @@
 # unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route or a takeaway disposition that will not stamp),
-# 5 react no-op: the subject already carries a first reaction, so nothing was
-# slung (a first reaction happens once) — distinct from 4 so an intake caller
-# files its own visit instead of reading a skip as a dispatched reaction.
+# 5 react no-op: the subject already has an open first reaction, or a live owner
+# owns its reaction, so nothing was filed (a first reaction happens once at a
+# time) — distinct from 4 so an intake caller files its own visit instead of
+# reading a skip as a dispatched reaction.
 # 6 react no-op: a live workflow already drives the subject, so nothing was
-# slung (a first reaction never races work in flight) — distinct from 5 so the
+# filed (a first reaction never races work in flight) — distinct from 5 so the
 # intake caller names the cause in the visit it files.
 
 set -eu
@@ -44,7 +45,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
-  gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
+  gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
@@ -90,7 +91,7 @@ there is no id prefix yet to derive a rig from); --no-input requires --rig. The
 subject is marked gc.reaction_owned=1 so the async first-reaction/proactive
 worker stands down rather than file a second visit; the operator-origin
 force-to-visit invariant is preserved — engage files that one visit itself.
-dismiss ends the sitting. react slings a proactive first reaction via
+dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
 update; --release also reopens/unassigns/clears the route and quiesces the
@@ -659,8 +660,8 @@ _resolve_superseded_reference() {
 #
 # What each resolved molecule gets turns on whether the RELEASING session holds
 # one of its steps. If it does, the molecule is the session's OWN and live — a
-# mol-first-reaction terminal step disposing the anchor it runs on, or a sitting
-# — and it closes its own chain the normal way: the held step is left alone, the
+# sitting disposing the anchor it runs on, say — and it closes its own chain the
+# normal way: the held step is left alone, the
 # husk pins around it are cleared, and workflow-finalize keeps its escape route.
 # If no step is the releasing session's, nothing will ever close the chain, so
 # the molecule is a husk and reap_release_molecule force-closes the whole
@@ -845,10 +846,10 @@ quiesce_release_molecule_steps() (
 # Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release adds
 # two acts to that stamp: PARK the anchor, and QUIESCE the molecule beneath it.
 #
-# The park (reopen, unassign, stamp the route, gc.proactive_reaction=1) rides
-# the same write as the headline, so a reaction that concludes "this is work"
-# hands the bead on in the write that records the conclusion: either the whole
-# disposition lands or none of it does. It applies to an anchor still standing.
+# The park (reopen, unassign, stamp the route) rides the same write as the
+# headline, so a reaction that concludes "this is work" hands the bead on in
+# the write that records the conclusion: either the whole disposition lands or
+# none of it does. It applies to an anchor still standing.
 # A closed anchor was disposed already, so it keeps that disposition and gets
 # the quiesce alone.
 #
@@ -1137,13 +1138,12 @@ cmd_takeaway() {
     # stale pin the runtime's orphan recovery resolves an owner from.
     # converse-claim.sh's release_turn clears the same pair when it puts a turn
     # back. Both are read back after this write and a lone unset retried, the way
-    # the route and the completion proof beside them are: a silent multi-pair drop
-    # would otherwise report a successful release while the very residue
+    # the route beside them is: a silent multi-pair drop would otherwise report a
+    # successful release while the very residue
     # doctor/executor-identity-residue exists to catch survives on the bead.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
-               --unset-metadata gc.session_name --unset-metadata gc.session_id \
-               --set-metadata "gc.proactive_reaction=1"
+               --unset-metadata gc.session_name --unset-metadata gc.session_id
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
@@ -1190,31 +1190,6 @@ cmd_takeaway() {
         else
             settled_missed=1
             echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
-        fi
-    fi
-    # The completion proof is read back like the route beside it. Two readers key
-    # on gc.proactive_reaction=1 as "the release landed": first-reaction-dispose's
-    # retry guard (assets/scripts/first-reaction-dispose.sh) and the proactive
-    # sling loop, which skips a bead already stamped it
-    # (tools/proactive-first-reaction-fixture.sh). It rides the same multi-pair
-    # write as the route, so the same silent drop can leave it empty; a park whose
-    # proof lands empty reads to both as a partial that never completed, and the
-    # next dispose re-releases a bead a worker may already hold. Read it back and
-    # repair it — a repair that also misses is a verb failure, because a caller
-    # reading a zero exit as "released, proof durable" would be wrong.
-    proactive_missed=""
-    if [ -n "$release_park" ]; then
-        proactive_got=$(meta_now "$bead" gc.proactive_reaction)
-        if [ "$proactive_got" != "1" ]; then
-            echo "$PROG: takeaway: gc.proactive_reaction on $bead read back as '$proactive_got', expected '1' — repairing" >&2
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 || true
-            proactive_got=$(meta_now "$bead" gc.proactive_reaction)
-            if [ "$proactive_got" = "1" ]; then
-                echo "$PROG: takeaway: the proactive-reaction repair landed on $bead" >&2
-            else
-                proactive_missed=1
-            fi
         fi
     fi
     # The pour stamp is cleared best-effort: gc.execution_routed_to names the pool
@@ -1311,15 +1286,7 @@ cmd_takeaway() {
     if [ -n "$settled_missed" ]; then
         exit 4
     fi
-    # The completion proof is exit-4, not a warn: unlike the pour stamp below, it
-    # HAS readers, and a missing proof causes the exact re-release the guards it
-    # feeds exist to prevent. The release and edges are kept and named, so a hand
-    # repair finishes it.
-    if [ -n "$proactive_missed" ]; then
-        echo "$PROG: takeaway: $bead is released but gc.proactive_reaction did not stamp as '1' — the completion proof first-reaction-dispose and cmd_sling read to refuse a second release is missing, so a re-offered dispose would re-release this bead. The headline, release and edges are written; stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.proactive_reaction=1" >&2
-        exit 4
-    fi
-    # A surviving session pin is exit-4 like the route and the proof above, not a
+    # A surviving session pin is exit-4 like the route above, not a
     # warn like the cosmetic pour stamp below: both have readers. A caller reading
     # a zero exit as "released, identity cleared" would route the bead onward — the
     # exact next step that turns a surviving gc.session_name into the residue
@@ -1872,10 +1839,10 @@ cmd_open() {
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
-# Thin wrapper over tools/gc-proactive.sh `sling` (which owns the
-# budget/cap clamp and the correctness-gated mr merge path): slings
-# mol-first-reaction at the bead so a worker writes a first-reaction card
-# and stamps gc.takeaway.
+# Thin wrapper over tools/gc-proactive.sh `sling` (which owns the budget/cap
+# clamp): files a reaction bead that tracks the subject and routes it to the
+# proactive pool, so a worker reads the subject, writes a first-reaction card,
+# and disposes it.
 cmd_react() {
     bead=""; reason=""; nudge=""; dry=""
     while [ $# -gt 0 ]; do
@@ -1917,30 +1884,32 @@ cmd_react() {
     set -- sling "$bead"
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
-    # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
-    # guard skipped an already-reacted bead, and 4 (RC_LIVE_WORKFLOW) when its
-    # live-workflow guard skipped a bead a live workflow already drives. Each is
-    # a no-op, not a failure, and NO reaction was dispatched. Re-raise them as
-    # exit 5 and exit 6 so an intake caller (gc-visit-open) files its own visit,
-    # naming the cause, instead of waiting for a reaction that never ran; any
-    # other non-zero is a real failure.
+    # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its dedup found an
+    # open reaction bead already tracking this subject, or a live owner owning its
+    # reaction, and 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead
+    # a live workflow already drives. Each is a no-op, not a failure, and NO new
+    # reaction was filed. Re-raise them as exit 5 and exit 6 so an intake caller
+    # (gc-visit-open) files its own visit, naming the cause, instead of waiting for
+    # a reaction that is already in flight or never ran; any other non-zero is a
+    # real failure.
     if "$tool" "$@"; then
         :
     else
         sling_rc=$?
         if [ "$sling_rc" -eq 3 ]; then
-            echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
+            echo "$PROG: react: $bead already has an open first reaction, or a live owner owns its reaction — nothing filed (a first reaction happens once at a time). It reacts when the pool claims the reaction bead, or file the visit directly." >&2
             exit 5
         fi
         if [ "$sling_rc" -eq 4 ]; then
-            echo "$PROG: react: a live workflow already drives $bead — nothing slung (a first reaction never races work in flight). React once that workflow's root closes, or file the visit directly." >&2
+            echo "$PROG: react: a live workflow already drives $bead — nothing filed (a first reaction never races work in flight). React once that workflow's root closes, or file the visit directly." >&2
             exit 6
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4
     fi
 
-    # The reaction lands async in the slung session; just clear the cache.
+    # The reaction runs async once the pool claims the reaction bead; just clear
+    # the cache.
     if [ -z "$dry" ]; then bust_cache; fi
 }
 
@@ -2855,10 +2824,11 @@ EOF
 # The subject is created MARKED gc.reaction_owned=1 — a live owner (this engage)
 # already owns reacting to it — so the async first-reaction / proactive worker
 # stands down rather than file a SECOND visit (engage files the one visit itself,
-# below): tools/gc-proactive.sh drops a marked bead from its scan, and
-# formulas/mol-first-reaction.toml consumes the marker and files no visit if one
-# is slung anyway. The marker is set in the `gc bd create` write itself
-# (--metadata), so the scan can never observe the bead unmarked.
+# below): tools/gc-proactive.sh drops a marked bead from its scan and refuses to
+# file a reaction for one, and a reaction that reaches one anyway closes without
+# acting (agents/proactive/prompt.template.md). The marker is set in the
+# `gc bd create` write itself (--metadata), so the scan can never observe the
+# bead unmarked.
 # gc.origin=operator is the honest origin; the force-to-visit invariant is
 # preserved, not relaxed — the subject still gets its one operator-filed visit.
 engage_create_subject() {
@@ -2920,7 +2890,7 @@ engage_create_subject() {
     # not confirm the bead), and until the visit is filed an abort would leave this
     # operator-origin subject owing a visit that nothing supplies: its own
     # stand-down marker hides it from the async worker (gc-proactive drops a marked
-    # bead, mol-first-reaction consumes-and-ignores it), and even unmarked a first
+    # bead, and a reaction that reaches one stands down), and even unmarked a first
     # reaction does not force a visit for gc.origin=operator (actionable/blocked/
     # close file none). So engage_new_subject_cleanup files that one visit itself on
     # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at

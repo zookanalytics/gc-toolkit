@@ -304,6 +304,15 @@ JQF='.subject.origin'                 runj tk-anchor; eq "$JQ" operator    "subj
 JQF='.subject.takeaway_settled'       runj tk-anchor; eq "$JQ" 1           "subject.takeaway_settled returned as the field it is"
 # A bead with no merge_result carries a null anchor, not a fabricated one.
 JQF='.subject.anchor'                 runj tk-epic;   eq "$JQ" null        "anchor is null when the bead is not an anchor"
+# A subject a reaction bead reacted to carries gc.reacted_by, the reaction's
+# landed proof, and no gc.first_reaction record.
+bead "$R_TK" tk-reacted <<'J'
+{"id":"tk-reacted","title":"reacted subject","status":"open","issue_type":"task","metadata":{"gc.reacted_by":"tk-r9"}}
+J
+JQF='.subject.first_reaction.reacted_by' runj tk-reacted; eq "$JQ" tk-r9 "first_reaction.reacted_by names the reaction bead whose write-back landed"
+JQF='.subject.first_reaction.reacted_by' runj tk-anchor;  eq "$JQ" null  "  ... and is null on a subject no reaction bead reacted to"
+run tk-reacted
+has "$OUT" "First react by tk-r9" "  ... and the text view names it"
 
 # --- D. Context edges -------------------------------------------------------
 JQF='.edges.parent.id'                runj tk-anchor; eq "$JQ" tk-epic     "edges.parent resolved from .parent"

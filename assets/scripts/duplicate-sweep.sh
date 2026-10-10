@@ -13,8 +13,10 @@
 #     scaffolding-sweep retires only a disposed anchor's scaffolding, and
 #     finding.sh close-answered closes only findings.
 # Disposal goes through bead-rehome.sh --kind duplicate, which is the one
-# writer for a successor pointer: it stamps gc.superseded_by + _store, reads
-# them back, and closes only if they stuck. Nothing here writes a close.
+# writer for a successor pointer: it re-establishes the evidence a duplicate
+# close needs (the successor closed or shipped in this store, the origin
+# recording no work), stamps gc.superseded_by + _store, reads them back, and
+# closes only if they stuck. Nothing here writes a close.
 # Neither detection trusts a recorded fact on its own, so every gate below
 # re-establishes one from the store, and an untested condition is never a
 # satisfied one. Each detection's gates are listed above its pass.
@@ -217,9 +219,12 @@ CANDS_EOF
 # re-establishes it:
 #   - the population is the OPEN task_kind=rework children naming a
 #     source_review_bead whose metadata records no dispatch: unassigned, and no
-#     route, deferred dispatch, claim, worktree, commit, prepare or outcome. A
-#     child carrying any of those is in flight or done, not a twin, so it is
-#     not read further. A duplicate_of marker leaves it to the marker pass;
+#     route, deferred dispatch, claim, worktree, commit, prepare or outcome
+#     other than no-op. A child carrying any of those is in flight or done, not
+#     a twin, so it is not read further. A no-op outcome alone is not dispatch
+#     evidence: this pass stamps it on a twin before disposing of it, so a twin
+#     whose close was held carries it into the next pass. A duplicate_of marker
+#     leaves it to the marker pass;
 #   - it names an anchor_bead, and no hold_reason parks it (a park is
 #     somebody's judgement in progress);
 #   - no convoy tracks it. A pour mints one, and that edge survives what the
@@ -249,8 +254,11 @@ CANDS_EOF
 #     dispatched is another twin, not a landing.
 # The branch, target and PR fields are the work order signoff.sh stamps on
 # every child, naming the anchor's branch and PR, so they say nothing about
-# what this child did and are not read. Closing the twin releases its blocks
-# edge onto the anchor: merge.sh and gate-ensure count only a live blocker.
+# what this child did and are not read. bead-rehome's duplicate evidence reads
+# them as work, so the twin records gc.work_outcome=no-op first — the statement
+# that it pushed nothing, which every gate above has just proved. Closing the
+# twin releases its blocks edge onto the anchor: merge.sh and gate-ensure count
+# only a live blocker.
 TWINS=""
 if ! RROWS=$(bd_list --metadata-field task_kind=rework --status=open); then
   echo "$PROG: could not enumerate open rework children; failing loudly rather than reporting a false all-clear" >&2
@@ -264,13 +272,15 @@ else
       "gc.deferred_execution_routed_to", "gc.deferred_assignee",
       "gc.claimed_at", "gc.session_id", "gc.session_name",
       "work_dir", "gc.work_dir", "gc.work_commit", "self_review_passed_sha",
-      "prepare_mode", "merge_result", "gc.work_outcome", "work_outcome" ] as $dispatch
+      "prepare_mode", "merge_result" ] as $dispatch
+    | [ "gc.work_outcome", "work_outcome" ] as $outcome
     | .[]
     | . as $row
     | select(s("task_kind") == "rework" and s("source_review_bead") != "")
     | select(s("duplicate_of") == "")
     | select(((.assignee // "") | tostring) == "")
     | select([ $dispatch[] as $k | $row | s($k) | select(. != "") ] | length == 0)
+    | select([ $outcome[] as $k | $row | s($k) | select(. != "" and . != "no-op") ] | length == 0)
     | (.metadata // {}) as $m
     | [ ((.id // "") | p),
         ($m["source_review_bead"] | p),
@@ -355,16 +365,11 @@ LANDED_EOF
   else
     SWHY="$SUCC answers the same review $review on anchor $anchor, was dispatched ($SEVID) and is closed"
   fi
-  dispose "$id" "$SUCC" "$SWHY, and $id was never dispatched: no route, claim, worktree or outcome recorded, no convoy tracks it, and review $review is closed" \
-    || continue
-  # The twin keeps the anchor's branch, and pr-stack.sh lists every row on a
-  # branch in the PR body unless it carries duplicate_of or a no-op outcome.
-  # The marker goes on only after the close read back, so a refused close never
-  # leaves a marked twin that the marker pass would hold for its branch.
-  gc bd update "$id" --set-metadata "duplicate_of=$SUCC" </dev/null >/dev/null 2>&1 || true
-  if ! DROW=$(bd_show "$id") || [ "$(row_meta "$DROW" duplicate_of)" != "$SUCC" ]; then
-    echo "$PROG: $id is disposed, but duplicate_of=$SUCC did not stick; pr-stack.sh lists it on its anchor's branch until that is stamped by hand" >&2
-  fi
+  # The twin pushed nothing, and the no-op stamp is what says so: bead-rehome's
+  # duplicate evidence accepts it beside the work-order branch the twin carries,
+  # and pr-stack.sh keeps a no-op row out of the PR body on that branch.
+  gc bd update "$id" --set-metadata "gc.work_outcome=no-op" </dev/null >/dev/null 2>&1 || true
+  dispose "$id" "$SUCC" "$SWHY, and $id was never dispatched: no route, claim, worktree or outcome recorded, no convoy tracks it, and review $review is closed"
 done <<TWINS_EOF
 $TWINS
 TWINS_EOF

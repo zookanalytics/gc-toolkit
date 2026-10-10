@@ -42,6 +42,17 @@
 #       reason as the sitting's headline, so an outcome without it is unreadable;
 #   (x) an open visit on the origin holds the close at the finalize gate;
 #   (y) --except-key reaches that gate, and nothing is excepted without it.
+# The evidence gates this writer enforces for every caller:
+#   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
+#   (gate-held) EVERY kind — no close over a bead another session holds
+#       in_progress, while a bead this session holds is fine;
+#   (gate-b) fixed-upstream|duplicate — the successor is in the same store and
+#       is closed or shipped, and the origin did no work (no-op stamp, or no
+#       work-product key, so unlanded work is refused), the no-op stamp
+#       overriding a twin's leftover branch; a judgment kind is not held to it,
+#       and an origin carrying the operator's pre-recorded PR-close disposition
+#       for that kind and successor satisfies it;
+#   (check) --check evaluates all of the above and writes nothing, exit 0/1.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -155,11 +166,13 @@ open_blockers() {
 
 case "$sub" in
   show)
+    as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
     jq -n --arg id "$id" --arg st "$(sed -n 's/^status=//p' "$f" | tail -1)" \
+          --arg as "$as" \
           --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
           --argjson meta "$(meta_json)" \
           --argjson deps "$(deps_json)" \
-          '[{id: $id, status: $st, notes: $notes, metadata: $meta, dependencies: $deps}]'
+          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, metadata: $meta, dependencies: $deps}]'
     ;;
   update)
     while [ $# -gt 0 ]; do
@@ -286,9 +299,11 @@ eq "$(field alpha status al-origin3)" open "origin stays OPEN when the pointer d
 has "$(cat "$TMP/err")" "NOT closing" "the refusal says the close was skipped"
 
 # --- (d) close refused: the pointer is still recorded ----------------------
+# A judgment kind: its close reaches `bd close` (the evidence kinds are gated
+# earlier and never would), which is where the refusal under test happens.
 mkbead alpha open al-origin4
 mkbead beta  open bt-succ4
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor bt-succ4 --kind duplicate || rc=$?
+rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor bt-succ4 --kind folded || rc=$?
 eq "$rc" 5 "a refused close exits non-zero"
 eq "$(field alpha m.gc.superseded_by al-origin4)" bt-succ4 "the pointer survives a refused close"
 eq "$(field alpha status al-origin4)" open "the bead is left open, pointed and visible"
@@ -305,11 +320,23 @@ eq "$(field alpha m.gc.superseded_by al-origin5)" bt-other "the prior dispositio
 eq "$(field alpha status al-origin5)" open "the bead is not closed over a conflicting disposition"
 
 # --- (f) each kind renders its own phrasing -------------------------------
-for pair in "folded:folded into" "fixed-upstream:fixed upstream by" "duplicate:duplicate of" "not-needed:not needed, per"; do
+# The judgment kinds re-home work that is being carried elsewhere and gate only
+# on the origin, so a cross-store open successor is fine.
+for pair in "re-homed:re-homed to" "folded:folded into" "not-needed:not needed, per"; do
   kind="${pair%%:*}"; want="${pair#*:}"
   mkbead alpha open "al-k$kind"; mkbead beta open "bt-k$kind"
   rc=0; run --origin "al-k$kind" --successor "bt-k$kind" --kind "$kind" || rc=$?
   eq "$rc" 0 "kind '$kind' is accepted"
+  has "$(field alpha reason "al-k$kind")" "$want" "kind '$kind' renders '$want'"
+done
+# The evidence kinds assert the work already shipped, so they carry that
+# evidence: same-store successor, closed, over a no-op origin.
+for pair in "fixed-upstream:fixed upstream by" "duplicate:duplicate of"; do
+  kind="${pair%%:*}"; want="${pair#*:}"
+  mkbead alpha open "al-k$kind"; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-k$kind"
+  mkbead alpha closed "al-s$kind"
+  rc=0; run --origin "al-k$kind" --successor "al-s$kind" --kind "$kind" || rc=$?
+  eq "$rc" 0 "kind '$kind' is accepted with its evidence"
   has "$(field alpha reason "al-k$kind")" "$want" "kind '$kind' renders '$want'"
 done
 
@@ -411,7 +438,7 @@ mkbead alpha open al-origin14
 mkbead alpha open al-succ14
 mkbead alpha open al-block14
 printf 'dep.al-succ14=blocks\ndep.al-block14=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin14"
-rc=0; run --origin al-origin14 --successor al-succ14 --kind duplicate || rc=$?
+rc=0; run --origin al-origin14 --successor al-succ14 --kind folded || rc=$?
 eq "$rc" 5 "an unrelated blocker still refuses the close"
 eq "$(field alpha status al-origin14)" open "the bead is left open, pointed and visible"
 eq "$(field alpha m.gc.superseded_by al-origin14)" al-succ14 "the pointer is recorded either way"
@@ -524,6 +551,137 @@ eq "$(field alpha status al-visit5)" open "the visit stays OPEN when the reason 
 has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome stamp"
 eq "$(field alpha m.gc.outcome_reason al-visit5)" "" "the reason really was dropped by the fake"
 eq "$(field alpha m.gc.superseded_by al-visit5)" bt-vsucc5 "the pointer is still recorded, so the bead is findable"
+
+# --- (gate-b) unlanded work: refused under an evidence kind ---------------
+# merge_result names in-flight work, so an evidence kind (which claims the origin
+# did no work) is refused over it.
+mkbead alpha open al-unlanded
+mkbead alpha closed al-usucc
+printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-unlanded"
+rc=0; run --origin al-unlanded --successor al-usucc --kind duplicate || rc=$?
+eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
+eq "$(field alpha status al-unlanded)" open "the origin is left open"
+eq "$(field alpha m.gc.superseded_by al-unlanded)" "" "and nothing is stamped"
+has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
+# A judgment kind is a person's call: the converse retire path disposes an
+# in-flight anchor through this writer on the operator's ruling.
+mkbead alpha open al-retire
+mkbead beta  open bt-rtsucc
+printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
+rc=0; run --origin al-retire --successor bt-rtsucc --kind re-homed || rc=$?
+eq "$rc" 0 "a judgment kind (re-homed) disposes an in-flight anchor"
+eq "$(field alpha status al-retire)" closed "…and closes it"
+# The operator's pre-recorded PR-close disposition (pr-dispose.sh) is a ruling
+# already made: pr-facts.sh consummates it under whatever kind was recorded, so an
+# evidence kind recorded for this successor is not re-judged.
+mkbead alpha open al-ruled
+mkbead alpha open al-rsucc
+printf 'm.merge_result=pull_request\nm.branch=polecat/al-ruled\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-rsucc\n' >> "$TMP/rigs/alpha/.beads/al-ruled"
+rc=0; run --origin al-ruled --successor al-rsucc --kind duplicate || rc=$?
+eq "$rc" 0 "a pre-recorded PR-close disposition consummates under the recorded evidence kind"
+eq "$(field alpha status al-ruled)" closed "…and closes the anchor"
+# …but only the disposition it records: another successor is judged afresh.
+mkbead alpha open al-ruledx
+mkbead alpha closed al-rxsucc
+printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-other\n' >> "$TMP/rigs/alpha/.beads/al-ruledx"
+rc=0; run --origin al-ruledx --successor al-rxsucc --kind duplicate || rc=$?
+eq "$rc" 7 "a disposition record naming another successor is no ruling for this one"
+eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
+
+# --- (gate-a) not a review/step/workflow bead ------------------------------
+# merge_result=merged is landed work, not in-flight: it may be disposed.
+mkbead alpha open al-merged
+mkbead beta  open bt-msucc
+printf 'm.merge_result=merged\n' >> "$TMP/rigs/alpha/.beads/al-merged"
+rc=0; run --origin al-merged --successor bt-msucc --kind re-homed || rc=$?
+eq "$rc" 0 "merge_result=merged is landed work and may be disposed"
+
+mkbead alpha open al-review
+mkbead beta  open bt-rsucc
+printf 'm.task_kind=review\n' >> "$TMP/rigs/alpha/.beads/al-review"
+rc=0; run --origin al-review --successor bt-rsucc --kind re-homed || rc=$?
+eq "$rc" 7 "a review bead is refused: its own machinery closes it"
+mkbead alpha open al-step
+mkbead beta  open bt-ssucc
+printf 'm.gc.step_ref=mol-x.load\n' >> "$TMP/rigs/alpha/.beads/al-step"
+rc=0; run --origin al-step --successor bt-ssucc --kind re-homed || rc=$?
+eq "$rc" 7 "a step bead is refused"
+mkbead alpha open al-wf
+mkbead beta  open bt-wsucc
+printf 'm.gc.kind=workflow\n' >> "$TMP/rigs/alpha/.beads/al-wf"
+rc=0; run --origin al-wf --successor bt-wsucc --kind re-homed || rc=$?
+eq "$rc" 7 "a workflow root is refused"
+
+# --- (gate-held) another actor holds it, but self may ---------------------
+mkbead alpha in_progress al-held
+mkbead beta  open bt-hsucc
+printf 'assignee=someone-else-lx-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
+rc=0; run --origin al-held --successor bt-hsucc --kind re-homed || rc=$?
+eq "$rc" 7 "an origin in_progress under another actor is refused"
+has "$(cat "$TMP/err")" "in_progress under someone-else-lx-9999" "the refusal names the holder"
+# A worker re-homing the bead it holds is the holder.
+mkbead alpha in_progress al-mine
+mkbead beta  open bt-msucc2
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-mine"
+rc=0; run --origin al-mine --successor bt-msucc2 --kind re-homed || rc=$?
+eq "$rc" 0 "an origin this session holds is not treated as someone else's"
+
+# --- (gate-b) the evidence gates for fixed-upstream|duplicate -------------
+# Same store required.
+mkbead alpha open al-xstore; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-xstore"
+mkbead beta closed bt-xsucc
+rc=0; run --origin al-xstore --successor bt-xsucc --kind duplicate || rc=$?
+eq "$rc" 7 "a duplicate close needs the successor in the same store"
+has "$(cat "$TMP/err")" "same store" "the refusal names the same-store requirement"
+# Successor must be closed or shipped.
+mkbead alpha open al-openS; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-openS"
+mkbead alpha open al-openSucc
+rc=0; run --origin al-openS --successor al-openSucc --kind duplicate || rc=$?
+eq "$rc" 7 "a duplicate close needs the successor closed or shipped"
+# An OPEN successor that records work_outcome=shipped is accepted.
+mkbead alpha open al-shipO; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-shipO"
+mkbead alpha open al-shipSucc; printf 'm.gc.work_outcome=shipped\n' >> "$TMP/rigs/alpha/.beads/al-shipSucc"
+rc=0; run --origin al-shipO --successor al-shipSucc --kind fixed-upstream || rc=$?
+eq "$rc" 0 "a shipped-but-open successor satisfies the evidence"
+# Origin must have done no work: no work_outcome AND a work-product key refuses.
+mkbead alpha open al-didwork
+mkbead alpha closed al-dwSucc
+printf 'm.branch=polecat/al-didwork\n' >> "$TMP/rigs/alpha/.beads/al-didwork"
+rc=0; run --origin al-didwork --successor al-dwSucc --kind duplicate || rc=$?
+eq "$rc" 7 "an origin with a work-product key and no no-op stamp is refused"
+has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
+# …but a no-op stamp is accepted even beside that work-product key (the twin's
+# branch names the twin, not a push this bead made).
+mkbead alpha open al-twin
+mkbead alpha closed al-twinSucc
+printf 'm.branch=polecat/al-twinSucc\nm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-twin"
+rc=0; run --origin al-twin --successor al-twinSucc --kind duplicate || rc=$?
+eq "$rc" 0 "work_outcome=no-op is accepted even with a work-product key present"
+eq "$(field alpha status al-twin)" closed "and the duplicate is closed"
+
+# --- (check) --check evaluates the gates and writes nothing --------------
+mkbead alpha open al-chkok
+mkbead beta  open bt-chkok
+rc=0; run --origin al-chkok --successor bt-chkok --kind re-homed --check || rc=$?
+eq "$rc" 0 "--check passes an eligible origin"
+eq "$(field alpha status al-chkok)" open "--check does not close"
+eq "$(field alpha m.gc.superseded_by al-chkok)" "" "--check stamps nothing"
+has "$(cat "$TMP/out")" "eligible to close" "--check reports eligibility"
+
+mkbead alpha open al-chkno
+mkbead beta  closed bt-chkno
+rc=0; run --origin al-chkno --successor bt-chkno --kind duplicate --check || rc=$?
+eq "$rc" 1 "--check refuses a cross-store duplicate with exit 1"
+eq "$(field alpha status al-chkno)" open "--check refusal writes nothing"
+eq "$(field alpha m.gc.superseded_by al-chkno)" "" "--check refusal stamps nothing"
+has "$(cat "$TMP/err")" "--check refused" "--check names the refusal"
+
+# --check over an already-closed origin: the repair path is not gated.
+mkbead alpha closed al-chkclosed
+mkbead beta  open bt-chkclosed
+rc=0; run --origin al-chkclosed --successor bt-chkclosed --kind re-homed --check || rc=$?
+eq "$rc" 0 "--check over an already-closed origin passes (repair path)"
+eq "$(field alpha m.gc.superseded_by al-chkclosed)" "" "--check still writes nothing"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

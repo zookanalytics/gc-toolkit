@@ -12,9 +12,9 @@
 #               subject to the operator files a human gate, gate-visit-sweep
 #               files that gate's visit, and a second one would split the
 #               conversation into two sittings of the same subject.
-#   (SHED)      the whole reason the fallback exists. `gc sling` is
-#               fire-and-forget and returns 0 whether or not anything will
-#               ever pick the bead up, so an unguarded react path leaves the
+#   (SHED)      the whole reason the fallback exists. Filing a reaction bead
+#               is fire-and-forget and returns 0 whether or not anything will
+#               ever claim it, so an unguarded react path leaves the
 #               topic routed, unclaimed, and WITHOUT a visit — filed-looking
 #               and silently forgotten. The script asks `deliverable` up
 #               front, and a "no" must divert to the direct path. (The
@@ -194,8 +194,8 @@ cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
 #!/usr/bin/env bash
 printf 'proactive %s\n' "$*" >> "$FAKE_CALLS"
 case "${FAKE_DELIVERABLE:-yes}" in
-  yes) echo "yes: the proactive pool is always on — its cap only queues a slung reaction"; exit 0 ;;
-  no)  echo "no: this pool cannot run it (stub-stated reason) — a slung reaction would sit routed and unclaimed"; exit 1 ;;
+  yes) echo "yes: the proactive pool is always on — its cap only queues a routed reaction"; exit 0 ;;
+  no)  echo "no: this pool cannot run it (stub-stated reason) — a routed reaction would sit unclaimed"; exit 1 ;;
 esac
 PRO
 
@@ -231,7 +231,7 @@ has "$CALLS" "bd create -t task --title why is dolt wedging under load" "(DIRECT
 has "$CALLS" "helm open tk-newsub" "(DIRECT) the visit is filed through gc-helm.sh open"
 has "$CALLS" "--reason operator-origin topic intake" "(DIRECT) the visit says what it is actually for"
 has "$CALLS" "--body" "(DIRECT) the claim-time brief is supplied"
-hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is slung"
+hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is filed"
 has "$OUT" "visit filed" "(DIRECT) the summary reports a filed visit"
 has "$OUT" "tk-newsub" "(DIRECT) the summary names the subject id"
 
@@ -242,7 +242,7 @@ has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subj
 # --- (SINGLE) the react path files NO visit ----------------------------------
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
-has "$CALLS" "helm react tk-newsub" "(SINGLE) the first reaction is slung at the new subject"
+has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
 hasnt "$CALLS" "helm open" "(SINGLE) no visit is filed — the reaction files it"
 has "$OUT" "not filed yet" "(SINGLE) the operator is told the visit does not exist yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
@@ -250,7 +250,7 @@ has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
 # --- (SHED) an undeliverable proactive surface diverts to the direct path ----
 run no "what should the deacon do about quota parks"
 eq "$RC" "0" "(SHED) exits 0"
-hasnt "$CALLS" "helm react" "(SHED) nothing is slung at a pool that cannot run it"
+hasnt "$CALLS" "helm react" "(SHED) nothing is filed for a pool that cannot run it"
 has "$CALLS" "helm open tk-newsub" "(SHED) the visit is filed directly instead"
 has "$OUT" "visit filed" "(SHED) the summary reports a filed visit"
 run no "a topic"
@@ -266,9 +266,9 @@ CALLS="$(cat "$FAKE_CALLS")"
 eq "$RC" "0" "(SHED/missing) a missing gc-proactive.sh still exits 0"
 has "$CALLS" "helm open tk-newsub" "(SHED/missing) the visit is filed directly"
 
-# --- (RECOVER) a failed sling still ends in a conversation --------------------
-run yes "a topic that fails to sling"
-FAKE_HELM_RC=4 run yes "a topic that fails to sling"
+# --- (RECOVER) a reaction that fails to file still ends in a conversation -----
+run yes "a topic whose reaction fails to file"
+FAKE_HELM_RC=4 run yes "a topic whose reaction fails to file"
 # helm is stubbed to fail for BOTH verbs here, so the run ends in the die() —
 # what matters is that it TRIED the direct path after react failed.
 has "$CALLS" "helm react tk-newsub" "(RECOVER) react was attempted"
@@ -277,35 +277,35 @@ has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
 eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
 
-# --- (REACTED) an already-reacted subject files the visit directly ------------
-# react returns its no-op code (5) when the subject already carries a first
-# reaction: the guard slung nothing, so no reaction will file the visit.
-# gc-visit-open must NOT trust the skip as a dispatch (the bug this fixes) — it
+# --- (REACTED) an already-reacting subject files the visit directly -----------
+# react returns its no-op code (5) when the subject already has an open first
+# reaction or a live owner owns it: the guard filed nothing, so no new reaction
+# will file the visit. gc-visit-open must NOT trust the skip as a dispatch — it
 # falls through and files the visit itself, naming the real cause so the visit
-# body is accurate rather than reporting a sling failure that did not happen.
+# body is accurate rather than reporting a failure to file that did not happen.
 FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
 eq "$RC" "0" "(REACTED) exits 0 — the visit is filed"
 has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the visit"
 has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
-has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
-hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
+has "$ERR" "already has an open first reaction" "(REACTED) the reason names the no-op skip"
+hasnt "$ERR" "FAILED" "(REACTED) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
 # --- (DRIVEN) a subject a live workflow drives files the visit directly -------
 # react returns its other no-op code (6) when a live workflow already drives the
-# subject: the guard slung nothing because a reaction never races work in
+# subject: the guard filed nothing because a reaction never races work in
 # flight, so no reaction will file the visit either. The visit body the converse
-# session reads must name that cause, not the already-reacted one and not a
-# sling failure.
+# session reads must name that cause, not the already-reacting one and not a
+# failure to file.
 FAKE_HELM_REACT_RC=6 run yes "a topic on a subject a polecat is building"
 eq "$RC" "0" "(DRIVEN) exits 0 — the visit is filed"
 has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the visit"
 has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the visit body names the live workflow"
 has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
-hasnt "$ERR" "already carries a first reaction" "(DRIVEN) it is NOT reported as an already-reacted subject"
-hasnt "$ERR" "sling FAILED" "(DRIVEN) it is NOT reported as a sling failure"
+hasnt "$ERR" "already has an open first reaction" "(DRIVEN) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "FAILED" "(DRIVEN) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing

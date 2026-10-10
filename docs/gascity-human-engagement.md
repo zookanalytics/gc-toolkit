@@ -231,7 +231,7 @@ the alert model rather than duplicating them.
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
-bead that already exists — `mol-first-reaction` files one when its reaction
+bead that already exists — a first reaction files one when its reaction
 concludes the next move is the operator's,
 `liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
@@ -295,12 +295,12 @@ the bar, not liveness: a suspended rig keeps its registered agents and still
 files (triaged on resume). An unreadable roster refuses nothing, so a degraded
 data plane never blocks an intake.
 
-**Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject. That formula triages the subject and
-takes one of its five dispositions. On the two that put the subject to the
-operator, a ruling or a recommend, its `advance-and-drain` step files a human
-gate on the subject, and `gate-visit-sweep` files the visit that resolves it on
-its next pass (see "How a sitting ends" below). A
+**Two paths, and the choice is not a preference.** The preferred path files a
+first reaction at the new subject. The reaction triages the subject and takes
+one of its five dispositions. On the two that put the subject to the operator, a
+ruling or a recommend, it files a human gate on the subject, and
+`gate-visit-sweep` files the visit that resolves it on its next pass (see "How a
+sitting ends" below). A
 ruling is Discuss-only: the reaction judges the capture a genuine fork, an
 irreversible or destructive action, or a policy call, and the operator arrives at
 a framed conversation with a first-reaction card already written. A recommend
@@ -388,11 +388,11 @@ holds — but engage files that one visit itself, so the async worker must not f
 a second. The subject is created marked `gc.reaction_owned=1`, in the same
 `gc bd create` write so the proactive scan never observes it unmarked. Three
 gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
-race-free gate, so a sweep never slings a first reaction at it),
-`sling_first_reaction_guard` refuses it as a no-op, and `mol-first-reaction`'s
-`advance-and-drain` consumes it fail-closed and files no visit if a direct pour
-reaches one — stamping `gc.proactive_reaction=1` first, so the engage counts as
-the reaction and no later scan re-reacts. The invariant is preserved, not
+race-free gate, so a sweep never files a first reaction for it),
+`reaction_absent_guard` refuses to file one as a no-op, and a reaction that
+reaches a marked subject anyway closes its own reaction bead without acting
+(`agents/proactive/prompt.template.md`). The engage counts as the reaction, and
+the marker stays, so no later scan reacts. The invariant is preserved, not
 relaxed: the subject gets exactly one operator-filed visit. If a later gate
 refuses the live spawn — a bad model, a suspended rig — the subject's one visit
 is still filed and parked on the board, so the topic is never lost; the operator
@@ -662,8 +662,8 @@ that stamp. It asserts nothing about the sentence and blanks nothing —
   de-route cannot end it: an open step, even unrouted, keeps workflow-finalize
   blocked, so the molecule never reaps and its held steps keep drawing
   re-dispatches. A stood-down molecule should die, not park. The one molecule
-  spared is the releasing session's own — a mol-first-reaction terminal step
-  disposing the anchor it runs on — which closes its chain the normal way and
+  spared is the releasing session's own — a sitting disposing the anchor it runs
+  on — which closes its chain the normal way and
   only sheds its husk pins. An edge would assert a wait that does not exist.
 
   An anchor CLOSED before the stand-down reaches it — a fold that landed after

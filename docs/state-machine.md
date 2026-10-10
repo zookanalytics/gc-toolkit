@@ -693,17 +693,24 @@ review's result set.
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 11): a duplicate
-  dispatch a polecat diagnosed and parked has no other way out, since polecats
-  never close work beads. The arm closes it through `bead-rehome.sh --kind
-  duplicate` only when the named successor resolves and is closed or shipped
-  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It also closes an unmarked rework
-  twin, an open rework child that was never dispatched (no dispatch metadata,
-  no convoy tracking it) whose review is closed and whose same-review,
-  same-anchor sibling landed. That twin would otherwise hold its anchor
-  forever. It writes nothing to the successor's branch or PR, and holds on
-  anything it cannot establish.
+- **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
+  close-with-successor writer): a bead that duplicates another or was fixed
+  upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
+  gates its own evidence — the named successor resolves and is closed or shipped
+  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
+  work-product key at all), unless the origin carries the operator's
+  pre-recorded PR-close disposition for that kind and successor — and holds on
+  anything it cannot establish. Converse and operator dispositions use the same
+  writer, and so does `duplicate-sweep.sh` (cadence arm 11). The sweep reads
+  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
+  duplicate dispatch: polecats never close work beads, so the bead has no other
+  way out. It checks the same evidence before it calls the writer. It also
+  closes an unmarked rework twin: an open rework child that was never
+  dispatched (no dispatch metadata, no convoy tracking it) whose review is
+  closed and whose same-review, same-anchor sibling landed. That twin would
+  otherwise hold its anchor forever; the sweep records `gc.work_outcome=no-op`
+  on it before the close. A first reaction never closes a bead: it hands a
+  confident no-op to the validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc

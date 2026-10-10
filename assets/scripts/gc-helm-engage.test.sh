@@ -1350,7 +1350,7 @@ echo "# --new-subject whose post-create gate aborts still files the subject's on
 # engage (here an unknown --model, like the suspended/not-running rig and unknown
 # --template gates). An abort there must not leave the operator-origin subject with
 # no visit: the async worker will not supply one (gc-proactive drops a marked bead,
-# mol-first-reaction consumes-and-ignores it, and even unmarked a first reaction
+# a reaction that reaches one stands down, and even unmarked a first reaction
 # does not force a visit for gc.origin=operator). So the backstop files the one
 # parked visit itself (via cmd_open, carrying the opener) and LEAVES the marker,
 # exactly as a successful engage does, so the async worker still stands down.
