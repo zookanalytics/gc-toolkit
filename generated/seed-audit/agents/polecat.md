@@ -183,12 +183,17 @@ closed.
 
 ### Integration branches (owned convoys)
 
-`metadata.target` is not always the default branch. Under an owned convoy
-with an integration branch, `gc sling`'s convoy-ancestor walk resolves
-`metadata.target = integration/<convoy-id>`: you branch from
-`origin/integration/<convoy-id>`, the refinery lands your work on that
-integration branch, and main moves only when the convoy graduates later.
-Nothing special to do — the formula preserves `metadata.target` — just do not
+`metadata.target` is not always the default branch. A child of an owned
+convoy with an integration branch carries `metadata.target =
+integration/<convoy-id>`, which the owned-convoy recipe stamps when it links
+the child. `gc sling` takes the bead's own target as the base branch before
+anything else: you branch from `origin/integration/<convoy-id>`, the refinery
+lands your work on that integration branch, and main moves only when the
+convoy graduates later. Without the stamp, sling reads a convoy target only
+off the one parent chain bd reports, so a child whose reported parent is an
+epic outside the convoy is poured from the default branch. workspace-setup
+holds that molecule before it cuts a branch. Otherwise there is nothing
+special to do, because the formula preserves `metadata.target`. Just do not
 read "landed in the refinery" as "main moved".
 
 ## Work bead metadata contract

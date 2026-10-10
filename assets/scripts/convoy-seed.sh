@@ -90,9 +90,9 @@ fi
 
 BRANCH="integration/$CONVOY_ID"
 
-# 2. Set the convoy target so children inherit metadata.target through gc sling's
-#    convoy-ancestor walk. Setting the same target again is a no-op, so this is
-#    safe to re-run on resume.
+# 2. Set the convoy target, which gc sling takes as the base of a child that
+#    names no target of its own and reports the convoy as its parent. Setting
+#    the same target again is a no-op, so this is safe to re-run on resume.
 gc convoy target "$CONVOY_ID" "$BRANCH" "${RIG_FLAG[@]}" >/dev/null 2>&1 \
   || die "gc convoy target failed for $CONVOY_ID -> $BRANCH"
 

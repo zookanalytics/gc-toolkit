@@ -15,10 +15,12 @@ arms implementation, with no human running git.
 ## Why a molecule stands it up
 
 The default PR unit is an owned convoy on an integration branch
-(`agents/mechanik/prompt.template.md`). Children inherit
-`metadata.target = integration/<convoy-id>` through `gc sling`'s convoy-ancestor
-walk; the refinery lands them on that branch; the cadence then graduates the
-convoy to the default branch as one human-approved PR (`convoy-graduate.sh`).
+(`agents/mechanik/prompt.template.md`). Children branch from
+`integration/<convoy-id>`: `gc sling` reads it from a child's own
+`metadata.target`, which the mechanik recipe stamps, and otherwise from the
+first convoy target on the one parent chain bd reports. The refinery lands them
+on that branch, and the cadence then graduates the convoy to the default branch
+as one human-approved PR (`convoy-graduate.sh`).
 
 Creating the convoy is the one step a converse sitting cannot perform. `gc convoy
 create --owned` records metadata but never touches git, and a sitting never
