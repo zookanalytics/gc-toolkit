@@ -654,26 +654,68 @@ eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the same window
 await_run
 
 # An unprovable probe must NOT disable sweeping: a health check that returns an
-# unreadable answer is treated as healthy-enough to proceed, so a broken probe
-# can never silence the patrol.
+# unreadable answer, or fails outright, is treated as healthy-enough to proceed,
+# so a broken probe can never silence the patrol. The report says the gate was
+# skipped, so a skip never reads as a pass.
 new_state dolt_unprovable
 : > "$STUB_LOG"
 export STUB_DOLT_RC=0 STUB_DOLT_HEALTH='not json'
 run
 has "$OUT" "state=started" "an unreadable health probe proceeds, never blocks the sweep"
+has "$OUT" "note=Dolt health gate skipped: health probe answer carried no readable server.latency_ms" "  ... and the report says the gate was skipped"
+await_run
+
+new_state dolt_probe_failed
+: > "$STUB_LOG"
+export STUB_DOLT_RC=3 STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=started" "a health probe that exits non-zero proceeds, its output unread"
+has "$OUT" "note=Dolt health gate skipped: health probe exited 3" "  ... naming the exit code"
 await_run
 export STUB_DOLT_RC=0 STUB_DOLT_HEALTH=""
 
-# A probe that outruns its own bound is itself the overload signal.
+# How long the report takes is not a Dolt signal. `gc dolt health` caps each of
+# its own Dolt calls, so a slow report measures the host and the gc calls it
+# makes. A report that runs long and finishes is judged on what it says.
+new_state dolt_probe_slow_healthy
+: > "$STUB_LOG"
+export STUB_DOLT_SLEEP=2 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=6
+run
+has "$OUT" "state=started" "a slow health report that says reachable and fast starts the sweep"
+hasnt "$OUT" "Dolt health gate skipped" "  ... on its verdict, not on a skipped gate"
+await_run
+
+new_state dolt_probe_slow_unreachable
+: > "$STUB_LOG"
+export STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
+run
+has "$OUT" "state=deferred" "a slow health report that says unreachable still defers"
+has "$OUT" "detail=Dolt server unreachable" "  ... on what it said"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+
+# The bound is a hang guard. A probe still running at it proved nothing, so the
+# start proceeds and the report says the gate was skipped. The answer this probe
+# would have given is unreachable, so the case also shows a cut answer is never
+# guessed at.
 new_state dolt_probe_timeout
 : > "$STUB_LOG"
-export STUB_DOLT_SLEEP=2 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1
+export STUB_DOLT_SLEEP=3 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT=1 STUB_DOLT_HEALTH='{"server":{"reachable":false}}'
 run
-has "$OUT" "state=deferred" "a health probe past its bound defers the start"
-has "$OUT" "reason=dolt-degraded" "  ... as a degraded data plane"
-eq "$(grep -c . "$STUB_LOG")" "0" "  ... starting nothing"
+has "$OUT" "state=started" "a health probe cut at its bound proceeds instead of deferring"
+has "$OUT" "note=Dolt health gate skipped: health probe gave no answer within 1s" "  ... and the report says the gate was skipped"
+await_run
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... and the sweep ran"
 unset GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
-export STUB_DOLT_SLEEP=""
+export STUB_DOLT_SLEEP="" STUB_DOLT_HEALTH=""
+
+# The default bound is the one the usage text names. A malformed value falls
+# back to it out loud, from an idle pass that runs no probe.
+new_state dolt_probe_default
+: > "$STUB_LOG"
+printf '%s' "$(( $(date +%s) - 100 ))" > "$STATE/last-start"
+OUT=$(GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT='soon' "$SUT" 2>/dev/null)
+has "$OUT" "GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT='soon' is not a number, using 90" "a malformed probe bound falls back to the 90s default"
+has "$("$SUT" --help 2>&1)" "is unproven and defers nothing (default 90)" "  ... the default the usage text names"
 
 # --- the pre-spawn cadence floor: the one cross-session gate -----------------
 # STATE_DIR can go blind — a per-session fallback a recycled session does not
