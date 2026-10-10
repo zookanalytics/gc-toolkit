@@ -26,6 +26,13 @@
 #   - the create's id is guarded before use (an unguarded empty id
 #     cascades into stamping nothing, and the silent failure is what
 #     tempts agents to rewrite the block instead of re-running it)
+#   - every FORMULA copy reuses the conversation visit already open on its
+#     subject instead of filing a second one, and never reuses an escalate.sh
+#     visit; this one is executed against every formula copy, because a step
+#     re-run is exactly when the block runs twice. The two script copies keep
+#     their own dedup outside the markers (gc-helm.sh open folds into any open
+#     visit; escalate.sh keys on subject and escalation_key), and their own
+#     tests cover it.
 # Hermetic: reads the repo only; no gc, no city.
 #
 # run-tests-scope: tree
@@ -211,9 +218,13 @@ cat > "$EXTMP/bin/gc" <<'GVSTUB'
 # the observed failure: the update returns 0 and the value reads back empty.
 # $AGENTS is the live identity set the route is proved against; an arm that
 # answered nothing would read as UNREADABLE, which fails open and would take
-# the whole route check out of this suite.
+# the whole route check out of this suite. $LIST_JSON is the file the open-visit
+# listing answers with; unset, the listing answers nothing, as a store with no
+# open visit does.
 case "$1 ${2:-}" in
   "agent list") printf '%s\n' "${AGENTS:-}" ;;
+  "bd list")   printf 'LIST %s\n' "$*" >> "$LOG"
+               if [ -n "${LIST_JSON:-}" ]; then cat "$LIST_JSON"; fi ;;
   "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"
                # The title and body as bd received them, for the bound checks.
                while [ $# -gt 0 ]; do
@@ -255,9 +266,13 @@ awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$FDIR/mol-vis
 # pool's replacement) and resolves no pool, so this run exercises the create and
 # the continuation_group repair, not a route. The route-refusal proof lives with
 # the surviving pool-route.sh call sites (escalate.test.sh executes it).
+# The block locates visit-identity.sh through GC_PACK_DIR, GC_RIG_ROOT, the git
+# toplevel and GC_CITY_PATH, in that order. Each run pins all four, so the copy
+# in this repo answers and an ambient city's copy never does.
 run_block_gv() { # <LOST> -> stdout+stderr of the block; $EXTMP/log side-effects
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
     PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
+        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="" \
         bash "$EXTMP/block.sh" 2>&1
 }
 group_writes() { grep -c 'gc.continuation_group=' "$EXTMP/log" 2>/dev/null || echo 0; }
@@ -304,10 +319,13 @@ render_gv() { # <visit-text>
     raw="${raw//\{\{visit\}\}/"$1"}"
     printf '%s\n' "$raw" > "$EXTMP/block-v.sh"
 }
+# Pinned like run_block_gv: the open-visit listing answers nothing, so the
+# block files, and only this repo's visit-identity.sh is in reach.
 run_gv() { # <CREATE answer: object|array|refused> -> OUT, RC; title/body in $EXTMP/state
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
     OUT="$(PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST=0 CREATE="$1" \
         REFUSAL='validation failed: validation failed for issue : title must be 500 characters or less (got 544)' \
+        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="" \
         bash "$EXTMP/block-v.sh" 2>&1)"; RC=$?
 }
 
@@ -379,6 +397,128 @@ if [ "$RC" = 0 ] && [ "$(wc -c < "$EXTMP/state/title")" -le 500 ]; then
     ok "a tail in 4-byte characters fits the byte cap too ($(wc -c < "$EXTMP/state/title") bytes)"
 else
     bad "a tail in 4-byte characters fits the byte cap too" "rc=$RC, $(wc -c < "$EXTMP/state/title" 2>/dev/null) bytes"
+fi
+
+echo "── a conversation visit already open on the subject is reused (executed) ──"
+# One listing per row shape the reuse has to judge. A row is a visit on sub-A
+# unless its arguments say otherwise; "-" is a visit with no tracks edge.
+visit_row() { # <id> <status> <tracks-target|-> <group-stamp> [escalation_key] [task_kind]
+    jq -nc --arg id "$1" --arg st "$2" --arg t "$3" --arg g "$4" --arg k "${5:-}" --arg tk "${6:-visit}" '
+      { id: $id, status: $st,
+        metadata: ({task_kind: $tk, "gc.continuation_group": $g}
+                   + (if $k == "" then {} else {escalation_key: $k} end)),
+        dependencies: (if $t == "-" then [] else [{type: "tracks", depends_on_id: $t}] end) }'
+}
+listing() { # <name> <row>... — writes the rows as one array to $EXTMP/list-<name>.json
+    ls_name="$1"; shift
+    printf '%s\n' "$@" | jq -sc '.' > "$EXTMP/list-$ls_name.json"
+}
+listing open        "$(visit_row v-9 open sub-A sub-A)"
+listing in-progress "$(visit_row v-9 in_progress sub-A sub-A)"
+listing edge-only   "$(visit_row v-9 open sub-A "")"
+listing stamp-only  "$(visit_row v-9 open - sub-A)"
+listing two         "$(visit_row v-7 open sub-A sub-A)" "$(visit_row v-3 open sub-A sub-A)"
+listing keyed       "$(visit_row v-9 open sub-A sub-A deferred-dispatch-sling-failed)"
+listing other       "$(visit_row v-9 open sub-B sub-B)"
+listing stale-stamp "$(visit_row v-9 open sub-B sub-A)"
+listing closed      "$(visit_row v-9 closed sub-A sub-A)"
+listing not-a-visit "$(visit_row v-9 open sub-A sub-A "" task)"
+printf 'not json\n' > "$EXTMP/list-unreadable.json"
+
+# The canonical copy again, now reporting the visit it ended on.
+{ cat "$EXTMP/block.sh"; printf '%s\n' 'printf "RESULT %s\n" "$VISIT"'; } > "$EXTMP/block-result.sh"
+run_reuse() { # <script> <listing-name> [VAR=value...] -> stdout+stderr; $EXTMP/log side-effects
+    rr_script="$1"; rr_list="$2"; shift 2
+    rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
+    env PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST=0 \
+        GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="$EXTMP/list-$rr_list.json" \
+        WORK_BEAD_ID=sub-A SUBJECT=sub-A "$@" bash "$rr_script" 2>&1
+}
+creates() { cr_n=$(grep -c '^CREATE ' "$EXTMP/log" 2>/dev/null); echo "${cr_n:-0}"; }
+result_of() { printf '%s\n' "$1" | sed -n 's/^RESULT //p' | tail -n 1; }
+reuse_case() { # <listing-name> <reuse:<id>|file> <label>
+    out="$(run_reuse "$EXTMP/block-result.sh" "$1")"
+    case "$2" in
+        reuse:*)
+            if [ "$(creates)" = "0" ] && [ "$(result_of "$out")" = "${2#reuse:}" ]; then ok "$3"
+            else bad "$3" "want ${2#reuse:} reused and nothing created; got VISIT='$(result_of "$out")' after $(creates) create(s): $out"; fi ;;
+        file)
+            if [ "$(creates)" = "1" ] && [ "$(result_of "$out")" = "v-1" ]; then ok "$3"
+            else bad "$3" "want one fresh visit (v-1); got VISIT='$(result_of "$out")' after $(creates) create(s): $out"; fi ;;
+    esac
+}
+reuse_case open        reuse:v-9 "an open conversation visit on the subject is reused, and nothing is filed"
+reuse_case in-progress reuse:v-9 "…as is one a sitting holds (in_progress)"
+reuse_case edge-only   reuse:v-9 "…matched by its tracks edge when its group stamp landed empty"
+reuse_case stamp-only  reuse:v-9 "…or by its group stamp when it has no tracks edge"
+reuse_case two         reuse:v-3 "…and of two, the lowest id (the tiebreak converse's fold uses)"
+reuse_case keyed       file      "an escalate.sh visit (escalation_key) never stands in — the block files its own"
+reuse_case other       file      "a visit on another subject is not reused"
+reuse_case stale-stamp file      "a stale group stamp beside a tracks edge to another subject does not match"
+reuse_case closed      file      "a closed row the listing let through is not reused"
+reuse_case not-a-visit file      "a non-visit row the listing let through is not reused"
+reuse_case unreadable  file      "a listing that does not read files anyway"
+
+OUT_REUSE="$(run_reuse "$EXTMP/block-result.sh" open)"
+case "$OUT_REUSE" in
+    *"visit v-9 is already open on sub-A"*) ok "the reuse is reported, not silent" ;;
+    *) bad "the reuse is reported, not silent" "no reuse line in: $OUT_REUSE" ;;
+esac
+if grep -qE '^(UPDATE|DEP) ' "$EXTMP/log"; then
+    bad "a reused visit is neither re-stamped nor re-wired" "$(cat "$EXTMP/log")"
+else
+    ok "a reused visit is neither re-stamped nor re-wired"
+fi
+if grep -qE '^LIST bd list --status=open,in_progress --metadata-field task_kind=visit( |$)' "$EXTMP/log"; then
+    ok "the listing reads open and in_progress visits"
+else
+    bad "the listing reads open and in_progress visits" "listing call: $(grep '^LIST ' "$EXTMP/log" || echo none)"
+fi
+OUT_NOVI="$(run_reuse "$EXTMP/block-result.sh" open \
+    GC_RIG_ROOT="$EXTMP/none" GC_CITY_PATH="$EXTMP/none" GIT_DIR="$EXTMP/none")"
+if [ "$(creates)" = "1" ]; then
+    case "$OUT_NOVI" in
+        *"visit-identity.sh not found"*) ok "with no visit-identity.sh in reach the block says so and files" ;;
+        *) bad "with no visit-identity.sh in reach the block says so and files" "filed without a warning: $OUT_NOVI" ;;
+    esac
+else
+    bad "with no visit-identity.sh in reach the block says so and files" "$(creates) create(s): $OUT_NOVI"
+fi
+
+echo "── every formula copy reuses the open visit and files past an escalation (executed) ──"
+# A step re-run is when a copy runs twice, so each formula copy is run, not
+# grepped: its subject variable is bound, the board stub answers, and the run
+# must end on the open visit (no create) and, beside only an escalation visit,
+# on a fresh one.
+COPIES_RUN=0
+mkdir -p "$EXTMP/copies"
+for f in "$FDIR"/*.toml; do
+    awk -v out="$EXTMP/copies/$(basename "$f" .toml)" \
+        '/# >>> gate-visit/{n++; f = 1; next} /# <<< gate-visit/{f = 0} f {print > (out "-" n ".sh")}' "$f"
+done
+for c in "$EXTMP"/copies/*.sh; do
+    [ -f "$c" ] || continue
+    name="$(basename "$c" .sh)"
+    { sed 's/{{subject}}/sub-A/g; s/{{visit}}/why/g; s/{{binding_prefix}}/gc-toolkit./g' "$c"
+      printf '%s\n' 'printf "RESULT %s\n" "$VISIT"'; } > "$c.run"
+    COPIES_RUN=$((COPIES_RUN + 1))
+    out="$(run_reuse "$c.run" open)"
+    if [ "$(creates)" = "0" ] && [ "$(result_of "$out")" = "v-9" ]; then
+        ok "$name: a second run reuses the conversation visit already open"
+    else
+        bad "$name: a second run reuses the conversation visit already open" "VISIT='$(result_of "$out")' after $(creates) create(s): $out"
+    fi
+    out="$(run_reuse "$c.run" keyed)"
+    if [ "$(creates)" = "1" ] && [ "$(result_of "$out")" = "v-1" ]; then
+        ok "$name: an open escalation visit does not stand in for it"
+    else
+        bad "$name: an open escalation visit does not stand in for it" "VISIT='$(result_of "$out")' after $(creates) create(s): $out"
+    fi
+done
+if [ "$COPIES_RUN" -gt 0 ] && [ "$COPIES_RUN" -eq "$FORMULA_CONSUMERS" ]; then
+    ok "every formula copy was run ($COPIES_RUN)"
+else
+    bad "every formula copy was run" "ran $COPIES_RUN of $FORMULA_CONSUMERS formula copies"
 fi
 
 echo "── consumer census ──"
