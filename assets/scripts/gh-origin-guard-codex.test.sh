@@ -24,8 +24,9 @@
 #       left empty is dropped, and a group shared with another handler keeps it
 #   (5) a current group followed by others is left where it stands; two copies
 #       collapse to one
-#   (6) a file that is not a hooks document, or a PreToolUse that is not a
-#       list, is refused with exit 1 and left byte-identical
+#   (6) a file that is not exactly one hooks document (not JSON, empty, blank,
+#       two documents, a list), or a PreToolUse that is not a list, is refused
+#       with exit 1 and left byte-identical
 #   (7) the Codex home is $CODEX_HOME, else ~/.codex, created when absent
 #   (8) an overlay with no guard group, or a missing jq, is refused with exit 1
 #       and nothing written
@@ -163,13 +164,17 @@ refused_untouched() { # refused_untouched <label> <file contents>
     local h="$SANDBOX/refuse.$PASS.$FAIL"
     mkdir -p "$h"
     printf '%s' "$2" > "$h/hooks.json"
+    printf '%s' "$2" > "$SANDBOX/expected"
     install_into "$h"
     if [ "$RC" -ne 1 ]; then bad "$1" "rc=$RC (want 1)"; return; fi
-    if [ "$(cat "$h/hooks.json")" != "$2" ]; then bad "$1" "the file was changed"; return; fi
+    cmp -s "$SANDBOX/expected" "$h/hooks.json" || { bad "$1" "the file was changed"; return; }
     grep -Fq "$h/hooks.json" "$SANDBOX/stderr" || { bad "$1" "stderr names no file: $(cat "$SANDBOX/stderr")"; return; }
     ok "$1"
 }
 refused_untouched "refuses a file that is not JSON"          '{"hooks": {'
+refused_untouched "refuses an empty file"                    ''
+refused_untouched "refuses a file of blank lines"            "$(printf ' \n\n\t')"
+refused_untouched "refuses two documents in one file"        '{"hooks": {}} {"hooks": {}}'
 refused_untouched "refuses a JSON document that is a list"   '[1, 2]'
 refused_untouched "refuses hooks that are not an object"     '{"hooks": []}'
 refused_untouched "refuses a PreToolUse that is not a list"  '{"hooks": {"PreToolUse": {"g": {"matcher": "Bash", "hooks": []}}}}'

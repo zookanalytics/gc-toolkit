@@ -54,14 +54,16 @@ fi
 # Our handlers are the ones naming gh-origin-guard.sh. When they amount to the
 # current group, standing alone, the document is left as it is. Otherwise they
 # are removed wherever they stand, a group left empty is dropped, and the
-# current group is appended after everything else. A file that is not a hooks
-# document stops the transform, and is not overwritten: it may be the
-# operator's, and Codex cannot load hooks from it either.
-NEXT=$(printf '%s' "$CURRENT" | jq --argjson g "$GROUP" '
+# current group is appended after everything else. A file that is not exactly
+# one hooks document, an empty file among them, stops the transform, and is not
+# overwritten: it may be the operator's, and Codex cannot load hooks from it
+# either.
+NEXT=$(printf '%s' "$CURRENT" | jq -s --argjson g "$GROUP" '
     def ours: (.command // "") | contains("gh-origin-guard.sh");
-    if type != "object" or ((.hooks // {}) | type) != "object"
-       or ((.hooks.PreToolUse // []) | type) != "array"
-    then error("not a hooks document") else . end
+    if length != 1 then error("not one document") else .[0] end
+    | if type != "object" or ((.hooks // {}) | type) != "object"
+         or ((.hooks.PreToolUse // []) | type) != "array"
+      then error("not a hooks document") else . end
     | (.hooks.PreToolUse // []) as $pre
     | [ $pre[] | select(any((.hooks // [])[]; ours)) ] as $mine
     | if $mine == [$g] then .
