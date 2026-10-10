@@ -54,6 +54,12 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # STUB_LIST_FAIL_FIELD: only a listing that filters on this metadata field
+    # fails, so one lookup can be broken while the others still read.
+    for f in ${fields[@]+"${fields[@]}"}; do
+      [ -n "${STUB_LIST_FAIL_FIELD:-}" ] && [ "${f%%=*}" = "$STUB_LIST_FAIL_FIELD" ] \
+        && { echo "bd: down" >&2; exit 1; }
+    done
     out=$(jq -c --arg st ",$statuses," \
       '[ .[] | select((.status // "open") as $s | $st | contains("," + $s + ",")) ]' "$STORE")
     for f in ${fields[@]+"${fields[@]}"}; do
@@ -170,7 +176,7 @@ export STUB_SEQ="$TMP/seq"
 reset() {
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
   printf '0' > "$STUB_SEQ"
-  export STUB_CREATE_FAIL="" STUB_UPD_FAIL="" STUB_LIST_FAIL="" STUB_DROP_KEYS=""
+  export STUB_CREATE_FAIL="" STUB_UPD_FAIL="" STUB_LIST_FAIL="" STUB_LIST_FAIL_FIELD="" STUB_DROP_KEYS=""
   export STUB_CREATE_NO_ID="" STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
   export GC_RIG="gc-toolkit"
 }
@@ -257,19 +263,23 @@ reset
 eq "$(beads)" "2" "(distinct keys) two situations are two beads"
 
 # ── 5. --about narrows the dedup to one bead ─────────────────────────
+# A per-bead key (one finding per subject) passes --distinct on every call, so a
+# second subject under the key is its own finding, and --distinct leaves the
+# exact match in force: a repeat on the same subject still lands on its bead.
 reset
-"$SUT" --key witness-salvage-refused --about tk-aaa --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-"$SUT" --key witness-salvage-refused --about tk-bbb --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-eq "$(beads)" "2" "(--about) one key over two beads is two findings"
-"$SUT" --key witness-salvage-refused --about tk-aaa --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-eq "$(beads)" "2" "(--about) a repeat on the same bead files nothing new"
+"$SUT" --key witness-salvage-refused --about tk-aaa --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
+"$SUT" --key witness-salvage-refused --about tk-bbb --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
+eq "$(beads)" "2" "(--about) one per-bead key over two beads is two findings"
+"$SUT" --key witness-salvage-refused --about tk-aaa --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
+eq "$(beads)" "2" "(--about) a repeat on the same bead files nothing new, --distinct or not"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(--about) the repeat is counted on the first subject's bead"
 eq "$(meta fnd-1 'finding.about')" "tk-aaa" "(--about) the subject is stamped"
 eq "$(cat "$STUB_DEPS")" "fnd-1|tracks|tk-aaa
 fnd-2|tracks|tk-bbb" "(--about) tracks edges, never parent-child"
 
-# An unscoped finding must not adopt an --about-scoped bead: finding.about is
-# ABSENT there, which the listing filter alone cannot express.
-"$SUT" --key witness-salvage-refused --title "salvage refused" --message "no worktree" >/dev/null 2>&1
+# A finding with no --about must not adopt an --about-scoped bead: finding.about
+# is ABSENT there, which the listing filter alone cannot express.
+"$SUT" --key witness-salvage-refused --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
 eq "$(beads)" "3" "(--about) a finding with no subject is its own situation"
 eq "$(meta fnd-3 'finding.about')" "<absent>" "(--about) and carries no subject stamp"
 
@@ -398,6 +408,9 @@ eq "$RC" "0" "(dry-run) exit 0"
 eq "$(beads)" "0" "(dry-run) nothing filed"
 eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(dry-run) nothing slung"
 has "$OUT" "key=doctor-dry" "(dry-run) prints what it would file"
+OUT=$("$SUT" --key doctor-dry --title "dry" --message "dry fired" --distinct --dry-run 2>&1)
+has "$OUT" " distinct" "(dry-run) and names --distinct when it is given"
+eq "$(beads)" "0" "(dry-run) --distinct still files nothing"
 
 # ── 15. --check derives the doctor key from the check name ───────────
 # The doctor JSON names a check `<rig>:<check>`, and dedup is exact-match on the
@@ -571,6 +584,124 @@ for st in in_progress deferred hooked pinned; do
   eq "$(findings doctor-live)" "1" "(live/$st) no second bead"
   eq "$(meta fnd-1 'finding.occurrences')" "2" "(live/$st) the recurrence lands on it"
 done
+
+# ── 18. one situation re-reported under another key or subject ───────
+# A patrol that types its key by hand picks it afresh on every pass, so one
+# situation comes back under a new key with the same subject, or under the same
+# key with another subject. The exact match cannot see either, and each would
+# be a twin with its own first reaction. A new bead that shares either half
+# with a live finding in its scope is refused, and those findings are listed.
+SIT="21 open witness-refinery-queue visits carry malformed groups"
+reset
+"$SUT" --scope witness-findings --key stale-malformed-visits --about tk-visit \
+  --title "$SIT" --message "21 visits, retract skips them" >/dev/null 2>&1
+eq "$(beads)" "1" "(sibling) the first report files its bead"
+
+# The subject half: a new key over the same subject.
+OUT=$("$SUT" --scope witness-findings --key witness-refinery-queue-malformed-visits --about tk-visit \
+        --title "$SIT" --message "21 visits, retract skips them" 2>&1); RC=$?
+eq "$RC" "3" "(sibling/subject) a new key over a live finding's subject exits 3"
+eq "$(beads)" "1" "(sibling/subject) and files nothing"
+has "$OUT" "refusing to file a new bead" "(sibling/subject) says it refused"
+has "$OUT" "fnd-1 [open] --key stale-malformed-visits --about tk-visit — $SIT" "(sibling/subject) lists the live finding with the key and subject to re-run with"
+has "$OUT" "--distinct" "(sibling/subject) names the override for a different situation"
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(sibling/subject) a refused filing slings no reaction"
+
+# Re-run with the listed key and subject: the report is an occurrence there.
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits --about tk-visit \
+        --title "$SIT" --message "21 visits, still skipped" 2>&1); RC=$?
+eq "$RC" "0" "(sibling/re-run) the listed key and subject land"
+eq "$(beads)" "1" "(sibling/re-run) still one bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/re-run) counted as an occurrence on it"
+
+# The key half: the same key over another subject, or over none.
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits --about tk-handoff \
+        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+eq "$RC" "3" "(sibling/key) the live key over another subject exits 3"
+has "$OUT" "fnd-1 [open] --key stale-malformed-visits --about tk-visit" "(sibling/key) lists the finding holding the key"
+OUT=$("$SUT" --scope witness-findings --key stale-malformed-visits \
+        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+eq "$RC" "3" "(sibling/key) the live key with no subject exits 3"
+eq "$(beads)" "1" "(sibling/key) neither files a bead"
+
+# --distinct files it: the caller compared and the situation is another one.
+OUT=$("$SUT" --scope witness-findings --key witness-salvage-refused --about tk-visit --distinct \
+        --title "tk-visit salvage refused" --message "no worktree" 2>&1); RC=$?
+eq "$RC" "0" "(sibling/--distinct) exit 0"
+eq "$(beads)" "2" "(sibling/--distinct) files its own bead beside the live one"
+has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-2" "(sibling/--distinct) and slings its reaction"
+
+# Only a live finding in the same scope is a sibling, and only one that shares
+# a half: another patrol's finding, a closed one, or one that shares neither key
+# nor subject files as before.
+OUT=$("$SUT" --scope deacon-findings --key dolt-visit-lag --about tk-visit \
+        --title "dolt lag" --message "lag" 2>&1); RC=$?
+eq "$RC" "0" "(sibling/scope) another scope's finding on the subject is no sibling"
+eq "$(beads)" "3" "(sibling/scope) it files"
+OUT=$("$SUT" --scope witness-findings --key witness-crash-loop --about tk-other \
+        --title "crash loop" --message "recovered twice" 2>&1); RC=$?
+eq "$RC" "0" "(sibling/neither half) a new key over a new subject files"
+eq "$(beads)" "4" "(sibling/neither half) as its own bead"
+gc bd close fnd-1 >/dev/null 2>&1
+gc bd close fnd-2 >/dev/null 2>&1
+OUT=$("$SUT" --scope witness-findings --key witness-legacy-visits --about tk-visit \
+        --title "$SIT" --message "21 visits" 2>&1); RC=$?
+eq "$RC" "0" "(sibling/closed) a closed finding on the subject is no sibling"
+eq "$(beads)" "5" "(sibling/closed) it files"
+
+# Findings with no subject share only a key, so distinct keys stay distinct.
+reset
+"$SUT" --scope deacon-findings --key dolt-server-unreachable --title a --message a >/dev/null 2>&1
+OUT=$("$SUT" --scope deacon-findings --key dolt-orphan-dbs --title b --message b 2>&1); RC=$?
+eq "$RC" "0" "(sibling/no subject) two keys with no subject are two findings"
+eq "$(beads)" "2" "(sibling/no subject) both file"
+
+# A held sibling is still a live record of the situation, so it is listed, after
+# the unheld one.
+reset
+"$SUT" --scope witness-findings --key k-first --about tk-visit --title "$SIT" --message m >/dev/null 2>&1
+put_bead fix-1 open
+hold fnd-1 blocked fix-1
+"$SUT" --scope witness-findings --key k-second --about tk-visit --distinct --title "$SIT" --message m >/dev/null 2>&1
+OUT=$("$SUT" --scope witness-findings --key k-third --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+eq "$RC" "3" "(sibling/held) a held sibling still refuses the filing"
+has "$OUT" "fnd-1 [blocked]" "(sibling/held) the held finding is listed"
+FIRST=$(printf '%s\n' "$OUT" | grep -m1 '^  fnd-' | sed 's/^  \(fnd-[0-9]*\).*/\1/')
+eq "$FIRST" "fnd-2" "(sibling/held) the unheld finding is listed first"
+
+# The sibling lookup itself cannot be read: fail CLOSED, as the exact lookup
+# does, rather than read a failed listing as "no sibling" and file the twin.
+reset
+"$SUT" --scope witness-findings --key k-live --about tk-visit --title "$SIT" --message m >/dev/null 2>&1
+export STUB_LIST_FAIL_FIELD=finding.scope
+OUT=$("$SUT" --scope witness-findings --key k-new --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+eq "$RC" "1" "(sibling/unreadable) fails closed on an unreadable sibling lookup"
+eq "$(beads)" "1" "(sibling/unreadable) files nothing"
+has "$OUT" "sibling lookup failed" "(sibling/unreadable) says the lookup failed"
+OUT=$("$SUT" --scope witness-findings --key k-live --about tk-visit --title "$SIT" --message m 2>&1); RC=$?
+eq "$RC" "0" "(sibling/unreadable) an exact repeat never reaches the sibling lookup"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(sibling/unreadable) and lands on its bead"
+OUT=$("$SUT" --scope witness-findings --key k-other --about tk-visit --distinct --title "$SIT" --message m 2>&1); RC=$?
+eq "$RC" "0" "(sibling/unreadable) --distinct skips the lookup"
+eq "$(beads)" "2" "(sibling/unreadable) and files"
+
+# ── 19. a wisp is no subject ─────────────────────────────────────────
+# A patrol burns its wisp when the pass ends and the next pass pours another,
+# so a finding about one would carry a new --about every pass and file a new
+# bead each time. The wisp is dropped and the key alone is the identity.
+reset
+OUT=$("$SUT" --scope witness-findings --key witness-binding-prefix-empty --about tk-wisp-abc \
+        --title "binding prefix empty" --message "wisp poured with an empty binding_prefix" 2>&1); RC=$?
+eq "$RC" "0" "(wisp) a wisp subject still files"
+has "$OUT" "tk-wisp-abc is a wisp" "(wisp) and says the subject was dropped"
+eq "$(meta fnd-1 'finding.about')" "<absent>" "(wisp) no finding.about is stamped"
+eq "$(cat "$STUB_DEPS")" "" "(wisp) no tracks edge to a bead about to vanish"
+"$SUT" --scope witness-findings --key witness-binding-prefix-empty --about tk-wisp-def \
+  --title "binding prefix empty" --message "wisp poured with an empty binding_prefix" >/dev/null 2>&1
+eq "$(beads)" "1" "(wisp) the next pass's wisp lands on the same bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(wisp) as an occurrence"
+OUT=$("$SUT" --key witness-binding-prefix-empty --about tk-wisp-ghi --title t --message m --dry-run 2>&1)
+hasnt "$OUT" "about=" "(wisp) a dry run shows no subject either"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
