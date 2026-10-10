@@ -4,7 +4,7 @@
 # of the condition order orders/liveness-sweep.toml: exit 0 = run the pass,
 # non-zero = do not.
 # IT CLASSIFIES WITH liveness-sweep.sh's OWN CLASSIFIER (liveness-classify.sh)
-# over the same three bead reads, and passes empty the reads it does not make:
+# over the same bead reads, and passes empty the reads it does not make:
 # open PRs, convoy-worked beads, husk steps and pre-open gate verdicts. An
 # empty input drops nothing, so the local survivor set is a SUPERSET of the
 # sweep's true candidates and "zero new locally" proves "zero new really" for
@@ -24,10 +24,10 @@
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
 set -uo pipefail
 
-# The classifier liveness-sweep.sh runs ($LIVENESS_CLASSIFY_JQ), and the two
-# shared definitions it builds on: what subject a visit covers
-# ($VISIT_IDENTITY_JQ, which the live-visit guard reads as well) and the
-# standing kinds ($STANDING_KINDS_JQ).
+# The classifier liveness-sweep.sh runs ($LIVENESS_CLASSIFY_JQ), and the shared
+# definitions it builds on: what subject a visit covers ($VISIT_IDENTITY_JQ,
+# which the live-visit guard reads as well) and the standing kinds
+# ($STANDING_KINDS_JQ).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
