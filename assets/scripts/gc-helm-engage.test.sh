@@ -110,14 +110,18 @@ stub_lock()   { _t=0; until mkdir "$1" 2>/dev/null; do sleep 0.02; _t=$((_t + 1)
 stub_unlock() { rmdir "$1" 2>/dev/null || true; }
 case "$1 ${2:-}" in
   "rig list")
-    # suspended/running are injected per-case via $RIG_SUSPENDED/$RIG_RUNNING.
-    # Unset means the field is ABSENT (an older gc that does not report it), which
-    # the liveness guard reads as unknown and does not refuse on — the default for
-    # every case that does not set them. The rig's checkout path is $RIG_PATH, a
-    # fixture that carries converse templates so the converse-template guard passes;
-    # a case points it at a template-less dir to exercise the refusal.
-    jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" \
-      '{rigs:[ ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk"}
+    # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
+    # controller, injected via $HQ_RUNNING. The rig's suspended/running are
+    # injected via $RIG_SUSPENDED/$RIG_RUNNING. Unset means the field is ABSENT (an
+    # older gc that does not report it), which the liveness guard reads as unknown
+    # and does not refuse on — the default for every case that does not set them.
+    # The rig's checkout path is $RIG_PATH, a fixture that carries converse
+    # templates so the converse-template guard passes; a case points it at a
+    # template-less dir to exercise the refusal.
+    jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
+      '{rigs:[ ({name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+               + (if $hq   != "" then {running:   ($hq   == "true")} else {} end)),
+               ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
                + (if $run  != "" then {running:   ($run  == "true")} else {} end)) ]}' ;;
   "session list")
@@ -1048,28 +1052,49 @@ has "$OUT" "is suspended" "(SUSPENDED) …saying the rig is suspended"
 has "$OUT" "gc rig resume gc-toolkit" "(SUSPENDED) …and naming the resume as the fix"
 unset RIG_SUSPENDED
 
-echo "# a subject rig with no agents running is refused before anything spawns"
-export RIG_RUNNING=false
+echo "# a city whose controller is down is refused before anything spawns"
+# The reconciler, the controller's loop, is what launches the sitting; the HQ
+# row's running is gc's probe of that controller.
+export HQ_RUNNING=false
 run_engage tk-vis --no-attach
-eq "$RC" 4 "(NOTRUNNING) engaging on a not-running rig exits 4"
-hasnt "$CALLED" "session new" "(NOTRUNNING) …and spawns nothing"
-has "$OUT" "no agents running" "(NOTRUNNING) …saying so"
-unset RIG_RUNNING
+eq "$RC" 4 "(CTRL-DOWN) engaging while the city controller is down exits 4"
+hasnt "$CALLED" "session new" "(CTRL-DOWN) …and spawns nothing"
+has "$OUT" "city controller is down" "(CTRL-DOWN) …saying the controller is down"
+has "$OUT" "gc status" "(CTRL-DOWN) …and pointing at the city's status"
+hasnt "$OUT" "gc rig status" "(CTRL-DOWN) …not at the subject rig's"
+unset HQ_RUNNING
 
-echo "# an explicitly live rig (suspended=false, running=true) spawns as normal"
-# The guard refuses only on suspended=true or running=false, so a rig gc reports
-# as live must engage exactly as one that reports neither flag.
-export RIG_SUSPENDED=false RIG_RUNNING=true
+echo "# an idle subject rig (running=false) engages while the controller is up"
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches the sitting there like anywhere else.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=false
 run_engage tk-vis --no-attach
-eq "$RC" 0 "(LIVE) engaging on an explicitly live rig exits 0"
+eq "$RC" 0 "(IDLE) engaging on an idle rig exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IDLE) …and spawns the sitting"
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
+
+echo "# a suspended rig is refused even while the controller is up"
+export HQ_RUNNING=true RIG_SUSPENDED=true
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-UP) a suspended rig still exits 4 with the controller up"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-UP) …on the suspension"
+unset HQ_RUNNING RIG_SUSPENDED
+
+echo "# an explicitly live city (controller running, rig not suspended) spawns as normal"
+# The guard refuses only on suspended=true or an HQ running=false, so a city gc
+# reports as live must engage exactly as one that reports neither flag.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=true
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(LIVE) engaging on an explicitly live city exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(LIVE) …and spawns the sitting"
-unset RIG_SUSPENDED RIG_RUNNING
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
 
 echo "# an open visit bound to a GONE sitting is reclaimed, then re-engaged"
-# A sitting whose rig was suspended/down at bind time never registers, leaving
-# the visit open+assigned to a session absent from `gc session list`. engage must
-# not point the operator at that dead session: it reclaims the visit (clears the
-# binding, re-parks on the board) and spawns a fresh sitting.
+# A sitting bound while its rig was suspended or the controller was down never
+# registers, leaving the visit open+assigned to a session absent from
+# `gc session list`. engage must not point the operator at that dead session: it
+# reclaims the visit (clears the binding, re-parks on the board) and spawns a
+# fresh sitting.
 export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-dead" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 export LIVE_SITTINGS=""
@@ -1385,7 +1410,7 @@ unset SUBJ_CREATE_FAIL
 
 echo "# --new-subject whose post-create gate aborts still files the subject's one visit"
 # The subject is created MARKED before the gates that can still refuse the live
-# engage (here an unknown --model, like the suspended/not-running rig and unknown
+# engage (here an unknown --model, like the suspended, controller-down and unknown
 # --template gates). An abort there must not leave the operator-origin subject with
 # no visit: the async worker will not supply one (gc-proactive drops a marked bead,
 # mol-first-reaction consumes-and-ignores it, and even unmarked a first reaction
