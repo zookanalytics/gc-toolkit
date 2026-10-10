@@ -1208,7 +1208,13 @@ run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existi
           "tk-subj" "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-other reason=outcome-stamped" \
    "(FINISH-FOREIGN) an out-of-group strand is finished, not put back"
-eq "${CUPD:-<none>}" "<none>" "(FINISH-FOREIGN) …and the release never runs"
+# The release is three writes: the session pins unset, --status=open, and the
+# assignee cleared. The finish writes only the visit's work outcome before its
+# close (work-outcome.sh).
+eq "$(grep -cE -- '--status=open|--assignee=|--unset-metadata gc\.session_(id|name)' <<< "$CUPD" || true)" "0" \
+   "(FINISH-FOREIGN) …and the release never runs"
+eq "$(grep -v -- '--set-metadata gc.work_outcome=no-op' <<< "$CUPD" | grep -c . || true)" "0" \
+   "(FINISH-FOREIGN) …and the finish writes nothing but the work outcome"
 
 # --- the prompt and the doc carry the verdict the script now returns ---------
 # An unknown action falls through the prompt's case with VISIT set, so a prompt
