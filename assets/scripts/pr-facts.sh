@@ -68,7 +68,9 @@
 # in-flight review stands it down as well as a rework. It reads the same required
 # set merge.sh holds on (required_contexts_for) but routes on a terminal failure
 # only: a pending or missing required check has not failed, so it is left for a
-# later pass.
+# later pass. It parks the anchor to a person instead of dispatching when no
+# failing required check is a code failure, when the attempt cap is reached, or
+# when a fixer already sent to this head closed and the head has not moved.
 # Such a batch also ensures a live check_name=human validation pass on the
 # anchor: it is review the branch has never been answered against, so it enters
 # the graph as a task_kind=validation bead from which gate-ensure's quiescence
@@ -587,12 +589,13 @@ reconcile_status_label() { # <anchor> <pr-number>
 # moved base (pr-retargeted), feedback nothing routed (pr-comments), review
 # threads nobody engaged (pr-unengaged-threads), threads branch protection
 # requires resolved (merge-blocked-threads), and red checks parked to a person
-# (pr-fix-noncode, pr-fix-capped). A PR closed with a pre-recorded disposition
-# has no merge left to hold, so the disposition arm retires these visits. An arm
-# that files a new merge-holding visit adds its key here.
+# (pr-fix-noncode, pr-fix-capped, pr-fix-unmoved). A PR closed with a
+# pre-recorded disposition has no merge left to hold, so the disposition arm
+# retires these visits. An arm that files a new merge-holding visit adds its key
+# here.
 MERGE_PATH_KEYS_JQ='
   def merge_path_key($n):
-    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
+    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped|fix-unmoved)\\." + $n + "$")
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
     or . == "merge-blocked-threads";'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
@@ -3065,12 +3068,25 @@ GATES
             fi
             rc_names=$(printf '%s' "$rc_code_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
             rc_urls=$(printf '%s' "$rc_code_json" | jq -r '[ .[] | .url | select(. != "") ] | join(" ")' 2>/dev/null)
+            # Every red-check child names the head it was sent to fix twice: in the
+            # title it is minted with ("$RC_TITLE required check red at head <oid>")
+            # and in its rejection_reason ("... at head <oid>"). Two writers unset
+            # rejection_reason: resuming a rework (mol-polecat-work's
+            # rejected-branch-resume block) and the refinery's landed-on-branch close
+            # (mol-refinery-patrol's one-anchor-per-pr-terminal). A child that has
+            # been worked keeps its head only in the title, so rc_heads reads both.
+            # The same-head park and the attempt cap below read a child's head
+            # through it.
+            RC_TITLE="Fix failing required check(s) on PR#$num:"
+            RC_HEADS_DEF='
+              def rc_heads($t):
+                ( ((.title // "") | tostring | select(startswith($t))),
+                  ((.metadata.rejection_reason // "") | tostring | select(test("Required check"))) )
+                | scan("head ([0-9a-fA-F]{7,40})"; "i") | .[0] | ascii_downcase;'
             # Dedup like the conflict arm, but keyed on anchor_bead so it also
             # stands down for an in-flight REVIEW child (a re-review that will move
             # the head), not only a rework: any LIVE child of this anchor means
-            # work already covers it, and any child (closed included) whose
-            # rejection_reason names THIS head means this head was already routed —
-            # re-dispatching it would loop on a head nothing moved.
+            # work already covers it.
             rc_kids=$(bd_list --metadata-field anchor_bead="$id" --status="$ALL_STATUSES") || {
               echo "$PROG: $id — PR#$num has a red required check but the child probe failed; nothing dispatched (retry next pass)" >&2
               skipped=$((skipped + 1)); continue
@@ -3087,39 +3103,65 @@ GATES
                 | select(((.metadata.merge_result // "") | tostring) == "")
                 | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
                 | .id ] | .[0] // empty' 2>/dev/null)
-            rc_dup=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg s "$rc_stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+            rc_dup=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg s "$rc_stranded" --arg live "$LIVE_STATUSES" '
               ($live | split(",")) as $ls
               | [ .[] | select(.id != $id) | select(.id != $s)
                   | ((.status // "open") | ascii_downcase) as $st
-                  | ((.metadata.rejection_reason // "") | tostring) as $rr
-                  | select((($ls | index($st)) != null)
-                           or (($h != "") and ($rr | contains("head " + $h))))
+                  | select(($ls | index($st)) != null)
                   | .id ] | .[0] // empty' 2>/dev/null)
             if [ -n "$rc_dup" ]; then
               echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
               skipped=$((skipped + 1)); continue
             fi
-            # Attempt cap. Each red-check child names the head it was sent to fix
-            # twice: in the title it is minted with ("$RC_TITLE required check red
-            # at head <oid>") and in its rejection_reason ("... at head <oid>").
-            # Two writers unset rejection_reason: resuming a rework
-            # (mol-polecat-work's rejected-branch-resume block) and the refinery's
-            # landed-on-branch close (mol-refinery-patrol's
-            # one-anchor-per-pr-terminal). A child that has been worked keeps its
-            # head only in the title, so both are read. The distinct hex heads
-            # across this anchor's children (any status), less this head, are the
-            # PRIOR attempts. At the cap, stop churning fixers at a stuck PR and
-            # park it to a human. A stranded child (rescued below) is this head's
-            # attempt whose route failed to land, not a new one, so it is never
-            # capped. Nothing lowers the count, so once an anchor reaches the cap
-            # every later red head parks it again, including the first pass after
-            # a person clears the route.
-            RC_TITLE="Fix failing required check(s) on PR#$num:"
-            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" '
-              [ .[] | select(.id != $id)
-                | ( ((.title // "") | tostring | select(startswith($t))),
-                    ((.metadata.rejection_reason // "") | tostring | select(test("Required check"))) )
-                | scan("head ([0-9a-fA-F]{7,40})"; "i") | .[0] | ascii_downcase ]
+            # A CLOSED red-check child sent to THIS head means this head was already
+            # routed to a fixer, and it is still red. Another fixer would repeat that
+            # attempt at a head nothing moved, and the attempt cap below counts only
+            # prior heads, so it would never stop the repeats. The anchor parks to a
+            # human instead. A child this script unmade at birth
+            # (gc.outcome=abandoned) was never routed, so no fixer was sent. A closed
+            # child of another arm is not read here: the red check is not what it
+            # was sent to fix.
+            rc_tried=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" "$RC_HEADS_DEF"'
+              ($h | ascii_downcase) as $hl
+              | [ .[] | select(.id != $id)
+                  | select(((.status // "open") | ascii_downcase) == "closed")
+                  | select(((.metadata["gc.outcome"] // "") | tostring) != "abandoned")
+                  | select(($hl != "") and any(rc_heads($t); . == $hl))
+                  | .id ] | .[0] // empty' 2>/dev/null)
+            if [ -n "$rc_tried" ]; then
+              # The head this pass read can predate the child's close, and the
+              # refinery closes a worked child only once its push has landed on the
+              # branch. So the head is read again, after the close, and the anchor
+              # parks only when it still names this head.
+              rc_head_now=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json headRefOid 2>/dev/null \
+                | scrub | jq -r '.headRefOid // ""' 2>/dev/null)
+              if [ "$rc_head_now" != "$head_oid" ]; then
+                echo "$PROG: $id — PR#$num head re-read as '${rc_head_now:-nothing}' rather than $head_oid after red-check child $rc_tried closed; nothing parked or dispatched (the next pass reads the head again)" >&2
+                skipped=$((skipped + 1)); continue
+              fi
+              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                   --route human \
+                   --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
+                escalate "$id" "pr-fix-unmoved.$num" \
+                  "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing gc.routed_to at this head parks it again. Once a push moves the head, clearing gc.routed_to lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
+                flagged=$((flagged + 1))
+                echo "$PROG: $id — PR#$num required check(s) failing ($rc_names) at head $head_oid, which red-check child $rc_tried was already sent to fix; parked to human (no new fixer dispatched)"
+              else
+                echo "$PROG: WARN $id — PR#$num is red at a head red-check child $rc_tried was already sent to fix, but parking the anchor to human did not land (retry next pass)" >&2
+                skipped=$((skipped + 1))
+              fi
+              continue
+            fi
+            # Attempt cap. The distinct heads this anchor's red-check children (any
+            # status) were sent to fix, less this head, are the PRIOR attempts. At
+            # the cap, stop churning fixers at a stuck PR and park it to a human. A
+            # stranded child (rescued below) is this head's attempt whose route
+            # failed to land, not a new one, so it is never capped. Nothing lowers
+            # the count, so once an anchor reaches the cap every later red head
+            # parks it again, including the first pass after a person clears the
+            # route.
+            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" "$RC_HEADS_DEF"'
+              [ .[] | select(.id != $id) | rc_heads($t) ]
               | unique | map(select(. != ($h | ascii_downcase))) | length' 2>/dev/null)
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then

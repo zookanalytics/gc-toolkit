@@ -745,13 +745,13 @@ mpvisit() { # id subject key [status] [assignee]
     "$1" "${4:-open}" "${5:-}" "$3" "$2"
 }
 : > "$STUB_DEPS"
-store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(mpvisit VC1 F2z pr-comments.133.5.7), $(mpvisit VU1 F2z pr-unengaged-threads.133.sha-133), $(mpvisit VB1 F2z merge-blocked-threads), $(mpvisit VT3 F2z pr-retargeted.133), $(mpvisit VN3 F2z pr-fix-noncode.133 deferred), $(mpvisit VK3 F2z pr-fix-capped.133)]"
-printf 'VC1|tracks|F2z\nVU1|tracks|F2z\nVB1|tracks|F2z\nVT3|tracks|F2z\nVN3|tracks|F2z\nVK3|tracks|F2z\n' > "$STUB_DEPS"
+store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(mpvisit VC1 F2z pr-comments.133.5.7), $(mpvisit VU1 F2z pr-unengaged-threads.133.sha-133), $(mpvisit VB1 F2z merge-blocked-threads), $(mpvisit VT3 F2z pr-retargeted.133), $(mpvisit VN3 F2z pr-fix-noncode.133 deferred), $(mpvisit VK3 F2z pr-fix-capped.133), $(mpvisit VM3 F2z pr-fix-unmoved.133)]"
+printf 'VC1|tracks|F2z\nVU1|tracks|F2z\nVB1|tracks|F2z\nVT3|tracks|F2z\nVN3|tracks|F2z\nVK3|tracks|F2z\nVM3|tracks|F2z\n' > "$STUB_DEPS"
 printf '%s' "$(prview 133 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_133.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus F2z)" "closed" "the anchor closes in the same pass"
-for v in VC1 VU1 VB1 VT3 VN3 VK3; do
+for v in VC1 VU1 VB1 VT3 VN3 VK3 VM3; do
   eq "$(bstatus "$v")" "closed" "merge-path visit $v is retired"
 done
 eq "$(meta VC1 'gc.outcome')" "moot" "…closed moot"
@@ -4542,13 +4542,108 @@ eq "$(meta CAP4 'gc.routed_to')" "human" "…so the anchor parks to a human"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
 rm -f "$GH_DIR/rules_main.json"
 
-echo "# …a worked child at the CURRENT head is not a prior attempt"
+echo "# …a child at the CURRENT head is not a prior attempt"
+# The child at the current head is a husk the arm unmade at birth
+# (gc.outcome=abandoned): it was never routed, so it parks nothing either, and
+# the arm mints the fixer the husk was meant to be.
 reap_req
-store "[$(anchor CAP5 124),$(rwchild_worked CK12 CAP5 124 "$CAPH1"),$(rwchild_worked CK13 CAP5 124 "$CAPH2"),$(rwchild_worked CK14 CAP5 124 "$CAPHX")]"
+CK14_HUSK='{"id":"CK14","status":"closed","assignee":"","notes":"","issue_type":"task","title":"Fix failing required check(s) on PR#124: required check red at head '"$CAPHX"'","metadata":{"task_kind":"rework","anchor_bead":"CAP5","branch":"polecat/x124","pr_number":"124","gc.outcome":"abandoned"}}'
+store "[$(anchor CAP5 124),$(rwchild_worked CK12 CAP5 124 "$CAPH1"),$(rwchild_worked CK13 CAP5 124 "$CAPH2"),$CK14_HUSK]"
 rcredview 124 "$CAPHX"
 out=$(run)
 hasnt "$out" "reached the cap" "two prior heads plus one child at the current head stay under the cap"
+hasnt "$out" "was already sent to fix" "…an unmade husk at the current head does not park the anchor"
+has "$out" "required check(s) failing (test); filed" "…so the arm sends the current head its fixer"
 eq "$(meta CAP5 'gc.routed_to')" "" "…and the anchor is not parked"
+rm -f "$GH_DIR/rules_main.json"
+
+# ---- same-head park: a head a fixer was already sent to draws no second one ----
+# A red-check child closed at the head the PR is still red at means a fixer was
+# already sent to that head and the head did not move. A second fixer would
+# repeat the attempt, and the cap counts only prior heads, so it would never stop
+# the repeats. The anchor parks to a human instead (gc.routed_to=human and the
+# takeaway in one lifecycle.sh update) and a pr-fix-unmoved visit is filed.
+echo "# a worked child at the CURRENT head parks the anchor rather than send a second fixer"
+reap_req
+store "[$(anchor UM1 175),$(rwchild_worked CK15 UM1 175 "$CAPHX")]"
+rcredview 175 "$CAPHX"
+: > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "which red-check child CK15 was already sent to fix; parked to human" "a worked child, its head only in its title, parks the anchor"
+eq "$(meta UM1 'gc.routed_to')" "human" "…to a human"
+has "$(meta UM1 'gc.takeaway')" "PR#175 is still red at the head an auto-fixer was already sent to" "…with a takeaway naming what the person owes"
+eq "$(grep '^bd update UM1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#175' || true)" "1" "…written in the same update as the route"
+eq "$(no_rework)" "0" "…and no second fixer is sent to the unmoved head"
+has "$(cat "$STUB_ESC_LOG")" "--subject UM1 --key pr-fix-unmoved.175" "…and the park files its visit"
+eq "$(meta UM1 merge_result)" "pull_request" "…while the anchor keeps gating"
+
+echo "# …a person clearing the route at the same head sees it parked again"
+jq -c 'map(if .id == "UM1" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/um1.json" && mv "$TMP/um1.json" "$STUB_STORE"
+out=$(run)
+eq "$(meta UM1 'gc.routed_to')" "human" "the next red pass at the same head parks the anchor again"
+eq "$(no_rework)" "0" "…and still sends no fixer"
+
+echo "# …once a push moves the head, clearing the route lets a fixer try the new head"
+rcredview 175 "$CAPH1"
+jq -c 'map(if .id == "UM1" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/um1.json" && mv "$TMP/um1.json" "$STUB_STORE"
+out=$(run)
+has "$out" "required check(s) failing (test); filed" "a still-red moved head draws a fixer, the unmoved head counting as one prior attempt"
+eq "$(meta UM1 'gc.routed_to')" "" "…and the anchor is not parked"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …a red-check child closed unworked at the current head parks too, read from its rejection_reason"
+# Closed before any fixer resumed it, the child keeps its rejection_reason, and
+# the title this fixture carries names no head.
+reap_req
+store "[$(anchor UM2 176),$(rwchild CK16 UM2 176 "$CAPHX" closed)]"
+rcredview 176 "$CAPHX"
+out=$(run)
+has "$out" "which red-check child CK16 was already sent to fix; parked to human" "a closed child naming the head in its rejection_reason parks the anchor"
+eq "$(no_rework)" "0" "…and sends no fixer"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …the park reads the head again: a head that moved since this pass read it parks nothing"
+# The refinery closes a worked child once its push lands, so a pass that read the
+# PR just before that push sees the child closed at a head the push has moved.
+# Here the pinned read answers with the old head and the re-read with the new one.
+reap_req
+store "[$(anchor UM3 177),$(rwchild_worked CK17 UM3 177 "$CAPHX")]"
+rcredview 177 "$CAPHX"
+mkdir -p "$GH_DIR/pr_view_177.queue/headRefOid"
+printf '{"headRefOid":"%s"}' "$CAPH1" > "$GH_DIR/pr_view_177.queue/headRefOid/01.json"
+out=$(run)
+has "$out" "PR#177 head re-read as '$CAPH1' rather than $CAPHX" "a head that re-reads as moved is named"
+has "$out" "nothing parked or dispatched" "…and is neither parked nor sent a fixer"
+eq "$(meta UM3 'gc.routed_to')" "" "…so the anchor stays unrouted"
+eq "$(no_rework)" "0" "…and no fixer goes to the stale head"
+out=$(run)
+eq "$(meta UM3 'gc.routed_to')" "human" "…while a pass whose re-read still names the head parks it"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …a park whose route does not read back files no visit and retries next pass"
+reap_req
+store "[$(anchor UM4 178),$(rwchild_worked CK18 UM4 178 "$CAPHX")]"
+rcredview 178 "$CAPHX"
+: > "$STUB_ESC_LOG"
+out=$(STUB_DROP_KEYS="UM4:gc.routed_to" run)
+has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-unmoved.178" "…so no visit is filed for a park that did not happen"
+eq "$(no_rework)" "0" "…and no fixer is sent either"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …a closed child of another arm at the current head neither parks the anchor nor stands the arm down"
+# A feedback rework closed at this head still names it in its rejection_reason,
+# but the red check is not what it was sent to fix, so the arm sends this head
+# its first fixer.
+reap_req
+FBK179='{"id":"FBK","status":"closed","assignee":"","notes":"","issue_type":"task","title":"Address review comments on PR#179 (through review 0, comment 1)","metadata":{"task_kind":"rework","anchor_bead":"UM5","branch":"polecat/x179","rejection_reason":"Review feedback on PR#179 is unanswered at head '"$CAPHX"'. Answer every item.","prepare_mode":"merge","merge_strategy":"mr","pr_number":"179"}}'
+store "[$(anchor UM5 179),$FBK179]"
+rcredview 179 "$CAPHX"
+out=$(run)
+hasnt "$out" "already covers this head" "a closed feedback rework at the current head does not cover the red check"
+hasnt "$out" "was already sent to fix" "…and does not park the anchor"
+has "$out" "required check(s) failing (test); filed" "…so the arm sends a fixer"
+eq "$(no_rework)" "1" "…exactly one"
 rm -f "$GH_DIR/rules_main.json"
 
 # ---- per-review dismissal + re-request once a human review's findings clear ----
