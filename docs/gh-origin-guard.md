@@ -34,7 +34,8 @@ keeps working.
 
 A refusal names the repository it stopped, names the repositories the session
 may write to, and points at the prepare-a-command path so the agent learns the
-route instead of only meeting a wall.
+route instead of only meeting a wall. When `gh` picked that repository from the
+working directory's remotes, the refusal also says how it picks.
 
 On a repository the session does own, a post is held to one more rule, below.
 
@@ -115,12 +116,40 @@ The guard resolves the target the way `gh` itself does, in the same order:
    global one.
 3. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
    same command line, or ambient in the environment.
-4. The `origin` remote of the working directory.
+4. The repository `gh` picks from the working directory's remotes, described
+   below.
 
 The working-directory step is the one that matters most. `gh` with no `--repo`
 writes to whatever repository the working directory belongs to, so an agent
 standing in a clone of someone else's project sends there with no flag to
 inspect. A guard that read only the explicit flag would wave that through.
+
+`gh` does not read the `origin` remote first. It ranks the remotes upstream,
+github, origin, then the rest by name. It takes the first of them that
+`gh repo set-default` marked, which is a remote whose
+`remote.<name>.gh-resolved` git config is set. A value of `base` means that
+remote's repository, and an OWNER/REPO value means that repository on the
+remote's host. With no remote marked, and no terminal to ask in, `gh` takes the
+first remote in that order. A clone whose `origin` is ours and whose `upstream`
+is someone else's therefore writes to the upstream repository unless `origin`
+is marked, and the guard measures that repository, not `origin`.
+
+`gh` skips a remote whose URL names no repository, such as a local path, and
+reads a remote's push URL when its fetch URL names none. Before choosing, it
+narrows the remotes by forge, using the hosts it is logged in to, or `GH_HOST`
+alone when that is set. The guard does not read `gh`'s login configuration, so
+it makes the choice twice: among every remote, and among the remotes on the
+forge the call uses, which is `GH_HOST` or else `github.com`. The two agree in
+any checkout whose remotes all live on that forge. When they disagree, the
+repository `gh` writes to depends on configuration the guard does not read, and
+the write is refused. An SSH host alias counts as a forge of its own, because
+the guard reads a remote's host as written.
+
+The guard reads a remote URL the way `gh` does, but it does not follow every
+form Go's URL parser accepts. A URL carrying a percent escape, a query, or a
+port that is not a number is never skipped, so if it would come first the
+write is refused. A checkout with more than twelve remotes is refused as well,
+because with more than twelve, `gh`'s sort can reorder remotes of equal rank.
 
 An owner/name given without a host is completed with the host `gh` would use:
 `GH_HOST` set inline on the command, exported earlier on the same line, or
@@ -164,7 +193,9 @@ the method and `-iftitle=x` adds a field, just as `-i -X POST` and
 
 `{owner}` and `{repo}` placeholders, and gh's older `:owner` and `:repo`
 spellings, are filled from the repository `GH_REPO` names, or else from the
-working directory's `origin`. gh fills them before it reads the host or the
+repository gh picks from the working directory's remotes. A `--hostname` does
+not change that pick, because only `GH_HOST` narrows the remotes. gh fills the
+placeholders before it reads the host or the
 path, and the guard does the same. Only the owner and the name come from that
 repository. The host stays the one the endpoint names, and a concrete owner or
 name beside a placeholder stays in the target. So
@@ -184,8 +215,10 @@ directory.
 
 City-scope agents such as the deacon and mechanik carry no rig root and
 legitimately work across rigs, so for them the owned set is the origin of every
-rig under `$GC_CITY_PATH/rigs`. The working directory is the last resort, used
-only when neither a rig root nor a city resolves.
+rig under `$GC_CITY_PATH/rigs`. The working directory's `origin` is the last
+resort, used only when neither a rig root nor a city resolves. The owned set is
+always read from `origin`, while the target is the repository `gh` picks, so a
+fork clone whose `upstream` is someone else's does not own that upstream.
 
 Resolving to the working directory earlier would make the guard vacuous exactly
 where it is needed, since a checkout of someone else's repository would then
@@ -199,9 +232,9 @@ the write lands somewhere we own, and "outside" is the safe reading.
 
 The subject of that rule is a write aimed at a repository. A `gh api` write to a
 `repos/OWNER/REPO` endpoint with no concrete owner and name, including one whose
-placeholders have no `GH_REPO` or `origin` to fill them, is such a write and is
-refused; an endpoint that names no repository at all is not, and is left alone
-rather than refused.
+placeholders have no `GH_REPO` or working-directory repository to fill them, is
+such a write and is refused; an endpoint that names no repository at all is
+not, and is left alone rather than refused.
 
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.

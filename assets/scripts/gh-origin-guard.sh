@@ -108,6 +108,147 @@ origin_of() {
     norm_repo "$_u"
 }
 
+# The repository gh writes to from directory $1 when the call names none (no
+# --repo, no GH_REPO), or nothing when that cannot be established. $2 is the
+# forge the call uses: GH_HOST, else github.com.
+#
+# gh does not read `origin` first (pkg/cmd/factory/default.go and
+# context/context.go in gh's source). It ranks the remotes upstream, github,
+# origin, then the rest as git lists them. It takes the first of them whose
+# `remote.<name>.gh-resolved` git config is set, which is what
+# `gh repo set-default` writes: `base` means that remote's repository, and an
+# OWNER/REPO value means that repository on the remote's host. With no remote
+# marked, and no terminal to ask in, it takes the first remote in that order.
+# A remote whose URL names no repository is skipped. Before choosing, gh
+# narrows the remotes by forge, using the hosts it is logged in to, or GH_HOST
+# alone when that is set.
+# That is gh's own configuration, which this guard does not read, so it chooses
+# twice, among every remote and among the remotes on the forge the call uses,
+# and answers only when the two choices agree.
+wd_repo() {
+    { [ -n "${1:-}" ] && [ -d "$1" ]; } || return 0
+    _wr_rv=$(git -C "$1" remote -v 2>/dev/null) || return 0
+    _wr_rs=$(git -C "$1" config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null)
+    # Exit 1 means no remote is marked. Any other failure stops gh as well.
+    case $? in 0|1) : ;; *) return 0 ;; esac
+    _wr=$(printf '%s\n\036\n%s\n' "$_wr_rv" "$_wr_rs" \
+        | awk -v forge="$(printf '%s' "${2:-}" | tr 'A-Z' 'a-z')" '
+# gh reads a remote URL with ParseURL (git/url.go) and FromURL
+# (internal/ghrepo). This returns the repository as host/owner/name, empty when
+# gh reads no repository from the URL and skips the remote, or "?" when this
+# reading cannot be sure what gh reads. It does not follow the characters Go
+# treats specially or rejects in a URL, such as escapes, a query, a fragment,
+# brackets or spaces, nor a port that is not a number.
+function ghurl(u,   rest, auth, path, p, seg, name) {
+    if (u !~ /^[A-Za-z0-9._~:\/@+-]+$/) return "?"
+    # gh reads an scp-style host:path as ssh://host/path.
+    if (u !~ /^(ssh|git\+ssh|git|http|git\+https|https|ftp|ftps|file):/ && index(u, ":") > 0) {
+        sub(/:/, "/", u); u = "ssh://" u
+    }
+    if (substr(u, 1, 2) == "//") return "?"
+    # With no scheme and authority, the URL is a local path and names no host.
+    if (!match(u, /^[A-Za-z][A-Za-z0-9+.-]*:\/\//)) return ""
+    rest = substr(u, RLENGTH + 1)
+    p = index(rest, "/")
+    if (p) { auth = substr(rest, 1, p - 1); path = substr(rest, p + 1) }
+    else { auth = rest; path = "" }
+    while ((p = index(auth, "@")) > 0) auth = substr(auth, p + 1)
+    if ((p = index(auth, ":")) > 0) {
+        if (substr(auth, p + 1) !~ /^[0-9]*$/) return "?"
+        auth = substr(auth, 1, p - 1)
+    }
+    if (auth == "") return ""
+    auth = tolower(auth); sub(/^www\./, "", auth)
+    sub(/^\/+/, "", path); sub(/\/+$/, "", path)
+    if (split(path, seg, "/") != 2) return ""
+    name = seg[2]; sub(/\.git$/, "", name)
+    return auth "/" seg[1] "/" name
+}
+# The owner/name a gh-resolved value names (repository.ParseWithHost in
+# go-gh): a URL, or OWNER/REPO with an optional HOST/ ahead of it. "?" when gh
+# cannot read one, which stops the call.
+function fullname(v,   n, f, r) {
+    if (v ~ /^git@/ || v ~ /^(ssh|git\+ssh|git|http|git\+https|https):/) {
+        r = ghurl(v)
+        if (r == "" || r == "?") return "?"
+        sub(/^[^\/]*\//, "", r)
+        return r
+    }
+    n = split(v, f, "/")
+    if (n == 2 && f[1] != "" && f[2] != "") return f[1] "/" f[2]
+    if (n == 3 && f[1] != "" && f[2] != "" && f[3] != "") return f[2] "/" f[3]
+    return "?"
+}
+function rank(nm) {
+    nm = tolower(nm)
+    return nm == "upstream" ? 3 : nm == "github" ? 2 : nm == "origin" ? 1 : 0
+}
+# The repository gh chooses among the remotes L[1..m], which stand in the
+# order gh sorts them.
+function choose(m, L,   k, i, v) {
+    for (k = 1; k <= m; k++) {
+        i = L[k]
+        if (RES[i] == "") continue
+        if (REPO[i] == "?") return "?"
+        if (RES[i] == "base") return REPO[i]
+        v = fullname(RES[i])
+        return (v == "?") ? "?" : (HOST[i] "/" v)
+    }
+    return (m > 0) ? REPO[L[1]] : ""
+}
+$0 == "\036" { sect = 2; next }
+sect != 2 {
+    # git remote -v: <name> TAB <url> (fetch|push), grouped by remote.
+    t = index($0, "\t")
+    if (t == 0) next
+    nm = substr($0, 1, t - 1); rest = substr($0, t + 1)
+    if (!match(rest, /[ \t]+\((fetch|push)\)/)) next
+    url = substr(rest, 1, RSTART - 1); kind = substr(rest, RSTART, RLENGTH)
+    if (nr == 0 || NAME[nr] != nm) { nr++; NAME[nr] = nm }
+    if (kind ~ /fetch/) FETCH[nr] = url; else PUSH[nr] = url
+    next
+}
+{
+    # remote.<name>.gh-resolved <value>. gh takes <name> to be the text between
+    # the first two dots of the key, and the last line for a name wins.
+    sp = index($0, " ")
+    if (sp == 0) next
+    key = substr($0, 1, sp - 1)
+    d = index(key, ".")
+    if (d == 0) next
+    key = substr(key, d + 1)
+    d = index(key, ".")
+    if (d) key = substr(key, 1, d - 1)
+    RESOLVED[key] = substr($0, sp + 1)
+}
+END {
+    # gh sorts the remotes by rank. Go keeps the listed order among equal
+    # ranks when a sort covers twelve remotes or fewer, and can reorder them
+    # beyond that.
+    if (nr > 12) exit
+    for (i = 1; i <= nr; i++) {
+        r = (i in FETCH) ? ghurl(FETCH[i]) : ""
+        if (r == "" && (i in PUSH)) r = ghurl(PUSH[i])
+        if (r == "") continue
+        REPO[i] = r
+        HOST[i] = (r == "?") ? "?" : substr(r, 1, index(r, "/") - 1)
+        RES[i] = (NAME[i] in RESOLVED) ? RESOLVED[NAME[i]] : ""
+    }
+    na = 0; ne = 0
+    for (s = 3; s >= 0; s--)
+        for (i = 1; i <= nr; i++) {
+            if (!(i in REPO) || rank(NAME[i]) != s) continue
+            ALL[++na] = i
+            if (HOST[i] == forge) ONF[++ne] = i
+        }
+    pa = choose(na, ALL); pe = choose(ne, ONF)
+    if (pa == "" || pa == "?" || tolower(pa) != tolower(pe)) exit
+    print pa
+}' 2>/dev/null)
+    [ -n "$_wr" ] || return 0
+    norm_repo "$_wr"
+}
+
 # Resolve the repository a `gh api` endpoint writes to. gh reads the repository
 # straight from the endpoint path, so this is the api analogue of repo_from_url.
 # The endpoint is a REST path (`repos/OWNER/REPO/...`), a leading-slash path, or
@@ -234,14 +375,18 @@ CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null)
 # structure. The same walk splits commands on unquoted operators, so a write
 # behind && or a pipe is inspected rather than skipped.
 #
-# Emits one line per guarded write, fields separated by \037: noun, verb, --repo
-# value, inline GH_REPO value, the pending cd destination, whether an earlier
-# export/unset set GH_REPO in this shell (1/0), that exported value, the inline
-# GH_HOST value, whether an earlier export/unset set GH_HOST (1/0), that exported
-# value, and the positional operand of a URL-capable verb (issue/pr comment, pr
-# review). A unit separator rather than a tab, because the shell collapses runs
-# of whitespace separators and an empty field would shift the next one into its
-# place. The shell resolves origins; awk only lexes.
+# Emits one line per guarded write, fields separated by \037, in the order the
+# verdict loop reads them: noun, verb, --repo value, inline GH_REPO value, the
+# pending cd destination, whether an earlier export/unset set GH_REPO in this
+# shell (1/0), that exported value, the inline GH_HOST value, whether an earlier
+# export/unset set GH_HOST (1/0), that exported value, the positional operand of
+# a URL-capable verb (issue/pr comment, pr review), the api endpoint, whether
+# the write posts, a review event, whether its body is written in an editor or
+# a browser, the body, its body files, whether it stands in a here-document
+# body, and a gh api call's --hostname. A unit separator rather than a tab,
+# because the shell collapses runs of whitespace separators and an empty field
+# would shift the next one into its place. The shell resolves origins; awk only
+# lexes.
 SCAN=$(printf '%s' "$CMD" | awk '
 function push() {
     if (have) { ntok++; T[ntok] = tok }
@@ -501,7 +646,6 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
         if (M != "POST" && M != "PATCH" && M != "PUT" && M != "DELETE") return
         if (endpoint == "") return
         ep = tolower(endpoint)
-        if (apihost != "") inlhost = apihost
         if (ainput != "") allfiles = allfiles "\036" ainput
         if (ep == "graphql" || ep ~ /\/graphql$/ || ep ~ /^graphql\?/ || ep ~ /\/graphql\?/) {
             # A GraphQL call names no repository the origin rule can measure, so
@@ -511,7 +655,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
             postmut = 0
             for (q = i + 1; q <= ntok; q++) if (T[q] ~ POSTMUT) postmut = 1
             if (!postmut) return
-            printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, "graphql", "", inl, cdspec, ghset, ghval, inlhost, hostset, hostval, "", endpoint, 1, "", 0, allvals, allfiles, inbody
+            printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, "graphql", "", inl, cdspec, ghset, ghval, inlhost, hostset, hostval, "", endpoint, 1, "", 0, allvals, allfiles, inbody, ""
             return
         }
         verb = M; repo = ""; urlop = ""
@@ -525,7 +669,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
         afiles = ""
         if (afile != "") afiles = "\036" afile
         if (ainput != "") afiles = afiles "\036" ainput
-        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, apost, "", 0, abody, afiles, inbody
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, apost, "", 0, abody, afiles, inbody, apihost
         return
     }
     # Exactly the verbs the ruling names, for the porcelain path.
@@ -566,7 +710,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
     # the review; the two creates post nothing pr-facts reads as feedback.
     ppost = 0; pbody = ""; pfile = ""; pevent = ""; pinter = 0
     if (verb == "comment" || verb == "review") porcelain_post(i + 2)
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, ppost, pevent, pinter, pbody, (pfile != "" ? "\036" pfile : ""), inbody
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, ppost, pevent, pinter, pbody, (pfile != "" ? "\036" pfile : ""), inbody, ""
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
 # Mark the lines of every here-document body, its terminator included, in BODY.
@@ -765,9 +909,10 @@ post_refusal() {
 ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
-NOUN=""; VERB=""; TARGET=""; REFUSE=""; UNMARKED=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop _endpoint _post _event _inter _body _files _hd; do
+NOUN=""; VERB=""; TARGET=""; REFUSE=""; UNMARKED=""; FROM_WD=""
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop _endpoint _post _event _inter _body _files _hd _apihost; do
     [ -n "${_noun:-}" ] || continue
+    _wd=""
 
     # Where this call would actually run, after any cd ahead of it.
     _base=$CWD
@@ -783,24 +928,28 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
         fi
     fi
 
-    # The host gh would use to complete an unqualified owner/name: GH_HOST set
-    # inline on the call, else exported earlier on the line (empty when unset,
-    # which means gh's default forge), else this process's ambient GH_HOST.
+    # The forge the call uses: GH_HOST set inline on it, else exported earlier
+    # on the line (empty when unset, which means gh's default forge), else this
+    # process's ambient GH_HOST. gh completes an unqualified owner/name with
+    # it, and narrows the working directory's remotes to it. A gh api call's
+    # --hostname sends that call to another forge, and the remotes are still
+    # narrowed by GH_HOST alone.
     if [ -n "${_inhost:-}" ]; then
-        _eff_host=$_inhost
+        _forge=$_inhost
     elif [ "${_hostset:-0}" = "1" ]; then
-        _eff_host=${_hostval:-github.com}
+        _forge=${_hostval:-github.com}
     else
-        _eff_host=${GH_HOST:-github.com}
+        _forge=${GH_HOST:-github.com}
     fi
-    [ -n "$_eff_host" ] || _eff_host=github.com
+    [ -n "$_forge" ] || _forge=github.com
+    _eff_host=${_apihost:-$_forge}
 
     # `gh api` names its repository in the endpoint, not in --repo, so it is
     # resolved on its own terms. An endpoint that names no repository is left
     # alone, and a repos path with no concrete owner and name resolves to
     # nothing and is refused. The owner and repo placeholders are filled from
-    # GH_REPO, else from the working directory's origin, in the order gh
-    # consults the two.
+    # GH_REPO, else from the repository gh picks from the working directory's
+    # remotes, in the order gh consults the two.
     # A GraphQL mutation names no repository to measure; only its provenance is.
     # A post found in a here-document body is not held to the mark (inbody,
     # above); the origin rule below still reads it.
@@ -823,11 +972,11 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
                 elif [ "${_ghset:-0}" = "1" ] && [ -n "${_ghval:-}" ]; then
                     _fill=$(norm_repo "$_ghval" "$_eff_host")
                 elif [ "${_ghset:-0}" = "1" ]; then
-                    _fill=$(origin_of "$_base")
+                    _fill=$(wd_repo "$_base" "$_forge"); _wd=1
                 elif [ -n "${GH_REPO:-}" ]; then
                     _fill=$(norm_repo "$GH_REPO" "$_eff_host")
                 else
-                    _fill=$(origin_of "$_base")
+                    _fill=$(wd_repo "$_base" "$_forge"); _wd=1
                 fi ;;
         esac
         _api=$(api_endpoint_target "${_endpoint:-}" "$_eff_host" "$_fill")
@@ -854,15 +1003,15 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
             if [ -n "${_ghval:-}" ]; then
                 _target=$(norm_repo "$_ghval" "$_eff_host")
             else
-                _target=$(origin_of "$_base")
+                _target=$(wd_repo "$_base" "$_forge"); _wd=1
             fi
         elif [ -n "${GH_REPO:-}" ]; then
             _target=$(norm_repo "$GH_REPO" "$_eff_host")
         else
-            # No explicit target: gh resolves against the working directory's
-            # remote, so the guard resolves the same way rather than waving the
-            # call through.
-            _target=$(origin_of "$_base")
+            # No explicit target: gh picks a repository from the working
+            # directory's remotes, so the guard resolves the same way rather
+            # than waving the call through.
+            _target=$(wd_repo "$_base" "$_forge"); _wd=1
         fi
     fi
 
@@ -878,7 +1027,7 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
         continue
     fi
 
-    NOUN=$_noun; VERB=$_verb; TARGET=${_target:-}; REFUSE=1
+    NOUN=$_noun; VERB=$_verb; TARGET=${_target:-}; REFUSE=1; FROM_WD=$_wd
     break
 done <<SCANLINES
 $SCAN
@@ -920,9 +1069,9 @@ if [ -z "${TARGET:-}" ] && [ "$NOUN" = "api" ]; then
 
 This call writes, but its endpoint names no repository that resolves: a
 \`repos/OWNER/REPO\` path carries no concrete owner and name, or an \`{owner}\` or
-\`{repo}\` placeholder had nothing to fill it, with no GH_REPO set and no
-\`origin\` remote in the working directory. The repositories this session may
-write to are: $OWNED.
+\`{repo}\` placeholder had nothing to fill it: no GH_REPO is set, and the
+working directory's remotes do not settle which repository gh would fill it
+from. The repositories this session may write to are: $OWNED.
 
 Name the repository in the endpoint (\`repos/OWNER/REPO/...\`), or hand the
 operator the exact command. Bead $PREPARE_PATH_BEAD carries that path."
@@ -932,18 +1081,26 @@ if [ -z "${TARGET:-}" ]; then
     deny "gh-origin-guard: refused \`gh $NOUN $VERB\`.
 
 No target repository could be resolved for this call: it names no --repo, and
-the working directory is not a checkout with a GitHub \`origin\` remote. The
-repositories this session may write to are: $OWNED.
+the working directory's remotes do not settle which repository gh would write
+to. The repositories this session may write to are: $OWNED.
 
 Name the repository explicitly with \`--repo\` if the write belongs to one of
 those. Bead $PREPARE_PATH_BEAD carries the path for a write that belongs
 somewhere else."
 fi
 
+WD_NOTE=""
+[ -n "$FROM_WD" ] && WD_NOTE="
+This call leaves the repository to gh, which picks one from the working
+directory's remotes. It takes the remote \`gh repo set-default\` marked, and
+otherwise the first of upstream, github and origin, then the rest. If the write
+belongs to one of ours, name that repository explicitly.
+"
+
 deny "gh-origin-guard: refused \`gh $NOUN $VERB\` aimed at $TARGET.
 
 That repository is not ours. This session may write to: $OWNED.
-
+${WD_NOTE}
 Opening an issue or a PR, or leaving a comment, on anyone else's repository
 spends their attention, and the operator holds that decision — an agent does not
 make it on their behalf.
