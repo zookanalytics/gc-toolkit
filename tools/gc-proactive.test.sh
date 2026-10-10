@@ -33,6 +33,13 @@
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
 #   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
 #   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
+# A failed read is not an empty ready set, and a page the filter cannot build is
+# not an empty page, so the scan fails on either rather than report no candidates:
+#   (READ-FAILCLOSED) a gc bd ready read that fails, in each shape a failed read
+#                     can take, fails the scan and names the read
+#   (READ-SWEEP)      …and a scan --sling sweep over it dispatches nothing
+#   (READ-CONTROL)    …while two reads that answer still scan
+#   (PAGE-FAILCLOSED) an unreadable or empty candidate set fails the scan and the sweep
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -618,6 +625,126 @@ for k in $PATH_KEYS; do
 done
 hasnt "$IDS" "tk-scan-driven" "(BOTH-READS) …and, in the same sweep, the bead a live workflow drives"
 has "$IDS" "tk-scan-free" "(BOTH-READS) …and keeps the bead with neither"
+
+# --- a ready read that fails fails the scan --------------------------------
+# gc bd answers a failed read with a non-zero exit and its {"error": ...} object,
+# or nothing, on stdout. Taken as an empty ready set, a failed read drops its
+# beads from the sweep unseen, and with both reads failing a --sling sweep exits
+# 0 with nothing slung. A third stub answers the two ready reads and logs every
+# call it sees.
+# FAIL_OPTIN or FAIL_MOVABLE fails one read in the shape it names; every other
+# call goes to the first stub. The opt-in read answers a bead the sweep can sling,
+# so a scan that skips the failed read and carries on is seen slinging it.
+READY="$TMP/stub-ready"
+mkdir -p "$READY"
+cat > "$READY/gc" <<SH
+#!/bin/sh
+printf '%s\n' "\$*" >> "$TMP/ready-calls.log"
+answer() {
+  case "\$1" in
+    object) printf '{\n  "error": "database is locked",\n  "schema_version": 1\n}\n'; exit 1 ;;
+    nothing) printf 'Error: failed to open database\n' >&2; exit 1 ;;
+    array-exit-1) printf '[]'; exit 1 ;;
+    nothing-exit-0) exit 0 ;;
+  esac
+}
+case "\$*" in
+  "bd ready --metadata-field gc.proactive=1 --unassigned --exclude-type=epic --json --sort oldest --limit 0")
+      answer "\${FAIL_OPTIN:-}"
+      printf '[{"id":"tk-optin-free","issue_type":"task","description":"asked for a reaction","title":"opt-in","created_at":"2026-01-03T00:00:00Z","metadata":{"gc.proactive":"1"}}]' ;;
+  "bd ready --unassigned --exclude-type=epic --json --sort oldest --limit 0")
+      answer "\${FAIL_MOVABLE:-}"
+      exec "$STUB/gc" "\$@" ;;
+  "bd dep list tk-optin-free --direction up -t tracks --json") printf '[]' ;;
+  *) exec "$STUB/gc" "\$@" ;;
+esac
+SH
+chmod +x "$READY/gc"
+ready_scan() { : > "$TMP/ready-calls.log"; env -u GC_PROACTIVE_FIXTURE PATH="$READY:$PATH" "${@:2}" bash "$SCRIPT" scan "$1" </dev/null 2>"$TMP/scan.err"; }
+
+echo "# with both ready reads answered, the scan offers a bead from each"
+set +e
+OUT="$(ready_scan --json)"; RC=$?
+set -e
+eq "$RC" 0 "(READ-CONTROL) the scan exits 0"
+IDS="$(printf '%s' "$OUT" | jq -r '.[].id' 2>/dev/null | sort | tr '\n' ' ' || true)"
+has "$IDS" "tk-optin-free" "(READ-CONTROL) …offering the opt-in bead"
+has "$IDS" "tk-scan-free" "(READ-CONTROL) …and the movable-forward bead"
+
+echo "# a ready read that fails fails the scan, in each shape a failed read can take"
+while read -r var shape name; do
+    set +e
+    OUT="$(ready_scan --json "FAIL_$var=$shape")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/scan.err")"
+    [ "$RC" -ne 0 ] && ok "(READ-FAILCLOSED) the $name read answering $shape fails the scan (exit $RC)" \
+        || bad "(READ-FAILCLOSED) the $name read answering $shape fails the scan (exited 0)"
+    eq "$OUT" "" "(READ-FAILCLOSED) …printing no candidate page"
+    has "$ERR" "the $name read failed" "(READ-FAILCLOSED) …and naming the read"
+    if [ "$shape" = object ]; then
+        has "$ERR" "the $name read failed (gc bd ready exit 1: database is locked)" "(READ-FAILCLOSED) …with gc bd's own error text"
+    fi
+done <<'CASES'
+OPTIN object opt-in
+MOVABLE object movable-forward
+OPTIN nothing opt-in
+MOVABLE nothing movable-forward
+OPTIN array-exit-1 opt-in
+MOVABLE array-exit-1 movable-forward
+OPTIN nothing-exit-0 opt-in
+MOVABLE nothing-exit-0 movable-forward
+CASES
+
+echo "# both reads failing, as they do while the store is down, fails the scan with gc bd's error"
+set +e
+OUT="$(ready_scan --json FAIL_OPTIN=object FAIL_MOVABLE=object)"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(READ-FAILCLOSED) both ready reads failing fails the scan (exit $RC)" \
+    || bad "(READ-FAILCLOSED) both ready reads failing fails the scan (exited 0)"
+has "$ERR" "gc bd ready exit 1: database is locked" "(READ-FAILCLOSED) …carrying gc bd's own error text"
+hasnt "$ERR" "syntax error" "(READ-FAILCLOSED) …and stopping before anything counts the candidates"
+
+echo "# a sweep whose ready read fails slings nothing and exits non-zero"
+set +e
+OUT="$(ready_scan --sling FAIL_MOVABLE=nothing)"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(READ-SWEEP) scan --sling exits non-zero when a ready read fails (exit $RC)" \
+    || bad "(READ-SWEEP) scan --sling exits non-zero when a ready read fails (exited 0)"
+eq "$(grep -c -e '^sling ' -e '^bd create' "$TMP/ready-calls.log" || true)" 0 "(READ-SWEEP) …dispatching nothing, not even the bead the other read offered"
+hasnt "$ERR" "first reaction(s)" "(READ-SWEEP) …and reporting no sweep total"
+has "$ERR" "the movable-forward read failed" "(READ-SWEEP) …naming the read that failed"
+
+# The fixture seam feeds scan.json through the same filter, drop and rank. A page
+# they cannot build is not an empty page: an unreadable candidate set, or an empty
+# one, fails the scan and the sweep before the live-workflow drop counts it.
+echo "# a candidate set the filter cannot build a page from fails the scan"
+printf '{\n  "error": "database is locked",\n  "schema_version": 1\n}\n' > "$TMP/scan.json"
+set +e
+OUT="$(bash "$SCRIPT" scan --json 2>"$TMP/scan.err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) an unreadable candidate set fails the scan (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) an unreadable candidate set fails the scan (exited 0)"
+eq "$OUT" "" "(PAGE-FAILCLOSED) …printing no candidate page"
+has "$ERR" "could not be filtered and ranked" "(PAGE-FAILCLOSED) …and saying so"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) a sweep over it exits non-zero (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) a sweep over it exits non-zero (exited 0)"
+hasnt "$OUT" "(fixture) would" "(PAGE-FAILCLOSED) …dispatching nothing"
+hasnt "$OUT" "first reaction(s)" "(PAGE-FAILCLOSED) …and reporting no sweep total"
+: > "$TMP/scan.json"
+set +e
+OUT="$(bash "$SCRIPT" scan --json 2>"$TMP/scan.err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) an empty candidate set fails the scan (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) an empty candidate set fails the scan (exited 0)"
+hasnt "$ERR" "syntax error" "(PAGE-FAILCLOSED) …refused before the live-workflow drop counts it"
+rm -f "$TMP/scan.json"
 
 echo "# the live reads: a live root names a convoy that tracks the bead"
 set +e
