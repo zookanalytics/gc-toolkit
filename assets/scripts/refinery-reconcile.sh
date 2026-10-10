@@ -426,12 +426,14 @@ pace_args pr-facts
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
-# convoy to the refinery; the order env does not supply GC_AGENT).
+# convoy to the refinery; the order env does not supply GC_AGENT). Its stamp in
+# the rig's state dir holds it to one complete pass per 15 minutes.
 if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
   log "-- (8) convoy-graduate: DISABLED (integration_auto_land=false)"
 else
   ( export GC_AGENT="$AGENT"
-    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" ) \
+    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" \
+      --stamp "$STATE_DIR/convoy-graduate.stamp" ) \
     || FAILED="${FAILED}convoy-graduate rc=$?; "
 fi
 
@@ -450,11 +452,12 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # closes that, held by finalize-gate while a human visit is still owed.
 run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
-# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches. Late,
-# and after review-sweep, because the gate it re-verifies is a CLOSED
-# successor: a twin that arm 2 merged or arm 7 recorded this pass is
-# disposable on this tick rather than a minute later. BEADS_ACTOR projected —
-# the close it delegates to bead-rehome is attributed in the events table.
+# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
+# never-dispatched rework twins whose same-review sibling landed. Late, and
+# after review-sweep, because the gate it re-verifies is a CLOSED successor: a
+# twin that arm 2 merged or arm 7 recorded this pass is disposable on this tick
+# rather than a minute later. BEADS_ACTOR projected — the close it delegates to
+# bead-rehome is attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(11) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "

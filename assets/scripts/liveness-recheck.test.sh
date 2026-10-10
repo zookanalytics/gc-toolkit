@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # liveness-recheck.test.sh — the liveness-sweep visit body is a SNAPSHOT, and
-# the sitting that reads it is entitled to a corrected census (bead tk-gvas6).
+# the sitting that reads it is entitled to a corrected census.
 #
 # THE DEFECT. classify writes its census into the visit body at pass time; the
 # converse sitting reads that body whenever the visit is claimed, which is
 # routinely a day or more later, and nothing re-checked it in between. Measured
-# on visit 8 of tk-hok6w (visit tk-3qeq0): the pass cut 2026-08-12T00:10Z, the
-# sitting read it ~41.5h later, and FIVE of the ten new candidates had merged
-# AND deployed in the interval (tk-1u8mi #316, tk-7g37t #322, tk-xesf6 #325,
-# tk-5ttye #328, tk-pe1hd #332 — the headline P0). 60% of that body was wrong on
-# arrival. A sitting that trusts such a body routes already-merged work and
-# burns a polecat on a no-op — already on this scope's record (visit 4 routed
-# tk-yjtf, closed as a no-op 30 minutes later).
+# once: the sitting read the census ~41.5h after the pass cut it, and FIVE of
+# the ten new candidates had merged AND deployed in the interval — 60% of that
+# body was wrong on arrival. A sitting that trusts such a body routes
+# already-merged work and burns a polecat on a no-op, as this scope's record
+# already shows.
 #
 # WHAT THIS PINS, in the two halves the fix has:
 #

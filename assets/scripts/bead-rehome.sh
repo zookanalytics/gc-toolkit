@@ -10,8 +10,11 @@
 # gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
 # the close, because a closed visit with no gc.outcome is a sitting the board
 # cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# A visit also gets gc.work_outcome=no-op, for the work-record gate the close
+# runs, from work-outcome.sh: a write of its own that never gates the close and
+# never replaces a work outcome the visit already records.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# outcome when the visit lacks one.
+# outcome and that work outcome when the visit lacks them.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
@@ -35,6 +38,10 @@ BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 # tracking the origin holds its close, the same subject-scoped precondition
 # merge.sh applies to a merge (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || { echo "bead-rehome: cannot source work-outcome.sh from $HERE" >&2; exit 1; }
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; EXCEPT_KEY=""
@@ -212,9 +219,11 @@ REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 # the same way. The --kind IS the disposition, so it is the outcome word, and
 # $REASON is its headline. An outcome the visit already records is the sitting's
 # own word and is left untouched (a visit closed through visit-close.sh, then
-# re-homed, already carries the word it signed off with).
+# re-homed, already carries the word it signed off with). gc.work_outcome is not
+# part of that word: step 1a stamps it whether or not the outcome is stamped.
 ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
 PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+PRIOR_WORK_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // empty' 2>/dev/null || true)
 STAMP_OUTCOME=""
 if [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_OUTCOME" ]; then STAMP_OUTCOME=1; fi
 
@@ -226,6 +235,7 @@ if [ -n "$DRY_RUN" ]; then
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
     [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
+    [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_WORK_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
@@ -277,6 +287,14 @@ if [ -n "$STAMP_OUTCOME" ]; then
     if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
         die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}' gc.outcome_reason='${GOT_OUTCOME_REASON:-}'); NOT closing it — a closed visit needs the outcome word the board groups by AND the reason headline it shows, and once it closes no re-run reaches it. The bead is still visible; re-run once the store accepts the write" 4
     fi
+fi
+
+# 1a. A visit's work outcome, for the work-record gate the close runs. It goes
+# through work-outcome.sh as a write of its own, after the gated stamps above,
+# so it never decides whether the visit closes. It runs on the repair path too,
+# where it reaches a closed visit that records its outcome but lacks this key.
+if [ "$ORIGIN_KIND" = "visit" ]; then
+    work_outcome_noop "$ORIGIN" bd_at "$ORIGIN_PATH"
 fi
 
 # 1b. Drop ONLY the wait edge to THIS successor: it would refuse the close,

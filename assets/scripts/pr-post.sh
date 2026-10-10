@@ -27,12 +27,17 @@
 #   reply    a reply into a review thread (addPullRequestReviewThreadReply).
 #   edit     a conversation comment rewritten in place (PATCH
 #            issues/comments/<id>).
+#   file-comment
+#            a review comment on one file of the diff as a whole (POST
+#            pulls/<n>/comments, subject_type=file), which opens a review
+#            thread on that file at the given commit.
 #
 # Usage:
 #   pr-post.sh comment --repo <host/owner/name> --pr <n> (--body <text> | --body-file <path>) [--attach <file>]
 #   pr-post.sh review  --repo <host/owner/name> --pr <n> (--body <text> | --body-file <path>)
 #   pr-post.sh reply   --host <host> --thread <thread node id> (--body <text> | --body-file <path>)
 #   pr-post.sh edit    --repo <host/owner/name> --comment <id> (--body <text> | --body-file <path>)
+#   pr-post.sh file-comment --repo <host/owner/name> --pr <n> --commit <oid> --path <file> (--body <text> | --body-file <path>)
 #   pr-post.sh mark      print the provenance marker
 #   pr-post.sh own-def   print the jq definitions gc_city_marked,
 #                        gc_city_cutover($since), gc_city_posted_at and
@@ -40,7 +45,8 @@
 #                        its program
 #
 # gh's own output passes through on stdout, so a caller that reads the posted
-# comment's URL still gets it.
+# comment back still gets it: its URL from comment, the created comment's JSON
+# from file-comment.
 #
 # Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr;
 #       2 usage.
@@ -90,12 +96,13 @@ VERB="${1:-}"
 case "$VERB" in
   mark)    printf '%s\n' "$MARK"; exit 0 ;;
   own-def) printf '%s\n' "$OWN_DEF"; exit 0 ;;
-  comment|review|reply|edit) shift ;;
+  comment|review|reply|edit|file-comment) shift ;;
   -h|--help) usage; exit 0 ;;
-  *) die_usage "first argument must be comment, review, reply, edit, mark or own-def" ;;
+  *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark or own-def" ;;
 esac
 
 REPO_Q=""; HOST=""; PR=""; THREAD=""; COMMENT=""; BODY=""; BODY_FILE=""; ATTACH=""
+COMMIT_OID=""; FILE_PATH=""
 HAVE_BODY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -107,6 +114,8 @@ while [ $# -gt 0 ]; do
     --body)      [ $# -ge 2 ] || die_usage "--body needs a value"; BODY="$2"; HAVE_BODY=1; shift 2 ;;
     --body-file) [ $# -ge 2 ] || die_usage "--body-file needs a value"; BODY_FILE="$2"; shift 2 ;;
     --attach)    [ $# -ge 2 ] || die_usage "--attach needs a value"; ATTACH="$2"; shift 2 ;;
+    --commit)    [ $# -ge 2 ] || die_usage "--commit needs a value"; COMMIT_OID="$2"; shift 2 ;;
+    --path)      [ $# -ge 2 ] || die_usage "--path needs a value"; FILE_PATH="$2"; shift 2 ;;
     *) die_usage "unknown argument '$1'" ;;
   esac
 done
@@ -121,6 +130,7 @@ elif [ -z "$HAVE_BODY" ]; then
 fi
 [ -n "$(printf '%s' "$BODY" | tr -d '[:space:]')" ] || die_usage "$VERB refuses an empty body"
 [ -z "$ATTACH" ] || [ "$VERB" = comment ] || die_usage "--attach is a comment option"
+[ -z "$COMMIT_OID$FILE_PATH" ] || [ "$VERB" = file-comment ] || die_usage "--commit and --path are file-comment options"
 
 # The mark goes last, after a blank line, so it opens an HTML block of its own
 # and renders as nothing. A body that already carries it is posted as it is.
@@ -171,6 +181,14 @@ case "$VERB" in
     split_repo
     case "$COMMENT" in ''|*[!0-9]*) die_usage "edit needs --comment <id>" ;; esac
     gh api --method PATCH "repos/$REPO/issues/comments/$COMMENT" --hostname "$HOST" -f body="$BODY" || exit 1
+    ;;
+  file-comment)
+    split_repo
+    case "$PR" in ''|*[!0-9]*) die_usage "file-comment needs --pr <number>" ;; esac
+    [ -n "$COMMIT_OID" ] || die_usage "file-comment needs --commit <oid>"
+    [ -n "$FILE_PATH" ] || die_usage "file-comment needs --path <file>"
+    gh api --method POST "repos/$REPO/pulls/$PR/comments" --hostname "$HOST" \
+      -f body="$BODY" -f commit_id="$COMMIT_OID" -f path="$FILE_PATH" -f subject_type=file || exit 1
     ;;
 esac
 exit 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/deferred-dispatch.sh (tk-y0ygs).
+# Hermetic test for assets/scripts/deferred-dispatch.sh.
 #
 # WHAT THE SCRIPT IS FOR. `gc sling` pours immediately and reads no `blocks`
 # deps, so sequencing used to be an agent remembering not to dispatch yet — a
@@ -558,7 +558,7 @@ eq "$(slings)" "0" "a closed armed bead is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "a closed armed bead's record is retired"
 has "$out" "1 retired" "summary counts the retire"
 
-# --- RECONCILE: the parent-cascade fix (tk-so8clv) ---------------------------
+# --- RECONCILE: the parent-cascade fix ---------------------------
 # An armed OPEN bead whose own `blocks` edges have all closed is dispatchable
 # even when `bd list --ready` excludes it: the is_blocked flag cascades DOWN
 # parent-child edges, so an epic child under a container held on a human gate

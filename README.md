@@ -64,7 +64,7 @@ gc session attach mechanik
 
 See [docs/install.md](docs/install.md) for the full install reference — remote
 imports, the opt-in `gascity-keeper` sub-pack, the helm `[[service]]` stanza,
-and `gc doctor` verification of the nine structural checks.
+and `gc doctor` verification of the structural checks.
 
 ## Developing this pack
 

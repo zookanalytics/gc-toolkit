@@ -136,6 +136,16 @@ JQ_ISSUES='(if type == "object" and (.issues | type) == "array" then .issues
 JQ_EPOCH='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
 JQ_META='def m($k): (((.metadata[$k] // "") | tostring)
             | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | gsub("[[:cntrl:]]"; " "));'
+# What counts as a dispatch path, from the one definition shared with the
+# proactive scan and check-blocked-work-armed. Exposes $DISPATCH_PATH_JQ, which
+# step_row_stream applies. An unsourceable one warns: without it no step can be
+# told to be offerable.
+# shellcheck source=../../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
+    echo "cannot determine whether step beads reach terminal states (I8)"
+    detail "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a step a pool can still be handed cannot be told from an unreachable husk."
+    exit 1
+}
 
 # One row per non-terminal step, unconditionally: root, step, whether it carries
 # an outcome, whether it is past the stall bound, the two values a finding
@@ -150,7 +160,7 @@ JQ_META='def m($k): (((.metadata[$k] // "") | tostring)
 # Rows are rebuilt one at a time out of the parse-event stream, so the reader's
 # cost is a row and never the listing.
 step_row_stream() {
-    step_list "$1" --limit 0 | scrub | jq -rn --stream --argjson stall "$STALL" "$JQ_EPOCH $JQ_META
+    step_list "$1" --limit 0 | scrub | jq -rn --stream --argjson stall "$STALL" "$JQ_EPOCH $JQ_META $DISPATCH_PATH_JQ
         fromstream(2 | truncate_stream(inputs | select(.[0][0] == \"issues\")))
         | select(type == \"object\")
         | m(\"gc.root_bead_id\") as \$r
@@ -165,7 +175,7 @@ step_row_stream() {
             ([ .dependencies[]? | select(((.type // \"\") | tostring) == \"blocks\")
                | ((.depends_on_id // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")
                | select(. != \"\") ] | join(\",\")),
-            (if m(\"gc.routed_to\") != \"\" or m(\"gc.dispatch_when_ready\") != \"\" then \"1\" else \"0\" end),
+            (if has_dispatch_path then \"1\" else \"0\" end),
             (if m(\"gc.kind\") == \"workflow-finalize\" then \"1\" else \"0\" end) ]
         | join(\"\u001f\")" 2>/dev/null
     printf '%s%s%s\n' "$END" "$SEP" "${PIPESTATUS[*]}"
@@ -286,9 +296,10 @@ resolve_blockers() {   # db
 
 # A step a worker pool can still hand out: open in its own right, carrying a
 # dispatch path — a gc.routed_to a queue consumes, or a gc.dispatch_when_ready
-# arm — with nothing live left to wait on, and not the control-dispatcher's own
-# workflow-finalize step. Everything else is residue that no pass can reach, and
-# a finding that calls it loose spends a human on a chain that cannot move. An
+# arm, as assets/scripts/dispatch-path.sh defines it — with nothing live left to
+# wait on, and not the control-dispatcher's own workflow-finalize step.
+# Everything else is residue that no pass can reach, and a finding that calls it
+# loose spends a human on a chain that cannot move. An
 # unrouted, unarmed husk is the common shape: it sits in `bd ready` forever yet
 # the pool query (unassigned + routed) never serves it. The finalize step is the
 # other: routed to an order, not a pool, it is closed by the control-dispatcher

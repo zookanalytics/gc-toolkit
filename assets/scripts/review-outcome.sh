@@ -23,7 +23,9 @@
 #   back-lane       Rule "no further full review is warranted": ensure a closed,
 #                   non-superseded approve backing exists for the lane, so it
 #                   derives green once nothing else holds it. Idempotent — a lane
-#                   already backed gets no second bead.
+#                   already backed gets no second bead. The backing is filed
+#                   closed with every stamp in a single write, and an outcome an
+#                   earlier write left stamped but open is closed, not filed again.
 #   supersede-lane  Rule "a fresh whole-diff review is warranted": stamp
 #                   gc.outcome=superseded on the lane's standing review(s) — the
 #                   approve backing(s) lane-state.sh reads for green, and any
@@ -103,6 +105,55 @@ backing_ids() { # <anchor> <lane>
     | .[].id' 2>/dev/null
 }
 
+# The approve outcomes back-lane filed for this lane that are stamped but still
+# open. lane-state.sh reads an open review for the lane as one in flight and
+# holds the lane out of green while it stays open, and backing_ids reads closed
+# beads only, so a retry that deduped against backings alone would file a twin
+# and leave this one holding the lane. The match is back-lane's own shape: its
+# exact title on this anchor and lane, carrying reviewed_oid,
+# signoff_verdict=approve and gc.outcome=recorded. signoff.sh writes a
+# reviewer's verdict in the update that closes the review, so an open approve
+# under any other title is not this writer's to close. Ids on stdout, one per
+# line; exit 2 when the store would not read.
+stranded_ids() { # <anchor> <lane> <title>
+  local anchor="$1" lane="$2" title="$3" rows
+  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$rows" | jq -r --arg lane "$lane" --arg title "$title" '
+    [ .[] | (.metadata // {}) as $m
+          | select(((.status // "") | tostring | ascii_downcase) != "closed")
+          | select(((.title // "") | tostring) == $title)
+          | select((($m.task_kind // "") | tostring) == "review")
+          | select(((($m.check_name // "") | tostring) | if . == "" then "correctness" else . end) == $lane)
+          | select((($m.reviewed_oid // "") | tostring) != "")
+          | select((($m.signoff_verdict // "") | tostring) == "approve")
+          | select((($m["gc.outcome"] // "") | tostring) == "recorded") ]
+    | .[].id' 2>/dev/null
+}
+
+# Close every stranded outcome so it becomes the backing it was filed to be. The
+# closes are read back: one that reported success but left the outcome open
+# would still hold the lane, and the dedup that follows cannot see an open
+# outcome. Returns 2 when the store would not read, a close was refused, or an
+# outcome still reads open.
+finish_stranded() { # <anchor> <lane> <title>
+  local anchor="$1" lane="$2" title="$3" ids id still
+  ids=$(stranded_ids "$anchor" "$lane" "$title") \
+    || { warn "could not read review outcomes on $anchor to find an open $lane approve outcome"; return 2; }
+  [ -n "$ids" ] || return 0
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    gc bd update "$id" --status=closed \
+      --append-notes "validator: closed this $lane approve outcome, which an earlier write left open" >/dev/null 2>&1 \
+      || { warn "could not close the open approve outcome $id for lane $lane on $anchor"; return 2; }
+  done <<EOF
+$ids
+EOF
+  still=$(stranded_ids "$anchor" "$lane" "$title") \
+    || { warn "could not read back the open $lane approve outcomes on $anchor"; return 2; }
+  [ -z "$still" ] || { warn "lane $lane on $anchor still has an open approve outcome after the close: $still"; return 2; }
+}
+
 # The closed reviews a supersede must retire — a strict superset of the backings
 # above. It keeps every approve backing (so superseding still un-greens the lane)
 # and adds any recorded verdict: gate-ensure.sh's per-head bar reads
@@ -170,6 +221,17 @@ cmd_back_lane() {
   [ -n "$anchor" ] && [ -n "$lane" ] && [ -n "$oid" ] \
     || { warn "back-lane needs --anchor, --lane, --oid"; exit 1; }
 
+  local title desc note
+  title="lane $lane converged: validator ruled no further review — anchor $anchor"
+  desc=$(printf 'The validator ruled lane %s converged on anchor %s at %s: no further whole-diff review is warranted. This closed approve outcome is what lane-state.sh reads to derive green once nothing else holds the lane. The reviewed_oid is a dispatch pin, not a claim that green is bound to that commit.%s' \
+    "$lane" "$anchor" "$oid" "${batch:+ Batch: $batch.}")
+  note="validator: lane $lane converged at $oid"
+  [ -n "$reason" ] && note="$note — $reason"
+
+  # An outcome an earlier write left stamped but open holds the lane in flight,
+  # and a fresh one filed beside it would be its twin, so it is finished first.
+  finish_stranded "$anchor" "$lane" "$title" || exit 2
+
   # Idempotent: a lane already backed by a live approve outcome earns no second
   # bead — a push does not stale a backing, so re-ruling convergence at a new
   # head is a no-op, not a new record.
@@ -184,27 +246,29 @@ cmd_back_lane() {
     return 0
   fi
 
-  local title desc id
-  title="lane $lane converged: validator ruled no further review — anchor $anchor"
-  desc=$(printf 'The validator ruled lane %s converged on anchor %s at %s: no further whole-diff review is warranted. This closed approve outcome is what lane-state.sh reads to derive green once nothing else holds the lane. The reviewed_oid is a dispatch pin, not a claim that green is bound to that commit.%s' \
-    "$lane" "$anchor" "$oid" "${batch:+ Batch: $batch.}")
-  id=$(gc bd create "$title" -t task -d "$desc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  [ -n "$id" ] || { warn "could not create the approve outcome bead for lane $lane on $anchor"; exit 2; }
-  local note="validator: lane $lane converged at $oid"
-  [ -n "$reason" ] && note="$note — $reason"
-  gc bd update "$id" \
-    --set-metadata task_kind=review \
-    --set-metadata anchor_bead="$anchor" \
-    --set-metadata check_name="$lane" \
-    --set-metadata reviewed_oid="$oid" \
-    --set-metadata signoff_verdict=approve \
-    --set-metadata gc.outcome=recorded \
-    --status=closed --append-notes "$note" >/dev/null 2>&1 \
-    || { warn "could not stamp/close the approve outcome bead $id for lane $lane"; exit 2; }
+  # Atomic birth: the outcome is created closed, carrying every stamp
+  # lane-state.sh keys on and the note, in one write. A refused create leaves
+  # nothing behind, and a create whose reply is lost has still filed a whole
+  # backing, so no attempt leaves a bare bead that a retry cannot find.
+  local meta id
+  meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg oid "$oid" \
+    '{task_kind: "review", anchor_bead: $ab, check_name: $ln, reviewed_oid: $oid,
+      signoff_verdict: "approve", "gc.outcome": "recorded"}' 2>/dev/null)
+  [ -n "$meta" ] || { warn "could not compose the approve outcome for lane $lane on $anchor"; exit 2; }
+  id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
+    | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+
   # Read back the shape lane-state.sh keys on: a bead that did not close, or lost
   # a metadata key, would leave the lane silently ungreen.
   local got
-  got=$(backing_ids "$anchor" "$lane") || { warn "approve outcome $id did not read back as a $lane backing"; exit 2; }
+  got=$(backing_ids "$anchor" "$lane") || { warn "could not read back the $lane backing on $anchor"; exit 2; }
+  [ -n "$got" ] || { warn "the approve outcome for lane $lane on $anchor did not land${id:+ ($id)}: nothing reads back as a backing"; exit 2; }
+  # The read, not the reply, says what landed. A reply that would not parse loses
+  # only the id, so the backing the read found is reported in its place.
+  if [ -z "$id" ]; then
+    printf '%s\n' "$got" | head -n1
+    return 0
+  fi
   case " $(printf '%s' "$got" | tr '\n' ' ') " in
     *" $id "*) printf '%s\n' "$id" ;;
     *) warn "approve outcome $id did not read back as a $lane backing (got '$got')"; exit 2 ;;

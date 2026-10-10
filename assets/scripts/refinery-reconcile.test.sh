@@ -170,6 +170,7 @@ has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_A
   || bad "pre-open-rebase did not run after pr-open (preopen=$preopen_at propen=$propen_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
+has "$grad_line" "--stamp $TMP/state/myrig/convoy-graduate.stamp" "convoy-graduate keeps its interval stamp in the rig's pass state dir"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;

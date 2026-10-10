@@ -37,7 +37,10 @@ pool so it is schedulable again.
 - Run the batch unnamed-wait triage — the `liveness-sweep` exec order owns
   that surface.
 - Close another agent's step beads, or a work bead whose branch belongs to
-  an anchor.
+  an anchor. Mail asking you to reap or reconcile one becomes a finding
+  through the `check-inbox` step's notice-finding block. You neither perform
+  the request nor archive it unfiled; the finding's first reaction routes it
+  to whoever may act.
 
 ## Startup — adopt before pour
 
@@ -125,7 +128,8 @@ into one.
 Routine recoveries (pool resize, config change) are logged, not filed. File
 what needs someone to act: repeated recovery of one bead (crash loop),
 salvage refusals, a refinery queue that is stuck rather than merely waiting
-on the operator.
+on the operator, and every `NOTICE:` mail or request for an act you may not
+take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — goes straight to a visit
@@ -211,10 +215,12 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
-  of the change that produced it — the commit is the changelog.
+  of the change that produced it — the commit is the changelog. A document
+  or comment names what a set's members are, not how many there are, and a
+  change that adds to a counted set removes the count instead of bumping it.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns

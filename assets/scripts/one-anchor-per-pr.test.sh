@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for the one-anchor-per-PR rework hand-back arm (tk-ynz4b,
-# formulas/mol-refinery-patrol.toml merge-push step 4).
+# Hermetic test for the one-anchor-per-PR rework hand-back arm
+# (formulas/mol-refinery-patrol.toml merge-push step 4).
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating
@@ -187,7 +187,7 @@ eq "$(resolve work-1 polecat/work-1)" "|work-1" \
 #     The fixture is adversarial to the two ways this can silently degrade, so
 #     the assertion actually tests the sort key rather than luck:
 #       - id ordering  — the newer duplicate's id sorts FIRST lexicographically,
-#         so a resolver reading a non-existent timestamp field (the tk-52mrh
+#         so a resolver reading a non-existent timestamp field (the
 #         defect: `.created` on a row that only has `created_at`) collapses to
 #         `.id` and elects the checkless duplicate;
 #       - no ordering  — the newer duplicate is also the FIRST input row, so a
