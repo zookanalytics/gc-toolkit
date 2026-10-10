@@ -281,28 +281,27 @@ bash -n "$TMP/guard.sh" \
   && ok "extracted guard is syntactically valid bash" \
   || bad "extracted guard failed bash -n"
 
-# A `gc` that serves canned answers and REFUSES anything the guard is not
-# supposed to call. Both real sources write clean JSON to stdout and their
-# banner to stderr, which is what the guard's 2>/dev/null relies on.
+# A `gc` that serves the session list, REFUSES anything else, and logs every
+# call it receives, so a case can assert what the guard reads. The real command
+# writes clean JSON to stdout and its banner to stderr, which is what the
+# guard's 2>/dev/null relies on.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GCSTUB'
 #!/usr/bin/env bash
 set -u
+printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 echo "gc: banner on stderr, as the real command does" >&2
 case "${1:-} ${2:-}" in
   "session list")
     if [ -n "${STUB_SESSIONS_RC:-}" ]; then exit "$STUB_SESSIONS_RC"; fi
     cat "$STUB_SESSIONS_FILE" ;;
-  "bd list")
-    if [ -n "${STUB_BEADS_RC:-}" ]; then exit "$STUB_BEADS_RC"; fi
-    cat "$STUB_BEADS_FILE" ;;
   *)
     echo "gc stub: unmodelled call: $*" >&2; exit 64 ;;
 esac
 GCSTUB
 chmod +x "$TMP/bin/gc"
-export STUB_SESSIONS_FILE="$TMP/sessions.json" STUB_BEADS_FILE="$TMP/session-beads.json"
-export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+export STUB_SESSIONS_FILE="$TMP/sessions.json" STUB_CALL_LOG="$TMP/gc-calls.log"
+export STUB_SESSIONS_RC=""
 
 # Shell mode is part of the contract. Every script in this pack runs under
 # `set -euo pipefail`, where an assignment that does not absorb its own failure
@@ -329,66 +328,67 @@ in_both_modes() {
     printf 'MODE DIVERGENCE lax=<%s> strict=<%s>' "$LAX" "$STRICT"
   fi
 }
-# guard <sessions-stdout> <session-beads-stdout> -> "MAP_COUNT|MAP_TRIP"
-# Optional 3rd/4th args are exit codes for the two sources.
+# guard <sessions-stdout> [rc] -> "MAP_COUNT|MAP_TRIP"
+# The optional 2nd arg is the session list's exit code.
 guard() {
   printf '%s' "$1" > "$STUB_SESSIONS_FILE"
-  printf '%s' "$2" > "$STUB_BEADS_FILE"
-  export STUB_SESSIONS_RC="${3:-}" STUB_BEADS_RC="${4:-}"
+  export STUB_SESSIONS_RC="${2:-}"
   in_both_modes "$EMIT_TRIP"
 }
-# guard_map <sessions-stdout> <session-beads-stdout> -> the built LIVENESS_MAP.
+# guard_map <sessions-stdout> -> the built LIVENESS_MAP.
 guard_map() {
   printf '%s' "$1" > "$STUB_SESSIONS_FILE"
-  printf '%s' "$2" > "$STUB_BEADS_FILE"
-  export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+  export STUB_SESSIONS_RC=""
   in_both_modes "$EMIT_MAP"
 }
 
-# The live steady state: sessions exist, the session-bead source is empty
-# because gc bd list drops issue_type=session outright.
+# The live steady state: the session list names every session that has not
+# closed, and no closed one.
 SESSIONS_LIVE='{"ok":true,"sessions":[
   {"id":"lx-3rk8v","name":"gc-toolkit--gc-toolkit__polecat-1-pool","state":"active"},
   {"id":"lx-fjnq1","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}'
-NO_BEADS='[]'
 
 # (W) The shape the fail safe must not fire on: a populated map that omits the
 #     sessions the stalled beads name. Orphan recovery must proceed.
-eq "$(guard "$SESSIONS_LIVE" "$NO_BEADS")" "4|" \
+eq "$(guard "$SESSIONS_LIVE")" "4|" \
    "(W) populated map, owners it does not name -> no trip, recovery proceeds"
 # (W) The two halves must agree: the same map that does not trip still resolves
 #     the missing owner to 'absent', which is the orphan signal, not drift.
-eq "$(state "$(guard_map "$SESSIONS_LIVE" "$NO_BEADS")" "lx-41aa7")" "absent" \
+eq "$(state "$(guard_map "$SESSIONS_LIVE")" "lx-41aa7")" "absent" \
    "(W) an owner absent from a non-tripping map still classifies as orphaned"
 # (W) And a named owner in that same map is still live — the map is usable, so
 #     both answers come from it rather than from a blanket skip.
-eq "$(state "$(guard_map "$SESSIONS_LIVE" "$NO_BEADS")" "gc-toolkit.furiosa")" "active" \
+eq "$(state "$(guard_map "$SESSIONS_LIVE")" "gc-toolkit.furiosa")" "active" \
    "(W) a named owner in the same map resolves live"
 
 # (X) The condition the fail safe is actually for: no keys at all.
-eq "$(guard '{"ok":true,"sessions":[]}' "$NO_BEADS")" "0|liveness map empty" \
+eq "$(guard '{"ok":true,"sessions":[]}')" "0|liveness map empty" \
    "(X) genuinely empty map -> trip"
 
-# (Y) Unreadable source A, four ways. A read that failed is not a city with no
-#     sessions, and each must trip rather than orphan everything.
-eq "$(guard '' "$NO_BEADS" 1)" "0|session list unreadable" \
+# (Y) Unreadable session list, four ways. A read that failed is not a city with
+#     no sessions, and each must trip rather than orphan everything.
+eq "$(guard '' 1)" "0|session list unreadable" \
    "(Y) session list exits non-zero -> trip"
-eq "$(guard 'not json at all' "$NO_BEADS")" "0|session list unreadable" \
+eq "$(guard 'not json at all')" "0|session list unreadable" \
    "(Y) session list emits garbage -> trip"
-eq "$(guard '{"ok":true}' "$NO_BEADS")" "0|session list unreadable" \
+eq "$(guard '{"ok":true}')" "0|session list unreadable" \
    "(Y) session list without a .sessions array (schema drift) -> trip"
-eq "$(guard '[]' "$NO_BEADS")" "0|session list unreadable" \
+eq "$(guard '[]')" "0|session list unreadable" \
    "(Y) session list returning an array instead of an object -> trip"
 
-# (Z) Source B is never required. Its emptiness is the healthy answer, and its
-#     failure must not decide a cycle that source A can answer.
-eq "$(guard "$SESSIONS_LIVE" 'garbage')" "4|" \
-   "(Z) unreadable session beads with a good session list -> no trip"
-eq "$(guard "$SESSIONS_LIVE" '' "" 1)" "4|" \
-   "(Z) session-bead read exits non-zero with a good session list -> no trip"
-# (Z) But B cannot rescue a genuinely empty cycle either.
-eq "$(guard '{"ok":true,"sessions":[]}' 'garbage')" "0|liveness map empty" \
-   "(Z) empty session list plus unreadable beads -> still trips as empty"
+# (Z) The session list is the map's only source: every key is one of a listed
+#     session's identities, carrying that session's state.
+eq "$(guard_map "$SESSIONS_LIVE" | jq -cS .)" \
+   '{"gc-toolkit--gc-toolkit__polecat-1-pool":"active","gc-toolkit/gc-toolkit.furiosa":"active","lx-3rk8v":"active","lx-fjnq1":"active"}' \
+   "(Z) the map is exactly the listed sessions' identities"
+# (Z) And the guard reads nothing else. Closed sessions are session beads in
+#     the city store, a set that grows with every session the city runs. A
+#     read of them here would run on every rig each cycle, and their keys would
+#     keep an empty session list from tripping 'liveness map empty'.
+: > "$STUB_CALL_LOG"
+guard "$SESSIONS_LIVE" >/dev/null
+eq "$(sort -u "$STUB_CALL_LOG")" "session list --state=all --json" \
+   "(Z) the guard's only gc call is the session list"
 
 # (Y) The builder dying behind a source that read fine. Normalizing the inputs
 #     makes this rare, so it is injected rather than waited for: a jq that
@@ -407,19 +407,11 @@ chmod +x "$TMP/badjq/jq"
 export REAL_JQ
 REAL_JQ="$(command -v jq)"
 printf '%s' "$SESSIONS_LIVE" > "$STUB_SESSIONS_FILE"
-printf '%s' "$NO_BEADS" > "$STUB_BEADS_FILE"
-export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+export STUB_SESSIONS_RC=""
 GUARD_PATH_PREFIX="$TMP/badjq:"
 eq "$(in_both_modes "$EMIT_TRIP")" "|liveness map unreadable" \
    "(Y) map builder fails behind a readable source -> trip, never fall through"
 GUARD_PATH_PREFIX=""
-
-# (AA) Both sources contribute keys; on a collision the session list wins,
-#      because it is the source whose state field is authoritative.
-eq "$(guard_map '{"ok":true,"sessions":[{"id":"x","state":"closed"}]}' \
-                '[{"id":"x","status":"active"},{"id":"y","status":"active"}]' \
-     | jq -r '.x + "," + .y')" "closed,active" \
-   "(AA) session-list state wins the collision; bead-only keys survive"
 
 # (AB) The structural guarantee behind the predicate: the decision is computed
 #      where no bead exists. If the block ever reads per-bead state, an
