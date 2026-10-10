@@ -807,7 +807,7 @@ for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 
 done
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-context workspace-setup preflight-tests implement; do
-  "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-polecat-work.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done
 gc runtime drain-ack
 ```
@@ -1020,7 +1020,7 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
   done
   : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
   for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
-    "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+    "$SC" --step "mol-polecat-work.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-store-only-chain-close
   gc runtime drain-ack
@@ -1200,7 +1200,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
   done
   : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
   for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
-    "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+    "$SC" --step "mol-polecat-work.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
   # <<< submit-halt-chain-close
   gc runtime drain-ack
@@ -1458,7 +1458,7 @@ for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 
 done
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
-  "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-polecat-work.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done
 # <<< submit-chain-close
 ```

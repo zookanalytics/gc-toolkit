@@ -70,7 +70,7 @@ drain — the same session carries on into `validate-and-resolve`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-validate-close.load-context --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-validate-close.load-context --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the bead, its slice, and the reaction's brief are read, and
@@ -165,7 +165,7 @@ graph.v2 step advances, and the dispatcher's `workflow-finalize` closes the
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-validate-close.validate-and-resolve --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-validate-close.validate-and-resolve --convoy {{convoy_id}} --outcome pass
 gc runtime drain-ack
 ```
 

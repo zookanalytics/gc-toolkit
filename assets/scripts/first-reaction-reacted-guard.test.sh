@@ -53,7 +53,9 @@ esac
 SHIM
 cat > "$TMP/pack/assets/scripts/step-close.sh" <<'SC'
 #!/usr/bin/env bash
+# FAKE_SC_RC makes the close fail, as step-close.sh does when it refuses.
 printf 'STEP-CLOSE %s\n' "$*" >> "$CALLS"
+exit "${FAKE_SC_RC:-0}"
 SC
 chmod +x "$TMP/shim/gc" "$TMP/pack/assets/scripts/step-close.sh"
 
@@ -72,7 +74,7 @@ eq "$(stamp_type)" "number" "(NUMBER) the release's write stores gc.proactive_re
 run_block "$TMP/guard.sh"
 eq "$RC" "0" "(NUMBER) the guard exits 0"
 has "$OUT" "ALREADY REACTED" "(NUMBER) a landed reaction stored as a number is read as landed"
-has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --outcome pass" "(NUMBER) …and the step is closed"
+has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --convoy conv-sub --outcome pass" "(NUMBER) …and the step is closed in the molecule its input convoy names"
 has "$CALLED" "DRAIN-ACK" "(NUMBER) …and the session drains, so no exit block runs"
 
 subject '{"gc.proactive_reaction":"1"}'
@@ -80,8 +82,18 @@ eq "$(stamp_type)" "string" "(STRING) the store also holds the stamp as the stri
 run_block "$TMP/guard.sh"
 eq "$RC" "0" "(STRING) the guard exits 0"
 has "$OUT" "ALREADY REACTED" "(STRING) a landed reaction stored as a string is read as landed"
-has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --outcome pass" "(STRING) …and the step is closed"
+has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --convoy conv-sub --outcome pass" "(STRING) …and the step is closed"
 has "$CALLED" "DRAIN-ACK" "(STRING) …and the session drains"
+
+# A drain over a step the close left open strands it: the step stays assigned to
+# a session that is gone, and every respawn re-runs this guard into the same
+# refusal. A refused close keeps the session, and still runs no exit.
+subject '{"gc.proactive_reaction":"1"}'
+FAKE_SC_RC=2 run_block "$TMP/guard.sh"
+has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain" "(REFUSED) the close is attempted"
+hasnt "$CALLED" "DRAIN-ACK" "(REFUSED) a refused close does not drain"
+eq "$RC" "1" "(REFUSED) …and the block exits non-zero"
+has "$OUT" "Run no exit block" "(REFUSED) …while still telling the session to run no exit"
 
 echo "# advance-and-drain: an unlanded reaction falls through to the exit blocks"
 subject '{}'
@@ -117,6 +129,16 @@ subject '{}'
 run_block "$TMP/check.sh"
 eq "$RC" "0" "(UNREACTED) the check exits 0"
 hasnt "$OUT" "ALREADY REACTED" "(UNREACTED) a bead with neither marker is not read as reacted"
+
+# The owned guard and the final close are not marked blocks, so their gate is
+# checked by shape: every advance-and-drain close is the condition of an `if !`
+# whose body stops a refused close before the drain.
+echo "# advance-and-drain: every close gates its drain"
+CLOSES=$(grep -c -- '--step mol-first-reaction.advance-and-drain' "$FORMULA")
+GATED=$(awk '/--step mol-first-reaction.advance-and-drain/ { if ($0 ~ /^ *if ! / && (getline nxt) > 0 && index(nxt, "step-close left this step open") > 0) n++ } END { print n + 0 }' "$FORMULA")
+[ "$CLOSES" -ge 1 ] && ok "(GATED) the formula closes advance-and-drain ($CLOSES)" \
+  || bad "(GATED) no advance-and-drain close found in $FORMULA"
+eq "$GATED" "$CLOSES" "(GATED) every advance-and-drain close stops a refused close before its drain"
 
 echo
 echo "first-reaction reacted guards: $PASS passed, $FAIL failed"

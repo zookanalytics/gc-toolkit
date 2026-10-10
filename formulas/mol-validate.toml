@@ -163,7 +163,7 @@ the same session carries on into `triage-findings`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one}" --step mol-validate.load-dispatch --outcome pass
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one}" --step mol-validate.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** validation-pass bead derived, anchor and lane and reviewed
@@ -311,7 +311,7 @@ the same session carries on into `rule-convergence`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-validate.triage-findings --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-validate.triage-findings --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
@@ -399,7 +399,7 @@ the same session carries on into `finalize-and-drain`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-validate.rule-convergence --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** convergence ruled and recorded through review-outcome.sh — a
@@ -447,7 +447,7 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
 done
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch triage-findings rule-convergence finalize-and-drain; do
-  "$SC" --step "mol-validate.$STEP" --outcome pass || echo "step-close: mol-validate.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-validate.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-validate.$STEP was not this session's to close — left for the finalizer"
 done
 gc runtime drain-ack
 ```

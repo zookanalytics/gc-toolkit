@@ -33,6 +33,14 @@
 #     to the same session, is still never touched; that in_progress outranks
 #     open rather than merging with it; and that ambiguity inside the open tier
 #     is refused like any other;
+#   * --convoy naming the molecule: the live root poured over the input convoy,
+#     taken only when this session holds or held a bead in it, so neither a
+#     re-pour over the same convoy nor an alias every session of an agent
+#     shares makes the fresh root this shell's; the derivation is the fallback;
+#   * the session stamp read from open and in_progress rows first, with closed
+#     rows read only when none of those carries it;
+#   * the chain-close loop the formula ships, run against the script: a loop
+#     that names its molecule issues no gc.session_id read;
 #   * ambiguity: two in_progress beads for one step, which is refused rather
 #     than guessed, because guessing is how the original defect writes;
 #   * the refusal DIAGNOSTIC distinguishing "not your bead" from "your bead, in
@@ -73,15 +81,20 @@ hasnt()  { if hasin "$1" "$2"; then bad "$3 (found '$2' in: $1)"; else ok "$3"; 
 mkdir -p "$TMP/bin"
 
 # --- gc stub. ----------------------------------------------------------------
-# Bead table, one per line: id|assignee|step_ref|status[|root[|session_id]]
+# Bead table, one per line:
+#   id|assignee|step_ref|status[|root[|session_id[|input_convoy|formula]]]
 # Root defaults to root-1 and the session id to absent, so a row that does not
-# care about the molecule stays four fields wide.
+# care about the molecule stays four fields wide. A row with an input convoy is
+# a workflow root, as gascity pours one: gc.kind=workflow, gc.input_convoy_id
+# and gc.formula_name, and no gc.step_ref or gc.root_bead_id of its own.
 # `bd show`   : the single bead, as a one-element array (unknown id -> []).
 # `bd list`   : every bead matching --status=, --assignee= and
 #               --metadata-field=<key>=<value>. Status takes a comma list, and
 #               an unsupported metadata key matches nothing — bd filters on the
 #               key it was given, and a stub that ignored it would answer a
-#               question the real one never would.
+#               question the real one never would. With $FAKE_CALLS set, each
+#               list call's argv is appended there, one line per call, so a
+#               case can assert which reads a close issued.
 # `bd update` : records "<id> <outcome>" in $FAKE_CLOSED; refuses ids listed in
 #               $FAKE_UPDFAIL so the write-failure arm is reachable.
 # FAKE_CTRL=1 injects a raw control character into every title, reproducing the
@@ -93,9 +106,14 @@ shift
 
 emit_one() {
   # $1 id  $2 assignee  $3 step_ref  $4 status  $5 root  $6 session id
+  # $7 input convoy (a workflow root when set)  $8 the root's formula
   local title="step $1" meta
   [ "${FAKE_CTRL:-0}" = "1" ] && title="step $(printf '\001')$1"
-  meta=$(printf '"gc.step_ref":"%s","gc.root_bead_id":"%s"' "$3" "${5:-root-1}")
+  if [ -n "${7:-}" ]; then
+    meta=$(printf '"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.input_convoy_id":"%s","gc.formula_name":"%s"' "$7" "${8:-}")
+  else
+    meta=$(printf '"gc.step_ref":"%s","gc.root_bead_id":"%s"' "$3" "${5:-root-1}")
+  fi
   [ -n "${6:-}" ] && meta="$meta,\"gc.session_id\":\"$6\""
   printf '{"id":"%s","title":"%s","status":"%s","assignee":"%s","metadata":{%s}}' \
     "$1" "$title" "$4" "$2" "$meta"
@@ -105,13 +123,14 @@ case "$1" in
   show)
     want="$2"
     out=""
-    while IFS='|' read -r id assignee step status root sid; do
+    while IFS='|' read -r id assignee step status root sid convoy formula; do
       [ -n "$id" ] || continue
       [ "$id" = "$want" ] || continue
-      out=$(emit_one "$id" "$assignee" "$step" "$status" "${root:-root-1}" "${sid:-}")
+      out=$(emit_one "$id" "$assignee" "$step" "$status" "${root:-root-1}" "${sid:-}" "${convoy:-}" "${formula:-}")
     done < "$FAKE_BEADS"
     if [ -n "$out" ]; then printf '[%s]\n' "$out"; else printf '[]\n'; fi ;;
   list)
+    [ -n "${FAKE_CALLS:-}" ] && printf '%s\n' "$*" >> "$FAKE_CALLS"
     # FAKE_LIST_BLIND makes the listing return nothing while `show` still
     # answers — the only way to reach the last-resort env path, which is
     # otherwise shadowed by discovery.
@@ -132,7 +151,7 @@ case "$1" in
       shift
     done
     out=""
-    while IFS='|' read -r id assignee step status root sid; do
+    while IFS='|' read -r id assignee step status root sid convoy formula; do
       [ -n "$id" ] || continue
       root="${root:-root-1}"
       if [ -n "$wstatus" ]; then
@@ -141,12 +160,13 @@ case "$1" in
       [ -n "$wassignee" ] && [ "$assignee" != "$wassignee" ] && continue
       case "$wkey" in
         "") ;;
-        gc.root_bead_id) [ "$root" = "$wval" ] || continue ;;
-        gc.session_id)   [ "${sid:-}" = "$wval" ] || continue ;;
-        gc.step_ref)     [ "$step" = "$wval" ] || continue ;;
+        gc.root_bead_id)    [ -z "${convoy:-}" ] && [ "$root" = "$wval" ] || continue ;;
+        gc.session_id)      [ "${sid:-}" = "$wval" ] || continue ;;
+        gc.step_ref)        [ -z "${convoy:-}" ] && [ "$step" = "$wval" ] || continue ;;
+        gc.input_convoy_id) [ -n "${convoy:-}" ] && [ "$convoy" = "$wval" ] || continue ;;
         *) continue ;;
       esac
-      obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}")
+      obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}" "${convoy:-}" "${formula:-}")
       if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
     done < "$FAKE_BEADS"
     printf '[%s]\n' "$out" ;;
@@ -167,8 +187,8 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
-export FAKE_BEADS="$TMP/beads" FAKE_CLOSED="$TMP/closed" FAKE_UPDFAIL="$TMP/updfail"
-: > "$FAKE_CLOSED"; : > "$FAKE_UPDFAIL"
+export FAKE_BEADS="$TMP/beads" FAKE_CLOSED="$TMP/closed" FAKE_UPDFAIL="$TMP/updfail" FAKE_CALLS="$TMP/calls"
+: > "$FAKE_CLOSED"; : > "$FAKE_UPDFAIL"; : > "$FAKE_CALLS"
 
 MINE="gc-toolkit__polecat-lx-zzk9"
 STEP="mol-feedback-distiller.load-and-gate"
@@ -528,6 +548,175 @@ run --step "$FSTEP"
 eq "$RC" "0" "(HUSKS) two abandoned molecules do not block a close"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(HUSKS) closed the bead for this step"
 
+# --- 1f. --convoy names the molecule -----------------------------------------
+# A formula step passes `--convoy {{convoy_id}}`, and the live workflow root
+# poured over that convoy is its molecule. The refusal it answers was live: a
+# step claimed with `gc bd update --claim` carries no gc.session_id stamp, so
+# only the assignee names its molecule, and every queued molecule's unassigned
+# bead for the same step is a rival the guard refuses over.
+FR="mol-first-reaction.advance-and-drain"
+convoy_store() {
+  cat > "$FAKE_BEADS" <<B
+root-mine|||in_progress|||conv-mine|mol-first-reaction
+root-q1|||open|||conv-q1|mol-first-reaction
+root-q2|||open|||conv-q2|mol-first-reaction
+tk-own11|$MINE|$FR|in_progress|root-mine|
+tk-q1aaa||$FR|open|root-q1|
+tk-q2aaa||$FR|open|root-q2|
+B
+  : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+}
+convoy_store
+run --step "$FR"
+eq "$RC" "2" "(CONVOY) with nothing naming the molecule, the queued rivals refuse the close"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY) …and nothing is written"
+has "$OUT" "gc.root_bead_id on the step bead" "(CONVOY) the refusal points at the step bead's own root"
+hasnt "$OUT" "gc hook --claim --json" "(CONVOY) …not at a claim, which takes new work on a pool worker"
+
+convoy_store
+run --step "$FR" --convoy conv-mine
+eq "$RC" "0" "(CONVOY) --convoy names the molecule, so the close proceeds past the queued rivals"
+has "$(cat "$FAKE_CLOSED")" "tk-own11 pass" "(CONVOY) it closes this molecule's bead"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-q" "(CONVOY) no queued molecule's bead is touched"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY) no gc.session_id read is issued"
+eq "$(wc -l < "$FAKE_CALLS" | tr -d ' ')" "2" "(CONVOY) two reads in all: the convoy's root, then the molecule's live rows"
+
+# (b) A forced re-pour over the same convoy closes the old root and pours a
+#     fresh one. A shell still running the old molecule resolves the fresh
+#     root from the convoy, and that molecule's steps are open and unassigned,
+#     exactly as an unclaimed successor of its own would be. This session holds
+#     nothing in it, so the convoy's root is not taken, and the derivation finds
+#     the molecule this shell actually ran.
+cat > "$FAKE_BEADS" <<B
+root-old|||closed|||conv-1|mol-polecat-work
+root-new|||open|||conv-1|mol-polecat-work
+tk-oldlc|$MINE|$FSTEP|closed|root-old|lx-zzk9
+tk-newlc||$FSTEP|open|root-new|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-1
+eq "$RC" "0" "(CONVOY-REPOURED) a shell whose molecule was replaced exits clean"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-REPOURED) the fresh molecule's step is NOT closed"
+has "$OUT" "re-pour" "(CONVOY-REPOURED) says why the convoy's root was not taken"
+has "$OUT" "tk-oldlc ($FSTEP) is already closed" "(CONVOY-REPOURED) the replaced molecule's own step reads as done"
+
+# (c) A convoy with no live root, as after the finalizer closed it, falls back
+#     to the derivation rather than refusing.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-none
+eq "$RC" "0" "(CONVOY-NONE) a convoy with no live root falls back to the derivation"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(CONVOY-NONE) …which closes this session's stamped bead"
+has "$OUT" "names no single live workflow root" "(CONVOY-NONE) the fallback is reported"
+
+# (d) Several live roots over one convoy: the one of this step's formula is
+#     taken when it stands alone, and a tie is no answer at all.
+cat > "$FAKE_BEADS" <<B
+root-pw|||in_progress|||conv-2|mol-polecat-work
+root-rv|||in_progress|||conv-2|mol-review
+tk-mine22|$MINE|$FSTEP|in_progress|root-pw|
+tk-rv1111|$MINE|mol-review.review|open|root-rv|
+tk-q3aaaa||$FSTEP|open|root-q3|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-2
+eq "$RC" "0" "(CONVOY-FORMULA) the root of this step's formula is taken among several"
+has "$(cat "$FAKE_CLOSED")" "tk-mine22 pass" "(CONVOY-FORMULA) it closes the bead in that molecule"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-q3aaaa" "(CONVOY-FORMULA) the queued rival is untouched"
+
+cat > "$FAKE_BEADS" <<B
+root-a|||in_progress|||conv-3|mol-polecat-work
+root-b|||in_progress|||conv-3|mol-polecat-work
+tk-mine33||$FSTEP|open|root-a|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-3
+has "$OUT" "names no single live workflow root" "(CONVOY-TIE) two roots of one formula over the convoy are no answer"
+has "$(cat "$FAKE_CLOSED")" "tk-mine33 pass" "(CONVOY-TIE) …and the derivation still closes this session's bead"
+
+# (e) The inline chain: this session claimed load-context and has closed it,
+#     and the successor it is closing now was never claimed, so it carries no
+#     assignee and no stamp. The session also ran an earlier molecule of the
+#     same formula, so its stamp names two roots and the derivation cannot
+#     settle it. The closed rows of the convoy's molecule still show this
+#     session's hand, and the close proceeds.
+cat > "$FAKE_BEADS" <<B
+root-mine|||in_progress|||conv-4|mol-polecat-work
+tk-lc111|$MINE|mol-polecat-work.load-context|closed|root-mine|lx-zzk9
+tk-ws111||mol-polecat-work.workspace-setup|open|root-mine|
+tk-lc222|$MINE|mol-polecat-work.load-context|closed|root-old|lx-zzk9
+tk-ws222|$MINE|mol-polecat-work.workspace-setup|closed|root-old|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step mol-polecat-work.workspace-setup
+eq "$RC" "2" "(CONVOY-INLINE) with the stamp naming two molecules, the derivation refuses"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-INLINE) …and writes nothing"
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step mol-polecat-work.workspace-setup --convoy conv-4
+eq "$RC" "0" "(CONVOY-INLINE) --convoy closes the unclaimed successor in this session's molecule"
+has "$(cat "$FAKE_CLOSED")" "tk-ws111 pass" "(CONVOY-INLINE) it is this molecule's bead that closes"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-ws222" "(CONVOY-INLINE) the earlier molecule is untouched"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY-INLINE) no gc.session_id read is issued"
+
+# (f) An agent alias is shared by every session of that agent. When another
+#     session of the same agent has claimed the fresh molecule's step, that step
+#     carries this shell's alias as its assignee, but its stamp names the other
+#     session, so the convoy's root is still not taken and their step is not
+#     closed.
+cat > "$FAKE_BEADS" <<B
+root-old|||closed|||conv-5|mol-review
+root-new|||open|||conv-5|mol-review
+tk-oldrv|gc-toolkit/gc-toolkit.nux|mol-review.review|closed|root-old|lx-zzk9
+tk-newrv|gc-toolkit/gc-toolkit.nux|mol-review.review|in_progress|root-new|lx-other
+B
+: > "$FAKE_CLOSED"
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_ALIAS="gc-toolkit/gc-toolkit.nux" \
+       -- --step mol-review.review --convoy conv-5
+eq "$RC" "0" "(CONVOY-ALIAS) a shell whose molecule was replaced exits clean"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-ALIAS) the other session's step under the shared alias is NOT closed"
+has "$OUT" "re-pour" "(CONVOY-ALIAS) the shared alias does not make the fresh root this shell's"
+has "$OUT" "tk-oldrv (mol-review.review) is already closed" "(CONVOY-ALIAS) this shell's own step reads as done"
+
+# --- 1g. the session stamp is read from live rows first -----------------------
+# The step this shell is executing is open or in_progress, and a read of those
+# rows stays cheap where one that includes closed rows scans the store. One live
+# root answers, even when closed rows name an earlier molecule this session
+# finished; before, that pair was ambiguous and a stripped bead was refused.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$FSTEP"
+eq "$RC" "0" "(LIVE-FIRST) a live stamped bead names the molecule past an earlier closed one"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-FIRST) it closes this molecule's bead"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(LIVE-FIRST) the earlier molecule is untouched"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=open,in_progress " "(LIVE-FIRST) the stamp is read from open and in_progress rows"
+hasnt "$(cat "$FAKE_CALLS")" "blocked,closed" "(LIVE-FIRST) …and closed rows are never read for it"
+
+# A re-run over a closed chain finds no live stamp, and only then reads closed rows.
+cat > "$FAKE_BEADS" <<B
+tk-9b3d8|$MINE|$STEP|closed|root-1|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$STEP"
+eq "$RC" "0" "(LIVE-EMPTY) a re-run over a closed chain still resolves"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=blocked,closed " "(LIVE-EMPTY) the closed rows are read once no live row carries the stamp"
+
+# Two live roots under the stamp are no answer, and reading closed rows could
+# not make one, so they are not read.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
+tk-oth111||mol-polecat-work.implement|in_progress|root-other|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$FSTEP"
+eq "$RC" "0" "(LIVE-AMBIG) the assignee still settles a step the live stamp cannot"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-AMBIG) it closes this session's bead"
+hasnt "$(cat "$FAKE_CALLS")" "blocked,closed" "(LIVE-AMBIG) two live roots skip the closed read"
+
 # --- 2. resolution with no env id at all -------------------------------------
 reset_beads
 run --step "$STEP"
@@ -821,6 +1010,76 @@ for f in mol-feedback-distiller mol-feedback-miner; do
   hasnt "$CMDS" 'gc bd update "\$GC_BEAD_ID"' "(SHIPPED) $f closes no bead on \$GC_BEAD_ID"
   has "$(cat "$FORMULA")" 'step-close.sh' "(SHIPPED) $f closes through step-close.sh"
 done
+
+# Every step-close call in a formula that has an input convoy names its
+# molecule with it. A formula without one has nothing to pass, and its closes
+# rest on the derivation.
+NAMED=0
+for FORMULA in "$ROOT"/formulas/*.toml; do
+  grep -q '{{convoy_id}}' "$FORMULA" || continue
+  SC_CALLS=$(grep -nE 'SC(:\?[^}]*\})?" --step ' "$FORMULA")
+  [ -n "$SC_CALLS" ] || continue
+  NAMED=$((NAMED + 1))
+  UNNAMED=$(printf '%s\n' "$SC_CALLS" | grep -v -- '--convoy {{convoy_id}}')
+  if [ -z "$UNNAMED" ]; then
+    ok "(SHIPPED) every step-close call in $(basename "$FORMULA") passes --convoy {{convoy_id}}"
+  else
+    bad "(SHIPPED) $(basename "$FORMULA") calls step-close without naming its molecule: $UNNAMED"
+  fi
+done
+[ "$NAMED" -ge 2 ] && ok "(SHIPPED) the convoy check reached the formulas that close steps ($NAMED)" \
+                   || bad "(SHIPPED) expected formulas calling step-close with an input convoy, found $NAMED"
+
+# --- 18. a step loop that names its molecule never scans gc.session_id --------
+# The terminal chain-close runs step-close once per step. Deriving the molecule
+# on each call read the session stamp over closed rows every time, about 6 to 9
+# seconds a call on a loaded store. The loop the formula ships is extracted and
+# run against the real script: every step resolves inside the named molecule,
+# and no read keys on gc.session_id.
+LOOP_SRC=$(awk '/^# >>> submit-chain-close$/ {f = 1; next} /^# <<< submit-chain-close$/ {f = 0} f' \
+  "$ROOT/formulas/mol-polecat-work.toml")
+if [ -n "$LOOP_SRC" ]; then ok "(LOOP) the submit-chain-close loop is extracted"; else bad "(LOOP) submit-chain-close markers missing from mol-polecat-work.toml"; fi
+loop_store() {
+  cat > "$FAKE_BEADS" <<B
+root-loop|||in_progress|||conv-loop|mol-polecat-work
+tk-s1aaa|gc-toolkit__polecat-lx-a|mol-polecat-work.load-context|closed|root-loop|lx-a
+tk-s2aaa||mol-polecat-work.workspace-setup|closed|root-loop|
+tk-s3aaa||mol-polecat-work.preflight-tests|closed|root-loop|
+tk-s4aaa||mol-polecat-work.implement|closed|root-loop|
+tk-s5aaa|$MINE|mol-polecat-work.submit-and-exit|in_progress|root-loop|lx-zzk9
+tk-wfaaa||mol-polecat-work.workflow-finalize|open|root-loop|
+tk-q1aaa||mol-polecat-work.submit-and-exit|open|root-q1|
+tk-q2aaa||mol-polecat-work.load-context|open|root-q2|
+B
+  : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+}
+run_loop() { # <loop file>; sets OUT and RC
+  RC=0
+  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    bash "$1" 2>&1) || RC=$?
+}
+
+printf '%s\n' "$LOOP_SRC" | sed 's/{{convoy_id}}/conv-loop/g' > "$TMP/loop-convoy.sh"
+loop_store
+run_loop "$TMP/loop-convoy.sh"
+eq "$RC" "0" "(LOOP) the shipped loop runs clean"
+eq "$(cat "$FAKE_CLOSED")" "tk-s5aaa pass" "(LOOP) it closes this session's step and nothing else"
+eq "$(grep -c 'is already closed' <<< "$OUT")" "4" "(LOOP) the four steps other sessions closed read as done"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(LOOP) a loop that names its molecule issues no gc.session_id read"
+
+# The same loop given --root, as a caller holding the root passes it.
+printf '%s\n' "$LOOP_SRC" | sed 's/--convoy {{convoy_id}}/--root root-loop/' > "$TMP/loop-root.sh"
+loop_store
+run_loop "$TMP/loop-root.sh"
+eq "$(cat "$FAKE_CLOSED")" "tk-s5aaa pass" "(LOOP-ROOT) a loop given --root closes this session's step"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(LOOP-ROOT) a loop given --root issues no gc.session_id read"
+
+# CONTROL: the loop with the molecule's name removed derives it on every call,
+# which is the read the two runs above are asserted not to issue.
+printf '%s\n' "$LOOP_SRC" | sed 's/ --convoy {{convoy_id}}//' > "$TMP/loop-bare.sh"
+loop_store
+run_loop "$TMP/loop-bare.sh"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9" "(LOOP-CONTROL) without the molecule's name, every call reads the session stamp"
 
 echo
 echo "step-close.test.sh: $PASS passed, $FAIL failed"

@@ -92,7 +92,7 @@ drain — the same session carries on into `first-reaction`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.load-bead --outcome pass
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.load-bead --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the bead and its slice are read, and this step bead is
@@ -247,7 +247,7 @@ merge, and step 3 hands the bead to the human, not the refinery.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.first-reaction --outcome pass
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.first-reaction --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the card is appended to the bead's notes, and this step
@@ -334,7 +334,10 @@ if [ "$REACTION_OWNED" = "1" ]; then
   SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
+  if ! "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --convoy {{convoy_id}} --outcome pass; then
+    echo "step-close left this step open, so this session is not draining: a drain would strand the step, and every respawn would re-run this block into the same refusal. Run no exit block. Re-run the close with --root <the gc.root_bead_id on this step bead>, then drain." >&2
+    exit 1
+  fi
   gc runtime drain-ack
   exit 0
 fi
@@ -369,7 +372,10 @@ if [ "$REACTED" = "true" ]; then
   SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
+  if ! "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --convoy {{convoy_id}} --outcome pass; then
+    echo "step-close left this step open, so this session is not draining: a drain would strand the step, and every respawn would re-run this block into the same refusal. Run no exit block. Re-run the close with --root <the gc.root_bead_id on this step bead>, then drain." >&2
+    exit 1
+  fi
   gc runtime drain-ack
   exit 0
 fi
@@ -541,11 +547,19 @@ worker at all, and `GC_TRIGGER_BEAD_ID` is pinned at spawn and is not
 refreshed by `gc hook --claim`, so it names some other session's bead
 (tk-niu2f).
 
+`--convoy {{convoy_id}}` names this reaction's molecule. Without it, a step
+claimed with no `gc.session_id` stamp is named by its assignee alone, and every
+queued reaction's step counts as a rival, so the close is refused. The block
+drains only once the close lands: a drain over an open step strands it.
+
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
+if ! "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --convoy {{convoy_id}} --outcome pass; then
+  echo "step-close left this step open, so this session is not draining: a drain would strand the step, and every respawn would re-run this block into the same refusal. Re-run the close with --root <the gc.root_bead_id on this step bead>, then drain." >&2
+  exit 1
+fi
 gc runtime drain-ack
 ```
 

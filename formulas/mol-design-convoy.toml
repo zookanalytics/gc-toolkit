@@ -85,7 +85,7 @@ echo "design_gated resolves to $DESIGN_GATED"
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the subject and its card are read, and this step is closed.
@@ -155,7 +155,7 @@ gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-me
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-convoy --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-convoy --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the owned convoy exists, its target is `integration/<convoy-id>`,
@@ -251,7 +251,7 @@ fi
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-design --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-design --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the design child is filed, linked to the convoy with the link
@@ -376,7 +376,7 @@ fi
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-implementation --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-implementation --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** the implementation child is filed, linked to the convoy, and
@@ -403,7 +403,7 @@ the subject, or any child yourself.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.drain --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.drain --convoy {{convoy_id}} --outcome pass
 gc runtime drain-ack
 ```
 
