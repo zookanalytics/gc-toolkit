@@ -429,6 +429,16 @@ rig_db_for_session() {
 # satisfies the blocker rule. A bead the store will not close is de-pinned
 # instead, so it stops re-attracting spawns while the patrol retries.
 #
+# Closing a step readies the steps behind it, and a waiting step carries its
+# pool route: the pour gives it one, and molecule-hold.sh and the quiesce below
+# leave it in place. A close-first teardown would pass through a step that is
+# ready, routed and unassigned, which is the pool's offer. So every member a
+# pool could be offered, through gc.routed_to or through the gc.run_target that
+# route recovery copies into it, is de-routed BEFORE the first close, and a
+# de-route the store refuses stops the reap before anything closes. A
+# control-dispatcher route stays, so workflow-finalize keeps its way out when
+# the reap stops there.
+#
 # $1 = newline-separated molecule rows (JSON, {id,kind,step,...}); $2 = rig
 # .beads path or ""; $3 = the released anchor id, for the log line.
 # >>> reap-release-molecule
@@ -436,6 +446,26 @@ reap_release_molecule() {
     _reap_rows="$1"; _reap_db="$2"; _reap_anchor="$3"
     _reap_todo=$(printf '%s\n' "$_reap_rows" | jq -r '.id // empty' 2>/dev/null | grep . || true)
     [ -n "$_reap_todo" ] || return 0
+
+    _reap_routed=$(printf '%s\n' "$_reap_rows" | jq -r '
+        select(((.routed // "") | test("control-dispatcher")) | not)
+        | select((.routed // "") != "" or (.run_target // "") != "")
+        | .id // empty' 2>/dev/null | grep . || true)
+    _reap_kept=""
+    while IFS= read -r _sid; do
+        [ -n "$_sid" ] || continue
+        # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
+        gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --unset-metadata gc.routed_to \
+            --unset-metadata gc.run_target --unset-metadata gc.session_affinity >/dev/null 2>&1 \
+            || _reap_kept="$_reap_kept $_sid"
+    done <<ROUTED
+$_reap_routed
+ROUTED
+    if [ -n "$_reap_kept" ]; then
+        echo "$PROG: takeaway: could not de-route$_reap_kept of $_reap_anchor — closed nothing, so no step is readied while still routed; re-run the release to reap it" >&2
+        return 0
+    fi
+
     _reap_n=$(printf '%s\n' "$_reap_todo" | grep -c . 2>/dev/null || echo 0)
     case "$_reap_n" in ''|*[!0-9]*) _reap_n=0 ;; esac
     _reap_pass=0
@@ -672,9 +702,12 @@ _resolve_superseded_reference() {
 # mol-first-reaction terminal step disposing the anchor it runs on, or a sitting
 # — and it closes its own chain the normal way: the held step is left alone, the
 # husk pins around it are cleared, and workflow-finalize keeps its escape route.
-# If no step is the releasing session's, nothing will ever close the chain, so
-# the molecule is a husk and reap_release_molecule force-closes the whole
-# subtree.
+# A step that waits on a member of the molecule that is not closed keeps its
+# route and session affinity and loses only a claim another session left on it:
+# bd ready leaves it out, so the pool cannot offer it before the chain reaches
+# it, and it is still routed when the chain does. If no step is the releasing
+# session's, nothing will ever close the chain, so the molecule is a husk and
+# reap_release_molecule force-closes the whole subtree.
 #
 # Guards: fail closed on an unresolved or foreign anchor; select steps by
 # contract (gc.step_ref) and never by formula name; an absent root is the
@@ -727,7 +760,9 @@ quiesce_release_molecule_steps() (
             convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
             routed:   ($b.metadata["gc.routed_to"] // ""),
             assignee: ($b.assignee // ""),
-            affinity: ($b.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
+            affinity: ($b.metadata["gc.session_affinity"] // ""),
+            run_target: ($b.metadata["gc.run_target"] // ""),
+            blockers: [ $b.dependencies[]? | select((.type // "") == "blocks") | (.depends_on_id // empty) ] }' 2>/dev/null || true)
     [ -n "$_rows" ] || exit 0
 
     # Resolve the released molecule DIRECTLY from the parked anchor. The input
@@ -770,7 +805,13 @@ quiesce_release_molecule_steps() (
             | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
         [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
-        _mol_rows=$(printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null || true)
+        # .waits marks a step with a `blocks` edge to a member of this molecule
+        # that the scan above listed, which is every member not yet closed.
+        _mol_rows=$(printf '%s\n' "$_rows" | jq -c -s --arg r "$_root" '
+            [ .[] | select(.root == $r) ] as $m
+            | (reduce $m[].id as $i ({}; .[$i] = true)) as $live
+            | $m[]
+            | .waits = (.kind == "step" and any(.blockers[]?; $live[.] == true))' 2>/dev/null || true)
         [ -n "$_mol_rows" ] || continue
 
         # A molecule the RELEASING session is itself completing keeps its chain
@@ -797,6 +838,7 @@ quiesce_release_molecule_steps() (
             _routed=$(printf '%s'   "$_row" | jq -r '.routed // empty' 2>/dev/null || true)
             _who=$(printf '%s'      "$_row" | jq -r '.assignee // empty' 2>/dev/null || true)
             _affinity=$(printf '%s' "$_row" | jq -r '.affinity // empty' 2>/dev/null || true)
+            _waits=$(printf '%s'    "$_row" | jq -r '.waits // false' 2>/dev/null || true)
             [ -n "$_sid" ] || continue
 
             # Never de-route the finalize step (the molecule's only escape path).
@@ -812,6 +854,20 @@ quiesce_release_molecule_steps() (
             # case where the skip is needed and unavailable.
             if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
                 echo "$PROG: takeaway: kept live $_kind $_sid ($_step) — this session holds it and still has to close it"
+                continue
+            fi
+
+            # A waiting step keeps its route and affinity, so the chain resumes
+            # through it whoever ends up closing the step in front. Only the claim
+            # goes, and there is no route clear for a refused unassign to undo.
+            if [ "$_waits" = "true" ]; then
+                [ -n "$_who" ] || continue
+                # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
+                if gc bd update "$_sid" ${_db:+--db "$_db"} --assignee "" >/dev/null 2>&1; then
+                    echo "$PROG: takeaway: unassigned waiting $_kind $_sid ($_step) of $_anchor — it keeps its route for when the chain reaches it"
+                else
+                    echo "$PROG: takeaway: could not unassign waiting $_kind $_sid ($_step) of $_anchor (retries via witness patrol)" >&2
+                fi
                 continue
             fi
 

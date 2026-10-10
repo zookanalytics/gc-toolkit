@@ -50,13 +50,18 @@ mkdir -p "$TMP/bin"
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
-#   s-NOPIN  refused : the store rejects its close   -> de-pinned as a fallback
+#   s-NOCLOSE refused: the store rejects its close   -> de-pinned as a fallback
+#   s-rt     recover : no gc.routed_to, a gc.run_target route recovery restores
+#                      from                          -> de-routed, then reaped
 #   s-fold   folded  : step of a molecule whose anchor is CLOSED -> reaped
+#   s-dr-ok, s-dr-NOPIN: A-DEROUTE's molecule, where the store refuses every
+#                      write to s-dr-NOPIN           -> nothing closes
 # and the gc.kind=workflow ROOTS, which carry a pool route of their own:
 #   root-PARKED      : this molecule's root          -> reaped with its steps
 #   root-OTHER       : another molecule's root       -> untouched
 #   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
 #   root-FOLD        : root of the folded anchor's molecule -> reaped too
+#   root-DEROUTE     : root of A-DEROUTE's molecule  -> de-routed, not closed
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
@@ -68,8 +73,12 @@ cat > "$TMP/steps.json" <<'JSON'
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-NOCLOSE","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-rt","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-PARKED","gc.run_target":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-dr-ok","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-DEROUTE","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-dr-NOPIN","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-DEROUTE","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"root-DEROUTE","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-DEROUTE","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-fold","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
@@ -82,6 +91,7 @@ cat > "$TMP/roots" <<'R'
 root-PARKED|convoy-PARKED
 root-OTHER|convoy-OTHER
 root-FOLD|convoy-FOLD
+root-DEROUTE|convoy-DEROUTE
 R
 
 # Convoys: convoy_id|anchor_id
@@ -91,6 +101,7 @@ cat > "$TMP/convoys" <<'C'
 convoy-PARKED|A-PARKED
 convoy-OTHER|A-OTHER
 convoy-FOLD|CLOSED-A-FOLD
+convoy-DEROUTE|A-DEROUTE
 C
 
 # Fold dispositions: bead_id|superseded_by
@@ -239,7 +250,10 @@ case "$1 ${2:-}" in
     # pins fail to land; the quiesce must not go on to unassign a bead it has
     # just failed to de-route. NOSTAMP is the same refusal on a VISIT, where
     # what fails to land is the outcome the board reads a finished sitting for.
+    # NOCLOSE refuses only the close, the way a blocker outside the molecule
+    # that never clears does.
     case "$3" in *NOPIN*|*NOSTAMP*) exit 1 ;; esac
+    case "$3" in *NOCLOSE*) case " $* " in *" --status=closed "*) exit 1 ;; esac ;; esac
     # gc.takeaway_settled lands here so a read-back sees what was written.
     # FAKE_SETTLED_DROP=1 loses every one of them (no repair recovers it);
     # =multi loses it only out of a multi-pair stamp, which is the shape a lone
@@ -525,19 +539,37 @@ reaped root-PARKED \
 
 # (REAPFAIL) a bead the store refuses to close is not left silently: the close
 # fails, and the fallback de-pins it so it stops re-attracting spawns while the
-# patrol retries. NOPIN refuses every write, so even the de-pin is refused, and
-# the run says so on stderr and never claims it reaped.
-grep -qE '^bd update s-NOPIN .*--status=closed' "$UP" \
+# patrol retries. NOCLOSE refuses only the close, and the run says so on stderr
+# and never claims it reaped.
+grep -qE '^bd update s-NOCLOSE .*--status=closed' "$UP" \
   && ok "(REAPFAIL) the refused bead's close was attempted" \
-  || bad "(REAPFAIL) the reap never tried to close s-NOPIN"
-grep -qE '^bd update s-NOPIN .*--unset-metadata gc.routed_to' "$UP" \
-  && ok "(REAPFAIL) …and the fallback de-pin was attempted so it stops re-offering" \
-  || bad "(REAPFAIL) a bead that would not close was not de-pinned as a fallback"
-reaped s-NOPIN && bad "(REAPFAIL) a refused close was reported as reaped" \
+  || bad "(REAPFAIL) the reap never tried to close s-NOCLOSE"
+grep -qE '^bd update s-NOCLOSE .*--unset-metadata gc.routed_to' "$UP" \
+  && ok "(REAPFAIL) …and it is de-pinned so it stops re-offering" \
+  || bad "(REAPFAIL) a bead that would not close was not de-pinned"
+reaped s-NOCLOSE && bad "(REAPFAIL) a refused close was reported as reaped" \
   || ok "(REAPFAIL) …and a refused close never reads as reaped"
-grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
+grep -q 'could not reap step s-NOCLOSE' <<< "$ERR" \
   && ok "(REAPFAIL) …and the failure is reported for the patrol to retry" \
   || bad "(REAPFAIL) the failed reap is silent (stderr: $ERR)"
+
+# (REAPORDER) closing a step readies the steps behind it, and a waiting step
+# keeps its pool route, so every member a pool could be offered is de-routed
+# before the first close. s-rt carries only gc.run_target, the route recovery
+# restores gc.routed_to from, so it is de-routed too. workflow-finalize keeps
+# its control-dispatcher route: the dispatcher, not a pool, answers for it.
+FIRST_CLOSE=$(grep -nE '^bd update [^ ]+ .*--status=closed' "$UP" | head -n1 | cut -d: -f1 || true)
+order_ok=1
+for m in s-load s-impl s-nonmol s-NOCLOSE s-rt root-PARKED; do
+  d=$(grep -nE "^bd update $m .*--unset-metadata gc.routed_to .*--unset-metadata gc.run_target" "$UP" | head -n1 | cut -d: -f1 || true)
+  if [ -z "$d" ] || [ -z "$FIRST_CLOSE" ] || [ "$d" -ge "$FIRST_CLOSE" ]; then order_ok=0; echo "  ($m de-route=$d first close=$FIRST_CLOSE)"; fi
+done
+eq "$order_ok" "1" "(REAPORDER) every pool-routed member, and one carrying only gc.run_target, is de-routed before the first close"
+reaped s-rt && ok "(REAPORDER) …and the member routed only by gc.run_target is still reaped" \
+  || bad "(REAPORDER) s-rt was not reaped (out: $OUT)"
+[ -z "$(grep -E '^bd update s-final .*--unset-metadata' "$UP" || true)" ] \
+  && ok "(REAPORDER) workflow-finalize keeps its control-dispatcher route" \
+  || bad "(REAPORDER) the reap de-routed workflow-finalize: $(line_for s-final)"
 
 # (REPORT) the run announces the steps it reaped.
 grep -q 'reaped step s-load' <<< "$OUT" \
@@ -569,6 +601,25 @@ QDANGER="$(printf '%s\n' "$QBLOCK" | grep -v 'bd list --status' | grep -E 'bd cl
   || bad "(NOCLOSE static) the de-pin block contains a close/status-write: $QDANGER"
 
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
+
+# (REAPSTOP) a de-route the store refuses stops the reap before anything
+# closes: a close past that point could ready a step that is still routed.
+# A-DEROUTE's molecule is a husk too; the store refuses every write to
+# s-dr-NOPIN.
+: > "$TMP/updates"
+DOUT="$(sh "$SCRIPT" takeaway A-DEROUTE "parked" --by proactive --release --no-wait 2>"$TMP/derr" || true)"
+DERR="$(cat "$TMP/derr")"
+eq "$(grep -cE '^bd update (s-dr-ok|s-dr-NOPIN|root-DEROUTE) .*--status=closed' "$TMP/updates" || true)" "0" \
+   "(REAPSTOP) a member whose de-route is refused stops the reap before any close"
+grep -qE '^bd update s-dr-ok .*--unset-metadata gc.routed_to' "$TMP/updates" \
+  && ok "(REAPSTOP) …the members that took the de-route are de-routed all the same" \
+  || bad "(REAPSTOP) s-dr-ok was never de-routed: $(grep -E '^bd update s-dr-ok' "$TMP/updates" || true)"
+grep -q 'could not de-route s-dr-NOPIN of A-DEROUTE' <<< "$DERR" \
+  && ok "(REAPSTOP) …and the refusal is named on stderr" \
+  || bad "(REAPSTOP) the stopped reap is silent (stderr: $DERR)"
+grep -qE 'reaped (step|root) ' <<< "$DOUT" \
+  && bad "(REAPSTOP) a stopped reap reported a bead as reaped (out: $DOUT)" \
+  || ok "(REAPSTOP) …and nothing is reported as reaped"
 
 # ── takeaway --waiting-on: the wait as a GRAPH EDGE ────────────────
 # --waiting-on writes `subject depends on <work bead>` as a `blocks` edge
@@ -1990,7 +2041,11 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 # right. L-live is the terminal step this session is executing the release
 # FROM; L-peer is a sibling step left pinned to a session that is gone, which
 # is what the quiesce exists for; L-held is the hard case — in_progress under
-# a DIFFERENT live session, so beads refuses to clear its assignee.
+# a DIFFERENT live session, so beads refuses to clear its assignee. L-next,
+# L-after and L-pinned wait behind L-live through `blocks` edges: L-next carries
+# a claim a gone session left, L-after sits unclaimed as the pour left it, and
+# L-pinned is this session's own. L-unheld's only blocker is not an open member
+# of the molecule, so nothing holds it back from bd ready.
 #
 # A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
 # molecule (root-FOLD, F-work, F-held) still carrying the pool route the pour
@@ -2006,6 +2061,14 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-next","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.report","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"L-next","depends_on_id":"root-LIVE","type":"tracks"},{"issue_id":"L-next","depends_on_id":"L-live","type":"blocks"}]},
+ {"id":"L-after","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-first-reaction.wrap-up","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"L-after","depends_on_id":"L-next","type":"blocks"}]},
+ {"id":"L-pinned","status":"open","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.follow-up","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"L-pinned","depends_on_id":"L-live","type":"blocks"}]},
+ {"id":"L-unheld","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.side","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
+  "dependencies":[{"issue_id":"L-unheld","depends_on_id":"X-closed","type":"blocks"}]},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
@@ -2142,6 +2205,31 @@ grep -q 'de-pinned husk step L-held' <<< "$RELOUT" \
 eq "$(field root-LIVE gc.routed_to)" "" \
    "(LIVEROOT) the workflow root is de-routed too, so no door is left open"
 
+# A step waiting behind the one the release runs from is outside bd ready until
+# that step closes, so it keeps its route and affinity: when the chain reaches
+# it, it is routed. Only a claim another session left on it goes.
+eq "$(field L-next gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(WAITSTEP) a step waiting on the releasing session's step keeps its route"
+eq "$(field L-next gc.session_affinity)" "require" \
+   "(WAITSTEP) …and its session affinity"
+eq "$(field L-next assignee)" "" \
+   "(WAITSTEP) …and loses the claim a gone session left on it"
+grep -q 'unassigned waiting step L-next' <<< "$RELOUT" \
+  && ok "(WAITSTEP) …and the run says so" \
+  || bad "(WAITSTEP) the unassign is unreported (out: $RELOUT)"
+eq "$(field L-after gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(WAITSTEP) a step further down the chain keeps its route too"
+eq "$(grep -c '^update bd update L-after' "$LIVE_LOG" || true)" "0" \
+   "(WAITSTEP) …and an unclaimed waiting step gets no write at all"
+eq "$(field L-pinned assignee)" "$SESSION" \
+   "(WAITSTEP) a waiting step this session holds keeps its claim — the session still means to run it"
+eq "$(field L-pinned gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(WAITSTEP) …and its route"
+eq "$(field L-unheld gc.routed_to)" "" \
+   "(WAITSTEP) a step whose blocker is not an open member of the molecule is ready on its own, and is de-routed"
+eq "$(field L-unheld assignee)" "" \
+   "(WAITSTEP) …and unassigned"
+
 # The disposition itself still lands whole.
 eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
 eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
@@ -2157,6 +2245,17 @@ eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step afte
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
 [ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
+
+# With that step closed, the step behind it is what the pool offers: open,
+# unassigned, routed, and every `blocks` blocker closed. A release that had
+# de-routed it would leave it ready and unroutable, the chain stranded there.
+eq "$(jq -r '
+  (reduce .[] as $b ({}; .[$b.id] = ($b.status // "open"))) as $st
+  | [ .[] | select(.id == "L-next")
+      | select(.status == "open" and (.assignee // "") == "" and (.metadata["gc.routed_to"] // "") != "")
+      | select(all(.dependencies[]? | select(.type == "blocks"); ($st[.depends_on_id] // "closed") == "closed"))
+      | .id ] | join(" ")' "$LIVE_STORE")" "L-next" \
+   "(WAITSTEP) once the releasing session closes its step, the next step is ready and routed: the chain resumes"
 
 # ── A FOLDED anchor, against the same mutating store ─────────────────────────
 # The argv assertions in the FOLDED section prove which flags the verb sent.
