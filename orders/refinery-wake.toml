@@ -1,0 +1,16 @@
+# refinery-wake — re-prompt a refinery that sits idle at its prompt while a
+# handoff waits in its find-work queue. The runtime defers the idle stop while
+# a session holds assigned work, and a refinery with a queue always does, so a
+# turn that ends with work queued leaves the refinery idle until something
+# types into its pane. Every 5m, per rig: when the oldest queued handoff has
+# waited past the bound and the refinery's pane has been quiet, nudge it with
+# its own nudge text, a few times per stall and spaced out. Nudge-only; a
+# no-op for a busy, attached, or absent refinery. scope=rig: one registration
+# per importing rig, which names the rig through GC_RIG.
+[order]
+description = "Nudge a refinery that sits idle at its prompt while its find-work queue waits"
+trigger = "cooldown"
+interval = "5m"
+timeout = "120s"
+exec = "$PACK_DIR/assets/scripts/refinery-wake.sh"
+scope = "rig"

@@ -106,14 +106,16 @@ performer; the full transition table with writers is
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a pool slot the runtime does not free, a provider quota park —
-are handled by six reactive paths: `pr-facts.sh` (an arm of the cadence)
-records PR events and files a visit, the witness patrol recovers work orphaned
-by dead sessions, the `dog` pool is warrant executor for due-process recovery
-of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
-session bead the runtime left holding its slot with no runtime and no work,
-`quota-park-nudge.sh` nudges a session parked behind a provider limit, and
-`boot-health.sh` detects a wedged deacon (report-only by design). See
+session dying, a pool slot the runtime does not free, a provider quota park, a
+refinery idle at its prompt with work queued — are handled by reactive paths:
+`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
+witness patrol recovers work orphaned by dead sessions, the `dog` pool is
+warrant executor for due-process recovery of wedged sessions (demand-scaled
+0-2), `pool-slot-reap.sh` closes a pool session bead the runtime left holding
+its slot with no runtime and no work, `quota-park-nudge.sh` nudges a session
+parked behind a provider limit, `refinery-wake.sh` nudges a refinery that sits
+idle at its prompt while its find-work queue waits, and `boot-health.sh`
+detects a wedged deacon (report-only by design). See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.

@@ -20,7 +20,9 @@ runtime guarantees the arrangement depends on.
 [state-machine.md](state-machine.md). The refinery *agent*'s judgment calls
 (rejection, blocked, refused) live in `formulas/mol-refinery-patrol.toml` and
 are not driven by this order. That patrol's liveness has its own doctor check,
-`check-refinery-patrol-live`.
+`check-refinery-patrol-live`, and a refinery that sits idle at its prompt while
+its find-work queue waits is re-prompted by the `refinery-wake` order
+(`assets/scripts/refinery-wake.sh`).
 
 ## Mechanism
 
