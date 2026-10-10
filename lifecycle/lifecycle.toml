@@ -1058,11 +1058,23 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one live bead per key, narrowed to
-# finding.about when the finding names a subject bead. finding.scope is which
-# patrol filed it; finding.digest is the message hash that tells a recurrence
-# with changed text from an identical one. finding.occurrences counts the
-# recurrences and finding.first_seen/finding.last_seen bracket them.
+# it). finding.key and finding.about together are the dedup identity. A report
+# whose key and subject both match a live bead records a recurrence on that
+# bead, unless that bead is held at blocked with nothing open left to wait on.
+# A report that names no subject matches only a bead with no finding.about. An
+# --about that names a wisp (`*-wisp-*`) is dropped, and the key alone
+# identifies the finding. A patrol burns its wisp when the pass ends, so no
+# later pass can name the same one. When no live bead takes the report, a new
+# bead is refused while a live finding with the same finding.scope carries the
+# report's key under another subject or none, or the report's subject under
+# another key. The refusal lists those findings, and a caller reporting one of
+# them re-runs with that finding's key and subject, which records a recurrence
+# there. --distinct files the new bead despite those findings, though an exact
+# match still records a recurrence. A key meant to hold one finding per subject
+# passes --distinct on every call. finding.scope is which patrol filed it;
+# finding.digest is the message hash that tells a recurrence with changed text
+# from an identical one. finding.occurrences counts the recurrences and
+# finding.first_seen/finding.last_seen bracket them.
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
 # way a fix that did not hold is visible.
