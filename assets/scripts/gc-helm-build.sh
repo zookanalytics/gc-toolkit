@@ -46,6 +46,8 @@ done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOD="$(cd "$HERE/../../services/helm" && pwd)"
+# shellcheck source=icu4c-cgo.sh
+. "$HERE/icu4c-cgo.sh" || { echo "gc-helm-build: cannot source icu4c-cgo.sh from $HERE" >&2; exit 1; }
 
 # Every `replace <module> => <local path>` in helm's go.mod points at a sibling
 # module whose sources are compiled into helm-svc — services/gctk holds the
@@ -486,26 +488,11 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-# helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
-# Homebrew installs icu4c keg-only, so its headers and libraries are on no
-# default search path, and the order's environment sets no CGO flags. The build
-# is pointed at the keg, after any CGO flags already set. Off macOS the system
-# libicu is on the default search path, so nothing is added there. This runs
-# only when a build is owed, so a tick with nothing to build never asks brew.
-BUILD_CGO_CPPFLAGS="${CGO_CPPFLAGS:-}"
-BUILD_CGO_LDFLAGS="${CGO_LDFLAGS:-}"
-if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
-    ICU_PREFIX="$(brew --prefix icu4c 2>/dev/null || true)"
-    # brew prints a formula's prefix whether or not it is installed; an
-    # include/ under it is what says icu4c is there.
-    if [ -n "$ICU_PREFIX" ] && [ -d "$ICU_PREFIX/include" ]; then
-        BUILD_CGO_CPPFLAGS="${BUILD_CGO_CPPFLAGS:+$BUILD_CGO_CPPFLAGS }-I$ICU_PREFIX/include"
-        BUILD_CGO_LDFLAGS="${BUILD_CGO_LDFLAGS:+$BUILD_CGO_LDFLAGS }-L$ICU_PREFIX/lib"
-        echo "gc-helm-build: cgo builds against icu4c at $ICU_PREFIX"
-    else
-        echo "gc-helm-build: found no installed icu4c through brew on PATH; go-icu-regex needs its headers to build on macOS (brew install icu4c)" >&2
-    fi
-fi
+# helm-svc links ICU through Dolt's go-icu-regex, a cgo package, and
+# icu4c-cgo.sh points cgo at Homebrew's keg-only icu4c on macOS, after any CGO
+# flags already set. This runs only when a build is owed, so a tick with
+# nothing to build never asks brew.
+icu4c_cgo_flags gc-helm-build
 
 # Publish only via atomic rename from a scratch file beside $BIN: an
 # in-place -o could truncate the live binary into a half-written file that
@@ -515,7 +502,7 @@ BIN_TMP=""
 echo "gc-helm-build: building $MOD -> $BIN"
 if BIN_TMP="$(mktemp "$BIN_DIR/.helm-svc.build.XXXXXX" 2>/dev/null)"; then
     if ( cd "$MOD" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" \
-            CGO_CPPFLAGS="$BUILD_CGO_CPPFLAGS" CGO_LDFLAGS="$BUILD_CGO_LDFLAGS" \
+            CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" \
             "$GO" build -o "$BIN_TMP" ./cmd/helm-svc ) && mv -f "$BIN_TMP" "$BIN"; then
         build_ok=1
         BIN_TMP=""      # renamed away; nothing left for cleanup to remove
