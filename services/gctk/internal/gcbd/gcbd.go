@@ -7,7 +7,7 @@
 // answers when the daemon is down. The daemon read is cached and carries no
 // notes, so a write's read-back verification — which must observe the write it
 // just made and must see appended notes — takes the authoritative ShowDirect
-// path instead. Writes (Update) and the Show fallback shell out to `gc`
+// path instead. Writes (Create, Update) and the Show fallback shell out to `gc`
 // exactly as the shell scripts do, which keeps the observability, the stub
 // surface and the permissions surface of those paths identical across the
 // port: the same invocations appear in the same logs, and the same test stubs
@@ -324,6 +324,163 @@ func (c *Client) List(args ...string) (rows []Bead, ok bool) {
 // failed or unreadable probe rather than reading it as "no dependencies".
 func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
 	return c.array(true, append([]string{"bd", "dep", "list", id}, args...)...)
+}
+
+// ErrNotFiled reports a Create that filed nothing a reader can find. Either the
+// metadata had no key, or bd refused the create or answered with no id, or the
+// bead read back carrying none of its keys and was closed. A create whose reply
+// was lost can still have landed whole, so a caller that files again first
+// looks for the bead the way its own dedup does.
+var ErrNotFiled = errors.New("gcbd: create filed nothing")
+
+// ErrUnverified reports a Create whose bead was filed but whose read-back could
+// not be made, or did not show every key as written. Create returns the id with
+// it. The bead carries at least part of its metadata, so a caller holds off
+// acting on it and retries on its next run.
+var ErrUnverified = errors.New("gcbd: created bead did not read back as written")
+
+// Create files one bead with meta in the same write and returns its id. It is
+// bd_create in assets/scripts/bd-lib.sh, ported, and keeps that contract.
+//
+// The metadata a bead is born with is what its readers select it by: its
+// task_kind, the anchor it hangs on, the key its producer dedups on. Written in
+// a second update, it is missing whenever that write fails or the create's id
+// never comes back, so no reader can see the bead and the producer's next run
+// files a stamped twin beside it. `gc bd create --metadata` lands the payload
+// in the bead's own row insert, so the bead exists with its metadata or not at
+// all.
+//
+// args are `gc bd create`'s own: the title, -t, --status, --notes, --db and the
+// rest. A non-empty body is the bead's description, sent on stdin through
+// --body-file - so no argv limit bounds it. Create adds --metadata and --json.
+//
+// The bead is read back from the store the create wrote, through the
+// authoritative ShowDirect path, and every key must read back with the value
+// written. Values compare the way Meta reads them, as text, because bd keeps a
+// create's string values as strings while a --set-metadata re-stamp of the same
+// key can store a number. A bead that reads back carrying none of meta's keys
+// is closed (gc.outcome=abandoned) so that no reader meets it, and Create
+// reports ErrNotFiled. A read-back that fails, or shows only some keys as
+// written, returns the id with ErrUnverified.
+func (c *Client) Create(meta map[string]any, body string, args ...string) (string, error) {
+	if len(meta) == 0 {
+		return "", fmt.Errorf("%w: refusing to file a bead without metadata", ErrNotFiled)
+	}
+	payload, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("%w: metadata does not encode: %v", ErrNotFiled, err)
+	}
+	full := append([]string{"bd", "create"}, args...)
+	if body != "" {
+		full = append(full, "--body-file", "-")
+	}
+	full = append(full, "--metadata", string(payload), "--json")
+	cmd := exec.Command(c.bin, full...)
+	if body != "" {
+		cmd.Stdin = strings.NewReader(body)
+	}
+	// The exit status is not consulted: a refusal answers with an error object
+	// and a non-zero exit, and the reply alone says which it was.
+	out, _ := cmd.Output()
+	id, reason := createdID(out)
+	if id == "" {
+		if reason != "" {
+			return "", fmt.Errorf("%w: bd create returned no id: %s", ErrNotFiled, reason)
+		}
+		return "", fmt.Errorf("%w: bd create returned no id", ErrNotFiled)
+	}
+	db := dbFlag(args)
+	var dbArgs []string
+	if db != "" {
+		dbArgs = []string{"--db", db}
+	}
+	rows, ok := c.array(false, append(append([]string{"bd", "show", id}, dbArgs...), "--json")...)
+	if !ok || len(rows) == 0 || rows[0].ID != id {
+		return id, fmt.Errorf("%w: %s (unreadable)", ErrUnverified, id)
+	}
+	switch readBack(meta, rows[0].Metadata) {
+	case "landed":
+		return id, nil
+	case "bare":
+		note := "Unmade by gctk Create: this bead landed without the metadata its create carried, so no reader could find it. Its producer files it afresh."
+		closeArgs := append(append([]string{}, dbArgs...), "--status=closed",
+			"--set-metadata", "gc.outcome=abandoned", "--append-notes", note)
+		if _, err := c.Update(id, closeArgs...); err != nil {
+			return "", fmt.Errorf("%w: %s landed without its metadata and could not be closed: %v", ErrNotFiled, id, err)
+		}
+		return "", fmt.Errorf("%w: %s landed without its metadata and was closed", ErrNotFiled, id)
+	default:
+		return id, fmt.Errorf("%w: %s (partial)", ErrUnverified, id)
+	}
+}
+
+// createdID reads the id out of a `gc bd create --json` reply: the bead as an
+// object, or an array holding it. A refusal is a bare {"error": ...} object,
+// whose message comes back as the reason.
+func createdID(out []byte) (id, reason string) {
+	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", ""
+	}
+	if arr, ok := v.([]any); ok {
+		if len(arr) == 0 {
+			return "", ""
+		}
+		v = arr[0]
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	if s, ok := obj["id"].(string); ok && s != "" && s != "null" {
+		return s, ""
+	}
+	if s, ok := obj["error"].(string); ok {
+		return "", s
+	}
+	return "", ""
+}
+
+// dbFlag returns the store a create's args name with --db, in either spelling,
+// so the read-back and the close go to the store the create wrote.
+func dbFlag(args []string) string {
+	db := ""
+	for i, a := range args {
+		if a == "--db" && i+1 < len(args) {
+			db = args[i+1]
+		}
+		if strings.HasPrefix(a, "--db=") {
+			db = strings.TrimPrefix(a, "--db=")
+		}
+	}
+	return db
+}
+
+// readBack judges a created bead's metadata against the payload: "landed" when
+// every key is present with its value as text, "bare" when none is present, and
+// "partial" otherwise.
+func readBack(meta, got map[string]any) string {
+	present := 0
+	matched := 0
+	for k, v := range meta {
+		g, ok := got[k]
+		if !ok {
+			continue
+		}
+		present++
+		if jqString(g) == jqString(v) {
+			matched++
+		}
+	}
+	switch {
+	case matched == len(meta):
+		return "landed"
+	case present == 0:
+		return "bare"
+	default:
+		return "partial"
+	}
 }
 
 // Update runs one `gc bd update`, returning its combined output. Callers pass
