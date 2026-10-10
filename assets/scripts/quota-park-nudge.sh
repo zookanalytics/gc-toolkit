@@ -2,7 +2,8 @@
 # quota-park-nudge — resume agents parked at a provider quota banner
 # (a quota window closing mid-turn leaves the session state=active,
 # idle under the banner, with nothing to wake it).
-# Job: poll every live session's pane; nudge the ones showing a limit banner.
+# Job: read the session list once a pass, peek the panes it cannot vouch for,
+# and nudge the ones showing a limit banner.
 # A nudge is the ONLY action — never kill, never file a warrant. Signatures
 # are provider-agnostic (extend via $QUOTA_PARK_MATCH); recovery polls rather
 # than sleeping until the banner's stated reset (a manual reset lands early).
@@ -58,6 +59,13 @@ ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 # path, so thirty minutes leaves room for one slow gap and a missed pass.
 STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-1800}"
 
+# A pane is peeked only when the session list cannot vouch for it (see
+# list_vouches). ACTIVE_WITHIN: a pane that printed this recently is working,
+# not idle under a banner. REPEEK_AFTER: the longest a vouch from the list
+# stands before the pane is read again; 0 peeks every pane every pass.
+ACTIVE_WITHIN="${QUOTA_PARK_ACTIVE_WITHIN:-60}"
+REPEEK_AFTER="${QUOTA_PARK_REPEEK_AFTER:-3600}"
+
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
 
@@ -86,6 +94,7 @@ mkdir -p "$STATE_DIR" 2>/dev/null || STATE_DIR_OK=0
 CURSOR_FILE="$STATE_DIR/.sweep-cursor"
 HEARTBEAT_FILE="$STATE_DIR/.heartbeat"
 COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
+READS_FILE="$STATE_DIR/.pane-reads"
 
 NOW="$(date +%s)"
 # Sub-second clock for the SWEEP_BUDGET check only; state-file timestamps stay
@@ -279,6 +288,8 @@ num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
 num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
 num_min "$STALE_AFTER"    1 || STALE_AFTER=1800
+num_min "$ACTIVE_WITHIN"  1 || ACTIVE_WITHIN=60
+num_min "$REPEEK_AFTER"   0 || REPEEK_AFTER=3600
 
 # --- The status surface: quota-park-nudge.sh --status [<session-id>] ---------
 # What the patrols read INSTEAD of peeking a pane (pane text is agent output;
@@ -506,13 +517,63 @@ sweep_expired() {
 }
 
 checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0
-state_failed=0
+state_failed=0; listed=0
 last_attempted=""
 covered_now=""
+reads_now=""
 
 # Vouch for one session: this pass classified it AND the verdict is readable
 # back out of the state dir (see write_state_vouched).
 vouch() { covered_now="$covered_now$1 $NOW"$'\n'; }
+
+# This order's last clean read of a session's pane, as "<list_at> <idle>" (see
+# record_read); nothing when it holds no record.
+last_read() {
+    owned_file "$READS_FILE" || return 0
+    awk -v id="$1" 'NF == 3 && $1 == id { print $2, $3; exit }' "$READS_FILE" 2>/dev/null || true
+}
+
+# Record a clean pane read for list_vouches: when the session list behind it was
+# requested, and 1 if the pane had by then been quiet for ACTIVE_WITHIN. A pane
+# that printed just before the list may be inside the window where gc's
+# last_active still counts its own keystroke echo, and when that discount lands
+# it can also swallow output printed right after the echo. A quiet pane has no
+# such window open, so "no output since" is a fact about its screen.
+record_read() {
+    local idle=0
+    if num "${2:-}" && [ "$2" -le "$LIST_DONE" ] && [ $((LIST_AT - $2)) -ge "$ACTIVE_WITHIN" ]; then
+        idle=1
+    fi
+    reads_now="$reads_now$1 $LIST_AT $idle"$'\n'
+}
+
+# True when the session list alone shows this session is not parked, so its
+# pane is not peeked this pass. The list's last_active is the time of the
+# pane's last output, which settles it two ways: output within ACTIVE_WITHIN is
+# a pane at work, not one idle under a banner; and no output since a clean read
+# of a quiet pane means the screen that was read is the screen still showing.
+# Either needs nothing at the session's state path (an episode is always
+# peeked), a clean read within REPEEK_AFTER, and no nudge delivered since that
+# read's list (gc's echo discount can hide a banner printed straight after a
+# nudge). Sets READ_REC to the record a vouch carries forward.
+list_vouches() {
+    local id="$1" out_at="$2" nudge_in_at="$3" list_at="" idle=""
+    READ_REC=""
+    if [ -e "$STATE_DIR/$id" ] || [ -L "$STATE_DIR/$id" ]; then return 1; fi
+    # A pane time later than the list read itself is corrupt, not a record.
+    num "$out_at" && [ "$out_at" -le "$LIST_DONE" ] || return 1
+    read -r list_at idle <<< "$(last_read "$id")" || true
+    ts_valid "$list_at" || return 1
+    # A zero REPEEK_AFTER fails this for every read: every pane is peeked.
+    [ $((LIST_AT - list_at)) -lt "$REPEEK_AFTER" ] || return 1
+    if num "$nudge_in_at" && [ "$nudge_in_at" -ge "$list_at" ]; then return 1; fi
+    if [ $((LIST_AT - out_at)) -lt "$ACTIVE_WITHIN" ] \
+        || { [ "$idle" = 1 ] && [ "$out_at" -lt "$list_at" ]; }; then
+        READ_REC="$list_at $idle"
+        return 0
+    fi
+    return 1
+}
 
 # Persist an episode; vouch only if the write landed. A parked session whose
 # state write failed must fall to unknown/not-swept, never publish as `no` —
@@ -531,8 +592,15 @@ write_state_vouched() {
 # That a pass RAN. Written only where a pass completed, so a disabled or
 # wedged order's evidence goes stale rather than vouching city-wide.
 write_heartbeat() {
-    printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\n' \
-        "$NOW" "$checked" "$parked" "$nudged" "$skipped" | write_owned "$HEARTBEAT_FILE" || true
+    printf 'last_run=%s\nchecked=%s\nparked=%s\nnudged=%s\ndeferred=%s\nlisted=%s\n' \
+        "$NOW" "$checked" "$parked" "$nudged" "$skipped" "$listed" | write_owned "$HEARTBEAT_FILE" || true
+}
+
+# The pane reads the next pass may vouch from: this pass's clean reads and the
+# records its vouches carried forward. Replaced rather than merged, so a session
+# this pass neither read clean nor vouched for keeps no record to vouch from.
+write_reads() {
+    printf '%s' "$reads_now" | write_owned "$READS_FILE" || true
 }
 
 # WHICH sessions a pass classified — the record `--status` needs before it
@@ -554,10 +622,33 @@ write_coverage() {
 # churn — a filter on it drops exactly the live sessions). `attached` is
 # skipped: a human is at that pane. @tsv, not interpolation: jq escapes
 # tab/newline inside @tsv fields, so mutable session metadata cannot forge a
-# row (an alias with a newline once wrote state outside STATE_DIR).
+# row (an alias with a newline once wrote state outside STATE_DIR). A row also
+# carries the pane's last output and the last nudge delivered into it, in epoch
+# seconds, for list_vouches. No field is ever empty: `read` folds adjacent tabs
+# into one, so an empty field would shift every field after it. An unknown time
+# is "-", and an empty alias falls back like a missing one.
+LIST_AT="$(date +%s)"
 sessions=$(run_bounded gc session list --json 2>/dev/null \
-    | jq -r '.sessions[]? | select(.state == "active" and (.attached // false) == false)
-             | [.id, (.alias // .session_name // .id)] | @tsv' 2>/dev/null) || exit 0
+    | jq -r '
+        # RFC3339 at any offset to epoch seconds. Nothing when absent, zero-valued
+        # (Go renders an unset time as year 1) or unparseable.
+        def epoch:
+          try (
+            capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
+            | ((.d + "Z") | fromdateiso8601)
+              - (if .z == "Z" then 0
+                 else ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60)
+                      * (if .z[0:1] == "-" then -1 else 1 end)
+                 end)
+            | floor | select(. > 0)
+          ) catch empty;
+        def named: select(. != null and . != "");
+        .sessions[]? | select(.state == "active" and (.attached // false) == false)
+        | select((.id // "") != "")
+        | [.id, ((.alias | named) // (.session_name | named) // .id),
+           ((.last_active | epoch) // "-"), ((.last_nudge_delivered_at | epoch) // "-")]
+        | @tsv' 2>/dev/null) || exit 0
+LIST_DONE="$(date +%s)"
 # An empty list is a complete pass over nothing, not a failure.
 [ -n "$sessions" ] || { write_heartbeat; echo "quota-park-nudge: 0 checked, 0 parked, 0 nudged"; exit 0; }
 
@@ -585,10 +676,17 @@ fi
 # nothing and re-sweep the same slow prefix forever instead of rotating past it.
 START_NS="$(now_ns)"
 
-while IFS=$'\t' read -r id alias; do
+while IFS=$'\t' read -r id alias out_at nudge_in_at; do
     [ -n "${id:-}" ] || continue
     # An id we cannot safely name is not touched at all; counted, not silent.
     if ! safe_id "$id"; then rejected=$((rejected + 1)); continue; fi
+    # Classified from the list alone: no peek, and none of the budget spent.
+    if list_vouches "$id" "$out_at" "$nudge_in_at"; then
+        listed=$((listed + 1))
+        vouch "$id"
+        reads_now="$reads_now$id $READ_REC"$'\n'
+        continue
+    fi
     # Out of budget: defer the rest to the next cycle, counted.
     if sweep_expired; then skipped=$((skipped + 1)); continue; fi
     # Cursor-attempted BEFORE the peek — the peek is the call that hangs.
@@ -618,6 +716,7 @@ while IFS=$'\t' read -r id alias; do
         || ! grep -qEi -- "$MATCH_RE" < <(banner_candidates "$pane"); then
         owned_state_rm "$state"
         vouch "$id"
+        record_read "$id" "$out_at"
         continue
     fi
 
@@ -738,6 +837,7 @@ done <<< "$sessions"
 if [ -n "$last_attempted" ]; then
     printf 'session=%s\n' "$last_attempted" | write_owned "$CURSOR_FILE" || true
 fi
+write_reads
 write_coverage
 write_heartbeat
 
@@ -795,4 +895,6 @@ unconf=""
 # Coverage this pass did not achieve is named too.
 statefail=""
 [ "$state_failed" -gt 0 ] && statefail=", $state_failed state write failed (not vouched for)"
-echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unconf$unread$unsafe$deferred$statefail"
+fromlist=""
+[ "$listed" -gt 0 ] && fromlist=", $listed classified from the session list (not peeked)"
+echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$fromlist$unconf$unread$unsafe$deferred$statefail"
