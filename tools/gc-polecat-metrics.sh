@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # gc-polecat-metrics.sh — read-only per-polecat metrics report over CLOSED work
-# beads. Answers the operator's standing question (tk-4juzgd): how long polecats
+# beads. Answers the operator's standing question: how long polecats
 # take, how many PRs they open, how many review/rework rounds a change costs,
 # and how many tokens / dollars a session spent. Every column is a query over
 # data Gas City already records; this tool collects nothing new and writes

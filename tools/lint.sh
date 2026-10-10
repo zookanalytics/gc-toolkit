@@ -18,7 +18,11 @@
 #   GO — `go vet ./...` in every Go module (each go.mod tree). Whole-module, not
 #   argv-scoped: vet is a per-package analysis, it is clean across the tree
 #   today, so running it everywhere on every merge is zero-noise and still
-#   catches a regression in a package the diff did not name.
+#   catches a regression in a package the diff did not name. Vet runs cgo, so
+#   it needs the C headers a cgo package includes, and services/helm reaches ICU
+#   through one, Dolt's go-icu-regex. Each vet is handed the cgo flags
+#   assets/scripts/icu4c-cgo.sh works out, which on macOS point at Homebrew's
+#   keg-only icu4c, the same flags the helm-svc build uses.
 #
 #   GOFMT — `gofmt -l` over every tracked Go file. Whole-tree for the reason vet
 #   is: the tree is gofmt-clean today, so checking every file on every merge is
@@ -42,6 +46,14 @@
 set -uo pipefail
 
 PROG=lint
+
+# ── The icu4c cgo flags ──────────────────────────────────────────────────────
+# Sourced from lint.sh's own checkout, before the cd below can change what a
+# relative invocation path names. Its absence is a packaging error, as the
+# shell-lint runner's is below.
+# shellcheck source=../assets/scripts/icu4c-cgo.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/icu4c-cgo.sh" \
+  || { echo "$PROG: cannot source assets/scripts/icu4c-cgo.sh from lint.sh's checkout" >&2; exit 2; }
 
 # ── Repository root ──────────────────────────────────────────────────────────
 # Both linters are repo-relative: shell paths resolve from the root and go vet
@@ -135,8 +147,11 @@ elif ! command -v go >/dev/null 2>&1; then
   fail=1
   summary+=("go: FAIL — 'go' not on PATH; ${#modules[@]} module(s) unvetted; fail-closed, treated as a finding")
 else
+  # Worked out once, and only when vet is about to run, so a tree with nothing
+  # to vet never asks brew.
+  icu4c_cgo_flags "$PROG"
   for m in "${modules[@]}"; do
-    if ( cd "$ROOT/$m" && go vet ./... ); then
+    if ( cd "$ROOT/$m" && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go vet ./... ); then
       summary+=("go: $m vet clean")
     else
       rc=$?

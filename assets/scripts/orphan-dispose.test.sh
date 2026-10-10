@@ -37,6 +37,10 @@
 #     clearing the session pins reopen-source leaves (gc.session_id and
 #     gc.session_name) so orphan recovery stops re-detecting the pooled bead,
 #     with verify reporting partial when a pin reports cleared and rolls back;
+#   * the source arm's two `gc workflow` calls running under a hard bound: a
+#     call that stalls deaf to SIGTERM is killed, a timed-out delete-source
+#     fails without reopening, and a timed-out reopen-source is judged by
+#     whether the bead reads released;
 #   * preview being the default: no --apply writes nothing at all;
 #   * usage errors and an unreadable bead, which must write nothing.
 #
@@ -123,7 +127,7 @@ eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
 eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
-eq "$(wc -l < "$STUB_GC_LOG")" "2" "preview reads the step and its root, nothing more"
+eq "$(wc -l < "$STUB_GC_LOG" | tr -d ' ')" "2" "preview reads the step and its root, nothing more"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
 echo "--- root arm: never returns a root to a pool ---"
@@ -529,6 +533,79 @@ OUT=$("$SCRIPT" tk-work --apply 2>&1); rc=$?
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "reopen-source is not run after a failed close"
 eq "$(bstatus tk-work)" "in_progress" "the bead was not returned to the pool"
 export STUB_DELETE_SOURCE_RC=""
+
+echo "--- source arm: the gc workflow calls are hard-bounded ---"
+# Once either command holds its per-bead lock it ignores SIGTERM and runs the
+# work inside the lock to completion, so a TERM-only timeout bounds nothing.
+# The stub's stall ignores TERM the same way. A call that returns well inside
+# the stall was ended by the bound's SIGKILL; an unbounded one would run the
+# whole stall and blow through the ceiling.
+export GC_ORPHAN_WORKFLOW_TIMEOUT=3 GC_ORPHAN_WORKFLOW_KILL_AFTER=1
+STALL=60
+CEILING=20
+run_bounded_case() { # <bead>: sets OUT, rc and ELAPSED
+  local start; start=$(date +%s)
+  OUT=$("$SCRIPT" "$1" --owner lx-dead --apply 2>&1); rc=$?
+  ELAPSED=$(( $(date +%s) - start ))
+}
+within_ceiling() { # <label>
+  if [ "$ELAPSED" -lt "$CEILING" ]; then
+    ok "$1 (${ELAPSED}s)"
+  else
+    bad "$1: ran ${ELAPSED}s, so the bound never killed the call"
+  fi
+}
+
+# A delete-source that prints its result and never exits counts as failed:
+# reopen-source never runs, and the bead stays owned for the next cycle.
+fixture
+export STUB_DELETE_SOURCE_HANG=$STALL
+run_bounded_case tk-work
+export STUB_DELETE_SOURCE_HANG=""
+within_ceiling "a delete-source deaf to SIGTERM is killed at the bound"
+eq "$rc" "1" "a timed-out delete-source exits 1"
+has "$OUT" "failed=delete-source-timeout" "the timeout is named, not reported as a plain failure"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "reopen-source does not run after a timed-out delete-source"
+eq "$(bstatus tk-work)" "in_progress" "the bead stays owned for the next cycle"
+eq "$(meta tk-work gc.session_id)" "lx-dead" "its session pin is untouched"
+
+# A reopen-source that releases the bead, prints, and never exits has landed
+# its release. The bead reads open and unassigned, so the arm finishes the job
+# exactly as after a clean exit: pins cleared, route restored from the durable
+# execution stamp, verify green.
+store '[{"id":"tk-strand","status":"in_progress","assignee":"lx-dead","title":"a source bead",
+         "metadata":{"branch":"polecat/tk-anchor","gc.routed_to":"",
+                     "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
+                     "gc.session_id":"lx-dead","gc.session_name":"polecat-4-pool"}}]'
+: > "$STUB_GC_LOG"
+export STUB_REOPEN_SOURCE_HANG=$STALL
+run_bounded_case tk-strand
+export STUB_REOPEN_SOURCE_HANG=""
+within_ceiling "a reopen-source deaf to SIGTERM after its release is killed at the bound"
+eq "$rc" "0" "a release that landed before the bound exits 0"
+has "$OUT" "result=disposed" "a landed release is a disposal, not a failure"
+has "$OUT" "landed=delete-source,reopen-source,pins,route" "pins and route are finished after the cut-off call"
+has "$OUT" "detail=reopen-source-past-bound" "the report says the call ran past its bound"
+eq "$(bstatus tk-strand)" "open" "the bead is released"
+eq "$(bassignee tk-strand)" "" "the bead is unassigned"
+eq "$(meta tk-strand gc.session_id)" "<absent>" "the dead session id is cleared"
+eq "$(meta tk-strand gc.session_name)" "<absent>" "the dead session name is cleared"
+eq "$(meta tk-strand gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "the route is restored from the execution stamp"
+
+# A reopen-source killed before it writes released nothing. The arm writes
+# nothing either, so the bead keeps its assignee and its pins and orphan
+# recovery finds it again next cycle.
+fixture
+export STUB_REOPEN_SOURCE_STALL=$STALL
+run_bounded_case tk-work
+export STUB_REOPEN_SOURCE_STALL=""
+within_ceiling "a reopen-source stalled before its writes is killed at the bound"
+eq "$rc" "3" "a timed-out reopen-source after a landed delete-source exits 3"
+has "$OUT" "landed=delete-source failed=reopen-source-timeout" "only the close is reported landed, and the timeout is named"
+eq "$(bstatus tk-work)" "in_progress" "an unreleased bead is not reported released"
+eq "$(bassignee tk-work)" "lx-dead" "it keeps its assignee"
+eq "$(meta tk-work gc.session_id)" "lx-dead" "and its session pin, so orphan recovery finds it again"
+unset GC_ORPHAN_WORKFLOW_TIMEOUT GC_ORPHAN_WORKFLOW_KILL_AFTER
 
 echo "--- unreadable bead and usage ---"
 fixture

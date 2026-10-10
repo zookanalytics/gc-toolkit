@@ -5,6 +5,8 @@
 # every shape the readers hand it; and no file in the pack posts to a pull
 # request any other way. A gh stub records each call's argv and the body it
 # would post; no network, no city.
+#
+# run-tests-scope: tree
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -115,6 +117,15 @@ eq "$RC" 0 "edit exits 0"
 has "$(argv)" "$(printf 'api\n--method\nPATCH\nrepos/o/r/issues/comments/991\n--hostname\ngithub.com\n-f\n')" "it is a PATCH of issues/comments/<id> on the --repo host"
 has "$(argv)" "$(printf 'body=### Visit tk-v — closed\n\n%s' "$MARK")" "the new body carries the mark"
 
+echo "# file-comment: a review comment on a whole file of the diff, marked"
+run GH_OUT='{"id":4242}' -- file-comment --repo github.com/o/r --pr 12 --commit abc123 --path assets/scripts/x.sh --body "Finding from the codex review"
+eq "$RC" 0 "file-comment exits 0"
+eq "$(calls)" 1 "one gh call"
+has "$(argv)" "$(printf 'api\n--method\nPOST\nrepos/o/r/pulls/12/comments\n--hostname\ngithub.com\n-f\n')" "it is a POST of pulls/<n>/comments on the --repo host"
+has "$(argv)" "$(printf 'body=Finding from the codex review\n\n%s' "$MARK")" "the body carries the mark"
+has "$(argv)" "$(printf -- '-f\ncommit_id=abc123\n-f\npath=assets/scripts/x.sh\n-f\nsubject_type=file')" "…pinned to the commit and the file, as a comment on the file as a whole"
+has "$OUT" '"id":4242' "gh's output passes through, so a caller reads the new comment's id"
+
 echo "# a body that already carries the mark is posted as it is"
 run -- comment --repo github.com/o/r --pr 12 --body "$(printf 'x\n\n%s' "$MARK")"
 eq "$(grep -c -F -- "$MARK" "$GHLOG")" 1 "the mark is not doubled"
@@ -124,6 +135,7 @@ run GH_RC=1 -- comment --repo github.com/o/r --pr 12 --body x;            eq "$R
 run GH_RC=1 -- review --repo github.com/o/r --pr 12 --body x;             eq "$RC" 1 "review"
 run GH_RC=1 GH_OUT='{}' -- reply --host github.com --thread PRRT_x --body x; eq "$RC" 1 "reply"
 run GH_RC=1 -- edit --repo github.com/o/r --comment 5 --body x;           eq "$RC" 1 "edit"
+run GH_RC=1 -- file-comment --repo github.com/o/r --pr 12 --commit abc --path x.sh --body x; eq "$RC" 1 "file-comment"
 
 echo "# usage errors are exit 2 and post nothing"
 usage_case() { # <label> <args...>
@@ -141,6 +153,9 @@ usage_case "a non-numeric --pr"         review --repo github.com/o/r --pr main -
 usage_case "--attach on a review"       review --repo github.com/o/r --pr 1 --body x --attach "$TMPD/clip.mp4"
 usage_case "a reply with no thread"     reply --host github.com --body x
 usage_case "an edit with no comment id" edit --repo github.com/o/r --body x
+usage_case "a file-comment with no commit" file-comment --repo github.com/o/r --pr 1 --path x.sh --body x
+usage_case "a file-comment with no path"   file-comment --repo github.com/o/r --pr 1 --commit abc --body x
+usage_case "--path on a comment"           comment --repo github.com/o/r --pr 1 --body x --path x.sh
 
 echo "# own-def: the city's own post, and everything else is feedback"
 DEF="$("$SUT" own-def)"

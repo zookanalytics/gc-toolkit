@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the pre-existing-failure dedup probe in
-# mol-refinery-patrol.toml's `handle-failures` step (tk-277aj).
+# mol-refinery-patrol.toml's `handle-failures` step.
 #
 # The step's third branch ("if pre-existing on target") must find an already-filed
 # bug for the same failure and NOT file another. The pre-fix instruction probed
@@ -146,8 +146,9 @@ BLK="$TMP/block1.sh"
 # the block is executable, exactly as the refinery would fill them in. The
 # stand-in log carries a backtick and a $ on purpose: real failure output does,
 # and they must reach the bead as text rather than running.
-sed -i 's/<failing test name or error symbol>/test_widget_rebase/' "$BLK"
-sed -i 's|<the check that failed, the package or target it ran in, and its raw output>|--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS|' "$BLK"
+sed -i.bak -e 's/<failing test name or error symbol>/test_widget_rebase/' \
+  -e 's|<the check that failed, the package or target it ran in, and its raw output>|--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS|' "$BLK" \
+  && rm -f "$BLK.bak"
 
 # run <list-scenario> [show-scenario] -> echo the snippet's exit code; leaves
 # $FAKE_META and $FAKE_BODY populated.

@@ -1008,7 +1008,7 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 //
 // The two look identical on the anchor — WaitingOn is empty in both the
 // "nothing outstanding" case and the "never learned" one — and reading the
-// empty set as an answer is the hazard. A per-anchor Dolt timeout or schema
+// empty set as an answer is the hazard. A Dolt timeout or schema
 // skew would otherwise stand an answered row down and tell the operator to
 // close or extend a question whose routed work the board never checked
 // (tk-fhd705). Not standing it down costs a glance; standing it down on an
@@ -2336,6 +2336,52 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	// The axes still travel: the row is closed, not unreadable.
 	if tile.PRMachine != MachineWedgedException {
 		t.Errorf("pr_machine = %q, want the recorded wedge", tile.PRMachine)
+	}
+}
+
+// A merged PR's anchor closes carrying its last pre-merge facts — posture still
+// approved, merge state frozen at CLEAN, never restamped — so prstatus.Derive,
+// reading only those live facts, still names it working. The board must not paint
+// that live chip on a done row; it names the PR's resolved state off the close
+// instead. A landed PR closes its anchor with merge_result=merged and reads
+// "merged"; a merge anchor that reached a closed bead without that marker — a
+// supersede or disposal — closed without merging and reads "closed". The per-bead
+// Phase stays empty on a closed row, so the frontier keeps its age phrase. The
+// live twin, with the merged anchor's identical frozen facts but still open,
+// proves closedness is the only thing moving the PR axis off working.
+func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
+	frozen := map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdPRMergeState: "CLEAN@" + headLive,
+	}
+	merged := mergeAnchor("tk-merged", map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdPRMergeState: "CLEAN@" + headLive,
+		mdMergeResult:  mergeResultMerged,
+		"merged_sha":   "abc123def456",
+	})
+	merged.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+	// Closed without merging: merge_result stays the default pull_request — a bare
+	// close on a supersede, never transitioned to merged.
+	superseded := mergeAnchor("tk-super", frozen)
+	superseded.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+	live := mergeAnchor("tk-live", frozen) // the merged anchor's facts, still open
+
+	b := BuildBoard([]Anchor{merged, superseded, live}, fixtureNow, false, nil, Facts{})
+
+	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseWorking {
+		t.Fatalf("test premise: the identical live anchor derives working; got %q", got)
+	}
+	if got := mustTile(t, b, "tk-merged").PRPhase; got != PhaseMerged {
+		t.Errorf("a merged (closed) anchor reads merged on the PR axis; got %q (the DONE-bead-shows-WORKING report)", got)
+	}
+	if got := mustTile(t, b, "tk-super").PRPhase; got != PhaseClosed {
+		t.Errorf("a merge anchor closed without merging reads closed; got %q", got)
+	}
+	for _, id := range []string{"tk-merged", "tk-super"} {
+		if got := mustTile(t, b, id).Phase; got != "" {
+			t.Errorf("%s: a closed row carries no per-bead phase; got %q", id, got)
+		}
 	}
 }
 
