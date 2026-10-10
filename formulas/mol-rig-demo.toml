@@ -1,9 +1,10 @@
 description = """
 mol-rig-demo — capture one narrated video demo of a rig's app, parameterized by
-rig and scenario, and deliver it to a PR or report its path. The reusable
-rig-demo mol of epic tk-vd66j1: the video review modality (tk-vd66j1.9) pours it
-to produce a clip for a PR under review, and an operator pours it for any rig
-from a shell.
+rig and scenario, and deliver it to a PR or report its path. An operator pours
+it for any rig from a shell. The demo review check does not pour it: its video
+modality makes the same capture call inside the review session, because that
+verdict judges the clip and the reviewed worktree is removed when the review
+ends (skills/review-demo/SKILL.md).
 
   gc sling <rig>/<pool> <demo-request-bead> --on mol-rig-demo \\
     --var rig_name=<rig> \\
@@ -15,8 +16,8 @@ The capture is engine-driven over @zookanalytics/sprintshow
 (skills/demo-capture/SKILL.md): the engine drives Playwright headlessly, the
 only path a pool session has, since it carries no browser MCP. The mechanical
 half — engine resolution, lint, capture, liveness check — lives in
-assets/scripts/rig-demo-capture.sh so this formula, tk-vd66j1.9, and a shell all
-drive it the same way. Delivery is assets/scripts/demo-deliver.sh (tk-vd66j1.4),
+assets/scripts/rig-demo-capture.sh so this formula, the demo review check, and a
+shell all drive it the same way. Delivery is assets/scripts/demo-deliver.sh,
 which attaches the clip to the PR inline and uncommitted.
 
 Two inputs name the scenario, and the mol needs exactly one: demo_script is a
