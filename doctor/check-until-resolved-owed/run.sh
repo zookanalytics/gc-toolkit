@@ -2,7 +2,7 @@
 # doctor/check-until-resolved-owed — a resolved-by disposition is firing or
 # surfaced. A bead carrying an `until` edge means "X resolves me": when that
 # target closes, the deferred-dispatch reconcile order (orders/deferred-dispatch.toml,
-# every 2m) disposes the bead through bead-rehome, so a wait whose named cause has
+# every 5m) disposes the bead through bead-rehome, so a wait whose named cause has
 # landed is closed with a successor pointer rather than re-entering triage. The
 # pass disposes an OPEN, UNASSIGNED bead whose own `until` targets have all
 # closed, so a healthy resolved-by edge is short-lived: it rests until its target
@@ -30,10 +30,11 @@
 
 set -u
 
-# A disposition owed longer than this has missed multiple reconcile passes.
-# Mirrors check-cadence-live's I10 floor, max(3×interval, 15m): the
-# deferred-dispatch order runs every 2m, so 900s is more than seven passes — long
-# past any normal window between a target closing and the next reconcile disposing.
+# A disposition owed longer than this has waited out three reconcile intervals.
+# Mirrors check-cadence-live's I10 window, max(3×interval, 15m), which is 900s
+# for the 5m deferred-dispatch order. On a loaded host the controller's per-tick
+# dispatch budget can stretch one gap between passes past it, and I10 reads that
+# same gap as a stopped order.
 OWED_WINDOW_SECONDS=900
 
 UNTIL_TYPE="until"
@@ -201,7 +202,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$since_epoch" ] || continue
         age=$(( now - since_epoch ))
         if [ "$age" -ge "$OWED_WINDOW_SECONDS" ]; then
-            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes a resolved \`until\` bead within its 2m cadence, so a disposition owed this long means that order is not firing (check-cadence-live/I10) or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
+            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes a resolved \`until\` bead within its 5m cadence, so a disposition owed this long means that order is not firing (check-cadence-live/I10) or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
         fi
     done
 done <<< "$scopes"
