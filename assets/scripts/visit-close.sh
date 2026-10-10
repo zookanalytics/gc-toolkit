@@ -58,6 +58,12 @@ done
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
+
 # meta_now <bead> <key> — the live value of one metadata key, or empty.
 meta_now() {
   gc bd show "$1" --json 2>/dev/null | scrub \
@@ -70,6 +76,10 @@ if [ -n "$SUBJECT" ]; then
   gc bd update "$SUBJECT" --append-notes "visit $VISIT closed $OUTCOME: $REASON" >/dev/null 2>&1 \
     || echo "visit-close: could not append the reading to $SUBJECT — continuing to the visit stamp" >&2
 fi
+
+# The work-record gate the close runs wants gc.work_outcome. work-outcome.sh
+# stamps it in a write of its own, so it never decides whether the visit closes.
+work_outcome_noop "$VISIT" gc bd
 
 # Stamp both keys, then read both back, repairing once. A store can exit 0 on a
 # --set-metadata that wrote nothing, so the readback is the proof.
