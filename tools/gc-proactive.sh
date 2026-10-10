@@ -285,7 +285,9 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       --sling, sling a first reaction at each,
                                       at most $SLING_CAP per sweep
                                       (GC_PROACTIVE_SLING_CAP). Read-only
-                                      without --sling.
+                                      without --sling. Exit 1, nothing
+                                      slung, when a ready read or the
+                                      filter fails.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
@@ -560,6 +562,10 @@ scan_precision_filter() {
 scan_drop_inflight() {
     local cands roots convoys inflight kept dropped db
     cands="$(cat)"
+    # The candidates come from the precision filter, which prints nothing when
+    # it fails. Nothing is not an empty page, so refuse it rather than count it;
+    # scan_candidates reports the failure.
+    printf '%s' "$cands" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 || return 1
     if [ -n "$FIXTURE" ]; then
         roots='[]'; convoys='[]'
         if [ -f "$FIXTURE/roots.json" ]; then roots="$(cat "$FIXTURE/roots.json")"; fi
@@ -587,16 +593,31 @@ scan_drop_inflight() {
     printf '%s' "$kept"
 }
 
+# ready_read_failed <read> <rc> <output> — log a gc bd ready read that exited
+# non-zero, with the error text from the {"error": ...} object gc bd leaves on
+# stdout when there is one. A failed read is not an empty ready set. Taken as
+# one, it drops its beads from the sweep unseen, and with both reads failing a
+# --sling sweep exits 0 with nothing slung, the result a sweep with no work gives.
+ready_read_failed() {
+    local err
+    err="$(printf '%s' "$3" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)"
+    log "$PROG: scan: the $1 read failed (gc bd ready exit $2${err:+: $err}). A failed read is not an empty ready set, so the scan fails rather than report no candidates; retry once the store answers."
+}
+
+# scan_candidates — the scan's candidate page, one JSON array. cmd_scan runs it
+# in a command substitution, where set -e does not apply, so a step that fails
+# returns non-zero here explicitly. A step that failed quietly would leave an
+# empty page, which reads as nothing to react to.
 scan_candidates() {
-    local ranked
+    local ranked rank_rc=0
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)"
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
     else
         # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
         # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-        local optin movable db
+        local optin movable db optin_rc=0 movable_rc=0
         db="$(rig_beads_db)"
         # Read the FULL opt-in and movable sets (--limit 0), not a page.
         # scan_precision_filter drops work-in-flight beads (review lanes,
@@ -607,20 +628,31 @@ scan_candidates() {
         # filter-before-bound the demand mirror uses.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null || true)"
-        [ -n "$optin" ] || optin='[]'
+                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null)" || optin_rc=$?
+        [ "$optin_rc" -eq 0 ] || { ready_read_failed opt-in "$optin_rc" "$optin"; return 1; }
 
         # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
         # filter below drops the ones a fresh first reaction must not touch.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                    --sort oldest --limit 0 2>/dev/null || true)"
-        [ -n "$movable" ] || movable='[]'
+                    --sort oldest --limit 0 2>/dev/null)" || movable_rc=$?
+        [ "$movable_rc" -eq 0 ] || { ready_read_failed movable-forward "$movable_rc" "$movable"; return 1; }
 
         # Union the two sources, apply the shared precision filter, drop the
-        # beads a workflow is already driving, then rank by board weight.
-        ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
-            | scan_precision_filter | scan_drop_inflight | board_rank)"
+        # beads a workflow is already driving, then rank by board weight. A read
+        # that exited 0 must still be one JSON array, [] when nothing is ready.
+        # Anything else, an empty read included, stops the union with an error
+        # that names the read. The check rides the union's own parse because
+        # each read can run to tens of megabytes.
+        ranked="$(jq -n --slurpfile optin <(printf '%s' "$optin") --slurpfile movable <(printf '%s' "$movable") '
+                def answered($read): if length == 1 and (.[0] | type) == "array" then .[0]
+                    else error("the \($read) read failed: gc bd ready printed something other than one JSON array") end;
+                ($optin | answered("opt-in")) + ($movable | answered("movable-forward"))' \
+            | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
+    fi
+    if [ "$rank_rc" -ne 0 ]; then
+        log "$PROG: scan: the candidates could not be filtered and ranked, so the scan fails rather than report none"
+        return 1
     fi
 
     # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
@@ -656,7 +688,7 @@ cmd_scan() {
     fi
 
     local cands
-    cands="$(scan_candidates)"
+    cands="$(scan_candidates)" || return 1
 
     if [ -z "$do_sling" ]; then
         if [ -n "$as_json" ]; then
