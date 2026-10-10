@@ -428,13 +428,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    a visit when the person closes it. Once the comment's bead has closed, and
    its own finding has closed if it has one, the comment is resolved: an answer
    leading with a check mark says what resolved it, and the comment trades its
-   EYES reaction for THUMBS_UP. A finding ruled needs-you keeps its comment
-   awaiting a person, and a declined or deferred finding resolves its comment;
-   in both cases the finding's own owed reply is the answer, and it carries the
-   same glyph. An inline comment is answered in its thread. The thread is
-   answered once every routed comment in it is resolved, by one reply naming
-   each bead, and is resolved behind that reply. A review body or a Conversation
-   comment has no thread, so a Conversation comment of the city's links to the
+   EYES reaction for THUMBS_UP. An answer for a rework child names the commits
+   it made: the PR's non-merge commits whose message names the child, and of
+   those only the ones naming the comment when any do. It says Fixed when the
+   comment's must-fix finding closed with that rework. It never names the PR
+   head for being the head, since the head can be a merge of the base. A
+   finding ruled needs-you keeps its comment awaiting a person, and its owed
+   reply is the answer, leading with the question mark. A declined or deferred
+   finding's owed reply is its comment's answer too. That reply leads with the
+   ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
+   the PR tells a fix from a pushback, and the comment trades EYES for
+   THUMBS_UP once it is on the PR. Whether an owed reply is on the PR is read
+   back off GitHub on every pass, by its own text, so another reply in the
+   thread never stands in for it. An inline comment is answered in its thread.
+   The thread is answered once every routed comment in it is resolved, by one
+   reply naming each bead. It is resolved behind that reply unless it holds a
+   declined or deferred finding, whose thread stays open for the operator to
+   accept or overrule, as a needs-you finding's does until they rule. A review
+   body or a Conversation comment has no thread, so a Conversation comment of
+   the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves
    out of a batch the feedback the review threads already answered: an inline
    comment in a resolved thread with a later post of the city's, or a review
@@ -473,10 +485,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
    file the diff touches becomes a file-level review comment on that file, and
    any other locus becomes a Conversation comment. Once the finding closes, the
-   comment is answered with how it closed: the head that carries the fix and
-   the fix units that landed it, or the deferral's follow-up. The thread is then
-   resolved unless a post that is not the city's own has come after it, and a
-   Conversation comment is edited to carry the answer. A finding that closed
+   comment is answered with how it closed: the fix units and the commits they
+   made, the deferral's follow-up, or the decline. A fixed finding's
+   thread is then resolved unless a post that is not the city's own has come
+   after it. A declined or deferred finding's thread stays open for the
+   operator to accept or overrule. A Conversation comment is edited to carry the
+   answer. A finding that closed
    before it was posted, as a pre-open round's findings have, is posted with its
    answer already in place. A human finding is never posted, because it already
    sits on the PR where its raiser wrote it and is answered there. One
@@ -487,9 +501,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
    they carry the city's mark and no feedback reader routes them or reads their
    thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
-   which is how a later pass finds the finding's comment, and the BLOCKED
+   which is how a later pass finds the finding's comment. The BLOCKED
    escalation does not count a thread that holds only the city's finding
-   comments.
+   comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
+   a declined or deferred finding's answer adds, since that thread waits for a
+   person.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's

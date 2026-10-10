@@ -83,7 +83,7 @@ harness_init() {
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
-  export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
+  export STUB_GQL_READ_FAIL="" STUB_GQL_COMMITS_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   export STUB_DELETE_SOURCE_HANG="" STUB_REOPEN_SOURCE_HANG="" STUB_REOPEN_SOURCE_STALL=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -832,6 +832,22 @@ case "$sub" in
           jq -c --arg t "$tid" '{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
               nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+          exit 0 ;;
+        *commits\(first:100,after:*)
+          # The PR's commits, which a fix's answer cites. Served from the PR
+          # fixture's .commits, a list of {oid, message, parents} where parents is
+          # the parent count (2 for a merge, 1 when absent). A fixture with no list
+          # is a PR none of whose commits names a fix unit. Each read is logged, so
+          # a test can tell the read is made only for an answer that is posted.
+          # STUB_GQL_COMMITS_FAIL models a commit read the API refuses.
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -z "${STUB_GQL_COMMITS_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          printf 'COMMITS %s\n' "$num" >> "${STUB_GH_LOG:?}"
+          jq -c '{data: {repository: {pullRequest: {
+              commits: {pageInfo: {hasNextPage: false, endCursor: null},
+                nodes: [ (.commits // [])[]
+                         | {commit: {oid, message, parents: {totalCount: (.parents // 1)}}} ]}}}}}' "$f"
           exit 0 ;;
         *comments\(first:100,after:*)
           # The Conversation-tab (issue comments) read. WB_THREAD_COMMENTS_QUERY

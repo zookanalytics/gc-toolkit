@@ -247,11 +247,13 @@ dependency edge by hand:
   which is the deference this pass now ends. What a human decline owes that a
   machine decline does not is an answer: they read the diff and objected, so a
   decline they never hear is a silent overrule. Pass the answer with `--reply`;
-  finding.sh records it and pr-facts.sh's write-back posts it into their PR thread:
+  finding.sh records it and pr-facts.sh's write-back posts it into their PR
+  thread after "Declined:", and leaves the thread open for them to accept or
+  overrule. Write it as the reason that follows that word:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined \
     --reason "<why this is not an objection>" \
-    --reply "<the answer to post to the operator: what you found, and why the objection does not hold>"
+    --reply "<the reason, as it reads after 'Declined:': what you found, and why the objection does not hold>"
   ```
   Declining closes the finding, which is what lets a re-raise re-block: if the
   operator still disagrees they re-review, the content key re-adopts the closed
