@@ -11,8 +11,9 @@
 #     the bead carries no prepare_mode at all;
 #   - a conflicting merge is left mid-merge, for the worker to resolve into a
 #     merge commit;
-#   - it stamps bring_current_from with the head it started from, before the
-#     merge moves HEAD, and it unsets rejection_reason;
+#   - before the merge moves HEAD, it stamps bring_current_from with the PR
+#     head, which is origin's copy of the branch, or HEAD when origin has none;
+#   - it unsets rejection_reason;
 #   - with no rejection_reason it does nothing.
 #
 # It EXECUTES the block extracted verbatim from the formula against a real git
@@ -163,7 +164,7 @@ g "$C" push -q origin HEAD:polecat/w1 >/dev/null 2>&1 \
   && ok "(2) a push with no force flag fast-forwards the PR branch" \
   || bad "(2) a push with no force flag fast-forwards the PR branch" "rejected: the resume rewrote the branch"
 
-echo "# no prepare_mode leads the resume to rewrite the branch"
+echo "# with prepare_mode=rebase, or none at all, the resume still merges and rewrites nothing"
 for m in '{"rejection_reason":"tests failed","prepare_mode":"rebase"}' \
          '{"rejection_reason":"tests failed"}'; do
   case "$m" in *prepare_mode*) label="prepare_mode=rebase" ;; *) label="no prepare_mode" ;; esac
@@ -184,6 +185,16 @@ GITDIR="$(g "$C" rev-parse --absolute-git-dir)"
   && ok "(4) no rebase is in progress" || bad "(4) no rebase is in progress"
 eq "$(rewrites)" "0" "(4) nothing rebases, resets, commits, cherry-picks or pushes"
 
+echo "# a local commit origin has not seen leaves the stamp at origin's copy of the branch"
+clone polecat/w1
+commit_in "$C" local.txt "local" "a commit origin has not seen"
+AHEAD="$(g "$C" rev-parse HEAD)"
+run_block "$(bead polecat/w1 '{"rejection_reason":"tests failed"}')"
+called "gc bd update tk-w --set-metadata bring_current_from=$W1" \
+  && ok "(5) bring_current_from is the PR head origin holds, not the local commit past it" \
+  || bad "(5) bring_current_from is the PR head origin holds, not the local commit past it" "$(grep '^gc bd update' "$CALLS" | tr '\n' ';')"
+eq "$(parents)" "$AHEAD $BASE_TIP" "(5) the base is merged into the local head"
+
 echo "# a branch origin does not have is stamped with HEAD from before the merge"
 clone polecat/w1
 g "$C" checkout -q -b polecat/w3
@@ -191,19 +202,19 @@ commit_in "$C" local.txt "local" "a commit origin never saw"
 LOCAL="$(g "$C" rev-parse HEAD)"
 run_block "$(bead polecat/w3 '{"rejection_reason":"tests failed"}')"
 called "gc bd update tk-w --set-metadata bring_current_from=$LOCAL" \
-  && ok "(5) bring_current_from is the head the resume started from, not its merge commit" \
-  || bad "(5) bring_current_from is the head the resume started from, not its merge commit" "$(grep '^gc bd update' "$CALLS" | tr '\n' ';')"
-eq "$(parents)" "$LOCAL $BASE_TIP" "(5) the base is merged in"
+  && ok "(6) bring_current_from is the head the resume started from, not its merge commit" \
+  || bad "(6) bring_current_from is the head the resume started from, not its merge commit" "$(grep '^gc bd update' "$CALLS" | tr '\n' ';')"
+eq "$(parents)" "$LOCAL $BASE_TIP" "(6) the base is merged in"
 
 echo "# without a rejection the block does nothing"
 for m in '' '{"rejection_reason":""}'; do
   case "$m" in '') label="no rejection_reason" ;; *) label="an empty rejection_reason" ;; esac
   clone polecat/w1
   run_block "$(bead polecat/w1 "${m:-null}")"
-  eq "$RC" "0" "(6) $label: the block exits 0"
-  eq "$(g "$C" rev-parse HEAD)" "$W1" "(6) $label: HEAD stays at the PR head"
-  eq "$(grep -c '^git ' "$CALLS")" "0" "(6) $label: git is not run"
-  eq "$(grep -c '^gc bd update' "$CALLS")" "0" "(6) $label: nothing is written to the bead"
+  eq "$RC" "0" "(7) $label: the block exits 0"
+  eq "$(g "$C" rev-parse HEAD)" "$W1" "(7) $label: HEAD stays at the PR head"
+  eq "$(grep -c '^git ' "$CALLS")" "0" "(7) $label: git is not run"
+  eq "$(grep -c '^gc bd update' "$CALLS")" "0" "(7) $label: nothing is written to the bead"
 done
 
 echo
