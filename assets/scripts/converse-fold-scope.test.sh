@@ -136,14 +136,16 @@ visit() {
 }
 # rigs <key>[:suspended]... — write rigs.json naming one store per key, each
 # rooted at $FIXDIR/<key> so its `--db <key>/.beads` read maps to
-# store-<key>.json. `key:suspended` marks that rig suspended.
+# store-<key>.json. The key is also the store's id prefix, as `gc rig list`
+# reports it, so a visit `<key>-<n>` lives in store <key>. `key:suspended`
+# marks that rig suspended.
 rigs() {
     local arr="[]" spec k susp
     for spec in "$@"; do
         k="${spec%%:*}"; susp=false
         [ "$spec" = "$k:suspended" ] && susp=true
-        arr=$(printf '%s' "$arr" | jq -c --arg p "$FIXDIR/$k" --argjson s "$susp" \
-            '. + [{name:$p, path:$p, suspended:$s}]')
+        arr=$(printf '%s' "$arr" | jq -c --arg p "$FIXDIR/$k" --arg k "$k" --argjson s "$susp" \
+            '. + [{name:$p, path:$p, prefix:$k, suspended:$s}]')
     done
     printf '%s' "$arr" | jq -c '{rigs: .}' >"$FIXDIR/rigs.json"
 }
@@ -158,15 +160,16 @@ store() {
     done
 }
 # fixture <visit-json>... — write list.json plus a show-<id>.json per visit, and
-# one default store whose --db read falls back to list.json. Every single-store
-# case therefore runs the cross-store union over exactly one store.
+# one store, prefix `v` (the prefix every single-store visit id carries), whose
+# --db read falls back to list.json. Every single-store case therefore runs the
+# scan over exactly the visit's own store.
 fixture() {
     rm -f "$FIXDIR"/*.json
     printf '%s\n' "$@" | jq -sc '.' >"$FIXDIR/list.json"
     for row in "$@"; do
         printf '%s' "$row" | jq -c '[.]' >"$FIXDIR/show-$(printf '%s' "$row" | jq -r '.id').json"
     done
-    rigs default
+    rigs v
 }
 # unreadable — a listing that is not JSON (the read that did not happen).
 unreadable() {
@@ -189,6 +192,8 @@ run_block() {
 field() { ( eval "$1"; eval "printf '%s' \"\${$2-}\"" ); }
 # holder <visit> <subject> — just the resolved holder.
 holder() { field "$(run_block "$1" "$2")" HOLDER; }
+# misfiled <visit> <subject> — just the visits reported outside their subject's store.
+misfiled() { field "$(run_block "$1" "$2")" MISFILED; }
 # legacy_holds <subject> — what the OLD group-only rule saw: the count of
 # held sibling visits of this group. >1 means it told BOTH sittings that
 # another session already holds one. Present as a positive control: it
@@ -284,61 +289,93 @@ is "a held visit of another group is not a holder, same key or not" \
 fixture "$(visit v-one sub sess-1)"
 is "a lone sitting holds" "$(holder v-one sub)" "v-one"
 
-echo "── one subject, sittings in TWO stores: they still fold to one ──"
-# A subject's sittings can be filed into different rig stores. The peer scan
-# unions the in_progress listing across every rig's store before the lowest-id
-# tiebreak, so two sittings on one subject fold to the lowest id wherever each
-# was filed.
+echo "── one subject, sittings in TWO stores: neither folds across stores ──"
+# A fold closes the visit and moves its PR merge hold onto the holder, and
+# merge.sh reads a PR's holds from its own rig's store only, so a holder in
+# another store would carry the hold where it holds nothing. The holder is
+# always in the visit's own store. A live sitting on the same topic in another
+# store is a misfile, reported and never folded into. The subject here lives in
+# store ta, so tb-two is the misfile.
 rm -f "$FIXDIR"/*.json
-rigs r1 r2
-store r1 "$(visit v-one sub sess-1)"
-store r2 "$(visit v-two sub sess-2)"
-is "positive control: store r1 alone holds only v-one (a single-store scan could never fold it)" \
-    "$(jq '[.[] | select(.assignee != "")] | length' "$FIXDIR/store-r1.json")" "1"
-is "positive control: store r2 alone holds only v-two" \
-    "$(jq '[.[] | select(.assignee != "")] | length' "$FIXDIR/store-r2.json")" "1"
-h1="$(holder v-one sub)"
-h2="$(holder v-two sub)"
-is "v-one (store r1) holds — the lowest id city-wide" "$h1" "v-one"
-is "v-two (store r2) folds into v-one across stores" "$h2" "v-one"
-folds=0
-[ "$h1" = "v-one" ] || folds=$((folds + 1))
-[ "$h2" = "v-two" ] || folds=$((folds + 1))
-is "exactly one of the two cross-store sittings folds (never both, never neither)" "$folds" "1"
+rigs ta tb
+store ta "$(visit ta-one ta-sub sess-1)"
+store tb "$(visit tb-two ta-sub sess-2)"
+is "positive control: a city-wide lowest-id tiebreak would fold tb-two into ta-one" \
+    "$(jq -rs '[.[][] | select(.assignee != "") | .id] | sort | .[0]' \
+        "$FIXDIR/store-ta.json" "$FIXDIR/store-tb.json")" "ta-one"
+is "ta-one holds the sitting in its own store" "$(holder ta-one ta-sub)" "ta-one"
+is "tb-two does not fold into ta-one across stores" "$(holder tb-two ta-sub)" "tb-two"
+is "ta-one's scan reports tb-two as misfiled" "$(misfiled ta-one ta-sub)" "tb-two"
+is "tb-two's own scan reports itself as misfiled" "$(misfiled tb-two ta-sub)" "tb-two"
+err="$(cd "$TMPD" && PATH="$BIN:$PATH" FIXDIR="$FIXDIR" VISIT=ta-one SUBJECT=ta-sub \
+    bash "$FOLD_SUT" 2>&1 >/dev/null)"
+case "$err" in
+    *"tb-two is a live sitting on ta-sub"*"never crosses stores"*)
+        ok "the cross-store sitting is named on stderr as no holder" ;;
+    *) bad "the cross-store sitting is named on stderr as no holder" "stderr: $err" ;;
+esac
 
-echo "── a store that does not read is skipped; the readable ones still dedup ──"
-# The union is best-effort: an unreadable store cannot force a wrong fold — a
-# fold only ever targets a readable lower id — so one store's blip degrades to
-# the old single-store miss rather than failing the whole scan closed.
+echo "── a sitting filed in its subject's store, with no peer, reports nothing ──"
 rm -f "$FIXDIR"/*.json
-rigs r1 r2
-store r1 "$(visit v-one sub sess-1)" "$(visit v-two sub sess-2)"
-printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
-is "the readable store still folds the higher id into the lower" "$(holder v-two sub)" "v-one"
+rigs ta tb
+store ta "$(visit ta-one ta-sub sess-1)"
+store tb
+is "a lone sitting in its subject's store holds" "$(holder ta-one ta-sub)" "ta-one"
+is "and nothing is misfiled" "$(misfiled ta-one ta-sub)" ""
+
+echo "── same-store siblings still fold to the lowest id beside a misfile ──"
+rm -f "$FIXDIR"/*.json
+rigs ta tb
+store ta "$(visit ta-two ta-sub sess-2)" "$(visit ta-one ta-sub sess-1)"
+store tb "$(visit tb-zero ta-sub sess-0)"
+is "the higher same-store id folds into the lower" "$(holder ta-two ta-sub)" "ta-one"
+is "the lower-id sitting in another store is reported, not folded into" \
+    "$(misfiled ta-two ta-sub)" "tb-zero"
+
+echo "── a subject whose prefix no rig carries reports no misfile ──"
+# With no store of the subject's to compare against, nothing can be called
+# misfiled, and the fold still stays inside the visit's own store.
+rm -f "$FIXDIR"/*.json
+rigs ta tb
+store ta "$(visit ta-one sub sess-1)"
+store tb "$(visit tb-two sub sess-2)"
+is "the visit holds the sitting in its own store" "$(holder tb-two sub)" "tb-two"
+is "no misfile is reported against an unplaceable subject" "$(misfiled tb-two sub)" ""
+
+echo "── another store that does not read is skipped; the visit's own still dedups ──"
+rm -f "$FIXDIR"/*.json
+rigs v rb
+store v "$(visit v-one sub sess-1)" "$(visit v-two sub sess-2)"
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-rb.json"
+is "the visit's own store still folds the higher id into the lower" "$(holder v-two sub)" "v-one"
+
+echo "── the visit's own store unread resolves no holder (hold, never fold) ──"
+# The holder can only be in the visit's own store. When that store does not
+# read, nothing proves who holds the sitting, whatever another store says.
+rm -f "$FIXDIR"/*.json
+rigs v rb
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-v.json"
+store rb "$(visit rb-one sub sess-1)"
+printf '%s' "$(visit v-two sub sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
+is "an unread own store resolves no holder" "$(holder v-two sub)" ""
+rigs rb
+is "a visit whose prefix no rig carries resolves no holder" "$(holder v-two sub)" ""
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-rb.json"
+rigs v rb
+is "no store read resolves no holder" "$(holder v-two sub)" ""
 
 echo "── a suspended store is not queried ──"
 # Querying a suspended rig would auto-start an orphan Dolt server, and it has no
-# live session to hold a sitting, so it is skipped: a lower-id stamp there does
-# not fold a live sitting elsewhere.
+# live session to hold a sitting, so it is skipped.
 rm -f "$FIXDIR"/*.json
-rigs r1 r2
-store r1 "$(visit v-one sub sess-1)"
-store r2 "$(visit v-low sub sess-0)"
-is "positive control: with r2 live, v-one folds into the lower-id sitting there" \
-    "$(holder v-one sub)" "v-low"
-rigs r1 r2:suspended
-is "a lower-id sitting in a suspended store is not a holder" "$(holder v-one sub)" "v-one"
-
-echo "── every store unreadable resolves no holder (hold, never fold) ──"
-# The city-wide analogue of the single-store unreadable case: if not one store
-# reads, nothing proves another session holds anything, so the block resolves
-# EMPTY and the prompt holds.
-rm -f "$FIXDIR"/*.json
-rigs r1 r2
-printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r1.json"
-printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/store-r2.json"
-printf '%s' "$(visit v-two sub sess-2)" | jq -c '[.]' >"$FIXDIR/show-v-two.json"
-is "no store read resolves no holder" "$(holder v-two sub)" ""
+rigs ta tb
+store ta "$(visit ta-one ta-sub sess-1)"
+store tb "$(visit tb-low ta-sub sess-0)"
+is "positive control: with tb live, its sitting is read and reported" \
+    "$(misfiled ta-one ta-sub)" "tb-low"
+rigs ta tb:suspended
+is "a sitting in a suspended store is not read" "$(misfiled ta-one ta-sub)" ""
+is "and the visit still holds its own" "$(holder ta-one ta-sub)" "ta-one"
 
 echo "── an EMPTY continuation group never folds across subjects ──"
 # The claim reports the gc.continuation_group STAMP, and the stamp
@@ -445,6 +482,12 @@ have "the prompt reads an empty holder as HOLD, not as fold" \
 echo "── the contract the block is written against ──"
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
+have "the prompt reads MISFILED from the fold" \
+    "grep -E '^(SUBJECT|HOLDER|MISFILED)=')" "$PROMPT"
+have "the prompt states a fold never crosses stores" \
+    'crosses stores: the merge-hold keys it moves' "$PROMPT"
+have "the prompt never folds into a misfiled visit" \
+    'Never fold into one.' "$PROMPT"
 # The stamp moved out of the prompt into the two scripts that write it. The hold
 # stamps the GATED bead — the visit for a PR anchor, so the hold marker sits
 # beside its demand edge (doctor/check-wait-is-an-edge), the subject otherwise —
@@ -481,7 +524,7 @@ else
 fi
 
 echo "── eval-safety: a metacharacter subject reaches the caller as data ──"
-# The prompt runs `eval "$(converse-fold.sh ... | grep -E '^(SUBJECT|HOLDER)=')"`,
+# The prompt runs `eval "$(converse-fold.sh ... | grep -E '^(SUBJECT|HOLDER|MISFILED)=')"`,
 # and SUBJECT is a continuation group recovered from claim/metadata, so it can
 # carry any byte. A group with shell metacharacters must arrive as one literal
 # string, never syntax the eval executes: `;` would end the assignment and start
@@ -492,7 +535,7 @@ fixture "$(visit v-inj "$INJ" '')"
 out="$(run_block v-inj "$INJ")"
 is "fold passes a metacharacter subject through as one literal" "$(field "$out" SUBJECT)" "$INJ"
 INJECTED_SEEN="$(out="$out" bash -c '
-    eval "$(printf "%s\n" "$out" | grep -E "^(SUBJECT|HOLDER)=")"
+    eval "$(printf "%s\n" "$out" | grep -E "^(SUBJECT|HOLDER|MISFILED)=")"
     printf %s "${INJECTED-}"')"
 is "fold eval neither splits the assignment nor substitutes" "$INJECTED_SEEN" ""
 case "$out" in

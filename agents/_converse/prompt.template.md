@@ -232,12 +232,12 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER` / `MISFILED`):
    ```bash
-   # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
-   # so a read that did not resolve leaves it empty — the "hold" case below.
-   HOLDER=""
-   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
+   # eval the assignments the fold reads. HOLDER="" first, so a read that did
+   # not resolve leaves it empty — the "hold" case below.
+   HOLDER=""; MISFILED=""
+   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER|MISFILED)=')"
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
@@ -251,6 +251,15 @@ The loop, every visit:
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
    hold.
+
+   `$HOLDER` is always a visit in this visit's own store, because a fold never
+   crosses stores: the merge-hold keys it moves hold a PR's merge only in that
+   PR's own store. `$MISFILED` names the live visits on this topic, this one
+   included, that sit in a different store from their subject. Nothing that
+   reads the subject's store sees them, and that includes a PR merge hold they
+   carry. Never fold into one. When `$MISFILED` is not empty, say in your
+   framing's detail which visits are misfiled, because correcting a misfile is
+   the operator's call.
 
 **Steps 2–8 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
