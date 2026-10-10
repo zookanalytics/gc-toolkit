@@ -57,8 +57,9 @@ env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps, and the age past
        GC_DOCTOR_SWEEP_STATE_DIR     where the run record lives
        GC_DOCTOR_SWEEP_NO_SYSTEMD    set to skip the transient user service and
                                      launch with setsid/nohup instead
-       GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT  seconds bounding the pre-spawn Dolt
-                                     health probe (default 20)
+       GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT  seconds the pre-spawn Dolt health
+                                     probe may run; a probe still running then
+                                     is unproven and defers nothing (default 90)
        GC_DOCTOR_SWEEP_CADENCE_DIR   where the cross-session cadence lock and
                                      last-start timestamp live (default under
                                      $XDG_RUNTIME_DIR, else a per-uid /tmp path)
@@ -102,11 +103,15 @@ resolve_num BOUND "${GC_DOCTOR_SWEEP_BOUND:-}" 1800 GC_DOCTOR_SWEEP_BOUND
 MAX_ATTEMPTS=""
 resolve_num MAX_ATTEMPTS "${GC_DOCTOR_SWEEP_MAX_ATTEMPTS:-}" 2 GC_DOCTOR_SWEEP_MAX_ATTEMPTS
 [ "$MAX_ATTEMPTS" -lt 1 ] && MAX_ATTEMPTS=1
-# The pre-spawn Dolt health probe is bounded: a data plane too slow to answer
-# its own health check is itself overloaded, so an exceeded probe reads as
-# degraded rather than something to wait on.
+# The pre-spawn Dolt health probe's bound is a hang guard, not a health signal
+# (see dolt_degraded). It is long enough for the probe to report a server it
+# cannot reach. That report skips the per-database counts, so it takes the ping,
+# `gc rig list` and `gc dolt-cleanup` calls at their caps plus the report's own
+# process scans, about a minute. It is short enough that a cut probe still
+# leaves this call inside the two minutes the deacon's harness gives a tool call
+# that asks for no more.
 DOLT_PROBE_TIMEOUT=""
-resolve_num DOLT_PROBE_TIMEOUT "${GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT:-}" 20 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
+resolve_num DOLT_PROBE_TIMEOUT "${GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT:-}" 90 GC_DOCTOR_SWEEP_DOLT_PROBE_TIMEOUT
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
@@ -205,23 +210,34 @@ kill_tree() { # <root-pid>
   kill -KILL "$root" 2>/dev/null
 }
 
-# Whether Dolt is degraded enough that a sweep must not pile onto it. Echoes a
-# one-line reason and returns 0 when degraded, 1 when healthy or unproven.
-# Judged off server.reachable and server.latency_ms — the same fields and
-# 5000ms ceiling the deacon patrol's dolt-health step uses — with a probe that
-# outruns its own bound counted as overloaded. A missing gc, a non-timeout
-# error, or an unparseable answer is unproven, never degraded, so a broken
-# probe cannot disable sweeping.
+# Whether Dolt is degraded enough that a sweep must not pile onto it. Prints a
+# one-line reason and returns 0 when degraded, 1 when healthy, and 2 when the
+# probe proved neither. The verdict reads server.reachable and
+# server.latency_ms, the same fields and 5000ms ceiling the deacon patrol's
+# dolt-health step uses. The report's wall time is not a Dolt signal. `gc dolt
+# health` caps each Dolt call it makes, so a server that cannot answer the ping
+# inside its cap reads as unreachable, while the time the whole report takes
+# follows host load and the gc calls it makes. A probe still running at its
+# bound is therefore unproven, like a missing gc, a failed run, or an unreadable
+# answer. Unproven never defers, so a broken or stalled probe cannot disable
+# sweeping. The kill-after holds the bound for a probe that ignores TERM.
 dolt_degraded() {
   local gcbin out rc reachable latency
   gcbin="$(command -v gc 2>/dev/null)"
-  [ -n "$gcbin" ] || return 1
-  out="$(timeout "$DOLT_PROBE_TIMEOUT" "$gcbin" dolt health --json 2>/dev/null)"; rc=$?
-  if [ "$rc" -eq 124 ]; then
-    printf 'health probe exceeded %ss; data plane too slow to answer' "$DOLT_PROBE_TIMEOUT"
-    return 0
+  if [ -z "$gcbin" ]; then
+    printf 'gc not on PATH'
+    return 2
   fi
-  [ "$rc" -eq 0 ] || return 1
+  out="$(timeout -k 5 "$DOLT_PROBE_TIMEOUT" "$gcbin" dolt health --json 2>/dev/null)"; rc=$?
+  case "$rc" in
+    0) ;;
+    124|137)
+      printf 'health probe gave no answer within %ss' "$DOLT_PROBE_TIMEOUT"
+      return 2 ;;
+    *)
+      printf 'health probe exited %s' "$rc"
+      return 2 ;;
+  esac
   # Not `// empty`: jq's `//` treats boolean false like null, so it would swallow
   # the very `reachable:false` this is looking for. Read the field raw.
   reachable="$(printf '%s' "$out" | jq -r '.server.reachable' 2>/dev/null)"
@@ -231,7 +247,9 @@ dolt_degraded() {
   fi
   latency="$(printf '%s' "$out" | jq -r '.server.latency_ms // empty' 2>/dev/null)"
   case "$latency" in
-    ''|*[!0-9]*) return 1 ;;
+    ''|*[!0-9]*)
+      printf 'health probe answer carried no readable server.latency_ms'
+      return 2 ;;
     *) if [ "$latency" -gt 5000 ]; then
          printf 'Dolt server latency %sms over 5000ms' "$latency"
          return 0
@@ -459,11 +477,14 @@ fi
 # so a start deferred here spends no cadence window; window-start and attempts
 # are left untouched too, so the same due start — the ordinary hourly one or the
 # retry a failed run armed — fires on the next pass once Dolt recovers, with no
-# attempt burned on a sweep that never ran.
-if DOLT_DETAIL="$(dolt_degraded)"; then
+# attempt burned on a sweep that never ran. A probe that proved nothing holds
+# nothing, and the report says the gate was skipped and why.
+DOLT_DETAIL="$(dolt_degraded)"; DOLT_RC=$?
+if [ "$DOLT_RC" -eq 0 ]; then
   report deferred "reason=dolt-degraded" "detail=$DOLT_DETAIL"
   exit 0
 fi
+[ "$DOLT_RC" -eq 2 ] && NOTE="${NOTE:+$NOTE; }Dolt health gate skipped: $DOLT_DETAIL"
 
 # The cadence floor — the one cross-session gate. The in-flight and interval
 # guards above read only STATE_DIR, which falls back to a per-session path when
