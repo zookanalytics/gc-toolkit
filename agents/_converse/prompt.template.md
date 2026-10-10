@@ -400,10 +400,17 @@ Rules:
   field of each `formulas/*.toml` in the rig checkout, and name the
   formula you chose when you frame the choice. File the work bead as a
   sibling and wire the wait exactly as step 7 says.
+- **Which route — a bare visit, a plain work bead, or a design-convoy.**
+  Decide with the questions under "Choosing a design-convoy" below. When they
+  point at a design-convoy, recommend `mol-design-convoy`: the
+  `gc.recommended_formula` stamp the operator Accepts and slings like any other
+  subject formula.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+{{ template "design-convoy-routing" . }}
 
 {{ template "context-discipline" . }}
 

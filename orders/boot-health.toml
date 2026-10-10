@@ -1,5 +1,6 @@
-# boot-health — "is the deacon stuck?" answered mechanically (three reads and
-# a threshold), replacing the always-on `boot` watchdog session. REPORT-ONLY:
+# boot-health — "is the deacon stuck?" answered mechanically (the patrol-wisp
+# ledger, the deacon's pane only when the wisp is not fresh, and a threshold),
+# replacing the always-on `boot` watchdog session. REPORT-ONLY:
 # it observes and reports to a human; it does not nudge the deacon (a nudge
 # forces a full context reload and delivery to a fresh-wake singleton is
 # unreliable) and it files no warrants. The dog pool exists again, but
