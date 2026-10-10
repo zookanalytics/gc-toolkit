@@ -723,9 +723,11 @@ keys = [
   # costs the write-back no GitHub read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
-  # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the finding for provenance; the anchor
-  # --blocks it until the merge.
+  # set by finding.sh as the deferral runs. It carries the objection and the
+  # deferral reason, and the create that files it carries both its edges: the
+  # anchor --blocks it until the merge, and it is --discovered-from the finding. A
+  # deferral retried after a failure finds the follow-up the failed attempt filed
+  # by that discovered-from edge, so the retry files no second one.
   "finding.follow_up",
   # The visit a needs-you finding files for the operator, set by finding.sh as the
   # ruling runs. The finding stays open and its visit id is posted to the raiser's

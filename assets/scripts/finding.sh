@@ -49,7 +49,10 @@
 # what holds that review until the operator rules its visit. The discovered-from
 # edge is the follow-up's own — a dispatchable bead — and points at the finding it
 # carries forward. bd keeps one edge per (issue, depends_on) pair, and the
-# follow-up/anchor pair is the gate's.
+# follow-up/anchor pair is the gate's. Both edges ride the create that files the
+# follow-up, and the discovered-from edge is how a deferral retried after a
+# failure finds the follow-up the failed attempt filed, so the retry files no
+# second one.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -242,6 +245,23 @@ strip_inbound_blocks() { # <finding>
   done
 }
 
+# The live follow-up a deferral of <finding> already filed, or empty. A follow-up
+# is born discovered-from the finding it carries forward, and only the deferred
+# arm hangs that edge type on a finding, so the finding's live discovered-from
+# dependents are its follow-ups. A closed one is not returned: a deferral must leave a
+# follow-up that can still dispatch, and a closed bead never will. One deferral
+# files one follow-up; if more are live, the first in id order is returned.
+# Non-zero rc = the edges would not read, which is not "none filed".
+deferred_follow_up() { # <finding>
+  local rows
+  rows=$(bd_json dep list "$1" --direction=up -t discovered-from) || return 2
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" '
+    ($live | split(",")) as $l
+    | [ .[] | select(((.status // "open") | tostring | ascii_downcase) as $s | $l | index($s)) | .id ]
+    | sort | .[0] // empty' 2>/dev/null
+}
+
 cmd_key() {
   local lane="" locus="" msg=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -408,42 +428,62 @@ cmd_set_disposition() {
       ! edge_exists "$finding" "$anchor" \
         || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
       strip_inbound_blocks "$finding"
-      # The follow-up carries the objection, the deferral reason, and discovered-from
-      # provenance. A deferral with no tracked follow-up is the orphan this retires,
-      # so fail closed if it cannot be filed.
-      local ftitle fdesc followup
-      ftitle=$(bd_json show "$finding" | jq -r '(.[0].title // "") | tostring' 2>/dev/null)
-      [ -n "$ftitle" ] || ftitle="finding[$finding]"
-      ftitle="follow-up: $(printf '%s' "$ftitle" | sed -E 's/^finding\[[^]]*\]: //')"
-      fdesc=$(printf 'Deferred from the review of anchor %s (finding %s), to be picked up after the PR merges.\n\n%s' \
-        "$anchor" "$finding" "${reason:-No reason recorded.}")
-      followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-      [ -n "$followup" ] \
-        || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
-      # Make the follow-up wait for the merge, then dispatch itself: the anchor
-      # --blocks the follow-up, so bd holds it unready until the anchor closes on
-      # merge-push, and deferred-dispatch's reconcile slings it to the fix pool
-      # (--on mol-polecat-work) the moment that blocker clears. Wire the gate BEFORE
-      # arming so no reconcile pass dispatches it early; fail closed if the gate or
-      # the arm does not land, and read the arm back off the bead — an un-gated or
-      # un-armed follow-up is the unclaimable orphan again, and the finding is about
-      # to close off the validator's unvalidated set where nothing re-attempts it.
-      #
-      # bd keeps one dependency per (issue, depends_on) pair and refuses a second
-      # type on a pair already taken, so the follow-up/anchor pair carries the gate
-      # and nothing else. The provenance edge points at the finding, and it is wired
-      # after the gate, so a provenance write can never cost the gate.
-      gc bd dep "$anchor" --blocks "$followup" >/dev/null 2>&1 \
-        || { warn "deferred $finding: could not wire anchor $anchor --blocks follow-up $followup; NOT closing"; exit 2; }
+      # One finding has one follow-up. Every step after the follow-up is filed can
+      # fail and exit 2, which leaves the finding at its prior disposition, so the
+      # validator rules it again. That retry reuses the follow-up the failed attempt
+      # filed. A second one would be armed beside the first, and both would dispatch
+      # the same later-work once the anchor merges. A read that cannot tell whether
+      # one was filed files nothing.
+      local followup
+      followup=$(deferred_follow_up "$finding") \
+        || { warn "deferred $finding: could not read whether an earlier attempt filed its follow-up; NOT filing one"; exit 2; }
+      if [ -z "$followup" ]; then
+        # The follow-up carries the objection and the deferral reason, and it is
+        # filed whole. Its gate rides the create: the anchor blocks it, so bd holds
+        # it unready until merge-push closes the anchor. Its discovered-from edge
+        # onto the finding rides the create too. bd lands a create with every --deps
+        # edge or files nothing, so no follow-up exists ungated, and every one is
+        # the finding's discovered-from dependent, which is how a retry finds it. bd
+        # keeps one dependency per (issue, depends_on) pair, so the two edges take
+        # two pairs, and the follow-up/anchor pair carries the gate alone. A
+        # deferral with no tracked follow-up is the orphan this retires, so fail
+        # closed if it cannot be filed.
+        local ftitle fdesc
+        ftitle=$(bd_json show "$finding" | jq -r '(.[0].title // "") | tostring' 2>/dev/null)
+        [ -n "$ftitle" ] || ftitle="finding[$finding]"
+        ftitle="follow-up: $(printf '%s' "$ftitle" | sed -E 's/^finding\[[^]]*\]: //')"
+        fdesc=$(printf 'Deferred from the review of anchor %s (finding %s), to be picked up after the PR merges.\n\n%s' \
+          "$anchor" "$finding" "${reason:-No reason recorded.}")
+        followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --deps "blocked-by:$anchor,discovered-from:$finding" --json 2>/dev/null \
+          | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+        # A create whose reply did not parse may still have landed, and the edge it
+        # was born with finds it.
+        [ -n "$followup" ] || followup=$(deferred_follow_up "$finding")
+        [ -n "$followup" ] \
+          || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }
+      fi
+      # The follow-up waits for the merge, then dispatches itself: deferred-dispatch's
+      # reconcile slings it to the fix pool (--on mol-polecat-work) the moment its
+      # gate clears. A reused follow-up whose gate is gone gets it back BEFORE it is
+      # armed, so no reconcile pass dispatches it early, and one already armed to
+      # the pool is not armed twice. Fail closed if the gate or the arm does not
+      # hold, and read the arm back off the bead: an un-gated or un-armed follow-up
+      # is the unclaimable orphan again, and the finding is about to close off the
+      # validator's unvalidated set where nothing re-attempts it.
+      if ! edge_exists "$anchor" "$followup"; then
+        gc bd dep "$anchor" --blocks "$followup" >/dev/null 2>&1 \
+          || { warn "deferred $finding: could not wire anchor $anchor --blocks follow-up $followup; NOT closing"; exit 2; }
+      fi
       edge_exists "$anchor" "$followup" \
-        || { warn "deferred $finding: anchor $anchor does not block follow-up $followup after wiring; NOT closing"; exit 2; }
-      gc bd dep add "$followup" "$finding" --type discovered-from >/dev/null 2>&1 \
-        || warn "could not wire follow-up $followup --discovered-from $finding (provenance only)"
-      "$dispatcher" arm "$followup" --target "$fixpool" --sling-arg --on --sling-arg mol-polecat-work \
-        --reason "deferred from the review of anchor $anchor (finding $finding); dispatch once the anchor merges" >/dev/null 2>&1 \
-        || { warn "deferred $finding: could not arm follow-up $followup to '$fixpool'; NOT closing"; exit 2; }
+        || { warn "deferred $finding: anchor $anchor does not block follow-up $followup; NOT closing"; exit 2; }
       local armed
       armed=$(bd_json show "$followup" | jq -r '(.[0].metadata["gc.dispatch_when_ready"] // "") | tostring' 2>/dev/null)
+      if [ "$armed" != "$fixpool" ]; then
+        "$dispatcher" arm "$followup" --target "$fixpool" --sling-arg --on --sling-arg mol-polecat-work \
+          --reason "deferred from the review of anchor $anchor (finding $finding); dispatch once the anchor merges" >/dev/null 2>&1 \
+          || { warn "deferred $finding: could not arm follow-up $followup to '$fixpool'; NOT closing"; exit 2; }
+        armed=$(bd_json show "$followup" | jq -r '(.[0].metadata["gc.dispatch_when_ready"] // "") | tostring' 2>/dev/null)
+      fi
       [ "$armed" = "$fixpool" ] \
         || { warn "deferred $finding: follow-up $followup did not read back armed (gc.dispatch_when_ready='$armed', want '$fixpool'); NOT closing"; exit 2; }
       gc bd update "$finding" --set-metadata finding.follow_up="$followup" >/dev/null 2>&1 \

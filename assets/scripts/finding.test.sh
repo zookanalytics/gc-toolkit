@@ -545,5 +545,137 @@ FA5b=$(upsert_a five "close a keyless birth")
 eq "$(meta "$FA5b" 'finding.key')" "$(key_a five "close a keyless birth")" "the retry files the finding with its key"
 eq "$(live_titled "finding[correctness]: close a keyless birth")" "1" "…and it is the only open bead with that title"
 
+# ---------------------------------------------------------------------------
+# One finding has one follow-up. A deferred ruling that fails after it filed its
+# follow-up leaves the finding unvalidated, so the validator rules it again. The
+# retry reuses that follow-up: a second one would be armed beside the first, and
+# both would dispatch the same later-work once the anchor merges.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+# The follow-ups filed for a finding: the beads hung discovered-from it.
+followups() { awk -F'|' -v f="$1" '$2 == "discovered-from" && $3 == f {print $1}' "$STUB_DEPS"; }
+# Every bead carrying a title, whatever its edges, so a follow-up filed bare is counted too.
+titled() { jq -r --arg t "$1" '[ .[] | select(.title == $t) ] | length' "$STUB_STORE"; }
+upsert_r() { "$SUT" upsert --anchor tk-ancR --lane correctness --locus "assets/scripts/retry.sh:$1()" --message "$2"; }
+defer_r() { "$SUT" set-disposition --finding "$1" --anchor tk-ancR --disposition deferred --reason "later work"; }
+
+# The follow-up is filed whole: its gate and its discovered-from edge ride the
+# create, so no follow-up exists ungated or unfindable from its finding.
+: > "$STUB_GC_LOG"
+RW=$(upsert_r whole "file the follow-up whole")
+defer_r "$RW"
+RWFU=$(meta "$RW" 'finding.follow_up')
+has "$(cat "$STUB_GC_LOG")" "--deps blocked-by:tk-ancR,discovered-from:$RW --json" "the follow-up's gate and discovered-from edge ride its create"
+hasnt "$(cat "$STUB_GC_LOG")" "bd dep tk-ancR --blocks $RWFU" "…so no second write wires the gate"
+hasnt "$(cat "$STUB_GC_LOG")" "bd dep add $RWFU" "…or the provenance edge"
+
+# The ruling fails after the arm: STUB_CLOSE_FAIL refuses only the finding's
+# --status=closed write, so the follow-up is filed, gated and armed when it fails.
+RL=$(upsert_r late "fail after the arm")
+export STUB_CLOSE_FAIL="$RL"
+defer_r "$RL" 2>/dev/null; rc=$?
+export STUB_CLOSE_FAIL=""
+if [ "$rc" -ne 0 ]; then ok "a deferral whose close is refused exits non-zero ($rc)"; else bad "a deferral whose close was refused exited 0"; fi
+eq "$(meta "$RL" 'finding.disposition')|$(bstatus "$RL")" "unvalidated|open" "…and leaves the finding unvalidated and open, so the validator rules it again"
+RLFU=$(followups "$RL")
+eq "$(printf '%s\n' "$RLFU" | grep -c .)" "1" "…holding the one follow-up it filed"
+eq "$(meta "$RLFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…already armed to the fix pool"
+defer_r "$RL"; rc=$?
+eq "$rc" "0" "the clean re-run succeeds"
+eq "$(meta "$RL" 'finding.disposition')|$(bstatus "$RL")" "deferred|closed" "…and closes the finding deferred"
+eq "$(followups "$RL")" "$RLFU" "…reusing the follow-up the failed attempt filed"
+eq "$(titled "follow-up: fail after the arm")" "1" "…so exactly one follow-up exists"
+eq "$(meta "$RL" 'finding.follow_up')" "$RLFU" "…recorded on the finding"
+has "$(meta "$RL" 'finding.reply')" "$RLFU" "…and named in the reply the raiser's thread receives"
+eq "$(meta "$RLFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the one follow-up is armed"
+eq "$(notes "$RLFU" | grep -c 'dispatch armed by')" "1" "…once: an arm already on the fix pool is not written again"
+has "$(deps)" "tk-ancR|blocks|$RLFU" "…and gated behind the anchor"
+
+# The ruling fails at the arm: the follow-up is filed, and its gate rode the
+# create, so it waits behind the anchor unarmed. The retry reuses it and arms it.
+cat > "$TMP/dispatch-fail.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "deferred-dispatch: simulated arm failure" >&2
+exit 1
+STUB
+chmod +x "$TMP/dispatch-fail.sh"
+RA=$(upsert_r arm "fail at the arm")
+GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" "$SUT" set-disposition --finding "$RA" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RA" 'finding.disposition')" "2|unvalidated" "a deferral whose arm fails exits 2 and leaves the finding unvalidated"
+RAFU=$(followups "$RA")
+eq "$(printf '%s\n' "$RAFU" | grep -c .)|$(meta "$RAFU" 'gc.dispatch_when_ready')" "1|<absent>" "…with its one follow-up filed but not armed"
+has "$(deps)" "tk-ancR|blocks|$RAFU" "…and already gated, so nothing dispatches it early"
+defer_r "$RA"; rc=$?
+eq "$rc|$(followups "$RA")" "0|$RAFU" "the retry reuses the unarmed follow-up"
+eq "$(meta "$RAFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…and arms it"
+eq "$(titled "follow-up: fail at the arm")" "1" "…filing no second follow-up"
+
+# A reused follow-up whose gate is gone gets it back before the finding closes.
+RG=$(upsert_r gate "regain a removed gate")
+export STUB_CLOSE_FAIL="$RG"
+defer_r "$RG" 2>/dev/null
+export STUB_CLOSE_FAIL=""
+RGFU=$(followups "$RG")
+gc bd dep remove "$RGFU" tk-ancR >/dev/null
+hasnt "$(deps)" "tk-ancR|blocks|$RGFU" "(fixture) the follow-up's gate is removed after the failed attempt"
+defer_r "$RG"; rc=$?
+eq "$rc|$(followups "$RG")" "0|$RGFU" "the retry reuses the follow-up whose gate was removed"
+has "$(deps)" "tk-ancR|blocks|$RGFU" "…and wires its gate again"
+
+# The create lands and its reply is lost: the edge the follow-up was born with
+# finds it in the same call, so the deferral completes without a twin.
+RC=$(upsert_r reply "recover a lost create reply")
+export STUB_CREATE_GARBAGE=1
+defer_r "$RC"; rc=$?
+export STUB_CREATE_GARBAGE=""
+eq "$rc|$(meta "$RC" 'finding.disposition')" "0|deferred" "a follow-up create whose reply does not parse is recovered in the same call"
+eq "$(meta "$RC" 'finding.follow_up')" "$(followups "$RC")" "…by the discovered-from edge it was born with"
+eq "$(titled "follow-up: recover a lost create reply")" "1" "…and no twin is filed"
+
+# A refused create files nothing, so the retry files exactly one follow-up.
+RF=$(upsert_r refused "retry a refused create")
+export STUB_CREATE_FAIL=1
+defer_r "$RF" 2>/dev/null; rc=$?
+export STUB_CREATE_FAIL=""
+eq "$rc|$(meta "$RF" 'finding.disposition')|$(titled "follow-up: retry a refused create")" "2|unvalidated|0" "a refused follow-up create exits 2, files nothing and leaves the finding unvalidated"
+defer_r "$RF"; rc=$?
+eq "$rc|$(titled "follow-up: retry a refused create")|$(followups "$RF" | grep -c .)" "0|1|1" "the retry files exactly one follow-up"
+
+# A closed follow-up is not reused: a deferral must leave a follow-up that can
+# still dispatch, and a closed bead never will.
+RX=$(upsert_r closed "skip a closed follow-up")
+export STUB_CLOSE_FAIL="$RX"
+defer_r "$RX" 2>/dev/null
+export STUB_CLOSE_FAIL=""
+RXFU=$(followups "$RX")
+gc bd update "$RXFU" --status=closed >/dev/null
+defer_r "$RX"; rc=$?
+RXFU2=$(meta "$RX" 'finding.follow_up')
+if [ "$rc" -eq 0 ] && [ -n "$RXFU" ] && [ "$RXFU2" != "$RXFU" ] && [ "$(bstatus "$RXFU2")" = "open" ]; then
+  ok "a closed follow-up is not reused: the deferral files a live one"
+else
+  bad "the deferral did not file a live follow-up past the closed $RXFU (rc=$rc, follow_up=$RXFU2)"
+fi
+eq "$(meta "$RXFU2" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…armed like any follow-up"
+has "$(deps)" "tk-ancR|blocks|$RXFU2" "…and gated behind the anchor"
+
+# A read that cannot tell whether a follow-up was filed files nothing: the
+# finding's edges answer garbage, an array from a read that failed, or nothing.
+RU=$(upsert_r unread "file nothing on an unread lookup")
+STUB_DEP_GARBAGE=1 "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "a deferral whose follow-up lookup answers garbage exits 2 and files nothing"
+STUB_DEP_PARTIAL=1 "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "…and so does one whose lookup prints [] from a failed read"
+mkdir -p "$TMP/quietdep"
+cat > "$TMP/quietdep/gc" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" dep list "*discovered-from*) exit 0 ;; esac
+exec "$BIN/gc" "\$@"
+STUB
+chmod +x "$TMP/quietdep/gc"
+PATH="$TMP/quietdep:$PATH" "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "…and so does one whose lookup prints nothing and exits 0"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
