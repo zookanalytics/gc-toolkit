@@ -190,10 +190,11 @@ if [ -n "$WHY" ]; then
   # redundant dispatch the refinery already carried past, as a lease-expiry
   # re-offer of THIS molecule's own load-context after its own work finished,
   # or as a pour whose work bead closed before this claim, and all three are
-  # husks. A visit there answers nothing, and a hold behind it has no way back:
-  # molecule-hold.sh is one-way and dead-molecule-dispose.sh refuses a live
-  # root. molecule-hold.sh never touches the work bead, so a closed bead stays
-  # closed and the refinery keeps a handed-off one while its PR proceeds.
+  # husks. A visit there answers nothing. molecule-hold.sh ends a molecule
+  # whose work bead is closed, and holds one whose work is still with the
+  # refinery with its end armed on that bead, so the molecule ends when the
+  # bead closes. molecule-hold.sh never touches the work bead, so a closed bead
+  # stays closed and the refinery keeps a handed-off one while its PR proceeds.
   #
   # Every other refusal records its release path first and holds only if that
   # landed: a blocked, de-routed molecule with no visit is a silent stall no
@@ -232,12 +233,14 @@ and the refusals split by whether a human has a decision to make.
 A FINISHED bead — closed, a completed hand-off, or carrying a `merge_result` —
 is not a live conflict. Its work has landed, is landing with the refinery, or
 was ruled unnecessary by whoever closed it, so no human has a decision to make.
-The gate quiesces the molecule and drains with no escalation; the drain is
-conditional on the hold alone. A human visit here answers nothing, and a hold
-behind one has no way back, because `molecule-hold.sh` is one-way and
-`dead-molecule-dispose.sh` refuses a live root. `molecule-hold.sh` never touches
-the work bead, so a closed bead stays closed and a handed-off bead stays with
-the refinery while its PR proceeds. A closed bead's note and hold reason read
+The gate runs `molecule-hold.sh` and drains with no escalation; the drain is
+conditional on the hold alone. A closed bead's molecule ends there:
+`molecule-hold.sh` finds its work closed and hands the molecule to
+`dead-molecule-dispose.sh` instead of holding it. A handed-off bead's molecule
+is held with its end armed on the bead, so it ends when the refinery closes
+the bead. A human visit answers nothing in either case. `molecule-hold.sh`
+never touches the work bead, so a closed bead stays closed and a handed-off
+bead stays with the refinery while its PR proceeds. A closed bead's note and hold reason read
 `closed before claim` and carry what the bead records about its close, so a
 duplicate close reads differently from a merge.
 
@@ -843,13 +846,29 @@ Recover what you need from durable state; assume nothing carried over.
 
 **1. Recover the work bead and worktree.** `CLAIMED_ITER_BEAD` is the `bead_id`
 your `gc hook --claim --json` returned for this iteration; it is the only id
-that names this attempt unambiguously, and you close it in step 6.
+that names this attempt unambiguously, and you close it in step 6. A work bead
+that has already closed leaves nothing to review or hand off, so the marked
+block runs `molecule-hold.sh` on this iteration, which ends the molecule, and
+drains before any check runs or any worktree is touched.
 ```bash
 CLAIMED_ITER_BEAD="<the bead_id your gc hook --claim returned>"
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "cannot derive work bead from convoy {{convoy_id}}" >&2; exit 1; }
 WORK_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
+# >>> self-review-closed-work-end
+if [ "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // empty' 2>/dev/null)" = "closed" ]; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh not found in the pack}"
+  ITER_REF=$(gc bd show "$CLAIMED_ITER_BEAD" --json | jq -r '.[0].metadata["gc.step_ref"] // empty' 2>/dev/null)
+  if "$SCRIPTS/molecule-hold.sh" --step "$ITER_REF" --bead "$CLAIMED_ITER_BEAD" --reason "work bead $WORK_BEAD_ID is closed; nothing is left to review"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable." >&2
+  fi
+  exit 1
+fi
+# <<< self-review-closed-work-end
 WORKTREE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.work_dir // empty')
 BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch // empty')
 cd "$WORKTREE" || { echo "recorded work_dir is missing: $WORKTREE" >&2; exit 1; }
@@ -950,6 +969,30 @@ The `# >>> submit-*` marked blocks below are extracted verbatim and executed
 by assets/scripts/submit-branch-gate.test.sh, so they must stay
 backslash-free (a TOML triple-quoted string eats a trailing backslash) and
 keep their markers.
+
+**Work that has closed is not handed off.** The handoff reopens the work bead
+for the refinery, so running it on a bead someone closed while this molecule
+waited would put closed work back in the merge queue. A closed work bead ends
+the molecule instead: `molecule-hold.sh` on this step finds the work closed
+and ends it, and the step drains before anything is pushed. `CLAIMED_STEP_BEAD_ID`
+is the `bead_id` your `gc hook --claim --json` returned for this step.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+# >>> submit-closed-work-end
+if [ -n "$WORK_BEAD_ID" ] && [ "$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].status // empty' 2>/dev/null)" = "closed" ]; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh not found in the pack}"
+  if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID is closed; nothing is left to hand off"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable." >&2
+  fi
+  exit 1
+fi
+# <<< submit-closed-work-end
+```
 
 **0. Store-only exit — a run whose whole product is store work (TERMINAL).**
 Some work has no diff: the deliverable is a bead filed in another rig's

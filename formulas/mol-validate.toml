@@ -88,9 +88,28 @@ if [ -z "$VALIDATION_PASS" ]; then
   exit 1
 fi
 # <<< validate-malformed-convoy-refuse
+# >>> validate-closed-pass-end
+if [ "$(gc bd show "$VALIDATION_PASS" --json | jq -r '.[0].status // empty' 2>/dev/null)" = "closed" ]; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh not found in the pack}"
+  if "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS is closed; nothing is left to rule"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable." >&2
+  fi
+  exit 1
+fi
+# <<< validate-closed-pass-end
 gc bd show "$VALIDATION_PASS"
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ```
+
+A pass that is already closed has been retired, by the cadence when its anchor
+was disposed or by an earlier run of this molecule, so nothing is left to rule.
+The `validate-closed-pass-end` block runs `molecule-hold.sh` on this step, which
+finds the pass closed and ends the molecule, and drains before anything is
+read or ruled. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your
+`gc hook --claim --json` returned for this step.
 
 **2. Pin the anchor, the lane, and the reviewed commit.** The pass rules one
 lane's batch on one anchor at the head the batch was produced at:

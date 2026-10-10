@@ -738,6 +738,61 @@ eq "$(run_ws_arm 0 1)" "1" "a refused escalation still exits 1"
 hasnt "$(cat "$TMP/arm.log")" "HOLD --step" "no hold without a release path recorded"
 hasnt "$(gclog)" "runtime drain-ack" "and a successful hold is not enough by itself: nothing drained"
 
+# --- The closed-work gates. ---------------------------------------------------
+# A step a fresh session claims runs nothing over work that has closed: each
+# gate hands the step to molecule-hold.sh, which ends the molecule, and drains.
+# Extracted verbatim from both formulas and executed against the stubs above.
+echo "== closed-work gates: a step over closed work goes through the hold and drains =="
+gate_block() { awk -v m="$1" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$2"; }
+SR_GATE="$(gate_block self-review-closed-work-end "$TOML")"
+SUB_GATE="$(gate_block submit-closed-work-end "$TOML")"
+VAL_GATE="$(gate_block validate-closed-pass-end "$ROOT/formulas/mol-validate.toml")"
+for G in SR_GATE SUB_GATE VAL_GATE; do
+  [ -n "${!G}" ] && ok "$G extracted between its markers" || bad "$G extraction EMPTY — markers missing"
+  bash -n <(printf '%s\n' "${!G}") 2>/dev/null && ok "$G is valid bash" || bad "$G does not parse under bash -n"
+  hasnt "${!G}" "--status=closed" "$G closes nothing itself"
+done
+
+gate_store() { # <work-status>
+  cat > "$FAKE_STORE" <<STORE
+[
+ {"id":"tk-work","status":"$1","assignee":"","metadata":{}},
+ {"id":"s-iter","status":"in_progress","assignee":"$MINE","metadata":{"gc.step_ref":"self-review.iteration.2","gc.root_bead_id":"root-1"}}
+]
+STORE
+}
+run_gate() { # <block> <hold-rc> -> "<rc>"; trace in $TMP/arm.log and $GC_LOG
+  : > "$TMP/arm.log"; : > "$GC_LOG"
+  printf '%s\n' "$1" > "$TMP/gate.sh"
+  local rc=0
+  WORK_BEAD_ID=tk-work WORK_JSON="$(jq -c '[ .[] | select(.id == "tk-work") ]' "$FAKE_STORE")" \
+    VALIDATION_PASS=tk-work CLAIMED_ITER_BEAD=s-iter CLAIMED_STEP_BEAD_ID=s-step \
+    ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$2" \
+    GC_PACK_DIR="$TMP/armpack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    bash "$TMP/gate.sh" >/dev/null 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+
+gate_store closed
+eq "$(run_gate "$SR_GATE" 0)" "1" "self-review over closed work exits 1 after the hold"
+has "$(cat "$TMP/arm.log")" "HOLD --step self-review.iteration.2 --bead s-iter" "it holds the iteration it claimed, by its own step ref"
+has "$(gclog)" "runtime drain-ack" "and drains"
+eq "$(run_gate "$SUB_GATE" 0)" "1" "submit-and-exit over closed work exits 1 after the hold"
+has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.submit-and-exit --bead s-step" "it holds its own step"
+has "$(gclog)" "runtime drain-ack" "and drains before anything is pushed"
+eq "$(run_gate "$VAL_GATE" 0)" "1" "mol-validate over a closed pass exits 1 after the hold"
+has "$(cat "$TMP/arm.log")" "HOLD --step mol-validate.load-dispatch --bead s-step" "it holds load-dispatch"
+has "$(gclog)" "runtime drain-ack" "and drains before anything is ruled"
+eq "$(run_gate "$SUB_GATE" 1)" "1" "a refused hold still exits 1"
+hasnt "$(gclog)" "runtime drain-ack" "and does not drain: something in the molecule is still claimable"
+
+gate_store open
+for G in SR_GATE SUB_GATE VAL_GATE; do
+  eq "$(run_gate "${!G}" 0)" "0" "$G over open work falls through to the step"
+  eq "$(cat "$TMP/arm.log")" "" "$G holds nothing over open work"
+  hasnt "$(gclog)" "runtime drain-ack" "$G does not drain over open work"
+done
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
