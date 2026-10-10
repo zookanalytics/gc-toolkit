@@ -2969,17 +2969,20 @@ GATES
   # context in state failure/error) and leaves pending/missing to the next pass,
   # which sees the failure once it lands.
   #
-  # Two safety rails sit on the dispatch. The attempt cap stops it churning
-  # fixers at a genuinely stuck PR: once RC_FIX_ATTEMPT_CAP distinct red heads
-  # have each drawn a fixer without the PR reaching green, the anchor is parked
-  # to a human instead of dispatching another. The non-code exclusion keeps a
-  # code-fixer off a failure no code change can clear — a timeout, a
-  # cancellation, a startup failure, an action-required gate, or a deploy/preview
-  # platform (matched by name) — which is likewise parked. Both parks write the
-  # stand-down this arm already honors, gc.routed_to=human, through lifecycle.sh
-  # in one update with the takeaway the board shows as what the person owes, so
-  # the next pass stands the anchor down on its own and the fixer is never
-  # re-offered.
+  # Safety rails on the dispatch park the anchor to a human instead of sending a
+  # fixer. The attempt cap stops it churning fixers at a genuinely stuck PR: once
+  # RC_FIX_ATTEMPT_CAP distinct red heads have each drawn a fixer without the PR
+  # reaching green, the anchor is parked instead of dispatching another. The
+  # same-head park stops it repeating an attempt: a red-check child that closed
+  # at the head the PR is still red at means a fixer was already sent there, so
+  # the anchor is parked rather than sent a second. The non-code exclusion keeps
+  # a code-fixer off a failure no code change can clear — a timeout, a
+  # cancellation, a startup failure, an action-required gate, or a
+  # deploy/preview platform (matched by name) — which is likewise parked. Each
+  # park writes the stand-down this arm already honors, gc.routed_to=human,
+  # through lifecycle.sh in one update with the takeaway the board shows as what
+  # the person owes, so the next pass stands the anchor down on its own and the
+  # fixer is never re-offered.
   RC_FIX_ATTEMPT_CAP=3
   RC_DEPLOY_CHECK_RE="vercel|netlify|deploy"
   case "$merge_state" in
