@@ -140,7 +140,7 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"gc.session_id":"lx-9"
    "a survivor keeps its fields (including the .owner host-bead-skip stamped)"
 
 # --- The composed pipeline: host-bead-skip then topology-root-skip. -----------
-# The exact shape the finding reported (tk-usezg2): an OWNED workflow ROOT — no
+# The exact shape the finding reported: an OWNED workflow ROOT — no
 # assignee, no gc.session_id, only a gc.session_name naming a pool SLOT a live
 # successor now holds. host-bead-skip KEEPS it (it names an owner), so
 # topology-root-skip is what must drop it, leaving the loop nothing to warrant.

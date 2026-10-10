@@ -63,6 +63,7 @@ routed, never assigned, and never blocks anything.
 | `obs.endorsed` | `operator` when filed via "learn this" |
 | `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
+| `gc.work_outcome` | `no-op` — an observation records feedback and ships no code, so this is the honest value for the work-record gate that fires on every close |
 
 **Dedup is on the pair (`obs.provenance`, `obs.category`), always.** The
 same finding captured by self-report and by the miner merges to one
@@ -128,6 +129,10 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   pattern is *surfaced* to the operator (held with the block stated), never
   adopted; it promotes later on corroboration or an explicit `learn this`
   endorsement.
+  `obs.source` records who filed an observation, not whose words it carries,
+  so an operator correction captured by the agent it corrected reads `self`.
+  The distiller checks the voice behind each `self` observation before it
+  treats a cluster as all-self.
 - **Remedy class (Gate 2).** A remedy that is an exhortation ("be
   thorough", "try harder") or that fixes a structural failure (a
   verification gap, a race, a missing mechanical check) does not become a

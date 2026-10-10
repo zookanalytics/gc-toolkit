@@ -6,10 +6,11 @@
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
 # close/terminal pairing guards (--close only into a closed state, closed states
-# must --close); --set-dated's compare-and-preserve rule for the @<since>
-# component; the reopen repair verb; the park-route takeaway guard and its
-# --takeaway writer, capped and mirrored from gc-helm.sh; the drift assertion
-# against lifecycle/lifecycle.toml; and the refusal when no gctk binary resolves.
+# must --close); the non-empty merged_sha that --to merged must carry;
+# --set-dated's compare-and-preserve rule for the @<since> component; the reopen
+# repair verb; the park-route takeaway guard and its --takeaway writer, capped
+# and mirrored from gc-helm.sh; the drift assertion against
+# lifecycle/lifecycle.toml; and the refusal when no gctk binary resolves.
 #
 # ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
 # `gctk lifecycle` (services/gctk) and has no other implementation. The suite
@@ -771,6 +772,23 @@ eq "$rc" 1 "--to merged without --close exits 1 (a terminal transition must clos
 has "$out" "requires --close" "the missing flag is named"
 eq "$(meta c-1 merge_result)" "pull_request" "a refused terminal transition writes nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refusal attempted a bd update"
+
+# `merged` carries the evidence its own definition names: it means "landed;
+# merged_sha recorded", so a close with no sha is the false landing claim (I5),
+# refused at the write instead of by the doctor after the fact. A bead that never
+# had a PR is no merge anchor, and the refusal names its close: a plain gc bd close.
+store '[{"id":"c-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-2 --to merged --close 2>&1)"; rc=$?
+eq "$rc" 1 "--to merged --close without merged_sha exits 1"
+has "$out" "merged_sha" "the missing evidence is named"
+has "$out" "gc bd close c-2" "the non-anchor close is named"
+eq "$(meta c-2 merge_result)" "pull_request" "a refused merged close writes nothing"
+eq "$(bstatus c-2)" "open" "and closes nothing"
+out="$("$SUT" transition c-2 --to merged --close --set merged_sha= 2>&1)"; rc=$?
+eq "$rc" 1 "an explicitly empty merged_sha is no evidence either"
+has "$out" "requires --set merged_sha" "the empty sha is refused by the same rule"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged close attempted a bd update"
 
 # --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
 echo "# reopen"

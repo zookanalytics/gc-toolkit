@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
-# the fail-closed-on-unset-GC_RIG sweep guard, and the scan's drop of a bead a
-# live workflow already drives (INFLIGHT-*).
+# the dispatch-path drop, the fail-closed-on-unset-GC_RIG sweep guard, and the
+# scan's drop of a bead a live workflow already drives (INFLIGHT-*).
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -19,6 +19,20 @@
 # disposition to make on it:
 #   (STANDING-DROP) scan_precision_filter drops a bead of every standing kind
 #   (STANDING-KEEP) …while a raw input beside them is still a candidate
+# A bead with a dispatch path (assets/scripts/dispatch-path.sh: a route or an
+# arm) already has its dispatch decided, so a first reaction would only
+# second-guess it:
+#   (DISPATCH-DROP) scan_precision_filter drops a bead carrying any dispatch-path key
+#   (ARMED-DROP)    …among them a full arm record and an arm capped at its failure cap
+#   (DISPATCH-KEEP) …while a raw input, and a bead whose keys are blank, stay candidates
+#   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
+#   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
+#                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
+# A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
+# key is all that sets it apart from raw input:
+#   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
+#   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
+#   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -115,6 +129,99 @@ OUT="$(bash "$SCRIPT" sling tk-plain 2>&1)"; RC=$?
 set -e
 eq "$RC" 0 "(SLING-GO) sling of an unmarked bead exits 0"
 has "$OUT" "would sling" "(SLING-GO) …and dispatches (fixture dry line)"
+
+# --- a bead with a dispatch path is not a scan candidate --------------------
+# A route or an arm already decides a bead's dispatch. An armed bead is ready,
+# unassigned and unrouted from its own blockers' close until the next
+# deferred-dispatch reconcile pass, so the arm is all that sets it apart from
+# raw input. tk-armed carries the record deferred-dispatch.sh arm writes.
+# tk-capped is an arm the reconcile pass stopped retrying at its failure cap,
+# which waits on the visit the cap filed. One more bead per dispatch-path key
+# carries only that key. The keys are read from the shared definition, so a key
+# added there is covered here with no edit to this file. tk-blank carries every
+# key with a blank value, which names no queue and no sling target, so it is
+# raw input like tk-raw. All pass every other clause (task type, a description,
+# no reaction or work markers, top-level).
+# shellcheck source=../assets/scripts/dispatch-path.sh
+. "$HERE/../assets/scripts/dispatch-path.sh"
+PATH_KEYS="$(jq -nr "$DISPATCH_PATH_JQ"'dispatch_path_keys[]')"
+[ -n "$PATH_KEYS" ] && ok "(DISPATCH) the shared definition lists the dispatch-path keys" \
+    || bad "(DISPATCH) the shared definition lists the dispatch-path keys (read back empty)"
+jq -n --arg keys "$PATH_KEYS" '
+  ($keys | split("\n") | map(select(length > 0))) as $k
+  | [ {"id":"tk-raw",    "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+      {"id":"tk-armed",  "issue_type":"task", "description":"a blocked follow-up armed by hand", "title":"armed follow-up",
+       "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"gc-toolkit/gc-toolkit.mechanik","gc.dispatch_when_ready_armed_at":"2026-10-01T00:00:00Z","gc.dispatch_when_ready_reason":"waits for tk-blocker to land"}},
+      {"id":"tk-capped", "issue_type":"task", "description":"an arm past its failure cap", "title":"capped arm",
+       "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":3}},
+      {"id":"tk-blank",  "issue_type":"task", "description":"dispatch-path keys left blank", "title":"blank keys",
+       "metadata": ($k | map({key: ., value: " "}) | from_entries)} ]
+    + [ $k[] | {"id": ("tk-path-" + .), "issue_type": "task", "description": "a bead with a dispatch path",
+                "title": ("dispatch path " + .), "metadata": {(.): "gc-toolkit/gc-toolkit.polecat"}} ]' > "$TMP/scan.json"
+
+echo "# scan_precision_filter drops a bead with a dispatch path, keeps raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(DISPATCH-KEEP) a raw input beside the routed and armed beads is still a candidate"
+has "$IDS" "tk-blank" "(DISPATCH-KEEP) …and so is a bead whose dispatch-path keys are blank"
+for k in $PATH_KEYS; do
+    hasnt "$IDS" "tk-path-$k" "(DISPATCH-DROP) a bead carrying $k is not a scan candidate"
+done
+hasnt "$IDS" "tk-armed" "(ARMED-DROP) an armed bead is not a scan candidate"
+hasnt "$IDS" "tk-capped" "(ARMED-DROP) …nor an arm the reconcile pass stopped retrying"
+
+echo "# a scan --sling sweep reacts to raw input and never to a bead with a dispatch path"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ARMED-SWEEP) the sweep exits 0"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(ARMED-SWEEP) the sweep slings a first reaction at the raw input"
+hasnt "$OUT" "tk-armed" "(ARMED-SWEEP) …and none at the armed bead"
+hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
+for k in $PATH_KEYS; do
+    hasnt "$OUT" "tk-path-$k" "(ARMED-SWEEP) …nor at the bead carrying $k"
+done
+
+# --- a molecule step is not a scan candidate --------------------------------
+# Most graph.v2 steps are issue_type task, and no graph.v2 step has a
+# parent-child edge, so the type allowlist and the top-level clause both pass
+# one. tk-step-validate and tk-step-reaction are ordinary steps of two formulas,
+# each tied to its root by a tracks edge. tk-step-finalize is a control step
+# whose gc.kind is not a topology kind, tied to its root by gc.root_bead_id
+# alone. Each is unrouted and passes every other clause, so gc.step_ref is all
+# that sets it apart from tk-raw. tk-step-blank carries the key with an empty
+# value, which names no step.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+  {"id":"tk-step-validate", "issue_type":"task", "description":"converge the rules", "title":"rule convergence",
+   "metadata":{"gc.step_ref":"mol-validate.rule-convergence","gc.step_id":"rule-convergence","gc.root_bead_id":"tk-root-validate"},
+   "dependencies":[{"issue_id":"tk-step-validate","depends_on_id":"tk-root-validate","type":"tracks"}]},
+  {"id":"tk-step-reaction", "issue_type":"task", "description":"react to the subject", "title":"first reaction",
+   "metadata":{"gc.step_ref":"mol-first-reaction.first-reaction","gc.step_id":"first-reaction","gc.root_bead_id":"tk-root-reaction"},
+   "dependencies":[{"issue_id":"tk-step-reaction","depends_on_id":"tk-root-reaction","type":"tracks"}]},
+  {"id":"tk-step-finalize", "issue_type":"task", "description":"finalize the workflow", "title":"workflow finalize",
+   "metadata":{"gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize","gc.step_id":"workflow-finalize","gc.root_bead_id":"tk-root-work"}},
+  {"id":"tk-step-blank", "issue_type":"task", "description":"a step key left empty", "title":"blank step key", "metadata":{"gc.step_ref":""}}
+]
+JSON
+
+echo "# scan_precision_filter drops a molecule step, keeps raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(STEP-KEEP) a raw input beside the step beads is still a candidate"
+has "$IDS" "tk-step-blank" "(STEP-KEEP) …and so is a bead whose gc.step_ref is empty"
+hasnt "$IDS" "tk-step-validate" "(STEP-DROP) a mol-validate step is not a scan candidate"
+hasnt "$IDS" "tk-step-reaction" "(STEP-DROP) …nor a mol-first-reaction step"
+hasnt "$IDS" "tk-step-finalize" "(STEP-DROP) …nor a workflow-finalize control step"
+
+echo "# a scan --sling sweep reacts to raw input and never to a molecule step"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(STEP-SWEEP) the sweep exits 0"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(STEP-SWEEP) the sweep slings a first reaction at the raw input"
+hasnt "$OUT" "tk-step-validate" "(STEP-SWEEP) …and none at the mol-validate step"
+hasnt "$OUT" "tk-step-reaction" "(STEP-SWEEP) …nor at the mol-first-reaction step"
+hasnt "$OUT" "tk-step-finalize" "(STEP-SWEEP) …nor at the control step"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
@@ -477,6 +584,40 @@ IDS="$(live_scan STUB_CONVOYS=locked | jq -r '.[].id' | sort | tr '\n' ' ')"
 ERR="$(cat "$TMP/scan.err")"
 has "$IDS" "tk-scan-driven" "(INFLIGHT-READS) with the convoy read failing, the driven bead stays a candidate"
 has "$ERR" "could not read the workflow roots or the open convoys" "(INFLIGHT-READS) …and the sweep logs that it went unfiltered"
+
+# Both drops in one sweep, on the live read path. Each fixture case above
+# exercises one drop, and the live case above feeds no bead with a dispatch path.
+# Here the movable-forward ready read returns one bead per dispatch-path key, read
+# from the shared definition, beside tk-scan-driven, which the stub's convoy read
+# ties to a live workflow root, and tk-scan-free, which has neither. A second stub
+# answers that read and passes every other call to the first.
+jq -n --arg keys "$PATH_KEYS" '
+  [ {"id":"tk-scan-driven", "issue_type":"task", "description":"queued for a reaction", "title":"driven",
+     "created_at":"2026-01-01T00:00:00Z", "metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+    {"id":"tk-scan-free", "issue_type":"task", "description":"never slung", "title":"free",
+     "created_at":"2026-01-02T00:00:00Z", "metadata":{}} ]
+  + [ $keys | split("\n")[] | select(length > 0)
+      | {"id": ("tk-scan-path-" + .), "issue_type": "task", "description": "a bead with a dispatch path",
+         "title": ("dispatch path " + .), "created_at": "2026-01-03T00:00:00Z",
+         "metadata": {(.): "gc-toolkit/gc-toolkit.polecat"}} ]' > "$TMP/ready-both.json"
+BOTH="$TMP/stub-both"
+mkdir -p "$BOTH"
+cat > "$BOTH/gc" <<SH
+#!/bin/sh
+case "\$*" in
+  "bd ready --unassigned --exclude-type=epic --json --sort oldest --limit 0") cat "$TMP/ready-both.json" ;;
+  *) exec "$STUB/gc" "\$@" ;;
+esac
+SH
+chmod +x "$BOTH/gc"
+
+echo "# the live path drops a bead with a dispatch path and a bead a live workflow drives in one sweep"
+IDS="$(env -u GC_PROACTIVE_FIXTURE PATH="$BOTH:$PATH" bash "$SCRIPT" scan --json 2>"$TMP/scan.err" | jq -r '.[].id' | sort | tr '\n' ' ')"
+for k in $PATH_KEYS; do
+    hasnt "$IDS" "tk-scan-path-$k" "(BOTH-READS) the live path drops the bead carrying $k"
+done
+hasnt "$IDS" "tk-scan-driven" "(BOTH-READS) …and, in the same sweep, the bead a live workflow drives"
+has "$IDS" "tk-scan-free" "(BOTH-READS) …and keeps the bead with neither"
 
 echo "# the live reads: a live root names a convoy that tracks the bead"
 set +e

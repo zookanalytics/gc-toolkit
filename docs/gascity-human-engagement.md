@@ -549,7 +549,7 @@ file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
 the reaction's takeaway as the question, and hold the subject on it. The topic
 keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
 already holds on the subject keeps its question. The sweep's next pass files the
-visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit, so a gated subject can wait up to one pass, a 5-minute cooldown, with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among
@@ -772,6 +772,13 @@ it can read as OPEN, so a visit closed without an outcome is one no re-run
 reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
 nothing to the subject: the subject's DONE row, once it closes, leaves the board
 only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
+
+`prefix+X` ends a sitting the same way from the keyboard, whether or not
+converse's copyable line is on screen. After a y/n confirm,
+`assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
+`gc session list`, refuses one that is not a converse sitting, and runs the
+argument-free dismiss under that session's identity, so dismiss itself infers
+which subject the sitting is on. Nothing is typed into the pane.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every

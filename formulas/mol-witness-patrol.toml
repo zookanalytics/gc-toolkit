@@ -29,19 +29,21 @@ disposes it: routed to a pool, held on an edge, or escalated to the operator
 as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
 a bead — an emergency that needs a human now.
 
-Every address this formula stamps comes from assets/scripts/resolve-route.sh.
-The agents it files to do not share a scope: the dog is city-scoped and its
-identity carries no rig segment, while the polecat and refinery pools are
-rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
-the other, and either stamp reads back clean, so a hand-written address is
-right only by luck.
+Every address this formula stamps or queries comes from
+assets/scripts/resolve-route.sh. The agents it files to do not share a scope:
+the dog is city-scoped and its identity carries no rig segment, while the
+polecat and refinery pools are rig-scoped and carry `<rig>/`. The qualifier that
+reaches one is invisible to the other, and either stamp reads back clean, so a
+hand-written address is right only by luck. A query by a hand-written address
+fails just as quietly: listing beads by an address no agent holds returns a
+valid empty array, which reads as an empty queue.
 
-Marked blocks (bug-dispatch, candidate-pipeline, host-bead-skip,
-downstream-court-skip, topology-root-skip, liveness-map-guard,
-liveness-lookup, warrant-file, husk-guard, owning-store-guard,
-recovery-stamp-gate, crash-loop-window, patrol-wisp-pour,
-refinery-stuck-escalate) are extracted and executed by their tests; keep
-markers, keep them backslash-free."""
+Marked blocks (bug-dispatch, notice-finding, candidate-pipeline,
+host-bead-skip, downstream-court-skip, topology-root-skip,
+liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
+owning-store-guard, recovery-stamp-gate, crash-loop-window,
+patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
+their tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -69,7 +71,7 @@ findings. Emergencies (crash, data loss, corruption, security) go straight to
 escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
-archive. Lifecycle chatter is acknowledged and archived.
+archive.
 
 Mail reporting a defect in the pack itself, a formula or script fault the
 sender hit and worked around, is none of those: it needs a polecat rather
@@ -104,6 +106,70 @@ else
 fi
 # <<< bug-dispatch
 ```
+
+A `NOTICE:` is never chatter. It reports a fact about shared state the sender
+does not own, so it leaves a tracked record before it is archived. A pack
+defect goes through bug-dispatch above and an emergency through escalate.sh.
+Every other notice becomes a finding through the notice-finding block below.
+Mail that asks you to act where you may not is the same, whatever its subject:
+reaping a molecule, reconciling or closing another agent's beads, re-homing a
+bead. The finding is the request's record, and its first reaction routes the
+act to whoever may perform it.
+
+The block files one mail per run. Set MAIL_ID first. KEY names the situation
+the mail reports, the way every finding key does, and ABOUT is the bead it
+concerns, left empty when it names none. NOTE is optional and adds what you
+know that the sender did not. The block copies the mail into the finding
+verbatim and archives the mail only after the finding is filed. When nothing is
+filed, the mail stays unread and the next cycle files it:
+```bash
+# >>> notice-finding
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+# peek leaves the mail unread. The control-byte strip keeps a raw byte from
+# failing the parse; the body's escaped newlines survive it.
+MAIL_JSON=""
+if [ -n "${MAIL_ID:-}" ]; then
+  MAIL_JSON=$(gc mail peek "$MAIL_ID" --json | tr -d '[:cntrl:]') || MAIL_JSON=""
+fi
+MAIL_SUBJECT=$(printf '%s' "$MAIL_JSON" | jq -r '.message.subject // empty' 2>/dev/null) || MAIL_SUBJECT=""
+NOT_FILED=""
+[ -n "$SCRIPTS" ] || NOT_FILED="patrol-finding.sh is not in the pack"
+[ -n "${KEY:-}" ] || NOT_FILED="KEY is unset"
+[ -n "$MAIL_SUBJECT" ] || NOT_FILED="the mail is unreadable"
+[ -n "${MAIL_ID:-}" ] || NOT_FILED="MAIL_ID is unset"
+if [ -n "$NOT_FILED" ]; then
+  echo "notice-finding: nothing filed for mail '${MAIL_ID:-}': $NOT_FILED. The mail stays unread for the next cycle." >&2
+  [ -z "${MAIL_ID:-}" ] || gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
+else
+  MAIL_BODY=$(printf '%s' "$MAIL_JSON" | jq -r '.message.body // ""') || MAIL_BODY=""
+  MAIL_FROM=$(printf '%s' "$MAIL_JSON" | jq -r '.message.from // "unknown"') || MAIL_FROM="unknown"
+  MAIL_SENT=$(printf '%s' "$MAIL_JSON" | jq -r '.message.created_at // "unknown"') || MAIL_SENT="unknown"
+  FINDING_TEXT="$MAIL_BODY
+
+## Source
+Mail $MAIL_ID from $MAIL_FROM, sent $MAIL_SENT. Subject: $MAIL_SUBJECT"
+  if [ -n "${NOTE:-}" ]; then
+    FINDING_TEXT="$FINDING_TEXT
+
+## Witness
+$NOTE"
+  fi
+  MAIL_TITLE="${MAIL_SUBJECT#NOTICE: }"
+  [ -n "$MAIL_TITLE" ] || MAIL_TITLE="$MAIL_SUBJECT"
+  if "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" --title "$MAIL_TITLE" --message "$FINDING_TEXT"; then
+    gc mail archive "$MAIL_ID" >/dev/null || echo "notice-finding: filed, but mail $MAIL_ID did not archive. The next cycle files it again, and the finding counts that as a recurrence." >&2
+  else
+    echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
+  fi
+fi
+# <<< notice-finding
+```
+Lifecycle chatter is mail that reports the sender's own progress and asks for
+nothing. Acknowledge it and archive it.
+
 Inbox near-empty after this step. Close it and continue."""
 
 [[steps]]
@@ -796,7 +862,18 @@ sat untouched far past that turnover, which the session is failing to advance.
 Escalate only that.
 ```bash
 # >>> refinery-stuck-escalate
-REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+SCRIPTS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?escalate.sh and resolve-route.sh not found in the pack}"
+# The queue is whatever is assigned to the refinery's live identity, so the
+# address is resolved against the roster rather than assembled: bd lists an
+# address no agent holds as a valid empty array, which reads exactly like a
+# clean queue. The rig-qualified form goes in, as in bug-dispatch, so an
+# unreadable roster (exit 3) echoes back, unverified, a name a rig-scoped
+# refinery can hold. A refusal prints nothing, which leaves REFINERY empty.
+if REFINERY=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"); then ROUTE_RC=0; else ROUTE_RC=$?; fi
 # A bead assigned to the refinery clears on its own: a handoff within a poll
 # interval, a rebase/rework task within the fix pool's work time (observed under
 # ~2h). Past this bound it is not churn; the session is not advancing it.
@@ -810,8 +887,12 @@ NOW=$(date -u +%s)
 # tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse,
 # the same strip recover-orphaned-beads applies to its bd --json read above.
 # The common blinding case is a control byte in an otherwise-valid queue, which
-# the strip rescues.
-if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0 | tr -d '[:cntrl:]'); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+# the strip rescues. An unresolved address is never read.
+QUEUE=""
+QUEUE_RC=0
+if [ -n "$REFINERY" ]; then
+  if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0 | tr -d '[:cntrl:]'); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+fi
 # Keep only the session's own inbound work (merge_result empty; a gating anchor
 # carries one and belongs to the cadence, and is unassigned anyway) that has sat
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
@@ -821,7 +902,14 @@ STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty e
 case "${STUCK_N:-}" in
   ''|*[!0-9]*) STUCK_N="" ;;
 esac
-if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
+if [ -z "$REFINERY" ]; then
+  # No live agent carries the address, so there is no queue to read. A listing
+  # there would come back empty and look healthy, so no stuck handoff would ever
+  # escalate. The monitor is blind, so escalate that under its own key, the way
+  # an unreadable queue is escalated.
+  echo "check-refinery: no live refinery identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery'; read no queue and retracted nothing; escalating the blind monitor" >&2
+  "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unroutable --message "check-refinery cannot resolve the refinery address it builds for rig ${GC_RIG:-<unset>} to a live agent identity, so it read no queue. A listing at an address no agent holds returns an empty array that looks like a clean queue, so the stuck-handoff monitor is blind until the address resolves. Compare the binding_prefix this witness patrol was poured with against the refinery identity in gc agent list." || echo "check-refinery: refinery address unroutable AND escalation failed" >&2
+elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A silent stderr log here was the defect this
   # block fixes — a blinded monitor lets a genuinely stuck handoff go unseen —
@@ -830,20 +918,10 @@ if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # is this patrol run (a wisp id, or the session as a fallback); escalate.sh
   # redirects an ephemeral subject onto the standing triage bucket.
   echo "check-refinery: refinery queue unreadable (rc=$QUEUE_RC; not a JSON array after the control-byte strip); escalating the blind monitor" >&2
-  SCRIPTS=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?escalate.sh not found in the pack}"
   "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unreadable --message "check-refinery cannot read the refinery queue (rc=$QUEUE_RC; the bd --json listing is not a JSON array even after stripping control bytes). The stuck-handoff monitor is blind, so a genuinely stuck refinery handoff would go unseen until this is fixed. Inspect the refinery queue listing and the store's health." || echo "check-refinery: queue unreadable AND escalation failed (rc=$QUEUE_RC)" >&2
 elif [ "$STUCK_N" -eq 0 ]; then
   echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  SCRIPTS=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?escalate.sh not found in the pack}"
   printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
     "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
   done
@@ -867,21 +945,21 @@ fi
 # assigned to a refinery.
 #
 # The candidate pass runs only after a queue read that parsed as an array
-# ($STUCK_N set); a failed queue read leaves every visit as it is until a later
-# cycle reads the queue. Only a visit whose group is exactly the handoff bead id
-# is a candidate; a legacy group carrying extra tokens (a malformed-subject
-# filing) is left for repair.
-if [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
+# ($STUCK_N set), at an address the roster verified (resolve-route.sh exit 0).
+# A failed queue read leaves every visit as it is until a later cycle reads the
+# queue, and so does an unreadable roster (exit 3): the address is then the
+# rendered name echoed back unproven, and the role each candidate is compared
+# against comes from it. A wrong retract closes the visit moot, which
+# escalate.sh's verdict window holds against a re-escalation of that handoff for
+# a day by default. Only a visit whose group is exactly the handoff bead id is a
+# candidate; a legacy group carrying extra tokens (a malformed-subject filing) is
+# left for repair.
+if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   QUEUE_IDS_JSON=$(printf '%s' "$QUEUE" | jq -c 'if type == "array" then [.[].id] else [] end' 2>/dev/null)
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
   CANDIDATES=$(gc bd list --status=open,in_progress --has-metadata-key=escalation_key --json --limit=0 2>/dev/null | tr -d '[:cntrl:]' | jq -c --argjson q "$QUEUE_IDS_JSON" 'if type == "array" then [ .[] | select((.metadata.escalation_key // "") == "witness-refinery-queue") | select((.metadata.task_kind // "") == "visit") | (.metadata["gc.continuation_group"] // "") as $g | select($g | test("^[A-Za-z0-9._-]+$")) | select(($q | index($g)) == null) | $g ] else [] end' 2>/dev/null) || CANDIDATES=""
   CANDIDATE_IDS=$(printf '%s' "$CANDIDATES" | jq -r 'if type == "array" then join(",") else empty end' 2>/dev/null) || CANDIDATE_IDS=""
   if [ -n "$CANDIDATE_IDS" ]; then
-    SCRIPTS=""
-    for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-    done
-    : "${SCRIPTS:?escalate.sh not found in the pack}"
     # One read for every candidate, closed ones included.
     HANDOFFS=$(gc bd list --id="$CANDIDATE_IDS" --all --json --limit=0 2>/dev/null | tr -d '[:cntrl:]') || HANDOFFS=""
     printf '%s' "$CANDIDATES" | jq -r '.[]' | while IFS= read -r RSUBJ || [ -n "$RSUBJ" ]; do
@@ -918,14 +996,16 @@ subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
 escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. The counterpart retract closes the loop. A handoff an open
-visit escalates that the queue listing no longer carries is read by id, and the
-visit is retracted moot through escalate.sh --retract (guarded by
+silently trusted. A refinery address that resolves to no live agent is blind the
+same way and escalates once under a key of its own, without reading a queue.
+The counterpart retract closes the loop. A handoff an open visit escalates that
+a queue read at the refinery's verified address no longer carries is read by
+id, and the visit is retracted moot through escalate.sh --retract (guarded by
 visit-close.sh, which stamps gc.outcome) only when that read shows the handoff
 closed, prepared, or assigned away from the refinery. A listing that omits a
-handoff still sitting with the refinery, as a wrong address does, withdraws
-nothing, and a handoff that cannot be read keeps its visit. Close this step and
-continue to next-iteration."""
+handoff still sitting with the refinery withdraws nothing, and a handoff that
+cannot be read keeps its visit. Close this step and continue to
+next-iteration."""
 
 [[steps]]
 id = "next-iteration"
