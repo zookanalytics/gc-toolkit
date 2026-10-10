@@ -145,13 +145,14 @@ the molecule, so without the skip it would be de-routed.
   over the shared stub store. It parks a molecule, closes its source, and
   observes the end bead's run close the molecule with no sweep. It also
   covers an open source left alone, each refusal as a wait, park-after-close,
-  a `mol-validate` molecule, the create, block and route order, failed writes
-  and dry runs.
+  a `mol-validate` molecule, the create, block and route order, a create that
+  answers with no id, failed writes and dry runs.
 - `molecule-hold.test.sh` covers the end running before the hold, a failed end
   failing the hold, the end bead keeping its route, and the three formula gates
   extracted and executed.
 - `dead-molecule-dispose.test.sh` covers `--owner`, `--if-source-closed`, and
   the PR guard on a closed work bead.
-- Six targeted mutants each fail a suite: no `--owner`, no visits at arm, the
-  end bead de-routed by the hold, the end bead never routed, the PR guard on a
-  closed source, and a reopened source not re-armed.
+- Each of these targeted mutants fails a suite: no `--owner`, no visits at
+  arm, the end bead de-routed by the hold, the end bead never routed, the PR
+  guard on a closed source, a reopened source not re-armed, and an end bead
+  whose create answered with no id left unfound.

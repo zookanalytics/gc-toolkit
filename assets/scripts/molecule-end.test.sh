@@ -27,7 +27,8 @@
 #     ends the same way;
 #   * ORDER — a new end bead is routed only after its blockers are in place,
 #     and a claimed one is re-armed edges first, then reopened, then released;
-#   * idempotence, an unbound molecule, failed writes and dry runs.
+#   * idempotence, an unbound molecule, a create that answers with no id,
+#     failed writes and dry runs.
 #
 # No live city, Dolt, network, gc or bd — stubs from test-harness.sh only.
 set -uo pipefail
@@ -356,6 +357,16 @@ OUT=$("$END_SH" tk-load 2>&1); rc=$?
 eq "$rc" "1" "no pool at all exits 1"
 has "$OUT" "detail=no_route" "and names why"
 eq "$(end_bead)" "" "and creates nothing"
+
+echo "--- a create that answers with no id is found by its stamps ---"
+molecule
+OUT=$(STUB_CREATE_GARBAGE=1 "$END_SH" tk-load 2>&1); rc=$?
+eq "$rc" "0" "a create whose reply carries no id still arms"
+has "$OUT" "result=armed" "and reports the end armed"
+END=$(end_bead)
+[ -n "$END" ] && [ "${END#*,}" = "$END" ] && ok "the bead the create made is used, and no second one is made ($END)" || bad "one end bead expected, got '$END'"
+eq "$(blockers "$END")" "tk-work" "it is blocked by the work"
+eq "$(meta "$END" gc.routed_to)" "$POOL" "and routed to the pool"
 
 echo "--- failed writes leave nothing offerable ---"
 molecule

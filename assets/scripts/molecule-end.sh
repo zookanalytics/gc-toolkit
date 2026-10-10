@@ -237,6 +237,10 @@ arm() {
           --metadata "$(jq -cn --arg r "$ROOT" --arg s "$END_REF" '{"gc.root_bead_id": $r, "gc.step_ref": $s}')" \
           --json 2>&1) || true
     END=$(printf '%s' "$created" | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    # `bd create --json` can answer with no id for a bead it did create. The
+    # stamps rode the create, so the bead is found by them, where a second
+    # create would leave the first one behind.
+    [ -n "$END" ] || END=$(find_end) || END=""
     [ -n "$END" ] || fail "could not create the end bead of $ROOT ($(printf '%s' "$created" | head -c 200)) — nothing armed" "create_failed"
     new=1
   fi
