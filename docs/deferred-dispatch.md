@@ -228,8 +228,8 @@ workflow, and spends one of the bead's attempts. So a pass measures a
 budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
 0 = unpaced), and starts a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
-point it starts no sling. Each remaining ready bead keeps its arm as the
-pass found it, with no marker and no attempt counted, and the next pass
+point it starts no sling. Each remaining ready bead keeps its arm with no
+marker on it, this pass counts no attempt against it, and the next pass
 slings it. The pass names the beads it left, counts them as `left for the
 next pass` in its summary, and declares the run `partial`. The retires and
 reports for the rest of the armed set still run.

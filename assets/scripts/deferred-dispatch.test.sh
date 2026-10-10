@@ -1025,6 +1025,19 @@ eq "$(slings)" "0" "and slings nothing"
 has "$out" "1 left for the next pass" "it counts the bead it left"
 eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "with no attempt counted against its cap"
 
+echo "# a bead a dead pass left mid-sling, reached past the budget, waits for the next pass's re-attempt"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_slung":"slinging@2026-01-01T00:00:00Z","gc.dispatch_when_ready_fail_count":"1"},"notes":"","_ready":true}]'
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(slings)" "0" "and slings nothing"
+has "$out" "1 left for the next pass" "it counts the bead it left"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the bead keeps its arm"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "with the dead pass's unconfirmed marker cleared"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "1" "and only the dead pass's attempt counted against its cap"
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "1" "the next pass makes the re-attempt"
+
 echo "# a zero budget is unpaced, and a dry run spends no budget"
 store "$FOUR_READY"
 printf '1000\n' > "$CLOCK"

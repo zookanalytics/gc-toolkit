@@ -832,9 +832,12 @@ cmd_reconcile() {
             capped=$((capped + 1)); continue
         fi
 
-        # The pass budget. Past it, the bead keeps its arm exactly as it found it,
-        # with no marker and no attempt counted, and the next pass slings it. The
-        # retires and reports for the rest of the armed set still run.
+        # The pass budget. Past it, the bead keeps its arm with no marker on it,
+        # this pass counts no attempt against it, and the next pass slings it. If
+        # a dead pass left an unconfirmed marker, the recovery above already
+        # cleared it, and the next pass re-attempts the sling just as this one
+        # would have. The retires and reports for the rest of the armed set still
+        # run.
         if [ "$DRY_RUN" != 1 ] && ! sling_fits_budget; then
             if [ "$left" = 0 ]; then
                 echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings this pass"
