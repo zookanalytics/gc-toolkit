@@ -7,7 +7,9 @@
 # masked while threads are open; no guess when the read fails, and an operator
 # merge_hold left alone) while a pending required approving review files no visit
 # and any stale merge-blocked-approval visit is retired; CONFLICTING -> one rework child per head (dedup on
-# branch+head, holds and a live demand veto, unstamped orphans adopted),
+# branch+head, holds and a live demand veto, unstamped orphans adopted, a
+# supersession hold from branch-supersession.sh vetoes — asked only on an
+# approved PR, after the dedup, and only about the head GitHub reported),
 # stamped prepare_mode=merge (every branch brought current by merge, never rebase),
 # counted as dispatched only once that stamp AND the route read back, with a
 # child stranded by a lost route stamp re-routed rather than buried by the
@@ -135,6 +137,17 @@ gc bd update "$vid" --set-metadata "escalation_key=$key" \
   --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
 ESC
+# branch-supersession.sh's hold verb, by its exit contract: 0 holds the merge-in
+# dispatch for the operator's decision, anything else proceeds. Its own suite
+# covers the classification; here only the call and its answer matter.
+cat > "$SD/branch-supersession.sh" <<'SUPS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_SUPERSESSION_LOG:?}"
+[ -n "${STUB_SUPERSESSION_HOLD:-}" ] && { echo "branch-supersession (stub): filed decision, no rework dispatched"; exit 0; }
+exit 1
+SUPS
+chmod +x "$SD/branch-supersession.sh"
+export STUB_SUPERSESSION_LOG="$TMP/supersession.log" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 # validate-dispatch-body.sh's real output is prose the validator reads; the test
 # only needs a non-empty note so the validation-pass open takes its body path.
@@ -1364,6 +1377,57 @@ has "$out" "rework live-rw already covers branch" "the live sibling still vetoes
 has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
+echo "# CONFLICTING: a branch a landed change superseded gets the operator's decision, not a child"
+# The stub git serves STUB_FETCHED_HEAD for every rev-parse, so both fetched tips
+# read as the PR's head: the head GitHub reported is the head classified.
+store "[$(anchor SUP1 120)]"
+printf '%s' "$(prview 120 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_120.json"
+approve 120
+export STUB_FETCHED_HEAD="sha-120" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_SUPERSESSION_LOG")" "hold --anchor SUP1 --branch polecat/x120 --target main --base sha-120 --head sha-120 --pr 120" \
+  "the guard is asked about this anchor, its branch, its base and the head GitHub reported"
+has "$out" "filed decision, no rework dispatched" "a held answer is reported"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no merge-in child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …the guard answering proceed leaves the ordinary merge-in child"
+store "[$(anchor SUP2 121)]"
+printf '%s' "$(prview 121 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_121.json"
+approve 121
+export STUB_FETCHED_HEAD="sha-121" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_SUPERSESSION_LOG")" "hold --anchor SUP2" "the guard was asked"
+has "$out" "filed merge-mode rework" "and drift still files the merge-in child"
+
+echo "# …a head that moved since GitHub reported it is not classified"
+store "[$(anchor SUP3 122)]"
+printf '%s' "$(prview 122 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_122.json"
+approve 122
+export STUB_FETCHED_HEAD="sha-moved" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "a fetched head that disagrees with GitHub's is not put to the guard"
+has "$out" "filed merge-mode rework" "and the ordinary child goes, as it did before the guard"
+
+echo "# …a live child on the branch stands the arm down before the guard is asked"
+store "[$(anchor SUP4 123), $(child LIVE4 polecat/x123 ',"task_kind":"rework","anchor_bead":"SUP4"' in_progress rig/gc-toolkit.polecat-1)]"
+printf '%s' "$(prview 123 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_123.json"
+approve 123
+export STUB_FETCHED_HEAD="sha-123" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$out" "already covers branch" "the live child dedups the arm"
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "…so a re-scoping child a sitting sent is never second-guessed by the guard"
+
+echo "# …an unapproved PR is not put to the guard: its conflict waits for an approval first"
+store "[$(anchor SUP5 124)]"
+printf '%s' "$(prview 124 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_124.json"
+echo '[]' > "$GH_DIR/reviews_124.json"
+export STUB_FETCHED_HEAD="sha-124" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$out" "PR#124 conflicts but no external approval stands; no merge-in filed" "the approval gate answers first"
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "…so no decision is put to the operator for a PR nobody approved"
+export STUB_FETCHED_HEAD="" STUB_SUPERSESSION_HOLD=""
 
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
