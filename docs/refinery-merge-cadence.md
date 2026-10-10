@@ -275,8 +275,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    kills before arm 7 would leave the operator's review stamped-as-seen by the
    posture yet unrouted while the anchor reads as handled. This arm closes that
    window: it re-reads each open anchor's feedback and dispatches the same
-   rework child or visit and opens the same validation pass arm 7 would, then
-   stops — no write-back sweep, no external-fact reconciliation, none of the
+   rework child or visit and opens the same validation pass arm 7 would. It also
+   files the visit that unengaged review threads stand for. Those are unresolved
+   threads no city post has engaged, on a PR carrying an unmarked post under
+   the city's login from before its provenance cutover, which arm 7 reads as
+   the city's own. Then it stops — no write-back sweep, no external-fact
+   reconciliation, none of the
    arms that belong at the tail. A batch it routes is live work on the anchor,
    which the `status:` label reads, so it re-derives that PR's label as it
    routes. Arm 7 still runs the routing idempotently (a
@@ -376,7 +380,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
    approved PR only, by the approval rule merge.sh lands on; the child's
    handoff runs `bring-current-guard.sh`, which dismisses the approval and
-   files a visit when bringing the branch current took judgment), `BLOCKED`
+   files a visit when bringing the branch current took judgment. While the PR
+   owes feedback nothing covers yet, the arm files no merge-in: an unanswered
+   batch routes to a rework child that brings the branch current as it
+   answers, and unengaged review threads route to their visit first), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no

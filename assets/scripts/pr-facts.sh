@@ -61,7 +61,10 @@
 # login before the cutover is read as the city's own, so its unresolved finding
 # threads are never counted by that arm. The posture pass folds such an unengaged
 # thread into `commented` — the merge-hold has to be recorded before merge.sh
-# runs — and the full pass files the one visit it stands for.
+# runs — and the routing passes file the one visit it stands for. Until that
+# visit is filed the threads are feedback owed the same as an unanswered batch,
+# so the CONFLICTING arm stands down for them too: a merge-in child answers
+# none of them.
 # A required check that has terminally FAILED, on a PR every arm above waved
 # through (no conflict, feedback answered, no unresolved-thread block), files ONE
 # rework child per head the same way — dedup keyed on anchor_bead, so an
@@ -1022,15 +1025,15 @@ unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not
 # Does an unengaged thread hold this PR's merge right now? merge.sh
 # reads posture off the bead and never reads threads, so this is decided in the
 # pre-merge posture pass and folded into `commented`; the visit it warrants is
-# the full pass's. Answers in three, because a read that will not run is not
+# a routing pass's. Answers in three, because a read that will not run is not
 # proof of zero unengaged threads — the caller keeps the posture uncurrent on the
 # third so the merge holds for the pass rather than reading a stale one:
 #   0  an unengaged thread holds the merge (caller folds into `commented`)
 #   1  the reads ran and none holds
 #   2  a read would not run — the in-flight ledger or the thread API did not answer
-# On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
-# the one visit without a second read; a later pass holds off the standing visit
-# and leaves UT_COUNT empty.
+# On the FIRST pass that reads the threads it sets UT_COUNT so the routing arm
+# files the one visit without a second read; a later pass holds off the standing
+# visit and leaves UT_COUNT empty.
 # UH_CANDIDATE is 1 once the cheap pre-gate below finds such a post. Past it the
 # answer also turns on bead state (the lane markers, the standing visit, the
 # children in flight), which the PR's own facts do not show, so the posture arm
@@ -1962,11 +1965,19 @@ MP_EOF
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
   # to be no older than the merge arm that reads it. --posture-only is the
   # pre-merge pass: it writes the posture and stops here.
-  # --route-comments-only runs on into the feedback-routing arm below (and stops
-  # after it), so operator feedback is picked up ahead of the slow arms rather
+  # --route-comments-only runs on into the feedback-routing arms below (and stops
+  # after them), so operator feedback is picked up ahead of the slow arms rather
   # than waiting for the full pass at the tail; every other dispatch arm is the
   # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
+
+  # Feedback is owed while nothing covers it yet: a batch arm 7 has not routed
+  # (`unanswered`), or unengaged review threads with no visit standing for them
+  # (UT_COUNT, which unengaged_holds sets only on a read that found none). Both
+  # fold into the `commented` posture, and the dispatch arms read them as one,
+  # so no arm treats one kind as owed and the other as answered.
+  owed=0
+  if [ "$unanswered" = 1 ] || { [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; }; then owed=1; fi
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
@@ -2084,11 +2095,13 @@ REAP_EOF
   # anchor, feedback included, because each parks the review by design and lifts
   # on its own; the next pass routes the feedback then. A missing head branch or
   # fix pool is not such a gate: it blocks only the merge-in dispatch, so an
-  # anchor owing feedback still falls through to the feedback arm, whose visit
-  # fallback dispositions the unresolved-branch and no-fix-pool cases. Past those
+  # anchor owing feedback still falls through to the arms that route it: the
+  # feedback arm's visit fallback dispositions the unresolved-branch and
+  # no-fix-pool cases, and the unengaged-thread visit needs neither. Past those
   # guards the anchor is dispatchable, and what it owes decides how: with
-  # unanswered feedback it falls through to the feedback arm below (whose
-  # prepare_mode=merge child brings the branch current as it answers); otherwise
+  # feedback owed it falls through to the arms below that route it (unanswered
+  # feedback to a prepare_mode=merge child that brings the branch current as it
+  # answers, unengaged review threads to the visit they stand for); otherwise
   # this arm files the one merge-in child, once the PR is approved. The gate that
   # splits the two, and the approval gate after it, sit just above the dedup.
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
@@ -2123,13 +2136,14 @@ REAP_EOF
     fix_branch="${head_ref:-$branch}"
     # fix_branch and FIX_POOL are needed only to DISPATCH the merge-in child, so
     # this guard fires under the same condition as that dispatch (below). An anchor
-    # that owes unanswered feedback — or a --route-comments-only pass — does not
-    # dispatch one here; it falls through to the feedback arm, whose visit fallback
-    # dispositions exactly these cases (an unresolved head branch, no configured
-    # fix pool). Skipping the whole anchor would strand that feedback with no
+    # that owes feedback — or a --route-comments-only pass — does not dispatch one
+    # here; it falls through to the arms that route the feedback. The feedback
+    # arm's visit fallback dispositions exactly these cases (an unresolved head
+    # branch, no configured fix pool), and the unengaged-thread visit needs
+    # neither. Skipping the whole anchor would strand that feedback with no
     # visit, no finding beads, and no validation pass.
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
-      if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      if [ "$owed" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -2163,14 +2177,19 @@ REAP_EOF
       skipped=$((skipped + 1)); continue
     fi
     # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on an early routing pass (--route-comments-only),
-    # this arm files no merge-in child: the feedback arm below dispatches a
-    # prepare_mode=merge child that brings this same branch current (a MERGE of
-    # origin/$base on resume) as it answers, so a merge-in child here would only
-    # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child,
-    # and only on an approved PR.
-    if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    # feedback, or on an early routing pass (--route-comments-only), this arm
+    # files no merge-in child. For unanswered feedback the feedback arm below
+    # dispatches a prepare_mode=merge child that brings this same branch current
+    # (a MERGE of origin/$base on resume) as it answers, so a merge-in child here
+    # would only twin it on the branch. For unengaged review threads a merge-in
+    # child answers none of them, and every path through this arm ends the
+    # anchor's visit before the visit they stand for is filed. Standing behind
+    # it, an unapproved PR's threads would wait on an approval that waits on
+    # them, and an approved one's would wait out the merge-in round unrouted.
+    # Fall through to route the feedback. Only a full-pass conflict with no
+    # feedback owed dispatches this arm's own merge-in child, and only on an
+    # approved PR.
+    if [ "$owed" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
@@ -2813,10 +2832,55 @@ $CBODY"
     continue
   fi
 
+  # --- unengaged review-thread findings: the visit the posture hold stands for --
+  # The merge-hold itself is the `commented` posture the posture section records
+  # in the pre-merge pass: merge.sh reads posture off the bead and never reads
+  # threads. This is the routing that hold stands for, so it runs beside the
+  # feedback arm on both routing passes, ahead of the --route-comments-only stop
+  # and every full-pass arm below it. A conflicting anchor reaches it the way it
+  # reaches the feedback arm: the CONFLICTING arm stands down while the threads
+  # are owed, so only the retarget arm and that arm's operator gates end such an
+  # anchor's visit before here. When this pass's posture
+  # read found threads no visit covers, it set UT_COUNT, so file ONE visit and
+  # watermark the head, then end the anchor's visit the way the feedback arm
+  # does once it routes. The hold then stands off that open visit until it
+  # closes; the watermark keeps a closed visit from re-raising until a new
+  # commit. It files a visit, not rework — telling a finding from our own
+  # answer well enough to drive an auto-fix loop is arm 7's watermark machinery,
+  # and running that off a raw thread read would loop on our own replies.
+  if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
+    UTKEY="pr-unengaged-threads.$num.$head_oid"
+    escalate "$id" "$UTKEY" \
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover (an outside review agent, or an operator-run review), so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+    UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
+    if [ -z "$UTVID" ]; then
+      echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
+      skipped=$((skipped + 1))
+    else
+      gc bd update "$UTVID" \
+        --set-metadata anchor_bead="$id" \
+        --set-metadata pr_url="$live_url" \
+        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+        || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
+      utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
+      if [ "$utvgot" != "$num" ]; then
+        echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT watermarking the head (it re-raises next pass, deduped on the same visit)" >&2
+        skipped=$((skipped + 1))
+      elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+             --set "pr_unengaged_threads=$head_oid" >/dev/null; then
+        flagged=$((flagged + 1))
+        echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed visit $UTVID (merge held)"
+      else
+        echo "$PROG: WARN $id — PR#$num visit $UTVID filed and stamped, but the head watermark did not record; it re-raises next pass (deduped on the same visit)" >&2
+      fi
+    fi
+    continue
+  fi
+
   # --route-comments-only stops here: routing operator feedback above is the whole
   # of its mandate. Every arm below (BLOCKED, superseded-CHANGES_REQUESTED
-  # dismissal, unengaged review threads, red required checks) and the write-back
-  # sweep are the full pass's, which runs after merge.
+  # dismissal, red required checks) and the write-back sweep are the full
+  # pass's, which runs after merge.
   [ "$ROUTE_ONLY" != 1 ] || continue
 
   # --- BLOCKED: escalate an unresolved-thread block; a pending approval is not one ----
@@ -2909,44 +2973,6 @@ GATES
       else
         echo "$PROG: $id — dismissal of review $stale_rid failed; marker stays recorded, retry next pass" >&2
         skipped=$((skipped + 1))
-      fi
-    fi
-  fi
-
-  # --- unengaged review-thread findings: the visit the posture hold stands for --
-  # The merge-hold itself is the `commented` posture the section above records in
-  # the pre-merge pass — merge.sh reads posture off the bead and never reads
-  # threads, and this full pass runs after merge. This is the dispatch that hold
-  # is for: when the posture pass first read the threads it set UT_COUNT, so file
-  # ONE visit and watermark the head. The hold then stands off that open visit
-  # until it closes; the watermark keeps a closed visit from re-raising until a
-  # new commit. It files a visit, not rework — telling a finding from our own
-  # answer well enough to drive an auto-fix loop is arm 7's watermark machinery,
-  # and running that off a raw thread read would loop on our own replies.
-  if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
-    UTKEY="pr-unengaged-threads.$num.$head_oid"
-    escalate "$id" "$UTKEY" \
-      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover (an outside review agent, or an operator-run review), so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
-    UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
-    if [ -z "$UTVID" ]; then
-      echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
-      skipped=$((skipped + 1))
-    else
-      gc bd update "$UTVID" \
-        --set-metadata anchor_bead="$id" \
-        --set-metadata pr_url="$live_url" \
-        --set-metadata pr_number="$num" >/dev/null 2>&1 \
-        || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
-      utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
-      if [ "$utvgot" != "$num" ]; then
-        echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT watermarking the head (it re-raises next pass, deduped on the same visit)" >&2
-        skipped=$((skipped + 1))
-      elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-             --set "pr_unengaged_threads=$head_oid" >/dev/null; then
-        flagged=$((flagged + 1))
-        echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed visit $UTVID (merge held)"
-      else
-        echo "$PROG: WARN $id — PR#$num visit $UTVID filed and stamped, but the head watermark did not record; it re-raises next pass (deduped on the same visit)" >&2
       fi
     fi
   fi
@@ -4425,7 +4451,7 @@ elif [ "$ROUTE_ONLY" = 1 ]; then
   # instead of waiting for the full pass at the tail. Its rc holds nothing:
   # routing is best-effort and the full pass re-runs it idempotently, so
   # refinery-reconcile reports a non-zero but never holds merge on it.
-  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
+  echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $flagged flagged-to-human, $skipped skipped"
 else
   echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $posted conversation answers posted, $swapped comments marked resolved, $fposted findings posted, $fanswered findings answered, $skipped skipped"
 fi

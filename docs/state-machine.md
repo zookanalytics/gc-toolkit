@@ -673,6 +673,11 @@ review's result set.
   none is in flight. An unapproved one records its posture and gets nothing: a
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
+  Feedback the PR owes is routed before any merge-in, approved or not: an
+  unanswered batch gets a rework child that brings the branch current as it
+  answers, and unengaged review threads get the visit their `commented`
+  posture stands for. Once that visit stands, an approved PR's merge-in
+  proceeds while the visit holds the merge.
   The child's handoff runs `bring-current-guard.sh`: a bring-current git made
   on its own, or whose conflicts kept both sides' insertions whole, leaves the
   approval standing, and one that took judgment files a visit on the anchor and
