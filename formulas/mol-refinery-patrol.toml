@@ -34,7 +34,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
 preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars) — keep
+patrol-wisp-reconcile, patrol-pour-vars, refinery-gate) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -321,27 +321,90 @@ needs = ["rebase"]
 description = """
 **Config: run_tests = {{run_tests}}**
 
-The branch under test is staged in the prep worktree (the rebase step), so run
-every check THERE — the rig root's checkout is never touched. Resolve the same
-path and enter it first, then run each configured check in order, skipping
-empty ones:
+The branch under test is staged in the prep worktree (the rebase step), so
+every check runs THERE, and the rig root's checkout is never touched. A tool
+call is cut off at ten minutes, and a cold build and test on a loaded host can
+take far longer, so the checks run as one detached job through
+`assets/scripts/detached-job.sh`: it starts the job in a session of its own,
+reports a launch that did not happen, and waits for the job in bounded
+foreground calls. Launch a gate no other way. A hand-rolled background launch
+can fail without a word (macOS ships no `setsid`), and a background poll for a
+result that never comes never returns.
+
+Write the gate script below with each configured command in its line. Each
+check runs in a subshell of its own, so an `exit` or a `cd` in one cannot cut
+the rest short, and an empty one passes. When the rig ships no commands at
+all, add the quality gates documented in the rig's CLAUDE.md as lines of the
+same form, with any environment they need, and never skip the gates silently.
+Then start the job:
 ```bash
+# >>> refinery-gate-start
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-cd "$PREP_WT"
-{{setup_command}}
-{{typecheck_command}}
-{{lint_command}}
-{{build_command}}
+COMMON="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+PREP_WT="$COMMON/gc-refinery-prep"
+GATE="$COMMON/gc-refinery-gate"
+JOB=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+[ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# A gate a previous session left running tests a prep worktree the rebase
+# step has since rebuilt.
+"$JOB" stop "$GATE" >/dev/null
+mkdir -p "$GATE"
+cat > "$GATE/gate.sh" <<'GATE'
+cd "$1" || exit 2
+failed=""
+( echo "== setup"; {{setup_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed setup:$rc"
+( echo "== typecheck"; {{typecheck_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed typecheck:$rc"
+( echo "== lint"; {{lint_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed lint:$rc"
+( echo "== build"; {{build_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed build:$rc"
+if [ "{{run_tests}}" = "true" ]; then
+  ( echo "== test"; {{test_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed test:$rc"
+fi
+[ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
+echo "GATE PASSED"
+GATE
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# <<< refinery-gate-start
 ```
-If run_tests = "true": `{{test_command}}` (in the same `$PREP_WT`). When the
-rig ships no commands at all, run the quality gates documented in the rig's
-CLAUDE.md instead — never silently skip the gates.
 
-Track which checks ran and what failed. Close this step when all checks
-complete (pass or fail)."""
+Then wait for it in the FOREGROUND: run the block below as an ordinary tool
+call with a ten-minute timeout (`timeout: 600000` in Claude Code), never with
+`run_in_background`. Each wait returns within nine minutes. While it reports
+`state=running` (exit 3), run it again. Never end your turn while the gate
+runs: a gate that finishes while you sit idle wakes nothing, and the queue
+behind it waits. The wait stops a gate still running after two hours and
+reports `state=exceeded`.
+```bash
+# >>> refinery-gate-wait
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
+JOB=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+"$JOB" wait "$GATE" --limit 7200
+# <<< refinery-gate-wait
+```
+
+Read the result off the report and the job's log (`$GATE/log`):
+- `state=done rc=0`: every check passed and the log ends `GATE PASSED`.
+- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check
+  with its exit code, and the log above it holds their output.
+- anything else (`state=died`, `state=exceeded`, or any other `rc`): the gate
+  stopped short of a verdict, ended by a signal, a restart, the limit, or a
+  missing prep worktree, which says nothing about the branch. Start it once
+  more. If the second run stops short too, escalate with key
+  `refinery-gate-cut-short`, naming the bead and the cause, and leave the work
+  with the refinery: `gc runtime drain-ack` and end the cycle without a
+  rejection.
+
+Close this step once the gate has finished, pass or fail."""
 
 [[steps]]
 id = "handle-failures"
@@ -352,6 +415,9 @@ All checks PASSED: close this step, proceed to merge-push.
 
 Any FAILED: diagnose — branch regression, or pre-existing on target?
 **FORBIDDEN: writing code to fix failures. You are a merge processor.**
+A check you re-run on the target to tell the two apart is a gate like any
+other: run it through `detached-job.sh` with a directory of its own, and wait
+for it in the foreground as run-tests does.
 
 **Branch-caused:** retire the workflow and repool with the failure summary —
 the same fail-closed lifecycle repool as the rebase step:
