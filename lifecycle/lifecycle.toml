@@ -1233,12 +1233,16 @@ keys = [
 #   orphan sweep reads the bare branch defined in merge_identity, not this key.
 #   Absent means no such product was recorded. A path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
-#   (produced nothing) or `shipped` (landed work). A pack component stamps
-#   `no-op` — dead-molecule-dispose.sh, and converse by hand — while its meaning
-#   is the runtime's, like gc.outcome. duplicate-sweep.sh reads it to confirm a
-#   no-op duplicate is disposable, pr-stack.sh drops a no-op row from a branch's
-#   ledger, and each falls back to the legacy bare `work_outcome` alias. Absent
-#   leaves the disposition unstated. Never cleared.
+#   (produced nothing) or `shipped` (landed work). Its meaning is the runtime's,
+#   like gc.outcome: the runtime's work-record gate checks it when a plain task
+#   bead closes, and warns on a missing or unknown value unless
+#   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `no-op`
+#   from dead-molecule-dispose.sh, mol-validate-close, work-outcome.sh on every
+#   visit close, the observation-filing recipes, and converse by hand.
+#   duplicate-sweep.sh reads it to confirm a no-op duplicate is disposable,
+#   pr-stack.sh drops a no-op row from a branch's ledger, and each falls back to
+#   the legacy bare `work_outcome` alias. Absent leaves the disposition
+#   unstated. Never cleared.
 # configured_named_session — on a session bead, the authoritative "standing
 #   named" gate: "true" marks a session the pack's [[named_session]] config
 #   declares standing, applied by the runtime. pin-keepalive.sh reads it beside

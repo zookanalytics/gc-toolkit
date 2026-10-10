@@ -226,6 +226,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer so dismiss cannot diverge from them. Exposes
+# work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
+    || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -2207,6 +2213,10 @@ cmd_dismiss() {
             echo "$PROG: dismiss: the outcome stamps on visit $_v did not read back (gc.outcome='${outcome_got:-<empty>}', gc.outcome_reason='${reason_got:-<empty>}'); it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
+        # The work-record gate the close runs wants gc.work_outcome.
+        # work-outcome.sh stamps it in a write of its own, so it never decides
+        # whether the visit closes.
+        work_outcome_noop "$_v" gc bd
         _closed_this=0
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1)); _closed_this=1

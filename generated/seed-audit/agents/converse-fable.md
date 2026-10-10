@@ -601,6 +601,7 @@ gc bd update "$OBS" \
   --set-metadata "obs.directive=<standing or diff>" \
   --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   --set-metadata gc.outcome=recorded \
+  --set-metadata gc.work_outcome=no-op \
   --status=closed
 ```
 

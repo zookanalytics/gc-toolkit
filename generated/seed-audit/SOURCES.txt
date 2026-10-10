@@ -66,7 +66,7 @@ formulas/mol-dog-shutdown-dance.toml
 formulas/mol-feedback-distiller.toml
 a8b13496407eb7d88eb8bb02e5104d878eebbc17e746fd5c2e130416ca10338d
 formulas/mol-feedback-miner.toml
-393f222951204105cba158692cd03be44802b65fc506e1267c0f0c2f250f2ccc
+3479365685a06839f76c3d0b57372c4f64163af52d8b2b489f31a2f5e99155af
 formulas/mol-first-reaction.toml
 48af9bb636e0eef6f3df93ec1ce9bc16e0b3aba88817a02a3d417e4ad4ac2ca7
 formulas/mol-polecat-work.toml
@@ -126,7 +126,7 @@ template-fragments/context-discipline.template.md
 template-fragments/design-convoy-routing.template.md
 dfcfa1a342b47f3d7e657ad50c16df95debe77193872c7078e1535d07ed307fb
 template-fragments/file-feedback-observations.template.md
-f0fe06afd3dc3bba6b2737bfcbcc4e711ce035ac15276f4db2df3a91515e3433
+a8c58b048de5f93dbae9fc8d92da3f086cd31f106d553560361953c6fb67a839
 template-fragments/file-work-records.template.md
 6295309f08c0c935f5b94706aaa66340ef9e6b960f1ef25624154ed67833b32d
 template-fragments/heartbeat-no-consent-ui.template.md
