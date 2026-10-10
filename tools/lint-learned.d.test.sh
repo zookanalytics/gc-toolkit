@@ -805,6 +805,15 @@ page docs/fenced.md <<'MD'
 ## Scope
 ```
 MD
+page docs/long-fence.md <<'MD'
+# A fence opened by four backticks
+
+````markdown
+```
+## Scope
+```
+````
+MD
 page docs/deeper.md <<'MD'
 # Deeper
 
@@ -858,7 +867,8 @@ MD
 page specs/tk-a/deep/er/notes.md <<'MD'
 # Deep
 MD
-DF_NO_SCOPE=(docs/new.md docs/topic/nested.md docs/fenced.md docs/deeper.md docs/longer.md)
+DF_NO_SCOPE=(docs/new.md docs/topic/nested.md docs/fenced.md docs/long-fence.md docs/deeper.md
+    docs/longer.md)
 DF_NO_DESC=(specs/tk-a/notes.md specs/tk-a/name-only.md specs/tk-a/blank.md specs/tk-a/null.md
     specs/tk-a/empty-fold.md specs/tk-a/unclosed.md specs/tk-a/late.md specs/tk-a/nested-key.md
     specs/tk-a/deep/er/notes.md)
@@ -871,7 +881,7 @@ done
 for p in "${DF_NO_DESC[@]}"; do
     has "$OUT" "$p:1: no frontmatter description" "$p is reported for a missing description"
 done
-eq "$(printf '%s\n' "$OUT" | grep -c .)" 15 "each page is reported once, whatever spelling named it, and nothing else is"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 16 "each page is reported once, whatever spelling named it, and nothing else is"
 has "$OUT" "specs/<bead-id>/" "a missing Scope names the other home a page can have"
 has "$OUT" "\"Inside docs/\"" "and points at the placement rule"
 has "$OUT" "(learned rule: doc-filing)" "the finding names the rule"
