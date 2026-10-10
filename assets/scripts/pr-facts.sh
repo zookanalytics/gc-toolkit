@@ -3332,12 +3332,10 @@ wb_commits_load() { # <pr-number>; non-zero = could not read
   WB_COMMITS_PR="$1"
 }
 # "in <oid>, <oid>" for the commits that made the fix, at most the last five of
-# them, or "on this PR" when no commit names a fix unit. Non-zero when the PR's
-# commits could not be read: an answer that cannot cite its commits waits for a
-# pass that can, rather than cite none.
+# them, or "on this PR" when no commit names a fix unit, cited from the commits
+# wb_expand loaded.
 wb_fixed_in() { # <fix-unit ids> [<ids of what is answered>], each comma- or space-separated
   local out
-  wb_commits_load "$wnum" || return 1
   out=$(printf '%s' "$WB_COMMITS" | jq -r --arg units "$1" --arg keys "${2:-}" '
     def ids($s): [ $s | splits("[, ]+") | select(length > 0) ];
     def names($id): test("(^|[^A-Za-z0-9_.-])" + ($id | gsub("[.]"; "\\.")) + "(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])");
@@ -3352,19 +3350,26 @@ wb_fixed_in() { # <fix-unit ids> [<ids of what is answered>], each comma- or spa
   [ -n "$out" ] || return 1
   printf '%s' "$out"
 }
-# The plan composes a fix's answer before any commit is read, so it names the
-# fix units and what they answer by a token, {{gc-fixed-in:<units>|<ids>}}, and
-# this cites it just before the answer is posted. Prints the body with every
-# token cited; non-zero when one could not be, and the caller posts nothing.
+# A fix's answer is composed before any commit is read, so it names the fix units
+# and what they answer by a token, {{gc-fixed-in:<units>|<ids>}}, and this cites
+# it just before the answer is posted. It sets WB_BODY to the body with every
+# token cited. It is non-zero when the PR's commits could not be read, and the
+# caller posts nothing: an answer that cannot cite its commits waits for a pass
+# that can, rather than cite none. It runs in the caller's shell and never in a
+# command substitution, because a subshell would keep nothing it read for the
+# anchor's next answer.
 WB_FIXED_IN_RE='[{][{]gc-fixed-in:([^}|]*)[|]([^}]*)[}][}]'
+WB_BODY=""
 wb_expand() { # <body>
-  local body="$1" tok rep
+  local body="$1" tok units keys rep
+  WB_BODY=""
   while [[ "$body" =~ $WB_FIXED_IN_RE ]]; do
-    tok="${BASH_REMATCH[0]}"
-    rep=$(wb_fixed_in "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}") || return 1
+    tok="${BASH_REMATCH[0]}"; units="${BASH_REMATCH[1]}"; keys="${BASH_REMATCH[2]}"
+    wb_commits_load "$wnum" || return 1
+    rep=$(wb_fixed_in "$units" "$keys") || return 1
     body="${body//"$tok"/"$rep"}"
   done
-  printf '%s' "$body"
+  WB_BODY="$body"
 }
 # Trade a resolved comment's EYES for THUMBS_UP: <node-id>:<add>:<remove>,
 # comma-joined, or "-". THUMBS_UP goes on first, so a pass that stops between the
@@ -3456,8 +3461,8 @@ WB_FINDING_BODY='def clip($n): if length > $n then .[0:$n] + " [truncated]" else
        + (if .disp == "declined" or .disp == "deferred" then "\n" + $mk + .id + ":open -->" else "" end)
      else "" end)'
 # The answer a closed finding is owed: for a must-fix, the commits of the fix
-# units that landed it (wb_fixed_in, below); for a deferral, its follow-up.
-WB_FINDING_ANSWER='if .disp == "must-fix" then "Fixed \($fixed)"
+# units that landed it (a token wb_expand cites); for a deferral, its follow-up.
+WB_FINDING_ANSWER='if .disp == "must-fix" then "Fixed {{gc-fixed-in:\($fus)|\(.id)}}"
     + (if $fus != "" then " (\($fus))" else "" end) + "."
   elif .disp == "deferred" then
     (if .reply != "" then .reply
@@ -3466,16 +3471,21 @@ WB_FINDING_ANSWER='if .disp == "must-fix" then "Fixed \($fixed)"
   elif .disp == "declined" then "Declined on review; no change was made."
     + (if .reply != "" then " " + .reply else "" end)
   else "Closed" + (if .disp != "" then " (\(.disp))" else "" end) + "." end'
-finding_answer() { # <owed-record-json> — the answer text on stdout; empty = could not compose
-  local fid fus="" fixed=""
+# Sets WB_ANSWER to the answer, its commits cited. Non-zero, with WB_ANSWER
+# empty, when it could not be composed or its commits could not be read. Like
+# wb_expand, it runs in the caller's shell.
+WB_ANSWER=""
+finding_answer() { # <owed-record-json>
+  local fus="" ans
+  WB_ANSWER=""
   if [ "$(printf '%s' "$1" | jq -r '.disp // ""' 2>/dev/null)" = "must-fix" ]; then
-    fid=$(printf '%s' "$1" | jq -r '.id' 2>/dev/null)
     # The fix units that answered it are the beads blocking it.
-    fus=$(bd_json dep list "$fid" --direction=down -t blocks \
+    fus=$(bd_json dep list "$(printf '%s' "$1" | jq -r '.id' 2>/dev/null)" --direction=down -t blocks \
       | jq -r 'if type == "array" then [ .[]? | (.id // empty) ] | join(", ") else "" end' 2>/dev/null)
-    fixed=$(wb_fixed_in "$fus" "$fid") || return 1
   fi
-  printf '%s' "$1" | jq -r --arg fixed "$fixed" --arg fus "$fus" "$WB_FINDING_ANSWER" 2>/dev/null
+  ans=$(printf '%s' "$1" | jq -r --arg fus "$fus" "$WB_FINDING_ANSWER" 2>/dev/null)
+  [ -n "$ans" ] && wb_expand "$ans" || return 1
+  WB_ANSWER="$WB_BODY"
 }
 WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
 # The anchors the sweep reads GitHub for: those carrying a routed batch, and
@@ -4011,11 +4021,11 @@ WB_REACTIONS
     [ "${act:-}" = "T" ] || continue
     [ "$wack_ok" = 1 ] || continue
     if [ "$a2" = "1" ]; then
-      if ! wtbody=$(wb_expand "$a4"); then
+      if ! wb_expand "$a4"; then
         echo "$PROG: $wid — PR#$wnum could not read the commits the answer on thread $a1 cites; NOT replying or resolving (retry next pass)" >&2
         continue
       fi
-      if wb_thread_reply "$a1" "$wtbody
+      if wb_thread_reply "$a1" "$WB_BODY
 $WB_MARKER
 <!-- gc-writeback-mark:resolved -->"; then
         replied=$((replied + 1))
@@ -4061,11 +4071,11 @@ WB_AWAITING
   while IFS="$(printf '\t')" read -r act a1 a2 a3 a4; do  # a1: mark; a2: tokens; a3: swaps; a4: body
     [ "${act:-}" = "P" ] || continue
     [ "$wack_ok" = 1 ] || continue
-    if ! wpbody=$(wb_expand "$a4"); then
+    if ! wb_expand "$a4"; then
       echo "$PROG: $wid — PR#$wnum could not read the commits the $a1 answer for $a2 cites; retry next pass" >&2
       continue
     fi
-    if wb_pr_comment "$wnum" "$wpbody
+    if wb_pr_comment "$wnum" "$WB_BODY
 $WB_MARKER
 <!-- gc-writeback-mark:$a1 $a2 -->"; then
       posted=$((posted + 1))
@@ -4395,8 +4405,11 @@ WB_REVIEW_CLEARS
             | max_by(length) // empty' 2>/dev/null)
           wfans=""
           if [ "$(printf '%s' "$wfj" | jq -r '.closed')" = "true" ]; then
-            wfans=$(finding_answer "$wfj")
-            [ -n "$wfans" ] || continue
+            if ! finding_answer "$wfj"; then
+              echo "$PROG: $wid — PR#$wnum could not compose finding $wfid's answer or read the commits it cites; not posted (retry next pass)" >&2
+              continue
+            fi
+            wfans="$WB_ANSWER"
           fi
           wfbody=$(printf '%s' "$wfj" | jq -r --arg mk "$WB_FINDING_MARKER" --arg ans "$wfans" "$WB_FINDING_BODY" 2>/dev/null)
           [ -n "$wfbody" ] || continue
@@ -4443,8 +4456,11 @@ WB_REVIEW_CLEARS
           wfans=""
           if [ "$wfanswered" != "true" ]; then
             if [ "$wfwrites" -ge "$WB_FINDING_CAP" ]; then wfheld=$((wfheld + 1)); continue; fi
-            wfans=$(finding_answer "$wfj")
-            [ -n "$wfans" ] || continue
+            if ! finding_answer "$wfj"; then
+              echo "$PROG: $wid — PR#$wnum could not compose finding $wfid's answer or read the commits it cites; NOT answering it (retry next pass)" >&2
+              continue
+            fi
+            wfans="$WB_ANSWER"
           fi
           # A declined or deferred finding waits for the operator, so its thread
           # is answered and left open.

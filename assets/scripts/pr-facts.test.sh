@@ -3287,6 +3287,7 @@ has "$IC3" 'Locus: `PR #200 body / Summary`' "…and its locus named, since no f
 has "$IC3" "<!-- gc:city -->" "…and the city's mark, as every Conversation post carries"
 eq "$(meta FM3 finding.pr_answered)" "1" "a Conversation comment posted with its outcome owes nothing more"
 has "$(fissue 200 FM4)" "The merge waits for this to be fixed on the branch." "an open finding posted to the Conversation says what it holds"
+eq "$(printf '%s\n' "$since" | grep -c '^COMMITS 200$')" "1" "the PR's commits are read once for the two outcomes that cite them"
 
 echo "# a posted finding that closes is answered: by a reply and a resolve in its thread, by an edit in the Conversation"
 # The operator has replied in FM6's thread, so that conversation is theirs to end.
@@ -3320,6 +3321,7 @@ hasnt "$IC4" "The merge waits" "…in place of what the ruling held"
 eq "$(jq '[ .issue_comments[] | select((.body // "") | contains("gc-finding:FM4")) ] | length' "$GH_DIR/threads_200.json")" "1" "…without a second comment"
 eq "$(meta FM1 finding.pr_answered)$(meta FM2 finding.pr_answered)$(meta FM4 finding.pr_answered)" "111" "each is recorded answered"
 has "$out" "3 findings answered" "the pass reports the three answers"
+eq "$(printf '%s\n' "$since" | grep -c '^COMMITS 200$')" "1" "…reading the PR's commits once for the two answers that cite them"
 hasnt "$since" "FCOMMENT" "nothing is posted twice"
 # This pass's walk read back every comment the first pass posted. The city's mark
 # is what keeps them out of the feedback batch: unmarked, a post under our login
