@@ -44,17 +44,21 @@
 # posture at that head, keeps it without the per-PR reads; any other anchor is
 # read as before.
 # Unanswered review feedback routes to something — a fix-pool rework child
-# carrying the review bodies and inline comments verbatim, or a visit when a
-# human already holds the anchor — with the watermarks advancing only once that
-# routing reads back. Feedback is decided by provenance, not by author: every
-# review, inline comment and conversation comment that is not the city's own post
-# (pr-post.sh's gc_city_own: marked by pr-post.sh, or under the city's login
-# before the anchor's provenance cutover, pr_provenance_since) is feedback,
-# whoever posted it, so a model review run under the city's own account routes
-# like a person's. This runs even while the anchor still conflicts: the rework
-# child is prepare_mode=merge, so it brings the branch current as it answers, and
-# the CONFLICTING arm above stands down when feedback is owed rather than filing a
-# redundant merge-in child. It routes under posture `commented` and equally under a
+# carrying the review bodies and inline comments verbatim, or a visit when the
+# city has nowhere to route work (no head branch or no fix pool) — with the
+# watermarks advancing only once that routing reads back. A hold on the anchor
+# does not choose the visit: the child is the fix unit a must-fix finding of the
+# batch attaches to, so it is filed whatever holds the anchor. Feedback is
+# decided by provenance, not by author: every review, inline comment and
+# conversation comment that is not the city's own post (pr-post.sh's
+# gc_city_own: marked by pr-post.sh, or under the city's login before the
+# anchor's provenance cutover, pr_provenance_since) is feedback, whoever posted
+# it, so a model review run under the city's own account routes like a person's.
+# This runs even while the anchor still conflicts: the rework child is
+# prepare_mode=merge, so it brings the branch current as it answers, and the
+# CONFLICTING arm above stands down when feedback is owed rather than file a
+# redundant merge-in child or defer the feedback behind a hold. It routes under
+# posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
 # comments under it out of the batch. An unmarked review posted under our own
@@ -1399,10 +1403,11 @@ while IFS= read -r tagged; do
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
   # parked and this PR's branch is superseded by the pending re-dispatch, so the
-  # dispatch arms below stand down on it as they do for a merge_hold or a live
-  # demand: a rework minted against a branch about to re-pour is non-hand-offable,
-  # so a polecat can only refuse it and the pool re-offers the refusal until a
-  # human clears it.
+  # stale-base and red-check arms below stand down on it as they do for a
+  # merge_hold or a live demand: a rework minted against a branch about to re-pour
+  # is non-hand-offable, so a polecat can only refuse it and the pool re-offers
+  # the refusal until a human clears it. Review feedback is the exception, and
+  # the feedback arm says why.
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
   # --- the posture basis, as this pass's batched read shows it -----------------
@@ -2078,20 +2083,18 @@ REAP_EOF
     fi
   fi
 
-  # --- CONFLICTING: bring the branch current, or route its feedback -------------
-  # A conflicting anchor holds the merge. The operator-gate skip guards below — a
-  # hold, a live demand, an armed re-dispatch, a foreign blocker — defer the whole
-  # anchor, feedback included, because each parks the review by design and lifts
-  # on its own; the next pass routes the feedback then. A missing head branch or
-  # fix pool is not such a gate: it blocks only the merge-in dispatch, so an
-  # anchor owing feedback still falls through to the feedback arm, whose visit
-  # fallback dispositions the unresolved-branch and no-fix-pool cases. Past those
-  # guards the anchor is dispatchable, and what it owes decides how: with
-  # unanswered feedback it falls through to the feedback arm below (whose
-  # prepare_mode=merge child brings the branch current as it answers); otherwise
-  # this arm files the one merge-in child, once the PR is approved. The gate that
-  # splits the two, and the approval gate after it, sit just above the dedup.
-  if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+  # --- CONFLICTING: bring the branch current ----------------------------------
+  # A conflicting anchor holds the merge. One that also owes unanswered feedback
+  # belongs to the feedback arm below, whose prepare_mode=merge child brings the
+  # branch current as it answers, whatever holds the anchor. This arm stands
+  # aside for it: a merge-in child here would twin that child on the branch, and
+  # a skip guard here would leave the feedback unanswered behind a hold. With no
+  # feedback owed, this arm files the one merge-in child, after the skip guards
+  # below: a hold, a live demand, an armed re-dispatch or a foreign blocker
+  # defers the merge-in, and a missing head branch or fix pool leaves nowhere to
+  # dispatch it. Past them, the child is filed once the PR is approved, by the
+  # approval gate just above the dedup.
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; } && [ "$unanswered" != 1 ]; then
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -2122,14 +2125,10 @@ REAP_EOF
     fi
     fix_branch="${head_ref:-$branch}"
     # fix_branch and FIX_POOL are needed only to DISPATCH the merge-in child, so
-    # this guard fires under the same condition as that dispatch (below). An anchor
-    # that owes unanswered feedback — or a --route-comments-only pass — does not
-    # dispatch one here; it falls through to the feedback arm, whose visit fallback
-    # dispositions exactly these cases (an unresolved head branch, no configured
-    # fix pool). Skipping the whole anchor would strand that feedback with no
-    # visit, no finding beads, and no validation pass.
+    # this guard fires under the same condition as that dispatch (below): a
+    # --route-comments-only pass dispatches none, so it is not skipped here.
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
-      if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      if [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -2162,15 +2161,11 @@ REAP_EOF
       echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on an early routing pass (--route-comments-only),
-    # this arm files no merge-in child: the feedback arm below dispatches a
-    # prepare_mode=merge child that brings this same branch current (a MERGE of
-    # origin/$base on resume) as it answers, so a merge-in child here would only
-    # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child,
-    # and only on an approved PR.
-    if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    # Past the skip guards, the anchor is dispatchable. An early routing pass
+    # (--route-comments-only) files no merge-in child: routing feedback is its
+    # whole mandate, and this anchor owes none. Only the full pass dispatches this
+    # arm's merge-in child, and only on an approved PR.
+    if [ "$ROUTE_ONLY" != 1 ]; then
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
@@ -2358,25 +2353,25 @@ REAP_EOF
   # them.
   if [ "$unanswered" = 1 ]; then
     fix_branch="${head_ref:-$branch}"
-    routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
-    # Read once: the routing choice below turns on whether a person or a sitting
-    # is holding this anchor, and each answer costs a ledger read. The demand may
-    # sit on the anchor or on the live rework child reconciling its branch;
-    # anchor_decision_held reads both.
-    holding=""; anchor_decision_held "$id" && holding=1
 
-    # A human already holding this anchor gets the comments; filing work under a
-    # live human decision fights it, and a child told to answer comments may have
-    # to bring the branch current, which rebase_hold forbids. Absent any of that,
-    # and with a pool to route to, the comments become work.
+    # The batch becomes a rework child whenever there is a branch to work on and
+    # a pool to route it to, whatever holds the anchor. The child is the batch's
+    # fix unit: a must-fix ruling on a finding filed below hangs its
+    # close-ordering edge on the anchor's human-lane rework child (finding.sh
+    # set-disposition). A batch sent to a visit has no child of its own, so a
+    # finding ruled must-fix either holds the merge with nothing acting on it or
+    # attaches to an earlier batch's landed child and closes as answered by work
+    # that never saw it. merge_hold, rebase_hold, a route to a human, a live
+    # demand and an armed re-dispatch therefore choose nothing here. Each still
+    # gates what it gates elsewhere, the merge or the stale-base and red-check
+    # dispatches. The child brings the branch current by merge as it answers, as
+    # every rework child does. On an armed anchor its blocks edge keeps the
+    # anchor out of bd ready, so deferred-dispatch holds the re-pour until the
+    # feedback is answered rather than re-pour the branch under the child. Only
+    # when the city has nowhere to route work does the batch go to a person.
     why=""
     [ -n "$fix_branch" ] || why="the PR head branch is unresolved"
     [ -n "$FIX_POOL" ]   || why="no fix pool is configured"
-    is_held "$rhold"        && why="rebase_hold freezes the branch"
-    is_held "$hold"         && why="merge_hold is set"
-    [ "$routed" = "human" ] && why="the anchor is already routed to a human"
-    [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
-    [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
@@ -2991,9 +2986,10 @@ GATES
         && rc_why="the anchor is already routed to a human"
       anchor_decision_held "$id" && rc_why="a sitting holds it for an operator ruling"
       [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
-      # A held or human-steered anchor is theirs; file nothing under it, exactly
-      # as the conflict and feedback arms stand down on the same gates. The
-      # decision may be filed on the anchor or on the live rework child
+      # A held or human-steered anchor is theirs; file nothing under it, as the
+      # stale-base arm files no merge-in under a hold. Review feedback is the one
+      # batch filed whatever holds the anchor, for the reason the feedback arm
+      # gives. The decision may be filed on the anchor or on the live rework child
       # reconciling its branch; anchor_decision_held reads both.
       if [ -z "$rc_why" ]; then
         required_contexts_for "$base"
