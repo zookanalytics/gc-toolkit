@@ -123,10 +123,12 @@ function judge(text, last,   flat, remain, k, seg, list, at, seen, hits) {
 /^[[:space:]]*```/ {
     # A fence ends the block, as the end of the file does. Either one ends a
     # line still being joined, which is judged as it stands so it cannot run
-    # on into the next block.
+    # on into the next block. A fence closes whichever block is open, shell or
+    # not, and only a fence that opens a block is read for its tag: a bare
+    # closing fence would read as an untagged, and so shell, opening.
     if (pending != "") judge(pending, 1)
     pending = ""
-    if (inb) { inb = 0 } else { inb = is_shell_fence($0) }
+    if (infence) { infence = 0; inb = 0 } else { infence = 1; inb = is_shell_fence($0) }
     next
 }
 !inb { next }
