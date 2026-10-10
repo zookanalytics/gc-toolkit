@@ -252,8 +252,9 @@ fi
 # and otherwise arms the end bead that ends it once that work does. An end bead
 # is never held: it has to stay open for the pool to be offered it when its
 # blockers close, so a hold asked for at that step is the end's own run and
-# stops there. A root this script could not resolve skips the end and is
-# reported by the quiesce below, which fails closed on it.
+# stops there. A root this script could not resolve skips the end, and the
+# quiesce below fails closed on it. The end bead's own step reaches no quiesce,
+# so it fails closed on that root itself.
 if [ "$ROOT_READABLE" = "1" ] && [ -n "$ROOT" ]; then
   if [ "$DRY_RUN" = "1" ]; then
     END_OUT=$("$END_TOOL" "$TARGET" --dry-run 2>&1) || END_FAILED=1
@@ -273,6 +274,10 @@ if [ "$ROOT_READABLE" = "1" ] && [ -n "$ROOT" ]; then
   fi
 fi
 if [ "$STEP" = "molecule-end" ]; then
+  if [ "$ROOT_READABLE" != "1" ] || [ -z "$ROOT" ]; then
+    echo "$PROG: FATAL — could not resolve the molecule of end bead $TARGET, so molecule-end.sh did not run and the end bead is neither re-armed nor retired. Do not drain; re-run once the store answers." >&2
+    exit 1
+  fi
   [ "$END_FAILED" = "0" ] || exit 1
   exit 0
 fi

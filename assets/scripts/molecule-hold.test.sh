@@ -612,6 +612,16 @@ eq "$(bstatus s-end)" "in_progress" "the end bead is not held at blocked"
 hasnt "$(gclog)" "--status=blocked" "nothing is held"
 OUT=$(FAKE_END_RC=1 "$SCRIPT" --step molecule-end --bead s-end --reason "end" 2>&1); RC=$?
 eq "$RC" "1" "a failed end run exits 1"
+# An end bead whose molecule cannot be resolved reaches no quiesce, so the exit
+# is the only thing that can stop the caller's drain.
+: > "$END_LOG"
+echo "s-end" > "$FAKE_SHOWFAIL"
+OUT=$("$SCRIPT" --step molecule-end --bead s-end --reason "end" 2>&1); RC=$?
+: > "$FAKE_SHOWFAIL"
+eq "$RC" "1" "an end bead whose molecule cannot be resolved exits 1, not 0"
+has "$OUT" "Do not drain" "and the caller is told not to drain"
+eq "$(cat "$END_LOG")" "" "molecule-end.sh never ran"
+eq "$(bstatus s-end)" "in_progress" "and the end bead is not held"
 
 # --- The formula wiring. ------------------------------------------------------
 # Extracted verbatim, so a wholesale reconciliation against the base formula

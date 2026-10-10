@@ -148,11 +148,13 @@ the molecule, so without the skip it would be de-routed.
   a `mol-validate` molecule, the create, block and route order, a create that
   answers with no id, failed writes and dry runs.
 - `molecule-hold.test.sh` covers the end running before the hold, a failed end
-  failing the hold, the end bead keeping its route, and the three formula gates
+  failing the hold, an end bead whose molecule cannot be resolved failing its
+  own step, the end bead keeping its route, and the three formula gates
   extracted and executed.
 - `dead-molecule-dispose.test.sh` covers `--owner`, `--if-source-closed`, and
   the PR guard on a closed work bead.
 - Each of these targeted mutants fails a suite: no `--owner`, no visits at
   arm, the end bead de-routed by the hold, the end bead never routed, the PR
-  guard on a closed source, a reopened source not re-armed, and an end bead
-  whose create answered with no id left unfound.
+  guard on a closed source, a reopened source not re-armed, an end bead whose
+  create answered with no id left unfound, and an end bead's own step exiting 0
+  when its molecule cannot be resolved.
