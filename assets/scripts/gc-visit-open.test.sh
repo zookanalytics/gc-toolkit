@@ -462,8 +462,13 @@ done
 # owed a visit back once its routed work lands — without it such a sweep
 # cannot see the subject at all.
 run no "why is dolt wedging under load"
-has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
-  "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"
+has "$CALLS" "--metadata {\"gc.origin\":\"operator\"} --db $TMP/rigs/gc-toolkit/.beads" \
+  "(ORIGIN) the created subject carries the key the sweep reads on its create, in its own rig's ledger"
+# The create's key reads back, so the minted subject takes no second write.
+export FAKE_ORIGIN=operator
+run no "why is dolt wedging under load"
+unset FAKE_ORIGIN
+hasnt "$CALLS" "--set-metadata gc.origin=operator" "(ORIGIN) …and a subject whose create carried it takes no second write"
 
 # Both intake paths are the operator asking for a conversation — typing a topic,
 # and pointing at a bead that already exists — so both stamp. Pointing at an

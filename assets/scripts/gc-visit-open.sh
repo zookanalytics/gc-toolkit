@@ -347,8 +347,10 @@ conversation, not a specification. The title is a shortened label for the
 board; this body is the record. Ask before assuming scope."
 
     SUBJ_TITLE=$(derive_title "$ARG")
+    # gc.origin=operator rides the create (see "Record the origin" below), so a
+    # minted subject never exists without the key a sweep selects it by.
     SUBJ_RAW=$(gc bd create -t "$SUBJ_TYPE" --title "$SUBJ_TITLE" -d "$SUBJ_BODY" \
-        --db "$RIG_PATH/.beads" --json 2>/dev/null)
+        --metadata '{"gc.origin":"operator"}' --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
     SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
@@ -373,7 +375,8 @@ fi
 # ── Record the origin as a KEY, not only as prose ────────────────────
 # gc.origin=operator is the machine-readable fact ("operator commissioned
 # this") a sweep can select on where the body sentence cannot be (prose
-# drifts and gets quoted). BOTH intake paths stamp it; gc-helm.sh
+# drifts and gets quoted). BOTH intake paths carry it: the topic path files it
+# on the subject's create above, and an existing bead is stamped here. gc-helm.sh
 # open deliberately does not (a board pick is a glance, not a commission).
 # Only when absent, and never fatal: the deliverable is the conversation.
 ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
