@@ -8,8 +8,9 @@
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); dedup on
 # branch and head against a live child, a stranded child re-routed rather than
-# buried, and an unstamped orphan adopted by title; the read-backs that leave a
-# child unrouted when prepare_mode or the route did not persist; anchors that
+# buried, and a child filed with its work order and blocks edge on the create,
+# so a lost create reply is re-routed rather than twinned; the read-backs that
+# leave a child unrouted when prepare_mode or the route did not persist; anchors that
 # already carry a PR left to pr-facts.sh; and an unreadable enumeration failing
 # loudly rather than reporting a false all-clear.
 # The premise under the ref guard is asserted directly: `git merge-tree` exits 1
@@ -112,6 +113,9 @@ eq "$(meta "$K" pr_number)" "<absent>" "no pr_number rides a child filed before 
 eq "$(meta "$K" pr_url)" "<absent>" "no pr_url either"
 eq "$(meta "$K" existing_pr)" "<absent>" "and no existing_pr to adopt"
 has "$(cat "$STUB_DEPS")" "$K|blocks|A1" "the child blocks the anchor it was filed for"
+has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps blocks:A1" "…born with that edge on the create"
+has "$(grep '^bd create' "$STUB_GC_LOG")" '"prepare_mode":"merge"' "…and with its work order on the create"
+hasnt "$(grep "^bd update $K" "$STUB_GC_LOG")" "--set-metadata task_kind" "…so no second write stamps the work order"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
 
 echo "# a branch that still merges is left alone"
@@ -189,11 +193,16 @@ eq "$(newcount)" "0" "a child stranded by a lost route stamp is not twinned"
 has "$OUT" "re-routing stranded rework S1" "it is re-routed instead"
 eq "$(meta S1 "gc.routed_to")" "$POOL" "and the route it was missing is stamped"
 
-reset "$(pre AB polecat/tk-c1)" '{"id":"O1","status":"open","assignee":"","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}'
+# A create whose reply is lost has still landed with its work order, so the
+# next pass finds it on its branch and re-routes it rather than filing a twin.
+reset "$(pre AB polecat/tk-c1)"
+OUT=$(STUB_CREATE_GARBAGE=1 run --fix-pool "$POOL")
+has "$OUT" "could not file the rework child" "a lost create reply is reported, and nothing is routed"
+eq "$(meta new-2 branch)|$(meta new-2 anchor_bead)" "polecat/tk-c1|AB" "…yet the child landed with its work order"
 OUT=$(run --fix-pool "$POOL")
-eq "$(newcount)" "0" "an unstamped orphan carrying the deterministic title is adopted, never twinned"
-has "$OUT" "adopting unstamped rework orphan O1" "and the adoption is reported"
-eq "$(meta O1 branch)" "polecat/tk-c1" "the orphan gets the stamp its first pass lost"
+eq "$(newcount)" "1" "the next pass files no twin"
+has "$OUT" "re-routing stranded rework new-2" "…and re-routes the child that landed"
+eq "$(meta new-2 "gc.routed_to")" "$POOL" "…which now carries its route"
 
 # The freeze is read over every bead naming the branch, but a LIVE one is
 # already a dedup match, so the arm it reaches alone is a settled bead the
