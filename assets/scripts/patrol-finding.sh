@@ -8,7 +8,9 @@
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
 #                     [--priority <n>] [--rig <rig>] [--no-react] [--dry-run]
-# Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml.
+# Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
+# and the refinery reconcile's assets/scripts/merge-tail-report.sh and
+# assets/scripts/pr-facts.sh.
 # The visit is not this path's exit. A finding needing the operator's judgment
 # gets there through the reaction's `ruling` disposition, which files the visit
 # inline (the gate-visit block in formulas/mol-first-reaction.toml). A patrol
