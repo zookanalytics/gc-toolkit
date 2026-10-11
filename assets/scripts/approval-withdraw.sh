@@ -34,13 +34,13 @@
 # When no approval stands, nothing is written, so a retry looks again.
 #
 # UNROUTED FEEDBACK WAITS. GitHub keeps the inline comments of a dismissed
-# review, and pr-facts.sh reads a dismissal as retiring the comments under it,
-# so they stop counting as feedback. An approval can carry inline comments the
-# operator means as feedback. While one of them sits above both of the anchor's
-# routing marks (pr_comment_watermark, pr_comment_answered), the feedback loop
-# has not read it yet, and dismissing its review now would drop it unread. This
-# then dismisses nothing and exits 1, and the retry after the next reconcile
-# pass finds it routed.
+# review, but a dismissal retires them: they stop counting as feedback, by the
+# rule pr-facts.sh reads the comment space with (review-dismissal.sh). An
+# approval can carry inline comments the operator means as feedback. While one
+# of them is feedback the loop has not routed yet (unrouted_comment_ids: above
+# both of the anchor's routing marks), dismissing its review now would drop it
+# unread. This then dismisses nothing and exits 1, and the retry after the next
+# reconcile pass finds it routed.
 #
 # NO RE-REQUEST. The change the ruling calls for has not been pushed yet, so a
 # review request now would ask for a look at code that is about to change. The
@@ -75,6 +75,13 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# What a dismissal retires, REVIEW_DISMISSAL_DEF.
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
+# The city's-own rule unrouted_comment_ids reads, from the writer of the city's
+# PR posts.
+CITY_OWN_DEF=$("$SCRIPTS_DIR/pr-post.sh" own-def 2>/dev/null) && [ -n "$CITY_OWN_DEF" ] \
+  || { echo "$PROG: pr-post.sh beside this script did not print its provenance definition; cannot tell feedback from the city's own posts" >&2; exit 2; }
 
 usage() {
   echo "usage: $PROG --pass <validation-pass-id> --reason <text>" >&2
@@ -132,6 +139,11 @@ if ! reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/revi
   echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
   exit 1
 fi
+self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
+if [ -z "$self" ]; then
+  echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
+  exit 1
+fi
 
 if [ -n "$recorded" ]; then
   # A retry of this pass: finish the recorded set and nothing else. An approval
@@ -157,11 +169,6 @@ if [ -n "$recorded" ]; then
     exit 0
   fi
 else
-  self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
-  if [ -z "$self" ]; then
-    echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
-    exit 1
-  fi
   targets=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" "$REVIEW_VERDICT_DEF"'
     [ standing_approvals($self)[] | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
   [ -n "$targets" ] || { echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
@@ -171,19 +178,14 @@ else
   fi
 fi
 
-cwm=$(printf '%s' "$arow" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
-cam=$(printf '%s' "$arow" | jq -r '(.metadata.pr_comment_answered // "") | tostring')
-case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
-case "$cam" in ''|*[!0-9]*) cam=0 ;; esac
-[ "$cam" -ge "$cwm" ] || cam="$cwm"
 if ! comments=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/comments?per_page=100" --jq '.[]' 2>/dev/null); then
   echo "$PROG: PR#$num's inline comments could not be read; nothing is dismissed and the caller retries" >&2
   exit 1
 fi
-unread=$(printf '%s' "$comments" | scrub | jq -sr --argjson mark "$cam" --argjson t "$targets" '
-  ([ $t[].id | tostring ]) as $rids
-  | [ .[] | select(((.pull_request_review_id // "") | tostring) as $p | any($rids[]; . == $p))
-          | select((.id // 0) > $mark) | (.id | tostring) ] | join(",")' 2>/dev/null) \
+unread=$({ printf '%s' "$reviews" | scrub | jq -sc '.'; printf '%s' "$comments" | scrub | jq -sc '.'; } \
+  | jq -nr --argjson t "$targets" --argjson m "$(printf '%s' "$arow" | jq -c '.metadata // {}')" --arg self "$self" \
+      "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'(input) as $revs | input
+      | unrouted_comment_ids($revs; [ $t[].id ]; $m; $self) | map(tostring) | join(",")' 2>/dev/null) \
   || { echo "$PROG: PR#$num's inline comments did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
 if [ -n "$unread" ]; then
   echo "$PROG: PR#$num: an approval to dismiss carries inline comments the feedback loop has not routed (comment $unread). A dismissal now would retire them unread, so nothing is dismissed and the caller retries after pr-facts.sh routes them" >&2
