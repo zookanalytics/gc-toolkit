@@ -50,7 +50,20 @@
 #       visit — the key is a write of its own, never a precondition;
 #   (ab) a dropped gc.work_outcome on a visit that records its outcome is read
 #       back and written again before the close;
-#   (ac) a work outcome the visit already records is never written over.
+#   (ac) a work outcome the visit already records is never written over;
+#   (ad) once the close reads back, the branch the bead names in metadata.branch
+#       goes to branch-end.sh with the bead's rig and id, once, after the close;
+#   (ae) a branch-end that cannot end the branch leaves the close standing: exit
+#       0, the bead closed and pointed, and a WARN naming the branch and the
+#       command that ends it;
+#   (af) a branch kept for a live owner is reported, not warned about;
+#   (ag) no branch-end runs when the close is refused or held, when the bead
+#       names no branch, or on a dry run, which names the branch in its plan;
+#   (ah) the repair path ends an already-closed bead's branch too;
+#   (ai) a close that does not read back closed leaves the branch, with a WARN;
+#   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
+#       ends the branch with its tip pinned, and a delete origin refuses leaves
+#       the close standing.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +76,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (got '$1', wanted substring '$2')" ;; esac; }
+hasnt() { case "$1" in *"$2"*) bad "$3 (got '$1', wanted no '$2')" ;; *) ok "$3" ;; esac; }
 
 # --- fake stores ------------------------------------------------------------
 mkdir -p "$TMP/rigs/alpha/.beads" "$TMP/rigs/beta/.beads" "$TMP/bin"
@@ -127,6 +141,37 @@ if [ "$sub" = "dep" ]; then
             echo "✓ removed dependency: $id -> $other" ;;
     *)      exit 1 ;;
   esac
+  exit 0
+fi
+
+# The status contract and the live listing: the two reads branch-end.sh makes
+# besides show, for the end-to-end case.
+if [ "$sub" = "statuses" ]; then
+  printf '%s\n' '{"built_in_statuses":[{"name":"open","category":"active"},{"name":"in_progress","category":"wip"},{"name":"closed","category":"done"}]}'
+  exit 0
+fi
+if [ "$sub" = "list" ]; then
+  st=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --status) st="$2"; shift 2 ;;
+      --status=*) st="${1#--status=}"; shift ;;
+      *) shift ;;
+    esac
+  done
+  rows='[]'
+  for bf in "$DB"/*; do
+    [ -f "$bf" ] || continue
+    bs=$(sed -n 's/^status=//p' "$bf" | tail -1)
+    case ",$st," in *",$bs,"*) ;; *) continue ;; esac
+    lines=$(sed -n 's/^m\.//p' "$bf")
+    meta='{}'
+    [ -z "$lines" ] || meta=$(printf '%s' "$lines" | jq -R -s 'split("\n") | map(select(length > 0))
+      | map(split("=") | {key: .[0], value: (.[1:] | join("="))}) | from_entries')
+    rows=$(jq -nc --argjson r "$rows" --arg id "${bf##*/}" --arg st "$bs" --argjson m "$meta" \
+      '$r + [{id: $id, status: $st, metadata: $m}]')
+  done
+  printf '%s\n' "$rows"
   exit 0
 fi
 
@@ -209,6 +254,8 @@ case "$sub" in
       echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2
       exit 1
     fi
+    # FAKE_BD_CLOSE_NOOP reports a close that never persisted.
+    [ -z "${FAKE_BD_CLOSE_NOOP:-}" ] || exit 0
     # A stub that closes a blocked bead would report a green suite for the bug
     # in case (n) below: the whole defect is that real bd refuses here.
     BLOCKED=$(open_blockers)
@@ -243,6 +290,35 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${FG_LOG:?}"\ncase "${FG_V
 chmod +x "$FG_STUB"
 export GC_FINALIZE_GATE_TOOL="$FG_STUB"
 export FG_LOG="$TMP/finalize-gate.log"; : > "$FG_LOG"
+
+# branch-end.sh is a sibling bead-rehome forks once the close reads back. Stub it
+# so this suite tests the wiring; its own logic is covered by branch-end.test.sh,
+# and case (aj) runs the real one end to end. Each call's argv, with the bead's
+# status as the stub finds it in the fake store, is appended to BE_LOG; BE_RC
+# picks its exit (0 ended, 3 kept, anything else not ended).
+BE_STUB="$TMP/bin/branch-end-stub.sh"
+cat > "$BE_STUB" <<'STUB'
+#!/usr/bin/env bash
+args="$*"; bead=""; rig=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --bead) bead="$2"; shift 2 ;;
+    --rig) rig="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+st=$(sed -n 's/^status=//p' "${FAKE_RIGS_ROOT:?}/$rig/.beads/$bead" 2>/dev/null | tail -1)
+printf '%s status-at-call=%s\n' "$args" "$st" >> "${BE_LOG:?}"
+case "${BE_RC:-0}" in
+  0) echo "branch-end (stub): ended" ;;
+  3) echo "branch-end (stub): kept for a live owner" ;;
+  *) echo "branch-end (stub): did NOT end" >&2 ;;
+esac
+exit "${BE_RC:-0}"
+STUB
+chmod +x "$BE_STUB"
+export GC_BRANCH_END_TOOL="$BE_STUB" BE_LOG="$TMP/branch-end.log" FAKE_RIGS_ROOT="$TMP/rigs"
+: > "$BE_LOG"
 
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 
@@ -619,6 +695,159 @@ eq "$(field alpha status al-visit5)" open "the visit stays OPEN when the reason 
 has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome stamp"
 eq "$(field alpha m.gc.outcome_reason al-visit5)" "" "the reason really was dropped by the fake"
 eq "$(field alpha m.gc.superseded_by al-visit5)" bt-vsucc5 "the pointer is still recorded, so the bead is findable"
+
+# A bead that names the branch its work was pushed to.
+mkbranched() { mkbead "$1" "$2" "$3"; printf 'm.branch=polecat/%s\n' "$3" >> "$TMP/rigs/$1/.beads/$3"; }
+
+# --- (ad) the retired bead's branch goes to branch-end, after the close ------
+# A merge ends a landed branch; a retire ends its own the same way, once the
+# bead it retires reads back closed.
+mkbranched alpha open al-br1
+mkbead beta open bt-br1
+: > "$BE_LOG"
+rc=0; run --origin al-br1 --successor bt-br1 --kind re-homed || rc=$?
+eq "$rc" 0 "a retire whose bead names a branch succeeds"
+eq "$(field alpha status al-br1)" closed "…and closes the bead"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br1 --bead al-br1 status-at-call=closed" \
+   "branch-end is handed the bead's rig, branch and id, once, after the close"
+has "$(cat "$TMP/out")" "branch-end (stub): ended" "…and its report is printed"
+has "$(field alpha notes al-br1)" "branch-end (stub): ended" "…and recorded on the bead"
+
+# --- (ae) a branch that cannot be ended leaves the close standing -----------
+mkbranched alpha open al-br2
+mkbead beta open bt-br2
+rc=0; BE_RC=4 run --origin al-br2 --successor bt-br2 --kind not-needed || rc=$?
+eq "$rc" 0 "a branch-end that fails does not fail the retire"
+eq "$(field alpha status al-br2)" closed "…the close stands"
+eq "$(field alpha m.gc.superseded_by al-br2)" bt-br2 "…with its pointer"
+has "$(cat "$TMP/err")" "branch-end (stub): did NOT end" "…branch-end's own reason is passed on"
+has "$(cat "$TMP/err")" "the close stands, but branch polecat/al-br2 is still on the git remote" "…and a WARN names the branch"
+has "$(cat "$TMP/err")" "end it with: $BE_STUB --rig alpha --branch polecat/al-br2 --bead al-br2" "…and the command that ends it"
+has "$(field alpha notes al-br2)" "Branch polecat/al-br2 is still on the git remote (branch-end exit 4: branch-end (stub): did NOT end)" \
+    "…and the bead records that the branch is still there"
+has "$(field alpha notes al-br2)" "End it with: $BE_STUB --rig alpha --branch polecat/al-br2 --bead al-br2" "…with the command that ends it"
+
+# --- (af) a branch kept for a live owner is reported, not warned about ------
+mkbranched alpha open al-br3
+mkbead beta open bt-br3
+rc=0; BE_RC=3 run --origin al-br3 --successor bt-br3 --kind folded || rc=$?
+eq "$rc" 0 "a branch kept for a live owner does not fail the retire"
+has "$(cat "$TMP/out")" "kept for a live owner" "…its report is printed"
+hasnt "$(cat "$TMP/err")" "WARN" "…and nothing is warned"
+has "$(field alpha notes al-br3)" "kept for a live owner" "…and the bead records why its branch stays"
+
+# --- (ag) no branch-end without a landed close, a branch, or a real run -----
+mkbranched alpha open al-br4
+mkbead beta open bt-br4
+: > "$BE_LOG"
+rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-br4 --successor bt-br4 --kind duplicate || rc=$?
+eq "$rc" 5 "a refused close still exits 5"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+mkbranched alpha open al-br5
+mkbead beta open bt-br5
+rc=0; FG_VERDICT=hold run --origin al-br5 --successor bt-br5 --kind re-homed || rc=$?
+eq "$rc" 5 "a held close still exits 5"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+mkbead alpha open al-br6
+mkbead beta open bt-br6
+rc=0; run --origin al-br6 --successor bt-br6 --kind re-homed || rc=$?
+eq "$rc" 0 "a bead that names no branch retires"
+eq "$(cat "$BE_LOG")" "" "…and calls no branch-end"
+mkbranched alpha open al-br7
+mkbead beta open bt-br7
+rc=0; run --origin al-br7 --successor bt-br7 --kind re-homed --dry-run || rc=$?
+eq "$rc" 0 "a dry run over a branch succeeds"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+has "$(cat "$TMP/out")" "end polecat/al-br7 on the git remote of rig:alpha once the close reads back" "…and its plan names the branch"
+eq "$(field alpha status al-br7)" open "…and closes nothing"
+
+# --- (ah) the repair path ends an already-closed bead's branch too ----------
+mkbranched alpha closed al-br8
+mkbead beta open bt-br8
+: > "$BE_LOG"
+rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
+eq "$rc" 0 "a repair over a bead that names a branch succeeds"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br8 --bead al-br8 status-at-call=closed" \
+   "the repair hands the closed bead's branch to branch-end"
+rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
+eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
+   "a re-run that reaches the same outcome records it once"
+
+# --- (ai) a close that does not read back closed leaves the branch ----------
+mkbranched alpha open al-br9
+mkbead beta open bt-br9
+: > "$BE_LOG"
+rc=0; FAKE_BD_CLOSE_NOOP=1 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
+eq "$(cat "$BE_LOG")" "" "a close that does not read back ends no branch"
+has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the branch was left"
+
+# --- (aj) end to end: the real branch-end.sh against a bare origin -----------
+# A rig of its own, gamma, is a git checkout whose origin is a bare repository:
+# url.insteadOf sends a GitHub-shaped origin to it. Its pre-receive hook refuses
+# branch deletes while the refuse-delete file exists. Nothing from the session's
+# git environment reaches it.
+unset "${!GIT_@}" 2>/dev/null || true
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+: > "$GIT_CONFIG_GLOBAL"
+GM="$TMP/rigs/gamma"; GM_BARE="$TMP/gamma-origin.git"
+mkdir -p "$GM/.beads"
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
+  {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":true},
+  {"name":"gamma","path":"$GM","prefix":"gm","hq":false}
+]}
+JSON
+git init -q --bare -b main "$GM_BARE"
+cat > "$GM_BARE/hooks/pre-receive" <<HOOK
+#!/usr/bin/env bash
+while read -r old new ref; do
+  case "\$ref" in refs/heads/*) case "\$new" in *[!0]*) ;; *) [ -e "$TMP/refuse-delete" ] && { echo "refusing branch deletes" >&2; exit 1; } ;; esac ;; esac
+done
+exit 0
+HOOK
+chmod +x "$GM_BARE/hooks/pre-receive"
+git init -q -b main "$GM"
+git -C "$GM" config user.email t@e.com
+git -C "$GM" config user.name T
+git -C "$GM" config commit.gpgsign false
+git -C "$GM" remote add origin https://github.com/test/gamma.git
+git -C "$GM" config "url.$GM_BARE.insteadOf" https://github.com/test/gamma.git
+echo seed > "$GM/seed"; git -C "$GM" add seed; git -C "$GM" commit -qm seed
+git -C "$GM" push -q origin main
+for b in polecat/gm-e2e1 polecat/gm-e2e2 polecat/gm-bystander; do
+  git -C "$GM" checkout -q -b "$b" main
+  echo "$b" > "$GM/work"; git -C "$GM" add work; git -C "$GM" commit -qm "work on $b"
+  git -C "$GM" push -q origin "$b"
+  git -C "$GM" checkout -q main
+done
+gm_tip() { git -C "$GM_BARE" rev-parse -q --verify "refs/heads/$1" 2>/dev/null || true; }
+TIP1=$(gm_tip polecat/gm-e2e1); TIP2=$(gm_tip polecat/gm-e2e2)
+
+mkbranched gamma open gm-e2e1
+mkbead beta open bt-e2e1
+rc=0; GC_BRANCH_END_TOOL='' run --origin gm-e2e1 --successor bt-e2e1 --kind re-homed || rc=$?
+eq "$rc" 0 "end to end: the retire succeeds"
+eq "$(field gamma status gm-e2e1)" closed "end to end: the bead is closed"
+eq "$(gm_tip polecat/gm-e2e1)" "" "end to end: its branch is gone from origin"
+eq "$(git -C "$GM_BARE" rev-parse -q --verify "refs/tags/archive/polecat/gm-e2e1@${TIP1:0:12}^{commit}" || true)" "$TIP1" \
+   "end to end: an archive tag on origin pins the tip"
+has "$(cat "$TMP/out")" "branch-end: ended polecat/gm-e2e1" "end to end: the end is reported"
+has "$(field gamma notes gm-e2e1)" "branch-end: ended polecat/gm-e2e1 at ${TIP1:0:12}; its tip is kept by refs/tags/archive/polecat/gm-e2e1@${TIP1:0:12}" \
+    "end to end: the bead records where the tip is kept"
+[ -n "$(gm_tip polecat/gm-bystander)" ] && ok "end to end: a branch no retire names stays" || bad "end to end: a branch no retire names stays"
+
+mkbranched gamma open gm-e2e2
+mkbead beta open bt-e2e2
+: > "$TMP/refuse-delete"
+rc=0; GC_BRANCH_END_TOOL='' run --origin gm-e2e2 --successor bt-e2e2 --kind re-homed || rc=$?
+rm -f "$TMP/refuse-delete"
+eq "$rc" 0 "end to end: a delete origin refuses does not fail the retire"
+eq "$(field gamma status gm-e2e2)" closed "end to end: the close stands"
+eq "$(gm_tip polecat/gm-e2e2)" "$TIP2" "end to end: the branch stays at its tip"
+has "$(cat "$TMP/err")" "branch-end: did NOT end polecat/gm-e2e2: origin refused the delete" "end to end: branch-end's reason reaches the caller"
+has "$(cat "$TMP/err")" "the close stands" "end to end: and the WARN says the close stands"
+has "$(field gamma notes gm-e2e2)" "Branch polecat/gm-e2e2 is still on the git remote" "end to end: the bead records that its branch is still there"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"
