@@ -1223,12 +1223,14 @@ eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
 # --- 6c. The bring-current guard. ---------------------------------------------
-# A merge-in child that took judgment on an approved PR must not reach the
-# handoff before its guard has filed the visit and dismissed the approval, and a
+# A round that brought the branch current must not reach the handoff before the
+# guard has held it to the worker's audit and recorded it on the anchor, and a
 # guard that cannot finish must hand nothing off: the open bead is what keeps
-# blocking the anchor's merge until a re-run finishes the guard. So the block
-# sits after the verified push, which gives it the pushed head, and before the
-# handoff, and it reads the origin head from before the push.
+# blocking the anchor's merge until a re-run finishes the guard. An audit that
+# does not cover the round is the worker's to complete, so that refusal stops
+# the block without draining. The block sits after the verified push, which
+# gives it the pushed head, and before the handoff, and it reads the origin head
+# from before the push.
 BCG_BLOCK="$(extract submit-bring-current-guard)"
 [ -n "$BCG_BLOCK" ] \
   && ok "bring-current guard extracted between submit-bring-current-guard markers" \
@@ -1273,6 +1275,10 @@ eq "$(run_bcg 1)" "1|GUARD,DRAIN" "a guard that cannot finish drains before any 
 grep -q "BRING-CURRENT GUARD DID NOT FINISH" "$TMP/out" \
   && ok "…and says the bead is not handed off" \
   || bad "the guard failure must say the bead is not handed off"
+eq "$(run_bcg 3)" "3|GUARD" "an audit that does not cover the round stops before any handoff write, without draining"
+grep -q "BRING-CURRENT AUDIT INCOMPLETE" "$TMP/out" \
+  && ok "…and tells the worker to record the entries and re-run" \
+  || bad "the audit refusal must tell the worker to complete the audit"
 eq "$(run_bcg 0 '')" "0|GUARD" "an unread origin head still runs the guard, which decides what that means"
 eq "$(cat "$TMP/guard-argv")" "guard --bead tk-work --to sha-local --from " \
    "…passing the empty start through rather than dropping the flag"
