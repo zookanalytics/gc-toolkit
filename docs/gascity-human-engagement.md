@@ -558,6 +558,36 @@ subject's visits. Dismissing the visit without an answer leaves the gate open
 and the question owed, with no second visit offered unless `gc.gate_visit` is
 unset.
 
+### Two visit channels: keyless conversation, keyed escalation
+
+A visit reaches a person two ways. Both channels file through the one
+`gate-visit` snippet, whose copies `assets/scripts/gate-visit.test.sh` holds to
+the same invariants. Each channel keeps one open visit per situation, and they
+differ in what names the situation.
+
+A **conversation visit** is keyless, and its subject names its situation.
+`gc-helm.sh open` files the operator's board pick, and `gate-visit-sweep` and
+`gc-visit-open.sh` file through it. It folds a second ask into whatever visit is
+already open on the subject. The one deliberate exception is `gc-helm.sh
+engage` when the operator asks for a new visit, which passes `--allow-duplicate`
+to file a fresh visit for a distinct concern. The formula copies of the snippet,
+in `mol-visit`, `mol-validate-close` and `mol-feedback-distiller`, first look
+for a conversation visit already open on the subject and reuse it. That check
+matters when a step runs twice, either because a later command in it failed and
+the block is re-run or because a second session takes a re-offered step.
+Without it the second run files a second visit, which goes on asking after the
+first one is answered. Both paths read coverage through
+`assets/scripts/visit-identity.sh`. It reads the visit's `tracks` edge and falls
+back to the `gc.continuation_group` stamp.
+
+An **escalation visit** is keyed. `assets/scripts/escalate.sh` stamps
+`escalation_key` and keeps one open visit per subject and key. It also carries a
+verdict window, which declines to re-raise a situation a person already ruled
+moot or benign. That is what a detector that re-fires every cycle needs. A
+formula copy never reuses an escalation visit. `escalate.sh --retract` closes
+one as moot when its own situation clears, and the formula's question would
+close with it, unasked.
+
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 
 What the conversation demand gates is the choice that keeps a sitting from
