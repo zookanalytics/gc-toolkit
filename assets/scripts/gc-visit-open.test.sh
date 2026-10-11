@@ -91,8 +91,7 @@ mkdir -p "$TMP/bin" "$TMP/rigs/gc-toolkit/.beads" "$TMP/rigs/gascity/.beads"
 # Two rigs, so "which ledger" is a real question the test can check. Every
 # mutating call is appended to $FAKE_CALLS so "nothing was created" is asserted
 # against the actual argv, not against exit status alone.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
@@ -721,8 +720,7 @@ eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 # There is no timeout arm — unlike gc-helm.sh this script does not bound the
 # call, so there is no kill to report.
 mkdir -p "$TMP/rigbin"
-cat > "$TMP/rigbin/gc" <<'RIGSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rigbin/gc" <<'RIGSTUB'
 if [ "$1 ${2:-}" = "rig list" ]; then
   case "${RIGMODE:-}" in
     exitfail) echo "dial tcp 127.0.0.1:3307: connect: connection refused" >&2; exit 7 ;;
@@ -793,8 +791,7 @@ grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
-cat > "$TMP/enumbin/gc" <<'ENUMGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
 [ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
 exit 0
 ENUMGC
