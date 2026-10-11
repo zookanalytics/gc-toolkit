@@ -106,16 +106,13 @@ id = "first-reaction"
 title = "Do the cheap reaction and write the first-reaction card to notes"
 needs = ["load-bead"]
 description = """
-**A first reaction happens once — check before you write.** When a session
-runs this workflow inline and closes only an earlier step, the graph re-offers
-this step to a second session on a bead whose reaction is already done. A
-completed reaction carries `gc.first_reaction` (and `gc.proactive_reaction=1`
-from the release). Writing a second card duplicates it, and the
-`advance-and-drain` dispose that follows would re-release a bead a worker may
-already hold — `first-reaction-dispose.sh` refuses the second dispose, but the
-wasted card is avoidable. So check first, and if it is already reacted, write
-no card and run no dispose: close this step, let the claim loop carry you to
-`advance-and-drain`, and take its step-2 chain-close and drain.
+**A first reaction happens once — check before you write.** The graph can
+re-offer this step to a second session on a bead whose reaction is already
+done: it carries `gc.first_reaction` (and `gc.proactive_reaction=1` from the
+release). A second card only duplicates the first, and
+`first-reaction-dispose.sh` refuses a second dispose. So if it is already
+reacted, write no card and run no dispose: close this step, let the claim loop
+carry you to `advance-and-drain`, and take its step-2 chain-close and drain.
 
 ```bash
 # >>> first-reaction-reacted-check
@@ -228,16 +225,13 @@ if the operator Accepts: broad direction, not a spec — the bead's own content
 plus `execute via <mol>`, naming the formula that action takes.
 
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
-on a snapshot that may have moved by the time the human reads it (design Risk
-"stale proactive worldview"). The `## Found` timestamp is that stamp.
+on a snapshot that may have moved by the time the human reads it. The
+`## Found` timestamp is that stamp.
 
-The card's one-line headline doubles as the board-visible **takeaway** — the
-single sentence `gc-helm.sh` renders as the anchor's NEEDS, so a glance
-explains what the reaction concluded / what it needs. Derive it from your
-**## Decision needed** (the one thing the human must accept or redirect); keep
-it ≤140 chars on ONE line (the wrapper collapses stray whitespace, but a tight
-single line reads best). You stamp it in the final step, folded into the bead's
-release (`takeaway … --release`) — one Dolt write, not a separate stamp here.
+The card's one-line headline doubles as the board-visible **takeaway**, the
+sentence `gc-helm.sh` renders as the anchor's NEEDS. Derive it from your
+**## Decision needed**, ≤140 chars on ONE line. The final step stamps it with
+the bead's release, so there is no separate stamp here.
 
 **mr-invariant (only if this reaction produced code).** A first reaction is
 notes-only by default. If — and only if — you wrote code, it takes the
@@ -260,7 +254,7 @@ merge, and step 3 hands the bead to the human, not the refinery.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.first-reaction --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-first-reaction.first-reaction --outcome pass
 ```
 
 **Exit criteria:** the card is appended to the bead's notes, and this step
@@ -286,11 +280,9 @@ included: it routes the bead to a validating closer rather than closing it here.
 | close | route the bead to a validating closer | a capable pool re-checks the no-work call and closes the bead, or escalates |
 | ruling | file a human gate | a gate whose visit the operator lands in, Discuss-only |
 
-`gc.origin=operator` does not force an exit: an operator capture is triaged on
-its merits like any other bead. `first-reaction-dispose.sh` performs all five.
-It records what you chose and why on the bead (`gc.first_reaction*`) before it
-acts, and the release it writes stamps `gc.proactive_reaction=1` so no scan
-re-reacts.
+`first-reaction-dispose.sh` performs all five. It records what you chose and
+why on the bead (`gc.first_reaction*`) before it acts, and the release it
+writes stamps `gc.proactive_reaction=1` so no scan re-reacts.
 
 **Run your exit as ONE command that starts with these lines.**
 `first-reaction-guard.sh` stands down when a live owner already owns the
@@ -348,39 +340,26 @@ research note):
 ```
 
 **1c. CLOSE — you are confident there is nothing to do, so route the bead to a
-validating closer.** Take this when you verified the thing is already fixed
-with nothing left to merge, or the bead should not exist. The closer runs
-mol-validate-close on this rig's capable pool (`--route` for another), re-checks
-your conclusion against live state, and closes the bead or escalates. Your
-`--reason` is its brief: why there is no work, and the counter-case for keeping
-the bead open. The closer must be the bead's only workflow, so
-`--after-workflow` defers it behind this reaction's own root until the
-reaction closes. When the conclusion is the operator's to make, it is a ruling
-(1d):
+validating closer.** The closer runs mol-validate-close on this rig's capable
+pool (`--route` for another), re-checks your conclusion against live state, and
+closes the bead or escalates. Your `--reason` is its brief: why there is no
+work, and the counter-case for keeping the bead open. The closer must be the
+bead's only workflow, so `--after-workflow` defers it behind this reaction's
+own root until the reaction closes:
 ```bash
 REACTION_ROOT=$(gc bd list --status open,in_progress --metadata-field gc.input_convoy_id={{convoy_id}} --metadata-field gc.kind=workflow --json --limit 0 | tr -d '[:cntrl:]' | jq -r '.[0].id // empty')
 "$DISPOSE" "$WORK_BEAD_ID" --disposition close --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<the ≤140-char headline>" ${REACTION_ROOT:+--after-workflow "$REACTION_ROOT"}
 ```
 
 **1d. RULING or RECOMMEND — the operator's move, so put it to them as a human
-gate.** Both file the SAME native human gate that blocks the bead; they differ
-in whether you can name the action:
-
-- **ruling** — the operator's judgment, with no worker-runnable action to offer:
-  a genuine fork, an irreversible or destructive action, or a policy call.
-  Discuss-only.
-- **recommend** — you can name the action, but it warrants the operator's
-  trigger: an authority-gated action (retire an in-flight PR, supersede an
-  anchor), or a consequential call you have a clear lean on. Name the execution
-  mol with `--recommended-formula <mol>` so the operator can Accept it from the
-  visit; the `--takeaway` states the recommendation AND why they might discuss
-  instead.
-
-Both are the minority case: if a pool or a named agent can just do the thing
-take 1a, and if there is honestly nothing to do take 1c. The script files the
-gate through `gc-helm.sh demand` under the topic `first-reaction`, one per bead
-and topic, so a re-run refreshes it. `orders/gate-visit-sweep.toml` files its
-visit on its next pass; you file no visit here:
+gate.** Both file the SAME native human gate that blocks the bead. A
+**ruling** names no action and is Discuss-only. A **recommend** names its
+execution mol with `--recommended-formula <mol>`, so the operator can Accept it
+from the visit, and its `--takeaway` states the recommendation AND why they
+might discuss instead. The script files the gate through `gc-helm.sh demand`
+under the topic `first-reaction`, one per bead and topic, so a re-run refreshes
+it. `orders/gate-visit-sweep.toml` files its visit on its next pass; you file
+no visit here:
 ```bash
 # ruling — a fork, irreversible action, or policy call; Discuss-only (no --recommended-formula):
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the fork, irreversible action, or policy call only the operator can decide>" --takeaway "<the ≤140-char headline>"
