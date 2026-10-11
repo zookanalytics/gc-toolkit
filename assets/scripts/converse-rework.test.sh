@@ -9,8 +9,9 @@
 # that it carries source_ruling_bead and NOT a minted source_review_bead, the
 # blocks edge, the dispatch read-back, idempotency on the ruling, the identity
 # riding in the create so a lost create id is adopted rather than twinned, a
-# review's child never adopted for a ruling, the open-PR-only guard, and the
-# no-double-dispatch refusal on a partial pour.
+# review's child never adopted for a ruling, the open-PR guards (a live anchor
+# at pull_request, carrying no disposition, naming its branch, target and PR),
+# and the no-double-dispatch refusal on a partial pour.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -227,6 +228,23 @@ reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"pull_request",
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
 eq "$RC" "2" "exit 2 when the anchor names no target"
 eq "$(created)" "0" "no child filed when the target is unknown"
+
+echo "# --- guard: an anchor still at pull_request but not an open PR is refused ---"
+# merge_result alone does not prove the PR open: a hand-closed anchor keeps the
+# field, and a disposed one sits at pull_request until pr-facts.sh consummates
+# the close. Each is refused before the writer runs.
+guard() { # <label> <jq edit of the anchor row> <expected message fragment>
+  reset "$(printf '%s' "$ANCHOR_PR" | jq -c "$2")"
+  OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+  eq "$RC" "2" "exit 2 when $1"
+  has "$OUT" "$3" "…saying why"
+  eq "$(created)" "0" "…and no child filed"
+  eq "$(grep -c '^bd list' "$STUB_GC_LOG")" "0" "…before the writer's dedup read"
+}
+guard "the anchor is closed" '.[0].status = "closed"' "status='closed', not live"
+guard "pr-dispose.sh has disposed the anchor" '.[0].metadata["gc.pr_close_disposition_kind"] = "not-needed"' "gc.pr_close_disposition_kind=not-needed"
+guard "the anchor is superseded" '.[0].metadata["gc.superseded_by"] = "anc-2"' "superseded by anc-2"
+guard "the anchor names no PR" '.[0].metadata |= del(.existing_pr, .pr_url)' "names no PR"
 
 echo "# --- no double-dispatch: a partial pour (no route stamped) refuses the bare-route fallback ---"
 reset "$ANCHOR_PR"
