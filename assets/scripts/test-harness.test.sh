@@ -357,6 +357,24 @@ gc bd update tk-desc -d third >/dev/null
 eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
 eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
 
+# The gc bd update stub lands a whole write in one jq, and the gc bd list stub
+# answers a query and all of its --metadata-field filters in one, however many
+# flags the call carries. Each counted call is read back, so a call that stopped
+# before its jq cannot pass the count.
+store '[{"id":"tk-one","status":"open","assignee":"a","title":"o","notes":"n","metadata":{"old":"x","gone":"y"}},
+        {"id":"tk-two","status":"open","assignee":"","title":"t","notes":"","metadata":{"lane":"c","stage":"1"}}]'
+one=$(jq_runs gc bd update tk-one --set-metadata k1=1)
+many=$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
+  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)
+eq "$many" "$one" "update: a write with nine flags starts as many jq processes as one with a single key"
+eq "$(jq -c '.[] | select(.id == "tk-one") | [.metadata, .assignee, .status, .notes, .description]' "$STUB_STORE")" \
+  '[{"old":"x","k1":3},"bob","in_progress","n\nmore","d"]' "update: …and every flag of that write lands"
+one=$(jq_runs gc bd list --json)
+many=$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)
+eq "$many" "$one" "list: a read with three --metadata-field filters starts as many jq processes as one with none"
+eq "$(gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json | jq -r 'map(.id) | join(",")')" "tk-two" \
+  "list: …and that read answers with the one bead every filter matches"
+
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
 # failure an undeclared name records is read back from its output rather than
