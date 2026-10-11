@@ -7,7 +7,10 @@
 #             before the latest is taken; a COMMENTED review is neither; a tie on
 #             the timestamp falls to the review id. standing_approvals names
 #             every outside approval not yet dismissed, and dismissing that set
-#             leaves no approver behind.
+#             leaves no approver behind. approvals_since names the outside
+#             approvals that answer an ask made at an instant: each account's
+#             latest opinion, an approval submitted no earlier than the ask, and
+#             none against an instant that is not GitHub's form.
 #   (READERS) every reader of the rule sources this file and applies
 #             $REVIEW_VERDICT_DEF
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
@@ -77,6 +80,24 @@ eq "$(approvals "$STANDING")" '[1,3,2,5]' \
 eq "$(withdrawn "$STANDING")" '[{"veto":"human3","approver":""},{"veto":"","approver":""}]' \
    "(PRED) dismissing the standing approvals leaves no approver, and none comes back once the later CHANGES_REQUESTED is dismissed"
 
+echo "# the approvals given since an ask"
+since() { printf '%s' "$1" | jq -c --arg self "$SELF" --arg since "$2" "$REVIEW_VERDICT_DEF"'[ approvals_since($self; $since)[] | .id ]'; }
+ASKED="2026-08-21T00:00:00Z"
+eq "$(since "[$(rv 1 human1 APPROVED 2026-08-21T00:00:00Z),$(rv 2 human2 APPROVED 2026-08-22T00:00:00Z)]" "$ASKED")" '[1,2]' \
+   "(PRED) an outside approval submitted at or after the ask answers it"
+eq "$(since "[$(rv 1 human1 APPROVED 2026-08-20T23:59:59Z)]" "$ASKED")" '[]' \
+   "(PRED) one submitted before the ask does not, though it still stands"
+eq "$(since "[$(rv 1 human1 DISMISSED 2026-08-22T00:00:00Z),$(rv 2 $SELF APPROVED 2026-08-22T00:00:00Z),$(rv 3 human2 COMMENTED 2026-08-22T00:00:00Z)]" "$ASKED")" '[]' \
+   "(PRED) neither a dismissed approval, the city's own, nor a COMMENTED review answers it"
+eq "$(since "[$(rv 1 human1 APPROVED 2026-08-22T00:00:00Z),$(rv 2 human1 CHANGES_REQUESTED 2026-08-23T00:00:00Z)]" "$ASKED")" '[]' \
+   "(PRED) an approval its author has since replaced with a CHANGES_REQUESTED does not"
+eq "$(since "[$(rv 1 human1 APPROVED 2026-08-20T00:00:00Z),$(rv 2 human1 APPROVED 2026-08-22T00:00:00Z)]" "$ASKED")" '[2]' \
+   "(PRED) an account that approved again after the ask answers it with that approval"
+for bad_since in "" "2026-08-21" "2026-08-21T00:00:00.5Z" "2026-08-21T00:00:00-06:00" "null"; do
+  eq "$(since "[$(rv 1 human1 APPROVED 2026-08-22T00:00:00Z)]" "$bad_since")" '[]' \
+     "(PRED) an ask instant that is not YYYY-MM-DDTHH:MM:SSZ ('$bad_since') answers nothing"
+done
+
 echo "# every reader sources the one definition"
 READERS="assets/scripts/merge.sh
 assets/scripts/pr-facts.sh
@@ -96,7 +117,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of the rule under any of its names. Specs and generated
 # renders are history and output, not readers.
-COPY_RE='def (review_verdict|latest_opinions|standing_approvals)[[:space:]]*\('
+COPY_RE='def (review_verdict|latest_opinions|standing_approvals|approvals_since)[[:space:]]*\('
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

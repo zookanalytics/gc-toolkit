@@ -47,4 +47,16 @@ REVIEW_VERDICT_DEF='
   # CHANGES_REQUESTED from the same account once that request is dismissed.
   def standing_approvals($self):
     [ .[] | select((.user.login // "") != $self) | select(.state == "APPROVED") ];
+  # The approvals that answer a re-review asked for at $since: each account
+  # other than $self whose latest opinion is an approval submitted at or after
+  # $since. $since is an instant in the form GitHub stamps, YYYY-MM-DDTHH:MM:SSZ,
+  # in which instants order as strings. An approval given before the ask does
+  # not answer it, and neither does one its author has since replaced with a
+  # CHANGES_REQUESTED. A $since in any other form answers nothing, so an instant
+  # that did not read never counts an approval.
+  def approvals_since($self; $since):
+    if (($since | tostring) | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) then
+      [ latest_opinions($self)[] | select(.state == "APPROVED")
+        | select(((.submitted_at // "") | tostring) >= $since) ]
+    else [] end;
 '
