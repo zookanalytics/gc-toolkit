@@ -228,9 +228,15 @@ an account other than the city's, with a standing CHANGES_REQUESTED from any
 other account a veto. An approval stands across later pushes until it is
 dismissed, so it counts whatever commit it was given at. A dismissed review is
 dropped before each reviewer's latest review is taken, so it neither approves
-nor vetoes, and it does not hide its author's older approval. No
-`check.approval` marker and no `check_set` token arms it or opts out, and
-GitHub branch protection is an extra layer, not the authority.
+nor vetoes, and it does not hide its author's older approval. A small fix after
+an approval lands on it. An outside approval is dismissed when the code that
+would land is not the code the approver saw: by `bring-current-guard.sh` when
+bringing the branch current took judgment, and by `approval-withdraw.sh` when
+the validator rules a fresh whole-diff review warranted. Each dismisses every
+approval an account has not had dismissed, not only its latest, because an
+older approval would otherwise count again. No `check.approval` marker and no
+`check_set` token arms it or opts out, and GitHub branch protection is an extra
+layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check

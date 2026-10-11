@@ -35,9 +35,11 @@
 # ORDER. On judgment over a standing approval, the visit is filed first and read
 # back: it holds the anchor's merge (finalize-gate.sh) and tells the operator
 # why, so no dismissal strands a PR without a signal. Each approving account is
-# then re-requested and its approval dismissed, the order pr-facts.sh uses when
-# it clears a human review. A dismissal that does not land is noted on the
-# visit, which still holds the merge.
+# then re-requested and every approval it has standing is dismissed, the order
+# pr-facts.sh uses when it clears a human review. An account that approved
+# twice loses both approvals, because a dismissed review drops out of the
+# approval rule and the older approval would count again. A dismissal that does
+# not land is noted on the visit, which still holds the merge.
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]
@@ -65,10 +67,14 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
-# The approval rule merge.sh lands on: standing_approvals($self) is one review per
-# approving account other than the city's.
+# The approval rule merge.sh lands on: standing_approvals($self) is every
+# approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# The PR and approval naming the two approval dismissers share (pr_coords,
+# approval_phrase).
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 TAB=$(printf '\t')
@@ -396,13 +402,12 @@ cmd_guard() {
   fi
 
   # Judgment. Whether it costs an approval depends on whether one stands.
-  local host repo self reviews approvals logins noun covers them are key msg dmsg visit rows failed="" dismissed="" rid login
-  host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
-  repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
-  if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
+  local host repo self reviews approvals logins noun covers them are key msg dmsg visit rows failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN APPROVAL_VERB
+  if ! pr_coords "$url" "$num"; then
     echo "$PROG: $bead names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
     return 1
   fi
+  host="$PR_HOST"; repo="$PR_REPO"
   self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
   if [ -z "$self" ]; then
     echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
@@ -422,12 +427,9 @@ cmd_guard() {
     echo "$PROG: PR#$num's bring-current took judgment, but no approval stands to dismiss; the next review sees the change"
     return 0
   fi
-  logins=$(printf '%s' "$approvals" | jq -r '[ .[].login ] | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
-  if [ "$(printf '%s' "$approvals" | jq 'length')" -gt 1 ]; then
-    noun="approvals"; covers="cover"; them="them"; are="are"
-  else
-    noun="approval"; covers="covers"; them="it"; are="is"
-  fi
+  approval_phrase "$approvals"
+  logins="$APPROVERS"; noun="$APPROVAL_NOUN"; are="$APPROVAL_VERB"
+  if [ "$noun" = "approvals" ]; then covers="cover"; them="them"; else covers="covers"; them="it"; fi
 
   if [ -z "$anchor" ]; then
     rows=$(bd_list --status=open --metadata-field branch="$branch") || rows=""
@@ -465,13 +467,18 @@ Your call: review the change on the PR and approve again to let it land, or say 
   fi
 
   dmsg="Bringing this branch current with $target took judgment (pushed head $(short "$to")), so this approval no longer covers the code that would land: $(printf '%s\n' "$REASONS" | awk -v max="$MAX_REASONS" 'NF { n++; if (n <= max) printf "%s%s", (n > 1 ? "; " : ""), $0 } END { if (n > max) printf "; and %d more", n - max }'). Please review the change and approve again."
-  while IFS=$'\t' read -r rid login; do
-    [ -n "$rid" ] || continue
+  while IFS= read -r login; do
+    [ -n "$login" ] || continue
     gh api --hostname "$host" -X POST "repos/$repo/pulls/$num/requested_reviewers" \
       -f "reviewers[]=$login" </dev/null >/dev/null 2>&1 || failed="$failed; $login was not re-requested"
+  done <<APPROVERS
+$(printf '%s' "$approvals" | jq -r '[ .[].login ] | unique | .[]')
+APPROVERS
+  while IFS=$'\t' read -r rid login; do
+    [ -n "$rid" ] || continue
     if gh api --hostname "$host" -X PUT "repos/$repo/pulls/$num/reviews/$rid/dismissals" \
          -f message="$dmsg" </dev/null >/dev/null 2>&1; then
-      dismissed="$dismissed${dismissed:+, }$login"
+      dismissed="$dismissed${dismissed:+, }$login (review $rid)"
     else
       failed="$failed; the approval from $login (review $rid) could not be dismissed"
     fi
