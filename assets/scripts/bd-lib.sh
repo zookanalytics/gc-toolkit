@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the one-write create every script files a stamped bead through,
-# and the gating-PR read the merge and pr-facts arms share. Sourced, never
-# executed.
+# the metadata read-back that gates handing such a bead on, and the gating-PR
+# read the merge and pr-facts arms share. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -152,10 +152,8 @@ bd_live_children() {
 # --body-file - (stdin reaches the create), --status, --notes, --db and the
 # rest. The helper adds --metadata and --json.
 #
-# The bead is read back from the store the create wrote, and every key must
-# read back with the value written. Values compare as text, because bd keeps a
-# create's string values as strings while a --set-metadata re-stamp of the same
-# key can store a number.
+# The bead is read back from the store the create wrote (bd_meta_readback), and
+# every key must read back with the value written.
 #
 # Returns:
 #   0  filed, and every key read back. Prints the id.
@@ -167,9 +165,10 @@ bd_live_children() {
 #      first looks for the bead the way its own dedup does.
 #   2  filed, but the read-back could not be made or did not show every key as
 #      written. Prints the id. The bead carries at least part of its metadata,
-#      so a caller holds off acting on it and retries on its next run.
+#      so a caller hands it on only once bd_meta_ensure has made it whole, in
+#      the same run or in the later one whose dedup finds it.
 bd_create() {
-  local meta="${1:-}" db="" prev="" a reply id row verdict err
+  local meta="${1:-}" db="" prev="" a reply id got verdict short err
   shift || true
   printf '%s' "$meta" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1 \
     || { echo "bd_create: refusing to file a bead without a metadata object; nothing filed" >&2; return 1; }
@@ -189,15 +188,8 @@ bd_create() {
     echo "bd_create: bd create returned no id${err:+: $err}" >&2
     return 1
   fi
-  row=$(bd_json show "$id" ${db:+--db "$db"} </dev/null)
-  verdict=$(printf '%s' "$row" | jq -r --arg id "$id" --argjson m "$meta" '
-    if type == "array" and ((.[0].id // "") == $id) then
-      ((.[0].metadata // {}) | if type == "object" then . else {} end) as $got
-      | if ($m | to_entries | all(.[]; . as $e | ($got | has($e.key))
-              and ((($got[$e.key] // "") | tostring) == (($e.value // "") | tostring)))) then "landed"
-        elif ($m | keys | all(.[]; . as $k | ($got | has($k)) | not)) then "bare"
-        else "partial" end
-    else "unreadable" end' 2>/dev/null)
+  got=$(bd_meta_readback "$id" "$meta" ${db:+--db "$db"})
+  verdict="${got%%$'\t'*}"; short="${got#*$'\t'}"
   case "$verdict" in
     landed)
       printf '%s\n' "$id"
@@ -210,10 +202,66 @@ bd_create() {
       echo "bd_create: $id landed without its metadata and was closed; nothing filed" >&2
       return 1 ;;
     *)
-      echo "bd_create: $id was filed but its metadata did not read back as written (${verdict:-unreadable})" >&2
+      echo "bd_create: $id was filed but its metadata did not read back as written (${verdict:-unreadable}${short:+: $short})" >&2
       printf '%s\n' "$id"
       return 2 ;;
   esac
+}
+
+# bd_meta_readback <id> <metadata-json> [gc-bd-show-args...] — how a bead in the
+# store carries a metadata payload. Prints one line: a verdict, a tab, and the
+# payload's keys that do not read back with the value written, comma-joined.
+#   landed      every key reads back as written
+#   bare        the bead carries none of the payload's keys
+#   partial     some key is missing, or reads back with another value
+#   unreadable  the bead itself did not read back
+# Values compare as text, because bd keeps a create's string values as strings
+# while a --set-metadata write of the same key can store a number. The trailing
+# arguments reach `gc bd show`, so the read follows the --db a write named.
+bd_meta_readback() {
+  local id="${1:-}" meta="${2:-}" out
+  shift 2 || true
+  out=$(bd_json show "$id" "$@" </dev/null | jq -r --arg id "$id" --argjson m "$meta" '
+    if type == "array" and ((.[0].id // "") == $id) then
+      ((.[0].metadata // {}) | if type == "object" then . else {} end) as $got
+      | [ $m | to_entries[] | . as $e
+          | select((($got | has($e.key))
+                    and ((($got[$e.key] // "") | tostring) == (($e.value // "") | tostring))) | not)
+          | .key ] as $short
+      | (if ($short | length) == 0 then "landed"
+         elif ($m | keys | all(.[]; . as $k | ($got | has($k)) | not)) then "bare"
+         else "partial" end) + "\t" + ($short | join(","))
+    else "unreadable\t" end' 2>/dev/null)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else printf 'unreadable\t\n'; fi
+}
+
+# bd_meta_ensure <id> <metadata-json> — make a bead that already exists carry a
+# payload before its caller hands it on. The payload is read back, and when any
+# key is short every key is written in one update and read back again. Returns 0
+# once every key reads back as written. Otherwise prints the keys still short,
+# comma-joined, or "unreadable" when the bead itself did not read back, and
+# returns 1.
+#
+# A route or a sling makes a bead someone's work order, so a caller gates that
+# act on this check and not on the exit of the write that filed the bead:
+# bd_create prints the id of a bead whose read-back fell short (its rc 2), and
+# `gc bd update` can exit 0 without writing. The write ignores bd's claim guard,
+# so a caller runs this only on a bead nobody has taken.
+bd_meta_ensure() {
+  local id="${1:-}" meta="${2:-}" got kv sets=()
+  got=$(bd_meta_readback "$id" "$meta")
+  [ "${got%%$'\t'*}" = landed ] && return 0
+  while IFS= read -r -d '' kv; do
+    sets+=(--set-metadata "$kv")
+  done < <(printf '%s' "$meta" | jq -j 'to_entries[] | "\(.key)=\(.value | if type == "string" then . else tojson end)\u0000"' 2>/dev/null)
+  if [ "${#sets[@]}" -gt 0 ]; then
+    gc bd update "$id" "${sets[@]}" </dev/null >/dev/null 2>&1 || true
+    bd_cache_clear
+    got=$(bd_meta_readback "$id" "$meta")
+    [ "${got%%$'\t'*}" = landed ] && return 0
+  fi
+  if [ "${got%%$'\t'*}" = unreadable ]; then printf 'unreadable\n'; else printf '%s\n' "${got#*$'\t'}"; fi
+  return 1
 }
 
 # The gating-PR read. The merge arm (merge.sh) and the pr-facts arm

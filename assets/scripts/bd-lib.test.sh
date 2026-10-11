@@ -182,7 +182,7 @@ has "$(cat "$TMP/err")" "landed without its metadata and was closed" "…and std
 store '[]'
 id=$(STUB_DROP_KEYS="new-1:check_name" bd_create "$META" "partial" -t task 2>"$TMP/err"); rc=$?
 eq "$rc|$id|$(bstatus new-1)" "2|new-1|open" "bd_create: a partial read-back returns 2, prints the id and leaves the bead open"
-has "$(cat "$TMP/err")" "did not read back as written (partial)" "…and stderr names the partial read-back"
+has "$(cat "$TMP/err")" "did not read back as written (partial: check_name)" "…and stderr names the partial read-back and the key it is short of"
 
 # A read-back that fails proves nothing about the bead, so nothing is closed.
 store '[]'
@@ -220,6 +220,50 @@ eq "$(cache_files)" 1 "bd_create: (a cached list before the create)"
 id=$(bd_create "$META" "cache" -t task)
 eq "$(cache_files)" 0 "bd_create: the create drops the per-pass bd_list cache"
 unset GC_RECONCILE_BD_CACHE
+
+# --- bd_meta_readback: the verdict and the keys a bead is short of ------------
+store '[{"id":"tk-m","status":"open","assignee":"","title":"m","notes":"","metadata":{"task_kind":"review","anchor_bead":"tk-anc","pr_number":42}}]'
+eq "$(bd_meta_readback tk-m '{"task_kind":"review","anchor_bead":"tk-anc"}')" "landed	" \
+  "bd_meta_readback: every key read back as written is landed, with no key named"
+eq "$(bd_meta_readback tk-m '{"task_kind":"review","branch":"b","target":"main"}')" "partial	branch,target" \
+  "…a missing key is partial, and the line names each key short, in the payload's order"
+eq "$(bd_meta_readback tk-m '{"task_kind":"rework","anchor_bead":"tk-anc"}')" "partial	task_kind" \
+  "…a key read back with another value is short too"
+eq "$(bd_meta_readback tk-m '{"branch":"b","target":"main"}')" "bare	branch,target" \
+  "…a bead carrying none of the payload's keys is bare"
+eq "$(bd_meta_readback tk-m '{"pr_number":"42"}')" "landed	" \
+  "…values compare as text, so a number read back matches the string written"
+eq "$(bd_meta_readback tk-gone '{"task_kind":"review"}')" "unreadable	" "…a bead the store does not return is unreadable"
+eq "$(STUB_SHOW_FAIL=1 bd_meta_readback tk-m '{"task_kind":"review"}')" "unreadable	" "…and so is a read that fails"
+
+# --- bd_meta_ensure: a bead is made whole before its caller hands it on ---------
+WORK='{"task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/x","target":"main","pr_number":"7"}'
+store '[{"id":"tk-w","status":"open","assignee":"","title":"w","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/x","target":"main","pr_number":"7"}}]'
+reset_log
+out=$(bd_meta_ensure tk-w "$WORK"); rc=$?
+eq "$rc|$out|$(update_calls)" "0||0" "bd_meta_ensure: a bead already carrying the payload passes with no write"
+
+store '[{"id":"tk-w","status":"open","assignee":"","title":"w","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc","gc.routed_to":""}}]'
+reset_log
+out=$(bd_meta_ensure tk-w "$WORK"); rc=$?
+eq "$rc|$out" "0|" "bd_meta_ensure: a bead short of keys is written whole and passes once they read back"
+eq "$(meta tk-w branch)|$(meta tk-w target)|$(meta tk-w pr_number)" "polecat/x|main|7" "…and now carries every key of the payload"
+eq "$(update_calls)" 1 "…written in one update"
+has "$(grep '^bd update tk-w' "$STUB_GC_LOG")" "--set-metadata task_kind=rework" "…which carries the keys already present as well"
+eq "$(meta tk-w gc.routed_to)" "" "…and touches no key outside the payload"
+
+store '[{"id":"tk-w","status":"open","assignee":"","title":"w","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-anc"}}]'
+out=$(STUB_DROP_KEYS="tk-w:branch,pr_number" bd_meta_ensure tk-w "$WORK"); rc=$?
+eq "$rc|$out" "1|branch,pr_number" "bd_meta_ensure: a write that does not land fails and names the keys still short"
+
+out=$(STUB_SHOW_FAIL=1 bd_meta_ensure tk-w "$WORK"); rc=$?
+eq "$rc|$out" "1|unreadable" "bd_meta_ensure: a bead that does not read back fails as unreadable"
+
+# A value carrying '=' or a newline is one argument to --set-metadata.
+store '[{"id":"tk-w","status":"open","assignee":"","title":"w","notes":"","metadata":{}}]'
+out=$(bd_meta_ensure tk-w '{"rejection_reason":"Resume in prepare_mode=merge:\nsecond line"}'); rc=$?
+eq "$rc|$(jq -r '.[0].metadata.rejection_reason' "$STUB_STORE")" "0|Resume in prepare_mode=merge:
+second line" "bd_meta_ensure: a value with '=' and a newline is written whole"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
