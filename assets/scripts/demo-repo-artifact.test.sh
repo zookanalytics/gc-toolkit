@@ -72,6 +72,17 @@ exit 0
 STUB
 chmod +x "$STUBS/gc"
 
+# A broken awk, on PATH only for the case that asks for it: it fails the call
+# that ranks the candidates, the one handed a visfile, and passes every other
+# call to the real awk.
+BROKEN="$TMPD/broken"; mkdir -p "$BROKEN"
+cat >"$BROKEN/awk" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" visfile="*) echo "broken awk" >&2; exit 2 ;; esac
+exec "$FARM/awk" "\$@"
+STUB
+chmod +x "$BROKEN/awk"
+
 # --- the fixture repository ------------------------------------------------
 REPO="$TMPD/repo"; mkdir -p "$REPO"
 g() { git -C "$REPO" -c commit.gpgsign=false -c user.name=fixture -c user.email=fixture@example.com -c core.hooksPath=/dev/null "$@"; }
@@ -147,16 +158,17 @@ LONG=$(g rev-parse HEAD)
 g checkout -q feature
 
 GHLOG="$TMPD/gh.log"
-# run [STUB_DESC=..] [STUB_SHOW_FAIL=1] [GH_STUB_FAIL=1] -- <sut args...>
+# run [STUB_DESC=..] [STUB_SHOW_FAIL=1] [GH_STUB_FAIL=1] [RANK_FAIL=1] -- <sut args...>
 # Combined stdout and stderr are returned. Each call starts with an empty gh
 # log, an empty capture dir and an empty TMPDIR.
 run() {
-  local desc="" showfail="" ghfail=""
+  local desc="" showfail="" ghfail="" rankfail=""
   while [ $# -gt 0 ]; do
     case "$1" in
       STUB_DESC=*)      desc="${1#*=}" ;;
       STUB_SHOW_FAIL=*) showfail="${1#*=}" ;;
       GH_STUB_FAIL=*)   ghfail="${1#*=}" ;;
+      RANK_FAIL=*)      rankfail="${1#*=}" ;;
       --) shift; break ;;
       *) break ;;
     esac
@@ -164,7 +176,7 @@ run() {
   done
   : >"$GHLOG"; rm -rf "${CAPTURE:?}"/* "${RUNTMP:?}"/*
   ( cd "$REPO" && env -i \
-      PATH="$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" TMPDIR="$RUNTMP" \
+      PATH="${rankfail:+$BROKEN:}$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" TMPDIR="$RUNTMP" \
       GHLOG="$GHLOG" CAPTURE="$CAPTURE" STUB_DESC="$desc" STUB_SHOW_FAIL="$showfail" \
       GH_STUB_FAIL="$ghfail" \
       bash "$SUT" "$@" 2>&1 )
@@ -216,6 +228,13 @@ out="$(run -- candidates --base main --oid "$FAR")"; rc=$?
 eq "$rc" 3 "nothing near the change exits 3"
 has "no visual at $FAR is changed, named or near the diff" "$out" "it says nothing was found"
 hasnt "${TAB}" "$out" "and lists nothing"
+
+echo "# a ranking that fails is said, not taken for an empty list"
+out="$(run RANK_FAIL=1 -- candidates --base main --oid "$FEATURE")"; rc=$?
+eq "$rc" 1 "a failed ranking exits 1"
+has "ranking the candidates failed" "$out" "it says the ranking failed"
+hasnt "no visual at" "$out" "…and does not report an empty list"
+eq "$(ls -A "$RUNTMP")" "" "a failed ranking leaves nothing in TMPDIR"
 
 echo "# a long run of path characters is scanned in linear time"
 start=$SECONDS

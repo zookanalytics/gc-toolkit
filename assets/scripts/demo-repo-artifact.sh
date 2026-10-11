@@ -229,14 +229,15 @@ cmd_candidates() {
       -v addfile="$TMPD/added" -v anchfile="$TMPD/anchor" "$RANK_AWK" </dev/null \
     | LC_ALL=C sort -t "$TAB" -k1,1n -k2,2n -k3 \
     | awk -v cap="$NEAR_CAP" -v cutfile="$TMPD/cut" "$EMIT_AWK"
-  local rc=$? cut
+  # Every stage's status is read, because pipefail would report a failed
+  # ranking as the last stage's 3, an empty list.
+  local st="${PIPESTATUS[*]}" cut
   cut=$(cat "$TMPD/cut" 2>/dev/null)
-  case "$rc" in
-    0) [ "${cut:-0}" -gt 0 ] && echo "$PROG: $cut more visual(s) near the diff not listed" >&2 ;;
-    3) echo "$PROG: no visual at $oid is changed, named or near the diff" >&2 ;;
-    *) fail "ranking the candidates failed (rc=$rc)" ;;
+  case "$st" in
+    "0 0 0") [ "${cut:-0}" -gt 0 ] && echo "$PROG: $cut more visual(s) near the diff not listed" >&2; exit 0 ;;
+    "0 0 3") echo "$PROG: no visual at $oid is changed, named or near the diff" >&2; exit 3 ;;
+    *) fail "ranking the candidates failed (exit statuses: $st)" ;;
   esac
-  exit "$rc"
 }
 
 cmd_deliver() {
