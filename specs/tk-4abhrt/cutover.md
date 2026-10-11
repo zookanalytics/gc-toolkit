@@ -1,3 +1,8 @@
+---
+name: Converse cutover, spawn on engagement (tk-4abhrt)
+description: The converse cutover the operator ruled after the blockers, in which a visit parks on the helm board and a sitting spawns only when the operator engages it. It records the model, what changed, the rollout runbook, and the follow-ups filed.
+---
+
 # converse cutover (tk-4abhrt): spawn on engagement, board as the attention channel
 
 The converse routed-pool held a live pool claim per visit and dodged the
