@@ -679,7 +679,7 @@ for want in "bd kv --db $TMP/pin.db get anchor_edges.joined" \
             "bd list --db $TMP/pin.db --metadata-field anchor_bead=we-anchor" \
             "bd dep --db $TMP/pin.db list we-anchor --direction=up"; do
     grep -qF -- "$want" "$TMP/reads.log" \
-        && ok "pinned: the census read '$want…' carries the pin" \
+        && ok "pinned: the census read '${want}…' carries the pin" \
         || bad "pinned: the census read carries the pin" "missing '$want' in: $(grep -F 'we-anchor\|kv' "$TMP/reads.log")"
 done
 rm -f "$TMP/show/dep-we-anchor.json"
