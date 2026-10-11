@@ -9,6 +9,8 @@
 #     name and exit code, not just the last one;
 #   - each command runs as configured, so a trailing comment or a heredoc in
 #     it works;
+#   - a wait that finds the gate still running notes it on the refinery's
+#     patrol wisp, and one that finds it finished does not;
 #   - an empty check is skipped, and run_tests=false skips the test command;
 #   - a gate a previous session left running is stopped before the new one
 #     starts;
@@ -83,12 +85,16 @@ cp "$HERE/detached-job.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
 EMPTY_CITY="$TMP/empty-city"
 mkdir -p "$EMPTY_CITY"
 
-# A stub gc: the blocks call it only to drain.
+# A stub gc: the blocks call it to drain, to list the refinery's patrol wisps
+# (STUB_WISPS, a JSON file), and to note a running gate on one.
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
+case "$1 $2" in
+  "bd list") [ -z "${STUB_WISPS:-}" ] || cat "$STUB_WISPS" ;;
+esac
 exit 0
 STUB
 chmod +x "$BIN/gc"
@@ -99,7 +105,7 @@ export DETACHED_JOB_POLL=1 DETACHED_JOB_STOP_GRACE=2
 # run_block <script> <city>: run a rendered block as the agent would, from a
 # directory outside any repo, so only GC_CITY_PATH can supply the script.
 run_block() {
-  ( cd "$TMP" && env PATH="$BIN:$PATH" GC_RIG=testrig GC_RIG_ROOT="$REPO" GC_CITY_PATH="$2" bash "$1" )
+  ( cd "$TMP" && env PATH="$BIN:$PATH" GC_RIG=testrig GC_RIG_ROOT="$REPO" GC_CITY_PATH="$2" GC_AGENT=testrig/gc-toolkit.refinery bash "$1" )
 }
 
 echo "── a passing gate ──"
@@ -112,6 +118,34 @@ OUT=$(run_block "$TMP/wait.sh" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 0/done/0 "the wait reports done, rc=0"
 has "$(cat "$GATE/log")" "GATE PASSED" "the log ends GATE PASSED"
 eq "$(cd "$(cat "$TMP/gate-pwd")" && pwd -P)" "$(cd "$PREP_WT" && pwd -P)" "the checks run in the prep worktree"
+
+echo "── a wait that finds the gate still running notes it on the patrol wisp ──"
+: > "$STUB_GC_LOG"
+OUT=$(run_block "$TMP/wait.sh" "$CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)" 0/done "a wait on a finished gate reports done"
+case "$(cat "$STUB_GC_LOG")" in *"bd update"*) bad "a finished gate writes no note" "it wrote one" ;; *) ok "a finished gate writes no note" ;; esac
+# A launcher that reports the gate still running, as a wait does after --max.
+RUNNING_CITY="$TMP/running-city"
+mkdir -p "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts"
+cat > "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'state=running\npid=4242\nelapsed=600\nwaited=540\ndir=%s\n' "$2"
+exit 3
+STUB
+chmod +x "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh"
+printf '[{"id":"tk-other","title":"mol-polecat-work"},{"id":"tk-wisp","title":"mol-refinery-patrol"}]\n' > "$TMP/wisps.json"
+: > "$STUB_GC_LOG"
+OUT=$(STUB_WISPS="$TMP/wisps.json" run_block "$TMP/wait.sh" "$RUNNING_CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)" 3/running "the wait still reports running, exit 3"
+has "$(cat "$STUB_GC_LOG")" "bd list --assignee=testrig/gc-toolkit.refinery --status=open,in_progress --type=molecule --include-infra" \
+  "it lists this refinery's patrol wisps as check-refinery-patrol-live does"
+has "$(cat "$STUB_GC_LOG")" "bd update tk-wisp --append-notes run-tests: the gate has run 600s and is still running" \
+  "it notes the running gate on the patrol wisp"
+has "$OUT" "noted the running gate on patrol wisp tk-wisp" "it says so"
+: > "$STUB_GC_LOG"
+OUT=$(run_block "$TMP/wait.sh" "$RUNNING_CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)" 3/running "with no patrol wisp found, the wait still reports running"
+has "$OUT" "could not note the running gate" "it says the note did not land"
 
 echo "── a failing gate names every failed check ──"
 render "$TMP/start.raw" "$TMP/s2.sh" '' 'exit 3' 'cd /' '' 'echo test-output; pwd; false' true

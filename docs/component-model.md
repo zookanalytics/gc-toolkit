@@ -347,7 +347,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-outcome.sh` | review | The write side of a lane's approve outcome, the bead lane-state.sh reads: `back-lane` files the closed approve outcome that greens a lane, `supersede-lane` stamps it superseded to return the lane to `unreviewed`. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
-| `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
+| `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. Its run-tests step appends a note to the patrol wisp each time a wait finds the gate still running, so a refinery waiting on a long gate keeps its wisp inside I14's bound. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
 | `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. It also keeps each walk's seen marks, what it saw of each anchor at its last visit, so an arm can put first the anchors that changed since. The paced arms source it, and `gctk merge` carries the same rotation. |
 | `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |

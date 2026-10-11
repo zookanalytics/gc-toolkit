@@ -72,7 +72,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 6f6fb8ff7f96d87e92a65620e4fb0e98eab98966da6a95547c71b678b2c33fc5
 formulas/mol-refinery-patrol.toml
-02649c43811a5c1f79a4289e9bc9905b65a2a82af9a032028f2e60dcbfb4706c
+77d59efab78ef3402121682053658522e9a46664fbcedf67839355045ff2e332
 formulas/mol-review-quorum-signoff.toml
 676c9a30f559480daebcadd857f6c94b0dfc9989015be76e6b470753b75ccbd7
 formulas/mol-review.toml

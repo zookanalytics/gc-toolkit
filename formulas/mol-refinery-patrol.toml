@@ -401,7 +401,10 @@ call with a ten-minute timeout (`timeout: 600000` in Claude Code), never with
 `state=running` (exit 3), run it again. Never end your turn while the gate
 runs: a gate that finishes while you sit idle wakes nothing, and the queue
 behind it waits. The wait stops a gate still running after two hours and
-reports `state=exceeded`.
+reports `state=exceeded`. A wait that reports the gate still running also
+appends a note to this patrol's wisp. check-refinery-patrol-live (I14) dates a
+patrol by its wisp's last write and calls it stalled once that is an hour old
+with work queued, so the note keeps a gate in progress from reading as a stall.
 A wait that cannot find its launcher says so and exits 1 without touching the
 gate, which keeps running. Point it at the pack and wait again; do not drain
 on it.
@@ -416,7 +419,18 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
-"$JOB" wait "$GATE" --limit 7200
+WAIT_OUT=$("$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
+printf '%s' "$WAIT_OUT"; echo
+if [ "$WAIT_RC" -eq 3 ]; then
+  WISP=$(gc bd list --assignee="$GC_AGENT" --status=open,in_progress --type=molecule --include-infra --limit=0 --json 2>/dev/null | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty' 2>/dev/null)
+  ELAPSED=$(printf '%s' "$WAIT_OUT" | sed -n 's/^elapsed=//p')
+  if [ -n "$WISP" ] && gc bd update "$WISP" --append-notes "run-tests: the gate has run ${ELAPSED:-?}s and is still running" >/dev/null 2>&1; then
+    echo "noted the running gate on patrol wisp $WISP"
+  else
+    echo "could not note the running gate on a patrol wisp ('$WISP'), so check-refinery-patrol-live may call this patrol stalled once its wisp is an hour old; keep waiting"
+  fi
+fi
+exit "$WAIT_RC"
 # <<< refinery-gate-wait
 ```
 
