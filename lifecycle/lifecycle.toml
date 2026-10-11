@@ -1099,6 +1099,20 @@ keys = [
 # apart by task_kind, and only these patrol keys (scope, digest, the seen
 # timestamps, occurrences, about, recurrence_of) belong to this one.
 
+[metadata.preexisting_failure]
+# One tracker per failure already red on a base branch, filed through
+# assets/scripts/preexisting-failure.sh by the refinery's merge gate
+# (mol-refinery-patrol.toml, handle-failures) and by a polecat's pre-flight
+# (mol-polecat-work.toml, preflight-tests).
+keys = ["failure_key"]
+# failure_key — the failure's dedup identity, as the script's `key` derives it:
+#   a test function, a repo-relative path, or a linter and a path. `file` writes
+#   it in the create and reads it back; `find` matches it exactly, over the live
+#   statuses for both gates' lookup and over closed beads for the pre-flight's
+#   landed-fix check. Absent on a tracker filed before the stamp, which `find`
+#   matches by the key in its title only while it carries no failure_key. Never
+#   cleared, so a retitle leaves it in place. A string.
+
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
 # (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
