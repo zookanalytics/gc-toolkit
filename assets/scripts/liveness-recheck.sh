@@ -52,9 +52,9 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
-# The one definition of the standing kinds, shared with liveness-sweep.sh, the
-# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
-# classify block splices in.
+# The one definition of the standing kinds, shared with liveness-sweep.sh and
+# its precheck, the proactive scan and the doctor checks. Exposes
+# $STANDING_KINDS_JQ, which the classify block splices in.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
