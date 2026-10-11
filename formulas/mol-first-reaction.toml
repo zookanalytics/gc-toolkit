@@ -106,16 +106,13 @@ id = "first-reaction"
 title = "Do the cheap reaction and write the first-reaction card to notes"
 needs = ["load-bead"]
 description = """
-**A first reaction happens once — check before you write.** When a session
-runs this workflow inline and closes only an earlier step, the graph re-offers
-this step to a second session on a bead whose reaction is already done. A
-completed reaction carries `gc.first_reaction` (and `gc.proactive_reaction=1`
-from the release). Writing a second card duplicates it, and the
-`advance-and-drain` dispose that follows would re-release a bead a worker may
-already hold — `first-reaction-dispose.sh` refuses the second dispose, but the
-wasted card is avoidable. So check first, and if it is already reacted, write
-no card and run no dispose: close this step, let the claim loop carry you to
-`advance-and-drain`, and take its step-2 chain-close and drain.
+**A first reaction happens once — check before you write.** The graph can
+re-offer this step to a second session on a bead whose reaction is already
+done: it carries `gc.first_reaction` (and `gc.proactive_reaction=1` from the
+release). A second card only duplicates the first, and
+`first-reaction-dispose.sh` refuses a second dispose. So if it is already
+reacted, write no card and run no dispose: close this step, let the claim loop
+carry you to `advance-and-drain`, and take its step-2 chain-close and drain.
 
 ```bash
 # >>> first-reaction-reacted-check
@@ -228,16 +225,13 @@ if the operator Accepts: broad direction, not a spec — the bead's own content
 plus `execute via <mol>`, naming the formula that action takes.
 
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
-on a snapshot that may have moved by the time the human reads it (design Risk
-"stale proactive worldview"). The `## Found` timestamp is that stamp.
+on a snapshot that may have moved by the time the human reads it. The
+`## Found` timestamp is that stamp.
 
-The card's one-line headline doubles as the board-visible **takeaway** — the
-single sentence `gc-helm.sh` renders as the anchor's NEEDS, so a glance
-explains what the reaction concluded / what it needs. Derive it from your
-**## Decision needed** (the one thing the human must accept or redirect); keep
-it ≤140 chars on ONE line (the wrapper collapses stray whitespace, but a tight
-single line reads best). You stamp it in the final step, folded into the bead's
-release (`takeaway … --release`) — one Dolt write, not a separate stamp here.
+The card's one-line headline doubles as the board-visible **takeaway**, the
+sentence `gc-helm.sh` renders as the anchor's NEEDS. Derive it from your
+**## Decision needed**, ≤140 chars on ONE line. The final step stamps it with
+the bead's release, so there is no separate stamp here.
 
 **mr-invariant (only if this reaction produced code).** A first reaction is
 notes-only by default. If — and only if — you wrote code, it takes the
@@ -260,7 +254,7 @@ merge, and step 3 hands the bead to the human, not the refinery.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.first-reaction --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-first-reaction.first-reaction --outcome pass
 ```
 
 **Exit criteria:** the card is appended to the bead's notes, and this step
@@ -286,161 +280,56 @@ included: it routes the bead to a validating closer rather than closing it here.
 | close | route the bead to a validating closer | a capable pool re-checks the no-work call and closes the bead, or escalates |
 | ruling | file a human gate | a gate whose visit the operator lands in, Discuss-only |
 
-`gc.origin=operator` does not force an exit. An operator capture is triaged on
-its merits like any other bead (the rubric in `first-reaction`), so the script
-performs whichever of the five the card names.
+`first-reaction-dispose.sh` performs all five. It records what you chose and
+why on the bead (`gc.first_reaction*`) before it acts, and the release it
+writes stamps `gc.proactive_reaction=1` so no scan re-reacts.
 
-`assets/scripts/first-reaction-dispose.sh` performs all five. It records what
-you chose and why on the bead (`gc.first_reaction*`) before it acts. The
-actionable, blocked, ruling, and recommend exits fold the board takeaway and the
-release into one `gc-helm.sh takeaway … --release` write, which also stamps
-`gc.proactive_reaction=1` so the scan does not re-react; the close exit records
-the reaction and hands the bead to the closer pool, deferred behind this
-reaction's own workflow so the closer is the bead's sole dispatch surface. Each
-block below resolves it and re-derives the bead in its own shell, because that is
-the only thing a block can rely on.
-
-**A live owner already owns the reaction — stand down.** A subject raised by
-`gc-helm engage --new-subject` carries `gc.reaction_owned=1`, set in its
-create write. That engage created the subject, filed its ONE visit, and spawned
-the sitting itself, so a first reaction here would only put the subject to the
-operator a second time, for a conversation already under way. The proactive scan
-drops a marked bead and the sling guard refuses it, so a reaction normally never
-reaches this step for one; this block is the backstop for a direct pour. The
-engage IS the reaction: record it with `gc.proactive_reaction=1` so no later scan
-re-reacts, consume the one-shot marker fail-closed, run no exit, then close this
-step and drain. Check it ahead of the exit blocks.
-
+**Run your exit as ONE command that starts with these lines.**
+`first-reaction-guard.sh` stands down when a live owner already owns the
+reaction (a subject `gc-helm engage --new-subject` raised) or the reaction
+already landed (a re-offered step after a dispose). It then prints REACTION
+OWNED or ALREADY REACTED, closes this step, drains, and exits 3, so the exit
+after it never runs, and you are done:
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-REACTION_OWNED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.reaction_owned"] // "") else "" end' 2>/dev/null || printf '')
-if [ "$REACTION_OWNED" = "1" ]; then
-  echo "REACTION OWNED: $WORK_BEAD_ID carries gc.reaction_owned=1 — gc-helm engage --new-subject created it, filed its one visit, and spawned the sitting. Running no exit and filing no visit; recording the reaction and draining."
-  # Stamp the permanent completion proof (the scan and the sling guard read it),
-  # then CONFIRM it is on the bead before consuming the one-shot marker.
-  # The unset is gated on a read-back-proven gc.proactive_reaction=1, so a failed
-  # or silently-dropped stamp can never combine with a successful unset to leave
-  # the bead carrying NEITHER marker — the state the next proactive scan reads as
-  # unreacted and re-visits, filing the second visit this block exists to prevent.
-  # A marker that will not clear is left armed: the proven gc.proactive_reaction
-  # and the scan's gc.reaction_owned drop each keep a sweep off it, so either
-  # way no second visit is filed.
-# >>> live-intake-consume
-  REACTED=""
-  if gc bd update "$WORK_BEAD_ID" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1; then
-    REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.proactive_reaction"] // "") else "" end' 2>/dev/null || printf '')
-  fi
-  if [ "$REACTED" = "1" ]; then
-    # Proof is on the bead — consume the one-shot marker, reading it back.
-    gc bd update "$WORK_BEAD_ID" --unset-metadata gc.reaction_owned >/dev/null 2>&1 || true
-    REACTION_OWNED_LEFT=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r 'if type=="array" then ((.[0].metadata // {})["gc.reaction_owned"] // "") else "unknown" end' 2>/dev/null || printf 'unknown')
-    [ "$REACTION_OWNED_LEFT" = "1" ] && echo "note: gc.reaction_owned did not clear on $WORK_BEAD_ID (still armed) — left as-is; the scan drop and gc.proactive_reaction both keep a sweep off it" >&2
-  else
-    # The stamp is not proven on the bead, so DO NOT unset the marker —
-    # leaving it armed keeps scan_precision_filter's drop over the bead, so no
-    # second visit is filed even without the permanent proof.
-    echo "warning: could not confirm gc.proactive_reaction=1 on $WORK_BEAD_ID; left gc.reaction_owned armed so scan_precision_filter's drop still keeps a sweep off it" >&2
-  fi
-# <<< live-intake-consume
-  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-  done
-  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
-  gc runtime drain-ack
-  exit 0
-fi
+WORK_BEAD_ID=$(gc convoy status {{convoy_id}} --json | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+DISPOSE="${SCRIPTS:?first-reaction-dispose.sh not found in the pack}/first-reaction-dispose.sh"
+"$SCRIPTS/first-reaction-guard.sh" --convoy {{convoy_id}}; GUARD_RC=$?
+[ "$GUARD_RC" = 0 ] || exit "$GUARD_RC"
 ```
 
-If it prints REACTION OWNED, you are done: do not run any exit block below.
-
-**A landed reaction disposes once — check before you run an exit.** A completed
-reaction carries `gc.proactive_reaction=1`, stamped by the release the dispose
-performs. When a first session disposed and drained before closing this step,
-the graph re-offers this step to a second session on a bead whose reaction has
-already landed. Running an exit again is wrong on all five: it would re-release
-a bead a worker may already hold. `first-reaction-dispose.sh` refuses that
-re-dispose on every exit before it writes anything, and the human gate the
-`ruling` and `recommend` exits file is filed inside that script, after the
-refusal, so a re-run files no second gate. A run that died part-way, before
-`gc.proactive_reaction=1` landed, is not a landed reaction: its re-run resumes,
-and `gc-helm.sh demand` refreshes the gate the first run filed under the
-reaction's topic rather than filing another. So check first, ahead of the exit
-blocks: if the reaction has landed, run no exit — close this step and drain.
-
-```bash
-# >>> advance-and-drain-reacted-guard
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-# gc.proactive_reaction reads back as the number 1 or the string "1", so it is
-# compared as a string.
-REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '(((.[0].metadata // {})["gc.proactive_reaction"] // "") | tostring) == "1"' 2>/dev/null || printf 'false')
-if [ "$REACTED" = "true" ]; then
-  echo "ALREADY REACTED: $WORK_BEAD_ID carries gc.proactive_reaction=1 — the reaction has landed. Running no exit and filing no visit; closing this step and draining."
-  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-  done
-  "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
-  gc runtime drain-ack
-  exit 0
-fi
-# <<< advance-and-drain-reacted-guard
-```
-
-If it prints ALREADY REACTED, you are done: do not run any exit block below.
-
-The **takeaway** in every exit below is your card's one-line headline, derived
-from **## Decision needed**, ≤140 chars on ONE line — the wrapper rejects a
-longer one rather than truncating it. The **reason** is why this disposition
-and not the other two; it is required, because a classification nobody can
-second-guess is one nobody can correct.
+The **takeaway** in every exit is your card's one-line headline, derived from
+**## Decision needed**, ≤140 chars on ONE line; the wrapper rejects a longer
+one rather than truncating it. The **reason** is why this disposition and not
+the others. It is required, because a classification nobody can second-guess
+is one nobody can correct.
 
 **1a. ACTIONABLE — the bead is work, so hand it to whoever does that work.**
-This is the exit that schedules an action for a bead: a routed, unassigned,
-open bead is exactly what a pool's find-work offers, and the card you just
-wrote is the dispatch note the worker reads. The default target is this rig's
-polecat pool, which runs `mol-polecat-work`; pass `--route` for any other pool.
-Work that is a named agent's own goes to that agent instead: `--assign <agent>`
-makes it the bead's assignee, which is the address the agent's own hook
-matches, since a named agent never reads `gc.routed_to`. A town-repo edit takes
-`--assign gc-toolkit.mechanik`.
-
+A routed, unassigned, open bead is what a pool's find-work offers, and your
+card is the dispatch note the worker reads. The default target is this rig's
+polecat pool; pass `--route` for any other. Work that is a named agent's own
+goes to that agent instead: `--assign <agent>` makes it the bead's assignee,
+the address the agent's own hook matches, since a named agent never reads
+`gc.routed_to`. A town-repo edit takes `--assign gc-toolkit.mechanik`. Either
+way the exit hands off the ONE bead you reacted to, never a fan-out of newly
+filed beads, and where several beads share one cause the useful filing is one
+bead naming the cause:
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
-[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 "$DISPOSE" "$WORK_BEAD_ID" --disposition actionable --by proactive --reason "<why this is work and not a question>" --takeaway "<the ≤140-char headline>"
 # Work that is a named agent's own, such as a town-repo edit:
 "$DISPOSE" "$WORK_BEAD_ID" --disposition actionable --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<the ≤140-char headline>" --assign gc-toolkit.mechanik
 ```
 
-Two things this exit must not become. It routes the ONE bead you reacted to —
-never a fan-out of newly filed beads, because a pool queue is a shared
-resource and one reaction that files eight beads costs eight sessions. And
-where several beads share one cause, the useful filing is one bead naming the
-cause, not one bead per instance; say so in the card and route that one.
-
 **1b. BLOCKED — the bead is waiting, so record the wait as an edge.** Prose
-about a wait holds nothing: a bead nobody has held is still `ready`, still
-offered, and still claimed by the next worker who reads it. The edge is the
-hold (component-model I1). The blocker must be a bead in the SAME store — a
-`bd dep add` naming another rig's bead answers "✓ Added dependency" and holds
-nothing — and the script refuses a cross-store id rather than writing one.
-
+about a wait holds nothing; the `blocks` edge is the hold (component-model
+I1). The blocker must be a bead in the SAME store, and the script refuses a
+cross-store id. `--then-route` arms the deferred dispatch, so the blocker
+closing sends the bead to that pool. Waiting work that is a named agent's own
+takes `--then-assign <agent>` instead: the bead is assigned in the same release
+and the agent's hook offers it once the wait lifts, so nothing is armed. Omit
+both only when the bead is not work anyone takes (a decision, a ruling, a
+research note):
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
-[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 # The wait is already a bead:
 "$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --waiting-on <blocker-bead-id> --then-route <rig>/<rig>.polecat
 # The wait is not a bead yet — file it once, keyed so a repeat of the same
@@ -450,133 +339,53 @@ done
 "$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --waiting-on <blocker-bead-id> --then-assign gc-toolkit.mechanik
 ```
 
-The examples pass `--then-route <rig>/<rig>.polecat` because a blocked bead that is
-plainly work must not be left unrouted: it arms the deferred dispatch, so the
-blocker closing is what sends the bead to that pool and nobody has to route it
-by hand. Leaving a blocked work bead with no route and no arm is the debt
-doctor/check-blocked-work-armed flags. Waiting work that is a named agent's own
-takes `--then-assign <agent>` instead: the bead is assigned in the same release,
-and the agent's hook offers it once the wait lifts, so nothing is armed. Omit
-both only when the bead is not work anyone takes — a decision, a ruling, or a
-research note.
-
 **1c. CLOSE — you are confident there is nothing to do, so route the bead to a
-validating closer.** Take this when you verified the thing is already fixed with
-nothing left to merge, or the bead should not exist. A first reaction never
-closes a bead; it hands the conclusion to a capable pool that re-checks it
-against live state and closes the bead when it agrees, or escalates to the
-operator when it does not. Your `--reason` is the closer's brief: why there is
-no work, and the counter-case for keeping the bead open, so the closer can
-disagree. The closer runs mol-validate-close on this rig's capable pool (pass
-`--route` for another pool). It is not poured now: this reaction is still a live
-workflow on the bead, and the closer must be the bead's sole workflow, so
-`--after-workflow` names this reaction's root and the closer is deferred — held
-behind that root and armed, then slung by the deferred-dispatch reconcile pass
-once the reaction closes.
-
+validating closer.** The closer runs mol-validate-close on this rig's capable
+pool (`--route` for another), re-checks your conclusion against live state, and
+closes the bead or escalates. Your `--reason` is its brief: why there is no
+work, and the counter-case for keeping the bead open. The closer must be the
+bead's only workflow, so `--after-workflow` defers it behind this reaction's
+own root until the reaction closes:
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
-[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
-# This reaction's own workflow root, so the closer is deferred until it closes
-# rather than poured as a second live workflow on the bead. The root is the
-# kind=workflow bead launched from this workflow's input convoy.
 REACTION_ROOT=$(gc bd list --status open,in_progress --metadata-field gc.input_convoy_id={{convoy_id}} --metadata-field gc.kind=workflow --json --limit 0 | tr -d '[:cntrl:]' | jq -r '.[0].id // empty')
 "$DISPOSE" "$WORK_BEAD_ID" --disposition close --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<the ≤140-char headline>" ${REACTION_ROOT:+--after-workflow "$REACTION_ROOT"}
 ```
 
-A high-confidence "nothing to do" takes this exit, not a card: the closer
-confirms and closes, so the operator is not asked to glance at a bead the
-reaction already judged inert. Keep it for a conclusion you are confident in;
-when the conclusion itself is the operator's to make, that is a ruling (1d).
-
 **1d. RULING or RECOMMEND — the operator's move, so put it to them as a human
-gate.** When the next move is the operator's, the exit files a native human gate
-(`issue_type=gate`, `await_type=human`) that blocks the bead, and hands the bead
-over. Two dispositions do that, and both file the SAME gate — they differ only in
-whether you can name the action:
-
-- **ruling** — the operator's judgment, and you have no worker-runnable action to
-  offer: a genuine fork with several reasonable directions, an irreversible or
-  destructive action, or a policy call. Discuss-only.
-- **recommend** — you can name the action, but it warrants the operator's trigger
-  before it runs: an authority-gated action (retire an in-flight PR, supersede an
-  anchor; authority-map rows 28-30), or a consequential or partially-uncertain
-  call you have a clear lean on. Name the execution mol with
-  `--recommended-formula <mol>`; it stamps `gc.recommended_formula` on the subject
-  so the operator can Accept it from the visit, and the `--takeaway` states the
-  recommendation AND why the operator might discuss instead. The card (from
-  `first-reaction`) is the execution guidance, broad direction not a spec.
-
-Both are the minority case: if a pool or a named agent can just do the thing
-take 1a, and if the honest conclusion is that there is nothing to do take 1c.
-
-`first-reaction-dispose.sh` files the gate itself, through `gc-helm.sh demand`:
-your `--takeaway` is the gate's question and your `--reason` rides its body. It
-holds the bead on the gate and records the gate as the disposition's target. The
-gate is filed under the topic `first-reaction`, and one open gate stands per bead
-and topic, so a re-run after a partial refreshes that gate rather than filing a
-second, and a demand a converse sitting already holds on the bead keeps its own
-question. The gate is the escalation's state, and a visit is how it resolves:
-`orders/gate-visit-sweep.toml` files the visit on the bead on its next pass, a
-5-minute cooldown, so for up to one pass the bead waits on a gate with no visit.
-You file no visit here. The gate resolves when the operator answers it:
-Accept resolves it as it runs the recommended mol, and a sitting resolves it when
-the operator rules.
-
+gate.** Both file the SAME native human gate that blocks the bead. A
+**ruling** names no action and is Discuss-only. A **recommend** names its
+execution mol with `--recommended-formula <mol>`, so the operator can Accept it
+from the visit, and its `--takeaway` states the recommendation AND why they
+might discuss instead. The script files the gate through `gc-helm.sh demand`
+under the topic `first-reaction`, one per bead and topic, so a re-run refreshes
+it. `orders/gate-visit-sweep.toml` files its visit on its next pass; you file
+no visit here:
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
-DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
-done
-[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 # ruling — a fork, irreversible action, or policy call; Discuss-only (no --recommended-formula):
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the fork, irreversible action, or policy call only the operator can decide>" --takeaway "<the ≤140-char headline>"
-# recommend — a determinable action that warrants the operator's trigger, naming
-# the execution mol so the operator can Accept it from the gate's visit:
+# recommend — a determinable action that warrants the operator's trigger:
 "$DISPOSE" "$WORK_BEAD_ID" --disposition recommend --by proactive --reason "<the action, and why it warrants the operator's trigger>" --takeaway "<the ≤140-char headline, e.g. 'recommend: <action>; execute via <mol>; discuss if <caveat>'>" --recommended-formula <execution-mol>
 ```
 
-**2. Close THIS step bead, then drain.** Run this only after the exit block
-above exited zero. `first-reaction-dispose.sh` returns non-zero when the route
-never stamped, the human gate never filed, or the wait never became a `blocks`
-edge, and a bead in that state is neither routed nor held, so closing over it
-strands the subject. Fix what its message names and re-run the exit block first.
-
-The reaction session is one-shot — it ends here. This is the terminal graph
-step, so it still closes its own step bead: that is how a graph.v2 step
-advances, and the dispatcher's `workflow-finalize` closes the `kind=workflow`
-root only once every step is closed. Skip the close and this drained session leaves an open assigned step
-bead behind, so a fresh worker re-pools on it forever — which on a POOL-routed
-formula means one spawned session per cycle, indefinitely.
-
-Close by `(gc.root_bead_id, gc.step_ref)` through the pack helper — an
-assignee repeats across every molecule an agent ran, and the same step of an
-earlier one is already closed. Never close on a
-`GC_*BEAD_ID` environment variable: `GC_BEAD_ID` is not populated in a pool
-worker at all, and `GC_TRIGGER_BEAD_ID` is pinned at spawn and is not
-refreshed by `gc hook --claim`, so it names some other session's bead
-(tk-niu2f).
-
+**2. Close THIS step bead, then drain** — only after the exit exited zero.
+`first-reaction-dispose.sh` returns non-zero when the route never stamped, the
+gate never filed, or the wait never became an edge; a bead in that state is
+neither routed nor held, so fix what its message names and re-run the exit
+first. This is the terminal step: skip its close and a fresh worker re-pools on
+the open step every cycle. Close by `(gc.root_bead_id, gc.step_ref)` through
+step-close.sh, never by a `GC_*BEAD_ID` environment variable, which names some
+other session's bead after a claim:
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-first-reaction.advance-and-drain --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-first-reaction.advance-and-drain --outcome pass
 gc runtime drain-ack
 ```
 
-**Never** run `gc bd close` / `--status=closed` on the work bead. The only
-exception is the code case from step 2: if you produced code and handed it to
-the refinery, the refinery closes the bead after the merge — you still do not
-close it yourself. Every disposition here leaves the bead open: routed to a
-pool or assigned to a named agent, held on an edge, or waiting on the operator
-behind its human gate.
-"""
+**Never** run `gc bd close` / `--status=closed` on the work bead. If you
+produced code and handed it to the refinery, the refinery closes the bead after
+the merge. Every disposition here leaves the bead open: routed to a pool or
+assigned to a named agent, held on an edge, or waiting on the operator behind
+its human gate."""
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

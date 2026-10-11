@@ -47,9 +47,10 @@
 #
 # A finding is mooted only when it objects to the disposed diff. A machine-lane
 # finding does, by the review contract: a reviewer files an out-of-scope bug as
-# a bead of its own, never as a finding (formulas/mol-review.toml, step 6b). So
-# does a human finding whose locus names no file, an objection to the PR as a
-# whole, and one whose GitHub comment sits on a line the diff added or removed.
+# a bead of its own, never as a finding (formulas/mol-review.toml, review step
+# 6). So does a human finding whose locus names no file, an objection to the PR
+# as a whole, and one whose GitHub comment sits on a line the diff added or
+# removed.
 # A human comment on a line the diff did not change can cite code the target
 # branch already carries, and closing the PR does not answer it, so that finding
 # is carried forward instead. A bug bead takes its objection, and the finding

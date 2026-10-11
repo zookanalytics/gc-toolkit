@@ -114,7 +114,7 @@ picked. It sits beside the flags the review formula's verdict step passes:
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve --visual screenshot \
-  --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
+  --reviewed-oid "$REVIEWED_OID" --notes-file "$WS/findings.md" --findings-file "$WS/findings.json"
 ```
 
 `signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with

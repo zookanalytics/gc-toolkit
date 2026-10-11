@@ -570,9 +570,10 @@ A **conversation visit** is keyless, and its subject names its situation.
 `gc-visit-open.sh` file through it. It folds a second ask into whatever visit is
 already open on the subject. The one deliberate exception is `gc-helm.sh
 engage` when the operator asks for a new visit, which passes `--allow-duplicate`
-to file a fresh visit for a distinct concern. The formula copies of the snippet,
-in `mol-visit`, `mol-validate-close` and `mol-feedback-distiller`, first look
-for a conversation visit already open on the subject and reuse it. That check
+to file a fresh visit for a distinct concern. The formula-form copies of the
+snippet, in `mol-visit`, `mol-validate-close` and the `visit-file.sh` that
+`mol-feedback-distiller` runs, first look for a conversation visit already open
+on the subject and reuse it. That check
 matters when a step runs twice, either because a later command in it failed and
 the block is re-run or because a second session takes a re-offered step.
 Without it the second run files a second visit, which goes on asking after the

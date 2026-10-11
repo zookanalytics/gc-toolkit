@@ -37,14 +37,17 @@
 #      the store refuses is reported, and the hold still runs. The step is never
 #      left silently claimable or silently parked.
 #
-# EXECUTES the real snippet extracted verbatim from the formula against fake
-# `gc` and stub scripts, so the test cannot drift from the shipped instruction.
-# No live city, Dolt, network, or worktrees.
+#   5. WIRING — mol-polecat-work's load-context step runs this gate.
+#
+# Runs load-context-duplicate-dispatch-gate.sh, and the real
+# escalate-hold-drain.sh it calls, against a fake `gc` and stub escalate.sh and
+# molecule-hold.sh. No live city, Dolt, network, or worktrees.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-polecat-work.toml"
+SUT="$HERE/load-context-duplicate-dispatch-gate.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-load-context-duplicate-dispatch-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -58,52 +61,28 @@ no()  { case "$1" in *"$2"*) bad "$3" "'$2' unexpectedly in '$1'" ;; *) ok "$3" 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -f "$TOML" ] || { echo "formula not found: $TOML" >&2; exit 1; }
 
-# --- Extract the REAL snippet from the formula. -------------------------------
-# The flag-flip pulls the lines between the markers (exclusive). If the markers
-# are removed or renamed — the exact thing a wholesale reconciliation against
-# base does — extraction yields nothing and the checks below fail loudly.
-extract() {
-  awk -v m="$1" '
-    $0 ~ ("# >>> " m "$") {f=1; next}
-    $0 ~ ("# <<< " m "$") {f=0}
-    f' "$TOML"
-}
+# --- The gate and its wiring. ------------------------------------------------
+[ -x "$SUT" ] && ok "gate script is executable" || bad "gate script missing or not executable: $SUT"
+bash -n "$SUT" && ok "gate script is syntactically valid bash" || bad "gate script failed bash -n"
 
-GATE="$(extract load-context-duplicate-dispatch-hold)"
-
-[ -n "$GATE" ] \
-  && ok "gate extracted between load-context-duplicate-dispatch-hold markers" \
-  || bad "gate extraction EMPTY — markers missing from $TOML"
-
-# Two regions sharing one marker name would concatenate into one extraction and
-# double every assertion below; pin the opener to a single occurrence.
-eq "$(grep -c '^# >>> load-context-duplicate-dispatch-hold$' "$TOML")" "1" \
-   "exactly one load-context-duplicate-dispatch-hold region"
-
-# TOML `"""` strings eat a trailing backslash (line-ending escape), silently
-# joining lines. The snippet is written backslash-free; assert it, because
-# reintroducing a continuation is an easy and invisible edit.
-case "$GATE" in
-  *\\*) bad "snippet contains a backslash — TOML line-ending escapes will mangle it" ;;
-  *)    ok  "snippet is backslash-free (safe inside a TOML triple-quoted string)" ;;
-esac
-
-printf '%s\n' "$GATE" > "$TMP/gate.sh"
-bash -n "$TMP/gate.sh" \
-  && ok "extracted gate is syntactically valid bash" \
-  || bad "extracted gate failed bash -n"
+# load-context runs the gate with the claimed step bead as the hold's hint, so a
+# formula edit cannot drop the gate without failing here.
+grep -qE '"\$SCRIPTS/load-context-duplicate-dispatch-gate\.sh" --bead "\$WORK_BEAD_ID" --convoy \{\{convoy_id\}\} --step-bead "\$\{CLAIMED_STEP_BEAD_ID:-\}"' "$TOML" \
+  && ok "load-context runs the gate on the work bead with the claimed step bead" \
+  || bad "load-context no longer runs load-context-duplicate-dispatch-gate.sh as the gate"
 
 # --- Fakes. -------------------------------------------------------------------
 # gc : `bd update` (the refusal note) and `runtime drain-ack` record to
-#      $FAKE_LOG; `session list` returns $FAKE_SESSIONS (the liveness probe) and
-#      is intentionally NOT logged, so the verb trace reads the same whether or
-#      not the in-flight check consulted it. `bd update` exits $FAKE_UPDATE_RC,
-#      so a refused note can be driven. The block reads the work bead from
-#      $WORK_BEAD_JSON (set by the step), so no `bd show` is needed.
+#      $FAKE_LOG; `bd show` returns $FAKE_SHOW (the work bead row) and `session
+#      list` returns $FAKE_SESSIONS (the liveness probe), and neither read is
+#      logged, so the verb trace reads the same whether or not the in-flight
+#      check consulted the session list. `bd update` exits $FAKE_UPDATE_RC, so a
+#      refused note can be driven.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
+  "bd show")           printf '%s' "${FAKE_SHOW:-}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit "${FAKE_UPDATE_RC:-0}" ;;
   "session list")      printf '%s' "${FAKE_SESSIONS:-}"; exit 0 ;;
 esac
@@ -112,10 +91,10 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# molecule-hold.sh and escalate.sh resolved out of $GC_PACK_DIR exactly as the
-# arm resolves them. Each records its verb into the ordered trace and its argv
-# where the reason/message assertions can read it, returning a code the
-# assertions control.
+# molecule-hold.sh and escalate.sh, which escalate-hold-drain.sh resolves
+# through GC_MOLECULE_HOLD_TOOL and GC_ESCALATE_TOOL. Each records its verb into
+# the ordered trace and its argv where the reason/message assertions can read
+# it, returning a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
 cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
 #!/usr/bin/env bash
@@ -131,7 +110,8 @@ exit "${FAKE_ESC_RC:-0}"
 ESC
 chmod +x "$TMP/pack/assets/scripts/molecule-hold.sh" \
          "$TMP/pack/assets/scripts/escalate.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
+export GC_MOLECULE_HOLD_TOOL="$TMP/pack/assets/scripts/molecule-hold.sh"
+export GC_ESCALATE_TOOL="$TMP/pack/assets/scripts/escalate.sh"
 
 # This session's four identity forms. A work bead whose assignee is any of them
 # is "owned by you" and must be a no-op; anything else is a foreign owner.
@@ -148,14 +128,12 @@ SESS_REAL='{"sessions":[{"session_name":"lx-busy","id":"sess-busy","alias":"rig/
 run() {
   : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/hold"; : > "$TMP/esc"
   local rc=0
-  WORK_BEAD_ID=tk-work \
-  WORK_BEAD_JSON="$1" \
-  CLAIMED_STEP_BEAD_ID=st-load \
+  FAKE_SHOW="$1" \
   GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
   FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_HOLD="$TMP/hold" FAKE_ESC="$TMP/esc" \
   FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" \
   FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_UPDATE_RC="${FAKE_UPDATE_RC:-0}" \
-    bash "$TMP/gate.sh" > "$TMP/out" 2>&1 || rc=$?
+    "$SUT" --bead tk-work --convoy tk-convoy --step-bead st-load > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
@@ -260,7 +238,7 @@ eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
    "in_progress under a LIVE foreign owner with a merge_result: still the live conflict, escalates"
 
 # An unreadable bead proves nothing, whatever the session list says. Every shape
-# a failed or empty `gc bd show` can leave in WORK_BEAD_JSON is held for a human,
+# a failed or empty `gc bd show` can return is held for a human,
 # both when the liveness probe answers nothing and when it answers with sessions
 # that match no owner.
 for shape in '' '[]' 'null' '{"error":"not found"}' '[{}]' 'not json'; do

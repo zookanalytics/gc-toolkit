@@ -29,14 +29,15 @@
 # a crashed pool session's step bead, which keeps a live slot assignee beside its
 # dead id.
 #
-# This test EXECUTES the real filter extracted verbatim from the formula (between
-# the `host-bead-skip` markers), so it cannot drift from the shipped instruction.
+# This test EXECUTES the real filter extracted verbatim from witness-recovery.sh
+# (between the `host-bead-skip` markers), so it cannot drift from the shipped
+# code.
 # No live city, Dolt, network, or sessions — only jq and a tmpdir.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-host-bead-skip-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -47,18 +48,18 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
-# --- Extract the REAL filter from the formula. -------------------------------
+# --- Extract the REAL filter from witness-recovery.sh. -----------------------
 # Pulls the lines between the markers (exclusive). If the markers or the filter
 # are removed/renamed, extraction yields nothing and the check below fails
 # loudly — the guardrail cannot silently disappear.
 FILTER="$(awk '
   /# >>> host-bead-skip/ {f=1; next}
   /# <<< host-bead-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$FILTER" ] \
   && ok "filter extracted between host-bead-skip markers" \
-  || bad "filter extraction EMPTY — markers missing from $TOML"
+  || bad "filter extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
 bash -n "$TMP/filter.sh" \
@@ -93,10 +94,10 @@ assignee_only_ids() {
 TOPOSKIP="$(awk '
   /# >>> topology-root-skip/ {f=1; next}
   /# <<< topology-root-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 [ -n "$TOPOSKIP" ] \
   && ok "topology-root-skip extracted (needed for the composed-candidate case)" \
-  || bad "topology-root-skip extraction EMPTY — markers missing from $TOML"
+  || bad "topology-root-skip extraction EMPTY — markers missing from $LIB"
 printf '%s\n' "$TOPOSKIP" > "$TMP/toposkip.sh"
 candidate_ids() {
   printf '%s' "$1" | bash "$TMP/filter.sh" 2>/dev/null | bash "$TMP/toposkip.sh" 2>/dev/null \

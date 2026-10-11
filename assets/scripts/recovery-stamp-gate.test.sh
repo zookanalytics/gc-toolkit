@@ -12,14 +12,14 @@
 # only `disposed` is a recovery; `skipped`, `partial`, `failed`, and an unread
 # empty are not.
 #
-# This test EXECUTES the real block extracted verbatim from the formula (between
-# the `recovery-stamp-gate` markers), so it cannot drift from the shipped
-# instruction. No live city, Dolt, network, or sessions.
+# This test EXECUTES the real block extracted verbatim from witness-recovery.sh
+# (between the `recovery-stamp-gate` markers), so it cannot drift from the
+# shipped code. No live city, Dolt, network, or sessions.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-recovery-stamp-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -28,27 +28,22 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 
-# --- Extract the REAL block from the formula. --------------------------------
+# --- Extract the REAL block from witness-recovery.sh. ------------------------
 # If the markers or the block are removed or renamed, extraction yields nothing
 # and the check below fails loudly — the contract cannot silently disappear.
 BLOCK="$(awk '
   /# >>> recovery-stamp-gate/ {f=1; next}
   /# <<< recovery-stamp-gate/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$BLOCK" ] \
   && ok "block extracted between recovery-stamp-gate markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+  || bad "block extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \
   && ok "extracted block is syntactically valid bash" \
   || bad "extracted block failed bash -n"
-
-case "$BLOCK" in
-  *'\'*) bad "the block carries a backslash — TOML triple-quote eats continuations" ;;
-  *)     ok "the block is backslash-free, as the formula header requires" ;;
-esac
 
 # gate <dispose_result> -> STAMP_RECOVERY. Sourced exactly as the witness runs
 # it, under `set -u`: the step pre-sets DISPOSE_RESULT to "" before the disposal,

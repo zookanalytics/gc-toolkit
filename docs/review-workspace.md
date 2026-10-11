@@ -7,7 +7,9 @@ description: Where a review keeps its worktree and scratch on disk, and when tha
 
 A review runs the suites at its pinned commit in a detached worktree, and the
 reviewer may also write logs, probe output, or a second worktree at the base.
-All of it lives in one directory named for the review bead,
+mol-review's review step also writes its verdict, `findings.md` and
+`findings.json`, for the verdict step to hand to `signoff.sh`. All of it lives
+in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it
 makes the worktree, and it removes the directory when the review ends.
@@ -40,6 +42,15 @@ Shells that run it at the same moment take turns on a lock, so each of them
 gets the one worktree. A worktree found at another commit is rebuilt at the one
 asked for. The directory is mode 0700. A name that another user or a symlink
 already holds is refused rather than used, because `/tmp` is shared.
+
+`review-workspace.sh path --review-bead <id>` prints the directory itself.
+mol-review makes the worktree once, in its load-dispatch step, and every later
+shell rebuilds the directory's path from the bead id this way. That is also
+what carries the verdict across the review step's close: the close refuses
+until both verdict files are in the directory, so a session that compacts or
+restarts before the verdict step still finds them there. The load-dispatch step
+removes any verdict files an earlier attempt at the same review left in the
+directory, so only the current attempt's verdict satisfies the close.
 
 ## When it is removed
 

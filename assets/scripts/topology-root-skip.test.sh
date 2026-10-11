@@ -22,15 +22,15 @@
 # and this runs on that result to remove the roots. A step bead (gc.session_id, no
 # topology kind) is not a root and survives to be recovered.
 #
-# This test EXECUTES the real filters extracted verbatim from the formula (between
-# the topology-root-skip and host-bead-skip markers), so it cannot drift from the
-# shipped instruction. No live city, Dolt, network, or sessions — only jq and a
+# This test EXECUTES the real filters extracted verbatim from witness-recovery.sh
+# (between the topology-root-skip and host-bead-skip markers), so it cannot drift
+# from the shipped code. No live city, Dolt, network, or sessions — only jq and a
 # tmpdir.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-topology-root-skip-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -41,7 +41,7 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
-# --- Extract the REAL filters from the formula. ------------------------------
+# --- Extract the REAL filters from witness-recovery.sh. ----------------------
 # Pulls the lines between each pair of markers (exclusive). If a marker or its
 # filter is removed/renamed, extraction yields nothing and the check below fails
 # loudly — the guardrail cannot silently disappear.
@@ -49,7 +49,7 @@ extract() {
   awk -v tag="$1" '
     $0 ~ ("# >>> " tag "$") {f=1; next}
     $0 ~ ("# <<< " tag "$") {f=0}
-    f' "$TOML"
+    f' "$LIB"
 }
 
 FILTER="$(extract topology-root-skip)"
@@ -57,21 +57,16 @@ HOSTSKIP="$(extract host-bead-skip)"
 
 [ -n "$FILTER" ] \
   && ok "filter extracted between topology-root-skip markers" \
-  || bad "filter extraction EMPTY — markers missing from $TOML"
+  || bad "filter extraction EMPTY — markers missing from $LIB"
 [ -n "$HOSTSKIP" ] \
   && ok "host-bead-skip extracted (needed for the composed-pipeline case)" \
-  || bad "host-bead-skip extraction EMPTY — markers missing from $TOML"
+  || bad "host-bead-skip extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
 printf '%s\n' "$HOSTSKIP" > "$TMP/hostskip.sh"
 bash -n "$TMP/filter.sh" \
   && ok "extracted filter is syntactically valid bash" \
   || bad "extracted filter failed bash -n"
-
-case "$FILTER" in
-  *'\'*) bad "the filter carries a backslash — TOML triple-quote eats continuations" ;;
-  *)     ok "the filter is backslash-free, as the formula header requires" ;;
-esac
 
 # keep <bead-array-json> -> the surviving ids, sorted and comma-joined. Run
 # exactly as the witness runs it: a jq filter over the listing on stdin.

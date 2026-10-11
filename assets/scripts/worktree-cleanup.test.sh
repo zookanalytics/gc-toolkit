@@ -20,6 +20,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-worktree-cleanup-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
@@ -40,11 +41,11 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 BLOCK="$(awk '
   /# >>> worktree-cleanup/ {f=1; next}
   /# <<< worktree-cleanup/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$BLOCK" ] \
   && ok "block extracted between worktree-cleanup markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+  || bad "block extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$BLOCK" > "$TMP/cleanup.sh"
 bash -n "$TMP/cleanup.sh" \
@@ -150,8 +151,8 @@ grep -q "__CLEANUP_DONE__" <<< "$D_OUT" \
 
 # (E) OWNED=0 must not remove anything — the store guard refused ownership, so
 #     the worktree is not the witness's to delete.
-E_OUT=""; E_RC=0
-E_OUT="$(run_cleanup 0 "$LIVE_E" "$RIG")" || E_RC=$?
+E_RC=0
+run_cleanup 0 "$LIVE_E" "$RIG" >/dev/null || E_RC=$?
 eq "$E_RC" "0" "(E) OWNED=0 -> block exits 0"
 [ -d "$LIVE_E" ] \
   && ok "(E) OWNED=0 -> worktree left intact (OWNED gate preserved)" \

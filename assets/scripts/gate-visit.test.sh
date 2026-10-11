@@ -26,13 +26,13 @@
 #   - the create's id is guarded before use (an unguarded empty id
 #     cascades into stamping nothing, and the silent failure is what
 #     tempts agents to rewrite the block instead of re-running it)
-#   - every FORMULA copy reuses the conversation visit already open on its
-#     subject instead of filing a second one, and never reuses an escalate.sh
-#     visit; this one is executed against every formula copy, because a step
-#     re-run is exactly when the block runs twice. The two script copies keep
-#     their own dedup outside the markers (gc-helm.sh open folds into any open
-#     visit; escalate.sh keys on subject and escalation_key), and their own
-#     tests cover it.
+#   - every FORMULA copy, and visit-file.sh's, reuses the conversation visit
+#     already open on its subject instead of filing a second one, and never
+#     reuses an escalate.sh visit; this one is executed against each of those
+#     copies, because a step re-run is exactly when the block runs twice. The
+#     other script copies keep their own dedup outside the markers (gc-helm.sh
+#     open folds into any open visit; escalate.sh keys on subject and
+#     escalation_key), and their own tests cover it.
 # Hermetic: reads the repo only; no gc, no city.
 #
 # run-tests-scope: tree
@@ -520,16 +520,36 @@ else
     bad "every formula copy was run" "ran $COPIES_RUN of $FORMULA_CONSUMERS formula copies"
 fi
 
+echo "── visit-file.sh's copy reuses the open visit and files past an escalation (executed) ──"
+# visit-file.sh carries the formula form of the block, reuse included, so its
+# copy runs the same two cases. It lands outside copies/, which holds only the
+# formula copies the census above counts.
+mkdir -p "$EXTMP/vf"
+awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$SDIR/visit-file.sh" > "$EXTMP/vf/copy.sh"
+{ cat "$EXTMP/vf/copy.sh"; printf '%s\n' 'printf "RESULT %s\n" "$VISIT"'; } > "$EXTMP/vf/copy.sh.run"
+out="$(run_reuse "$EXTMP/vf/copy.sh.run" open)"
+if [ "$(creates)" = "0" ] && [ "$(result_of "$out")" = "v-9" ]; then
+    ok "visit-file.sh: a second run reuses the conversation visit already open"
+else
+    bad "visit-file.sh: a second run reuses the conversation visit already open" "VISIT='$(result_of "$out")' after $(creates) create(s): $out"
+fi
+out="$(run_reuse "$EXTMP/vf/copy.sh.run" keyed)"
+if [ "$(creates)" = "1" ] && [ "$(result_of "$out")" = "v-1" ]; then
+    ok "visit-file.sh: an open escalation visit does not stand in for it"
+else
+    bad "visit-file.sh: an open escalation visit does not stand in for it" "VISIT='$(result_of "$out")' after $(creates) create(s): $out"
+fi
+
 echo "── consumer census ──"
-if [ "$FORMULA_CONSUMERS" -ge 3 ]; then
+if [ "$FORMULA_CONSUMERS" -ge 2 ]; then
     ok "the known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
 else
-    bad "the known formula consumers carry marked copies" "expected >=3 (mol-visit, mol-feedback-distiller, mol-validate-close); found $FORMULA_CONSUMERS"
+    bad "the known formula consumers carry marked copies" "expected >=2 (mol-visit, mol-validate-close); found $FORMULA_CONSUMERS"
 fi
-if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
+if [ "$SCRIPT_CONSUMERS" -ge 2 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"
 else
-    bad "the script surface carries marked copies" "expected >=1 (gc-helm.sh open files the operator's visit); found $SCRIPT_CONSUMERS — did a copy get unmarked or hand-rolled?"
+    bad "the script surface carries marked copies" "expected >=2 (gc-helm.sh open files the operator's visit, visit-file.sh the distiller's); found $SCRIPT_CONSUMERS — did a copy get unmarked or hand-rolled?"
 fi
 
 echo

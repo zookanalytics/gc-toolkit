@@ -26,16 +26,22 @@ harness_init
 
 # The canonical copies, placeholders bound. awk directly: the blocks are
 # executed, so nothing but the marked lines may ride into them.
-block() { # <marker> <out-file>
-  awk -v m="$1" '$0 ~ "# >>> " m "$" {f = 1; next} $0 ~ "# <<< " m "$" {f = 0} f' "$FORMULA" \
+# The first-reaction step's check lives in the formula; advance-and-drain's guard
+# lives in first-reaction-guard.sh, which that step runs.
+GUARD_SH="$HERE/first-reaction-guard.sh"
+block() { # <marker> <out-file> [<source-file>]
+  awk -v m="$1" '$0 ~ "# >>> " m "$" {f = 1; next} $0 ~ "# <<< " m "$" {f = 0} f' "${3:-$FORMULA}" \
     | sed 's/{{convoy_id}}/conv-sub/g' > "$2"
 }
 block first-reaction-reacted-check "$TMP/check.sh"
-block advance-and-drain-reacted-guard "$TMP/guard.sh"
+block advance-and-drain-reacted-guard "$TMP/guard.sh" "$GUARD_SH"
+grep -qF '/first-reaction-guard.sh" --convoy {{convoy_id}}' "$FORMULA" \
+  && ok "advance-and-drain runs first-reaction-guard.sh on its input convoy" \
+  || bad "advance-and-drain no longer runs first-reaction-guard.sh"
 grep -q 'gc.proactive_reaction' "$TMP/check.sh" && ok "first-reaction-reacted-check extracted" \
   || bad "could not extract first-reaction-reacted-check from $FORMULA"
 grep -q 'gc.proactive_reaction' "$TMP/guard.sh" && ok "advance-and-drain-reacted-guard extracted" \
-  || bad "could not extract advance-and-drain-reacted-guard from $FORMULA"
+  || bad "could not extract advance-and-drain-reacted-guard from $GUARD_SH"
 
 # The blocks also call `gc convoy status` and `gc runtime drain-ack`, which the
 # harness stub does not serve; this shim answers those two and hands every
@@ -43,9 +49,17 @@ grep -q 'gc.proactive_reaction' "$TMP/guard.sh" && ok "advance-and-drain-reacted
 # GC_PACK_DIR, the first place the guard looks.
 mkdir -p "$TMP/shim" "$TMP/pack/assets/scripts" "$TMP/cwd"
 export CALLS="$TMP/calls"
+# CONVOY_OK_CALLS=<n> answers the first n convoy reads and then an empty convoy,
+# so a case can fail one derivation and not the one before it.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/shim/gc" <<SHIM
 case "\$1 \${2:-}" in
-  "convoy status")     printf '{"children":[{"id":"tk-sub"}]}\n' ;;
+  "convoy status")
+    n=\$(( \$(cat "$TMP/convoy-reads" 2>/dev/null || echo 0) + 1 )); echo "\$n" > "$TMP/convoy-reads"
+    if [ -n "\${CONVOY_OK_CALLS:-}" ] && [ "\$n" -gt "\$CONVOY_OK_CALLS" ]; then
+      printf '{"children":[]}\n'
+    else
+      printf '{"children":[{"id":"tk-sub"}]}\n'
+    fi ;;
   "runtime drain-ack") printf 'DRAIN-ACK\n' >> "\$CALLS" ;;
   *)                   exec "$TMP/bin/gc" "\$@" ;;
 esac
@@ -100,6 +114,43 @@ eq "$CALLED" "" "(PARTIAL) …so the exit is re-attempted rather than drained"
 subject '{"gc.proactive_reaction":""}'
 run_block "$TMP/guard.sh"
 hasnt "$OUT" "ALREADY REACTED" "(EMPTY) an emptied stamp is not read as landed"
+
+echo "# first-reaction-guard.sh: a stand-down exits 3, so the exit chained after it never runs"
+run_guard() { # -> OUT, RC, CALLED
+  : > "$CALLS"; rm -f "$TMP/convoy-reads"; RC=0
+  OUT="$(cd "$TMP/cwd" && PATH="$TMP/shim:$PATH" GC_PACK_DIR="$TMP/pack" bash "$GUARD_SH" --convoy conv-sub 2>&1)" || RC=$?
+  CALLED="$(cat "$CALLS")"
+}
+subject '{"gc.proactive_reaction":"1"}'
+run_guard
+eq "$RC" "3" "(SCRIPT) a landed reaction stands down with exit 3"
+has "$OUT" "ALREADY REACTED" "(SCRIPT) …and says why"
+has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --outcome pass" "(SCRIPT) …after closing the step"
+has "$CALLED" "DRAIN-ACK" "(SCRIPT) …and draining"
+
+subject '{"gc.reaction_owned":"1"}'
+run_guard
+eq "$RC" "3" "(SCRIPT) a reaction an engage owns stands down with exit 3"
+has "$OUT" "REACTION OWNED" "(SCRIPT) …and says why"
+has "$CALLED" "STEP-CLOSE --step mol-first-reaction.advance-and-drain --outcome pass" "(SCRIPT) …after closing the step"
+has "$CALLED" "DRAIN-ACK" "(SCRIPT) …and draining"
+
+subject '{}'
+run_guard
+eq "$RC" "0" "(SCRIPT) an unreacted bead exits 0, so the card's exit runs"
+eq "$CALLED" "" "(SCRIPT) …with nothing closed or drained"
+
+# The reacted guard derives the bead again. A derivation that fails there
+# proves nothing about the reaction, so the script refuses rather than let an
+# exit run on a bead whose reaction may have landed.
+subject '{"gc.proactive_reaction":"1"}'
+CONVOY_OK_CALLS=1 run_guard
+eq "$RC" "1" "(SCRIPT) a reacted guard that cannot derive its bead exits 1, so no exit runs"
+eq "$CALLED" "" "(SCRIPT) …with nothing closed or drained"
+
+subject '{}'
+CONVOY_OK_CALLS=0 run_guard
+eq "$RC" "1" "(SCRIPT) a convoy with no single member exits 1 before any guard"
 
 echo "# first-reaction: a completed reaction writes no second card"
 subject '{}'

@@ -9,7 +9,10 @@
 # workspace name that is a symlink; remove taking every worktree inside a
 # workspace, a nested one included, with its registration, and a read-only
 # subtree, while another worktree's stale registration is left for
-# worktree-reap; the formulas' own add and remove lines, run verbatim; and
+# worktree-reap; the formulas' own add and remove lines, run verbatim; the
+# review step's close, run verbatim, which refuses until both verdict files are
+# in the workspace, the verdict step handing signoff.sh those files, and
+# load-dispatch removing the verdict files an earlier attempt left; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -194,6 +197,55 @@ if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes 
 GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fq REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
 REVIEW_BEAD=tk-fq SC="$PACK/assets/scripts/step-close.sh" bash -c "$QREMOVE" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
+
+# --- the review step's close and the verdict step's read ------------------------
+# The verdict crosses the review step's close on disk: the close refuses until
+# findings.md and a findings.json array are in the workspace, and the verdict
+# step hands signoff.sh those two files from the same workspace.
+step_text() { # <step id>: mol-review.toml from that step's id line to the next step
+    awk -v id="id = \"$1\"" '$0 == id {f=1; next} /^\[\[steps\]\]$/ {f=0} f' "$ROOT/formulas/mol-review.toml"
+}
+GUARD="$(step_text review | grep -F -A1 '[ -s "$WS/findings.md" ]')"
+has "$GUARD" '"$SCRIPTS/step-close.sh" --step mol-review.review ' "the review step's close follows its verdict-file check"
+VSC="$TMP/verdict-scripts"; mkdir -p "$VSC"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$VSC/step-close.sh" <<'SC'
+printf '%s\n' "$*" >> "$CLOSE_LOG"
+SC
+chmod +x "$VSC/step-close.sh"
+export CLOSE_LOG="$TMP/close.log"
+VWS="$TMP/verdict-ws"
+close_case() { # <label> <findings.md body, or - for none> <findings.json body, or - for none> <rc> <closes>
+    rm -rf "$VWS"; mkdir -p "$VWS"; : > "$CLOSE_LOG"
+    [ "$2" = "-" ] || printf '%s' "$2" > "$VWS/findings.md"
+    [ "$3" = "-" ] || printf '%s' "$3" > "$VWS/findings.json"
+    SCRIPTS="$VSC" WS="$VWS" bash -c "$GUARD" >/dev/null 2>&1
+    eq "$?" "$4" "$1: the close block exits $4"
+    eq "$(wc -l < "$CLOSE_LOG" | tr -d ' ')" "$5" "$1: step-close runs $5 time(s)"
+}
+close_case "no verdict files"           -            -               1 0
+close_case "findings.md alone"          "VERDICT: x" -               1 0
+close_case "an empty findings.md"       ""           "[]"            1 0
+close_case "findings.json not JSON"     "VERDICT: x" "not json"      1 0
+close_case "findings.json an object"    "VERDICT: x" '{"locus":"a"}' 1 0
+close_case "both verdict files written" "VERDICT: x" "[]"            0 1
+has "$(cat "$CLOSE_LOG")" "--step mol-review.review --outcome pass" "the close it runs is the review step's own"
+WS_LINE='review-workspace.sh" path --review-bead "$REVIEW_BEAD")'
+has "$(step_text review)" "$WS_LINE" "the review step finds the workspace by the review bead"
+has "$(step_text verdict-and-drain)" "$WS_LINE" "so does the verdict step"
+has "$(step_text verdict-and-drain)" '--notes-file "$WS/findings.md" --findings-file "$WS/findings.json"' "the verdict step hands signoff.sh the files the review step's close checked"
+# A failed verdict leaves the workspace for the next attempt, so load-dispatch
+# removes the verdict files it finds there and keeps the worktree.
+CLEAR="$(step_text load-dispatch | grep -E '^rm -f .*findings\.md')"
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fv REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
+printf 'VERDICT: approve\n' > "$WS/gc-review-tk-fv/findings.md"; printf '[]\n' > "$WS/gc-review-tk-fv/findings.json"
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fv REVIEWED_OID="$C1" bash -c "$ADD
+$CLEAR" >/dev/null 2>&1
+if exists "$WS/gc-review-tk-fv/findings.md" || exists "$WS/gc-review-tk-fv/findings.json"; then
+    bad "load-dispatch removes an earlier attempt's verdict files"
+else
+    ok "load-dispatch removes an earlier attempt's verdict files"
+fi
+eq "$(git -C "$WS/gc-review-tk-fv/wt" rev-parse HEAD 2>/dev/null)" "$C1" "and keeps the review's worktree"
 
 # --- reap ----------------------------------------------------------------------
 export REVIEW_WORKSPACE_DIR="$TMP/ws-reap"

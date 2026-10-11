@@ -111,16 +111,12 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 cd "$REPO"
-# GNU/BSD-portable window start (same pair as the precedented scripts).
+# GNU/BSD-portable window start.
 SINCE_EPOCH=$(( $(date -u +%s) - {{miner_window_days}} * 86400 ))
 SINCE=$(date -u -d "@$SINCE_EPOCH" +%Y-%m-%d 2>/dev/null || date -u -r "$SINCE_EPOCH" +%Y-%m-%d)
 
-# GitHub counts merged PRs as closed, so the two lists overlap; union on
-# number. --limit keeps a busy window from being silently truncated at gh's
-# default of 30.
-# merged:>=/closed:>= deliberately misses comments added to PRs that merged
-# before the window; the updated:>= alternative would re-sweep old PRs — the
-# trade is accepted.
+# Merged PRs count as closed too, so union on number. --limit beats gh's
+# default of 30; comments added after a PR's merge window are missed by design.
 MERGED=$(gh pr list --state merged --search "merged:>=$SINCE" --limit 200 --json number -q '.[].number')
 CLOSED=$(gh pr list --state closed --search "closed:>=$SINCE" --limit 200 --json number -q '.[].number')
 [ "$(echo "$MERGED" | sed '/^$/d' | wc -l)" -eq 200 ] && echo "WARN: merged listing hit the 200 cap — window may be truncated" >&2
@@ -138,17 +134,12 @@ echo "PRs in window:"; echo "$PRS"
 
 ## 2. Read each PR's conversation — comment streams and review bodies
 
-For each PR number, read three streams: the inline review comments (attached to
-the diff), the issue comments (the PR's conversation tab), and the review bodies
-(a reviewer's top-level verdict and prose, which neither comment stream carries).
-Each carries corrective feedback; none alone is complete. The codex reviewer
-posts its verdict and findings as a review body, so a run that skips that stream
-misses the feedback this formula exists to capture.
+For each PR number, read three streams: the inline review comments, the issue
+comments, and the review bodies, where a reviewer's top-level verdict lives
+(the codex reviewer posts its findings there). None alone is complete.
 
 ```bash
-# `while read` from a FILE, never `for N in $PRS`: zsh does not word-split
-# unquoted expansions (the loop would run once on one joined token), and a
-# file redirect keeps `exit` in the step rather than a subshell.
+# `while read` from a FILE, never `for N in $PRS`: zsh does not word-split.
 PR_LIST=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-miner.XXXXXX")
 trap 'rm -f "$PR_LIST"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 printf '%s' "$PRS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$PR_LIST"
@@ -175,54 +166,42 @@ reports, "this line is wrong", design discussion about this change's content,
 approvals, questions, bot noise — is ordinary review of the diff and is NOT
 captured.
 
-Hold the base rate: most review comments are about the diff. A window that
-yields many candidates means the distinction is being applied loosely —
-tighten it, don't file the pile. Precision over recall: a missed observation
-recurs and gets caught later; a junk observation pollutes the distiller's
-evidence.
+Hold the base rate: most review comments are about the diff, so a window that
+yields many candidates means the distinction is applied loosely. Precision over
+recall: a missed observation recurs and is caught later; a junk one pollutes
+the distiller's evidence.
 
 For each candidate, derive at capture time:
 
 - **Statement** — the generalizable point, in one or two of your own
   sentences.
-- **`obs.directive`** — the capture-time guess at D6's key distinction:
-  `standing` ONLY when the comment itself states universal intent ("never do
-  this again", "change all occurrences", "stop doing X everywhere");
-  everything phrased about this change is `diff`. The distiller re-judges;
-  when unsure, guess `diff`.
+- **`obs.directive`** — `standing` ONLY when the comment itself states
+  universal intent ("never do this again", "change all occurrences", "stop
+  doing X everywhere"); everything phrased about this change is `diff`. The
+  distiller re-judges; when unsure, guess `diff`.
 - **`obs.category`** — a free slug (e.g. `redundant-comments`,
-  `commit-message-style`); the distiller owns the vocabulary and merges
-  near-duplicates, so a rough guess is fine. When one comment yields two
-  candidates, give them different slugs: the §4 dedup key is the pair
-  (provenance, category), and the provenance half is identical for both.
+  `commit-message-style`); the distiller owns the vocabulary, so a rough guess
+  is fine. Two candidates from one comment get different slugs, since §4 dedups
+  on the (provenance, category) pair.
 - **`obs.scope`** — guess narrow (D4): default `repo:<rig>`; use
   `agent:<role>` only when the feedback explicitly names a role's standing
   behavior. Never guess `global` at capture time.
 
 ## 4. Dedup on (`obs.provenance`, `obs.category`) — before filing anything
 
-The provenance key names the source item, not the finding: one item can carry
-two distinct corrections. A comment keys on `pr:<owner/repo>#<n>:comment:<id>`,
-a review body on `pr:<owner/repo>#<n>:review:<id>`. A candidate whose provenance
-AND category are both already carried by an existing observation bead in this
-rig's store is skipped — this is where self-report double-counts die: the same
-finding captured in-conversation and by this miner must stay one occurrence.
-Keying on provenance alone lets the first capture of an item shadow every other
-finding in it, permanently, because nothing re-reads an item this sweep has
-already covered.
+A comment keys on `pr:<owner/repo>#<n>:comment:<id>`, a review body on
+`pr:<owner/repo>#<n>:review:<id>`. A candidate whose provenance AND category an
+existing observation bead already carries is skipped, so a finding captured
+in-conversation and by this miner stays one occurrence. The category is half
+the key because one item can carry two corrections.
 
 ```bash
-# The dedup surface. Observations are closed at creation, so closed is the
-# norm; the open statuses are included as belt-and-suspenders against a
-# malformed capture. --limit=0 is deliberate: an unbounded all-time closed
-# listing — dedup correctness beats page-size truncation; the surface grows
-# with observation history.
+# Observations are closed at creation; the open statuses catch a malformed
+# capture. --limit=0: dedup correctness beats page-size truncation.
 SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | [(.metadata["obs.provenance"] // ""), (.metadata["obs.category"] // "")] | @tsv')
 
-# Per candidate; $CATEGORY is the slug derived in §3. SRC_KIND and SRC_ID name
-# the §2 source item: SRC_KIND is `comment` for an item from either comment
-# stream and `review` for a review body, and SRC_ID is that item's id. The key
-# carries SRC_KIND as its infix, so a comment id and a review id cannot collide.
+# Per candidate: SRC_KIND is `comment` (either comment stream) or `review` (a
+# review body), SRC_ID that item's id, $CATEGORY the §3 slug.
 KEY="pr:${REPO_SLUG}#${N}:${SRC_KIND}:${SRC_ID}"
 PAIR=$(printf '%s\\t%s' "$KEY" "$CATEGORY")
 printf '%s\\n' "$SEEN" | grep -Fxq "$PAIR" && { echo "dedup: $KEY + $CATEGORY already recorded — skipping"; continue; }
@@ -231,8 +210,7 @@ printf '%s\\n' "$SEEN" | grep -Fxq "$PAIR" && { echo "dedup: $KEY + $CATEGORY al
 ## 5. File at most {{max_obs_per_run}} observation beads — the §1 contract, exactly
 
 Order candidates newest-first and file up to the cap. Each bead is closed at
-creation — an ephemeral record unit ("landed" means "recorded"): never
-routed, never assigned, never left open.
+creation: never routed, never assigned, never left open.
 
 For each surviving `(N, SRC_KIND, SRC_ID, USER, QUOTE, STATEMENT, NORM,
 CATEGORY, DIRECTIVE, SCOPE)`:
@@ -249,23 +227,19 @@ $STATEMENT
 $NORM
 
 (Draft rule text only — explicitly non-binding; the distiller judges.)"
-# Optionally append a '## Context' section (what the diff was doing) when it
-# helps the distiller read the quote.
+# Optionally append a '## Context' section when it helps read the quote.
 
 BEAD_JSON=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task -l learning -l observation -d "$BODY" --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create observation for $KEY${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 
-# Non-atomic create→update: a crash between the two leaves an observation
-# without its provenance stamp, invisible to dedup. Accepted — low probability.
+# A crash between create and update leaves an unstamped observation; accepted.
 gc bd update "$BEAD" --set-metadata task_kind=observation --set-metadata obs.category="$CATEGORY" --set-metadata obs.scope="$SCOPE" --set-metadata obs.source=miner --set-metadata obs.directive="$DIRECTIVE" --set-metadata obs.provenance="$KEY" --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --status=closed
 echo "filed observation $BEAD ($KEY)"
 ```
 
-If candidates remain past the cap, drop them and note the count — they are
-not lost: the window re-covers those PRs next run and the §4 pair-key dedup
-keeps everything already filed from double-counting, so a capped run is
-naturally resumable.
+If candidates remain past the cap, drop them and note the count: the window
+re-covers those PRs next run, and the §4 dedup keeps a capped run resumable.
 
 ## 6. Summarize and drain
 
@@ -274,21 +248,17 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 echo "feedback-miner complete: read P PR(s); filed F observation(s); skipped S already-recorded; dropped D for the {{max_obs_per_run}} cap (window re-covers them next run)."
-# Terminal step: close this step bead, THEN drain. The dispatcher's
-# workflow-finalize closes the kind=workflow root once every step is closed.
+# Terminal step: close this step bead, THEN drain.
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-miner.mine-and-file --outcome pass
 gc runtime drain-ack
 ```
 
-**Never** file a pattern bead, a prompt-update proposal, or any routed/open
-bead from this formula, and never edit a prompt, fragment, or skill in
-response to what a comment says — the distiller and a reviewed PR do that.
-The miner records, full stop.
+**Never** file a pattern bead, a prompt-update proposal, or any routed or open
+bead from this formula, and never edit a prompt, fragment, or skill in response
+to a comment: the distiller and a reviewed PR do that. The miner records.
 
-**Exit criteria:** Every window PR's inline review comments, issue comments, and
-review bodies read as data; each corrective-of-a-generalizable-kind item either
-filed as one closed observation bead (§1 contract, `obs.source=miner`), skipped
-by §4 pair-key dedup, or dropped for the cap with a logged count; the session
-drained.
-"""
+**Exit criteria:** every window PR's three streams read as data; each
+generalizable corrective item filed as one closed observation bead
+(`obs.source=miner`), skipped by §4 dedup, or dropped for the cap with a
+logged count; the session drained."""
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

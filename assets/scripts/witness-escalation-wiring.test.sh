@@ -37,12 +37,13 @@ for k in witness-salvage-refused witness-partial-release \
 done
 
 # witness-refinery-queue is the deliberate exception. check-refinery's
-# refinery-stuck-escalate block files it through escalate.sh, not
+# refinery-stuck-escalate.sh files it through escalate.sh, not
 # patrol-finding.sh: a handoff still assigned and unprepared past the stuck
 # bound is a session a human must look at now — the escalate.sh emergency, not a
 # routine observation the reaction triages. escalate.sh dedups per --subject, so
 # two stuck handoffs are still two visits.
-if grep -Eq 'escalate\.sh.*--key witness-refinery-queue' "$TOML"; then
+if grep -q 'refinery-stuck-escalate\.sh' "$TOML" \
+   && grep -Eq '"\$ESCALATE".*--key witness-refinery-queue' "$ROOT/assets/scripts/refinery-stuck-escalate.sh"; then
   ok "witness-refinery-queue is an escalate.sh stuck-handoff visit, not a finding"
 else
   bad "witness-refinery-queue is no longer wired to escalate.sh"

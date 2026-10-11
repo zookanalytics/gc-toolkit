@@ -7,9 +7,9 @@
 # judgment, this files a visit on the anchor and dismisses the approval, so the
 # operator re-reviews what changed instead of landing it under the old approval.
 #
-# Called by submit-and-exit (formulas/mol-polecat-work.toml) right after the
-# push is verified, for every bead it hands off; any bead but a merge-in child of
-# an open PR is left alone.
+# Called by submit-and-exit.sh (mol-polecat-work's submit-and-exit step) right
+# after the push is verified, for every bead it hands off; any bead but a
+# merge-in child of an open PR is left alone.
 #
 # THE BOUNDARY. A bring-current is MECHANICAL when every commit it adds to the
 # branch is a merge of the base whose result is the one git produces on its own,

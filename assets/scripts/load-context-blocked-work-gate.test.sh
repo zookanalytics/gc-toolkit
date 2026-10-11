@@ -22,14 +22,17 @@
 #      recorded it neither holds nor drains; a hold that did not land does not
 #      drain. The step is never left silently claimable or silently parked.
 #
-# EXECUTES the real snippet extracted verbatim from the formula against fake
-# `gc` and stub scripts, so the test cannot drift from the shipped instruction.
-# No live city, Dolt, network, or worktrees.
+#   4. WIRING — mol-polecat-work's load-context step runs this gate.
+#
+# Runs load-context-blocked-work-gate.sh, and the real escalate-hold-drain.sh it
+# calls, against a fake `gc` and stub deferred-dispatch.sh, escalate.sh and
+# molecule-hold.sh. No live city, Dolt, network, or worktrees.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-polecat-work.toml"
+SUT="$HERE/load-context-blocked-work-gate.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-load-context-blocked-work-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -43,50 +46,26 @@ no()  { case "$1" in *"$2"*) bad "$3" "'$2' unexpectedly in '$1'" ;; *) ok "$3" 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -f "$TOML" ] || { echo "formula not found: $TOML" >&2; exit 1; }
 
-# --- Extract the REAL snippet from the formula. -------------------------------
-# The flag-flip pulls the lines between the markers (exclusive). If the markers
-# are removed or renamed — the exact thing a wholesale reconciliation against
-# base does — extraction yields nothing and the checks below fail loudly.
-extract() {
-  awk -v m="$1" '
-    $0 ~ ("# >>> " m "$") {f=1; next}
-    $0 ~ ("# <<< " m "$") {f=0}
-    f' "$TOML"
-}
+# --- The gate and its wiring. ------------------------------------------------
+[ -x "$SUT" ] && ok "gate script is executable" || bad "gate script missing or not executable: $SUT"
+bash -n "$SUT" && ok "gate script is syntactically valid bash" || bad "gate script failed bash -n"
 
-GATE="$(extract load-context-blocked-work-hold)"
-
-[ -n "$GATE" ] \
-  && ok "gate extracted between load-context-blocked-work-hold markers" \
-  || bad "gate extraction EMPTY — markers missing from $TOML"
-
-# Two regions sharing one marker name would concatenate into one extraction and
-# double every assertion below; pin the opener to a single occurrence.
-eq "$(grep -c '^# >>> load-context-blocked-work-hold$' "$TOML")" "1" \
-   "exactly one load-context-blocked-work-hold region"
-
-# TOML `"""` strings eat a trailing backslash (line-ending escape), silently
-# joining lines. The snippet is written backslash-free; assert it, because
-# reintroducing a continuation is an easy and invisible edit.
-case "$GATE" in
-  *\\*) bad "snippet contains a backslash — TOML line-ending escapes will mangle it" ;;
-  *)    ok  "snippet is backslash-free (safe inside a TOML triple-quoted string)" ;;
-esac
-
-printf '%s\n' "$GATE" > "$TMP/gate.sh"
-bash -n "$TMP/gate.sh" \
-  && ok "extracted gate is syntactically valid bash" \
-  || bad "extracted gate failed bash -n"
+# load-context runs the gate with the claimed step bead as the hold's hint, so a
+# formula edit cannot drop the gate without failing here.
+grep -qE '"\$SCRIPTS/load-context-blocked-work-gate\.sh" --bead "\$WORK_BEAD_ID" --step-bead "\$\{CLAIMED_STEP_BEAD_ID:-\}"' "$TOML" \
+  && ok "load-context runs the gate on the work bead with the claimed step bead" \
+  || bad "load-context no longer runs load-context-blocked-work-gate.sh as the gate"
 
 # --- Fakes. -------------------------------------------------------------------
-# gc : `bd update` and `runtime drain-ack` record to $FAKE_LOG; the block reads
-#      the work bead from $WORK_BEAD_JSON (set by the step), so no `bd show` is
-#      needed. `bd update --append-notes ...` and the delivery-key clear both
-#      arrive here; the argv is captured so the containment write is provable.
+# gc : `bd update` and `runtime drain-ack` record to $FAKE_LOG; `bd show`
+#      returns $FAKE_SHOW (the work bead row) and is not logged.
+#      `bd update --append-notes ...` and the delivery-key clear both arrive
+#      here; the argv is captured so the containment write is provable.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
+  "bd show")           printf '%s' "${FAKE_SHOW:-}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit 0 ;;
 esac
 exit 0
@@ -94,10 +73,10 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# molecule-hold.sh, escalate.sh, deferred-dispatch.sh resolved out of
-# $GC_PACK_DIR exactly as the arm resolves them. Each records its verb into the
-# ordered trace and its argv where the reason/target assertions can read it,
-# and returns a code the assertions control.
+# molecule-hold.sh, escalate.sh and deferred-dispatch.sh, resolved through
+# GC_MOLECULE_HOLD_TOOL, GC_ESCALATE_TOOL and GC_DEFERRED_DISPATCH_TOOL. Each
+# records its verb into the ordered trace and its argv where the reason/target
+# assertions can read it, and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
 cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
 #!/usr/bin/env bash
@@ -120,20 +99,20 @@ ARM
 chmod +x "$TMP/pack/assets/scripts/molecule-hold.sh" \
          "$TMP/pack/assets/scripts/escalate.sh" \
          "$TMP/pack/assets/scripts/deferred-dispatch.sh"
-export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
+export GC_MOLECULE_HOLD_TOOL="$TMP/pack/assets/scripts/molecule-hold.sh"
+export GC_ESCALATE_TOOL="$TMP/pack/assets/scripts/escalate.sh"
+export GC_DEFERRED_DISPATCH_TOOL="$TMP/pack/assets/scripts/deferred-dispatch.sh"
 
 # run <work-bead-json> -> prints "<rc>|<ordered verb log>"
 #   FAKE_*_RC control each stub's exit; FAKE_UPDATE/HOLD/ESC/ARM capture argv.
 run() {
   : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/hold"; : > "$TMP/esc"; : > "$TMP/arm"
   local rc=0
-  WORK_BEAD_ID=tk-work \
-  WORK_BEAD_JSON="$1" \
-  CLAIMED_STEP_BEAD_ID=st-load \
+  FAKE_SHOW="$1" \
   FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_HOLD="$TMP/hold" \
   FAKE_ESC="$TMP/esc" FAKE_ARM="$TMP/arm" \
   FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_ARM_RC="${FAKE_ARM_RC:-0}" \
-    bash "$TMP/gate.sh" > "$TMP/out" 2>&1 || rc=$?
+    "$SUT" --bead tk-work --step-bead st-load > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
