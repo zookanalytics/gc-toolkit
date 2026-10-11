@@ -88,6 +88,11 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=pr-finishing-priority.sh
+. "$_bd_lib_dir/pr-finishing-priority.sh" || { echo "cannot source pr-finishing-priority.sh beside this script" >&2; exit 1; }
+# The priority a merge-in child is routed at. A pre-open anchor has no PR, so no
+# posture, whatever an earlier PR left recorded on it.
+FIX_PRIO=$(pr_finishing_priority "")
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -398,8 +403,9 @@ while IFS= read -r row; do
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such
   # path), so the exit code does not establish the route, and an unrouted child
-  # reported as dispatched is a rework nothing can reach.
-  gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+  # reported as dispatched is a rework nothing can reach. The priority rides the
+  # same write, so the child becomes claimable already at it.
+  gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" --priority "$FIX_PRIO" >/dev/null 2>&1 || true
   rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
   if [ "$rgot" != "$FIX_POOL" ]; then
     echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2

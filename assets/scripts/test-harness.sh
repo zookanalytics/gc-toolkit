@@ -101,6 +101,10 @@ harness_init() {
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k] // "<absent>") // "<absent>"' "$STUB_STORE"; }
+# A bead's priority, bd's default 2 when none was written, and the priority a
+# sling poured its workflow at (the stub's sling records it).
+bprio() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+bpoured() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
 bstatus() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
 bassignee() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .assignee) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
@@ -126,10 +130,12 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, and review-dismissal.sh, what a
-  # dismissal retires, are sourced by sibling path the same way.
+  # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
+  # retires, and pr-finishing-priority.sh, the priority PR-finishing work is
+  # filed at, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
+  [ -f "$here/pr-finishing-priority.sh" ] && cp "$here/pr-finishing-priority.sh" "$d/"
   return 0
 }
 
@@ -222,11 +228,14 @@ case "$sub" in
     done
     stamp=1
     case ",$drops," in *",gc.execution_routed_to,"*) stamp=0 ;; esac
+    # A pour copies the bead's priority into its workflow once, at the sling;
+    # poured_priority records that copy, bd's default 2 when none was written.
     tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$bead" --arg t "$target" --argjson stamp "$stamp" '
       map(if .id == $id then
             (.metadata |= del(.["gc.routed_to"]))
             | (if $stamp == 1 then .metadata["gc.execution_routed_to"] = $t else . end)
+            | .poured_priority = (.priority // 2)
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
@@ -315,11 +324,13 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0; prio=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --description=*) desc="${1#--description=}"; desc_set=1 ;;
         --description|-d) shift; desc="${1-}"; desc_set=1 ;;
+        --priority=*) prio="${1#--priority=}" ;;
+        --priority|-p) shift; prio="${1-}" ;;
         --set-metadata) shift; sets+=("${1:-}") ;;
         --set-metadata=*) sets+=("${1#--set-metadata=}") ;;
         --unset-metadata) shift; unsets+=("${1:-}") ;;
@@ -357,16 +368,18 @@ case "$verb" in
     # writes tens of thousands of updates. The sets ride the positional args
     # ahead of the unsets ($ns says where the split is), each `k=v` cut at its
     # first `=` as the shell cut it. A set or unset whose key STUB_DROP_KEYS
-    # names is skipped, as are the assignee, status and description it names;
-    # notes are never dropped.
+    # names is skipped, as are the assignee, status, priority and description it
+    # names; notes are never dropped.
     # bd stores a value that parses as a JSON number, true, false or null as
     # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
     # boolean. Every other value, a quoted JSON string included, is stored as
     # its raw text. The number grammar is JSON's, which is stricter than jq's
     # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+    # bd takes a priority as 0-4 or P0-P4 and stores the number.
     tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$id" --arg dr "$drops" --argjson ns "${#sets[@]}" \
       --argjson asg_set "$asg_set" --arg asg "$asg" --arg st "$newstatus" \
+      --arg prio "$prio" \
       --argjson note_set "$note_set" --arg note "$note" \
       --argjson desc_set "$desc_set" --arg desc "$desc" '
       ($dr | split(",")) as $drop
@@ -388,6 +401,7 @@ case "$verb" in
               | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
               | (if $asg_set == 1 and kept("assignee") then .assignee = $asg else . end)
               | (if $st != "" and kept("status") then .status = $st else . end)
+              | (if $prio != "" and kept("priority") then .priority = ($prio | ltrimstr("P") | tonumber) else . end)
               | (if $note_set == 1 then
                    .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $note)
                  else . end)

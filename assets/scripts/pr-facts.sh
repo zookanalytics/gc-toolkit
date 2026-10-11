@@ -644,6 +644,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # space counts only the live ones.
 # shellcheck source=review-dismissal.sh
 . "$_bd_lib_dir/review-dismissal.sh" || { echo "cannot source review-dismissal.sh beside this script" >&2; exit 1; }
+# The priority each fix-pool child is routed at, pr_finishing_priority.
+# shellcheck source=pr-finishing-priority.sh
+. "$_bd_lib_dir/pr-finishing-priority.sh" || { echo "cannot source pr-finishing-priority.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -2143,6 +2146,10 @@ MP_EOF
   # than waiting for the full pass at the tail; every other dispatch arm is the
   # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
+  # The priority a fix-pool child of this anchor is routed at, from this pass's
+  # posture, else the one the anchor records. Each route stamp below writes it in
+  # the same update as the route, so a child becomes claimable already at it.
+  FIX_PRIO=$(pr_finishing_priority "${posture:-$have_p}")
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
@@ -2494,9 +2501,9 @@ REAP_EOF
       # — or not at all, so a child that can veto a merge but cannot be rescued or
       # reaped is never left behind. mint_rework_child reads the whole identity back
       # (rejection_reason included) and unmakes a newborn it cannot complete. The
-      # route is stamped LAST, on the id it returns, so only a complete child ever
-      # becomes claimable; a route that does not land leaves a rescuable child the
-      # stranded arm re-routes next pass, never a husk.
+      # route is stamped LAST, on the id it returns and with the child's priority,
+      # so only a complete child ever becomes claimable; a route that does not land
+      # leaves a rescuable child the stranded arm re-routes next pass, never a husk.
       FIX=$(mint_rework_child "$reuse" "$FIX_TITLE base rewritten, PR conflicts" "$id" "$fix_branch" "$base" \
         "stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
         "$prepare_mode" "$live_url" "$num")
@@ -2504,7 +2511,7 @@ REAP_EOF
         echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+      gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" --priority "$FIX_PRIO" >/dev/null 2>&1 || true
       rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
       if [ "$rgot" != "$FIX_POOL" ]; then
         echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
@@ -2683,7 +2690,7 @@ $CBODY"
         fi
         rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         if [ "$rgot" != "$FIX_POOL" ]; then
-          gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+          gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" --priority "$FIX_PRIO" >/dev/null 2>&1 || true
           rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
         if [ "$rgot" != "$FIX_POOL" ]; then
@@ -3350,7 +3357,7 @@ GATES
               echo "$PROG: $id could not form the red-check rework for PR#$num; retry next pass" >&2
               skipped=$((skipped + 1)); continue
             fi
-            gc bd update "$RCFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+            gc bd update "$RCFIX" --set-metadata gc.routed_to="$FIX_POOL" --priority "$FIX_PRIO" >/dev/null 2>&1 || true
             rc_rgot=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
             if [ "$rc_rgot" != "$FIX_POOL" ]; then
               echo "$PROG: WARN red-check rework $RCFIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2

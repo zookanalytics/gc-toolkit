@@ -919,11 +919,25 @@ hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "a m
 has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words"
 grep -qxF "new-2|blocks|F4" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
+hasnt "$(cat "$STUB_DEPS")" "|parent-child|" "the child carries no parent edge, so no hold on an epic cascades onto it"
+# The fixture's reviewDecision is empty, so the posture this pass records reads
+# none, not approved.
+eq "$(meta_pinned F4 pr_posture)" "none@sha-13" "the posture reads none"
+eq "$(bprio new-2)" "1" "…so the child is routed at P1, above new work"
 
 echo "# …dedup: second pass files nothing"
 out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
+
+echo "# …the merge-in of a PR whose posture reads approved is routed at P0"
+store "[$(anchor F4A 413)]"
+printf '%s' "$(prview 413 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_413.json"
+approve 413
+out=$(run)
+has "$out" "filed merge-mode rework new-2 routed to $FIX" "the approved PR's conflict files a merge-in child"
+eq "$(meta_pinned F4A pr_posture)" "approved@sha-413" "the posture records the approval"
+eq "$(bprio new-2)" "0" "…and the child is routed at P0, ahead of all new work"
 
 echo "# …an UNAPPROVED conflicting PR files no merge-in: its posture is recorded, and one line says why"
 # A bring-current costs a polecat round and a CI run, and goes stale whenever
@@ -1801,6 +1815,8 @@ eq "$(meta new-2 pr_number)" "40" "…and the PR, so merge.sh counts it in fligh
 eq "$(meta new-2 branch)" "polecat/x40" "the child resumes the PR's own branch"
 eq "$(meta new-2 prepare_mode)" "merge" "every branch shape is brought current by merge, polecat/* included"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "the child is routed to the fix pool"
+eq "$(bprio new-2)" "1" "…at P1, above new work: a commented posture is not an approval"
+hasnt "$(cat "$STUB_DEPS")" "|parent-child|" "…and carries no parent edge, so no hold on an epic cascades onto it"
 has "$(meta new-2 rejection_reason)" "Do NOT open a new PR" "the work order reworks THIS PR"
 grep -qxF "new-2|blocks|P1" "$STUB_DEPS" && ok "the child blocks the anchor" || bad "blocks edge missing"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
@@ -4779,11 +4795,22 @@ has "$(meta new-2 rejection_reason)" "test" "…names the failing check"
 has "$(meta new-2 rejection_reason)" "actions/runs/999" "…and carries the run log url"
 grep -qxF "new-2|blocks|RC1" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta RC1 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
+eq "$(bprio new-2)" "1" "the child is routed at P1, above new work: the PR's posture is not approved"
+hasnt "$(cat "$STUB_DEPS")" "|parent-child|" "…and carries no parent edge, so no hold on an epic cascades onto it"
 
 echo "# …dedup: an open child at this head suppresses a twin (rework OR review)"
 out=$(run)
 has "$out" "already covers this head, no new child" "the second pass files nothing"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "still exactly one child"
+
+echo "# …the red-check fix of a PR whose posture reads approved is routed at P0"
+store "[$(anchor RCA 452)]"
+printf '%s' "$(prview 452 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" \
+  | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_452.json"
+out=$(run)
+has "$out" "required check(s) failing (test); filed merge-mode rework new-2 routed to $FIX" "the approved PR's red check files a rework child"
+eq "$(meta_pinned RCA pr_posture)" "approved@sha-452" "the posture records the approval"
+eq "$(bprio new-2)" "0" "…and the child is routed at P0, ahead of all new work"
 
 echo "# …a live review child (keyed on anchor_bead, not this branch) also stands the arm down"
 # Built inline, not via child(): a later block reuses that name for a 2-arg

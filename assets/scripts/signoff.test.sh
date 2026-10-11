@@ -44,10 +44,12 @@ if [ "${1:-}" = "sling" ]; then
     esac
     shift || true
   done
+  # The pour also copies the bead's priority into its workflow once, which
+  # poured_priority records (bd's default 2 when none was written).
   if [ -z "${STUB_SLING_NOPOUR:-}" ] && [ -n "$bead" ]; then
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "$bead" --arg p "$pool" \
-      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"]) | .poured_priority = (.priority // 2)) else . end)' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   fi
   exit 0
@@ -130,6 +132,9 @@ case "${1:-}" in
         --status=*) st="${1#--status=}"
           jq -c --arg id "$id" --arg s "$st" \
             'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --priority) shift
+          jq -c --arg id "$id" --arg p "$1" \
+            'map(if .id == $id then .priority = ($p | ltrimstr("P") | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -359,6 +364,10 @@ reset() { # $1 = anchor json, extra beads appended via $2
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
+# A bead's priority (bd's default 2 when none was written) and the priority the
+# sling poured its workflow at.
+prio()   { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+poured() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
 notes()  { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 anchor_meta() { # <k=v>... — stamp the anchor before the run
   local kv
@@ -750,6 +759,18 @@ hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, no
 has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the summary"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
+eq "$(prio fix-1)" "1" "a rework on a PR not yet approved is filed at P1, above new work"
+eq "$(poured fix-1)" "1" "…and the sling pours its workflow at that priority"
+hasnt "$(cat "$STUB_DEPS")" "parent-child" "the child carries no parent edge, so no hold on an epic cascades onto it"
+hasnt "$(grep '^bd create' "$STUB_GC_LOG")" "--parent" "…and is not created under a parent"
+
+echo "# a rework on an approved PR is filed at P0"
+reset "$ANCHOR_PR"
+anchor_meta "pr_posture=approved@$OID_HEAD@2026-10-11T00:00:00Z"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "request-changes on an approved PR exits 0"
+eq "$(prio fix-1)" "0" "the rework of an approved PR is filed at P0"
+eq "$(poured fix-1)" "0" "…and the sling pours its workflow at P0"
 
 echo "# request-changes files a child at any round count — GC_MAX_REVIEW_ROUNDS is inert, no park written"
 # The round cap is retired: no counter, no floor, no signoff_cap park. Even with
@@ -788,6 +809,14 @@ reset "$ANCHOR_PRE"
 eq "$rc" 0 "pre-open request-changes exits 0"
 eq "$(grep '^Rework' "$STUB_CREATED")" "Rework branch polecat/tk-1: address pre-open signoff findings" "pre-open child is branch-titled"
 eq "$(meta fix-1 existing_pr)" "<absent>" "pre-open child carries no PR fields"
+eq "$(prio fix-1)" "1" "a pre-open rework is filed at P1"
+
+echo "# a pre-open rework ignores a posture an earlier PR left on the anchor"
+reset "$ANCHOR_PRE"
+anchor_meta "pr_posture=approved@$OID_OLD@2026-10-01T00:00:00Z"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "pre-open request-changes over a stale posture exits 0"
+eq "$(prio fix-1)" "1" "an anchor with no PR has no posture, so its rework is filed at P1"
 
 echo "# incomplete child work order is exit 2, review stays open"
 reset "$ANCHOR_PR"

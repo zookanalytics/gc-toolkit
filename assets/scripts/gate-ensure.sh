@@ -166,6 +166,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# The priority a review or validation pass is slung at, pr_finishing_priority.
+# shellcheck source=pr-finishing-priority.sh
+. "$_bd_lib_dir/pr-finishing-priority.sh" || { echo "cannot source pr-finishing-priority.sh beside this script" >&2; exit 1; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is
@@ -492,6 +495,17 @@ meta_of() { # <row-json> <key>
   printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
 
+# child_priority <anchor-row> — the priority a review or validation pass
+# dispatched onto this anchor runs at. A sling copies the bead's priority into
+# the workflow once, so it is written to the bead ahead of the sling. Only a
+# pull_request anchor's posture counts: a pre-open anchor has no PR, whatever an
+# earlier PR left recorded on it.
+child_priority() {
+  local posture=""
+  [ "$(meta_of "$1" merge_result)" != pull_request ] || posture=$(meta_of "$1" pr_posture)
+  pr_finishing_priority "$posture"
+}
+
 # Does <have> already record <want> in the dated shape <value>@<oid>@<instant>?
 # The instant is lifecycle.sh's to keep or restamp, so any well-formed one
 # answers yes; a value that is not yet dated does not.
@@ -740,6 +754,8 @@ STRAY
         echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
         skipped=$((skipped + 1))
       else
+        gc bd update "$VPASS_D" --priority "$(child_priority "$row")" >/dev/null 2>&1 \
+          || echo "$PROG: WARN $id validation pass $VPASS_D priority not written; its validator runs at the priority the pass carries" >&2
         gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
         if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
           gc session wake "$VALIDATE_POOL" >/dev/null 2>&1 || true
@@ -973,6 +989,8 @@ STRAY
           # union. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
           # --review-formula that marks its lane and synthesis vars required
           # cannot mint that first root without them.
+          gc bd update "$rid" --priority "$(child_priority "$row")" >/dev/null 2>&1 \
+            || echo "$PROG: WARN $id stranded review $rid priority not written; its review runs at the priority the bead carries" >&2
           gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
@@ -1075,7 +1093,8 @@ STRAY
       skipped=$((skipped + 1)); continue
     fi
     # reviewed_oid pins the dispatch head (signoff binds the verdict to it);
-    # fix_target_pool routes a request-changes rework to the derived pool.
+    # fix_target_pool routes a request-changes rework to the derived pool; the
+    # priority is the one the sling below copies into the review's workflow.
     gc bd update "$RID" \
       --set-metadata task_kind=review \
       --set-metadata check_name="$g" \
@@ -1084,7 +1103,8 @@ STRAY
       --set-metadata review_base="$target" \
       --set-metadata review_pool="$REVIEW_POOL" \
       ${head:+--set-metadata reviewed_oid="$head"} \
-      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
+      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} \
+      --priority "$(child_priority "$row")" >/dev/null 2>&1
     gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 \
       || echo "$PROG: WARN could not attach review $RID as a blocks-dep of $id (anchor_bead persists the link)" >&2
     # The anchor link is what lets the signoff find the check to stamp; verify it

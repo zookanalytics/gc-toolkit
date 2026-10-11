@@ -157,6 +157,13 @@ eq "$(meta "$K" pr_url)" "<absent>" "no pr_url either"
 eq "$(meta "$K" existing_pr)" "<absent>" "and no existing_pr to adopt"
 has "$(cat "$STUB_DEPS")" "$K|blocks|A1" "the child blocks the anchor it was filed for"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
+eq "$(bprio "$K")" "1" "the child is routed at P1, above new work: a pre-open anchor has no approved PR"
+hasnt "$(cat "$STUB_DEPS")" "|parent-child|" "the child carries no parent edge, so no hold on an epic cascades onto it"
+
+echo "# a posture an earlier PR left on a pre-open anchor counts for nothing"
+reset "$(pre AP polecat/tk-c1 ',"pr_posture":"approved@0000000000000000000000000000000000000000@2026-10-01T00:00:00Z"')"
+run --fix-pool "$POOL" >/dev/null
+eq "$(bprio "$(newborn)")" "1" "the merge-in child of an anchor with no PR is routed at P1"
 
 echo "# a branch a landed change superseded gets the operator's decision, not a child"
 ( cd "$WORK" && git merge-tree --write-tree --quiet origin/main origin/polecat/tk-moot >/dev/null 2>&1 ); rc=$?
@@ -258,6 +265,7 @@ OUT=$(run --fix-pool "$POOL")
 eq "$(newcount)" "0" "a child stranded by a lost route stamp is not twinned"
 has "$OUT" "re-routing stranded rework S1" "it is re-routed instead"
 eq "$(meta S1 "gc.routed_to")" "$POOL" "and the route it was missing is stamped"
+eq "$(bprio S1)" "1" "…with the priority of finishing work in the same write"
 
 reset "$(pre AB polecat/tk-c1)" '{"id":"O1","status":"open","assignee":"","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}'
 OUT=$(run --fix-pool "$POOL")

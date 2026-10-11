@@ -651,6 +651,33 @@ the cadence — the arms run whether or not any refinery session is awake.
    runs last, and after arm 2, so a bead this pass landed onto another anchor's
    branch is named on the same tick.
 
+## The priority of PR-finishing work
+
+A polecat claims routed work in priority order, and a pour copies the slung
+bead's priority into its workflow once. bd files a bead at P2 when it is given
+none, which is where new work queues. Each child that carries an anchor's
+branch to its merge is a review, a validation pass, a merge-in, a red-check fix
+or a review rework, and each is filed above new work, at the priority
+`pr-finishing-priority.sh` gives:
+
+- P0 once the anchor's recorded `pr_posture` reads `approved`;
+- P1 for any other posture, and for an anchor with no PR yet.
+
+The priority rides the update that makes the child claimable, so a child a pass
+adopts or rescues gets it as well as a fresh one:
+
+- The route stamp carries it for a child routed to the fix pool: arm 7's
+  merge-in, red-check fix and review rework, arm 4's review rework, and arm 5's
+  merge-in.
+- gate-ensure (arm 6) writes it to a review, or to a validation pass that
+  `pr-facts.sh` or `signoff.sh` opened, before it slings `mol-review` or
+  `mol-validate` onto the bead.
+- `signoff.sh` writes it to the rework child a request-changes verdict files
+  before it slings `mol-polecat-work` onto the child.
+
+The refinery patrol's find-work takes handoffs in priority order too, so the
+rank a child is filed at holds through its hand-back.
+
 ## Single-flight: the tracking gate and the pass lock
 
 Two `merge.sh` writers against the same anchors is the failure this

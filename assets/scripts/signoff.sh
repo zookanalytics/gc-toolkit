@@ -138,6 +138,9 @@ fi
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# The priority the rework child is filed at, pr_finishing_priority.
+# shellcheck source=pr-finishing-priority.sh
+. "$_bd_lib_dir/pr-finishing-priority.sh" || { echo "cannot source pr-finishing-priority.sh beside this script" >&2; exit 1; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
@@ -924,6 +927,11 @@ META=(
 if [ -n "$POST_OPEN" ]; then
   META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL" --set-metadata "pr_number=$PR_NUMBER")
 fi
+# The priority the sling below copies into the rework's workflow. A pre-open
+# anchor has no PR, so no posture.
+FIX_POSTURE=""
+[ -z "$POST_OPEN" ] || FIX_POSTURE=$(row_meta "$ANCHOR_ROW" pr_posture)
+META+=(--priority "$(pr_finishing_priority "$FIX_POSTURE")")
 gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 
 # The child must BLOCK the anchor. Recorded the other way round it waits on an

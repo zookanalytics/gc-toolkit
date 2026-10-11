@@ -208,6 +208,23 @@ hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no f
 eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the anchor — the ceiling is retired"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
+eq "$(bprio "$rid")" "1" "a review of an anchor with no PR yet is filed at P1, above new work"
+eq "$(bpoured "$rid")" "1" "…and the sling pours its workflow at that priority"
+hasnt "$(cat "$STUB_DEPS")" "|parent-child|" "the review carries no parent edge, so no hold on an epic cascades onto it"
+hasnt "$(grep '^bd create' "$STUB_GC_LOG")" "--parent" "…and is not created under a parent"
+
+echo "# a review of an approved PR is slung at P0; a posture left on a pre-open anchor counts for nothing"
+store "[$(anchor PA pull_request correctness "" polecat/pa ",\"pr_posture\":\"approved@$(oid pa)@2026-10-11T00:00:00Z\""),
+        $(anchor PS pre_open_gate correctness "" polecat/ps ",\"pr_posture\":\"approved@$(oid ps-old)@2026-10-01T00:00:00Z\"")]"
+oid pa > "$GH_DIR/head_polecat_pa"
+oid ps > "$GH_DIR/head_polecat_ps"
+out=$(run)
+has "$out" "2 reviews dispatched" "both unbacked lanes dispatch a review"
+rpa=$(jq -r '.[] | select(.metadata.task_kind == "review" and .metadata.anchor_bead == "PA") | .id' "$STUB_STORE")
+rps=$(jq -r '.[] | select(.metadata.task_kind == "review" and .metadata.anchor_bead == "PS") | .id' "$STUB_STORE")
+eq "$(bprio "$rpa")" "0" "the review of an approved PR is filed at P0"
+eq "$(bpoured "$rpa")" "0" "…and the sling pours its workflow at P0"
+eq "$(bprio "$rps")" "1" "a pre-open anchor has no PR, so its review is filed at P1 whatever posture it still records"
 
 echo "# the forced baseline: an empty check_set stamps correctness,triage and dispatches both lanes"
 store "[$(anchor A1b pre_open_gate "" "" polecat/a1b)]"
@@ -446,6 +463,15 @@ has "$out" "dispatched validation pass vp-1 to $VALP" "the open pass is dispatch
 eq "$(meta vp-1 'gc.execution_routed_to')" "$VALP" "…and the pour read back (gc.execution_routed_to)"
 has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
 has "$out" "0 reviews dispatched" "…and no review is dispatched: the open pass quiesces the lane"
+eq "$(bpoured vp-1)" "1" "…and the validator's workflow is poured at P1, the PR not being approved"
+
+echo "# a validation pass on an approved PR is slung at P0"
+store "[$(anchor VD6 pull_request correctness "" polecat/vd6 ",\"pr_posture\":\"approved@$(oid vd6)@2026-10-11T00:00:00Z\""), $(validation vp-6 VD6)]"
+oid vd6 > "$GH_DIR/head_polecat_vd6"
+out=$(run_val)
+has "$out" "dispatched validation pass vp-6 to $VALP" "the open pass is dispatched to the validate pool"
+eq "$(bprio vp-6)" "0" "the pass is written at P0 ahead of its sling"
+eq "$(bpoured vp-6)" "0" "…so the validator's workflow is poured at P0"
 
 echo "# …a second reconcile over the same pass re-slings nothing (dedup on the pour stamp)"
 # pr-facts leaves the pass unrouted; the pour stamps gc.execution_routed_to, so a
@@ -636,6 +662,7 @@ has "$out" "STRANDED review rev-3" "the stranded shape is named"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3 --on mol-review" "the never-poured stranded review is re-slung with the formula"
 eq "$(meta rev-3 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 hasnt "$out" "dispatched review new-" "no twin was minted for it"
+eq "$(bpoured rev-3)" "1" "…and its workflow is poured at the priority of finishing work, P1 before approval"
 
 echo "# stranded review whose tracked root has a LIVE step chain is a live pour — never re-slung"
 store "[$(anchor D4 pull_request correctness "" polecat/d4),
