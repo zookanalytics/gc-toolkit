@@ -40,8 +40,7 @@ mkdir -p "$BIN"
 #               fold hold-transfer's silent drop)
 #   FAIL_CLOSE  the close logs but the status never becomes closed
 #   NEED_FORCE  a plain close is refused; only a --force close takes
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
@@ -133,8 +132,7 @@ echo "── the work-record outcome never holds the close ──"
 #                   ones land
 WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
 mkdir -p "$WBIN"
-cat >"$WBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$WBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update)

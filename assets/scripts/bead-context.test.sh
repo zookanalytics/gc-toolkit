@@ -167,8 +167,7 @@ printf '{"id":"tk-ctrl","title":"ctl\001note","status":"open","issue_type":"task
 printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes":"a\000b","metadata":{}}\n' \
   > "$R_TK/.beads/tk-nul.json"
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-context.sh touches: rig list; bd show; bd list --parent
 # (children); bd dep list --direction=up --type tracks (reverse trackers). Every
 # call is logged so the test can prove which store was asked, not just what came
@@ -256,8 +255,7 @@ fi
 echo "gc bd: unsupported ($SUB $SUB2)" >&2; exit 1
 GC
 
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The tool reaches every store through `gc bd`; a direct `bd` is the regression
 # this stub exists to fail on. It records the call so one assertion reads the
 # whole run.

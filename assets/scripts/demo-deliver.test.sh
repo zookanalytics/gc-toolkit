@@ -45,8 +45,7 @@ EMPTY="$TMPD/empty.mp4"; : >"$EMPTY"
 # gh stub: `gh --version` prints $GH_STUB_VER; `gh pr comment ...` logs its argv
 # to $GHLOG and prints a comment URL, or fails when $GH_STUB_FAIL is set. Every
 # other call is a silent success.
-cat >"$STUBS/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUBS/gh" <<'STUB'
 if [ "${1:-}" = "--version" ]; then
   echo "gh version ${GH_STUB_VER:-2.101.0} (2026-01-01)"
   exit 0
@@ -68,8 +67,7 @@ chmod +x "$STUBS/gh"
 # assert the fix-unit close and exercise the fail-closed write path. The knob names
 # are STUB_-prefixed on purpose: the script's own $PR_URL variable would otherwise
 # shadow an un-prefixed knob and the stub would read it back empty.
-cat >"$STUBS/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUBS/gc" <<'STUB'
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
   jq -nc --arg p "${RIG_PREFIX:-tk}" --arg path "${RIG_PATH:-}" \
     'if $path=="" then {rigs:[]} else {rigs:[{name:"fixture",prefix:$p,path:$path}]} end'
@@ -127,8 +125,7 @@ run() {
 }
 restore_gh() {
   [ -x "$STUBS/gh" ] && return 0
-  cat >"$STUBS/gh" <<'STUB'
-#!/usr/bin/env bash
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUBS/gh" <<'STUB'
 if [ "${1:-}" = "--version" ]; then echo "gh version ${GH_STUB_VER:-2.101.0} (2026-01-01)"; exit 0; fi
 printf '%s\n' "$*" >>"${GHLOG:?}"
 if [ "${1:-}" = "pr" ] && [ "${2:-}" = "comment" ]; then

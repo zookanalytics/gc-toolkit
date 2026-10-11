@@ -53,8 +53,7 @@ mkdir -p "$TMP/bin"
 # pick the exact payload shape the real `bd show` emits for that reading.
 # Every mutating call is appended to $FAKE_CALLS so "nothing was filed" is
 # asserted against the actual argv, not against exit status alone.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # This stub's opens are all bead ids, which pass through the resolver with no
@@ -441,8 +440,7 @@ grep -qi 'cannot index object' <<< "$ERR" \
 # already exists, so a timeout strands it visit-less. TIMEOUT is set only by
 # cmd_board's parser, so the one-shot verbs take the tunable below.
 mkdir -p "$TMP/slowbin"
-cat > "$TMP/slowbin/gc" <<'SLOW'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/slowbin/gc" <<'SLOW'
 case "$1 ${2:-}" in
   "rig list")  sleep 2; jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")   jq -n --arg i "$3" '[{id:$i, title:"a real bead"}]' ;;
@@ -487,8 +485,7 @@ grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
 # about: the six sentences must be pairwise different, so no two causes can
 # collapse back together.
 mkdir -p "$TMP/rigbin"
-cat > "$TMP/rigbin/gc" <<'RIGSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rigbin/gc" <<'RIGSTUB'
 if [ "$1 ${2:-}" = "rig list" ]; then
   case "${RIGMODE:-}" in
     slow)     sleep 3; jq -n '{rigs:[{name:"gc-toolkit",path:"/nonexistent-rig",prefix:"tk"}]}' ;;
@@ -586,8 +583,7 @@ grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw
 # is filed on the RESOLVED bead, and that an unresolvable or ambiguous reference
 # files nothing.
 mkdir -p "$TMP/resbin"
-cat > "$TMP/resbin/gc" <<'RESGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/resbin/gc" <<'RESGC'
 # One rig, prefix tk, with a real .beads store (created below as $RESRIG) so the
 # resolver can pin --db for its cross-store PR search; the stub ignores the --db
 # value and answers by argv pattern. `bd show` branches on the id so a supersede
@@ -790,8 +786,7 @@ unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_DEFERRED_ROWS
 # "nothing filed" is observable, with a readable-but-EMPTY control proving the
 # refusal keys on unreadability, not merely on a second rig existing.
 mkdir -p "$TMP/unread/rigA/.beads" "$TMP/unread/rigB/.beads" "$TMP/unread/bin"
-cat > "$TMP/unread/bin/gc" <<UNREADGC
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/unread/bin/gc" <<UNREADGC
 # rigA (prefix aa) is scanned first; its ledger read is controlled by \$RIGA_MODE:
 # fail = non-zero exit, badshape = rc 0 with a non-array answer, ok = an empty
 # array (readable, no PR rows). rigB (prefix tk) records PR #615. The PR search
@@ -867,8 +862,7 @@ unset FAKE_PR_ROWS
 # the unread rig also records could open a visit on the wrong anchor. rigA has no
 # .beads dir and is scanned first; rigB records #615 but is never reached.
 mkdir -p "$TMP/noledger/rigA" "$TMP/noledger/rigB/.beads" "$TMP/noledger/bin"
-cat > "$TMP/noledger/bin/gc" <<NOLEDGERGC
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/noledger/bin/gc" <<NOLEDGERGC
 case "\$1 \${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"riga",path:"$TMP/noledger/rigA",prefix:"aa"},{name:"rigb",path:"$TMP/noledger/rigB",prefix:"tk"}]}' ;;
@@ -909,8 +903,7 @@ unset FAKE_PR_ROWS
 # verb writes is the RESOLVED one (a supersede chain's successor, or the bead a
 # PR number records), never the reference typed.
 mkdir -p "$TMP/rebin"
-cat > "$TMP/rebin/gc" <<'REBIN'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rebin/gc" <<'REBIN'
 # `bd show` branches on the id so a supersede chain, a live bead, and the visit
 # read differently; the visit's assignee is served from $VISIT_STATE so the
 # assignee the bind writes is the one the readback sees. `bd list` tells the PR
