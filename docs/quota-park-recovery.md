@@ -17,6 +17,18 @@ Twice observed, two different providers:
 Both times every agent resumed within 20s of a single `gc session nudge`.
 Bug: `tk-al95k`.
 
+## Scope
+
+**Mandate.** Recovering a session parked at an idle prompt under a provider
+quota block: how the order detects a park and nudges it, the status surface
+the patrols read before they warrant a session, and the order's tuning and
+state rules.
+
+**Boundaries.** Nudging is the order's only action. Killing a wedged session is
+the dog pool's, on a warrant, per [authority-map.md](authority-map.md), and each
+patrol's warrant path is its own formula's. How an escalation visit reaches a
+person is [gascity-human-engagement.md](gascity-human-engagement.md).
+
 ## Mechanism
 
 `orders/quota-park-nudge.toml` runs `assets/scripts/quota-park-nudge.sh` every
