@@ -2452,75 +2452,83 @@ $CBODY"
         echo "$PROG: $id — PR#$num comment dedup probe failed; nothing dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
+      # The work order: branch and target say where the fix is pushed and where
+      # it lands, rejection_reason is the instruction, and prepare_mode says how
+      # the branch is brought current. merge_strategy=mr and the PR identity
+      # (existing_pr, pr_url, pr_number) name this PR as the one the refinery's
+      # PR pipeline reuses for the hand-back. task_kind and anchor_bead are the
+      # role marker, and anchor_bead is also the key the batch probe finds the
+      # child by. A fresh child is filed with this order, and a child the probe
+      # finds is held to it as well.
+      CMETA=$(jq -nc --arg a "$id" --arg b "$fix_branch" --arg t "$base" \
+        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+        --arg sr "$CSRC" --arg m "$prepare_mode" --arg u "$live_url" --arg n "$num" \
+        '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
+         + (if $sr == "" then {} else {source_review: $sr} end)
+         + {prepare_mode: $m, merge_strategy: "mr", existing_pr: $u, pr_url: $u, pr_number: $n}' 2>/dev/null)
       CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
         [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
+      cnew=""
       if [ -n "$CFIX" ]; then
         echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; re-checking its route before the watermark"
       else
         # The child is filed whole: its work order and the blocks edge that
         # holds the anchor ride the create. A create whose reply is lost has
         # still landed with the anchor_bead the batch probe above matches, so
-        # the next pass finds it rather than minting a twin.
-        CMETA=$(jq -nc --arg a "$id" --arg b "$fix_branch" --arg t "$base" \
-          --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
-          --arg sr "$CSRC" --arg m "$prepare_mode" --arg u "$live_url" --arg n "$num" \
-          '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
-           + (if $sr == "" then {} else {source_review: $sr} end)
-           + {prepare_mode: $m, merge_strategy: "mr", existing_pr: $u, pr_url: $u, pr_number: $n}' 2>/dev/null)
+        # the next pass finds it rather than minting a twin. bd_create prints
+        # the id of a child whose work order did not read back as written too
+        # (its rc 2), so the id says the child exists, not that it can be
+        # routed. The work-order check below says that.
         CFIX=$(printf '%s\n' "$CBODY" | bd_create "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -)
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
         fi
+        cnew=1
         # The comment-rework child now exists; drop the per-pass bd_list cache
         # so the title/anchor_bead dedup probe reads it on the next anchor and
         # does not twin it. The gc bd show reads below do not repopulate the
         # cache. No-op outside a reconcile pass.
         bd_cache_clear
-        # anchor_bead is the dedup key the probe above reads; an unstamped child
-        # is invisible to it, so routing one would twin on the next pass.
-        agot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
-        if [ "$agot" != "$id" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
-          skipped=$((skipped + 1)); continue
-        fi
       fi
       # An unrouted child still holds the merge through its blocks edge, but no
       # pool can claim it, and the mark would retire the only signal that could
       # re-file it. A CLOSED child is already dispositioned, so refusing on one
       # could never converge. Only a definitively closed status skips the check;
-      # an unreadable one still demands both stamps.
-      cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
-        | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      # an unreadable one still demands the work order and the route.
+      crow=$(gc bd show "$CFIX" --json 2>/dev/null | scrub)
+      cst=$(printf '%s' "$crow" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
       if [ "$cst" != "closed" ]; then
-        # prepare_mode is stamped merge and the resume path defaults to merge, so a
-        # child routed without it still merges rather than rewriting. Re-stamp for
-        # metadata completeness rather than refuse: a batch already covered skips
-        # the create block, so a child stranded by a dropped stamp could take one
-        # nowhere else.
-        mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
-        if [ "$mgot" != "$prepare_mode" ]; then
-          gc bd update "$CFIX" --set-metadata prepare_mode="$prepare_mode" >/dev/null 2>&1 || true
-          mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
-        fi
-        if [ "$mgot" != "$prepare_mode" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (route only a fully-stamped child)" >&2
-          skipped=$((skipped + 1)); continue
-        fi
-        # task_kind=rework is the role marker. The create-path read-back proves
-        # anchor_bead (the dedup key), but never this, and a recheck of a child
-        # that already covers the batch skips that read-back entirely — so a
-        # create that half-landed without task_kind would leave a routed comment
-        # rework on the anchor's own branch with no marker. anchor_bead is already
-        # proven (it is how this child was found); re-stamp task_kind the same way
-        # as the mode, before the watermark advances past the comments it answers.
-        kgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.task_kind // empty' 2>/dev/null)
-        if [ "$kgot" != "rework" ]; then
-          gc bd update "$CFIX" --set-metadata task_kind=rework >/dev/null 2>&1 || true
-          kgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.task_kind // empty' 2>/dev/null)
-        fi
-        if [ "$kgot" != "rework" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record task_kind=rework; left unmarked and NOT watermarking" >&2
+        # The route makes the child a polecat's work order, and the watermark
+        # retires the comments it answers, so neither moves until every key of
+        # that order reads back. A child nobody has taken (open, unassigned, and
+        # not poured) that is short of a key is written the whole order once and
+        # read back again (bd_meta_ensure). It is this pass's order, so a child
+        # filed at an older head is brought up to this one before anyone works
+        # it. A child someone has taken was held to this check before it was
+        # routed, and its holder owns its metadata now: the resume clears its
+        # rejection_reason, and the hand-back clears its route. So it is not
+        # written. A fresh child still short of anchor_bead is one the batch
+        # probe can never find, yet its blocks edge holds the merge, so it is
+        # closed and the next pass files afresh. A child the probe found carries
+        # that key, so it is only ever left for the retry.
+        ctaken=$(printf '%s' "$crow" | jq -r '.[0] // {}
+          | if (((.assignee // "") | tostring) != "")
+               or (((.status // "open") | tostring | ascii_downcase) != "open")
+               or (((.metadata["gc.execution_routed_to"] // "") | tostring) != "")
+            then "taken" else "" end' 2>/dev/null)
+        if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure "$CFIX" "$CMETA"); then
+          clost=""
+          [ -n "$cnew" ] && case ",$cshort," in *,anchor_bead,*) clost=1 ;; esac
+          if [ -z "$clost" ]; then
+            echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
+          elif gc bd update "$CFIX" --status=closed --set-metadata gc.outcome=abandoned \
+                 --append-notes "Unmade by $PROG: its work order did not read back (short: $cshort). Without anchor_bead no later pass can find it to finish it, and its blocks edge held $id. The next pass files the comment rework afresh." \
+                 >/dev/null 2>&1; then
+            echo "$PROG: WARN comment rework $CFIX did not record its work order (short: $cshort), and no later pass could find it; closed it and NOT watermarking, and the next pass files afresh" >&2
+          else
+            echo "$PROG: WARN comment rework $CFIX did not record its work order (short: $cshort), no later pass can find it, and it would not close; it holds $id until it is closed by hand. NOT watermarking" >&2
+          fi
           skipped=$((skipped + 1)); continue
         fi
         rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)

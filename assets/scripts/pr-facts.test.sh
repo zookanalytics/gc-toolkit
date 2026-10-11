@@ -2091,14 +2091,21 @@ has "$out" "already covers this batch; re-checking its route" "the next pass fin
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
 eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
-echo "# …a child whose anchor_bead does not read back is inert, never routed"
+echo "# …a fresh child whose anchor_bead does not read back is never routed, and is closed rather than left holding the merge"
 store "[$(anchor W2 46)]"
 printf '%s' "$(prview 46 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_46.json"
 echo '[]' > "$GH_DIR/reviews_46.json"
 printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_46.json"
 out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-has "$out" "did not record anchor_bead=W2; left unrouted" "a child the batch probe cannot see is never routed"
+has "$out" "comment rework new-2 did not record its work order (short: anchor_bead), and no later pass could find it; closed it" "a child the batch probe cannot see is never routed"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and cannot be claimed"
+eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…and is closed, so its blocks edge no longer holds the merge"
+has "$(notes new-2)" "Unmade by pr-facts" "…with a note naming why"
+eq "$(meta W2 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
+out=$(run)
+CW2=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "W2") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CW2" "<none>" "the next pass files the comment rework afresh"
+eq "$(meta "$CW2" 'gc.routed_to')|$(meta W2 pr_comment_watermark)" "$FIX|9100" "…routes it, and only then moves the mark"
 
 echo "# …a comment rework is filed whole, so a create whose reply is lost is found next pass, never twinned"
 # The work order and the blocks edge ride the create, so the child that landed
@@ -2151,7 +2158,7 @@ echo '[]' > "$GH_DIR/reviews_50.json"
 printf '[{"id":9600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_50.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
-has "$out" "did not record prepare_mode=merge; left unrouted and NOT watermarking" "the lost mode stamp is caught BEFORE the route"
+has "$out" "did not record its whole work order (short: prepare_mode); left unrouted and NOT watermarking" "the lost mode stamp is caught BEFORE the route"
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the child is never routed with incomplete metadata"
 eq "$(meta W6 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
@@ -2176,7 +2183,7 @@ out=$(run)
 eq "$(meta W5 pr_comment_watermark)" "9400" "a closed child answers the batch even unrouted — refusing forever could not converge"
 
 echo "# …a child whose task_kind stamp drops is never routed nor watermarked past, then re-stamped"
-# anchor_bead is the dedup key and lands, so the create-path read-back passes;
+# anchor_bead is the dedup key and lands, so the next pass finds the child;
 # task_kind is the role marker, and a dropped one would leave a routed comment
 # rework on the anchor's own branch that a metadata read cannot tell apart.
 store "[$(anchor W7 51)]"
@@ -2185,7 +2192,7 @@ echo '[]' > "$GH_DIR/reviews_51.json"
 printf '[{"id":9700,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_51.json"
 : > "$STUB_SESSION_LOG"
 out=$(STUB_DROP_KEYS="new-2:task_kind" run)
-has "$out" "did not record task_kind=rework; left unmarked and NOT watermarking" "a dropped role marker refuses the watermark"
+has "$out" "did not record its whole work order (short: task_kind); left unrouted and NOT watermarking" "a dropped role marker refuses the watermark"
 eq "$(meta new-2 task_kind)" "<absent>" "the marker really was dropped"
 eq "$(meta new-2 anchor_bead)" "W7" "…while the dedup key (anchor_bead) still landed"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
@@ -2197,6 +2204,39 @@ eq "$(meta new-2 task_kind)" "rework" "…re-stamps the role marker on the reche
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…without minting a twin rework child (the batch's own validation pass is a separate bead)"
 eq "$(meta W7 pr_comment_watermark)" "9700" "…and only then does the mark move"
+
+echo "# …a child whose create read back short of its hand-back keys is never routed, then made whole"
+# bd_create prints the id of a child whose work order did not read back (its
+# rc 2). anchor_bead lands, so the next pass finds the child. branch and the PR
+# identity are what hand the fix back to the refinery as a rework of this PR.
+store "[$(anchor WK1 346)]"
+printf '%s' "$(prview 346 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_346.json"
+echo '[]' > "$GH_DIR/reviews_346.json"; echo '[]' > "$GH_DIR/issue_comments_346.json"
+printf '[{"id":34601,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_346.json"
+out=$(STUB_DROP_KEYS="new-2:branch,existing_pr,pr_number" run)
+has "$out" "comment rework new-2 did not record its whole work order (short: branch,existing_pr,pr_number); left unrouted and NOT watermarking" \
+  "a create short of its branch and PR identity is caught, every short key named"
+eq "$(meta new-2 'gc.routed_to')|$(bstatus new-2)" "<absent>|open" "…and the child is left open and unrouted"
+eq "$(meta WK1 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
+out=$(run)
+has "$out" "comment rework new-2 already covers this batch; re-checking its route" "the next pass finds the child by its anchor_bead"
+eq "$(meta new-2 branch)|$(meta new-2 existing_pr)|$(meta new-2 pr_number)" "polecat/x346|https://github.com/zook/gc-toolkit/pull/346|346" \
+  "…writes the keys it was short of"
+eq "$(meta new-2 'gc.routed_to')|$(meta WK1 pr_comment_watermark)" "$FIX|34601" "…and only then routes it and moves the mark"
+
+echo "# …a covering child someone has taken is not written"
+# Its holder owns its metadata: the resume clears rejection_reason, so a child
+# in flight reads short of its work order and is still left as it is.
+store "[$(anchor WK2 347),$(printf '{"id":"cw-347","status":"in_progress","assignee":"rig/polecat-1","title":"Address review comments on PR#347 (through review 0, comment 34701)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"WK2","branch":"polecat/x347","prepare_mode":"merge","gc.routed_to":"%s"}}' "$FIX")]"
+printf '%s' "$(prview 347 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_347.json"
+echo '[]' > "$GH_DIR/reviews_347.json"; echo '[]' > "$GH_DIR/issue_comments_347.json"
+printf '[{"id":34701,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_347.json"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "comment rework cw-347 already covers this batch" "the batch probe finds the child in flight"
+hasnt "$(grep '^bd update cw-347' "$STUB_GC_LOG")" "--set-metadata" "…and writes nothing onto it"
+eq "$(meta cw-347 rejection_reason)" "<absent>" "…so the reason its holder cleared stays cleared"
+eq "$(meta WK2 pr_comment_watermark)" "34701" "…and the batch is marked handled by it"
 
 echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
 # merge.sh reads pr_posture off the bead and never asks GitHub. The full arm
