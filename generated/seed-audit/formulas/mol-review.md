@@ -42,6 +42,6 @@ track the current step.
 
 Steps (4):
   ├── mol-review.load-dispatch: Read the dispatch and pin what you are reviewing
-  ├── mol-review.review: Read the diff, run the tests, grade every finding [needs: mol-review.load-dispatch]
-  ├── mol-review.verdict-and-drain: Write the verdict, hand it to signoff.sh once, then drain [needs: mol-review.review]
+  ├── mol-review.review: Read the diff, run the tests, write the verdict body [needs: mol-review.load-dispatch]
+  ├── mol-review.verdict-and-drain: Hand the verdict to signoff.sh — once — then drain [needs: mol-review.review]
   └── mol-review.workflow-finalize: Finalize workflow [needs: mol-review.verdict-and-drain]

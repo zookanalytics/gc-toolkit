@@ -248,7 +248,7 @@ to reach a confident verdict, treat the review as request-changes with a
 finding that names the coverage gap rather than approving on one lane.
 
 **3. Run the suite once at the pinned commit** in the review's workspace,
-exactly as `formulas/mol-review.toml`'s `review` step 2 does
+made exactly as `formulas/mol-review.toml`'s `load-dispatch` step 4 makes it
 (`review-workspace.sh add`; anything else you write to disk goes in the same
 workspace). The lanes did not run tests; this is the quorum's single
 verification. A failure that also fails on the base is pre-existing
@@ -266,9 +266,9 @@ because pre-open it is replayed verbatim as the opening PR comment. Note which
 lanes covered what, and any reduced coverage.
 
 **5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
-per BLOCKING (P0/P1) finding, `[]` on approve — exactly as
-`formulas/mol-review.toml`'s `verdict-and-drain` step specifies (rebase-stable locus:
-a file and a symbol or section, never a line number or oid).
+per BLOCKING (P0/P1) finding, `[]` on approve — in the shape `signoff.sh --help`
+gives for `--findings-file` (rebase-stable locus: a file and a symbol or
+section, never a line number or oid).
 
 **6. One call, through the one writer.** Resolve signoff.sh from the pack and
 call it once:

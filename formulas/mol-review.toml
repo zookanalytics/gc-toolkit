@@ -102,15 +102,27 @@ if [ -z "$PR" ] && [ -z "$BASE" ]; then
 fi
 ```
 
-**4. Pin the commit.** The dispatch stamped `reviewed_oid` with the head it
-reviewed for; that pin wins when present. The diff you read, the tests you
-run, and the OID you hand off are all that one commit — a verdict recorded
-against a head you never read certifies unreviewed code:
+**4. Pin the commit and check it out.** The dispatch stamped `reviewed_oid`
+with the head it reviewed for; that pin wins when present. The diff you read,
+the tests you run, and the OID you hand off are all that one commit — a verdict
+recorded against a head you never read certifies unreviewed code. The tests run
+in a worktree detached at the pin, inside this review's workspace: a directory
+named for the review bead, which every later shell finds again by that id:
 ```bash
 git fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git rev-parse "origin/$BRANCH")
 echo "reviewing $BRANCH -> $BASE at $REVIEWED_OID"
+# >>> review-workspace-add
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
+cd "$REVIEW_WT"
+# <<< review-workspace-add
 ```
 
 **5. Read the intent.** The anchor bead (`metadata.anchor_bead`), the PR or
@@ -127,7 +139,8 @@ done
 ```
 
 **Exit criteria:** shape discriminated, base and branch pinned (never a
-guessed main), REVIEWED_OID pinned, intent read, this step bead closed.
+guessed main), REVIEWED_OID pinned and checked out in the review's workspace,
+intent read, this step bead closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -144,10 +157,10 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "review"
-title = "Read the diff, run the tests, grade every finding"
+title = "Read the diff, run the tests, write the verdict body"
 needs = ["load-dispatch"]
 description = """
-Each block is its own shell, so re-derive the pins first.
+Each block is its own shell, so start each one with these lines.
 `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim --json` returned
 for this step; its lease is the one the keepalive below refreshes.
 ```bash
@@ -160,6 +173,8 @@ BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
 BASE=$(printf '%s' "$M" | jq -r '.review_base // empty')
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # Post-open or missing fields: re-derive exactly as load-dispatch did.
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+WS=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" path --review-bead "$REVIEW_BEAD") || exit 1
 ```
 
 **1. Read the whole diff:**
@@ -170,29 +185,20 @@ git diff       "origin/$BASE...$REVIEWED_OID"
 Three dots compare against the merge-base: what the branch changed, not what
 the base moved. Read a large diff in chunks, never sampled.
 
-**2. Run the tests at the pinned commit** in a detached worktree in this
-review's workspace (`add` returns the same one each time). `hb` keeps the claim's lease fresh while a
-suite runs, and runs the command plain when no keepalive resolves:
+**2. Run the tests at the pinned commit** in `$WS/wt`, the worktree
+load-dispatch detached at it. `hb` keeps the claim's lease fresh while a suite
+runs, and runs the command plain when no keepalive resolves:
 ```bash
 # >>> review-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
 # <<< review-lease-keepalive
-# >>> review-workspace-add
-REPO="${GC_RIG_ROOT:-}"
-[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
-cd "$REVIEW_WT"
-# <<< review-workspace-add
+cd "$WS/wt" || exit 1
 # run each suite the diff touches as `hb bash -c '<suite>'`; record real counts
 ```
-Anything else the review writes to disk goes beside `wt` in the workspace
-(`dirname "$REVIEW_WT"`), never loose in `/tmp`. A suite that fails on the base
-too is context for the verdict, not this branch's defect.
+Anything else the review writes to disk goes in `$WS` beside `wt`, never loose
+in `/tmp`. A suite that fails on the base too is context for the verdict, not
+this branch's defect.
 
 **3. What to check.** Work the whole list on every round. A P0 or a P1 is not
 a stopping point: one verdict enumerates every blocking finding this diff
@@ -246,8 +252,7 @@ carries.
 `review-context.sh` prints the page (pre-open, the anchor's pending summary),
 then the work-quality fragments and exemplars:
 ```bash
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/review-context.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
-"${SCRIPTS:?review-context.sh not found in the pack}/review-context.sh" --review-bead "$REVIEW_BEAD"
+"$SCRIPTS/review-context.sh" --review-bead "$REVIEW_BEAD"
 ```
 
 **4. Calibrate severity.** P0 — broken or unsafe as merged: data loss, a
@@ -267,44 +272,20 @@ actionable, and "improve error handling" isn't a finding.
 **5. File what is real but not this diff's.** A finding you are confident in
 that this branch neither caused nor was asked to fix has no place on the
 severity ladder: blocking on it bills a rework round to work that did not cause
-it. File it and name it in the verdict instead. `review-file-bug.sh` files
-nothing when an open bug carries the token already, and prints the id, or why
-it filed nothing. The token is the location plus a short slug, such as
-`PR #<n> body / ## Summary: placeholder` or `<path>: <slug>`:
+it. File it and name it in the verdict instead. The token is the location plus a
+short slug, such as `PR #<n> body / ## Summary: placeholder` or
+`<path>: <slug>`:
 ```bash
-"${SCRIPTS:?resolve the pack scripts as in step 3}/review-file-bug.sh" --token "<location: slug>" --title "<one line: what is wrong>" --body "<what is wrong, why it matters, what would fix it>" --branch "$BRANCH" --oid "$REVIEWED_OID"
+"$SCRIPTS/review-file-bug.sh" --token "<location: slug>" --title "<one line: what is wrong>" --body "<what is wrong, why it matters, what would fix it>" --branch "$BRANCH" --oid "$REVIEWED_OID"
 ```
 
-**6. Close this step bead so the graph advances.** Non-terminal step, no
-drain — the same session carries on into `verdict-and-drain`:
-```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-review.review --outcome pass
-```
-
-**Exit criteria:** whole diff read, tests run at the pinned commit, published
-page and work-quality standards checked, every finding graded with its
-location, out-of-scope findings filed or named unfiled, this step bead closed."""
-metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
-
-[[steps]]
-id = "verdict-and-drain"
-title = "Write the verdict, hand it to signoff.sh once, then drain"
-needs = ["review"]
-description = """
-Exactly one verdict: **approve** — no P0 and no P1; the signoff passes and
-remaining P2s ride along as non-blocking notes; it is posted as a COMMENT,
-never a GitHub approval (the city does not approve PRs; approval is external
-and human). **request-changes** — at least one P0 or P1, each with its
-required fix.
-
-**1. Write the verdict body** to `findings.md` in your working directory, from
-what the review step found:
+**6. Write the verdict to the workspace.** A session that compacts or
+restarts once this step closes has only what is on disk.
+`$WS/findings.md` is the verdict body, self-contained because pre-open it is
+replayed verbatim as the opening PR comment. Say what you did **not** check:
 
 ```
-VERDICT: <approve|request-changes>
+VERDICT: <request-changes on any P0 or P1, else approve>
 Reviewed branch: <branch>
 Reviewed base:   <base>
 Reviewed commit: <REVIEWED_OID>
@@ -318,30 +299,40 @@ Filed: <bug ids for findings out of scope for this diff, or "none">
 Verification: <suite -> N passed, M failed, run at the reviewed commit>
 ```
 
-Say what you did **not** check — an honest coverage line is worth more than
-an implied "I read everything". Write it self-contained: pre-open, it is
-replayed verbatim as the opening PR comment.
+`$WS/findings.json` holds the P0 and P1 findings in the shape
+`signoff.sh --help` gives for `--findings-file`, and `[]` on approve. Step 5's
+bugs stay out of it.
 
-**1b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
-array with one object per BLOCKING (P0/P1) finding, each carrying a `locus` and
-a `message`. signoff.sh files each as a first-class bead beside the rework
-child, deduped on a normalized locus and message, so one objection is never
-filed twice across rounds:
-
+**7. Close this step bead so the graph advances.** Non-terminal step, no
+drain — the same session carries on into `verdict-and-drain`. The close
+refuses until both files are written:
 ```bash
-cat > findings.json <<'JSON'
-[
-  {"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix — self-contained>"}
-]
-JSON
+[ -s "$WS/findings.md" ] && jq -e 'type == "array"' "$WS/findings.json" >/dev/null || { echo "write findings.md and a JSON-array findings.json in $WS first" >&2; exit 1; }
+"$SCRIPTS/step-close.sh" --step mol-review.review --outcome pass
 ```
 
-The `locus` must survive a rebase: a file and a symbol, function, or section,
-never a line number or a commit oid; on the PR page, the part that is wrong. An
-`approve` writes `[]`. The review step's out-of-scope bugs are already their
-own beads and stay out of this file.
+**Exit criteria:** whole diff read, tests run at the pinned commit, published
+page and work-quality standards checked, every finding graded with its
+location, out-of-scope findings filed or named unfiled, both verdict files
+written to the workspace, this step bead closed."""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
-**2. One call, through the one writer.** `signoff.sh` owns every mechanic
+[[steps]]
+id = "verdict-and-drain"
+title = "Hand the verdict to signoff.sh — once — then drain"
+needs = ["review"]
+description = """
+The review step wrote the verdict to the review's workspace: `findings.md` is
+its body and `findings.json` its finding set. Never write either file here. A
+missing one means the review's judgment did not survive, so signoff.sh writes
+nothing and the failure arm below returns the bead to the pool for a fresh
+review. Exactly one verdict, the one `findings.md` states: **approve** — no P0
+and no P1; the signoff passes and remaining P2s ride along as non-blocking
+notes; it is posted as a COMMENT, never a GitHub approval (the city does not
+approve PRs; approval is external and human). **request-changes** — at least
+one P0 or P1, each with its required fix.
+
+**1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
 read-back, filing the finding set from `findings.json` beside one slung rework
 child on request-changes, and refusing a pin the branch no longer carries:
@@ -355,10 +346,11 @@ REVIEWED_OID=<the OID from the review step>
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
+WS=$("${SCRIPTS:?signoff.sh not found in the pack}/review-workspace.sh" path --review-bead "$REVIEW_BEAD") || exit 1
+"$SCRIPTS/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file "$WS/findings.md" --findings-file "$WS/findings.json"
 ```
 Do not post the review yourself, do not touch `check.*`, do not file rework
-beads or finding beads (signoff.sh files the findings from your
+beads or finding beads (signoff.sh files the findings from
 `findings.json`), and never run `gh pr review --approve`.
 
 Pass on this same call any flag the check section of this bead's dispatch note
@@ -367,7 +359,7 @@ When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.
 
-**3. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
+**2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and
 nothing in the cadence compares a marker to a head. A rebase or a new commit
 that lands on top of the pin while you read does not stale your findings —
@@ -380,7 +372,7 @@ gate-ensure pours a fresh review at the live head next pass.
 re-pin: this dispatch was recorded or retired before you judged it, so drop the
 verdict, close the chain and drain. Any other failure, in this order: append your findings to
 the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the
-step chain forward with part 4's step-close loop; then — only after the chain
+step chain forward with part 3's step-close loop; then — only after the chain
 is closed — restore the bead's claimability from the dispatch-stamped pool
 and drain:
 ```bash
@@ -396,7 +388,7 @@ unrecorded verdict is recoverable; a hand-rolled one is not. The review's
 workspace stays where it is, and the reviewer who claims the bead next gets
 the same worktree back from `review-workspace.sh add`.
 
-**4. Close this workflow's step chain, remove the workspace, then drain.**
+**3. Close this workflow's step chain, remove the workspace, then drain.**
 Terminal step: it still closes its own bead — that is how a graph.v2 step
 advances, and skipping it leaves an open assigned step bead that re-pools a
 fresh worker every cycle, indefinitely. Forward order is mandatory (each step
