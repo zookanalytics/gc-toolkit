@@ -11,7 +11,8 @@
 # riding in the create so a lost create id is adopted rather than twinned, a
 # review's child never adopted for a ruling, the open-PR guards (a live anchor
 # at pull_request, carrying no disposition, naming its branch, target and PR),
-# and the no-double-dispatch refusal on a partial pour.
+# the no-double-dispatch refusal on a partial pour, and every lane returned to
+# unreviewed (review-outcome.sh, run for real) once the child is dispatched.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,6 +82,9 @@ case "${1:-}" in
         --status=*) st="${1#--status=}"
           jq -c --arg id "$id" --arg s "$st" \
             'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --append-notes) shift
+          jq -c --arg id "$id" --arg n "${1:-}" \
+            'map(if .id == $id then .notes = (((.notes // "") | if . == "" then "" else . + "\n" end) + $n) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -163,6 +167,9 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
 
+# No check index: review-checks.sh then resolves every check_set token as a
+# lane gating every transition, so the lanes do not depend on the checkout.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 export STUB_STORE="$TMP/store.json"
 export STUB_DEPS="$TMP/deps"
 export STUB_GC_LOG="$TMP/gc.log"
@@ -181,7 +188,16 @@ created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
 # child (arg 1) blocking the anchor (arg 2) is the line "<anchor>|<child>|blocks".
 blocks_anchor() { grep -qxF "$2|$1|blocks" "$STUB_DEPS"; }
 
-ANCHOR_PR='[{"id":"anc-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","branch":"polecat/anc-1","target":"main","existing_pr":"https://github.com/o/r/pull/42","pr_url":"https://github.com/o/r/pull/42","pr_number":"42"}}]'
+ANCHOR_PR='[{"id":"anc-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","branch":"polecat/anc-1","target":"main","existing_pr":"https://github.com/o/r/pull/42","pr_url":"https://github.com/o/r/pull/42","pr_number":"42","check_set":"correctness,arch"}}]'
+# approve <id> <lane>: a closed approve review backing <lane> on anc-1, the bead
+# lane-state.sh derives green from.
+approve() {
+  jq -nc --arg id "$1" --arg l "$2" '{id:$id,status:"closed",assignee:"",notes:"",
+    metadata:{task_kind:"review",anchor_bead:"anc-1",check_name:$l,reviewed_oid:"deadbeef",
+              signoff_verdict:"approve","gc.outcome":"recorded"}}'
+}
+WITH_LANES=$(printf '%s' "$ANCHOR_PR" | jq -c --argjson a "$(approve rv-c correctness)" --argjson b "$(approve rv-a arch)" '. + [$a, $b]')
+green() { "$HERE/lane-state.sh" green --anchor anc-1 --lane "$1" --no-remote; }
 
 echo "# --- happy path: a ruling on an open PR mints the fix unit and dispatches it ---"
 reset "$ANCHOR_PR"
@@ -301,6 +317,55 @@ eq "$(created)" "1" "the ruling files its own child beside the review's"
 eq "$(meta fix-1 source_ruling_bead)" "vis-1" "…keyed on the ruling"
 eq "$(meta rv-kid source_ruling_bead)" "" "the review's child is not re-keyed"
 eq "$(meta rv-kid gc.execution_routed_to)" "" "…nor dispatched by the ruling"
+
+echo "# --- every lane returns to unreviewed once the ruling's child is dispatched ---"
+# A ruling has no lane of its own, so the approves every lane holds were of a
+# branch the ruling has outdated. Left standing they keep each lane green, and
+# the merge passes on the rework no review read.
+reset "$WITH_LANES"
+if green correctness && green arch; then ok "both lanes are green before the ruling"; else bad "setup: the lanes are not green"; fi
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0 once the child is dispatched and the lanes are returned"
+eq "$(meta rv-c gc.outcome)" "superseded" "the correctness approve is superseded"
+eq "$(meta rv-a gc.outcome)" "superseded" "…and the arch approve"
+if green correctness; then bad "correctness still derives green after the ruling"; else ok "correctness no longer derives green"; fi
+if green arch; then bad "arch still derives green after the ruling"; else ok "…nor arch"; fi
+has "$(jq -r '.[] | select(.id == "rv-c") | .notes' "$STUB_STORE")" "operator ruling (converse visit vis-1): superseded (anchor-wide) — rework fix-1" \
+  "the superseded review names the ruling and the child"
+has "$OUT" "2 standing review(s) superseded" "the run reports the lanes it returned"
+so_sl=$(grep -n '^sling ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+so_sp=$(grep -n '^bd update rv-c ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$so_sl" ] && [ -n "$so_sp" ] && [ "$so_sl" -lt "$so_sp" ]; then
+  ok "…after the child is dispatched, so quiescence already holds every review dispatch"
+else
+  bad "the supersede did not follow the dispatch (sling@${so_sl:-none} supersede@${so_sp:-none})"
+fi
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "the re-run exits 0"
+has "$OUT" "0 standing review(s) superseded" "…with nothing left to supersede"
+eq "$(created)" "1" "…and no second child"
+
+echo "# --- a supersede that fails fails the run, and the re-run finishes it ---"
+reset "$(printf '%s' "$WITH_LANES" | jq -c '(.[] | select(.id == "anc-1") | .metadata) |= del(.check_set)')"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+eq "$RC" "2" "exit 2 when the lanes cannot be returned (no check_set to resolve them from)"
+has "$OUT" "rework fix-1 is dispatched, but the review lanes on anc-1 did not return to unreviewed" "…saying the child stands and the lanes do not"
+eq "$(meta fix-1 gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "the child stands dispatched"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
+jq -c 'map(if .id == "anc-1" then .metadata.check_set = "correctness,arch" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+eq "$RC" "0" "the re-run exits 0"
+eq "$(created)" "1" "…adopting the dispatched child rather than filing a second"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and returns the lanes"
+
+echo "# --- a filing the writer does not dispatch returns no lane ---"
+reset "$WITH_LANES"
+export STUB_SLING_NOPOUR=1
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?
+unset STUB_SLING_NOPOUR
+eq "$RC" "2" "the writer's exit code is the run's"
+eq "$(meta rv-c gc.outcome)" "recorded" "the approves stand while the child's edge holds the merge for the retry"
 
 echo
 echo "===================="

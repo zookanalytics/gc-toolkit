@@ -621,7 +621,9 @@ the merge holds until the abandoned question is answered or the demand is
 resolved. The moved wait carries the sitting's topic, so it refreshes this
 sitting's own demand on the anchor and never a sibling sitting's. A ruled
 sign-off that answers `--rework` holds the merge too, through the rework child's
-`blocks` edge, until the rework lands.
+`blocks` edge, until the rework lands. It also returns every review lane to
+`unreviewed`, so the branch is re-reviewed at the head the rework lands rather
+than merged on reviews of the head the ruling outdated.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that

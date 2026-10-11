@@ -164,18 +164,19 @@ DEMAND_TOPIC=()
 # must contain, while the PR still reads review-ready against a head that
 # predates it. --rework turns that ruling into the rework demand a review verdict
 # files — a fix unit that blocks the anchor and resumes its branch — sourced by
-# this visit instead of a verdict. The filing is independent of the demand
-# discharge below: a ruling with no prior hold still needs its rework.
+# this visit instead of a verdict, and returns every review lane to unreviewed so
+# the branch is re-reviewed once the rework lands. The filing is independent of
+# the demand discharge below: a ruling with no prior hold still needs its rework.
 # The filing runs before every other write and fails the sign-off closed. Filed
 # first, the child's blocks edge already holds the merge when the discharge
 # resolves a merge hold this sitting took, so the hold passes to the edge with no
-# gap in which the stale PR can land. A filing does not land when no script
+# gap in which the stale PR can land. A filing does not complete when no script
 # resolves, or when converse-rework.sh exits non-zero, as it does for any filing
-# it refuses or cannot prove. Then the takeaway, the discharge and the release
-# stay unwritten, every demand this sitting filed still stands, and exit 1 tells
-# the sitting not to sign off or close the visit. A re-run starts clean, and
-# converse-rework.sh adopts a child an earlier attempt filed rather than minting
-# a second.
+# it refuses or cannot prove and for lanes it cannot return to unreviewed. Then
+# the takeaway, the discharge and the release stay unwritten, every demand this
+# sitting filed still stands, and exit 1 tells the sitting not to sign off or
+# close the visit. A re-run starts clean, and converse-rework.sh adopts a child
+# an earlier attempt filed rather than minting a second.
 REWORK_FILED=""
 if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
   CR=$(pack_script converse-rework.sh)
@@ -186,7 +187,7 @@ if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
     REWORK_FILED=yes
   fi
   if [ -z "$REWORK_FILED" ]; then
-    echo "REWORK NOT FILED on $SUBJECT: $REWORK_OUT"
+    echo "REWORK NOT COMPLETE on $SUBJECT: $REWORK_OUT"
     echo "Nothing is signed off: no takeaway, discharge or release was written, and every demand this sitting filed still stands. Do NOT post the sign-off or close the visit."
     echo "Repair the cause and re-run this sign-off. If $SUBJECT is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
     exit 1

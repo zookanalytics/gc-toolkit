@@ -8,9 +8,18 @@
 #
 # What is the ruling's own to decide is decided here: the anchor must be an open
 # PR, the child resumes the anchor's own branch and lands where the anchor lands,
-# and its rejection_reason carries the ruling. Resuming the branch keeps the PR,
-# its history and its review lanes, which closing the PR and re-pouring would
-# discard. converse never pushes code; the molecule does (docs/authority-map.md).
+# and its rejection_reason carries the ruling. Resuming the branch keeps the PR
+# and its history, which closing the PR and re-pouring would discard. converse
+# never pushes code; the molecule does (docs/authority-map.md).
+#
+# A ruling has no lane of its own. Like a human feedback batch the validator rules
+# not converged, it is operator input the whole diff was never reviewed against,
+# so once the child is filed every lane the anchor declares returns to
+# unreviewed (review-outcome.sh supersede-anchor). The child's blocks edge holds
+# the merge and gate-ensure's quiescence holds every review dispatch while it is
+# open; when it lands, each lane is re-reviewed at the new head. Without this,
+# the reviews of the pre-ruling head would keep every lane green, and the merge
+# would pass on content no review read.
 #
 # Usage:
 #   converse-rework.sh --anchor <anchor-bead> --ruling-bead <visit> \
@@ -20,8 +29,11 @@
 #   or gc.superseded_by), and naming its branch, its landing target and its PR.
 #   --ruling-bead is the visit the ruling was reached in. --pool defaults to
 #   rework-child.sh's default.
-# Output and exit: rework-child.sh's. A refusal here, before the writer runs,
-#   exits 2 with nothing written.
+# Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>".
+# Exit: rework-child.sh's when it does not dispatch the child. Otherwise 0 once
+#   every lane is back to unreviewed, and 2 when that supersede fails: the child
+#   stands dispatched, and a re-run adopts it and retries the supersede. A
+#   refusal here, before the writer runs, exits 2 with nothing written.
 set -u
 
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -101,4 +113,17 @@ ARGS=(--anchor "$ANCHOR" --ruling-bead "$RULING_BEAD" --branch "$BRANCH" --targe
       --pr-url "$PR_URL")
 [ -z "$PR_NUMBER" ] || ARGS+=(--pr-number "$PR_NUMBER")
 [ -z "$POOL_NAME" ] || ARGS+=(--pool "$POOL_NAME")
-exec "$SCRIPT_DIR/rework-child.sh" "${ARGS[@]}"
+FILED=$("$SCRIPT_DIR/rework-child.sh" "${ARGS[@]}"); rc=$?
+[ "$rc" -eq 0 ] || exit "$rc"
+read -r CHILD _ <<< "$FILED"
+
+# Run on every filing, an adopted or in-flight child's included, so a re-run
+# finishes a supersede an earlier run did not. It is idempotent: a lane whose
+# reviews are already superseded has nothing left to retire.
+if ! RETIRED=$("$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" \
+       --by "operator ruling (converse visit $RULING_BEAD)" \
+       --reason "rework $CHILD changes what the branch must contain; every lane re-reviews it once it lands"); then
+  die "rework $CHILD is dispatched, but the review lanes on $ANCHOR did not return to unreviewed (review-outcome.sh supersede-anchor failed), so its landing would read green on reviews of the branch before the ruling. Re-run: the writer adopts $CHILD and the supersede retries"
+fi
+echo "converse-rework: returned $ANCHOR's lanes to unreviewed ($RETIRED standing review(s) superseded); each is re-reviewed once $CHILD lands" >&2
+printf '%s\n' "$FILED"

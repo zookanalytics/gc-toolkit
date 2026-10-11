@@ -74,13 +74,14 @@ that one is theirs to close.
 branch must contain.** Pass `--rework` when it does: the PR still reads
 review-ready against a head that predates the ruling. It files the rework
 demand a review verdict would file, a fix unit that blocks the subject
-anchor and resumes its branch, sourced by this visit. Pass `--no-rework`
-when the branch stands as it is. Given neither on an open-PR subject, the
+anchor and resumes its branch, sourced by this visit, and returns every
+review lane to unreviewed, so the whole branch is re-reviewed once the
+rework lands. Pass `--no-rework` when the branch stands as it is. Given neither on an open-PR subject, the
 sign-off refuses and writes nothing, because a ruling whose rework is
 never filed lands only in notes nothing reads while the stale PR keeps
 reading ready. The rework files before the sign-off writes
-anything else. A rework that does not file stops the sign-off there, and
-the script exits non-zero. No trace is written and every demand this
+anything else. A rework that does not complete stops the sign-off there,
+and the script exits non-zero. No trace is written and every demand this
 sitting filed still stands, so a merge hold you took still holds the PR.
 Re-run once the cause is repaired, and the re-run adopts a child an
 earlier attempt filed. `--rework` applies only to an open-PR subject. On

@@ -1929,7 +1929,7 @@ have "…and the PR-reminder close text names the filed rework" 'filed ruling-dr
 echo "── a rework that does not file stops the sign-off before any write ──"
 run_so SO_REWORK_RC=2
 eq "$SO_RC" "1" "a refused rework exits 1, so the sitting does not sign off"
-case "$SO_OUT" in *"REWORK NOT FILED on item-x"*"not pull_request"*) ok "…naming the subject and why the rework refused" ;;
+case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x"*"not pull_request"*) ok "…naming the subject and why the rework refused" ;;
                   *) bad "…naming the subject and why the rework refused" "got: $SO_OUT" ;; esac
 case "$SO_OUT" in *"Do NOT post the sign-off or close the visit"*) ok "…and telling the sitting not to sign off or close" ;;
                   *) bad "…and telling the sitting not to sign off or close" "got: $SO_OUT" ;; esac
@@ -1944,7 +1944,7 @@ echo "── a rework script that resolves nowhere stops the sign-off too ──
 # that ran on past the missing script would reach that writer.
 run_so GC_RIG_ROOT="$SOFOR"
 eq "$SO_RC" "1" "a missing converse-rework.sh exits 1"
-case "$SO_OUT" in *"REWORK NOT FILED on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
+case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
                   *) bad "…and says the script resolved nowhere" "got: $SO_OUT" ;; esac
 if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…and writes nothing" "found: $(cat "$SOLOG" "$SOGC")"
 else ok "…and writes nothing"; fi
