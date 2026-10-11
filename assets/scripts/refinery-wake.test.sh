@@ -46,7 +46,10 @@ case "$1 $2" in
   "bd list")      [ "${STUB_QUEUE_RC:-0}" = 0 ] || exit "$STUB_QUEUE_RC"; cat "$STUB_QUEUE" ;;
   "session list") [ "${STUB_SESSIONS_RC:-0}" = 0 ] || exit "$STUB_SESSIONS_RC"; cat "$STUB_SESSIONS" ;;
   "config show")  [ "${STUB_CONFIG_RC:-0}" = 0 ] || exit "$STUB_CONFIG_RC"; cat "$STUB_CONFIG" ;;
-  "session nudge") printf '%s\n' "$*" >> "$STUB_NUDGES"; exit "${STUB_NUDGE_RC:-0}" ;;
+  "session nudge") printf '%s\n' "$*" >> "$STUB_NUDGES"
+    # STUB_NUDGE_DELIVERY_RC: how a gc that does not know --delivery answers it.
+    case "$3" in --delivery) [ -z "${STUB_NUDGE_DELIVERY_RC:-}" ] || exit "$STUB_NUDGE_DELIVERY_RC" ;; esac
+    exit "${STUB_NUDGE_RC:-0}" ;;
   *) echo "stub gc: unexpected: $*" >&2; exit 9 ;;
 esac
 STUB
@@ -206,11 +209,20 @@ echo "── a nudge that fails fast is not counted; one cut off is ──"
 queue cnt:3000
 STUB_NUDGE_RC=1 run
 has "$OUT" "FAILED" "a fast failure is reported"
+eq "$(nudges | wc -l | tr -d ' ')" 2 "a fast failure is retried once, in the plain form"
 [ -e "$TMP/state/r1" ] && [ "$(sed -n 's/^bead=//p' "$TMP/state/r1")" = cnt ] && bad "a fast failure is not counted" "a wake was recorded" \
   || ok "a fast failure is not counted"
 STUB_NUDGE_RC=124 run
 has "$OUT" "UNCONFIRMED" "a cut-off nudge is reported unconfirmed"
 has "$(cat "$TMP/state/r1")" "wakes=1" "and counted as a wake"
+eq "$(nudges | wc -l | tr -d ' ')" 1 "a cut-off nudge is not retried"
+
+echo "── a gc that does not know --delivery gets the plain form ──"
+queue plain:3000
+STUB_NUDGE_DELIVERY_RC=2 run
+eq "$(nudges | sed -n 2p)" "session nudge ses-r1 Your merge queue has held plain for 50m while this session sat idle at its prompt. Configured refinery nudge." \
+  "the nudge is retried without --delivery"
+has "$OUT" "nudged ses-r1 (wake 1 of 3)" "the plain-form nudge counts as the wake"
 
 echo "── the refinery is discovered per rig ──"
 printf '{"agents":[]}\n' > "$STUB_AGENTS"

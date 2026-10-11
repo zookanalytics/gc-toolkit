@@ -237,6 +237,13 @@ write_state() {
 }
 NUDGE_RC=0
 bounded gc session nudge --delivery immediate "$SID" "$MSG" >/dev/null 2>&1 || NUDGE_RC=$?
+# A gc whose session nudge does not know --delivery fails fast with a usage
+# error, so the plain form is tried once. A timeout or a signal is not that
+# case: the nudge may already have landed, and a retry would type it twice.
+if [ "$NUDGE_RC" -ne 0 ] && [ "$NUDGE_RC" -ne 124 ] && [ "$NUDGE_RC" -lt 128 ]; then
+  NUDGE_RC=0
+  bounded gc session nudge "$SID" "$MSG" >/dev/null 2>&1 || NUDGE_RC=$?
+fi
 if [ "$NUDGE_RC" -eq 0 ]; then
   write_state $((WAKES + 1))
   record "nudged $SID (wake $((WAKES + 1)) of $MAX): $OLDEST has waited $((WAITED / 60))m while the pane sat quiet for $((QUIET / 60))m"
