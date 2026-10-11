@@ -29,10 +29,12 @@ compiled package keeps them from diverging.
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script only execs the binary, with no fallback — a call with no binary to run is refused |
 | `merge` | `assets/scripts/merge.sh` | ported; the script remains as the fallback |
 | `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
+| `lane-state` | `assets/scripts/lane-state.sh` | in progress; the first port under the revised model (`internal/lane`, called in-process by `gctk merge`); the script remains until its suite is mapped to Go tests |
 
-Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
-`signoff`. The spec's port order is `lifecycle` first (everything else calls
-it), then `merge`, then the rest — one subcommand per PR.
+Still shell: `pr-facts`, `gate-ensure`, `pr-open`, `convoy-graduate`,
+`signoff`. The spec's order from 2026-10-11 is the bead-store interface and
+its fake, carried by `lane-state`; then `pr-facts`; then `gate-ensure`; then
+retiring `merge.sh`'s shell arm; then the rest — one PR each.
 
 `pr-status` is not a cadence port: it is the working | needs-review |
 needs-attention tri-state that `pr-status-label.sh` and the helm board share
@@ -43,18 +45,29 @@ lives in gctk, and it has no shell fallback (see below).
 ordering, the posture interlock, the arm budgets. The cadence has to remain
 readable as a script.
 
-## Subprocess seams, not a linked library
+## Gas City seams, not a linked library
 
-gctk shells out to `gc`, `bd` and `gh` exactly as the scripts do. Linking the
-beads library would change the observability surface, the permissions surface,
-and the test surface all at once. Keeping the seams means the scripts' existing
-`.test.sh` stub harnesses drive the binary unchanged — the stubs are ordinary
-executables on `PATH`, and a Go `exec.Command("gc", …)` finds them the same way
-a shell does.
+Gas City is the abstraction over beads — rigs, store resolution, the controls
+around them — so every bead read and write goes through Gas City: the
+supervisor API or `gc`. The beads library is never linked; that is the standing
+rule. The three ports landed before 2026-10-11 (`lifecycle`, `merge`,
+`pr-status`) are transliterations that shell out to `gc`, `bd` and `gh` exactly
+as the scripts do, so the scripts' existing `.test.sh` stub harnesses drive the
+binary unchanged — the stubs are ordinary executables on `PATH`, and a Go
+`exec.Command("gc", …)` finds them the same way a shell does.
 
-That is why `assets/scripts/lifecycle.test.sh`, which drives the binary through
-`lifecycle.sh`, is the port's acceptance bar, and why the port needs no test
-suite of its own.
+From `lane-state` on, the spec's revised model applies. The bead store is read
+and written through one Go interface in `internal/gcbd`, which `*gcbd.Client`
+implements as a client of the Gas City contract (daemon API for reads, `gc`
+exec for writes and the read fallback); a port's logic is a package that takes
+the interface, and `go test` runs it against an in-process fake of that
+contract — no bash, no jq, no subprocess. The replaced script's shell suite
+stays the acceptance bar until every assertion in it has a Go test that fails
+when the behaviour it pins is removed; the PR that drops a suite maps the
+assertions explicitly. Shell-only mechanics stay in shell.
+
+`assets/scripts/lifecycle.test.sh`, which drives the binary through
+`lifecycle.sh`, remains the lifecycle port's acceptance bar.
 
 ## Resolution, and a missing binary
 
@@ -162,7 +175,8 @@ it against the TOML.
 cmd/gctk/            dispatch and `version`
 internal/lifecycle/  the state machine — states, classifications, edges
 internal/cli/        one file per subcommand, each a contract-preserving port
-internal/gcbd/       the `gc bd` subprocess seam and its jq-equivalent accessors
+internal/gcbd/       the bead-store client: daemon API reads, `gc bd` writes and fallback, jq-equivalent accessors
+internal/lane/       (in progress) lane-state as a package, called in-process by merge
 ```
 
 `internal/gcbd`'s accessors reproduce the jq expressions the scripts used,
@@ -176,6 +190,7 @@ scripts is the contract; improving on them silently is how a port diverges.
 cd services/gctk && go test ./...          # the units
 bash assets/scripts/lifecycle.test.sh      # the acceptance bar
 bash assets/scripts/merge.test.sh          # the acceptance bar, both arms
+bash assets/scripts/lane-state.test.sh     # the acceptance bar for the port in progress
 bash assets/scripts/gctk-resolve.test.sh   # which implementation answers
 ```
 

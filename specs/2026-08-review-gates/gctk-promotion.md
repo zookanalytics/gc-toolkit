@@ -1,13 +1,15 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); lifecycle's shell fallback dropped 2026-10-05 (tk-crzvfv); the remaining subcommands follow one PR at a time.
+description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); lifecycle's shell fallback dropped 2026-10-05 (tk-crzvfv); porting model revised 2026-10-11 — ports are written against typed in-process clients with fakes, not as transliterations, and lane-state is the first port under the new model; the remaining subcommands follow one PR at a time.
 ---
 
 # gctk: the compiled data plane
 
 Status: **in progress**. Follow-up to the rewrite; independent of the
 review-gates work (same specs dir because both were scoped from the same
-operator conversation).
+operator conversation). As of 2026-10-11 the porting model changed: a port is
+written against typed in-process clients with fakes, not as a transliteration
+of the script. `lane-state` is the first port under the new model.
 
 Landed 2026-08-26 (tk-utjreo): `services/gctk`, the `lifecycle` port, the
 build/deploy pattern below, the fallback wiring, the build-status file, and its
@@ -19,10 +21,16 @@ eight days of clean ticks. `lifecycle.sh` now only execs the binary, and a call
 with no binary to run exits 1 naming the `gctk-build` order. The fallback still
 stands for the other subcommands.
 
-Remaining, one subcommand per PR in this order: `gate-ensure`,
-`pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
-bead. The remaining shell scripts and their fallbacks drop when the last one
-lands.
+Remaining, one PR each, in this order: (1) the bead-store interface in
+`internal/gcbd` and its fake, carried by (2) `lane-state` as `internal/lane`
+and `gctk lane-state`, with `gctk merge` calling the package in-process;
+(3) `pr-facts`, the largest and most call-dense arm, run every tick — its
+11-part test file is the behavioural spec; (4) `gate-ensure`, consuming the
+lane package; (5) retiring `merge.sh`'s shell arm once `gctk merge` is the only
+path; then `pr-open`, `convoy-graduate`, `signoff`. Each is filed as its own
+bead. Reapers, sweeps and gc-helm are out of this pass: idle-bound, and
+`services/helm` is the Go surface for the board. The remaining shell scripts
+and their fallbacks drop when the last one lands.
 
 ## The language rule (add to the review charter when it lands)
 
@@ -41,7 +49,7 @@ behind the command is invisible to them.
 | Ports to `gctk` (subcommand) | Stays shell |
 |---|---|
 | `lifecycle` (transition/state) | every formula/prompt shell block |
-| `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate` | doctor checks, order predicates |
+| `lane-state`, `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate` | doctor checks, order predicates |
 | `signoff` | `escalate.sh`, `step-close.sh`, `deferred-dispatch.sh` (small, agent-legible) |
 | (later, if warranted) `liveness-sweep` | tmux surface, helm verbs, worktree-setup, tools/ |
 
@@ -49,22 +57,54 @@ behind the command is invisible to them.
 ordering + the rc=3 interlock) calling `gctk <arm>` — the cadence remains
 readable as a script.
 
-## Contract-preserving port
+## Port model (revised 2026-10-11)
+
+The three ports landed before this date (`lifecycle`, `merge`, `pr-status`)
+are transliterations: they kept every subprocess seam the scripts had (fork
+`gc`/`gh`/`git`, exec the sibling shell scripts) and are covered behaviourally
+only by the shell stub suites. From `lane-state` on, a port is written against
+typed in-process clients with fakes. The CLI contract does not move.
 
 - Each subcommand keeps the **byte-identical CLI** of the script it replaces
   (flags, exit codes 0/1/2, stdout grammar). No formula, order, prompt, or
-  doctor check changes.
-- The existing `.test.sh` stub-harness suites are the **acceptance suite**:
-  each port must pass the replaced script's tests unmodified (the stubs fake
-  `gc`/`bd`/`gh`, which gctk shells out to exactly as the scripts do —
-  keeping subprocess seams rather than linking the beads library is
-  deliberate: same observability, same stubs, same permissions surface).
+  doctor check changes. Unchanged from the original scope.
+- Gas City is the abstraction over beads — rigs, store resolution, the
+  controls around them — so every bead read and write goes through Gas City:
+  the supervisor API or `gc`. The beads library is never linked. That is the
+  standing rule, not a deferral. The bead store is read and written through
+  **one Go interface** in `internal/gcbd`, which `*gcbd.Client` implements as
+  a client of that Gas City contract: the daemon API for reads, `gc` exec for
+  writes and for the read fallback. No port re-implements a read. The two
+  contracts `bd-lib.sh` encodes travel with the interface: the C0-byte scrub
+  before parsing, and "non-zero exit or non-array = could not tell, never =
+  none".
+- A port's logic is a package, `internal/<name>`, that takes the interfaces;
+  the `cli` subcommand is a thin adapter over it. Another Go subcommand that
+  needs the rule calls the package in-process, never execs the sibling shell
+  script. First instance: `lane-state` as `internal/lane`, called in-process
+  by `gctk merge`. Today `merge.go` execs `lane-state.sh`, which sources
+  `bd-lib.sh`, which forks `gc` — per lane, per anchor.
+- Fakes: one in-process fake per interface (the bead store now; GitHub and
+  git later). The bead-store fake fakes the Gas City contract, not bead
+  internals. Each fake expresses every scenario the corresponding shell stub
+  in `assets/scripts/test-harness.sh` expresses (the `STUB_*` knobs become
+  fake methods) and records every call, so a test asserts reads and writes
+  the way the shell suites read `STUB_GC_LOG`. `go test` runs against the
+  fakes: no bash, no jq, no subprocess.
+- Acceptance: the replaced script's `*.test.sh` suite keeps running against
+  the Go binary through the existing stubs until every assertion in it has a
+  Go test that fails when the behaviour it pins is removed. The PR that drops
+  a shell suite maps assertions to Go tests explicitly; "covered in spirit"
+  does not count. A port that cannot pass the shell suite through the stubs
+  is wrong; the suite is not. Parts of a suite that test shell-only mechanics
+  stay in shell indefinitely.
+- Each port PR states the measured before and after: the component's shell
+  suite wall time, and the city-side call it replaces (forks per call, ms per
+  call).
 - `lifecycle/lifecycle.toml` stays the human/doctor-readable declaration; the
   state table lives once in a typed package, and the drift test compares the
   TOML against `gctk lifecycle --dump-machine` (replacing the shell-constant
   mirror).
-- Port order: `lifecycle` first (everything else calls it), then `merge`,
-  then the rest; one subcommand per PR, deleting its script in the same PR.
 
 ## Build and deploy
 
@@ -103,6 +143,10 @@ and answers neither the sharing problem nor deploy as cleanly.
 
 ## Out of scope
 
-Linking the beads library directly (changes the observability and permission
-surface); porting anything agents paste; a shared shell library (rejected by
-measured decision, unchanged); rewriting services/helm.
+Linking the beads library, under the standing rule above: Gas City is the
+abstraction over beads, so writes and the read fallback still go through `gc`
+and reads through the supervisor API, and the permissions surface and the
+logs are unchanged. What changed on 2026-10-11 is that the read path and the
+rule packages are shared Go code behind interfaces, not shell execs. Also out:
+porting anything agents paste; a shared shell library (rejected by measured
+decision, unchanged); rewriting services/helm.
