@@ -556,8 +556,9 @@ rigwhy ok 30
 eq "$RIGWHY_RC" "0" "(RIGWHY) a well-formed rig list still enumerates and files"
 
 # MUTATION CHECK (static): the causes are told apart by gc's exit status and
-# stderr, so enumerate_rigs must capture both. The stubbed runs above never take
-# its mktemp-failure fallback, so assert the source directly.
+# stderr, so enumerate_rigs must capture both. No stubbed run above takes its
+# mktemp-failure fallback, so only the source shows that the fallback keeps the
+# exit status too.
 grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
   && ok "(RIGWHY-EVIDENCE) gc's stderr is captured, not sent to /dev/null" \
   || bad "(RIGWHY-EVIDENCE) stderr capture removed — messages will lose their 'why'"
