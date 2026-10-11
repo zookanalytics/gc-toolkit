@@ -54,7 +54,7 @@ ok "dolt-backup-check.sh parses as bash"
 
 # The script must not have regressed to the dolt_stale key it replaced. Its
 # header names the field to say why it is never trusted, so only code counts.
-if grep -v '^[[:space:]]*#' "$TMP/check.sh" | grep -q 'dolt_stale'; then
+if grep -q 'dolt_stale' < <(grep -v '^[[:space:]]*#' "$TMP/check.sh"); then
     bad "the script keys off dolt_stale (the false-clean field it exists to replace)"
 else
     ok "the script does not key off dolt_stale"
