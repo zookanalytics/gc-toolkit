@@ -965,14 +965,14 @@ keys = [
 #   not this key. Read by that script's own guard, tools/gc-proactive.sh,
 #   mol-first-reaction.toml and bead-context.sh. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
-#   visit it named, and the timestamp. A ruling or recommend that files its own
-#   gate stamps _target in a second write, once the gate exists. _reason is the
-#   closer's brief: mol-validate-close.toml reads it as the claim it re-derives
-#   against live state before it closes or escalates a bead the close exit
-#   handed it. first-reaction-dispose.sh reads _target and _at to compose its
-#   "already landed" message. bead-context.sh returns every key of the record
-#   with a subject's context. Never cleared. _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, named agent, waiting-ids,
+#   human gate or visit it named, and the timestamp. A ruling or recommend that
+#   files its own gate stamps _target in a second write, once the gate exists.
+#   _reason is the closer's brief: mol-validate-close.toml reads it as the claim
+#   it re-derives against live state before it closes or escalates a bead the
+#   close exit handed it. first-reaction-dispose.sh reads _target and _at to
+#   compose its "already landed" message. bead-context.sh returns every key of
+#   the record with a subject's context. Never cleared. _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
