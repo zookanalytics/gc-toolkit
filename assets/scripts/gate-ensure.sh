@@ -30,8 +30,9 @@
 # (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
 # (signoff.sh binds the verdict) with fix_target_pool for the rework route. A
 # create whose reply is lost has still landed whole, so the next pass's stranded
-# arm re-slings it rather than filing a twin; a failed sling is never retried
-# in-pass (a re-pour mints a second workflow root). Reach carried by the pour ALONE is qualified before it counts: a review
+# arm re-slings it rather than filing a twin. Either sling waits until the
+# review's whole work order reads back (bd_meta_ensure), and a failed sling is
+# never retried in-pass (a re-pour mints a second workflow root). Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. There is no dispatch
@@ -173,6 +174,23 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # recognised by its closures, and one repeated --status flag keeps only the
 # last value, so both halves ride a single comma list.
 ALL_STATUSES="$LIVE_STATUSES,closed"
+
+# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> — the
+# metadata a review bead carries. task_kind, check_name and anchor_bead are what
+# inflight_review selects it by. review_branch and review_base are what
+# mol-review reads, review_pool is the route its failure path restores, and
+# reviewed_oid pins the dispatch head that signoff.sh binds the verdict to.
+# fix_target_pool is the pool signoff.sh routes a request-changes rework to. An
+# empty <reviewed-oid> leaves the pin out, and an empty FIX_POOL leaves out
+# fix_target_pool.
+review_work_order() {
+  jq -nc --arg g "$1" --arg a "$2" --arg br "$3" --arg tg "$4" \
+    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg fp "$FIX_POOL" '
+    {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
+     review_base: $tg, review_pool: $rp}
+    + (if $oid == "" then {} else {reviewed_oid: $oid} end)
+    + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null
+}
 
 # A live review bead already owed to <anchor> for check <g>? Echoes its id.
 # Poured (gc.execution_routed_to), routed, or claimed counts; an open,
@@ -968,6 +986,19 @@ STRAY
             judge_pour_liveness "$rid"
             continue
           fi
+          # A stranded review is re-slung only once it carries its whole work
+          # order, the one the fresh dispatch below files with. A create that
+          # read back short leaves exactly this shape, and a pour onto it could
+          # run against a work order the bead does not carry. Nobody holds a
+          # stranded review, so a short one is written the whole order once and
+          # read back again (bd_meta_ensure). The order leaves reviewed_oid
+          # out: the pin is the head the review was dispatched for, and it is
+          # never moved here. A review without one is pinned by mol-review to
+          # the head it reads.
+          if ! rshort=$(bd_meta_ensure "$rid" "$(review_work_order "$g" "$id" "$branch" "$target" "")"); then
+            echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
           # Zero roots: a tracking convoy exists but carries no workflow root, so
           # nothing drives the review. Re-sling — this mints the FIRST root; the
           # empty convoy is left in place, contributing none to a later pass's
@@ -1045,14 +1076,7 @@ STRAY
     # it by and the blocks edge that holds the anchor, so no review exists that
     # inflight_review cannot see. A create whose reply is lost has still landed
     # whole, and the next pass finds it in flight and re-slings it as stranded.
-    # reviewed_oid pins the dispatch head (signoff binds the verdict to it);
-    # fix_target_pool routes a request-changes rework to the derived pool.
-    RID_META=$(jq -nc --arg g "$g" --arg a "$id" --arg br "$branch" --arg tg "$target" \
-      --arg rp "$REVIEW_POOL" --arg oid "$head" --arg fp "$FIX_POOL" '
-      {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
-       review_base: $tg, review_pool: $rp}
-      + (if $oid == "" then {} else {reviewed_oid: $oid} end)
-      + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null)
+    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head")
     RID_TITLE="Review branch $branch -> $target ($g): $title"
     body=""
     [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
@@ -1062,13 +1086,28 @@ STRAY
       echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
       RID=$(bd_create "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
     fi
-    if [ "$rid_rc" -ne 0 ]; then
-      # A review that did not read back as filed is not slung: its pour could
-      # run against a work order the bead does not carry.
-      if [ -n "$RID" ]; then
-        echo "$PROG: WARN review $RID did not read back as filed; not slung, merge stays held, retry next pass" >&2
+    if [ -z "$RID" ]; then
+      echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    # bd_create prints the id of a review whose work order did not read back as
+    # written (its rc 2). A pour onto it could run against a work order the bead
+    # does not carry, so it is slung only once one write of the whole order has
+    # read back (bd_meta_ensure). Nobody holds a review this pass just filed. A
+    # review still short of a key inflight_review selects it by is one no later
+    # pass can find, yet its blocks edge holds the anchor, so it is closed. One
+    # short of anything else is left for the stranded arm above, next pass.
+    if [ "$rid_rc" -ne 0 ] && ! rshort=$(bd_meta_ensure "$RID" "$RID_META"); then
+      rlost=""
+      case ",$rshort," in *,task_kind,*|*,check_name,*|*,anchor_bead,*) rlost=1 ;; esac
+      if [ -z "$rlost" ]; then
+        echo "$PROG: WARN review $RID did not record its whole work order (short: $rshort); not slung, merge stays held, retry next pass" >&2
+      elif gc bd update "$RID" --status=closed --set-metadata gc.outcome=abandoned \
+             --append-notes "Unmade by $PROG: its work order did not read back (short: $rshort). Without the keys inflight_review selects it by no later pass can find it to sling it, and its blocks edge held $id. The next pass files the review afresh." \
+             >/dev/null 2>&1; then
+        echo "$PROG: WARN review $RID did not record its work order (short: $rshort), and no later pass could find it; closed it, and the next pass files afresh" >&2
       else
-        echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
+        echo "$PROG: WARN review $RID did not record its work order (short: $rshort), no later pass can find it, and it would not close; it holds $id until it is closed by hand" >&2
       fi
       skipped=$((skipped + 1)); continue
     fi

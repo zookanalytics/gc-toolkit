@@ -641,6 +641,30 @@ has "$out" "STRANDED review rev-3" "the stranded shape is named"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3 --on mol-review" "the never-poured stranded review is re-slung with the formula"
 eq "$(meta rev-3 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 hasnt "$out" "dispatched review new-" "no twin was minted for it"
+eq "$(meta rev-3 review_branch)|$(meta rev-3 review_base)|$(meta rev-3 review_pool)|$(meta rev-3 fix_target_pool)" "polecat/d3|main|$POOL|$FIXP" \
+  "…carrying the work order the fresh dispatch files with, written before the sling"
+eq "$(meta rev-3 reviewed_oid)" "<absent>" "…without a pin it never had: mol-review pins the head it reads"
+
+echo "# a stranded review keeps the head it was pinned to"
+store "[$(anchor D3p pull_request correctness "" polecat/d3p),
+        $(stranded_review_row rev-3p D3p | jq -c '.metadata.reviewed_oid = "1111111111111111111111111111111111111111"')]"
+oid d3p > "$GH_DIR/head_polecat_d3p"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3p --on mol-review" "a pinned stranded review is re-slung"
+eq "$(meta rev-3p reviewed_oid)" "1111111111111111111111111111111111111111" "…and its pin is never moved to the live head"
+
+echo "# a stranded review whose work order will not take is not re-slung"
+# A create that read back short leaves exactly the stranded shape. Its pour
+# could run against a work order the bead does not carry.
+store "[$(anchor D3w pull_request correctness "" polecat/d3w),
+        $(stranded_review_row rev-3w D3w)]"
+oid d3w > "$GH_DIR/head_polecat_d3w"
+: > "$STUB_GC_LOG"
+out=$(STUB_DROP_KEYS="rev-3w:review_branch" run)
+has "$out" "stranded review rev-3w did not record its whole work order (short: review_branch); not re-slung" "a stranded review short of what mol-review reads is held, the key named"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3w" "…and nothing is poured onto it"
+eq "$(bstatus rev-3w)" "open" "…and it is left open for the next pass"
 
 echo "# stranded review whose tracked root has a LIVE step chain is a live pour — never re-slung"
 store "[$(anchor D4 pull_request correctness "" polecat/d4),
@@ -976,9 +1000,49 @@ oid h2 > "$GH_DIR/head_polecat_h2"
 : > "$STUB_GC_LOG"
 out=$(STUB_DROP_KEYS="new-2:review_pool" run); rc=$?
 eq "$rc" 0 "a short read-back leaves rc=0 (check armed, merge held)"
-has "$out" "review new-2 did not read back as filed; not slung" "the short read-back is reported"
+has "$out" "review new-2 did not record its whole work order (short: review_pool); not slung" "the short read-back is reported, the key named"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is poured"
 eq "$(bstatus new-2)" "open" "…and the review is left as it landed"
+# The next pass finds it as stranded. Its pour still waits on the whole work
+# order, so a key that still will not take holds it, and one that takes lets
+# that same bead be slung.
+: > "$STUB_GC_LOG"
+out=$(STUB_DROP_KEYS="new-2:review_pool" run)
+has "$out" "stranded review new-2 did not record its whole work order (short: review_pool); not re-slung" "the stranded arm holds a review still short of its work order"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and pours nothing onto it"
+out=$(run)
+has "$out" "had a STRANDED review new-2" "once the key takes, the stranded arm re-slings the same bead"
+eq "$(meta new-2 review_pool)|$(meta new-2 'gc.execution_routed_to')" "$POOL|$POOL" "…written whole, then poured"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…and no twin was filed"
+
+echo "# a review whose create read back short is slung in the same pass once one write of its order takes"
+# The hook strips review_branch from the newborn before the create's read-back,
+# once.
+cat > "$TMP/strip-branch-once" <<'HOOK'
+#!/usr/bin/env bash
+[ "${1:-}" = new-2 ] && [ ! -e "$STUB_STORE.stripped" ] || exit 0
+: > "$STUB_STORE.stripped"
+tmp="$(mktemp "${STUB_STORE%/*}/.hook.XXXXXX")"
+jq -c 'map(if .id == "new-2" then (.metadata |= del(.review_branch)) else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+HOOK
+chmod +x "$TMP/strip-branch-once"
+store "[$(anchor H2s pull_request correctness "" polecat/h2s)]"
+oid h2s > "$GH_DIR/head_polecat_h2s"
+rm -f "$STUB_STORE.stripped"; : > "$STUB_GC_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/strip-branch-once" run)
+[ -e "$STUB_STORE.stripped" ] && ok "(the newborn read back without its review_branch)" || bad "(the hook never stripped the newborn's review_branch)"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL new-2 --on mol-review" "the review is slung in the same pass"
+eq "$(meta new-2 review_branch)" "polecat/h2s" "…once it carries the review_branch it was short of"
+
+echo "# a review whose create will not take a key inflight_review selects it by is closed, and the next pass files afresh"
+store "[$(anchor H2c pull_request correctness "" polecat/h2c)]"
+oid h2c > "$GH_DIR/head_polecat_h2c"
+out=$(STUB_DROP_KEYS="new-2:check_name" run)
+has "$out" "review new-2 did not record its work order (short: check_name), and no later pass could find it; closed it" "a review no later pass could find is closed rather than left holding the anchor"
+eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…closed as abandoned"
+has "$(notes new-2)" "Unmade by gate-ensure" "…with a note naming why"
+out=$(run)
+has "$out" "dispatched review new-3" "the next pass files the review afresh"
 
 echo "# a review that lands with none of its metadata is closed, and the next pass files a whole one"
 store "[$(anchor H3 pull_request correctness "" polecat/h3)]"
