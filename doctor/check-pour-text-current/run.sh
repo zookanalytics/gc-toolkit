@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # doctor/check-pour-text-current — I9: a molecule executes the formula text
-# that is current when it runs (docs/component-model.md §3, tk-5w3boh). Two
+# that is current when it runs (docs/component-model.md §3). Two
 # facts compose to break it: a graph.v2 step's description renders once at
 # pour and never re-renders, and rigs/<rig> — the checkout the runtime
 # executes — advances on the reconciler's 15m cooldown

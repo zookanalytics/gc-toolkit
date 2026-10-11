@@ -120,7 +120,7 @@ echo "── every required field is checked (fail closed on a missing one) ─�
 ( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x SUBJECT=tk-sub bash "$SUT" >/dev/null 2>&1 ); is "a missing reason is refused" "$?" "2"
 
 echo "── the converse role prompt wires this script (doctrine and tool do not drift) ──"
-PROMPT="$REPO/agents/converse/prompt.template.md"
+PROMPT="$REPO/agents/_converse/prompt.template.md"
 has "the prompt names converse-invalidate-recommendation.sh" \
     'converse-invalidate-recommendation.sh' "$PROMPT"
 

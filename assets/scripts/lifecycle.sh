@@ -13,9 +13,12 @@
 # reconcile cadence re-derives the same verdict at the same head every few
 # minutes, so a naive clock would restart a three-day wait on every pass.
 # --close only into a closed state, and a closed state requires --close (status
-# and merge_result move together). A state's declared routing rides in the same
-# call unless --route is given: human states stamp gc.routed_to=human, and
-# detached states clear it unless the bead already rests on the park route.
+# and merge_result move together). --to merged also requires a non-empty
+# --set merged_sha, the landing the state names; a bead that never had a PR is
+# no merge anchor and closes with a plain `gc bd close`. A state's declared
+# routing rides in the same call unless --route is given: human states stamp
+# gc.routed_to=human, and detached states clear it unless the bead already rests
+# on the park route.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to

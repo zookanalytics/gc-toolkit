@@ -86,6 +86,91 @@ if [ "$ID3" != "$ID" ]; then ok "re-converging after a supersede files a fresh b
 if green tk-anc correctness; then ok "the fresh backing greens the lane again"; else bad "the fresh backing did not green the lane"; fi
 
 # ---------------------------------------------------------------------------
+# back-lane leaves no bead its own dedup cannot see. The dedup selects on
+# anchor_bead and task_kind=review, so an outcome created bare and stamped in a
+# second write is invisible to it once that write fails: the bead stays open
+# and unstamped, no review reader ever closes it, and the retry files a stamped
+# twin under the same title. Born closed with every stamp in the one create,
+# the outcome is whole or absent whatever happens to the write, and one left
+# stamped but open is finished rather than twinned.
+# ---------------------------------------------------------------------------
+AT_ANCHOR='{"id":"tk-at","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","pr_number":"43"}}'
+AT_TITLE="lane correctness converged: validator ruled no further review — anchor tk-at"
+outcomes()  { jq --arg t "$AT_TITLE" '[ .[] | select(.title == $t) ] | length' "$STUB_STORE"; }
+unstamped() { jq --arg t "$AT_TITLE" '[ .[] | select(.title == $t) | select(((.metadata // {}).task_kind // "") == "") ] | length' "$STUB_STORE"; }
+
+# Every write after the create refused: the stamp-and-close a create-then-stamp
+# writer depends on can no longer fail, because the create carries it.
+store "[$AT_ANCHOR]"
+STUB_UPDATE_FAIL="new-2" "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef --reason "one localized must-fix" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "with every write after the create refused, back-lane still backs the lane"
+eq "$(unstamped)" "0" "…and leaves no unstamped outcome"
+eq "$(bstatus new-2)" "closed" "the outcome is born closed"
+eq "$(meta new-2 signoff_verdict)" "approve" "…with its stamps in the same write"
+has "$(notes new-2)" "converged at deadbeef — one localized must-fix" "…and its note"
+if green tk-at correctness; then ok "…so the lane derives green from the create alone"; else bad "the lane did not derive green from a born-closed outcome"; fi
+
+# A refused create leaves nothing behind, and the retry files exactly one.
+store "[$AT_ANCHOR]"
+STUB_CREATE_FAIL=1 "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "a refused create fails closed (exit 2)"
+eq "$(jq 'length' "$STUB_STORE")" "1" "…and leaves no bead behind"
+"$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1
+eq "$(outcomes)" "1" "the retry after a refused create files exactly one outcome"
+
+# A create whose reply will not parse has still filed the whole backing; the
+# read-back finds it, and the retry's dedup does too.
+store "[$AT_ANCHOR]"
+ID=$(STUB_CREATE_GARBAGE=1 "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef 2>/dev/null); rc=$?
+eq "$rc" 0 "a create whose reply will not parse still backs the lane"
+eq "$ID" "new-2" "…and reports the backing the read-back found"
+eq "$(unstamped)" "0" "…leaving no unstamped outcome"
+ID2=$("$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef 2>/dev/null)
+eq "$ID2" "new-2" "the retry finds that backing"
+eq "$(outcomes)" "1" "…and files no second approve outcome"
+
+# A create that lands stamped but without its closed status fails the read-back.
+# What it leaves is stamped, so the retry finishes it instead of filing a twin
+# beside it.
+store "[$AT_ANCHOR]"
+STUB_DROP_KEYS="new-2:status" "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "a create that lands open fails closed (exit 2)"
+eq "$(unstamped)" "0" "…and what it leaves is stamped, not an orphan the dedup cannot see"
+if green tk-at correctness; then bad "an open outcome derived green"; else ok "the open outcome holds the lane in flight until it closes"; fi
+ID=$("$SUT" back-lane --anchor tk-at --lane correctness --oid cafef00d 2>/dev/null); rc=$?
+eq "$rc" 0 "the retry succeeds"
+eq "$ID" "new-2" "…by finishing the open outcome"
+eq "$(bstatus new-2)" "closed" "…which it closes"
+eq "$(outcomes)" "1" "…and files no second approve outcome"
+if green tk-at correctness; then ok "…and the lane derives green"; else bad "the finished outcome did not green the lane"; fi
+
+# An open outcome beside a live backing still holds the lane in flight, so it is
+# finished before the dedup returns the backing, and nothing new is filed.
+AT_BACKING='{"id":"tk-atb","status":"closed","assignee":"","title":"'"$AT_TITLE"'","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-at","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'
+AT_OPEN='{"id":"tk-ato","status":"open","assignee":"","title":"'"$AT_TITLE"'","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-at","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'
+store "[$AT_ANCHOR, $AT_BACKING, $AT_OPEN]"
+if green tk-at correctness; then bad "setup: a lane with an open outcome derived green"; else ok "an open outcome beside a backing holds the lane (setup)"; fi
+"$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1
+eq "$(bstatus tk-ato)" "closed" "back-lane finishes the open outcome beside the backing"
+eq "$(outcomes)" "2" "…and files nothing new"
+if green tk-at correctness; then ok "…so the lane derives green"; else bad "the lane stayed held after the open outcome was finished"; fi
+
+# A close that reports success but leaves the outcome open still holds the lane,
+# and the dedup cannot see an open outcome, so back-lane reads the close back
+# and fails closed instead of filing a twin beside it.
+store "[$AT_ANCHOR, $AT_OPEN]"
+STUB_DROP_KEYS="tk-ato:status" "$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1; rc=$?
+eq "$rc" 2 "a close of the open outcome that does not land fails closed (exit 2)"
+eq "$(outcomes)" "1" "…and files no twin beside the outcome still holding the lane"
+
+# Finishing is bound to back-lane's own outcome. An open approve review under
+# any other title belongs to another writer, and back-lane leaves it open.
+OTHER='{"id":"tk-other","status":"open","assignee":"","title":"Review PR#43 correctness","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-at","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'
+store "[$AT_ANCHOR, $OTHER]"
+"$SUT" back-lane --anchor tk-at --lane correctness --oid deadbeef >/dev/null 2>&1
+eq "$(bstatus tk-other)" "open" "back-lane never closes an open review it did not file"
+
+# ---------------------------------------------------------------------------
 # Guards: --oid required; unreadable store fails closed (exit 2).
 # ---------------------------------------------------------------------------
 if "$SUT" back-lane --anchor tk-anc --lane correctness >/dev/null 2>&1; then bad "back-lane ran without --oid"; else ok "back-lane requires --oid"; fi

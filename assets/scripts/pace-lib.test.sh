@@ -3,8 +3,11 @@
 # share: the rotation order after a cursor, the cursor write, the deadline, and
 # the per-group bookkeeping (exempt never stops, first skips past the deadline
 # and rotates on a cursor of its own, rest stops and resumes at the anchor it
-# stopped at, and one anchor of each paced group is always visited), and the
-# deadline check pace_start makes for every arm.
+# stopped at, and one anchor of each paced group is always visited), the
+# deadline check pace_start makes for every arm, and the seen marks: recorded
+# when a visit finishes, replaced mid-visit, never by a visit the deadline
+# refused, compacted to one live mark per anchor, and read as no change by a
+# walk that has none yet.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pace-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -104,6 +107,72 @@ err=$( { walk "$(( $(date +%s) + 600 ))" rest:a rest:b rest:c >/dev/null; } 2>&1
 has "$err" "cannot record progress" "the failed write is reported"
 eq "$(printf '%s\n' "$err" | grep -c 'cannot record progress')" 1 "…once per walk"
 eq "$(walk "$(( $(date +%s) + 600 ))" rest:a rest:b rest:c 2>/dev/null)" "a,b,c" "…and every anchor is still visited"
+
+echo "# seen marks: a walk with none reads nothing as changed, and one with marks compares"
+CUR="$TMP/seen.cursor"; SEEN="$TMP/walk.seen"; rm -f "$CUR" "$SEEN"
+pace_seen_start "$SEEN"
+eq "$PACE_SEEN_FRESH" 1 "a walk whose seen file does not exist has no marks"
+pace_seen_changed a m1 && bad "a walk with no marks read an anchor as changed" || ok "with no marks nothing reads as changed, so the caller seeds instead"
+pace_seen_put a m1
+pace_seen_put b m1
+eq "$(pace_seen_get a)" "m1" "a recorded mark reads back in the same walk"
+pace_seen_start "$SEEN"
+eq "$PACE_SEEN_FRESH" 0 "the next walk loads the marks"
+pace_seen_changed a m1 && bad "the same mark read as a change" || ok "the same mark is no change"
+pace_seen_changed a m2 && ok "a different mark is a change" || bad "a different mark read as no change"
+pace_seen_changed c m1 && ok "an anchor the walk never saw is a change once it has marks" || bad "an unseen anchor read as no change"
+
+echo "# seen marks: recorded when the visit finishes, which is when the cursor records it"
+rm -f "$CUR" "$SEEN"
+pace_start "$CUR" ""; pace_seen_start "$SEEN"
+pace_visit rest a ma
+eq "$(cut -f1,2 "$SEEN" 2>/dev/null | paste -sd, -)" "" "a visit in hand has recorded nothing yet"
+pace_visit rest b mb
+eq "$(cut -f1,2 "$SEEN" | paste -sd, -)" "a	ma" "the mark is recorded once the next visit begins"
+pace_seen_mark "mb2"
+pace_visit rest c
+pace_end
+eq "$(cut -f1,2 "$SEEN" | paste -sd, -)" "a	ma,b	mb2" "pace_seen_mark replaces the mark mid-visit, and a visit with no mark records none"
+pace_seen_start "$SEEN"
+eq "$(pace_seen_get b),$(pace_seen_get c)" "mb2," "…as the next walk reads them"
+
+echo "# seen marks: a visit the deadline refused records nothing"
+rm -f "$CUR" "$CUR.first" "$SEEN"
+pace_start "$CUR" 1; pace_seen_start "$SEEN"
+pace_visit first f1 mf1; pace_visit first f2 mf2; pace_visit rest r1 mr1; pace_visit rest r2 mr2
+pace_end
+eq "$(cut -f1,2 "$SEEN" | sort | paste -sd, -)" "f1	mf1,r1	mr1" "only the visits the deadline let through record a mark"
+
+echo "# seen marks: compaction keeps the last mark per anchor and drops the stale and the malformed"
+now=$(date +%s)
+printf 'a\told\t%s\na\tnew\t%s\nb\tgone\t%s\nnot a mark line\nc\t\t%s\n' "$now" "$now" "$((now - 1209600 - 100))" "$now" > "$SEEN"
+pace_seen_start "$SEEN"
+eq "$(pace_seen_get a)" "new" "the last line for an anchor wins"
+eq "$(pace_seen_get b)" "" "a mark older than the TTL is dropped"
+eq "$(cut -f1,2 "$SEEN" | paste -sd, -)" "a	new" "the file is rewritten with one live mark per anchor"
+PACE_SEEN_TTL_SECS=10
+printf 'a\tm\t%s\n' "$((now - 60))" > "$SEEN"
+pace_seen_start "$SEEN"
+eq "$PACE_SEEN_FRESH" 1 "a file holding only expired marks reads as no marks"
+unset PACE_SEEN_TTL_SECS
+
+echo "# seen marks: a tab or newline in a mark is flattened, so it stays one line"
+rm -f "$SEEN"; pace_seen_start "$SEEN"
+pace_seen_put a "x	y
+z"
+eq "$(wc -l < "$SEEN" | tr -d ' ')" 1 "the record is one line"
+pace_seen_start "$SEEN"
+eq "$(pace_seen_get a)" "x y z" "…and reads back flattened"
+
+echo "# seen marks: an empty path records nothing; an unwritable file warns once and the walk goes on"
+pace_seen_start ""
+pace_seen_put a m; eq "$?" 0 "a put with no seen file succeeds"
+eq "$PACE_SEEN_FRESH" 1 "…and the walk has no marks"
+CUR="$TMP/no-such-dir/walk.cursor"
+err=$( { pace_start "$CUR" ""; pace_seen_start "$TMP/no-such-dir/walk.seen"
+         pace_visit rest a ma; pace_visit rest b mb; pace_visit rest c mc; pace_end; } 2>&1 )
+has "$err" "cannot record seen marks" "the failed record is reported"
+eq "$(printf '%s\n' "$err" | grep -c 'cannot record seen marks')" 1 "…once per walk"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

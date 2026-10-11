@@ -25,7 +25,7 @@
 # fixtures that omit the keys (must be flagged), so the check cannot pass
 # vacuously and discriminates the keyless shape that strands a step.
 #
-# No live city, Dolt, network, or PRs — only python3's tomllib and a tmpdir.
+# No live city, Dolt, network, or PRs — only a Python with tomllib and a tmpdir.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,13 +34,15 @@ TOML="$ROOT/formulas/mol-first-reaction.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-mfr-step-routing.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
-command -v python3 >/dev/null 2>&1 \
-  || { echo "FAIL - python3 is required to read the formula's TOML structure"; exit 1; }
+TOML_PY="$(tomllib_python)" \
+  || { echo "skip - every check here reads the formula's TOML structure: $TOML_PY"; exit 0; }
 
 # --- The detector. -----------------------------------------------------------
 # Reads a formula TOML and checks every [[steps]] declares both continuation
@@ -79,10 +81,10 @@ print(f"OK {len(steps)} step(s) carry both continuation keys")
 sys.exit(0)
 PY
 
-run_detector() { python3 "$TMP/check.py" "$1" >"$TMP/out" 2>&1; printf '%s' "$?"; }
+run_detector() { "$TOML_PY" "$TMP/check.py" "$1" >"$TMP/out" 2>&1; printf '%s' "$?"; }
 
 # --- The real formula must be clean. -----------------------------------------
-python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$TOML" 2>/dev/null \
+"$TOML_PY" -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$TOML" 2>/dev/null \
   && ok "mol-first-reaction.toml parses as TOML" \
   || bad "mol-first-reaction.toml parses as TOML (tomllib rejected it)"
 
@@ -92,7 +94,7 @@ eq "$RC" "0" "every declared step carries both continuation keys"
 
 # The formula must actually declare steps — a zero-step formula would pass the
 # loop vacuously, so the no-steps case is its own exit code and is asserted.
-STEP_COUNT="$(python3 -c 'import tomllib,sys; print(len(tomllib.load(open(sys.argv[1],"rb")).get("steps",[])))' "$TOML")"
+STEP_COUNT="$("$TOML_PY" -c 'import tomllib,sys; print(len(tomllib.load(open(sys.argv[1],"rb")).get("steps",[])))' "$TOML")"
 [ "${STEP_COUNT:-0}" -ge 1 ] \
   && ok "formula declares at least one [[steps]] block (count=$STEP_COUNT)" \
   || bad "formula declares no [[steps]] — nothing for the guard to check"

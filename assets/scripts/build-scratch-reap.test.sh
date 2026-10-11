@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for build-scratch-reap.sh against a synthetic scratch root. Real
-# filesystem and real lsof/proc — holder detection is the whole safety model, so
-# the shell tools are NOT stubbed (harness_init would replace them).
+# filesystem and real lsof and ps — holder detection is the whole safety model,
+# so the shell tools are NOT stubbed (harness_init would replace them), except
+# where a stand-in injects a fault.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +21,9 @@ PASS=0; FAIL=0
 SUT="$HERE/build-scratch-reap.sh"
 ROOT="$TMP/root"
 mkdir -p "$ROOT"
+# The reaper names entries under the resolved root, so output is matched
+# against the same spelling whatever symlink TMPDIR goes through.
+RROOT="$(cd "$ROOT" && pwd -P)"
 
 gone()  { if [ ! -e "$1" ]; then ok "$2"; else bad "$2 (still present: $1)"; fi; }
 kept()  { if [ -e "$1" ]; then ok "$2"; else bad "$2 (was removed: $1)"; fi; }
@@ -28,8 +32,9 @@ kept()  { if [ -e "$1" ]; then ok "$2"; else bad "$2 (was removed: $1)"; fi; }
 # substitution's) stdout/stderr: a process that does keeps the pipe open and the
 # reader blocks on EOF until the holder exits. Each detaches all three streams.
 #
-# A pid that is certainly dead: spawn a child and reap it. Linux allocates pids
-# sequentially, so a just-freed pid is not reused until the counter wraps.
+# A pid that is certainly dead: spawn a child and reap it. Linux and macOS
+# allocate pids sequentially, so a just-freed pid is not reused until the
+# counter wraps.
 dead_pid() { local p; ( exec sleep 0.1 ) </dev/null >/dev/null 2>&1 & p=$!; wait "$p" 2>/dev/null || true; echo "$p"; }
 # A live pid held for the duration of the run. It is read through a command
 # substitution, a subshell whose HOLDERS is a copy, so the caller registers it.
@@ -39,6 +44,7 @@ hold_open() { ( exec 9>"$1"; exec sleep 300 ) </dev/null >/dev/null 2>&1 & HOLDE
 
 DEAD1="$(dead_pid)"; DEAD2="$(dead_pid)"; DEAD3="$(dead_pid)"; DEADH="$(dead_pid)"
 DEADN1="$(dead_pid)"; DEADN2="$(dead_pid)"; DEADN3="$(dead_pid)"; DEADN4="$(dead_pid)"
+DEADP="$(dead_pid)"
 LIVE1="$(live_pid)"; LIVERUN="$(live_pid)"; HOLDERS+=("$LIVE1" "$LIVERUN")
 
 # --- dead scratch: must be reaped ---
@@ -49,10 +55,12 @@ mkdir -p "$ROOT/go-build99887766";          : >"$ROOT/go-build99887766/a.o"
 mkdir -p "$ROOT/go-link-55443322";          : >"$ROOT/go-link-55443322/exe"
 mkdir -p "$ROOT/gctk-liveness.deaddir"
 : >"$ROOT/gctk-pr-facts.deadfile"
+mkdir -p "$ROOT/go-build-sized"; head -c 65536 /dev/zero >"$ROOT/go-build-sized/obj"
 
 # --- live or held: must be kept ---
 mkdir -p "$ROOT/gct${LIVE1}-333"            # pid alive
 mkdir -p "$ROOT/run.${LIVERUN}"             # pid alive
+mkdir -p "$ROOT/gct1-555"                   # pid 1: alive, and another uid's, so kill -0 is refused
 mkdir -p "$ROOT/gct${DEADH}-444"            # dead pid BUT an open holder inside
 hold_open "$ROOT/gct${DEADH}-444/.lock"
 mkdir -p "$ROOT/go-build-held"; hold_open "$ROOT/go-build-held/obj"   # no pid, held
@@ -82,6 +90,11 @@ has "$DRY" "would reap" "dry-run reports a plan"
 has "$DRY" "dry-run" "dry-run summary names itself"
 kept "$ROOT/gct${DEAD1}-111" "dry-run removes nothing (dead gct tree still there)"
 kept "$ROOT/go-build99887766" "dry-run removes nothing (dead go-build still there)"
+case "$DRY" in
+    *"would reap $RROOT/go-build-sized (0"*) bad "dry-run reports the size of what it would reap (got zero)" ;;
+    *"would reap $RROOT/go-build-sized ("*)  ok "dry-run reports the size of what it would reap" ;;
+    *) bad "dry-run reports the size of what it would reap (not planned: $DRY)" ;;
+esac
 
 # --- real pass ---
 OUT="$(bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)"
@@ -94,9 +107,11 @@ gone "$ROOT/go-build99887766"     "reaps an unheld go-build tree"
 gone "$ROOT/go-link-55443322"     "reaps an unheld go-link tree"
 gone "$ROOT/gctk-liveness.deaddir" "reaps an unheld gctk-* dir"
 gone "$ROOT/gctk-pr-facts.deadfile" "reaps an unheld gctk-* file"
+gone "$ROOT/go-build-sized"       "reaps an unheld go-build tree with content"
 
 kept "$ROOT/gct${LIVE1}-333"      "keeps gct<pid> whose pid is alive"
 kept "$ROOT/run.${LIVERUN}"       "keeps run.<pid> whose pid is alive"
+kept "$ROOT/gct1-555"             "keeps gct<pid> whose live pid another uid owns"
 kept "$ROOT/gct${DEADH}-444"      "keeps a dead-pid tree that still has an open holder"
 kept "$ROOT/go-build-held"        "keeps a held go-build tree (no pid, open fd inside)"
 kept "$ROOT/gctk-held.file"       "keeps a held gctk-* file"
@@ -119,6 +134,21 @@ REFUSE="$(PATH="$FAKEBIN:$PATH" bash "$SUT" --root "$ROOT" --no-lock 2>&1)" || R
 eq "$RC" "1" "refuses (exit 1) when lsof reports nothing for self"
 has "$REFUSE" "refusing to reap" "refusal explains itself"
 kept "$ROOT/gct${DEAD1}-again" "refusal leaves dead scratch untouched"
+
+# --- a ps that cannot list this process shows no pid gone ---
+# The pid-named tree is kept while a tree whose name carries no pid, gated on
+# holders alone, is still reaped in the same pass. With ps answering, the same
+# pid-named tree goes.
+NOPS="$TMP/nops"; mkdir -p "$NOPS"
+printf '#!/bin/sh\nexit 1\n' >"$NOPS/ps"; chmod +x "$NOPS/ps"
+mkdir -p "$ROOT/gct${DEADP}-888";           : >"$ROOT/gct${DEADP}-888/f"
+mkdir -p "$ROOT/go-build-psblind";          : >"$ROOT/go-build-psblind/a.o"
+OUT="$(PATH="$NOPS:$PATH" bash "$SUT" --root "$ROOT" --no-lock --verbose 2>&1)"
+kept "$ROOT/gct${DEADP}-888"  "a ps that cannot list this process keeps a dead pid's tree"
+has "$OUT" "keep (pid '${DEADP}' not shown gone)" "and says the pid was not shown gone"
+gone "$ROOT/go-build-psblind" "while a tree with no pid in its name is reaped in the same pass"
+bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
+gone "$ROOT/gct${DEADP}-888"  "with ps answering, the same dead pid's tree is reaped"
 
 echo "build-scratch-reap.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

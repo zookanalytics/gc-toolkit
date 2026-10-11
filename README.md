@@ -30,7 +30,7 @@ All agents are native to this pack — no gastown import.
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
-| `converse` | conversation role | holds subject conversations, claims visits |
+| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged visit: `gc-helm engage` opens it on a board visit, and it holds that subject's conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 
@@ -64,7 +64,7 @@ gc session attach mechanik
 
 See [docs/install.md](docs/install.md) for the full install reference — remote
 imports, the opt-in `gascity-keeper` sub-pack, the helm `[[service]]` stanza,
-and `gc doctor` verification of the nine structural checks.
+and `gc doctor` verification of the structural checks.
 
 ## Developing this pack
 

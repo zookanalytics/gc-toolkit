@@ -492,6 +492,13 @@ if [ -n "$REJECTION" ]; then
     # force-push it. prepare_mode is stamped merge; an absent stamp resolves to
     # merge here too, so a dropped stamp never triggers a rewrite.
     echo "resuming rejected branch by MERGE (git merge --no-edit origin/{{base_branch}}); never rebase or force-push"
+    # The PR head this bring-current starts from, recorded before the merge
+    # moves HEAD. submit-and-exit's bring-current guard reads what the push
+    # added from here, so a session that re-runs the handoff after the push
+    # still sees the whole bring-current.
+    RESUME_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+    RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$RESUME_BRANCH" || git rev-parse HEAD)
+    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM"
     git merge --no-edit origin/{{base_branch}}
     # Conflicts (likely the rejection reason): resolve, git add, git commit.
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
@@ -552,17 +559,36 @@ Check if the codebase is healthy BEFORE starting your work.
 **Skip this step if resuming a rejected branch** — pre-flights were
 already verified on the prior attempt. Close this step and proceed.
 
-**1. Run pre-flights (skip empty commands silently):**
+**1. Run pre-flights (skip empty commands silently).** The test suite can run
+far longer than a claim's five-minute lease TTL, so run it through the
+claim-lease keepalive: `assets/scripts/lease-heartbeat.sh` refreshes your claim
+every couple of minutes while the suite runs, so a live holder is not taken for
+a dead one. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim
+--json` returned for this step. The lease is on that step bead, and an earlier
+step's claim is already closed, so its id refreshes nothing. The keepalive is
+best-effort — an unresolved wrapper runs the command plain.
 ```bash
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
+# >>> preflight-lease-keepalive
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
+# <<< preflight-lease-keepalive
 {{typecheck_command}}
 {{lint_command}}
+# A quoted heredoc hands the test command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
 {{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
 
 **If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
 (whichever your provider uses) for quality-gate guidance. Look for sections
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
-verification commands listed there — in code blocks or bullet lists.
+verification commands listed there — in code blocks or bullet lists. Run the
+test command through the keepalive the same way, `hb bash -c '<test command>'`,
+so a long suite keeps the lease fresh.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
 Do NOT run install, cleanup, publish, release, `git push`, or any
@@ -867,14 +893,33 @@ than re-deriving from scratch.
 {{build_command}}
 ```
 
-**4. Tests — affected subset when the rig provides one, full suite otherwise:**
+**4. Tests — affected subset when the rig provides one, full suite otherwise.**
+Run them through the claim-lease keepalive. A claim's lease has a fixed
+five-minute TTL and the suite routinely outlives it, so a live holder whose
+lease expired reads, to any lease consumer, exactly like a dead one;
+`assets/scripts/lease-heartbeat.sh` refreshes `$CLAIMED_ITER_BEAD` every couple
+of minutes while the command runs. It is best-effort. An unresolved wrapper runs
+the command plain, and a refresh the store refuses is reported once on stderr.
+Neither fails the command.
 ```bash
-if [ -n "{{affected_tests_command}}" ]; then
-    {{affected_tests_command}}
-else
-    {{test_command}}
-fi
+# >>> self-review-lease-keepalive
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_ITER_BEAD" -- "$@"; else "$@"; fi; }
+# <<< self-review-lease-keepalive
+# A quoted heredoc hands each command over verbatim, whatever quotes it carries.
+TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{affected_tests_command}}
+TEST_CMD_EOF
+)
+[ -n "$TEST_CMD" ] || TEST_CMD=$(cat <<'TEST_CMD_EOF'
+{{test_command}}
+TEST_CMD_EOF
+)
+if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
 ```
+If the rig declares no test command (both empty) and you run the repo's own
+quality gate instead, invoke it the same way — `hb bash -c '<your test
+command>'` — so the long run keeps the lease fresh.
 
 **A failure your diff introduced blocks the stamp — fix it and commit.** A
 failure that reproduces on `origin/{{base_branch}}` is pre-existing:
@@ -1151,10 +1196,10 @@ echo "landing target: $LANDING_TARGET"
 committed (`chore: capture remaining work ($WORK_BEAD_ID)`) — never push
 with untracked work left behind.
 
-**3. auto_push=false halt arm, then push.** The halt arm is a TERMINAL exit,
-so it carries its own copy of the chain-close block — `exit 0` never reaches
-step 5, and each fenced block is its own shell (the test pins the copy
-byte-identical to step 7's, +2 indent):
+**3. auto_push=false halt arm, then push, then the bring-current guard.** The
+halt arm is a TERMINAL exit, so it carries its own copy of the chain-close
+block — `exit 0` never reaches step 5, and each fenced block is its own shell
+(the test pins the copy byte-identical to step 7's, +2 indent):
 
 ```bash
 # >>> submit-auto-push-halt
@@ -1200,6 +1245,9 @@ if [ "$AUTO_PUSH" = "false" ]; then
   exit 0
 fi
 # <<< submit-auto-push-halt
+# The origin head before this push: where the bring-current guard below starts
+# reading when no resume recorded a start of its own.
+PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry — never force-push (branches are brought current by merge, never rebase)."; gc runtime drain-ack; exit 1; }
 # Verify the ref is actually on origin before trusting the push.
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
@@ -1209,7 +1257,28 @@ if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
     gc runtime drain-ack
     exit 1
 fi
+# >>> submit-bring-current-guard
+BCG=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/bring-current-guard.sh" ] && { BCG="$c/assets/scripts/bring-current-guard.sh"; break; }
+done
+: "${BCG:?bring-current-guard.sh not found in the pack; a merge-in child is not handed off without its guard}"
+if ! "$BCG" guard --bead "$WORK_BEAD_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"; then
+  echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< submit-bring-current-guard
 ```
+
+The bring-current guard runs for every handoff and acts only on a merge-in
+child, the bead pr-facts.sh's conflict arm files for an approved PR whose
+branch conflicts. Bringing that branch current either took no judgment (git
+merged it, or each conflict kept both sides' insertions whole), and the
+approval stands, or it took judgment, and the guard files a visit on the anchor
+and dismisses the approval so the operator re-reviews what changed. A guard
+that cannot finish hands nothing off: the bead stays open and still blocks the
+anchor, so nothing lands under an approval the guard could not check.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the

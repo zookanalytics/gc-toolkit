@@ -43,6 +43,10 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "converse-claim: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || { echo "converse-claim: cannot source work-outcome.sh from $HERE" >&2; exit 3; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -120,15 +124,15 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (tk-tu5g3; su-ab9je is the edge holding where the stamp
+# carries the subject (su-ab9je is the edge holding where the stamp
 # did not). Left empty, the deliberate cannot-prove-foreign fallback below
 # silently disables this guard for exactly the turn it exists to catch — an
-# unrelated visit vacuumed onto a live sitting (tk-msfmu) — so recover the
+# unrelated visit vacuumed onto a live sitting — so recover the
 # group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
 # not a visit-only edge (a convoy tracks its members), and inventing a group
 # for a non-visit would release a turn this session was entitled to work. A
 # visit carrying neither recording still resolves to the fallback below; the
-# writer-side loss (tk-ax6y4) is repaired where the visit is filed.
+# writer-side loss is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
         | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
@@ -196,9 +200,13 @@ OUTCOME=$(printf '%s' "$BEAD_JSON" \
 # refusal escalates to --force the way gc-helm.sh's dismiss does; the holder
 # being overridden here is this session. The READ decides, not either exit
 # status — a close that reported success and left the visit open is the strand
-# again, one door over.
+# again, one door over. The work-record gate the close runs wants
+# gc.work_outcome, and the stranded sitting may never have stamped it, so
+# work-outcome.sh stamps it first, in a write of its own that never decides
+# whether the visit closes.
 finish_close() {
     _why="stranded after gc.outcome=$2 was stamped; close completed by $PROG"
+    work_outcome_noop "$1" gc bd
     gc bd close "$1" --reason "$_why" >/dev/null 2>&1 \
         || gc bd close "$1" --reason "$_why" --force >/dev/null 2>&1
     gc bd show "$1" --json 2>/dev/null | scrub \
@@ -290,7 +298,7 @@ fi
 
 # release_turn <bead-id> — three ORDERED writes (bd's claim guard refuses
 # --assignee "" on an in_progress bead, and metadata writes bypass it, so:
-# unset session pointers, --status=open, then --assignee="" — tk-z27pw), then
+# unset session pointers, --status=open, then --assignee=""), then
 # the read-back that decides. gc.routed_to is deliberately left alone: it is
 # the pool's offer predicate, and clearing it would park the turn. Every
 # write is attempted even after one fails; the READ must also agree.

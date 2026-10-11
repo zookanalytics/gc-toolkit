@@ -9,7 +9,7 @@
 # again, attach drops on detach). Single owner of pin-state detection AND
 # the toggle, so the picker cannot drift from it. "up" is the session bead's
 # metadata.pin_awake — the real durable pin, NOT tmux liveness (a keeper
-# materialized by hooked work is up-but-unpinned, tk-oe5bc3/tk-7qczss); the
+# materialized by hooked work is up-but-unpinned); the
 # read is one bounded `gc session list --json` (alias → bead id) plus one
 # bounded `gc bd show`. Invoked with run-shell -b so a slow pin can never
 # freeze tmux. Needs jq; degrades to unbounded reads without timeout(1).
@@ -54,14 +54,21 @@ bounded_gc() {
 }
 
 # keeper_pin_state <bound-secs> — up | down | unknown; short-circuits to
-# unknown on the first failed call. jq -r renders boolean and string true
-# alike; absent prints null and reads as unpinned.
+# unknown on the first failed call. `gc session list --json` rows carry
+# lower-case `id` and `alias` under `.sessions`, and older gc builds print a
+# bare array of `ID`/`Alias` rows; both resolve. A roster with no row array
+# fails to iterate, and jq -e also exits non-zero on a keeper row with no id
+# (null) and on an empty answer (no output), so each reads unknown. Reading
+# one as down would claim the keeper is unpinned and offer the wrong toggle.
+# jq -r renders boolean and string true alike; absent prints null and reads
+# as unpinned.
 keeper_pin_state() {
     bound="$1"
     rows=$(bounded_gc "$bound" session list --json 2>/dev/null) \
         || { printf 'unknown'; return 0; }
-    id=$(printf '%s\n' "$rows" | jq -r --arg a "$KEEPER_ALIAS" \
-        'first((.sessions // [])[] | select(.Alias==$a) | .ID) // empty' 2>/dev/null) \
+    id=$(printf '%s\n' "$rows" | jq -er --arg a "$KEEPER_ALIAS" '
+        (if type == "array" then . else .sessions end)
+        | first((.[] | select((.alias // .Alias) == $a) | .id // .ID), "")' 2>/dev/null) \
         || { printf 'unknown'; return 0; }
     # No session row: the keeper has never been created — down/unpinned.
     [ -n "$id" ] || { printf 'down'; return 0; }

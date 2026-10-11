@@ -8,11 +8,13 @@
 scope = "rig"
 provider = "claude"
 option_defaults = { model = "fable-5" }
-prompt_template = "agents/converse/prompt.template.md"
+prompt_template = "agents/_converse/prompt.template.md"
 work_dir = ".gc/worktrees/{{.Rig}}/converse-fable/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 wake_mode = "resume"
 attach = true
+nudge = ""
+idle_timeout = "0"
 min_active_sessions = 0
 max_active_sessions = 8
 max_session_age = "5h"

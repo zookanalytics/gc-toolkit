@@ -97,7 +97,7 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
            GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --reason "pick a backend" --dry-run 2>&1 || true)"
     has    "react surfaces the operator --reason"     "pick a backend"                  "$RXR"
     absent "react does NOT forward --reason to sling" "--reason"                        "$RXR"
-    # Regression (tk-82g33): react must SELF-SUPPLY GC_RIG so the sling can
+    # Regression: react must SELF-SUPPLY GC_RIG so the sling can
     # rig-qualify its pool target even from a GC_RIG-less shell — the NORMAL
     # operator path (the prefix+b board picker and a bare shell both lack it).
     # The assertions above pre-set GC_RIG=gc-toolkit, which MASKS the bug by
@@ -140,16 +140,22 @@ has  "script -h prints usage"     "Usage:" "$("$TOOL" -h 2>&1 || true)"
 #     script name "gc-helm" (hyphen) is intentionally NOT matched.
 SURFACE_FILES=(
     "$HERE/../assets/scripts/gc-helm.sh"
-    "$HERE/../agents/converse/prompt.template.md"
-    "$HERE/../agents/converse/agent.toml"
-    "$HERE/../agents/converse/PROVENANCE.md"
+    "$HERE/../agents/_converse/prompt.template.md"
+    "$HERE/../agents/_converse/PROVENANCE.md"
+    "$HERE/../agents/converse-opus/agent.toml"
+    "$HERE/../agents/converse-fable/agent.toml"
+    "$HERE/../agents/converse-codex/agent.toml"
 )
 phantom=""
+missing=""
 for f in "${SURFACE_FILES[@]}"; do
-    [ -f "$f" ] || continue
+    # A surface file that moved would otherwise drop out of the scan unnoticed,
+    # and the absent-check below would pass on the files left.
+    [ -f "$f" ] || { missing+="$f"$'\n'; continue; }
     hit="$(grep -nF 'gc helm' "$f" 2>/dev/null || true)"
     [ -n "$hit" ] && phantom+="$f: $hit"$'\n'
 done
+eq "every operator surface file the scan names exists" "" "$missing"
 absent "no operator surface file advertises a phantom 'gc helm' CLI" "gc helm" "$phantom"
 
 # ---------------------------------------------------------------------------

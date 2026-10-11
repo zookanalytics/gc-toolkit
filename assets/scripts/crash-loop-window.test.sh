@@ -26,8 +26,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 
-date -u -d "2026-01-01T00:00:00Z" +%s >/dev/null 2>&1 \
-  || { echo "GNU date is required for this test" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
 # --- Extract the REAL block from the formula. --------------------------------
 # If the markers or the block are removed or renamed, extraction yields nothing
@@ -63,7 +62,12 @@ decide() {
     printf "%s %s" "$COUNT" "$CRASH_LOOP"
   ' "$TMP/block.sh" 2>"$TMP/err"
 }
-ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
+# ago <seconds> -> the stamp that many seconds back, in the form NOW_AT writes.
+# GNU date reads epoch seconds with -d @N and BSD date with -r N.
+ago() {
+  local s=$(( $(date -u +%s) - $1 ))
+  date -u -d "@$s" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$s" +%Y-%m-%dT%H:%M:%SZ
+}
 
 echo "# a bead with no recovery history is never a loop"
 eq "$(decide '' '' '')" "1 0" "a first recovery counts 1 and escalates nothing"
@@ -115,6 +119,13 @@ sete() {
 eq "$(sete "$(ago 90000)" '1' 'true')" "2 0" "the not-a-loop path completes under set -e"
 eq "$(sete "$(ago 600)" '1' 'true')" "2 1" "the loop path completes under set -e"
 eq "$(sete '' '' '')" "1 0" "and so does the no-history path"
+
+echo "# the stamp is read as UTC whatever zone the witness runs in"
+# POSIX TZ strings need no zoneinfo files: LINT-14 is fourteen hours ahead of
+# UTC and HST10 ten hours behind. A parse that read the stamp as local time
+# would move each recovery by that offset and flip both verdicts.
+eq "$(TZ=LINT-14 decide "$(ago 600)" '1' 'true')" "2 1" "fourteen hours ahead of UTC, a recovery 10 minutes ago is still a loop"
+eq "$(TZ=HST10 decide "$(ago 43200)" '1' 'true')" "2 0" "ten hours behind, one 12 hours ago is still not"
 
 echo "# the window is tunable"
 eq "$(decide "$(ago 3600)" '1' 'true' 600)" "2 0" "a narrower window reads the same pair as two incidents"

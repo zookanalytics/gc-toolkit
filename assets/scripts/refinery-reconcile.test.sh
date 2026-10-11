@@ -82,6 +82,8 @@ order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
 eq "$order" "pr-facts.sh,merge.sh,pr-open.sh,pr-facts.sh,pre-open-rebase.sh,gate-ensure.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture, then merge, then pr-open, ahead of every arm whose cost grows with the gating set)"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
+scaf_line=$(grep '^scaffolding-sweep' "$ARM_LOG")
+has "$scaf_line" "|myrig/gc-toolkit.refinery|" "scaffolding-sweep ran as BEADS_ACTOR=<refinery>"
 # pr-stack writes PR bodies and no bead, so it carries neither projection: an
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
@@ -134,6 +136,7 @@ has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_
 hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
 hasnt "$posture_line" "--deadline" "the posture arm is never paced: merge needs every posture current"
 hasnt "$posture_line" "--cursor" "…so it takes no cursor either"
+has "$posture_line" "--seen $TMP/state/myrig/pr-posture.seen" "…but keeps what each posture was read from in the rig's pass state dir"
 at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
 posture_at=$(at 'pr-facts.*--posture-only')
 merge_at=$(at 'merge.sh')
@@ -169,6 +172,7 @@ has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_A
   || bad "pre-open-rebase did not run after pr-open (preopen=$preopen_at propen=$propen_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
+has "$grad_line" "--stamp $TMP/state/myrig/convoy-graduate.stamp" "convoy-graduate keeps its interval stamp in the rig's pass state dir"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;

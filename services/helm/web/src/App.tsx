@@ -153,9 +153,11 @@ function PRLink({ tile }: { tile: Tile }) {
 }
 
 /**
- * The phase indicator: who must act on this merge anchor next, in the same three
- * values the GitHub status: label carries. A colored chip so the answer reads at
- * a glance; nothing rendered on a row with no phase.
+ * The PR phase indicator for a merge anchor. On a live row it names who must act
+ * next, in the three values the GitHub status: label carries (working,
+ * needs-review, needs-attention); on a closed row it names how the PR resolved,
+ * in the board-only terminal states (merged, closed). A colored chip so the
+ * answer reads at a glance; nothing rendered on a row with no phase.
  */
 function PRPhaseChip({ tile }: { tile: Tile }) {
   if (!tile.pr_phase) return null;

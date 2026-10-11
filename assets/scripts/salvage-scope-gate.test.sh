@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # Hermetic test for the witness-patrol SALVAGE SCOPE GATE.
 #
-# THE BUG: mol-witness-patrol step recover-orphaned-beads part 3 (salvage) reads
-# metadata.work_dir and metadata.branch and part 4 verifies a branch merged. A
-# polecat stamps those on the work (source) bead alone; a visit, a review, a
-# graph.v2 step and a graph.v2 root carry neither by construction (a review's
-# review_branch names the anchor under review, not work of its own). So the husk
-# guard refused salvage for them and the fall-through filed a no-signal
-# witness-salvage-refused, and part 4 read `unknown` off an empty branch and
-# escalated witness-branch-recovery-unknown. On the gc-toolkit rig those non-work
-# beads were roughly a third of every recovery pass.
+# Orphan recovery (mol-witness-patrol, step recover-orphaned-beads) salvages a
+# dead owner's worktree in part 3, checks whether its branch merged in part 4,
+# and hands the bead to orphan-dispose.sh for disposal in part 5. Salvage and
+# the merge check read metadata.work_dir and metadata.branch, which a polecat
+# stamps on the work (source) bead alone. A visit, a review, a graph.v2 step and
+# a graph.v2 root carry neither. A review's review_branch names the anchor under
+# review, not work of its own.
 #
-# THE FIX: a scope gate classifies the bead the way part 5's orphan-dispose.sh
-# does and sets IS_WORK_BEAD=1 only for a `source` work bead. The salvage block
-# and part 4 branch on it, so a visit/step/root skips both and reaches part 5
-# (disposal) directly, where orphan-dispose releases or skips it by that same
-# class.
+# The scope gate classifies the bead in the order orphan-dispose.sh uses: a
+# visit, then a review (both by task_kind), then a graph.v2 root, then a
+# graph.v2 step, else a source. It sets IS_WORK_BEAD=1 only for a source, and
+# salvage and the merge check run only when IS_WORK_BEAD=1. A visit, review,
+# step or root skips both checks, so salvage files no witness-salvage-refused
+# for it and the merge check escalates no witness-branch-recovery-unknown. It
+# still reaches part 5, where orphan-dispose.sh releases or skips it by the same
+# class. The nothing-to-salvage gate gives the same path to a source bead that
+# carries neither a work_dir nor a branch, since it has no worktree to salvage
+# and no branch to check.
 #
 # What is exercised here:
 #   * the gate EXTRACTED VERBATIM from the formula (between the salvage-scope-gate
@@ -34,8 +37,8 @@
 #   * static wiring: the salvage refuse-branch and part 4 branch on IS_WORK_BEAD
 #     and on NOTHING_TO_SALVAGE, and both gates are defined before the first
 #     salvage `git add -A`, so an edit that drops either fails here rather than
-#     silently re-filing the no-signal escalations;
-#   * the formula still parses as TOML after the edit.
+#     silently filing the no-signal escalations;
+#   * the formula parses as TOML.
 #
 # No live city, Dolt, network, or beads — stubs from test-harness.sh only.
 set -uo pipefail
@@ -184,7 +187,7 @@ eq "$(nts_says 0 '' '')"                "0" "non-work bead -> inert (scope gate 
 echo "--- static wiring: salvage and verify must honor the gate ---"
 # The gate protects anything only if the salvage refuse-branch and part 4 branch
 # on IS_WORK_BEAD. Assert both, so an edit that drops a gate fails here rather
-# than silently re-filing the no-signal escalations.
+# than silently filing the no-signal escalations.
 grep -qF 'if [ "$IS_WORK_BEAD" != "1" ]; then' "$TOML" \
   && ok "salvage block short-circuits when IS_WORK_BEAD != 1" \
   || bad "salvage block must branch on IS_WORK_BEAD"
@@ -193,9 +196,9 @@ grep -qF 'if [ "$IS_WORK_BEAD" = "1" ]; then' "$TOML" \
   || bad "part 4 verify must branch on IS_WORK_BEAD"
 
 # The nothing-to-salvage arm protects a bead only if salvage and part 4 honor it.
-# Assert both, so an edit that drops it re-files the no-signal escalations loudly
-# here. The salvage arm and the verify skip carry distinct strings, so neither
-# assertion matches the other.
+# Assert both, so an edit that drops it fails here rather than silently filing
+# the no-signal escalations. The salvage arm and the verify skip carry distinct
+# strings, so neither assertion matches the other.
 grep -qF 'elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then' "$TOML" \
   && ok "salvage block skips a nothing-to-salvage bead (no witness-salvage-refused)" \
   || bad "salvage block must branch on NOTHING_TO_SALVAGE"
@@ -220,12 +223,14 @@ NTS_LINE=$(grep -nE '^NOTHING_TO_SALVAGE=0' "$TOML" | head -1 | cut -d: -f1)
   || bad "nothing-to-salvage gate must be defined before any 'git add -A' (got nts@${NTS_LINE:-none} add@${FIRST_ADD:-none})"
 
 echo "--- formula still parses as TOML ---"
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "formula still parses as TOML" || bad "formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f:
     tomllib.load(f)
 PY
+else
+  echo "skip - formula still parses as TOML: $TOML_PY"
 fi
 
 echo "---"

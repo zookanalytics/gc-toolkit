@@ -365,9 +365,10 @@ th {
 }
 
 /*
- * The PR phase chip: who must act on a merge anchor next, in the three status:
- * values the GitHub PR list carries. One shared shape, colored by value so the
- * answer reads at a glance — needs-attention loudest, working quietest.
+ * The PR phase chip: a merge anchor's PR status. On a live row the status: value
+ * says who must act next, colored so the answer reads at a glance —
+ * needs-attention loudest, working quietest. On a closed row it names how the PR
+ * resolved — merged or closed — in a calm terminal color, since nobody acts on it.
  */
 .pr-phase {
   font-size: 0.8125rem;
@@ -386,6 +387,14 @@ th {
 
 .pr-phase--working {
   opacity: 0.7;
+}
+
+.pr-phase--merged {
+  color: #8250df;
+}
+
+.pr-phase--closed {
+  color: #6e7781;
 }
 
 /*

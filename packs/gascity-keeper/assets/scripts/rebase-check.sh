@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Exit condition for the `rebase` check loop in mol-upstream-gc-rebase.
 #
 # Exit 0 ("pass" — closes the control bead and releases install/push) ONLY when

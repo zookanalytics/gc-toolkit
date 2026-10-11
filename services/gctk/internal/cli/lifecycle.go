@@ -313,6 +313,27 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: --to %s requires --close — a closed state must close in the same atomic write, or the bead is left open+%s\n", prog, o.to, o.to)
 		return 1
 	}
+	// `merged` carries the evidence its own definition names: lifecycle.toml
+	// declares [states.merged] meaning = "landed; merged_sha recorded". Require
+	// that sha in the same atomic write, so the state cannot be entered with no
+	// landing to point at — the closed-implies-landed violation
+	// doctor/check-closed-implies-landed reports after the fact, refused here at
+	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh, the
+	// gctk merge port, mol-refinery-patrol) passes --set merged_sha=<oid>. What
+	// this refuses is a bead that never had a PR: it is no merge anchor, and it
+	// closes with a plain `gc bd close`, not a false landing.
+	if o.to == "merged" {
+		haveSha := false
+		for _, s := range o.sets {
+			if k, v := kv(s); k == "merged_sha" && v != "" {
+				haveSha = true
+			}
+		}
+		if !haveSha {
+			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead that never had a PR has not landed and is no merge anchor: with merge_result absent, close it with a plain 'gc bd close %s', not --to merged\n", prog, id)
+			return 1
+		}
+	}
 	// A human state is a bead waiting on a person, so it must name one. An
 	// omitted --route takes the default; an EMPTY one is the write that leaves a
 	// bead waiting on nobody — no queue holds it and no invariant can name it.

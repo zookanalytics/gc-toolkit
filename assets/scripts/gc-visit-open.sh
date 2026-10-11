@@ -1,6 +1,6 @@
 #!/bin/sh
 # gc-visit-open.sh — operator-origin visit intake: turn "I need an agent on
-# topic X" into a routed, durable conversation in one command (tk-4ojka).
+# topic X" into a routed, durable conversation in one command.
 # The argument (grammar and flags in usage()) is either a topic string, which
 # becomes a NEW subject bead, or a reference to an EXISTING one (a bead id, a
 # PR number or URL, or a superseded id) resolved through gc-helm to the live
@@ -17,7 +17,7 @@
 # or a live workflow already drives it (exit 6), so the sling is a no-op that
 # dispatches nothing: nothing would file the visit, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
-# matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
+# matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
 
 # >>> control-char-scrub
@@ -57,12 +57,14 @@ operator draws it off the board and `gc-helm engage` spawns a converse sitting
 on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
-                 override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —
-                 an existing bead's own rig is authoritative.
+                 override with GC_VISIT_DEFAULT_RIG). Refused with exit 2 for
+                 a bead id, a PR number, or a PR URL, because an existing
+                 bead's own rig is authoritative.
   --no-react     Skip the proactive first reaction and file the visit now.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
-                 reads as a question).
+                 reads as a question). Refused with exit 2 for a bead id, a PR
+                 number, or a PR URL, because an existing bead keeps its type.
   --topic        Treat the argument as a topic even if it looks like a bead id,
                  a PR number, or a PR URL.
   -h, --help     This help.
@@ -82,13 +84,18 @@ note()  { printf '%s\n' "$*" >&2; }
 
 # ── The subject's title ──────────────────────────────────────────────
 # `bd create` refuses a title over 500 BYTES, and the popup invites a
-# paragraph (tk-wp50s). The topic lives verbatim in the BODY; the title is a
+# paragraph. The topic lives verbatim in the BODY; the title is a
 # derived label, capped well under 500 in bytes (what ${#var} measures here).
 TITLE_MAX=200
 
 # derive_title <text> — one-line board label: whitespace collapsed, over-long
 # topics cut at a WORD boundary (an offset cut can slice a multi-byte char).
-derive_title() {
+# The body is a subshell under LC_ALL=C so that ${#var} counts bytes in every
+# shell. dash counts bytes in any locale, but bash, ksh and zsh count
+# characters under a UTF-8 locale, and /bin/sh is dash on Debian and bash on
+# macOS.
+derive_title() (
+    LC_ALL=C
     _dt=$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -s ' ')
     _dt="${_dt# }"; _dt="${_dt% }"
     [ "${#_dt}" -le "$TITLE_MAX" ] && { printf '%s' "$_dt"; return 0; }
@@ -108,7 +115,7 @@ derive_title() {
         [ -n "$_dt_utf8" ] && _dt="$_dt_utf8"
     fi
     printf '%s…' "${_dt% }"
-}
+)
 
 # ── Argument parsing ─────────────────────────────────────────────────
 ARG=""; RIG=""; NO_REACT=""; SUBJ_TYPE=""; FORCE_TOPIC=""
@@ -147,7 +154,7 @@ RIGS=""
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
     # >>> rig-enumeration-taxonomy
-    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences, tk-lzdty); no
+    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences); no
     # timeout arm because this script does not bound the call.
     # The stderr capture outlives nothing: it is read and removed a few lines
     # down, and the traps that cover the signal landing while `gc rig list`
@@ -346,7 +353,7 @@ board; this body is the record. Ask before assuming scope."
     SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
     SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
-        # A refused create STATES its reason in .error — surface it (tk-wp50s).
+        # A refused create STATES its reason in .error — surface it.
         SUBJ_ERR=$(printf '%s' "$SUBJ_JSON" | jq -r '.error // .[0].error // empty' 2>/dev/null)
         [ -n "$SUBJ_ERR" ] || SUBJ_ERR="bd create returned no id and no error (exit $SUBJ_RC)"
         die "could not create the subject bead in rig '$RIG': $SUBJ_ERR — nothing filed" 4
@@ -366,7 +373,7 @@ fi
 # ── Record the origin as a KEY, not only as prose ────────────────────
 # gc.origin=operator is the machine-readable fact ("operator commissioned
 # this") a sweep can select on where the body sentence cannot be (prose
-# drifts and gets quoted, tk-2cyxo). BOTH intake paths stamp it; gc-helm.sh
+# drifts and gets quoted). BOTH intake paths stamp it; gc-helm.sh
 # open deliberately does not (a board pick is a glance, not a commission).
 # Only when absent, and never fatal: the deliverable is the conversation.
 ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
@@ -388,7 +395,7 @@ elif [ ! -x "$PROACTIVE_TOOL" ]; then
     REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
 else
     # Ask under the SUBJECT's rig (the pool and its clamps are rig-scoped;
-    # helm-svc has no GC_RIG of its own — tk-hscs0). Set for this ONE command,
+    # helm-svc has no GC_RIG of its own). Set for this ONE command,
     # not exported: later gc calls resolve their own scope.
     REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
     [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"

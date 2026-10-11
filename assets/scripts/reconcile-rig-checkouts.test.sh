@@ -94,8 +94,8 @@ case "$1" in
       update)
         id="$1"; shift; key=""
         while [ $# -gt 0 ]; do [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"; shift; done
-        [ -n "$key" ] && sed -i "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" ;;
-      close) sed -i "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" ;;
+        [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
+      close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
   session) : ;;
 esac

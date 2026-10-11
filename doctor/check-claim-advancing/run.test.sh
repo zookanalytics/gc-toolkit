@@ -34,7 +34,7 @@ mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/beta"
 # single suite-start reference drifts by the suite's whole runtime, which is
 # longer than the minute the check rounds an age down to, so an age landing on
 # a minute boundary would read a minute older than it says.
-ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%SZ; }
+ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"},{"name":"beta","path":"$TMP/beta"}]}

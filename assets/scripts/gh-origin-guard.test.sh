@@ -66,6 +66,13 @@
 #        reaction, dismissal, re-request or delete posts no body and passes; a
 #        post inside a here-document body is not held to the mark, while the
 #        origin rule still reads the body and the commands after it
+#   (27) a Codex payload is measured in the directory its call runs in, read
+#        from the call's `workdir` in the session transcript: absolute,
+#        relative, absent, or a cd composed onto it; a body file resolves there
+#        too. A call with no line of its own (code mode), no transcript, or a
+#        workdir that does not exist leaves the directory unknown, so a write
+#        resolving against it is refused while one naming its repository and
+#        a read still pass. A Claude payload is never looked up.
 
 set -u
 
@@ -583,6 +590,108 @@ denied  "a quote in a body does not hide a post"  "$RIG" "$(lines "cat > notes.m
 allowed "…and a marked post after it passes"      "$RIG" "$(lines "cat > notes.md <<'R'" "don't" 'R' "gh pr comment 5 --body 'x <!-- gc:city -->'")"
 denied  "a here-string opens no body"             "$RIG" "$(lines "cat <<< 'x'" 'gh pr comment 5 --body plain')"
 denied  "<<EOF inside a quoted body is no opener" "$RIG" "$(lines 'gh pr comment 5 --body "see <<EOF here <!-- gc:city -->"' 'gh pr comment 6 --body plain')"
+
+# --- (27) Codex: the directory the call runs in --------------------------
+# Codex puts a call's working directory in its `workdir` argument and leaves it
+# out of the payload, whose cwd is the session's. The guard reads the call from
+# the session transcript, so a Codex session cannot reach a third-party clone
+# through workdir while the guard measures the session's own checkout.
+echo "  -- codex: the call's own directory"
+TX="$SANDBOX/codex-rollout.jsonl"
+: > "$TX"
+tx_call() { # tx_call <call id> [<workdir>] — append the call's transcript line
+    jq -cn --arg id "$1" --arg wd "${2-}" --argjson has "$([ "$#" -ge 2 ] && echo true || echo false)" '
+        {type: "response_item",
+         payload: {type: "function_call", name: "exec_command", call_id: $id,
+                   arguments: ({cmd: "x"} + (if $has then {workdir: $wd} else {} end) | tojson)}}' >> "$TX"
+}
+run_codex() { # run_codex <session cwd> <command> <call id> <transcript or ''>
+    local out
+    out="$(jq -n --arg c "$2" --arg w "$1" --arg id "$3" --arg t "$4" '
+              {session_id: "s", turn_id: "t", cwd: $w,
+               transcript_path: (if $t == "" then null else $t end),
+               hook_event_name: "PreToolUse", model: "m",
+               permission_mode: "bypassPermissions", tool_name: "Bash",
+               tool_input: {command: $c}, tool_use_id: $id}' \
+           | "$HOOK" 2>/dev/null)"
+    LAST_RC=$?
+    printf '%s' "$out"
+}
+codex_denied() { # codex_denied <label> <session cwd> <command> <call id> [<transcript>]
+    local out; out="$(run_codex "$2" "$3" "$4" "${5-$TX}")"
+    if [ "$LAST_RC" -ne 0 ]; then
+        bad "$1" "exit $LAST_RC (must always exit 0)"; return
+    fi
+    if ! printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
+        bad "$1" "expected a JSON deny, got: ${out:-<empty>}"; return
+    fi
+    ok "$1"
+}
+codex_allowed() { # codex_allowed <label> <session cwd> <command> <call id> [<transcript>]
+    local out; out="$(run_codex "$2" "$3" "$4" "${5-$TX}")"
+    if [ "$LAST_RC" -ne 0 ]; then
+        bad "$1" "exit $LAST_RC (must always exit 0)"; return
+    fi
+    if [ -n "$out" ]; then
+        bad "$1" "expected silence, got: $out"; return
+    fi
+    ok "$1"
+}
+
+tx_call call_third "$SANDBOX/third"
+tx_call call_rig   "$SANDBOX/rig"
+tx_call call_none
+tx_call call_rel   "../third"
+tx_call call_gone  "$SANDBOX/no-such-dir"
+tx_call call_empty ""
+tx_call call_city  "$SANDBOX/city"
+codex_denied  "workdir in a third-party clone"       "$RIG"            "gh issue create --title x --body y" call_third
+codex_allowed "workdir in the rig checkout"          "$SANDBOX/plain"  "gh issue create --title x --body y" call_rig
+codex_allowed "no workdir: the session's directory"  "$RIG"            "gh issue create --title x --body y" call_none
+codex_denied  "no workdir, session in a clone"       "$SANDBOX/third"  "gh issue create --title x --body y" call_none
+codex_allowed "an empty workdir is the session's"    "$RIG"            "gh issue create --title x --body y" call_empty
+codex_denied  "a relative workdir joins the session" "$RIG"            "gh issue create --title x --body y" call_rel
+codex_allowed "a cd composes onto the workdir"       "$RIG"            "cd rigs/gc-toolkit && gh issue create --title x" call_city
+codex_denied  "a workdir that does not exist"        "$RIG"            "gh issue create --title x --body y" call_gone
+REASON="$(run_codex "$RIG" "gh issue create --title x --body y" call_third "$TX" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+case "$REASON" in
+    *"aimed at github.com/get-convex/agent"*) ok "names the clone the workdir reaches" ;;
+    *) bad "names the clone the workdir reaches" "${REASON:-<empty>}" ;;
+esac
+
+# A post's body file resolves in the call's directory, not the session's.
+printf 'reply <!-- gc:city -->\n' > "$SANDBOX/rig/reply.md"
+codex_allowed "a body file resolves in the workdir" "$SANDBOX/plain" \
+    "gh pr comment 5 --repo zookanalytics/gc-toolkit --body-file reply.md" call_rig
+
+# A call made from inside Codex's code-mode tool has no transcript line of its
+# own, and a session can run with no transcript at all. The directory is then
+# unknown: a write resolving against it is refused, never measured in the
+# session's checkout, while a write naming its repository and a read pass.
+codex_denied  "code-mode call: implicit target"      "$RIG" "gh issue create --title x --body y" call_nested
+codex_allowed "code-mode call: --repo of our own"    "$RIG" "gh issue create --repo zookanalytics/gc-toolkit --title x" call_nested
+codex_denied  "code-mode call: --repo third party"   "$RIG" "gh issue create --repo get-convex/agent --title x" call_nested
+codex_denied  "code-mode call: a relative cd"        "$RIG" "cd rig && gh issue create --title x" call_nested
+codex_allowed "code-mode call: a read"               "$RIG" "gh issue view 5" call_nested
+codex_denied  "no transcript: implicit target"       "$RIG" "gh issue create --title x --body y" call_rig ""
+REASON="$(run_codex "$RIG" "gh issue create --title x --body y" call_nested "$TX" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+case "$REASON" in
+    *"code-mode"*"--repo"*) ok "explains the unknown directory" ;;
+    *) bad "explains the unknown directory" "${REASON:-<empty>}" ;;
+esac
+
+# The writer may be mid-line when the hook reads; a torn last line is skipped.
+printf '{"type":"response_item","payload":{"type":"function_call","call_id":"call_torn' >> "$TX"
+codex_allowed "a torn last line does not hide a call" "$SANDBOX/plain" "gh issue create --title x --body y" call_rig
+
+# Claude's payload carries no turn_id and is never looked up, whatever its
+# transcript holds.
+out="$(jq -n --arg c "gh issue create --title x" --arg w "$RIG" --arg t "$TX" \
+          '{tool_name:"Bash", tool_input:{command:$c}, cwd:$w, transcript_path:$t, tool_use_id:"call_third"}' \
+       | "$HOOK" 2>/dev/null)"
+[ -z "$out" ] && ok "a Claude payload keeps its cwd" || bad "a Claude payload keeps its cwd" "$out"
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"

@@ -104,6 +104,8 @@ SHIM
 chmod +x "$TMP/hold-reap-shim.sh"
 SCRIPT="$TMP/hold-reap-shim.sh"
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -563,13 +565,17 @@ has "$ARM" "molecule-hold.sh" "the refusal arm calls molecule-hold.sh"
 has "$ARM" "--step \"mol-polecat-work.load-context\"" "it names its own step ref"
 has "$ARM" "drain-ack" "it still drains"
 hasnt "$ARM" "--status=closed" "it still closes nothing"
-LC_DESC="$(python3 -c "
+if TOML_PY="$(tomllib_python)"; then
+  LC_DESC="$("$TOML_PY" -c "
 import sys, tomllib
 d = tomllib.load(open(sys.argv[1],'rb'))
 print([s for s in d['steps'] if s['id']=='load-context'][0]['description'])
 " "$TOML")"
-hasnt "$LC_DESC" "Leave this step bead OPEN" "the OPEN instruction is gone from the step text"
-has   "$LC_DESC" "never close it" "and the not-closed invariant is still stated"
+  hasnt "$LC_DESC" "Leave this step bead OPEN" "the OPEN instruction is gone from the step text"
+  has   "$LC_DESC" "never close it" "and the not-closed invariant is still stated"
+else
+  echo "skip - the load-context step text: $TOML_PY"
+fi
 bash -n <(printf '%s\n' "$ARM") 2>/dev/null \
   && ok "the refusal arm is syntactically valid bash" \
   || bad "the refusal arm does not parse under bash -n"

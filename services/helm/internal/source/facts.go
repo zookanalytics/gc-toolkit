@@ -124,9 +124,10 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 		OpenedAt:      iss.CreatedAt,
 	}
 	// A visit exists from the moment it is filed, but the CONVERSATION starts
-	// when a converse session claims it, and a visit can wait in the pool for
-	// as long as the pool is busy. The claim stamp is the truer start; the
-	// creation time is the fallback for a sitting that has not been claimed.
+	// when a converse session claims it, and a visit can wait on the board for
+	// as long as the operator leaves it there. The claim stamp is the truer
+	// start; the creation time is the fallback for a sitting that has not been
+	// claimed.
 	if claimed, ok := parseStamp(md["gc.claimed_at"]); ok {
 		st.OpenedAt = claimed
 	}

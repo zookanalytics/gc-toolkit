@@ -15,13 +15,13 @@
 # Safety model: a holder, never age or size. An entry is removed only when it
 # has NO live holder — lsof reports no process with a file inside it open and no
 # process whose cwd is inside it — AND, for the pid-encoded names
-# (gct<pid>-<n>, gct-<pid>-<n>, run.<pid>), /proc/<pid> is gone. Both gates are
-# re-checked immediately before the remove, because the scan-to-delete gap is a
-# TOCTOU window. Age and size are never a signal: a 6G gc.test tree nine minutes
-# into a live run holds a lock file and is kept; a 1K tree whose owner died is
-# reaped. A name that looks pid-encoded but whose pid is empty or non-numeric is
-# unparseable and is left alone — reading /proc with an empty pid would match
-# the directory /proc itself and call every entry alive.
+# (gct<pid>-<n>, gct-<pid>-<n>, run.<pid>), the process with that pid is gone.
+# Both gates are re-checked immediately before the remove, because the
+# scan-to-delete gap is a TOCTOU window. Age and size are never a signal: a 6G
+# gc.test tree nine minutes into a live run holds a lock file and is kept; a 1K
+# tree whose owner died is reaped. A name that looks pid-encoded but whose pid
+# is empty or non-numeric is unparseable and is left alone, and so is a pid
+# whose process cannot be shown gone.
 #
 # Scope: the host's shared build/test scratch, under every root this host's
 # runs point their temp at (tmpfs today, /var/tmp if a run redirects there).
@@ -77,6 +77,9 @@ if [ -z "$("$LSOF" -w -p "$$" 2>/dev/null)" ]; then
 fi
 TIMEOUT_BIN="$(command -v timeout || true)"
 UID_NUM="$(id -u 2>/dev/null || echo 0)"
+# GNU stat takes its format after -c and BSD stat after -f; both read %u as the
+# owner's uid, of a symlink itself rather than what it names.
+if stat -c %u -- / >/dev/null 2>&1; then STAT=(stat -c); else STAT=(stat -f); fi
 
 # Single-flight across the host. The lock lives at a per-uid path every session
 # shares and that matches none of the reaped patterns, so a pass never reaps its
@@ -156,19 +159,27 @@ compute_held() {   # compute_held "$snapshot"  ->  held candidate paths, one per
     ' <(printf '%s\n' "${CAND[@]}") <(printf '%s\n' "$1")
 }
 
-# /proc/<pid> gone? Empty or non-numeric pid is unparseable -> report "cannot
-# tell" (return 2), never "dead": /proc read with an empty pid is /proc itself,
-# which exists, and would call every entry alive.
+# Is the process gone? kill -0 answers for a process of this uid, on Linux and
+# macOS alike. A live process another uid owns refuses the signal, so ps, which
+# lists every uid's processes, answers for the rest. Each one reporting it
+# alive returns 1. Gone is only ever what ps shows, and only when its listing
+# shows this very process: a ps that cannot list the host cannot show any
+# process gone. That, and an empty or non-numeric pid, which is unparseable,
+# report "cannot tell" (return 2), never "dead".
+PS_OK=0
+[ "$(ps -p "$$" -o pid= 2>/dev/null | tr -d ' ')" = "$$" ] && PS_OK=1
 pid_is_dead() {
     local pid="$1"
     case "$pid" in ''|*[!0-9]*) return 2 ;; esac
-    if [ -e "/proc/$pid" ]; then return 1; fi
+    kill -0 "$pid" 2>/dev/null && return 1
+    [ -n "$(ps -p "$pid" -o pid= 2>/dev/null)" ] && return 1
+    [ "$PS_OK" -eq 1 ] || return 2
     return 0
 }
 
 # Phase 1 — the gates that need no holder scan: the name must be a known scratch
 # form, the entry must be ours, and a pid-encoded name whose pid is still alive
-# (or unparseable) is kept untouched. What survives is dead scratch unless a
+# (or not shown gone) is kept untouched. What survives is dead scratch unless a
 # holder says otherwise, which phase 2 decides.
 CAND=()        # candidate paths, dead by name/pid, pending the holder gate
 CAND_PID=()    # parallel: the pid for a pid-encoded name, "" otherwise
@@ -202,12 +213,12 @@ for root in "${SCAN_ROOTS[@]}"; do
         # and bounding to our uid is also what keeps an empty lsof result
         # trustworthy: we can always read our own trees, so a path missing from
         # the snapshot is idle, not merely unreadable.
-        if [ "$(stat -c %u "$entry" 2>/dev/null || echo -1)" != "$UID_NUM" ]; then
+        if [ "$("${STAT[@]}" %u -- "$entry" 2>/dev/null || echo -1)" != "$UID_NUM" ]; then
             log "keep (not owned by uid $UID_NUM): $entry"; KEPT_N=$((KEPT_N + 1)); continue
         fi
         if [ "$form" = pid ]; then
             d=0; pid_is_dead "$pid" || d=$?
-            if [ "$d" -eq 2 ]; then log "keep (unparseable pid '$pid'): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
+            if [ "$d" -eq 2 ]; then log "keep (pid '$pid' not shown gone): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
             if [ "$d" -eq 1 ]; then log "keep (pid $pid alive): $entry"; KEPT_N=$((KEPT_N + 1)); continue; fi
         fi
         CAND+=("$entry"); CAND_PID+=("$pid")
@@ -219,8 +230,11 @@ done
 REAPED_N=0
 REAPED_B=0
 reap() {
-    local p="$1" bytes
-    bytes="$(du -sb "$p" 2>/dev/null | awk 'NR==1{print $1}')" || true; bytes="${bytes:-0}"
+    local p="$1" kb bytes
+    # -k is the du size flag GNU and BSD share, so the count is the KiB on disk.
+    kb="$(du -sk "$p" 2>/dev/null | awk 'NR==1{print $1}')" || true
+    case "$kb" in ''|*[!0-9]*) kb=0 ;; esac
+    bytes=$((kb * 1024))
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "$PROG: would reap $p ($(numfmt --to=iec "$bytes" 2>/dev/null || echo "${bytes}B"))"
     else

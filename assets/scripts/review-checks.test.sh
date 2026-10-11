@@ -93,6 +93,12 @@ if [ -r "$REAL" ]; then
   # resolve that names it, so the shipped index must not carry one.
   unphased=$("$SUT" --file "$REAL" | awk -F'\t' 'NF && $4 !~ /^(pre-open|open-as-draft|ready-for-review|merge)$/ { print $1 }')
   is "every check in the repo index declares a valid phase" "$unphased" ""
+  # Every method the shipped index points at exists in the repo, so a dispatch
+  # never names a method no reviewer can open. A method may join files with " + ".
+  unshipped=$("$SUT" --file "$REAL" \
+    | awk -F'\t' 'NF { n = split($2, m, / [+] /); for (i = 1; i <= n; i++) print m[i] }' \
+    | while IFS= read -r p; do [ -n "$p" ] && [ ! -e "$REPO/$p" ] && printf '%s ' "$p"; done)
+  is "every method the repo index declares ships in the repo" "$unshipped" ""
 else
   bad "repo carries review-checks.toml" "no $REAL"
 fi

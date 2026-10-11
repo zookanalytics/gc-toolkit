@@ -1334,51 +1334,130 @@ else
 fi
 
 echo "# --deadline stops the pass after one anchor; --cursor resumes after it, in id order, wrapping"
-# Each anchor carries no check_set, so a visit leaves a trace (the default is
-# stamped) and stops there: no review pool, so nothing is dispatched. The ids
-# are enumerated out of id order to prove the pass orders them itself. A
-# deadline of epoch 1 has always passed, so every pass visits exactly the one
-# anchor a pass always visits.
-store "[$(anchor R30 pre_open_gate "" "" polecat/r30),
-        $(anchor R10 pull_request "" "" polecat/r10),
-        $(anchor R20 pre_open_gate "" "" polecat/r20)]"
-CUR="$TMP/gate.cursor"; rm -f "$CUR"
-pace() { "$SUT" --default correctness --fix-pool "$FIXP" --cursor "$CUR" "$@" 2>&1; }
+# Each anchor carries a verdict and check_set=none: it owes nothing, so it
+# rotates with the rest, and a visit probes its validation passes (the trace
+# visits() reads) and stops at the opt-out. The ids are enumerated out of id
+# order to prove the pass orders them itself. A deadline of epoch 1 has always
+# passed, so every pass visits exactly the one anchor a pass always visits.
+# The first pass has no seen marks yet, so it records them and puts nothing
+# first for a change.
+GE_SETTLED=',"pr.machine":"settled@'"$(oid settled)"'@2026-10-01T00:00:00Z"'
+store "[$(anchor R30 pre_open_gate none "" polecat/r30 "$GE_SETTLED"),
+        $(anchor R10 pull_request none "" polecat/r10 "$GE_SETTLED"),
+        $(anchor R20 pre_open_gate none "" polecat/r20 "$GE_SETTLED")]"
+CUR="$TMP/gate.cursor"; rm -f "$CUR" "$CUR".*
+pace() { : > "$STUB_GC_LOG"; "$SUT" --default correctness --fix-pool "$FIXP" --cursor "$CUR" "$@" 2>&1; }
+visits() { grep -o 'anchor_bead=[A-Za-z0-9]*' "$STUB_GC_LOG" | sed 's/^anchor_bead=//' | awk '!seen[$0]++' | paste -sd, -; }
 out=$(pace --deadline 1); rc=$?
 eq "$rc" 0 "a pass its deadline stopped exits 0"
-has "$out" "visited 1 of 3 gating anchors before the deadline; the next pass resumes at R20" "a passed deadline still visits one anchor, then names where the next pass resumes"
-eq "$(meta R10 check_set)" "correctness" "with no cursor the pass starts at the lowest id"
-eq "$(meta R20 check_set)" "<absent>" "…and the deadline kept it from starting the next anchor"
+has "$out" "visited 1 of 3 gating anchors (0 needing action first) before the deadline; the next pass resumes at R20" "a passed deadline still visits one anchor, then names where the next pass resumes"
+eq "$(visits)" "R10" "with no cursor the pass starts at the lowest id, and the deadline kept it from the next"
 eq "$(cat "$CUR" 2>/dev/null)" "R10" "the cursor records the anchor the pass finished"
+eq "$(cut -f1 "$CUR.seen" 2>/dev/null | sort -u | paste -sd, -)" "R10,R20,R30" "the first pass records a mark for every anchor"
 out=$(pace --deadline 1)
-eq "$(meta R20 check_set)" "correctness" "the next pass resumes after the cursor"
-eq "$(meta R30 check_set)" "<absent>" "…and visits one anchor again"
+eq "$(visits)" "R20" "the next pass resumes after the cursor, and visits one anchor again"
 has "$out" "the next pass resumes at R30" "…naming the next one"
 out=$(pace --deadline 1)
-eq "$(meta R30 check_set)" "correctness" "the third pass reaches the last anchor, so three passes cover all three"
+eq "$(visits)" "R30" "the third pass reaches the last anchor, so three passes cover all three"
 has "$out" "the next pass resumes at R10" "past the highest id the rotation wraps to the lowest"
 eq "$(cat "$CUR" 2>/dev/null)" "R30" "the cursor follows the rotation"
 out=$(pace --deadline "$(( $(date +%s) + 600 ))")
-has "$out" "visited 3 of 3 gating anchors" "a deadline that has not passed lets the pass visit every anchor"
+has "$out" "visited 3 of 3 gating anchors (0 needing action first)" "a deadline that has not passed lets the pass visit every anchor"
 hasnt "$out" "resumes at" "…and names no resume point"
 eq "$(cat "$CUR" 2>/dev/null)" "R30" "a full rotation from R10 ends on the anchor before it, so the next one starts at R10 again"
 
 echo "# a cursor naming an anchor no longer gating resumes at the next id after it"
-store "[$(anchor S10 pre_open_gate "" "" polecat/s10), $(anchor S30 pre_open_gate "" "" polecat/s30)]"
-printf 'S20\n' > "$CUR"
+store "[$(anchor S10 pre_open_gate none "" polecat/s10 "$GE_SETTLED"), $(anchor S30 pre_open_gate none "" polecat/s30 "$GE_SETTLED")]"
+rm -f "$CUR".*; printf 'S20\n' > "$CUR"
 out=$(pace --deadline 1)
-eq "$(meta S30 check_set)" "correctness" "the pass starts at the first id after the cursor"
-eq "$(meta S10 check_set)" "<absent>" "…not at the top of the list"
+eq "$(visits)" "S30" "the pass starts at the first id after the cursor, not at the top of the list"
 
 echo "# a disposed anchor the pass skips for free does not spend its one visit past the deadline"
 # V10 is disposed, so the pass passes it without a read. It leads the rotation
 # and the deadline has passed, so the visit the pass is owed goes to V20.
 store "[$(anchor V10 pull_request correctness "" polecat/v10 ',"gc.pr_close_disposition_kind":"not-needed"'),
-        $(anchor V20 pre_open_gate "" "" polecat/v20)]"
-rm -f "$CUR"
+        $(anchor V20 pre_open_gate none "" polecat/v20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
 out=$(pace --deadline 1)
-eq "$(meta V20 check_set)" "correctness" "the visit goes to the first anchor that costs a read"
-has "$out" "visited 1 of 2 gating anchors" "…counted once"
+eq "$(visits)" "V20" "the visit goes to the first anchor that costs a read"
+has "$out" "visited 1 of 2 gating anchors (0 needing action first)" "…counted once, and a disposed anchor is never put first"
+
+echo "# needing action first: an anchor owing a check_set stamp or with no verdict leads the rotation"
+# F30 has no check_set and F20 no machine verdict; both owe gate-ensure a visit.
+# F10 is settled and rotates, and F40 opts out with check_set=none, which never
+# gets a verdict, so its missing one puts nothing first. Past the deadline one
+# first anchor and one rest anchor are visited, and the first group rotates on
+# a cursor of its own.
+store "[$(anchor F10 pre_open_gate none "" polecat/f10 "$GE_SETTLED"),
+        $(anchor F20 pre_open_gate correctness "" polecat/f20),
+        $(anchor F30 pre_open_gate "" "" polecat/f30 "$GE_SETTLED"),
+        $(anchor F40 pre_open_gate none "" polecat/f40)]"
+rm -f "$CUR" "$CUR".*
+out=$(pace --deadline 1)
+eq "$(visits)" "F20,F10" "the first anchor goes ahead of the rotation, then the rest still get their visit"
+has "$out" "visited 2 of 4 gating anchors (2 needing action first) before the deadline; the next pass resumes at F40; 1 needing action wait for the next pass" "…the summary counts the first group and what each group left"
+eq "$(meta F30 check_set)" "<absent>" "the second first anchor waits for the next pass"
+eq "$(cat "$CUR.first" 2>/dev/null)" "F20" "the first group records its own cursor"
+eq "$(cat "$CUR" 2>/dev/null)" "F10" "…apart from the rest's"
+out=$(pace --deadline 1)
+eq "$(meta F30 check_set)" "correctness" "the next pass starts the first group after its cursor and stamps F30"
+
+echo "# needing action first: a live child opening or closing since the last visit puts the anchor first"
+# Both anchors are settled and seen. A validation pass opening on G20 is a
+# validator owed, so the next pass visits G20 first even though the rotation
+# would reach G10 first; once seen, G20 rotates again. A child closing moves
+# the mark the same way.
+store "[$(anchor G10 pre_open_gate none "" polecat/g10 "$GE_SETTLED"), $(anchor G20 pre_open_gate none "" polecat/g20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
+pace --deadline "$(( $(date +%s) + 600 ))" >/dev/null
+rm -f "$CUR" "$CUR.first"
+jq -c '. + [{"id":"VP-G20","status":"open","title":"validation pass","metadata":{"task_kind":"validation","anchor_bead":"G20","check_name":"human"}}]' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+out=$(pace --deadline 1)
+eq "$(visits)" "G20,G10" "the anchor whose children moved goes first"
+has "$out" "(1 needing action first)" "…counted as needing action"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(0 needing action first)" "once visited with its new child it rotates with the rest"
+jq -c 'map(if .id == "VP-G20" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(1 needing action first)" "the child closing moves the mark again"
+
+echo "# a review this arm opens joins the mark its visit records, so its own dispatch does not bring the anchor back first"
+store "[$(anchor E10 pre_open_gate correctness "" polecat/e10 "$GE_SETTLED"), $(anchor E20 pre_open_gate none "" polecat/e20 "$GE_SETTLED")]"
+oid e10 > "$GH_DIR/head_polecat_e10"
+rm -f "$CUR" "$CUR".*
+pdisp() { : > "$STUB_GC_LOG"; "$SUT" --default correctness --review-pool "$POOL" --fix-pool "$FIXP" --cursor "$CUR" "$@" 2>&1; }
+out=$(pdisp --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "E10 dispatched review" "the owed lane is dispatched"
+out=$(pdisp --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(0 needing action first)" "the next pass reads the review it opened as already seen"
+
+echo "# needing action first: a new stage or a widened check_set puts the anchor first"
+# pr-open flipping an anchor to pull_request, or triage widening its check_set,
+# changes the lanes the anchor's stage dispatches.
+store "[$(anchor H10 pre_open_gate none "" polecat/h10 "$GE_SETTLED"), $(anchor H20 pre_open_gate none "" polecat/h20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
+pace --deadline "$(( $(date +%s) + 600 ))" >/dev/null
+jq -c 'map(if .id == "H10" then .metadata.merge_result = "pull_request" elif .id == "H20" then .metadata.check_set = "none,off" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(2 needing action first)" "a new merge_result and a new check_set each put their anchor first"
+
+echo "# needing action first: a merge_hold lifted since the last visit puts the anchor first"
+# The hold stands down the anchor's review dispatch, so the visit after an
+# operator lifts it is the one that dispatches what waited on it.
+store "[$(anchor N10 pre_open_gate none "" polecat/n10 "$GE_SETTLED"',"merge_hold":"true"'), $(anchor N20 pre_open_gate none "" polecat/n20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
+pace --deadline "$(( $(date +%s) + 600 ))" >/dev/null
+jq -c 'map(if .id == "N10" then del(.metadata.merge_hold) else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+out=$(pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "(1 needing action first)" "the lifted hold puts its anchor first"
+
+echo "# a child list that does not read keeps the stamp and verdict rules and records no marks"
+store "[$(anchor J10 pre_open_gate none "" polecat/j10 "$GE_SETTLED"), $(anchor J20 pre_open_gate "" "" polecat/j20 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".*
+out=$(STUB_LIST_FAIL_ON="--has-metadata-key" pace --deadline "$(( $(date +%s) + 600 ))")
+has "$out" "live children did not read" "the unreadable child list is reported"
+has "$out" "(1 needing action first)" "…the anchor owing a stamp still goes first"
+[ -s "$CUR.seen" ] && bad "marks were recorded without the child list they are built from" || ok "…and no mark is recorded"
 
 echo "# no --deadline visits every anchor; an unwritable cursor warns and the pass still runs"
 store "[$(anchor T1 pre_open_gate "" "" polecat/t1), $(anchor T2 pull_request "" "" polecat/t2)]"
@@ -1409,8 +1488,8 @@ esac
 exit 1
 FS
 chmod +x "$KSD/finding.sh"
-store "[$(anchor K1 pre_open_gate correctness "" polecat/k1), $(anchor K2 pre_open_gate correctness "" polecat/k2)]"
-rm -f "$CUR" "$KILL_STARTED" "$KILL_RELEASE"
+store "[$(anchor K1 pre_open_gate correctness "" polecat/k1 "$GE_SETTLED"), $(anchor K2 pre_open_gate correctness "" polecat/k2 "$GE_SETTLED")]"
+rm -f "$CUR" "$CUR".* "$KILL_STARTED" "$KILL_RELEASE"
 "$KSD/gate-ensure.sh" --default correctness --fix-pool "$FIXP" --cursor "$CUR" >/dev/null 2>&1 &
 kp=$!
 i=0; while [ ! -f "$KILL_STARTED" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done

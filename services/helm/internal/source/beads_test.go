@@ -719,7 +719,7 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 }
 
 // TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem pins WHICH kinds pay
-// the per-anchor dependency read.
+// the batched dependency read.
 //
 // Three spend the answer: `parked` through board.dispositionDue, and
 // `decision` / `human` through board.ruled (tk-b3rga). The last two are why
@@ -984,8 +984,9 @@ func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	}
 	// Every kind that spends the `blocks` read shares the one batch, so all of
 	// them report UNKNOWN — never an empty set board.ruled would read as "all
-	// waits landed" and stand the row down.
-	for _, id := range []string{"tk-dec", "tk-human", "tk-parked"} {
+	// waits landed" and stand the row down. The epic and the convoy read their
+	// waits for the family grouping, and the same failed batch reaches them.
+	for _, id := range []string{"tk-dec", "tk-human", "tk-parked", "tk-epic", "tk-cv"} {
 		j, ok := findAnchor(res, id)
 		if !ok {
 			t.Fatalf("%s: an anchor whose edge read fails must still appear", id)

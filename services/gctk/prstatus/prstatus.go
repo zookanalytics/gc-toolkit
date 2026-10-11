@@ -1,10 +1,20 @@
-// Package prstatus derives the workflow-owned tri-state a PR anchor projects:
-// working, needs-review, or needs-attention — the one dimension that answers
-// who must act on the PR next. The `status:` PR label writer
-// (assets/scripts/pr-status-label.sh) computes it through `gctk pr-status`, and
-// the package is exported — not internal — so the helm board (services/helm)
-// derives the same per-bead state from the same code rather than its own. One
-// code path, so a bead's board liveness and its PR label cannot disagree.
+// Package prstatus is a PR anchor's status: vocabulary — the one dimension that
+// names where a PR stands. It has two halves. The live tri-state — working,
+// needs-review, needs-attention — answers who must act on an open PR next, and
+// [Derive] computes it from the anchor's refinery-recorded facts. The terminal
+// states — merged, closed — name how a resolved PR ended. They are stamped by
+// the helm board off the anchor's close and its merge_result, not returned by
+// [Derive]: a resolved anchor freezes its live facts at their last pre-merge
+// values (a merged PR keeps posture=approved, merge_state=CLEAN, and is never
+// restamped), so the facts [Derive] reads carry no merged-or-closed signal.
+//
+// The `status:` PR label writer (assets/scripts/pr-status-label.sh) computes the
+// live tri-state through `gctk pr-status`, and the package is exported — not
+// internal — so the helm board (services/helm) derives the same per-bead state
+// from the same code rather than its own. One code path, so a bead's board
+// liveness and its PR label cannot disagree. The label path reconciles only open
+// PRs, so it never reaches for the terminal states; the board, which alone shows
+// a resolved row, is their only consumer.
 //
 // The rule is Derive's; gathering the facts is the caller's. The label path
 // reads them by shelling out to `gc bd`; a caller that already holds the bead,
@@ -22,7 +32,9 @@ package prstatus
 
 import "strings"
 
-// State is one value of the mutually-exclusive `status:` label group.
+// State is a PR anchor's status value: the live, mutually-exclusive `status:`
+// label group (working, needs-review, needs-attention) plus the board-only
+// terminal states (merged, closed) a resolved anchor shows.
 type State string
 
 const (
@@ -37,6 +49,14 @@ const (
 	// city can settle it (a signoff-cap park, a merge or rebase hold, or an
 	// approved PR wedged at merge state BLOCKED with no rework in flight).
 	NeedsAttention State = "needs-attention"
+
+	// Merged and Closed are terminal: the PR round-trip has ended, so nobody acts
+	// on it next. Merged is a landed PR — the refinery closes its anchor carrying
+	// merge_result=merged. Closed is a merge anchor that closed without merging, a
+	// supersede or disposal. The board stamps these on a closed anchor; [Derive]
+	// never returns them, because the live facts it reads carry no terminal signal.
+	Merged State = "merged"
+	Closed State = "closed"
 )
 
 // Facts is the anchor's refinery-computed state as stored. Each string field

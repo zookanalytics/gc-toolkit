@@ -26,6 +26,8 @@ trap 'rm -rf "$TMP"' EXIT
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -157,12 +159,14 @@ eq "$E_RC" "0" "(E) OWNED=0 -> block exits 0"
 
 # --- The formula must still parse as TOML: the block lives in a multi-line
 #     basic string, where a stray escape would corrupt it. -------------------
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "(F) formula still parses as TOML" || bad "(F) formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "(F) formula still parses as TOML" || bad "(F) formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f:
     tomllib.load(f)
 PY
+else
+  echo "skip - (F) formula still parses as TOML: $TOML_PY"
 fi
 
 echo "---"

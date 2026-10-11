@@ -10,7 +10,9 @@
 # missing quota-park helper degrades to unknown and the round proceeds;
 # evidence lines are present and carry no pane text (prompt-injection bytes
 # in a pane never reach the output); usage errors — and only usage errors —
-# exit 2, every verdict exits 0.
+# exit 2, every verdict exits 0; every alternative of the default busy
+# markers reads alive on its own; an override grep rejects gives way to the
+# default markers, and one it accepts replaces them.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +69,8 @@ cat > "$FAKE_SESSIONS" <<'JSON'
  {"id":"s-parked","alias":"gc-toolkit.delta","state":"active"},
  {"id":"s-timer","alias":"gc-toolkit.echo","state":"active"},
  {"id":"s-inject","alias":"gc-toolkit.foxtrot","state":"active"},
- {"id":"s-closed","alias":"gc-toolkit.golf","state":"closed"}
+ {"id":"s-closed","alias":"gc-toolkit.golf","state":"closed"},
+ {"id":"s-ctrl","alias":"gc-toolkit.hotel","state":"active"}
 ]}
 JSON
 
@@ -101,6 +104,26 @@ eq "$(grep -c '^nudge s-alive ' "$FAKE_NUDGES")" 1 "alive: exactly one nudge sen
 run s-busy 1
 has "$LAST" "verdict=alive" "busy marker in the tail reads alive"
 has "$OUT" "evidence: life: busy-marker" "busy: evidence names the marker"
+hasnt "$OUT" "busy-markers:" "busy: grep accepts the default markers, so no fallback is named"
+
+# Each ctrl form on its own, in a static pane, so only the marker can read it
+# alive. The ctrl alternative carries the pattern's only braces, and GNU grep
+# reads a broken interval as literal text while still matching the esc form,
+# so these are the cases that show the whole default reaching grep.
+for marker in 'ctrl+c to interrupt' 'ctrl-c to stop'; do
+  printf 'Running (%s)\n' "$marker" > "$FAKE_PANES/s-ctrl"
+  run s-ctrl 1
+  has "$LAST" "verdict=alive" "busy marker '$marker' reads alive"
+  has "$OUT" "evidence: life: busy-marker" "busy marker '$marker': evidence names the marker"
+done
+
+run s-busy 1 DANCE_PROBE_BUSY='busy (unclosed'
+has "$OUT" "evidence: busy-markers: DANCE_PROBE_BUSY is not a valid ERE" "an override grep rejects is named in the evidence"
+has "$LAST" "verdict=alive" "an override grep rejects gives way to the default markers"
+
+run s-busy 1 DANCE_PROBE_BUSY='no such marker'
+has "$LAST" "verdict=silent" "an override grep accepts replaces the default markers"
+hasnt "$OUT" "busy-markers:" "an override grep accepts is not named as a fallback"
 
 START_T=$(date +%s)
 run s-silent 1

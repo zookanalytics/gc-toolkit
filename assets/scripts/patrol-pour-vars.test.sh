@@ -34,13 +34,16 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-patrol-pour-vars-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 is required for this test" >&2; exit 1; }
+TOML_PY="$(tomllib_python)" \
+  || { echo "skip - every check here renders a formula read with tomllib: $TOML_PY"; exit 0; }
 
 # extract <marker> <file> — the lines between the markers, exclusive. Renamed
 # or removed markers extract nothing, and the checks below then fail loudly.
@@ -54,12 +57,12 @@ extract() {
 # root_template <toml> — the formula's top-level description, the text bd
 # renders into every wisp's root.
 root_template() {
-  python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["description"])' "$1"
+  "$TOML_PY" -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["description"])' "$1"
 }
 
 # declared_vars <toml> — the formula's declared var names, one per line.
 declared_vars() {
-  python3 -c 'import sys, tomllib; print("\n".join(tomllib.load(open(sys.argv[1], "rb")).get("vars", {})))' "$1"
+  "$TOML_PY" -c 'import sys, tomllib; print("\n".join(tomllib.load(open(sys.argv[1], "rb")).get("vars", {})))' "$1"
 }
 
 # pour_line <title> — the lines of stdin that pour <title>.
@@ -73,7 +76,7 @@ var_names() {
 
 # set_default <toml> <var> <value> — rewrite [vars.<var>] default in place.
 set_default() {
-  python3 - "$@" <<'PY'
+  "$TOML_PY" - "$@" <<'PY'
 import re, sys
 path, var, value = sys.argv[1:4]
 with open(path, encoding="utf-8") as f:
@@ -125,7 +128,7 @@ if [ "${1:-}" = bd ] && [ "${2:-}" = mol ] && [ "${3:-}" = wisp ]; then
   done
   n=$(( $(cat "$STUB_STORE/seq" 2>/dev/null || echo 0) + 1 ))
   printf '%s\n' "$n" > "$STUB_STORE/seq"
-  python3 "$STUB_RENDER" "$STUB_FORMULAS/$formula.toml" ${vars[@]+"${vars[@]}"} > "$STUB_STORE/w$n.root" || exit 1
+  "$STUB_PY" "$STUB_RENDER" "$STUB_FORMULAS/$formula.toml" ${vars[@]+"${vars[@]}"} > "$STUB_STORE/w$n.root" || exit 1
   printf '{"new_epic_id":"w%s"}\n' "$n"
 fi
 exit 0
@@ -136,7 +139,7 @@ chmod +x "$TMP/bin/gc"
 # would, in a rig session with the stub on PATH, and print the newest wisp id.
 run_sh() {
   ( cd "$TMP" && env PATH="$TMP/bin:$PATH" STUB_STORE="$TMP/store" \
-      STUB_FORMULAS="$TMP/formulas" STUB_RENDER="$TMP/render.py" \
+      STUB_FORMULAS="$TMP/formulas" STUB_RENDER="$TMP/render.py" STUB_PY="$TOML_PY" \
       GC_BEAD_ID="${2:-}" GC_AGENT="rig-a/gc-toolkit.patrol" GC_RIG="rig-a" \
       bash "$1" >/dev/null 2>&1 ) || true
   printf 'w%s\n' "$(cat "$TMP/store/seq" 2>/dev/null || echo 0)"

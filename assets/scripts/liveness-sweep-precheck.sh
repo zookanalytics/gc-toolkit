@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # liveness-sweep-precheck.sh — decide, mechanically and cheaply, whether one
-# liveness-sweep pass has anything to say (bead tk-7h51d). It is the `check`
+# liveness-sweep pass has anything to say. It is the `check`
 # of the condition order orders/liveness-sweep.toml: exit 0 = run the pass,
 # non-zero = do not.
 # ITS CONDITION IS A STRICT SUBSET of liveness-sweep.sh's classification:
@@ -8,14 +8,10 @@
 # non-monotone ones (worked-via-convoy, the open-PR intersection, the
 # pre-open gate verdicts) are deliberately NOT made — so the local survivor
 # set is a SUPERSET of the sweep's true candidates and "zero new locally"
-# proves "zero new really", but only for the batch triage visit. The pass has a
-# second output — the per-anchor stale-gate escalation — that no unnamed-waits
-# baseline can represent, so the check ALSO runs whenever a PR-gated anchor's
-# re-escalation floor is up (the stale-due gate below). Anything else — any
-# unreadable probe, a missing subject, its own abort — RUNS the pass: a probe
-# that cannot be read excludes nothing. It also sets the 6h cadence (a
-# condition trigger has no interval). The per-rig window is spent by whichever
-# side ends the pass's
+# proves "zero new really" for the batch triage visit. Any unreadable probe, a
+# missing subject, or its own abort RUNS the pass: a probe that cannot be read
+# excludes nothing. It also sets the 6h cadence (a condition trigger has no
+# interval). The per-rig window is spent by whichever side ends the pass's
 # chance to run: liveness-sweep.sh when a pass starts, or this check when it
 # has proved the board quiet, since then no pass will. A RUN verdict never
 # spends it, because more callers evaluate a check than dispatch from it (the
@@ -38,11 +34,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
-# The floor between two stale-gate escalations about one anchor, mirrored from
-# liveness-sweep.sh so the "may owe an escalation" run-gate below reads the same
-# stamp with the same arithmetic the pass does.
-STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
-case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
 
 FORCE=0
 while [ $# -gt 0 ]; do
@@ -215,7 +206,7 @@ bd_read() { # bd_read <outfile> <subcommand> <flags...>
 }
 
 # The same three reads liveness-sweep.sh takes. WIDEN carries every non-closed
-# status LIVE omits: "still alive" means NOT CLOSED (live case tk-dhue).
+# status LIVE omits: "still alive" means NOT CLOSED.
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
 READS_OK=1
 READ_FAIL=""
@@ -354,37 +345,8 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     fi
 fi
 
-# The baseline speaks only for the batch triage visit. The pass has a second
-# output the baseline cannot represent: a per-anchor stale-gate escalation. On a
-# pass whose gh read failed, liveness-sweep.sh cannot intersect the open-PR set,
-# so a PR-gated anchor falls open to `unnamed` and is advanced into the reported
-# baseline; once gh recovers and the PR is past its age, that id is no longer new
-# and a baseline-only skip would bury the escalation for good. So run the pass
-# whenever a PR-gated anchor's re-escalation floor is up, regardless of the
-# baseline — the same stale_escalated_at stamp and floor arithmetic the sweep
-# gates on. PR age is the sweep's gh read, not this local check, so every
-# floor-elapsed PR-gated anchor is included: a superset of the sweep's stale-gate
-# set, the same run-the-pass bias as every probe above.
-STALE_DUE=""; N_STALE_DUE=""
-if [ "$READS_OK" -eq 1 ]; then
-    STALE_DUE=$(jq -n --slurpfile ready "$READY" \
-        --argjson now "$NOW" --argjson floor "$((STALE_REESCALATE_DAYS * 86400))" '
-      [ ($ready[0] // [])[]
-        | select((.metadata.merge_result // "") == "pull_request")
-        | select((.metadata.pr_url // "") != "")
-        | (.metadata.stale_escalated_at // "") as $e
-        | select($e == ""
-                 or ((try ($e | fromdateiso8601) catch null) as $t
-                     | if $t == null then true else ($now - $t) >= $floor end))
-        | .id ]' 2>/dev/null)
-    if printf '%s' "$STALE_DUE" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        N_STALE_DUE=$(printf '%s' "$STALE_DUE" | jq 'length')
-    fi
-fi
-
 # The ONE place DECISION may become skip — it needs every positive fact at once.
-# N_STALE_DUE empty (its jq failed) defaults to the run side, like every probe.
-if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ] && [ "${N_STALE_DUE:-1}" = "0" ]; then
+if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ]; then
     DECISION=skip
     REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no live visit on $SUBJECT"
 elif [ "$READS_OK" -ne 1 ]; then
@@ -397,8 +359,6 @@ elif [ "$JQ_OK" -ne 1 ]; then
     REASON="the local classification did not produce a JSON array — treating that as unknown, never as empty"
 elif [ -n "$LIVE_VISIT" ]; then
     REASON="a visit is already live on $SUBJECT; $N_NEW new local candidate(s) await it"
-elif [ "$N_NEW" = "0" ] && [ "${N_STALE_DUE:-0}" != "0" ]; then
-    REASON="$N_STALE_DUE PR-gated anchor(s) past the re-escalation floor may owe a stale-gate escalation the unnamed baseline cannot represent"
 else
     REASON="$N_NEW new local candidate(s) since the last reported pass"
 fi
@@ -419,9 +379,6 @@ if [ "$JQ_OK" -eq 1 ]; then
     if [ "$N_NEW" != "0" ]; then
         say "  new: $(printf '%s' "$NEW_IDS" | jq -r 'join(", ")')"
     fi
-fi
-if [ "${N_STALE_DUE:-0}" != "0" ]; then
-    say "  PR-gated anchors past the stale re-escalation floor: $N_STALE_DUE -> $(printf '%s' "$STALE_DUE" | jq -r 'join(", ")')"
 fi
 
 if [ "$DECISION" = "skip" ]; then

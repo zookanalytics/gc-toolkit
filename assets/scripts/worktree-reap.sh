@@ -172,16 +172,18 @@ done < <(gc session list --state all --json 2>/dev/null | jq -r '.sessions[]? | 
 # protects — a session between turns owns no process — so the checks above
 # carry the rest.
 #
-# `find` walks /proc rather than a glob over it. A shell glob stats every
-# candidate and drops what it cannot read, and passing the survivors to
-# `readlink` in bulk drops more still: measured on this host, find reported
-# around 360 cwds on every sample while the pair returned between 27 and 180,
-# and the pair missed a process started a moment earlier in 3 of 15 trials
-# where find missed none in 42. A protection that finds a varying fraction of
-# the live processes is worse than none, because it still reads as a check.
+# lsof lists the cwd of every process this user can see, on Linux and macOS
+# alike, and exits 0 on a walk it completed. A protection that finds none of
+# the live processes is worse than none, because it still reads as a check, so
+# a listing that failed, or that names no cwd at all, not even lsof's own,
+# refuses the pass.
+if ! LIVE_CWDS="$(lsof -w -n -P -F n -d cwd 2>/dev/null)" || ! grep -q '^n' <<< "$LIVE_CWDS"; then
+    echo "$PROG: no process cwd readable — refusing to reap without the live-cwd guard" >&2
+    exit 0
+fi
 while IFS= read -r d; do
     [ -n "$d" ] && protect_with_ancestors "$d" live-cwd
-done < <(find /proc -maxdepth 2 -name cwd -type l -printf '%l\n' 2>/dev/null || true)
+done < <(sed -n 's/^n//p' <<< "$LIVE_CWDS")
 SELF_CWD="$(pwd -P 2>/dev/null || true)"
 [ -n "$SELF_CWD" ] && protect_with_ancestors "$SELF_CWD" self
 
@@ -324,7 +326,7 @@ Restore: git -C $repo worktree add $path $tag" </dev/null >/dev/null 2>&1 || pru
             /^locked/     { lock = "locked"; next }
             END           { flush() }' >> "$WORK/wt"
 done
-TOTAL=$(wc -l < "$WORK/wt")
+TOTAL=$(($(wc -l < "$WORK/wt")))   # BSD wc pads the count with spaces
 
 # A registry that enumerated nothing means the walk failed, not that the city
 # has one checkout: the main worktree of every repo is always a row.

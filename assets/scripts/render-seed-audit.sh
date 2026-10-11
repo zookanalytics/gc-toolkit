@@ -5,7 +5,7 @@
 # Today that question is re-derived ad hoc from fragments every time somebody
 # asks, and the largest part of the answer is invisible after the fact: a
 # polecat transcript stores neither the skills appendix nor the standing prompt,
-# so ~26k tokens per spawn have no post-hoc audit trail at all (tk-yhwfv.3).
+# so ~26k tokens per spawn have no post-hoc audit trail at all.
 # Rendering is the only way to see it. Committing the render is what makes it
 # reviewable as ONE thing and diffable across time.
 #
@@ -109,11 +109,12 @@ fi
 # ---------------------------------------------------------------- placeholders
 #
 # Machine paths leak into the render through {{.ConfigDir}}-style expansions
-# (mechanik and keeper cite their own pack dir; twelve agents cite the city
-# root). Substituting them is what makes the committed bytes reproducible on
-# another checkout. The tokens are bracketed rather than brace-wrapped because
-# `gc formula show` output contains LITERAL un-rendered {{var}} syntax, and a
-# {{PACK_ROOT}} placeholder would read as one more of those.
+# (mechanik and keeper cite their own pack dir; mechanik, polecat and
+# polecat-codex cite the city root). Substituting them is what makes the
+# committed bytes reproducible on another checkout. The tokens are bracketed
+# rather than brace-wrapped because `gc formula show` output contains LITERAL
+# un-rendered {{var}} syntax, and a {{PACK_ROOT}} placeholder would read as one
+# more of those.
 PH_PACK="[[PACK-ROOT]]"
 PH_CITY="[[CITY-ROOT]]"
 PH_HOME="[[HOME]]"
@@ -126,8 +127,8 @@ PH_HOME="[[HOME]]"
 # it holds the per-agent inject_fragments_append lists AND the `sha:` pin for
 # the imported gastown pack, so an upstream prompt change moves it too.
 #
-# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate
-# (tk-wchab, pre-open signoff P1). The synthetic city below is not a wrapper
+# THIS SCRIPT IS ITSELF AN INPUT, and leaving it out was a hole in the gate.
+# The synthetic city below is not a wrapper
 # around the render — it is a variable the rendered prompts depend on, and the
 # scenario comment says so. Edit one line of its [agent_defaults] and 13 agent
 # prompts move; with only the content directories hashed, `--check` reported the
@@ -318,10 +319,13 @@ if [ "$MODE" = "install-hook" ]; then
     top="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repo: $ROOT"
     hookdir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)/hooks"
     # Refuse to shadow hooks somebody already installed by hand: core.hooksPath
-    # replaces .git/hooks wholesale rather than layering on top of it.
+    # replaces .git/hooks wholesale rather than layering on top of it. A listing
+    # that fails refuses too, because a hook it could not see is a hook it could
+    # shadow. BSD find has no -printf, so basename names the files.
     existing=""
     if [ -d "$hookdir" ]; then
-        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -printf '%f\n' 2>/dev/null)"
+        existing="$(find "$hookdir" -maxdepth 1 -type f ! -name '*.sample' -exec basename {} \;)" \
+            || die "could not list $hookdir, so hand-installed hooks there cannot be ruled out"
     fi
     if [ -n "$existing" ]; then
         printf 'refusing to set core.hooksPath: %s already holds hand-installed hook(s):\n' "$hookdir" >&2
@@ -471,6 +475,23 @@ gcq() {
 
 synth_city
 
+# gc names the city by the path it resolves, not the one --city hands it:
+# gascity's pathutil.NormalizePathForCompare cleans the path, resolves its
+# symlinks, and on darwin collapses the /private/tmp and /private/var host
+# aliases back to /tmp and /var. The rig checkout and city.toml paths in the
+# render carry that spelling, so the substitution needs it as well as "$CITY".
+# The two differ for a TMPDIR that ends in a slash (macOS sets one), for one
+# reached through a symlink, and for one spelled under /private.
+CITY_GC="$(cd "$CITY" && pwd -P)" || die "could not resolve the synthetic city's path"
+if [ "$(uname -s)" = Darwin ]; then
+    case "$CITY_GC" in
+        /private/tmp/*|/private/var/*) CITY_GC="${CITY_GC#/private}" ;;
+    esac
+fi
+# mktemp's random directory name is in every spelling of the city, so a render
+# still carrying it after the substitution leaked one (see render_one).
+CITY_TOKEN="$(basename "$TMPROOT")"
+
 # `gc config show` is the load gate: if the scenario does not compose, `gc prime`
 # does NOT inherit the failure — it prints a 16-line stub and exits 0. Checking
 # here is what stops the audit from silently recording stubs for every agent.
@@ -519,9 +540,9 @@ fi
 # fallback" rule below: claude, codex, gemini and control-dispatcher legitimately
 # ARE the builtin worker prompt, and banning it outright would fail them.
 PACK_AGENTS=""
-while IFS= read -r adir; do
-    PACK_AGENTS="${PACK_AGENTS} $(basename "$adir")"
-done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -printf '%h\n' 2>/dev/null | LC_ALL=C sort)
+while IFS= read -r atoml; do
+    PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
+done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
 # ------------------------------------------------------------------ inventory
 #
@@ -629,9 +650,20 @@ render_one() {
     python3 "$py_normalize" \
         "$ROOT" "$PH_PACK" \
         "$CITY" "$PH_CITY" \
+        "$CITY_GC" "$PH_CITY" \
         "$HOME" "$PH_HOME" \
         < "$raw" > "$dest"
     rm -f "$raw" "$raw.err"
+    # A spelling of the city that none of the needles above names would
+    # otherwise be written out. That path differs on every run, so --check would
+    # call the tree stale straight after the render that wrote it, and a commit
+    # would ship it.
+    if grep -F -e "$CITY_TOKEN" < "$dest" > /dev/null; then
+        printf 'FAILED %s %s (the throwaway city path survived normalization)\n' \
+            "$kind" "$name" > "$dest.error"
+        grep -F -e "$CITY_TOKEN" < "$dest" | head -3 | sed 's/^/  /' >> "$dest.error"
+        return 1
+    fi
 }
 
 STAGE="$TMPROOT/stage"
@@ -664,6 +696,9 @@ fi
 # job is to make a diff legible as "+1,400 tokens", not to bill anyone.
 est_tokens() { printf '%s\n' "$(( $1 / 4 ))"; }
 commas() { printf "%s\n" "$1" | sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta'; }
+# BSD wc pads its count with leading blanks and GNU wc does not. Arithmetic
+# expansion reads either as the bare number, so no padding reaches commas.
+bytes_of() { printf '%s\n' "$(( $(wc -c < "$1") ))"; }
 
 # Said on stdout, not committed. The number is worth knowing on a render; a copy
 # of it in a per-branch file is a repo-global line that every seed-input edit
@@ -772,7 +807,7 @@ EOF
 
     total_a=0
     for a in "${AGENTS[@]}"; do
-        b=$(wc -c < "$STAGE/agents/$a.md")
+        b=$(bytes_of "$STAGE/agents/$a.md")
         total_a=$((total_a + b))
         printf '| [`%s`](agents/%s.md) | %s | %s |\n' "$a" "$a" "$(commas "$b")" "$(commas "$(est_tokens "$b")")"
     done
@@ -793,7 +828,7 @@ EOF
 
     total_f=0
     for f in "${FORMULAS[@]}"; do
-        b=$(wc -c < "$STAGE/formulas/$f.md")
+        b=$(bytes_of "$STAGE/formulas/$f.md")
         total_f=$((total_f + b))
         sc="city"
         [ -f "$STAGE/formulas/$f.md.scope" ] && sc="$(cat "$STAGE/formulas/$f.md.scope")"

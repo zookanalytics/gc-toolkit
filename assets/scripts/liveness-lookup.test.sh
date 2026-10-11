@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol LIVENESS LOOKUP normalization (tk-opfsi).
+# Hermetic test for the witness-patrol LIVENESS LOOKUP normalization.
 #
 # THE BUG: mol-witness-patrol's recover-orphaned-beads resolved a bead's assignee
 # against the session liveness map by EXACT key lookup:
@@ -17,7 +17,7 @@
 # "the owning session is gone and will never come back" — for a session that is
 # active and running. Confirmed firing on gc-z0vi2.1 (status=open, owner active);
 # containment held only because the witness agent noticed by judgment. Unlike the
-# sibling orphan-sweep.sh path (tk-2l13a), this step enumerates `open` beads too,
+# sibling orphan-sweep.sh path, this step enumerates `open` beads too,
 # so the exposure was live, not latent.
 #
 # THE FIX: keep the exact lookup as the authoritative first pass, then retry ONCE
@@ -38,6 +38,8 @@ TOML="$ROOT/formulas/mol-witness-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-lookup-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -467,12 +469,14 @@ grep -qF 'after BOTH the exact lookup and the' "$TOML" \
 
 # The formula must still parse as TOML after the edit (the snippet lives inside a
 # multi-line basic string, where a stray backslash escape would corrupt it).
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$TOML" <<'PY' && ok "(P) formula still parses as TOML" || bad "(P) formula failed to parse as TOML"
+if TOML_PY="$(tomllib_python)"; then
+  "$TOML_PY" - "$TOML" <<'PY' && ok "(P) formula still parses as TOML" || bad "(P) formula failed to parse as TOML"
 import sys, tomllib
 with open(sys.argv[1], "rb") as f:
     tomllib.load(f)
 PY
+else
+  echo "skip - (P) formula still parses as TOML: $TOML_PY"
 fi
 
 echo "---"
