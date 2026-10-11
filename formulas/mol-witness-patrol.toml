@@ -249,17 +249,24 @@ If the dog executes, the dead session's beads return through this step next
 cycle.
 
 **3-6. Recover each orphaned bead** in one command, with `BEAD` and `OWNER` set
-from its row:
+from its row. Salvage and the merge verify run first, and the verdict gates the
+rest: only a bead whose work is not on its target (`no`) or that has no branch
+to verify (`skip`) is cleaned up and returned to the pool:
 ```bash
 BEAD="<bead>"; OWNER="<owner>"
 witness_salvage_context; echo "REPO_CTX=$REPO_CTX BRANCH_ON_ORIGIN=$BRANCH_ON_ORIGIN"
 witness_salvage_scope; witness_nothing_to_salvage; witness_husk_guard
 witness_salvage
 witness_verify; echo "BRANCH_MERGED=$BRANCH_MERGED"
-witness_owning_store; witness_worktree_cleanup
-witness_dispose; echo "DISPOSE_RESULT=$DISPOSE_RESULT DISPOSE_RC=$DISPOSE_RC"
-witness_recovery_stamp_gate; witness_prev_recovery; witness_crash_loop_window
-witness_record; echo "STAMP_RECOVERY=$STAMP_RECOVERY CRASH_LOOP=$CRASH_LOOP COUNT=$COUNT"
+case "$BRANCH_MERGED" in
+  no|skip)
+    witness_owning_store; witness_worktree_cleanup
+    witness_dispose; echo "DISPOSE_RESULT=$DISPOSE_RESULT DISPOSE_RC=$DISPOSE_RC"
+    witness_recovery_stamp_gate; witness_prev_recovery; witness_crash_loop_window
+    witness_record; echo "STAMP_RECOVERY=$STAMP_RECOVERY CRASH_LOOP=$CRASH_LOOP COUNT=$COUNT" ;;
+  yes) witness_owning_store; witness_worktree_cleanup ;;
+  *) echo "BRANCH_MERGED=$BRANCH_MERGED: nothing cleaned up or disposed" ;;
+esac
 ```
 Act on what the stages report:
 - `REPO_CTX` other than `ok`: the owning repo was not found, so escalate
@@ -270,14 +277,15 @@ Act on what the stages report:
   File it best-effort and carry on, since recovery is load-bearing:
   `patrol-finding.sh --scope witness-findings --key witness-salvage-refused
   --about <bead> ...`. A source bead that never had a worktree files nothing.
-- `BRANCH_MERGED`: `yes`, the work landed, so escalate the observation, close
-  the bead, and clean the worktree; `no`, it returns to the pool through the
-  disposal; `skip`, nothing to verify; `unknown`, do NOT reset or call the work
-  discardable, but escalate (`--key witness-branch-recovery-unknown`) and leave
-  the bead for a human.
+- `BRANCH_MERGED`: `yes`, the work landed and its worktree is cleaned, so
+  escalate the observation and close the bead; `no`, it returned to the pool
+  through the disposal; `skip`, nothing to verify, disposed the same way;
+  `unknown`, nothing was reset or disposed and the work is not discardable:
+  escalate (`--key witness-branch-recovery-unknown`) and leave the bead for a
+  human.
 - An owning-store refusal leaves the worktree standing: escalate
-  (`escalate.sh --subject <bead> --key witness-unplaceable-owner ...`).
-  Disposal runs either way.
+  (`escalate.sh --subject <bead> --key witness-unplaceable-owner ...`). A `no`
+  or `skip` bead is disposed either way.
 - `DISPOSE_RC=3` is a partial write, a half-released bead that needs a finding
   (`patrol-finding.sh --scope witness-findings --key witness-partial-release
   --about <bead> ...`), not a retry.
