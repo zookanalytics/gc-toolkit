@@ -515,7 +515,9 @@ mk_wt "$REPO/wt/second" polecat/second
 bead b-first  closed 100 "$REPO/wt/first"  polecat/first
 bead b-second closed 100 "$REPO/wt/second" polecat/second
 REAL_GIT="$(command -v git)"
-printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_GIT" > "$BIN/git"
+# 1.1s per call: the budget is measured in whole seconds, and a call that takes
+# more than one of them is past a one-second budget whichever tick it starts on.
+printf '#!/bin/sh\nsleep 1.1\nexec %s "$@"\n' "$REAL_GIT" > "$BIN/git"
 chmod +x "$BIN/git"
 OUT="$(WORKTREE_REAP_BUDGET=1 run)"
 rm -f "$BIN/git"
