@@ -146,9 +146,15 @@ all closed, either merged or superseded.
 
 ## What this leaves uncovered
 
-- **The backlog.** Molecules parked before this change carry no end bead. The
-  one-time cleanup tk-29y8gx clears them, and with the guard change it now
-  clears the four PR-guard refusals too.
+- **The backlog.** Molecules parked before this change carry no end bead, and
+  nothing ends them when their work closes. The one-time cleanup tk-29y8gx
+  ended 26 parks on 2026-10-10 and closed. It left the parks whose work was
+  still open, and the five it refused: the four PR-guard refusals and one park
+  behind an open visit. On 2026-10-11, 21 parked molecules had a non-closed
+  root, 7 of them over closed work. tk-vpzxq4l runs `molecule-end.sh` once on
+  each one still parked after this lands. That ends a molecule whose work has
+  closed, the four PR-guard refusals included now that the guard reads an open
+  work bead only, and arms an end bead on each of the rest.
 - **A work bead closed with `gc.work_outcome=blocked`.** gascity's readiness
   treats such a blocker as still blocking (`DependencySatisfied`,
   `internal/beads/beads.go`), so the end bead stays unready. No pack writer
