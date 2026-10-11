@@ -689,7 +689,8 @@ review's result set.
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
   The child's handoff runs `bring-current-guard.sh`, which holds the round to
-  the worker's audit and routes it to triage when it conflicted
+  the worker's audit. A round that conflicted goes to triage, or, on an anchor
+  that declares no triage lane, the guard rules on it closed
   ([Bringing a branch current](#bringing-a-branch-current)).
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
@@ -731,8 +732,9 @@ review's result set.
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator makes, or triage ruling on a bring-current round that
-  conflicted, not a trigger a push pulls. gate-ensure holds dispatch
+  the validator makes, or the ruling on a bring-current round that conflicted
+  (triage's, or the guard's closed ruling), not a trigger a push pulls.
+  gate-ensure holds dispatch
   rather than pouring a second review while an open rework child is already in
   flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
   `source_review_bead` (the review bead the rework answers) — and reads a

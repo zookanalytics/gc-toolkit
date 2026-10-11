@@ -1363,9 +1363,12 @@ clean, because git merged it on its own and it lands quietly, or conflicted.
 A conflicted round is handed off only when your audit has an entry for every
 item the guard names, and then the guard stores the audit with its diff
 evidence on the anchor and reopens triage, which rules from your entries on
-what else reopens and whether the approval still covers the merged code. A
-guard that cannot finish hands nothing off: the bead stays open and still
-blocks the anchor, so nothing lands on a round nobody accounted for.
+what else reopens and whether the approval still covers the merged code. On
+an anchor whose check_set declares no triage lane, the guard rules on the
+round itself: every lane the anchor declares runs again, and an approval given
+before the round is withdrawn. A guard that cannot finish hands nothing off:
+the bead stays open and still blocks the anchor, so nothing lands on a round
+nobody accounted for.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the
