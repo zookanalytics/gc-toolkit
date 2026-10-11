@@ -331,12 +331,16 @@ foreground calls. Launch a gate no other way. A hand-rolled background launch
 can fail without a word (macOS ships no `setsid`), and a background poll for a
 result that never comes never returns.
 
-Write the gate script below with each configured command in its line. Each
-check runs in a subshell of its own, so an `exit` or a `cd` in one cannot cut
-the rest short, and an empty one passes. When the rig ships no commands at
-all, add the quality gates documented in the rig's CLAUDE.md as lines of the
-same form, with any environment they need, and never skip the gates silently.
-Then start the job:
+Write the gate script below with each configured command, exactly as
+configured, on the lines between its `check` line and the `GATE_CMD` line
+after it. The quoted heredoc hands the command to a bash of its own, so a
+comment, a quote, a heredoc or a `cd` in it means what it would at a prompt,
+an `exit` in it ends only that check, and an empty one passes. A check's
+verdict is its command's exit status, so a command that sends its work to the
+background passes before that work ends: each must finish in the foreground.
+When the rig ships no commands at all, add the quality gates documented in the
+rig's CLAUDE.md as checks of the same form, with any environment they need,
+and never skip the gates silently. Then start the job:
 ```bash
 # >>> refinery-gate-start
 RIG_ROOT="${GC_RIG_ROOT:-}"
@@ -357,12 +361,32 @@ mkdir -p "$GATE"
 cat > "$GATE/gate.sh" <<'GATE'
 cd "$1" || exit 2
 failed=""
-( echo "== setup"; {{setup_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed setup:$rc"
-( echo "== typecheck"; {{typecheck_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed typecheck:$rc"
-( echo "== lint"; {{lint_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed lint:$rc"
-( echo "== build"; {{build_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed build:$rc"
+# check <name>: run the command on stdin in a bash of its own, with stdin
+# closed, and note its exit status when it fails.
+check() {
+  local cmd rc
+  cmd=$(cat)
+  echo "== $1"
+  bash -c "$cmd" </dev/null
+  rc=$?
+  [ "$rc" -eq 0 ] || failed="$failed $1:$rc"
+}
+check setup <<'GATE_CMD'
+{{setup_command}}
+GATE_CMD
+check typecheck <<'GATE_CMD'
+{{typecheck_command}}
+GATE_CMD
+check lint <<'GATE_CMD'
+{{lint_command}}
+GATE_CMD
+check build <<'GATE_CMD'
+{{build_command}}
+GATE_CMD
 if [ "{{run_tests}}" = "true" ]; then
-  ( echo "== test"; {{test_command}} ); rc=$?; [ "$rc" -eq 0 ] || failed="$failed test:$rc"
+check test <<'GATE_CMD'
+{{test_command}}
+GATE_CMD
 fi
 [ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
 echo "GATE PASSED"

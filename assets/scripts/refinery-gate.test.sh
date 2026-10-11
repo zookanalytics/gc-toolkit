@@ -7,6 +7,8 @@
 # detached-job.sh, and a stub gc. Proves:
 #   - the gate runs in the prep worktree and reports every failed check by
 #     name and exit code, not just the last one;
+#   - each command runs as configured, so a trailing comment or a heredoc in
+#     it works;
 #   - an empty check is skipped, and run_tests=false skips the test command;
 #   - a gate a previous session left running is stopped before the new one
 #     starts;
@@ -122,6 +124,15 @@ has "$LOG" "test-output" "the failed check's output is in the log"
 has "$LOG" "== test" "each check's output sits under its own header"
 case "$LOG" in *"test-output"$'\n'"/"$'\n'*) bad "a cd in one check does not move the next" "the test check ran in /" ;; *) ok "a cd in one check does not move the next" ;; esac
 case "$LOG" in *lint:*) bad "a passing check is not named" "lint appears in: $LOG" ;; *) ok "a passing check is not named" ;; esac
+
+echo "── each command runs as configured: a trailing comment, a heredoc ──"
+render "$TMP/start.raw" "$TMP/s7.sh" $'cat > "$HD_OUT" <<\'EOF\'\nfrom a heredoc\nEOF' '' 'true  # a trailing comment' '' 'test -s "$HD_OUT"' true
+bash -n "$TMP/s7.sh" && ok "the rendered start block is valid bash" || bad "the rendered start block is valid bash"
+HD_OUT="$TMP/heredoc-out" run_block "$TMP/s7.sh" "$CITY" >/dev/null
+OUT=$(run_block "$TMP/wait.sh" "$CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 0/done/0 "a command with a trailing comment and one that is a heredoc both pass"
+eq "$(cat "$TMP/heredoc-out" 2>/dev/null)" "from a heredoc" "the heredoc command wrote its body"
+has "$(cat "$GATE/log")" "GATE PASSED" "the log ends GATE PASSED"
 
 echo "── run_tests=false skips the test command ──"
 render "$TMP/start.raw" "$TMP/s3.sh" '' '' 'true' '' 'false' false
