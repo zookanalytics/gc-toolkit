@@ -1,3 +1,8 @@
+---
+name: Implementation beads DAG for the Bead-Universe Operating Model v1
+description: The phase beads filed under epic tk-q4xaj for bead-universe v1, with each one's dependency and the first to dispatch. Read it to find which bead carried which phase.
+---
+
 # Implementation beads DAG — Bead-Universe Operating Model v1
 
 Epic: tk-q4xaj  (discovered-from tk-yrio)

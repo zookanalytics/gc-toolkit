@@ -12,7 +12,7 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded.
+# id-read-unguarded, doc-filing.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -772,6 +772,231 @@ FIX
 runm "$TMP/continued.md"
 eq "$RC" 1 "a continued bare call in a marker-fenced snippet is scanned as one call"
 has "$OUT" "continued.md:2:" "and reported where it opened"
+
+# ── doc-filing ──────────────────────────────────────────────────────────
+#
+# The detector reads paths relative to the repository root, so every run
+# starts in a fixture root.
+DET_DF="$HERE/lint-learned.d/doc-filing.sh"
+[ -x "$DET_DF" ] || { echo "no detector at $DET_DF"; exit 1; }
+DF="$TMP/doc-filing"
+mkdir -p "$DF"
+rundf() { OUT="$(cd "$DF" && "$DET_DF" "$@" 2>&1)"; RC=$?; }
+# page <path> — write a fixture page from stdin under the fixture root.
+page() { mkdir -p "$DF/$(dirname "$1")" && cat > "$DF/$1"; }
+
+echo "── doc-filing: what is a finding ──"
+
+page docs/new.md <<'MD'
+---
+name: New
+description: A central page that never states its charter.
+---
+
+# New
+MD
+page docs/topic/nested.md <<'MD'
+# Nested
+MD
+page docs/fenced.md <<'MD'
+# Fenced
+
+```markdown
+## Scope
+```
+MD
+page docs/long-fence.md <<'MD'
+# A fence opened by four backticks
+
+````markdown
+```
+## Scope
+```
+````
+MD
+page docs/deeper.md <<'MD'
+# Deeper
+
+### Scope
+MD
+page docs/longer.md <<'MD'
+## Scope and history
+MD
+page docs/empty.md < /dev/null
+page specs/tk-a/notes.md <<'MD'
+# Notes with no frontmatter
+MD
+page specs/tk-a/name-only.md <<'MD'
+---
+name: Name only
+---
+MD
+page specs/tk-a/blank.md <<'MD'
+---
+description: ""
+---
+MD
+page specs/tk-a/null.md <<'MD'
+---
+description: ~
+---
+MD
+page specs/tk-a/empty-fold.md <<'MD'
+---
+description: >
+name: A folded value with no lines under it
+---
+MD
+page specs/tk-a/unclosed.md <<'MD'
+---
+description: The block never closes, so it is not frontmatter.
+MD
+page specs/tk-a/late.md <<'MD'
+# A title first
+
+---
+description: Frontmatter opens the page or it is not frontmatter.
+---
+MD
+page specs/tk-a/nested-key.md <<'MD'
+---
+meta:
+  description: Only a top-level key counts.
+---
+MD
+page specs/tk-a/deep/er/notes.md <<'MD'
+# Deep
+MD
+DF_NO_SCOPE=(docs/new.md docs/topic/nested.md docs/fenced.md docs/long-fence.md docs/deeper.md
+    docs/longer.md)
+DF_NO_DESC=(specs/tk-a/notes.md specs/tk-a/name-only.md specs/tk-a/blank.md specs/tk-a/null.md
+    specs/tk-a/empty-fold.md specs/tk-a/unclosed.md specs/tk-a/late.md specs/tk-a/nested-key.md
+    specs/tk-a/deep/er/notes.md)
+# docs/empty.md is named only as ./docs/empty.md, and docs/new.md both ways.
+rundf "${DF_NO_SCOPE[@]}" "${DF_NO_DESC[@]}" ./docs/empty.md ./docs/new.md
+eq "$RC" 1 "a page missing its tier's part exits 1"
+for p in "${DF_NO_SCOPE[@]}" docs/empty.md; do
+    has "$OUT" "$p:1: no \"## Scope\" section" "$p is reported for a missing Scope"
+done
+for p in "${DF_NO_DESC[@]}"; do
+    has "$OUT" "$p:1: no frontmatter description" "$p is reported for a missing description"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 16 "each page is reported once, whatever spelling named it, and nothing else is"
+has "$OUT" "specs/<bead-id>/" "a missing Scope names the other home a page can have"
+has "$OUT" "\"Inside docs/\"" "and points at the placement rule"
+has "$OUT" "(learned rule: doc-filing)" "the finding names the rule"
+
+echo "── doc-filing: what is not ──"
+
+page docs/good.md <<'MD'
+---
+name: Good
+description: A central page with its charter.
+---
+
+# Good
+
+## Scope
+
+**Mandate.** What the page owns.
+MD
+page docs/bare.md <<'MD'
+# Bare
+
+A description is encouraged on a docs/ page, not required.
+
+## Scope
+MD
+page docs/closing-hashes.md <<'MD'
+## Scope ##
+MD
+page docs/after-fence.md <<'MD'
+~~~sh
+echo "a fence that closes"
+~~~
+
+## Scope
+MD
+page docs/rule-first.md <<'MD'
+---
+A page that opens with a rule it never closes has no frontmatter.
+
+## Scope
+MD
+page docs/inline-code.md <<'MD'
+`code` at the start of a line opens no fence.
+
+## Scope
+MD
+page specs/tk-b/plain.md <<'MD'
+---
+name: Plain
+description: Why the page exists.
+---
+MD
+page specs/tk-b/folded.md <<'MD'
+---
+description: >-
+  A folded value on the lines below its key.
+---
+MD
+page specs/tk-b/next-line.md <<'MD'
+---
+description:
+  A plain value that starts on the next line.
+---
+MD
+page specs/tk-b/quoted.md <<'MD'
+---
+description: 'Quoted: a colon inside.'
+---
+MD
+page specs/tk-b/no-scope.md <<'MD'
+---
+description: A spec page needs no Scope section.
+---
+MD
+printf -- '---\r\ndescription: Written with CRLF line ends.\r\n---\r\n\r\n## Scope\r\n' > "$DF/specs/tk-b/crlf.md"
+cp "$DF/specs/tk-b/crlf.md" "$DF/docs/crlf.md"
+page docs/notes.txt <<'MD'
+not markdown
+MD
+page README.md <<'MD'
+# Outside both tiers
+MD
+page services/helm/docs/guide.md <<'MD'
+# A docs directory below the root is not the central tier
+MD
+page generated/out.md <<'MD'
+# Generated
+MD
+DF_GOOD=(docs/good.md docs/bare.md docs/closing-hashes.md docs/after-fence.md docs/rule-first.md
+    docs/inline-code.md docs/crlf.md
+    specs/tk-b/plain.md specs/tk-b/folded.md specs/tk-b/next-line.md specs/tk-b/quoted.md
+    specs/tk-b/no-scope.md specs/tk-b/crlf.md)
+rundf "${DF_GOOD[@]}" docs/notes.txt README.md services/helm/docs/guide.md generated/out.md docs/absent.md
+eq "$RC" 0 "pages carrying their tier's part, and paths outside the tiers, are clean"
+eq "$OUT" "" "a clean run prints nothing"
+
+echo "── doc-filing: a check that cannot read says so ──"
+
+chmod 000 "$DF/docs/good.md"
+if [ -r "$DF/docs/good.md" ]; then
+    ok "an unreadable page (not exercised: this user can read anything)"
+else
+    rundf docs/good.md docs/new.md
+    eq "$RC" 2 "an unreadable page is an error, never a pass"
+    has "$OUT" "docs/good.md: cannot read it" "and the page is named"
+    has "$OUT" "docs/new.md:1: no \"## Scope\"" "the readable pages are still checked"
+fi
+chmod 644 "$DF/docs/good.md"
+
+mkdir -p "$TMP/doc-filing-bin"
+printf '#!/bin/sh\nexit 3\n' > "$TMP/doc-filing-bin/awk"
+chmod +x "$TMP/doc-filing-bin/awk"
+OUT="$(cd "$DF" && PATH="$TMP/doc-filing-bin:$PATH" "$DET_DF" docs/new.md 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that fails is an error, never a pass"
+has "$OUT" "the page scan failed" "and says so"
 
 echo "── zsh-colon-modifier: what is a finding ──"
 

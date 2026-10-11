@@ -83,7 +83,7 @@ harness_init() {
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
-  export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
+  export STUB_GQL_READ_FAIL="" STUB_GQL_COMMITS_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   export STUB_DELETE_SOURCE_HANG="" STUB_REOPEN_SOURCE_HANG="" STUB_REOPEN_SOURCE_STALL=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -117,12 +117,13 @@ mk_sut_dir() { # <dir> <file>...
   # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
-  # posts or reads feedback runs it by sibling path. Copy all four beside the SUT
-  # so those calls resolve in the private dir; cp keeps pr-post.sh's executable
-  # bit. They sit beside this harness, so they are found whatever the
-  # SUT's own directory is.
+  # posts or reads feedback runs it by sibling path. work-outcome.sh is the
+  # gc.work_outcome stamp every visit closer (visit-close.sh among them) sources
+  # by sibling path. Copy all five beside the SUT so those calls resolve in the
+  # private dir; cp keeps pr-post.sh's executable bit. They sit beside this
+  # harness, so they are found whatever the SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, is sourced by sibling path the same way.
@@ -832,6 +833,22 @@ case "$sub" in
           jq -c --arg t "$tid" '{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
               nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+          exit 0 ;;
+        *commits\(first:100,after:*)
+          # The PR's commits, which a fix's answer cites. Served from the PR
+          # fixture's .commits, a list of {oid, message, parents} where parents is
+          # the parent count (2 for a merge, 1 when absent). A fixture with no list
+          # is a PR none of whose commits names a fix unit. Each read is logged, so
+          # a test can tell the read is made only for an answer that is posted.
+          # STUB_GQL_COMMITS_FAIL models a commit read the API refuses.
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -z "${STUB_GQL_COMMITS_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          printf 'COMMITS %s\n' "$num" >> "${STUB_GH_LOG:?}"
+          jq -c '{data: {repository: {pullRequest: {
+              commits: {pageInfo: {hasNextPage: false, endCursor: null},
+                nodes: [ (.commits // [])[]
+                         | {commit: {oid, message, parents: {totalCount: (.parents // 1)}}} ]}}}}}' "$f"
           exit 0 ;;
         *comments\(first:100,after:*)
           # The Conversation-tab (issue comments) read. WB_THREAD_COMMENTS_QUERY
