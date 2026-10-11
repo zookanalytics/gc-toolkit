@@ -927,15 +927,12 @@ fi
 gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 
 # The child must BLOCK the anchor. Recorded the other way round it waits on an
-# anchor that closes only once the rework lands, so nothing ever claims it, and
-# count_rounds, which walks the anchor's dependencies, cannot see it either.
-# Skip when the edge is already there: an adopted child carries it from the
-# prior attempt, and a second identical edge is one the round-count walk sees
-# twice.
-if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
-     | jq -e --arg f "$FIX_BEAD" 'any(.[]?; .id == $f)' >/dev/null 2>&1; then
-  gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
-fi
+# anchor that closes only once the rework lands, so nothing ever claims it.
+# bd_wire_rework hangs the edge, takes off a reversed one, and reads the result
+# back from the anchor's side; an adopted child keeps the edge its prior attempt
+# hung, and no second one is written.
+EDGE=ok
+bd_wire_rework "$FIX_BEAD" "$ANCHOR" || EDGE=""
 
 # The fix unit's edges onto the findings it answers are NOT hung here. Every
 # finding is still unvalidated at this point, and a fix unit that blocked one the
@@ -962,11 +959,7 @@ MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
     (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
     (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end)
   ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
-if [ "$MISSING" = "ok" ]; then
-  EDGE=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
-    | jq -r --arg f "$FIX_BEAD" 'if type == "array" and any(.[]; .id == $f) then "ok" else "" end' 2>/dev/null)
-  [ "$EDGE" = "ok" ] || MISSING="blocks_edge"
-fi
+[ "$MISSING" != "ok" ] || [ "$EDGE" = "ok" ] || MISSING="blocks_edge"
 if [ "$MISSING" != "ok" ]; then
   warn "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
   exit 2

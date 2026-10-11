@@ -108,6 +108,48 @@ unset STUB_LIST_FAIL
 [ "$rc" -ne 0 ] && ok "an unreadable store is reported non-zero" || bad "an unreadable store read as no children"
 eq "$lc" "" "…with nothing printed, so no caller reads it as no children"
 
+# --- bd_wire_rework: the rework blocks its anchor, proven from the anchor ------
+# Edge rows are "A|blocks|B" = A blocks B (test-harness.sh). STUB_ENFORCE_CYCLES
+# models bd refusing an edge that would make the pair wait on each other.
+store '[
+  {"id":"tk-anc","status":"open","metadata":{"merge_result":"pull_request"}},
+  {"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-anc"}}
+]'
+dep_writes() { grep -c -E '^bd dep (tk-rw --blocks|remove)' "$STUB_GC_LOG" 2>/dev/null; }
+
+: > "$STUB_DEPS"; reset_log
+bd_wire_rework tk-rw tk-anc; rc=$?
+eq "$rc" 0 "a fresh pair is wired"
+eq "$(cat "$STUB_DEPS")" "tk-rw|blocks|tk-anc" "…the rework blocks its anchor, the one edge between them"
+bd_blocked_by tk-anc tk-rw; eq "$?" 0 "…and the anchor's own rows name the rework as its blocker"
+
+reset_log
+bd_wire_rework tk-rw tk-anc; rc=$?
+eq "$rc" 0 "an edge already in place proves again"
+eq "$(dep_writes)" 0 "…with nothing written"
+
+printf 'tk-anc|blocks|tk-rw\n' > "$STUB_DEPS"; reset_log
+bd_blocked_by tk-rw tk-anc; eq "$?" 0 "the seeded edge runs the other way: the anchor blocks its rework"
+export STUB_ENFORCE_CYCLES=1
+bd_wire_rework tk-rw tk-anc; rc=$?
+unset STUB_ENFORCE_CYCLES
+eq "$rc" 0 "an edge running the other way is repaired"
+eq "$(cat "$STUB_DEPS")" "tk-rw|blocks|tk-anc" "…the reversed edge is gone and the rework blocks the anchor instead"
+bd_blocked_by tk-rw tk-anc; eq "$?" 1 "…so the rework no longer waits on the anchor it answers"
+
+: > "$STUB_DEPS"
+export STUB_DEP_FAIL=tk-rw
+bd_wire_rework tk-rw tk-anc; rc=$?
+unset STUB_DEP_FAIL
+[ "$rc" -ne 0 ] && ok "a write that does not land is reported non-zero" || bad "a write that did not land read as wired"
+
+reset_log
+export STUB_DEP_GARBAGE=1
+bd_wire_rework tk-rw tk-anc; rc=$?
+export STUB_DEP_GARBAGE=""
+[ "$rc" -ne 0 ] && ok "an edge set that does not read is reported non-zero" || bad "an unreadable edge set read as wired"
+eq "$(dep_writes)" 0 "…and nothing is written on a read that proved nothing"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

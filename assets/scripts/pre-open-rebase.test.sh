@@ -231,6 +231,26 @@ eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rat
 hasnt "$OUT" "filed merge-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
 export STUB_DROP_KEYS=""
 
+echo "# the edge: a child is routed only once it reads back as blocking its anchor"
+reset "$(pre AW polecat/tk-c1)"
+OUT=$(STUB_DEP_FAIL="new-2" run --fix-pool "$POOL")
+has "$OUT" "rework new-2 does not read back as a blocks-dep of AW" "an edge write that did not land is caught by its read-back"
+eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than routed with no edge holding the anchor"
+hasnt "$OUT" "filed merge-mode rework" "it is not counted as dispatched"
+OUT=$(run --fix-pool "$POOL")
+has "$OUT" "re-routing stranded rework new-2" "the next pass rescues it through the stranded arm"
+has "$(cat "$STUB_DEPS")" "new-2|blocks|AW" "…hangs its edge onto the anchor"
+eq "$(meta new-2 "gc.routed_to")" "$POOL" "…and only then routes it"
+eq "$(newcount)" "1" "…with no twin filed"
+
+reset "$(pre AR polecat/tk-c1)" "$(printf '{"id":"S2","status":"open","assignee":"","title":"stranded","metadata":{"branch":"polecat/tk-c1","rejection_reason":"stale base at head %s: ..."}}' "$C1_HEAD")"
+gc bd dep AR --blocks S2 >/dev/null 2>&1
+OUT=$(STUB_ENFORCE_CYCLES=1 run --fix-pool "$POOL")
+has "$OUT" "re-routing stranded rework S2" "a strand its anchor blocks is rescued"
+hasnt "$(cat "$STUB_DEPS")" "AR|blocks|S2" "the edge running the other way is gone: the anchor no longer blocks its rework"
+has "$(cat "$STUB_DEPS")" "S2|blocks|AR" "…the rework blocks the anchor instead"
+eq "$(meta S2 "gc.routed_to")" "$POOL" "…and only then is it routed"
+
 echo "# what this arm does not enumerate"
 reset '{"id":"P1","status":"open","assignee":"","notes":"","title":"pr anchor","description":"d","metadata":{"merge_result":"pull_request","branch":"polecat/tk-c1","merged_target":"main","pr_number":"7"}}'
 OUT=$(run --fix-pool "$POOL")

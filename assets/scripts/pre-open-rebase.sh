@@ -353,8 +353,6 @@ while IFS= read -r row; do
     --set-metadata prepare_mode="$prepare_mode" \
     --set-metadata merge_strategy=mr >/dev/null 2>&1 \
     || echo "$PROG: WARN rework $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-  gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
-    || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
   # A new rework child on this branch changes the kids/orphan probes above; drop
   # the per-pass bd_list cache so a later anchor on the same branch does not read
   # a stale "no child" and file a duplicate. No-op outside a reconcile pass.
@@ -378,6 +376,14 @@ while IFS= read -r row; do
   fi
   if [ "$kgot" != "rework|$id" ]; then
     echo "$PROG: WARN rework $FIX did not record task_kind=rework/anchor_bead=$id; left unrouted (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  # The child blocks its anchor, never the reverse, and the edge is read back
+  # from the anchor's side before the route. A child whose edge does not read
+  # back is left unrouted, and the stranded arm re-wires it at this head next
+  # pass.
+  if ! bd_wire_rework "$FIX" "$id"; then
+    echo "$PROG: WARN rework $FIX does not read back as a blocks-dep of $id; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such

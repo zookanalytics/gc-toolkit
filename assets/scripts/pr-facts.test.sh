@@ -1365,6 +1365,43 @@ eq "$(meta new-2 pr_number)" "102" "…which re-stamps the PR identity"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
 
+echo "# …a blocks edge that does not read back leaves the child UNROUTED"
+# The child blocks its anchor or it is not routed. merge.sh holds the merge on
+# that edge, so an edge the anchor's read does not show is a rework it holds
+# nothing for.
+store "[$(anchor BE 103)]"
+printf '%s' "$(prview 103 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_103.json"
+approve 103
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DEP_FAIL="new-2" run)
+has "$out" "could not form the rework child for PR#103" "a missing edge is caught by its read-back, before the route"
+has "$out" "rework new-2 does not read back as a blocks-dep of BE" "…and the refusal names the edge"
+hasnt "$(cat "$STUB_DEPS")" "new-2|blocks|BE" "the edge write really did not land"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the child is never routed without it"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …and the NEXT pass hangs the edge through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm"
+has "$(cat "$STUB_DEPS")" "new-2|blocks|BE" "…which hangs its edge onto the anchor"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# …a stranded child its anchor blocks is rewired before it is routed"
+# An edge running the other way, the anchor blocking its own rework, keeps the
+# rework out of bd ready while the anchor waits for it to land: neither moves.
+# The rescue takes that edge off and hangs the child's own before the route.
+str=$(child RV1 polecat/x104 ',"task_kind":"rework","anchor_bead":"RVA","rejection_reason":"stale base at head sha-104: ...","gc.routed_to":""')
+store "[$(anchor RVA 104), $str]"
+gc bd dep RVA --blocks RV1 >/dev/null 2>&1
+printf '%s' "$(prview 104 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_104.json"
+approve 104
+out=$(STUB_ENFORCE_CYCLES=1 run)
+has "$out" "re-routing stranded rework RV1" "the strand is rescued"
+hasnt "$(cat "$STUB_DEPS")" "RVA|blocks|RV1" "the anchor no longer blocks its rework"
+has "$(cat "$STUB_DEPS")" "RV1|blocks|RVA" "…the rework blocks the anchor instead"
+eq "$(meta RV1 'gc.routed_to')" "$FIX" "…and only then is it routed"
+
 echo "# …a covering rework that lacks the role marker is re-stamped, never left as its anchor's twin"
 # A routed-but-unclaimed child from a pass before this marker existed (or one
 # whose stamp half-landed) is treated as already covering the conflict, so it
@@ -2476,6 +2513,39 @@ has "$out" "did not record a blocks edge" "the unattached edge is reported, not 
 hasnt "$(grep -F '|blocks|Vb' "$STUB_DEPS" || true)" "new-3" "…and no pass blocks edge stands on the anchor"
 eq "$(meta Vb pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass holds, so it retries"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
+
+echo "# a comment rework whose blocks edge does not read back is not routed, and the batch is not watermarked"
+# The fix unit blocks its anchor or it is not routed: merge.sh holds the merge on
+# that edge, and a fix unit the anchor's read does not show holds nothing.
+store "[$(anchor WE1 78)]"
+printf '%s' "$(prview 78 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_78.json"
+echo '[]' > "$GH_DIR/reviews_78.json"
+printf '[{"id":8780,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_78.json"
+out=$(STUB_DEP_FAIL="new-2" run)
+has "$out" "comment rework new-2 does not read back as a blocks-dep of WE1" "the missing edge is caught by its read-back, before the route"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the fix unit is not routed"
+eq "$(meta WE1 pr_comment_disposition)" "<absent>" "…and the batch is not watermarked, so it retries"
+out=$(run)
+grep -qxF "new-2|blocks|WE1" "$STUB_DEPS" && ok "the next pass hangs the edge on the fix unit it already filed" || bad "the retry did not hang the comment rework's edge onto WE1"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…routes it"
+eq "$(meta WE1 pr_comment_disposition)" "rework:new-2" "…and watermarks the batch onto it"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WE1")] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# a comment rework its anchor blocks is rewired before it is routed"
+# The batch's child, already filed and found again by its title, carries an edge
+# running the other way: its anchor blocks it, so it can never enter bd ready while
+# the anchor waits on it. The re-check takes that edge off and hangs the child's own.
+store "[$(anchor Vr 79),$(printf '{"id":"cfr-79","status":"open","assignee":"","title":"Address review comments on PR#79 (through review 0, comment 8790)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"Vr","prepare_mode":"merge"}}')]"
+gc bd dep Vr --blocks cfr-79 >/dev/null 2>&1
+printf '%s' "$(prview 79 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_79.json"
+echo '[]' > "$GH_DIR/reviews_79.json"
+printf '[{"id":8790,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_79.json"
+out=$(STUB_ENFORCE_CYCLES=1 run)
+has "$out" "comment rework cfr-79 already covers this batch" "the batch's child is found again by its title"
+if grep -qxF "Vr|blocks|cfr-79" "$STUB_DEPS"; then bad "the anchor still blocks its comment rework"; else ok "the anchor no longer blocks its comment rework"; fi
+grep -qxF "cfr-79|blocks|Vr" "$STUB_DEPS" && ok "…the rework blocks the anchor instead" || bad "the comment rework does not block its anchor"
+eq "$(meta cfr-79 'gc.routed_to')" "$FIX" "…and only then is it routed"
+eq "$(meta Vr pr_comment_disposition)" "rework:cfr-79" "…and the batch is watermarked onto it"
 
 echo "# a batch whose watermark write dropped opens no second human-lane pass"
 # The pass and the watermark are separate writes, so a pass that opened but whose

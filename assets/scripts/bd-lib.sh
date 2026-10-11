@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, and the gating-PR read the merge and pr-facts arms share. Sourced,
-# never executed.
+# queries it; the one write of a rework child's edge onto its anchor, shared by
+# every writer that files a rework; and the gating-PR read the merge and
+# pr-facts arms share. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -132,6 +133,40 @@ bd_live_children() {
     | group_by(.a)[]
     | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
     | @tsv' 2>/dev/null
+}
+
+# bd_blocked_by <bead> <blocker> — whether <bead>'s own dependency rows list
+# <blocker> as a `blocks` blocker. 0 = they do, 1 = they do not, 2 = the read
+# did not answer with an edge array, which proves neither.
+bd_blocked_by() {
+  local rows
+  rows=$(bd_json dep list "$1" --direction=down -t blocks)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$rows" | jq -e --arg b "$2" 'any(.[]; .id == $b)' >/dev/null 2>&1
+}
+
+# bd_wire_rework <rework> <anchor> — hang a rework child's edge onto its anchor,
+# the rework blocking the anchor, and prove it from the anchor's side, the read
+# merge.sh holds the merge on. A rework exists to change its anchor's branch, so
+# the edge never runs the other way: an anchor that blocks its rework keeps the
+# rework out of bd ready, the anchor waits for the rework to land, and neither
+# moves. An edge already reversed between the pair comes off first and is read
+# back gone, because bd refuses an edge that would make the pair wait on each
+# other. Returns 0 once the anchor lists <rework> as a blocker, and non-zero
+# when the edge is not proven, so a caller routes and dispatches no rework whose
+# edge did not read back.
+bd_wire_rework() {
+  local rework="${1:-}" anchor="${2:-}" rc
+  [ -n "$rework" ] && [ -n "$anchor" ] || return 1
+  bd_blocked_by "$rework" "$anchor"; rc=$?
+  [ "$rc" -eq 2 ] && return 1
+  if [ "$rc" -eq 0 ]; then
+    gc bd dep remove "$rework" "$anchor" >/dev/null 2>&1 || true
+    bd_blocked_by "$rework" "$anchor"; [ "$?" -eq 1 ] || return 1
+  fi
+  bd_blocked_by "$anchor" "$rework" && return 0
+  gc bd dep "$rework" --blocks "$anchor" >/dev/null 2>&1 || true
+  bd_blocked_by "$anchor" "$rework"
 }
 
 # The gating-PR read. The merge arm (merge.sh) and the pr-facts arm

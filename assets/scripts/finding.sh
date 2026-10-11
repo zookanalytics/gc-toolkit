@@ -626,12 +626,12 @@ cmd_wire_fix_unit() {
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$fu" ] && [ -n "$anchor" ] || { warn "wire-fix-unit needs --fix-unit and --anchor"; exit 1; }
-  # Edge onto the anchor: the routed live blocker merge.sh reads. Idempotent —
-  # signoff.sh may have wired it already.
-  if ! edge_exists "$fu" "$anchor"; then
-    gc bd dep "$fu" --blocks "$anchor" >/dev/null 2>&1 \
-      || { warn "could not wire fix unit $fu --blocks anchor $anchor"; exit 2; }
-  fi
+  # Edge onto the anchor: the routed live blocker merge.sh reads. bd_wire_rework
+  # is the write every rework writer hangs this edge through: it takes off an edge
+  # running the other way and reads the result back from the anchor's side.
+  # Idempotent — the writer that filed the fix unit may have wired it already.
+  bd_wire_rework "$fu" "$anchor" \
+    || { warn "fix unit $fu does not read back as a blocker of anchor $anchor"; exit 2; }
   # An edge onto every finding it answers: the many-to-one relation, and the
   # close ordering — bd refuses to close a blocked issue, so no finding closes
   # before the work answering it does.

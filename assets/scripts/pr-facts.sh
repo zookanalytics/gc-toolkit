@@ -704,9 +704,9 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   # merge_strategy and PR identity (existing_pr/pr_url/pr_number) that keep the
   # refinery on an mr-mode hand-back instead of a direct push to target — and a
   # newborn that will not verify is closed rather than left half-stamped. Prints the
-  # fully-formed, dep-attached, UNROUTED child id and returns 0; the caller stamps
-  # gc.routed_to last, so only a complete child becomes claimable. Prints nothing
-  # and returns 1 when the caller should retry next pass.
+  # fully-formed, UNROUTED child id, its blocks edge onto the anchor read back, and
+  # returns 0; the caller stamps gc.routed_to last, so only a complete child becomes
+  # claimable. Prints nothing and returns 1 when the caller should retry next pass.
   local reuse="$1" title="$2" anchor="$3" branch="$4" target="$5" reason="$6" mode="$7" prurl="$8" prnum="$9"
   local meta fix ok
   meta=$(jq -nc --arg ab "$anchor" --arg br "$branch" --arg tg "$target" --arg rr "$reason" \
@@ -760,8 +760,14 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     fi
     return 1
   fi
-  gc bd dep "$fix" --blocks "$anchor" >/dev/null 2>&1 \
-    || echo "$PROG: WARN could not attach rework $fix as a blocks-dep of $anchor" >&2
+  # The child blocks its anchor, never the reverse, and the edge is read back from
+  # the anchor's side before the child is returned to be routed. A child whose edge
+  # does not read back is left unrouted, and the stranded arm re-wires it at this
+  # head next pass.
+  if ! bd_wire_rework "$fix" "$anchor"; then
+    echo "$PROG: WARN rework $fix does not read back as a blocks-dep of $anchor; left unrouted (retry next pass)" >&2
+    return 1
+  fi
   printf '%s' "$fix"
   return 0
 }
@@ -2492,8 +2498,6 @@ $CBODY"
           --set-metadata pr_url="$live_url" \
           --set-metadata pr_number="$num" >/dev/null 2>&1 \
           || echo "$PROG: WARN comment rework $CFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-        gc bd dep "$CFIX" --blocks "$id" >/dev/null 2>&1 \
-          || echo "$PROG: WARN could not attach comment rework $CFIX as a blocks-dep of $id" >&2
         # The comment-rework child now exists (created or adopted, then stamped);
         # drop the per-pass bd_list cache so the title/anchor_bead dedup probe reads
         # it on the next anchor and does not twin it. The gc bd show reads below do
@@ -2543,6 +2547,14 @@ $CBODY"
         fi
         if [ "$kgot" != "rework" ]; then
           echo "$PROG: WARN comment rework $CFIX did not record task_kind=rework; left unmarked and NOT watermarking" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        # The child blocks its anchor, never the reverse, and the edge is read back
+        # from the anchor's side before the route, on a new child and an adopted
+        # one alike. A child whose edge does not read back is left unrouted, and
+        # the next pass finds it by this batch's title and wires it again.
+        if ! bd_wire_rework "$CFIX" "$id"; then
+          echo "$PROG: WARN comment rework $CFIX does not read back as a blocks-dep of $id; left unrouted and NOT watermarking" >&2
           skipped=$((skipped + 1)); continue
         fi
         rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)

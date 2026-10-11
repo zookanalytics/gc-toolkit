@@ -228,6 +228,19 @@ has "$(deps)" "$FU|blocks|tk-anc" "fix unit blocks the anchor"
 has "$(deps)" "$FU|blocks|$F1" "fix unit blocks the first finding it answers"
 has "$(deps)" "$FU|blocks|$F2" "fix unit blocks the second finding it answers"
 
+# An anchor that blocks its own fix unit keeps the fix unit out of bd ready while
+# the anchor waits on it. wire-fix-unit takes that edge off before it hangs the
+# fix unit's own; bd refuses the write while the reversed edge stands.
+FUR=$(gc bd create "Rework: reversed edge" -t task --json | jq -r '.id')
+gc bd dep tk-anc --blocks "$FUR" >/dev/null
+STUB_ENFORCE_CYCLES=1 "$SUT" wire-fix-unit --fix-unit "$FUR" --anchor tk-anc --findings ""; rc=$?
+eq "$rc" 0 "wire-fix-unit repairs a fix unit its anchor blocks"
+if grep -qxF "tk-anc|blocks|$FUR" "$STUB_DEPS"; then bad "the anchor still blocks the fix unit"; else ok "…the anchor no longer blocks the fix unit"; fi
+grep -qxF "$FUR|blocks|tk-anc" "$STUB_DEPS" && ok "…and the fix unit blocks the anchor" || bad "the fix unit does not block the anchor"
+FUN=$(gc bd create "Rework: edge refused" -t task --json | jq -r '.id')
+STUB_DEP_FAIL="$FUN" "$SUT" wire-fix-unit --fix-unit "$FUN" --anchor tk-anc --findings "" 2>/dev/null; rc=$?
+eq "$rc" 2 "an anchor edge that does not read back exits 2"
+
 # ---------------------------------------------------------------------------
 # open-must-fix: the read pr-open.sh holds a publish behind.
 # ---------------------------------------------------------------------------

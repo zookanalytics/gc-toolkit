@@ -75,7 +75,7 @@ harness_init() {
   export STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit"
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
-  export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
+  export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS="" STUB_ENFORCE_CYCLES=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
@@ -465,6 +465,13 @@ case "$verb" in
     dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
       local issue="$1" on="$3" have
       [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
+      # STUB_ENFORCE_CYCLES: bd refuses a blocks edge that would make two beads
+      # wait on each other, so A cannot block B while B blocks A.
+      if [ -n "${STUB_ENFORCE_CYCLES:-}" ] && [ "$2" = "blocks" ] \
+         && grep -qxF "$3|blocks|$1" "$D"; then
+        echo "Error: adding dependency would create a cycle" >&2
+        return 1
+      fi
       have=$(awk -F'|' -v i="$issue" -v d="$on" '
         { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
           if (ri == i && rd == d) { print $2; exit } }' "$D")

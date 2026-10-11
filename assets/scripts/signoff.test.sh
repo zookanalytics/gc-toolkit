@@ -197,9 +197,19 @@ case "${1:-}" in
           out="$out$row"; first=0
         done < "$DEPS"
         printf '%s]\n' "$out" ;;
+      remove)
+        # `dep remove A B` drops the row in which A depends on B, whatever its type.
+        awk -F'|' -v a="$2" -v b="$3" '!($1 == a && $2 == b)' "$DEPS" > "$DEPS.n" && mv "$DEPS.n" "$DEPS"
+        echo "dep removed" ;;
       *)
         src="${1:-}"; shift || true
         [ -n "${STUB_DEP_NOOP:-}" ] && { echo "dep added"; exit 0; }
+        # STUB_ENFORCE_CYCLES: bd refuses `dep S --blocks D` while S depends on D,
+        # since the pair would wait on each other.
+        if [ "${1:-}" = "--blocks" ] && [ -n "${STUB_ENFORCE_CYCLES:-}" ] \
+           && grep -qxF "$src|${2:-}|blocks" "$DEPS"; then
+          echo "Error: adding dependency would create a cycle" >&2; exit 1
+        fi
         [ "${1:-}" = "--blocks" ] && printf '%s|%s|blocks\n' "${2:-}" "$src" >> "$DEPS"
         echo "dep added" ;;
     esac ;;
@@ -861,6 +871,21 @@ has "$out" "adopting existing open rework child c9" "…it adopts the edge-less 
 eq "$(meta c9 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the adopted orphan is dispatched"
 eq "$(status rv-1)" "closed" "the review closes once the adopted child is dispatched"
 eq "$(grep -c 'tk-anc|c9|blocks' "$STUB_DEPS")" "1" "adoption repairs the missing blocks edge — exactly one now holds the anchor"
+
+echo "# an orphan its anchor blocks is rewired before it is dispatched"
+# An edge running the other way, the anchor blocking its own rework, keeps the
+# child out of bd ready while the anchor waits for it to land, so neither moves.
+# The adoption takes that edge off and hangs the child's own before the sling.
+reset "$ANCHOR_PR" "$(kid 8 open '"source_review_bead":"rv-1","task_kind":"rework","anchor_bead":"tk-anc","branch":"polecat/tk-1","target":"main"')"
+printf 'c8|tk-anc|blocks\n' > "$STUB_DEPS"
+hasnt "$(gc bd ready --json)" '"id":"c8"' "the seeded child waits on its anchor, out of bd ready"
+out=$(STUB_ENFORCE_CYCLES=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+has "$out" "adopting existing open rework child c8" "…it adopts the orphan by name"
+eq "$(grep -c 'c8|tk-anc|blocks' "$STUB_DEPS")" "0" "the edge running the other way is gone"
+eq "$(grep -c 'tk-anc|c8|blocks' "$STUB_DEPS")" "1" "…and the child holds the anchor instead"
+has "$(gc bd ready --json)" '"id":"c8"' "…so the child is in bd ready"
+eq "$(meta c8 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "…and dispatched"
 
 echo "# a create that lands but returns no id is adopted on the retry, not twinned"
 # The child is in the store, but the run never learned its id, so nothing past
