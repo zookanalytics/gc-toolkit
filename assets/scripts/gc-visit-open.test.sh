@@ -367,6 +367,16 @@ has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in th
 has "$ERR" "city controller did not answer" "(LIVENESS) and the note names the controller"
 has "$ERR" "both report it not running" "(LIVENESS) and the two readings that agree"
 has "$ERR" "gc status" "(LIVENESS) and points at the city's status"
+
+# The same downed controller reached through an existing bead, or a PR
+# reference, waits the same way, so every filing path carries the note.
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead filed while the controller is down files normally"
+has "$CALLS" "helm open gc-abc12" "(LIVENESS) the visit is filed on the existing bead"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the existing-bead path notes the controller too"
+FAKE_RESOLVE=gc-owner run no 615
+eq "$RC" "0" "(LIVENESS) a PR reference filed while the controller is down files normally"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the PR-reference path notes the controller too"
 unset STATUS_CONTROLLER
 
 # A missed ping that gc status contradicts is no wait at all.
@@ -375,6 +385,14 @@ eq "$RC" "0" "(LIVENESS) a report filed when gc status contradicts the HQ row fi
 has "$STATUS_CALLS" "status --json" "(LIVENESS) after asking gc status"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
 unset HQ_RUNNING
+
+# A suspended rig reached through an existing bead waits the same way as a topic.
+export GASCITY_SUSPENDED=true
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead in a suspended rig files normally"
+has "$ERR" "rig 'gascity' is suspended" "(LIVENESS) and the existing-bead path notes the suspension too"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
+unset GASCITY_SUSPENDED
 
 # A rig row's running=false is what gc reports for an idle rig, and an idle rig
 # is not a down one: the reconciler launches its triage like anywhere else, so

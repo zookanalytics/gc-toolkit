@@ -242,6 +242,32 @@ require_reaction_agent() {
     die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
 }
 
+# note_if_report_waits <rig> — say when what this files will wait for triage.
+# A suspended rig has its agents skipped by the reconciler, and while the city
+# controller is down the reconciler does not run at all, so on either nothing
+# triages the report yet. Neither refuses: `gc rig suspend` leaves the beads
+# store accessible, so the report is recorded now and triaged when the rig
+# resumes or the controller is back, and refusing would deny a rig paused on
+# purpose and filed into to process later. Every filing path says it, because a
+# topic and an existing subject wait the same way.
+#
+# A rig with no agents running gets no note, by design. It is idle, the
+# reconciler launches its triage like anywhere else, and a rig row's running
+# cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
+# reaction pool that cannot run at all, because it is unregistered, suspended
+# or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
+# choice below diverts on it to a direct visit and prints the reason.
+note_if_report_waits() {
+    if [ "$(rig_suspended "$1")" = "true" ]; then
+        note "$PROG: rig '$1' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $1)."
+        return 0
+    fi
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        note "$PROG: the city controller did not answer ($CONTROLLER_SEEN) — the report is recorded now and triaged once it answers (gc status and gc supervisor status show why)."
+    fi
+}
+
 # derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
 # .beads path, empty when the prefix matches no rig) from a bead id's rig
 # prefix. RIGS must already be populated by enumerate_rigs.
@@ -316,27 +342,6 @@ else
     # filed where no agent could engage it.
     require_reaction_agent "$RIG"
 
-    # ── Filing into a paused rig is allowed; say the report will wait ────
-    # A suspended rig has its agents skipped by the reconciler, and while the
-    # city controller is down the reconciler does not run at all, so on either
-    # nothing triages the report yet. `gc rig suspend` leaves the beads store
-    # accessible, so the report is recorded now and triaged when the rig
-    # resumes, or when the controller is back. Suspend means paused, not gone:
-    # refusing would deny a legitimate target (a rig paused on purpose, filed
-    # into to process later). So do not refuse — just note that the report
-    # waits. A rig with no agents running is idle, and the reconciler launches
-    # its triage like anywhere else, so it gets no note. Both readings come from
-    # city-liveness.sh; a gc that reports neither flag leaves them empty, read
-    # here as unknown, which says nothing.
-    if [ "$(rig_suspended "$RIG")" = "true" ]; then
-        note "$PROG: rig '$RIG' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $RIG)."
-    else
-        city_controller_state
-        if [ "$CONTROLLER_RUNNING" = "false" ]; then
-            note "$PROG: the city controller did not answer ($CONTROLLER_SEEN) — the report is recorded now and triaged once it answers (gc status and gc supervisor status show why)."
-        fi
-    fi
-
     # A question is a decision, everything else a task; --type overrides.
     if [ -z "$SUBJ_TYPE" ]; then
         case "$ARG" in
@@ -378,6 +383,7 @@ fi
 if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
     require_reaction_agent "$RIG_NAME"
 fi
+note_if_report_waits "$RIG_NAME"
 
 # ── Record the origin as a KEY, not only as prose ────────────────────
 # gc.origin=operator is the machine-readable fact ("operator commissioned
