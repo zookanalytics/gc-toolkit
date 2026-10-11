@@ -22,8 +22,8 @@
 #   mol-validate-close         closes the subject or escalates it
 #   mol-rig-demo               captures a demo and closes the request bead
 #
-# The suite catches two mistakes before a pour does. A key written below a table
-# header belongs to that table, so it is not the formula's declaration. And a
+# The suite catches these mistakes before a pour does. A key written below a
+# table header belongs to that table, so it is not the formula's declaration. A
 # driving formula that gains the key, itself or through extends, leaves its
 # subject's route live while it works the subject. The detector runs against the
 # real formulas (must pass) and against a fixture of each broken shape (must be
