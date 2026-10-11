@@ -32,7 +32,8 @@ keeps_a_marker() {  # $1 proactive-left, $2 intake-left, $3 label
 [ -f "$FORMULA" ] && ok "mol-first-reaction.toml present" || bad "formula missing at $FORMULA"
 
 # Extract the consume block between its markers.
-BLOCK="$(awk '/# >>> live-intake-consume/{f=1; next} /# <<< live-intake-consume/{f=0} f' "$FORMULA")"
+GUARD_SH="$HERE/first-reaction-guard.sh"
+BLOCK="$(awk '/# >>> live-intake-consume/{f=1; next} /# <<< live-intake-consume/{f=0} f' "$GUARD_SH")"
 [ -n "$BLOCK" ] && ok "live-intake-consume block extracted" || bad "could not extract live-intake-consume block"
 
 # A stateful gc stub. $STATE/proactive and $STATE/intake hold the two markers;

@@ -26,16 +26,22 @@ harness_init
 
 # The canonical copies, placeholders bound. awk directly: the blocks are
 # executed, so nothing but the marked lines may ride into them.
-block() { # <marker> <out-file>
-  awk -v m="$1" '$0 ~ "# >>> " m "$" {f = 1; next} $0 ~ "# <<< " m "$" {f = 0} f' "$FORMULA" \
+# The first-reaction step's check lives in the formula; advance-and-drain's guard
+# lives in first-reaction-guard.sh, which that step runs.
+GUARD_SH="$HERE/first-reaction-guard.sh"
+block() { # <marker> <out-file> [<source-file>]
+  awk -v m="$1" '$0 ~ "# >>> " m "$" {f = 1; next} $0 ~ "# <<< " m "$" {f = 0} f' "${3:-$FORMULA}" \
     | sed 's/{{convoy_id}}/conv-sub/g' > "$2"
 }
 block first-reaction-reacted-check "$TMP/check.sh"
-block advance-and-drain-reacted-guard "$TMP/guard.sh"
+block advance-and-drain-reacted-guard "$TMP/guard.sh" "$GUARD_SH"
+grep -qF '/first-reaction-guard.sh" --convoy {{convoy_id}}' "$FORMULA" \
+  && ok "advance-and-drain runs first-reaction-guard.sh on its input convoy" \
+  || bad "advance-and-drain no longer runs first-reaction-guard.sh"
 grep -q 'gc.proactive_reaction' "$TMP/check.sh" && ok "first-reaction-reacted-check extracted" \
   || bad "could not extract first-reaction-reacted-check from $FORMULA"
 grep -q 'gc.proactive_reaction' "$TMP/guard.sh" && ok "advance-and-drain-reacted-guard extracted" \
-  || bad "could not extract advance-and-drain-reacted-guard from $FORMULA"
+  || bad "could not extract advance-and-drain-reacted-guard from $GUARD_SH"
 
 # The blocks also call `gc convoy status` and `gc runtime drain-ack`, which the
 # harness stub does not serve; this shim answers those two and hands every
