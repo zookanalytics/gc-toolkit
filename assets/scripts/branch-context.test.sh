@@ -95,8 +95,7 @@ git clone -q --depth 1 --branch main "file://$CITY/remotes/gascity.git" "$CITY/r
 
 # Stub gh for the compare-API path. git stays REAL.
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'GH'
 [ "${STUB_GH_RC:-0}" = "0" ] || exit "${STUB_GH_RC}"
 printf '%s\n' "${STUB_AHEAD:-}"
 GH

@@ -64,8 +64,7 @@ eq "$STAGES" "host-bead-skip downstream-court-skip topology-root-skip" \
 # refuses anything else, so a step that goes back to two listings (or any other
 # shape) fails here. Like the real gc bd, it names its store on stderr.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 printf '%s\n' "$*" >> "$GC_STUB_LOG"
 echo 'gc bd: answering from the rig "stub" store' >&2
 if [ "$*" = "bd list --status=in_progress,open --json --limit=0" ]; then

@@ -56,8 +56,7 @@ mkdir -p "$TMP/bin"
 # let the shipped resolver's `sort_by(.created // .id)` pass while silently
 # falling back to id order against live beads. An empty timestamp column omits
 # the key entirely (exercises the last-resort `.id` tiebreak).
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
   [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
   # GCUPDRC drives a refused write. The stub models NO ownership check of its
@@ -245,8 +244,7 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
 # -C <dir> is ignored: the stub answers from the environment, not a real
 # repository. Anything else exits 0 with no
 # output, as the dumb stub did.
-cat > "$TMP/bin/git" <<'GIT'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 op=""
 for a in "$@"; do
   case "$a" in

@@ -62,8 +62,7 @@ grep -qE '"\$SCRIPTS/load-context-blocked-work-gate\.sh" --bead "\$WORK_BEAD_ID"
 #      `bd update --append-notes ...` and the delivery-key clear both arrive
 #      here; the argv is captured so the containment write is provable.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '%s' "${FAKE_SHOW:-}"; exit 0 ;;

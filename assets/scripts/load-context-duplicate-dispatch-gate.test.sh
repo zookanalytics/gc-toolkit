@@ -79,8 +79,7 @@ grep -qE '"\$SCRIPTS/load-context-duplicate-dispatch-gate\.sh" --bead "\$WORK_BE
 #      check consulted the session list. `bd update` exits $FAKE_UPDATE_RC, so a
 #      refused note can be driven.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '%s' "${FAKE_SHOW:-}"; exit 0 ;;

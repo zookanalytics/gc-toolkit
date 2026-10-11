@@ -212,8 +212,7 @@ echo "── the read-back actually repairs (executed, not grepped) ──"
 EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
-cat > "$EXTMP/bin/gc" <<'GVSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$EXTMP/bin/gc" <<'GVSTUB'
 # Serves the reads the block makes. LOST=1 makes the first stamp vanish —
 # the observed failure: the update returns 0 and the value reads back empty.
 # $AGENTS is the live identity set the route is proved against; an arm that

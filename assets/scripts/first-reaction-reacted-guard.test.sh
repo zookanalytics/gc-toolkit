@@ -51,8 +51,7 @@ mkdir -p "$TMP/shim" "$TMP/pack/assets/scripts" "$TMP/cwd"
 export CALLS="$TMP/calls"
 # CONVOY_OK_CALLS=<n> answers the first n convoy reads and then an empty convoy,
 # so a case can fail one derivation and not the one before it.
-cat > "$TMP/shim/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/shim/gc" <<SHIM
 case "\$1 \${2:-}" in
   "convoy status")
     n=\$(( \$(cat "$TMP/convoy-reads" 2>/dev/null || echo 0) + 1 )); echo "\$n" > "$TMP/convoy-reads"
