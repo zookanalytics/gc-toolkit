@@ -103,6 +103,10 @@ if [ "$REACTED" = "true" ]; then
 fi
 # <<< advance-and-drain-reacted-guard
 )
+GUARD_RC=$?
 [ -n "$GUARD_OUT" ] && printf '%s\n' "$GUARD_OUT"
 case "$GUARD_OUT" in *"ALREADY REACTED:"*) exit 3 ;; esac
+# A guard that could not derive its bead proved nothing about the reaction, so
+# no exit may run on its silence.
+[ "$GUARD_RC" -eq 0 ] || exit 1
 exit 0
