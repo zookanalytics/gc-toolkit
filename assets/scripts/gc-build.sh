@@ -19,14 +19,14 @@
 #                                      gctk is a command that serves the moment
 #                                      it lands, so --deploy does what a hand
 #                                      run does.
-# Staleness has two axes for every component and a third for helm. Sources
-# newer than the binary (find -newer). A recorded binary_rev other than the
-# revision this run sees, because find -newer is blind to an input a commit
-# deleted; the revision is the module SUBTREE's tree hash, so a merge that
-# touches nothing under it neither rebuilds nor republishes. For helm, whether
-# the binary can READ the stores it serves: that is fixed by the beads library
-# it embedded, while the store schema moves under it on a `bd` upgrade, so
-# `helm-svc probe` asks it, and ok is not reported without it.
+# A binary is stale when a source is newer than it (find -newer), or when the
+# recorded binary_rev differs from the revision this run sees, because find
+# -newer is blind to an input a commit deleted. The revision is the module
+# SUBTREE's tree hash, so a merge that touches nothing under it neither rebuilds
+# nor republishes. A helm binary is also stale when it cannot READ the stores it
+# serves: that is fixed by the beads library it embedded, while the store schema
+# moves under it on a `bd` upgrade, so `helm-svc probe` asks it, and ok is not
+# reported without it.
 # Exit: 0 current or built, and for helm under --deploy serving · 1 the build
 # or the restart failed, including a build owed with no Go toolchain (the
 # previous binary is left exactly as it was), or the published helm binary
@@ -155,12 +155,12 @@ done < <(local_dep_mods)
 # which answers a run whose environment names no city.
 CITY_ROOT="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 
-# One `gc service list` answers up to three questions: does this city run the
-# component's service, where is that service's state root (authoritative — it
-# beats reproducing gascity's StateRootOrDefault here), and which city this is
-# when the environment does not say. A command component whose environment names
-# its city has none of them to ask. Only a SUCCESSFUL listing that omits the
-# service is proof of absence; an erroring one must not silently stop deploys.
+# One `gc service list` says whether this city runs the component's service,
+# where that service's state root is (authoritative: it beats reproducing
+# gascity's StateRootOrDefault here), and which city this is when the
+# environment does not say. A command component whose environment names its city
+# has nothing to ask it. Only a SUCCESSFUL listing that omits the service is
+# proof of absence; an erroring one must not silently stop deploys.
 SERVICES=""
 if [ -n "$SERVICE" ] || [ -z "$CITY_ROOT" ]; then
     if ! SERVICES="$("$GC_BIN" service list --json 2>/dev/null)"; then
