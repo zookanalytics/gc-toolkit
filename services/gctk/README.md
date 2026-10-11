@@ -115,22 +115,28 @@ gctk gets a stale-but-safe label, never a wrong one.
 
 ## Build and deploy
 
-`orders/gctk-build.toml` runs `assets/scripts/gc-gctk-build.sh --deploy` on a
-5-minute cooldown: build if a source is newer than the binary or the last
-record shows the binary was built from another revision, publish by atomic
-rename, write a build-status record. The revision is the services/gctk
-SUBTREE's tree hash at HEAD (`git rev-parse HEAD:./` from the module), not the
-repo commit: it moves exactly when a committed input of this module changes,
-so a docs-only merge republishes nothing, and the build stamps the same value
-into the binary (`gctk version`). A tick with nothing to build needs no Go
-toolchain. A tick with something to build and no toolchain is a failed build:
-it records `last_build_rc=1`, so the board's PACK row shows it, because a city
-that cannot build the binary leaves `lifecycle.sh` nothing to exec. It finds the city by the env chain above
-and, failing that, by `gc service list --json`'s `city_path` — the order runner
-carries no city variables at all, so the listing is the only route a scheduled
-tick has. Both tests are needed — `find -newer`
-cannot see an input a commit deleted. Nothing builds in a caller's path — a build inside the cadence would put a Go toolchain
-between a merge and its ledger write.
+`orders/gctk-build.toml` runs `assets/scripts/gc-build.sh gctk --deploy` on a
+5-minute cooldown. `gc-build.sh` is the one out-of-band builder for the pack's
+compiled components, helm-svc included, and gctk takes none of helm's service
+steps: no restart, no readability probe. It builds if a source is newer than
+the binary or the last record shows the binary was built from another
+revision, publishes by atomic rename, and writes a build-status record. Both
+tests are needed, because `find -newer` cannot see an input a commit deleted.
+The revision is the services/gctk SUBTREE's tree hash at HEAD (`git rev-parse
+HEAD:./` from the module), not the repo commit: it moves exactly when a
+committed input of this module changes, so a docs-only merge republishes
+nothing, and the build stamps the same value into the binary (`gctk version`).
+The record also carries `behind_main`, the commits origin/main holds under
+services/gctk that the checkout lacks, which the PACK row reports and no build
+acts on. A tick with nothing to build needs no Go toolchain. A tick with
+something to build and no toolchain is a failed build: it records
+`last_build_rc=1`, so the board's PACK row shows it, because a city that cannot
+build the binary leaves `lifecycle.sh` nothing to exec. It finds the city by
+the env chain above and, failing that, by `gc service list --json`'s
+`city_path`, and publishes under `<city>/.gc/services/gctk`, a root
+`GC_GCTK_STATE_ROOT` overrides. Nothing builds in a caller's path: a build
+inside the cadence would put a Go toolchain between a merge and its ledger
+write.
 
 The module is stdlib-only, so a cold build is seconds. There is no service to
 restart: a published gctk is serving the moment it lands.

@@ -109,7 +109,7 @@ gctk_require() { # <subcommand> [args...]
     elif [ -z "$_gctk_city" ]; then
         echo "$sub: no city to find the gctk binary in — GC_CITY_PATH, GC_CITY and GC_CITY_ROOT are unset and \`gc service list --json\` named none. Set one of them, or GCTK_BIN; nothing was written" >&2
     else
-        echo "$sub: no gctk binary at $_gctk_bin, so nothing was written. The gctk-build order (orders/gctk-build.toml) publishes it: a fresh city has one after the order's first build, $_gctk_city/.gc/services/gctk/build-status.json records why the last build failed, and assets/scripts/gc-gctk-build.sh builds it now" >&2
+        echo "$sub: no gctk binary at $_gctk_bin, so nothing was written. The gctk-build order (orders/gctk-build.toml) publishes it: a fresh city has one after the order's first build, $_gctk_city/.gc/services/gctk/build-status.json records why the last build failed, and assets/scripts/gc-build.sh gctk builds it now" >&2
     fi
     exit 1
 }

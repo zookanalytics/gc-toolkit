@@ -56,7 +56,7 @@ func GatherPackHealth(cityPath string, now time.Time) []board.PackBuild {
 		return nil
 	}
 	// A service's state root must sit under .gc/services/ but may be nested
-	// one level deeper (a pack that groups its services), and gc-helm-build.sh
+	// one level deeper (a pack that groups its services), and gc-build.sh
 	// writes wherever `gc service list` reports; both depths are read so a
 	// grouped component does not vanish from the board.
 	var matches []string

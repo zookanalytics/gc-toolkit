@@ -10,8 +10,8 @@
 # again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
 # restart that could only report "did not become ready before timeout".
 #
-# Building now lives in gc-helm-build.sh, out of band, driven by the helm-build
-# order. gc-helm-svc.sh execs and nothing else. These tests pin BOTH halves:
+# Building now lives in gc-build.sh (component helm), out of band, driven by the
+# helm-build order. gc-helm-svc.sh execs and nothing else. These tests pin BOTH halves:
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
 #
@@ -40,7 +40,7 @@
 #                 newer than the binary — the whole point of the split
 #   (NOSTALE)     a stale binary is still exec'd; staleness is not its business
 #
-#   builder (gc-helm-build.sh)
+#   builder (gc-build.sh helm)
 #   (BUILD)       builds and publishes when the binary is missing
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
@@ -63,6 +63,8 @@
 #   (UNPROBED)    no city to probe against is reported as such, never as ok
 #   (FAILSTATUS)  a failed build still reports failed, not unreadable
 #   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
+#   (TOOLLESS)    a build owed with no Go toolchain is a failed build, recorded
+#                 as one, and the serving binary is left untouched
 #   (ATOMIC)      the binary is published by rename, never built in place
 #   (STAGE)       the failed build's staging file does not survive
 #   (SWEEPSTAGE)  old stranded staging files are reclaimed; fresh ones are not
@@ -74,6 +76,8 @@
 #   (DEGRADE)     an unwritable scratch root degrades to a reported failure,
 #                 leaves the last good binary intact, and the service still starts
 #   (LISTROOT)    the state root comes from the city's own service listing
+#   (SCOPED)      an inherited GC_SERVICE_STATE_ROOT, or gctk's override, does
+#                 not move helm's state root
 #   (ROOT)        it falls back to GC_CITY_ROOT when there is no listing
 #   (NOROOT)      with no hint at all it refuses instead of hunting for a city
 #   (ISOLATION)   the suite cannot reach a real city's service root
@@ -122,7 +126,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SVC="$HERE/gc-helm-svc.sh"
-BUILD="$HERE/gc-helm-build.sh"
+BUILD="$HERE/gc-build.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-svc-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -130,7 +134,7 @@ trap 'rm -rf "$TMP"' EXIT
 # This suite must never be able to write into a real city.
 #
 # It runs inside one: GC_CITY, GC_CITY_PATH, GC_RIG_ROOT and friends are all in
-# the ambient environment. Several cases deliberately omit GC_SERVICE_STATE_ROOT
+# the ambient environment. Several cases deliberately omit GC_HELM_STATE_ROOT
 # in order to exercise the builder's fallback chain — and that chain ends at
 # "$GC_CITY/.gc/services/<name>". Inherit the ambient city and such a case
 # publishes its stub binary straight into the running service's bin/.
@@ -151,8 +155,9 @@ trap 'rm -rf "$TMP"' EXIT
 #      real service's binary.
 # ---------------------------------------------------------------------------
 unset GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_CITY_RUNTIME_DIR GC_SERVICE_STATE_ROOT
+unset GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_HELM_CITY_PATH GC_HELM_ORIGIN_FETCH_TTL
 unset GC_RIG GC_RIG_ROOT GC_PACK_DIR PACK_DIR GC_HELM_SERVICE_NAME GC_HELM_GC_BIN
-for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT; do
+for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT; do
     if [ -n "$(eval "printf '%s' \"\${$_leak:-}\"")" ]; then
         echo "REFUSING TO RUN: $_leak is still set — this suite writes service" >&2
         echo "state roots and must not run against a real city." >&2
@@ -175,7 +180,7 @@ has()     { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (got: $1)" ;; esac; }
 hasnt()   { case "$1" in *"$2"*) bad "$3 (unexpectedly got: $1)" ;; *) ok "$3" ;; esac; }
 
 [ -f "$SVC" ]   && ok "gc-helm-svc.sh present"   || bad "gc-helm-svc.sh missing at $SVC"
-[ -f "$BUILD" ] && ok "gc-helm-build.sh present" || bad "gc-helm-build.sh missing at $BUILD"
+[ -f "$BUILD" ] && ok "gc-build.sh present"     || bad "gc-build.sh missing at $BUILD"
 
 # A pid the kernel cannot have handed out: allocation stops below pid_max, so
 # this one is dead by construction and no case can flake on pid reuse. Linux
@@ -238,7 +243,7 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
-    cp "$BUILD" "$ROOT/assets/scripts/gc-helm-build.sh"
+    cp "$BUILD" "$ROOT/assets/scripts/gc-build.sh"
     # The builder sources its icu4c cgo flags from beside itself.
     cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
@@ -381,9 +386,9 @@ run_build() { # -> OUT ERR RC
            STUB_BREW_LOG="$BREWLOG" \
            CGO_CPPFLAGS="${CGO_CPPFLAGS_IN:-}" CGO_LDFLAGS="${CGO_LDFLAGS_IN:-}" \
            GC_HELM_CITY_PATH="${CITY:-}" \
-           GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
+           GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_HELM_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
-           bash "$ROOT/assets/scripts/gc-helm-build.sh" "$@" 2>"$err")"
+           bash "$ROOT/assets/scripts/gc-build.sh" helm "$@" 2>"$err")"
     RC=$?
     set -e
     ERR="$(cat "$err")"
@@ -436,11 +441,11 @@ fixture
 run_svc --socket /run/helm.sock
 eq "$RC" 1 "(NOBIN) exits 1 when there is no binary to exec"
 has "$ERR" "no binary at" "(NOBIN) says what is missing"
-has "$ERR" "gc-helm-build.sh" "(NOBIN) names the out-of-band builder"
+has "$ERR" "gc-build.sh helm" "(NOBIN) names the out-of-band builder"
 absent "$RECORD" "(NOBIN) still refuses to build its way out"
 
 # ==============================================================================
-# BUILDER — gc-helm-build.sh
+# BUILDER — gc-build.sh helm
 # ==============================================================================
 
 # --- case: builds when the binary is missing, and sweeps while it is there ----
@@ -696,8 +701,8 @@ eq "$(status_kind)" "unprobed" "(UNPROBED) build-status says so rather than ok"
 absent "$RECORD" "(UNPROBED) nothing is built on a question it cannot ask"
 
 # --- case: the city comes from the service listing when the env has none ------
-# The supervisor that runs the helm-build order carries no GC_CITY, so this is
-# the resolution every scheduled tick uses.
+# A run whose environment names no city, such as a hand run from a shell outside
+# it, still probes against the city the listing reports.
 fixture
 cache_binary
 PROBE_FAIL_CACHED="$SKEW_MSG"
@@ -732,6 +737,23 @@ has "$OUT" "cached-binary ran:" "(FAILKEEP) the previously-built binary is untou
 absent "$(run_dir_of)" "(FAILKEEP) the failed build's scratch does not survive"
 eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' ')" "0" \
    "(STAGE) the failed build's staging file does not survive either"
+
+# --- case: a build owed with no Go toolchain is a failed build ----------------
+# Nothing can perform the build, so it is recorded the way any failed build is:
+# build-status says failed, the record the board reads carries the non-zero rc,
+# and the binary already serving is left exactly as it was.
+fixture
+cache_binary
+touch_source
+SUM_BEFORE="$(cksum < "$STATE/bin/helm-svc")"
+GOBIN="$TMP/case$CASE/no-go"
+run_build --deploy
+eq "$RC" 1 "(TOOLLESS) a build owed with no Go toolchain fails, under --deploy too"
+has "$ERR" "no Go toolchain" "(TOOLLESS) and says what is missing"
+eq "$(status_kind)" "failed" "(TOOLLESS) build-status reports the failed build"
+eq "$(status_field last_build_rc)" "1" "(TOOLLESS) and so does the record the board reads"
+eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(TOOLLESS) the serving binary is left exactly as it was"
+hasnt "$(cat "$GCLOG" 2>/dev/null || true)" "service restart" "(TOOLLESS) and nothing is restarted"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
 # One per killed start, laid down by the inline-build era between 08-19 and
@@ -790,7 +812,7 @@ has "$OUT" "cached-binary ran:" "(DEGRADE) on the binary the last good build lef
 fi
 
 # --- case: the listing's state_root is authoritative -------------------------
-# The order has no GC_SERVICE_STATE_ROOT — only the supervisor's own spawn does.
+# A service's state root is the one the city's listing reports for it.
 # Reproducing gascity's StateRootOrDefault() here would be a second copy of a
 # rule that lives in another repo; reading `city_path` + `state_root` off the
 # listing cannot drift from it. Pinned because a build published to the wrong
@@ -799,23 +821,43 @@ fixture
 set +e
 OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
        STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" GC_HELM_GC_BIN="$GCBIN" \
-       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+       bash "$ROOT/assets/scripts/gc-build.sh" helm 2>&1)"
 RC=$?
 set -e
 eq "$RC" 0 "(LISTROOT) builds using the state root the city reported"
 present "$STATE_CITY/.gc/services/helm/bin/helm-svc" \
     "(LISTROOT) the binary lands where the listing said, not at a guessed path"
 
+# --- case: an inherited service state root is not the builder's --------------
+# The supervisor sets GC_SERVICE_STATE_ROOT for whichever service spawned a
+# process, so a builder that read it would publish into that service's root.
+# Neither it nor the other component's override moves helm's binary: it lands
+# where the listing says, and nothing is written under the inherited roots.
+fixture
+OTHER="$TMP/case$CASE/other-service"
+GCTK_ROOT="$TMP/case$CASE/gctk-root"
+set +e
+OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
+       STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" GC_HELM_GC_BIN="$GCBIN" \
+       GC_SERVICE_STATE_ROOT="$OTHER" GC_GCTK_STATE_ROOT="$GCTK_ROOT" \
+       bash "$ROOT/assets/scripts/gc-build.sh" helm 2>&1)"
+RC=$?
+set -e
+eq "$RC" 0 "(SCOPED) builds with another service's state root in the environment"
+present "$STATE_CITY/.gc/services/helm/bin/helm-svc" \
+    "(SCOPED) the binary lands in helm's own state root"
+absent "$OTHER" "(SCOPED) nothing is written under GC_SERVICE_STATE_ROOT"
+absent "$GCTK_ROOT" "(SCOPED) nor under the gctk component's override"
+
 # --- case: the state root is derived when there is no listing to read ---------
-# The builder runs from an order, which sets GC_CITY_ROOT but not
-# GC_SERVICE_STATE_ROOT — that one only exists inside the supervisor's own spawn.
+# With no listing, the state root comes from the city the environment names.
 fixture
 CITY="$TMP/case$CASE/city2"
 mkdir -p "$CITY/.gc/services/$SAFE_NAME"
 set +e
 OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
        GC_CITY_ROOT="$CITY" GC_HELM_GC_BIN="$NO_SUCH_GC" GC_HELM_SERVICE_NAME="$SAFE_NAME" \
-       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+       bash "$ROOT/assets/scripts/gc-build.sh" helm 2>&1)"
 RC=$?
 set -e
 eq "$RC" 0 "(ROOT) builds with only GC_CITY_ROOT set"
@@ -823,19 +865,19 @@ present "$CITY/.gc/services/$SAFE_NAME/bin/helm-svc" \
     "(ROOT) the binary lands where the supervisor will look for it"
 
 # --- case: no state-root hint at all -> refuse, do not go hunting -------------
-# Every earlier resolution step is unavailable here: no GC_SERVICE_STATE_ROOT,
-# no listing, no GC_CITY_ROOT/GC_CITY, and a module in a throwaway tree with no
-# .gc above it. The builder must say it cannot locate the city and stop.
+# Every resolution step is unavailable here: no GC_HELM_STATE_ROOT, no listing,
+# and no GC_CITY_PATH, GC_CITY or GC_CITY_ROOT. The builder must say it cannot
+# locate the city and stop.
 #
 # This is the assertion that would have caught the 2026-08-22 accident, in which
 # a case with no explicit state root silently inherited the ambient GC_CITY and
-# published into the live service. `sandboxed` strips that env; this proves what
-# the script does once it is stripped.
+# published into the live service. The strip at the top of this file removes
+# that env; this proves what the script does once it is stripped.
 fixture
 set +e
 OUT="$(STUB_RECORD="$RECORD" GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" \
        GC_HELM_GC_BIN="$NO_SUCH_GC" GC_HELM_SERVICE_NAME="$SAFE_NAME" \
-       bash "$ROOT/assets/scripts/gc-helm-build.sh" 2>&1)"
+       bash "$ROOT/assets/scripts/gc-build.sh" helm 2>&1)"
 RC=$?
 set -e
 eq "$RC" 1 "(NOROOT) refuses when it cannot locate a state root"
@@ -933,7 +975,7 @@ eq "$RC" 0 "(RETRY) run 3 exits 0"
 hasnt "$(cat "$GCLOG")" "service restart" "(RETRY) a served binary is not restarted again every tick"
 
 # --- case: a hand-run build reaches the service on the next tick --------------
-# `gc-helm-build.sh` with no --deploy publishes and restarts nothing by design.
+# `gc-build.sh helm` with no --deploy publishes and restarts nothing by design.
 # Before the pending record existed, that binary was inert until the next SOURCE
 # edit made it stale again — the same dead end as a failed restart, entered by
 # someone building by hand.

@@ -20,7 +20,7 @@
 #     prerequisite. Off macOS brew is never asked. Each message starts with
 #     <prog>. Returns 0.
 #
-# Callers: assets/scripts/gc-helm-build.sh and tools/lint.sh.
+# Callers: assets/scripts/gc-build.sh (for helm) and tools/lint.sh.
 
 icu4c_cgo_flags() { # <prog>
     local prog="$1" prefix=""

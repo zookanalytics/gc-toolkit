@@ -370,7 +370,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
 | `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |
-| `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `orders/converse-reap.toml` | visit | Fires the converse sitting reaper every five minutes, city-wide. |
@@ -435,7 +434,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
 | `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan (visit) sources it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. |
 | `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |
-| `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
+| `assets/scripts/gc-build.sh` | shared primitive | Builds each of the pack's compiled Go components out of band and records what it serves, so no caller builds in its own exec path. Visit runs it for the board's `helm-svc` through `orders/helm-build.toml`, probing the binary and restarting the service onto it, and merge runs it for `gctk`, the cadence's data plane, through `orders/gctk-build.toml`. |
+| `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-build.sh helm`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
 
 ### The placements worth arguing about
 

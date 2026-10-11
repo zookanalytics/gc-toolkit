@@ -16,8 +16,8 @@
 # along with the start — 2,677 abandoned staging files in three days, and a
 # restart that could only ever report "did not become ready before timeout".
 #
-# Building now belongs to assets/scripts/gc-helm-build.sh, driven out of band by
-# the `helm-build` order (orders/helm-build.toml). Start is an exec: it cannot
+# Building now belongs to `assets/scripts/gc-build.sh helm`, driven out of band
+# by the `helm-build` order (orders/helm-build.toml). Start is an exec: it cannot
 # race the readiness probe, and there is nothing here for the readiness kill to
 # destroy.
 #
@@ -38,7 +38,7 @@ if [ ! -x "$BIN" ]; then
     cat >&2 <<MSG
 gc-helm-svc: no binary at $BIN — nothing to exec.
 The build runs out of band and has not produced one yet.
-  build now: assets/scripts/gc-helm-build.sh
+  build now: assets/scripts/gc-build.sh helm
   automatic: the 'helm-build' order (orders/helm-build.toml) builds and restarts
              this service whenever services/helm has moved past the binary.
 Deliberately NOT building here: the readiness window is 5s and this build needs

@@ -72,9 +72,9 @@ type PackBuild struct {
 // ordinary lateness never speaks.
 const buildCheckStale = 45 * time.Minute
 
-// probeUnreadable is the ProbeStatus gc-helm-build.sh writes for a binary whose
-// `helm-svc probe` failed. The other values it writes — "ok" and "unprobed" —
-// say nothing this banding acts on.
+// probeUnreadable is the ProbeStatus gc-build.sh writes for a helm-svc binary
+// whose `helm-svc probe` failed. The other values it writes — "ok" and
+// "unprobed" — say nothing this banding acts on.
 const probeUnreadable = "unreadable"
 
 // shortRev trims a revision for display without inventing one: a value that is
