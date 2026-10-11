@@ -35,7 +35,8 @@
 #      REFINERY_WAKE_BACKOFF       seconds between wakes for one stall
 #                                  (default 900)
 #      REFINERY_WAKE_MAX           wakes per stall (default 3)
-#      REFINERY_WAKE_CALL_TIMEOUT  seconds each gc call may take (default 30)
+#      REFINERY_WAKE_CALL_TIMEOUT  seconds before a gc call is stopped
+#                                  (default 30)
 #      REFINERY_WAKE_STATE_DIR     where the per-rig stall records live
 #      REFINERY_WAKE_AGENT         the refinery's qualified name (default:
 #                                  discovered from `gc agent list`)
@@ -78,9 +79,20 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 NOW="$(date +%s)"
 
-bounded() {
-  if command -v timeout >/dev/null 2>&1; then timeout "$CALL_TIMEOUT" "$@" </dev/null; else "$@" </dev/null; fi
-}
+# Every gc call is stopped CALL_TIMEOUT seconds in and, where timeout(1) takes
+# -k, killed KILL_AFTER seconds later, so a call that ignores the stop still
+# ends. orders/refinery-wake.toml sizes the pass's timeout from these bounds.
+# stdin is closed for every call.
+KILL_AFTER=5
+if command -v timeout >/dev/null 2>&1; then
+  if timeout -k 1 1 true >/dev/null 2>&1; then
+    bounded() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@" </dev/null; }
+  else
+    bounded() { timeout "$CALL_TIMEOUT" "$@" </dev/null; }
+  fi
+else
+  bounded() { "$@" </dev/null; }
+fi
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every

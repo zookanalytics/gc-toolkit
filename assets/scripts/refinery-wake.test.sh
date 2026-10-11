@@ -230,6 +230,24 @@ run
 eq "$(nudges)" "" "no refinery bound, nothing nudged"
 has "$OUT" "no refinery agent bound" "it says no refinery is bound"
 
+echo "── the order's timeout sits above the longest pass ──"
+# Each `bounded gc` call site runs at most once a pass, and each call ends by
+# its bound plus the SIGKILL grace.
+ORDER="$HERE/../../orders/refinery-wake.toml"
+T=$(sed -n 's/^timeout = "\([0-9][0-9]*\)s"$/\1/p' "$ORDER")
+CALL=$(grep -o 'REFINERY_WAKE_CALL_TIMEOUT:-}" [0-9][0-9]*' "$WAKE" | grep -o '[0-9][0-9]*$')
+KILL=$(sed -n 's/^KILL_AFTER=\([0-9][0-9]*\)$/\1/p' "$WAKE")
+CALLS=$(grep -c '^[^#]*bounded gc ' "$WAKE")
+if [ -n "$T" ] && [ -n "$CALL" ] && [ -n "$KILL" ] && [ "$CALLS" -gt 0 ]; then
+  if [ "$T" -gt $((CALLS * (CALL + KILL))) ]; then
+    ok "the ${T}s timeout exceeds $CALLS calls of up to $((CALL + KILL))s each"
+  else
+    bad "the order's timeout exceeds the pass's calls" "${T}s <= $CALLS calls of up to $((CALL + KILL))s each"
+  fi
+else
+  bad "the order's timeout and the pass's call bounds are readable" "timeout='$T' call='$CALL' kill='$KILL' calls='$CALLS'"
+fi
+
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

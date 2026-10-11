@@ -7,10 +7,18 @@
 # its own nudge text, a few times per stall and spaced out. Nudge-only; a
 # no-op for a busy, attached, or absent refinery. scope=rig: one registration
 # per importing rig, which names the rig through GC_RIG.
+#
+# The 240s timeout sits above the longest pass. A pass makes at most six gc
+# calls (agent list, bd list, session list, config show, the nudge, and the
+# nudge's plain-form retry), each ended by 35s (a 30s bound and a 5s SIGKILL
+# grace), so a pass ends within 210s plus its local jq and file work. The
+# timeout therefore never lands between a delivered nudge and the stall record
+# that counts it, which would let the next pass nudge again inside the backoff.
+# refinery-wake.test.sh fails if the calls outgrow it.
 [order]
 description = "Nudge a refinery that sits idle at its prompt while its find-work queue waits"
 trigger = "cooldown"
 interval = "5m"
-timeout = "120s"
+timeout = "240s"
 exec = "$PACK_DIR/assets/scripts/refinery-wake.sh"
 scope = "rig"
