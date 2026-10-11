@@ -1412,10 +1412,11 @@ recipe does — *exact first, then last segment, live wins*:
    a live state but can never manufacture an orphan.
 
 A step-2 hit means a live session, not an orphan. The lookup ships in
-`formulas/mol-witness-patrol.toml` between the `liveness-lookup` markers,
-and `assets/scripts/liveness-lookup.test.sh` executes that snippet
-extracted verbatim from the formula rather than a transcription of it —
-so the rule above and the running code cannot drift apart silently.
+`assets/scripts/witness-recovery.sh` between the `liveness-lookup` markers,
+the stage the witness patrol's recover-orphaned-beads step runs, and
+`assets/scripts/liveness-lookup.test.sh` executes that region verbatim rather
+than a transcription of it, so the rule above and the running code cannot
+drift apart silently.
 
 One thing narrows the exposure without closing it: **bare does not imply
 a mismatch.** City-scoped singletons
