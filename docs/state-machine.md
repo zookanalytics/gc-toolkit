@@ -470,8 +470,9 @@ visit per batch. A `gc.takeaway` is not one of those conditions: it records a
 sitting rather than naming a live wait, so on its own it forces no visit. Either
 way the filed bead holds the merge until it closes — the rework child through a
 `blocks` edge, the visit through the `pr_number` stamp that `merge.sh`'s
-in-flight-holder probe reads. A visit takes no `blocks` edge: `escalate.sh`
-files it *depending on* its subject, so an edge back would be a cycle.
+in-flight-holder probe reads. The visit's hold is that stamp alone, so a fold
+moves the hold with it: `visit-close.sh --into` carries `pr_number` to the
+visit it folds into before it closes the folded one.
 `pr_comment_disposition` records which was chosen. Silence is not one of the
 options.
 

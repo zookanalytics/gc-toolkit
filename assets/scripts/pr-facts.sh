@@ -2587,20 +2587,21 @@ $CBODY"
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      # A blocks edge would close a cycle: escalate.sh already files the visit
-      # DEPENDING on its subject (tracks), so an edge back is a two-node loop bd
-      # refuses. pr_number is what merge.sh's in-flight-holder probe reads, and
-      # it holds the merge until a human closes the visit. anchor_bead is safe
-      # beside it — every consumer of that key filters on task_kind=review.
-      # That tracks edge is also what joins the visit to the anchor's children,
-      # and bd_anchor_link joins it when the edge did not land.
-      gc bd update "$VID" \
-        --set-metadata anchor_bead="$id" \
-        --set-metadata pr_url="$live_url" \
-        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+      # The visit holds the merge through pr_number: merge.sh's in-flight-holder
+      # probe holds the merge while a live bead carries the PR's number, and a
+      # fold moves the stamp to its holder (visit-close.sh). anchor_bead makes
+      # the visit one of the anchor's children, so it lands only once the visit
+      # is joined to the anchor: escalate.sh's tracks edge usually joins it
+      # already, and bd_anchor_link joins it when that edge did not land. A
+      # failed join leaves anchor_bead off, and pr_number still holds the merge.
+      vstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
+      if bd_anchor_link "$id" "$VID"; then
+        vstamp+=(--set-metadata anchor_bead="$id")
+      else
+        echo "$PROG: WARN visit $VID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
+      fi
+      gc bd update "$VID" "${vstamp[@]}" >/dev/null 2>&1 \
         || echo "$PROG: WARN visit $VID not stamped with PR#$num; it will NOT hold the merge — stamp it by hand" >&2
-      bd_anchor_link "$id" "$VID" \
-        || echo "$PROG: WARN visit $VID is not joined to anchor $id; the anchor's children read will not see it until a later pass joins it" >&2
       vgot=$(gc bd show "$VID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
       if [ "$vgot" != "$num" ]; then
         echo "$PROG: WARN visit $VID did not record pr_number=$num; NOT watermarking (a mark past an unheld comment is the silence this arm exists to stop)" >&2
@@ -3009,13 +3010,16 @@ GATES
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
       skipped=$((skipped + 1))
     else
-      gc bd update "$UTVID" \
-        --set-metadata anchor_bead="$id" \
-        --set-metadata pr_url="$live_url" \
-        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+      # Stamped the way the comment-batch visit is: joined before anchor_bead
+      # lands, and pr_number holding the merge either way.
+      utvstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
+      if bd_anchor_link "$id" "$UTVID"; then
+        utvstamp+=(--set-metadata anchor_bead="$id")
+      else
+        echo "$PROG: WARN visit $UTVID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
+      fi
+      gc bd update "$UTVID" "${utvstamp[@]}" >/dev/null 2>&1 \
         || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
-      bd_anchor_link "$id" "$UTVID" \
-        || echo "$PROG: WARN visit $UTVID is not joined to anchor $id; the anchor's children read will not see it until a later pass joins it" >&2
       utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
       if [ "$utvgot" != "$num" ]; then
         echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT watermarking the head (it re-raises next pass, deduped on the same visit)" >&2
