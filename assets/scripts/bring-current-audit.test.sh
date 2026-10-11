@@ -9,9 +9,9 @@
 # show: prints a bead's entries and question, and an anchor's record.
 # render: composes the comment, the dismissal note and the re-ask visit from the
 #   anchor's record (the headline counts, judgment entries first, each entry's
-#   collision, decision and check beside the guard's evidence, an item no entry
-#   covers beside its evidence alone, the round's ruling, triage's or the
-#   guard's closed ruling, the generated renders);
+#   collision, decision and check beside the guard's evidence for its own
+#   round, an item no entry covers beside its evidence alone, the round's
+#   ruling, triage's or the guard's closed ruling, the generated renders);
 #   refuses an anchor with no record.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
@@ -136,6 +136,24 @@ has "$("$SUT" render --anchor AN1 --as visit)" "- \`c.sh\`, no entry from the wo
 has "$("$SUT" render --anchor AN1 --as dismissal)" "No entry from the worker covers c.sh." "…and the dismissal note names it"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
 hasnt "$("$SUT" render --anchor AN1 --as comment)" "no entry from the worker" "a round every entry covers lists no such item"
+
+echo "# render: an entry carried from an earlier round is shown beside that round's evidence"
+# Both rounds touched docs/a.md, so only the round tells the two pieces of
+# evidence apart.
+EARLY="abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+CARRY=$(jq -nc --arg e "$EARLY" '{head: "0123456789abcdef0123456789abcdef01234567", from: "f", target: "main", bead: "B1", class: "conflicted",
+  evidence: [
+    {covered: true, kind: "conflict", path: "docs/a.md", commit: "c2", detail: "conflicted where both sides only added lines; the resolution keeps both additions whole"},
+    {covered: true, kind: "conflict", path: "docs/a.md", commit: "c1", detail: "conflicted where the merge base had lines that one or both sides changed", round: $e}],
+  audit: [
+    {path: "docs/a.md", collided: "main added a FAQ", resolution: "kept both", check: "the FAQ", rating: "routine"},
+    {path: "docs/a.md", collided: "main reworded the intro", resolution: "took main wording", check: "the intro", rating: "judgment", round: $e}],
+  triage: null}')
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$CARRY" | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as comment)
+has "$(printf '%s\n' "$out" | grep -F 'took main wording')" "Git: conflicted where the merge base had lines" "the earlier round's entry carries the earlier round's evidence"
+has "$(printf '%s\n' "$out" | grep -F 'Decided: kept both')" "Git: conflicted where both sides only added lines" "…and this round's entry carries this round's"
+has "$(printf '%s\n' "$("$SUT" render --anchor AN1 --as visit)" | grep -F 'took main wording')" "Git: conflicted where the merge base had lines" "the re-ask visit pairs them the same way"
 
 echo "# render: the guard's closed ruling is told as the guard's, not triage's"
 GREC=$(printf '%s' "$REC" | jq -c --arg why "no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed, and it is ruled the safe way" \

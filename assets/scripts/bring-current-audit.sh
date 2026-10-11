@@ -128,7 +128,7 @@ def unaccounted: . as $r
   | unique_by([.path, (.round // "")]);
 def bare_line: "`\(.path)`, no entry from the worker. Git: \(.detail | sentence)";
 def judgment_first: (map(select(.rating == "judgment")) + map(select(.rating != "judgment")));
-def git_detail($p): [ .evidence[]? | select(.path == $p and .covered == true) | .detail ] | .[0] // "";
+def git_detail($p; $rd): [ .evidence[]? | select(.path == $p and (.round // "") == ($rd // "") and .covered == true) | .detail ] | .[0] // "";
 def headline:
   (covered | map(select(.kind == "conflict")) | length) as $c
   | (covered | map(select(.kind != "conflict")) | length) as $b
@@ -172,7 +172,7 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
         + headline + "\n\n"
         + (if by_guard then "**Ruling:** " else "**Triage:** " end) + decision
         + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
-        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
+        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n"))
         + (if (generated | length) > 0
            then "\n\nGenerated files the merge re-rendered, which need no entry: " + (generated | map("`" + . + "`") | joinand) + "."
@@ -199,7 +199,7 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
            elif by_guard then " " + (.triage.reason | sentence | cap)
            else " Triage ruled: " + (.triage.reason | sentence) end) + "\n\n"
         + "File by file:\n"
-        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
+        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n")) + "\n\n"
         + "Your call: review the change on the PR and approve again to let it land, or say what to change. This visit holds the merge while it is open."
       end' 2>/dev/null
