@@ -235,14 +235,15 @@ is not a live conflict. Its work has landed, is landing with the refinery, or
 was ruled unnecessary by whoever closed it, so no human has a decision to make.
 The gate runs `molecule-hold.sh` and drains with no escalation; the drain is
 conditional on the hold alone. A closed bead's molecule ends there:
-`molecule-hold.sh` finds its work closed and hands the molecule to
-`dead-molecule-dispose.sh` instead of holding it. A handed-off bead's molecule
-is held with its end armed on the bead, so it ends when the refinery closes
-the bead. A human visit answers nothing in either case. `molecule-hold.sh`
-never touches the work bead, so a closed bead stays closed and a handed-off
-bead stays with the refinery while its PR proceeds. A closed bead's note and hold reason read
-`closed before claim` and carry what the bead records about its close, so a
-duplicate close reads differently from a merge.
+`molecule-hold.sh` holds the step, finds the work closed, and hands the
+molecule to `dead-molecule-dispose.sh`, which closes the held step with the
+rest. A handed-off bead's molecule is held with its end armed on the bead, so
+it ends when the refinery closes the bead. A human visit answers nothing in
+either case. `molecule-hold.sh` never touches the work bead, so a closed bead
+stays closed and a handed-off bead stays with the refinery while its PR
+proceeds. A closed bead's note and hold reason read `closed before claim` and
+carry what the bead records about its close, so a duplicate close reads
+differently from a merge.
 
 Three other situations need a human, and each files its own visit. A LIVE
 conflict, in flight under a foreign owner still present in `gc session list

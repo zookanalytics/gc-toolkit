@@ -249,13 +249,14 @@ While the work bead is open, `molecule-hold.sh` closes nothing, so whatever a
 live worker is holding stays where it is. It also arms the molecule's end on
 that work bead, so the molecule ends when the work closes, whoever closes it.
 Once the work bead has closed, there is nothing left to hold for, and the hold
-ends the molecule instead. Drain only if both landed. `escalate.sh` exits
-non-zero when it can neither file nor find the visit; `molecule-hold.sh` exits
-non-zero when it cannot prove which bead is yours, when duplicate step beads
-make that ambiguous, when the blocking write is refused, when a route it had to
-clear survived, whether on the molecule root or on a sibling step, or when the
-molecule's end could not be armed. A drain after either failed leaves
-something in the molecule claimable, or a molecule that outlives its work.
+ends the molecule, the held step with it. Drain only if both landed.
+`escalate.sh` exits non-zero when it can neither file nor find the visit;
+`molecule-hold.sh` exits non-zero when it cannot prove which bead is yours,
+when duplicate step beads make that ambiguous, when the blocking write is
+refused, when a route it had to clear survived, whether on the molecule root
+or on a sibling step, or when it could neither end the molecule nor arm its
+end. A drain after either failed leaves something in the molecule claimable,
+or a molecule that outlives its work.
 
 If the ruling that comes back is stand-down — the premise was falsified, or a
 live sitting owns the decision — the disposal step is the sitting's

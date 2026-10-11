@@ -209,12 +209,12 @@ sibling whose route clear failed keeps its claim, because unassigning it there
 writes the offer predicate rather than escaping it.
 
 **A hold lasts no longer than the work the molecule was poured for.**
-`molecule-hold.sh` runs `assets/scripts/molecule-end.sh` before it writes
-anything. When the molecule's work bead, the one bead its input convoy tracks,
-has already closed, there is nothing left to hold for: the molecule ends there,
-through `dead-molecule-dispose.sh`, and the hold writes nothing. When the work
-is still open, the hold goes ahead and the molecule gets one end bead. It is a
-member carrying `gc.step_ref=molecule-end`, routed to the held step's pool, and
+`molecule-hold.sh` runs `assets/scripts/molecule-end.sh` as its last act, after
+the blocking write and the quiesce. When the molecule's work bead, the one bead
+its input convoy tracks, has closed, there is nothing left to hold for: the
+molecule ends there, the held step with it, through `dead-molecule-dispose.sh`.
+When the work is still open, the molecule gets one end bead. It is a member
+carrying `gc.step_ref=molecule-end`, routed to the held step's pool, and
 `blocks`-edged on the work bead and on every open escalation visit on the
 molecule. `bd ready` leaves it out while any of those is open, so the pool is
 offered it only once they close, whichever writer closes them. The worker that
@@ -223,6 +223,16 @@ created unrouted and routed only after its edges land, and the hold's sibling
 quiesce leaves its route alone. A hold whose end could not be armed exits
 non-zero like an incomplete quiesce, because the molecule would outlive its
 work.
+
+The end's claimant leaves the molecule to a live session still running a step
+of it, whose own way out ends it, and the end comes last for that reason. The
+work can close while a hold is still running. A claimant that reads the holder's
+claims before the hold's writes finish leaves the molecule to the holder, and
+the end the hold runs after its writes then finds the work closed. A claimant
+that reads after them finds the holder running nothing. Under
+`--if-source-closed`, `dead-molecule-dispose.sh` counts a session live only
+through a step it has claimed and can still run, so the held step, the root,
+and the end bead's own claim never keep a molecule whose work has closed.
 
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.

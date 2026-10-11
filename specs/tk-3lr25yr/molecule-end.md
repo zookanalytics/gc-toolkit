@@ -19,20 +19,21 @@ already closed.
 
 A molecule's lifetime is bound to its source, the one bead its input convoy
 tracks. `assets/scripts/molecule-end.sh` holds the binding, and
-`molecule-hold.sh` runs it before every hold.
+`molecule-hold.sh` runs it as the last act of every hold, after the blocking
+write and the quiesce.
 
-- **The work has already closed.** The molecule ends there.
+- **The work has closed.** The molecule ends there, the held step with it.
   `dead-molecule-dispose.sh` runs with `--owner`, which leaves the caller's
-  own session out of the liveness guard, and with `--if-source-closed`. The
-  hold writes nothing.
-- **The work is still open.** The hold goes ahead, and the molecule gets one
-  end bead. It is a member (`gc.root_bead_id`, `gc.step_ref=molecule-end`),
-  routed to the held step's pool, and `blocks`-edged on the work bead and on
-  every open escalation visit tracking the root or the work. `bd ready`
-  withholds it while any blocker is open. Once they close, whichever writer
-  closes them, the pool is offered the end bead, and the polecat that claims
-  it runs `molecule-end.sh` on it, which ends the molecule, the end bead
-  included.
+  own session out of the liveness guard, and with `--if-source-closed`.
+- **The work is still open.** The molecule gets one end bead. It is a member
+  (`gc.root_bead_id`, `gc.step_ref=molecule-end`), routed to the held step's
+  pool, and `blocks`-edged on the work bead and on every open escalation visit
+  tracking the root or the work. `bd ready` withholds it while any blocker is
+  open. Once they close, whichever writer closes them, the pool is offered the
+  end bead, and the polecat that claims it runs `molecule-end.sh` on it, which
+  ends the molecule, the end bead included. The hold has cleared the held
+  step's route and the root's by the time the end runs, so it names the pool
+  with `--route`.
 - **A step a fresh session claims over closed work.** Three entry steps gate
   on the work bead's status and route a closed one through `molecule-hold.sh`,
   which ends the molecule before the step does anything. The gated steps are
@@ -43,11 +44,46 @@ tracks. `assets/scripts/molecule-end.sh` holds the binding, and
 
 A disposer refusal is a wait on what it names. An open visit joins the end
 bead's blockers. A work bead reopened between the read and the end keeps the
-end bead waiting on it. A live session still holding the molecule owns its
-end, so nothing is armed, and an end bead its claimant holds is retired. A
-refusal the disposer would repeat, such as a member carrying `branch`, files a
-visit keyed `molecule-end-<root>` through `escalate.sh`, and the end waits on
-that visit.
+end bead waiting on it. A live session still running a step of the molecule
+owns its end, so nothing is armed, and an end bead its claimant holds is
+retired. A refusal the disposer would repeat, such as a member carrying
+`branch`, files a visit keyed `molecule-end-<root>` through `escalate.sh`, and
+the end waits on that visit.
+
+## Why the end runs last, and which sessions keep a molecule
+
+A live session running a step of the molecule owns its end, because its own
+way out ends it: a hold runs the end as its last act, the gated steps send
+closed work through a hold, and a molecule that runs on finishes at its
+terminal step. The end's claimant retires the end bead when it finds such a
+session. That is safe only if the session it defers to really does end the
+molecule, and two rules make sure it does.
+
+**The end runs after the hold's own writes.** The work can close while a hold
+is running, and the end bead is offered as soon as it does. The pre-open
+correctness review of this branch reproduced the failure when the end ran
+before the hold: the hold armed the end, the work closed before the blocking
+write, a second polecat claimed the end bead, saw the holder still running its
+step, and retired the only end bead. The hold then finished and drained, and
+nothing ever read the work again. The final state was a root `in_progress`, a
+held step, closed work and no live end bead. With the end last, a claimant
+that reads the holder's claims before the hold's writes finish leaves the
+molecule to the holder, and the end the hold runs after those writes finds
+the work closed and ends the molecule. A claimant that reads after them finds
+the holder running nothing, and ends the molecule itself.
+
+**Under `--if-source-closed`, only a session running a step counts as live.**
+The disposer reads a session's names only off a step the session has claimed
+(assigned, or `in_progress`) and can still run. Its claim on the held step
+(`blocked`) does not count, because the hold keeps that claim only so a re-run
+can find the step. The root does not count: it runs no step, though a live
+root can carry a polecat's `gc.session_name` (this rework's own molecule root
+carried the name of the polecat running it). The end bead's claim does not
+count, because its claimant is there to end the molecule. Without this, the
+holder's end would find the end bead's claimant live while that claimant found
+the holder live, and each would leave the molecule to the other. Only
+`molecule-end.sh` passes `--if-source-closed`, so the disposer's other callers,
+`dead-molecule-sweep.sh` and `orphan-dispose.sh`, keep the broader guard.
 
 ## Why an end bead routed to the pool
 
@@ -120,10 +156,11 @@ all closed, either merged or superseded.
 - **Formulas without an entry gate.** A `mol-review` molecule, or any formula
   not gated above, runs a step over closed work until the step completes the
   molecule or holds it. A hold ends it.
-- **A live session when the end bead fires.** The end bead retires and leaves
-  the molecule to that session, whose hold, gate or terminal step ends it. A
-  session that drains mid-chain without holding hands its next step to a fresh
-  session, and on a gated step that session ends the molecule.
+- **A live session running a step when the end bead fires.** The end bead
+  retires and leaves the molecule to that session, whose hold, gate or
+  terminal step ends it. A session that drains mid-chain without holding hands
+  its next step to a fresh session, and on a gated step that session ends the
+  molecule.
 - **The held step's own marker.** The held step still carries
   `blocked_reason` with no `blocks` edge of its own, which
   `doctor/check-wait-is-an-edge` (I1) reports at warning severity, as it did
@@ -146,15 +183,29 @@ the molecule, so without the skip it would be de-routed.
   observes the end bead's run close the molecule with no sweep. It also
   covers an open source left alone, each refusal as a wait, park-after-close,
   a `mol-validate` molecule, the create, block and route order, a create that
-  answers with no id, failed writes and dry runs.
-- `molecule-hold.test.sh` covers the end running before the hold, a failed end
-  failing the hold, an end bead whose molecule cannot be resolved failing its
-  own step, the end bead keeping its route, and the three formula gates
-  extracted and executed.
-- `dead-molecule-dispose.test.sh` covers `--owner`, `--if-source-closed`, and
-  the PR guard on a closed work bead.
+  answers with no id, failed writes and dry runs. Three race cases each end
+  the molecule. In the first, the review's interleaving, the work closes and
+  the end bead is claimed and run while the hold is still running. In the
+  second, the work closes before the parker drains. In the third, an end
+  bead's live claimant is present when another session's hold reads the
+  closed work. Run against the scripts as they stood before this fix, the first
+  reproduces the review's state: the claimant's run reports `result=live`, and
+  the root stays `in_progress`, the held step `blocked`, with no end bead left.
+- `molecule-hold.test.sh` covers the end running last, after the blocking
+  write, the sibling quiesce and the root's de-route, with the pool passed as
+  `--route`. It also covers an ended molecule exiting 0 when the quiesce left a
+  route, a failed end failing the hold, a step whose molecule cannot be
+  resolved getting no end, an end bead whose molecule cannot be resolved
+  failing its own step, the end bead keeping its route, and the three formula
+  gates extracted and executed.
+- `dead-molecule-dispose.test.sh` covers `--owner`, `--if-source-closed` and
+  the sessions it counts live, and the PR guard on a closed work bead.
 - Each of these targeted mutants fails a suite: no `--owner`, no visits at
   arm, the end bead de-routed by the hold, the end bead never routed, the PR
   guard on a closed source, a reopened source not re-armed, an end bead whose
-  create answered with no id left unfound, and an end bead's own step exiting 0
-  when its molecule cannot be resolved.
+  create answered with no id left unfound, an end bead's own step exiting 0
+  when its molecule cannot be resolved, the end run before the hold, the end
+  run before the quiesce, no `--route`, and a failed quiesce overriding an
+  ended molecule. So does each of these under `--if-source-closed`: a live
+  session counted through the root, through a held step, through an end bead,
+  or through a step nobody has claimed.
