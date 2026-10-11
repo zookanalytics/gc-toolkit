@@ -103,7 +103,8 @@ POOL=$("$SCRIPT_DIR/pool-route.sh" "$POOL_NAME") \
 # child carries the key on this anchor, the one already dispatched wins: a prior
 # run filed one and died before dispatch while a retry filed and dispatched
 # another, and re-slinging the inert one would double-dispatch the molecule the
-# routed one owns.
+# routed one owns. duplicate-sweep.sh closes the inert one once its source has
+# closed and the dispatched one has landed.
 if ! PRIOR=$(bd_list --metadata-field "$SRC_KEY=$SRC_BEAD" --status="$LIVE_STATUSES"); then
   fail "could not read prior rework children for $SRC_KEY=$SRC_BEAD (dedup query failed); nothing filed rather than risk a second child"
 fi
