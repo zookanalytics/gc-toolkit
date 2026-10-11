@@ -908,6 +908,25 @@ eq "$(bstatus find-ga1)" "open" "a GitHub-approval-only green lane leaves its un
 has "$out" "0 reviews dispatched" "…and the human-approved lane still dispatches nothing"
 rm -f "$GH_DIR/reviews_7701.json"
 
+echo "# a lane a conflicted bring-current round reopened dispatches past an approval older than the round"
+# The round reopened triage (bring_current_reopened, with its time) and has no
+# ruling yet. The standing approval predates the round, so it does not settle
+# triage, while correctness, which the round did not reopen, stays settled by it.
+# The triage dispatch says it rules on the round.
+BCREC=$(jq -nc '{head: "h", class: "conflicted", triage: null}' | jq -Rc .)
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+oid bc1 > "$GH_DIR/head_polecat_bc1"
+out=$(run)
+has "$out" "1 reviews dispatched" "only the reopened lane dispatches"
+has "$out" "check 'triage'" "…the triage lane"
+has "$out" "reopened by a bring-current round that conflicted: rule on the round" "…and its dispatch says to rule on the round"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-10-02T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+out=$(run)
+has "$out" "0 reviews dispatched" "an approval given after the round settles the reopened lane again"
+rm -f "$GH_DIR/reviews_7702.json"
+
 echo "# …the moot close is lane-scoped: a green lane does not resolve another lane's finding"
 # correctness is backed (locally green) and resolves its own unvalidated finding;
 # arch has no backing (ungreen) and keeps its unvalidated finding. The batched
