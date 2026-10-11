@@ -24,6 +24,10 @@
 # 6 react no-op: a live workflow already drives the subject, so nothing was
 # slung (a first reaction never races work in flight) — distinct from 5 so the
 # intake caller names the cause in the visit it files.
+# 7 react no-op: the subject already has a route or a deferred-dispatch arm, so
+# nothing was slung (a first reaction never second-guesses a dispatch already
+# decided) — distinct from 5 and 6 so the intake caller names the cause in the
+# visit it files.
 
 set -eu
 
