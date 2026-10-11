@@ -10,14 +10,13 @@
 # timestamp and escalates nothing. An unusable recovered_at is unknown, and
 # unknown never escalates.
 #
-# This test EXECUTES the real block extracted verbatim from the formula
+# This test EXECUTES the real block extracted verbatim from witness-recovery.sh
 # (between the `crash-loop-window` markers), so it cannot drift from the
-# shipped instruction. No live city, Dolt, network, or sessions.
+# shipped code. No live city, Dolt, network, or sessions.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-witness-patrol.toml"
 LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-crash-loop-window-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -29,7 +28,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
-# --- Extract the REAL block from the formula. --------------------------------
+# --- Extract the REAL block from witness-recovery.sh. ------------------------
 # If the markers or the block are removed or renamed, extraction yields nothing
 # and the check below fails loudly — the contract cannot silently disappear.
 BLOCK="$(awk '
@@ -45,11 +44,6 @@ printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \
   && ok "extracted block is syntactically valid bash" \
   || bad "extracted block failed bash -n"
-
-case "$BLOCK" in
-  *'\'*) bad "the block carries a backslash — TOML triple-quote eats continuations" ;;
-  *)     ok "the block is backslash-free, as the formula header requires" ;;
-esac
 
 # decide <prev_at> <prev_count> <prev_flag> [window] -> "COUNT CRASH_LOOP"
 # Sourced exactly as the witness runs it, under `set -u`: the recovery loop has

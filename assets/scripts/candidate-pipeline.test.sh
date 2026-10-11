@@ -14,8 +14,8 @@
 # A failed listing must not read as a rig with nothing to recover, so the block
 # reports a listing that does not parse instead of printing no rows.
 #
-# This test EXECUTES the real block extracted verbatim from the formula (between
-# the candidate-pipeline markers) against a stub gc that serves a fixture
+# This test EXECUTES the real block extracted verbatim from witness-recovery.sh
+# (between the candidate-pipeline markers) against a stub gc that serves a fixture
 # listing. It runs the block under bash, under bash with xpg_echo set (whose
 # echo expands escapes the way zsh's does, so the hazard reproduces where zsh is
 # not installed), and under zsh where it is. No live city, Dolt, network, or
@@ -24,7 +24,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-TOML="$ROOT/formulas/mol-witness-patrol.toml"
 LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-candidate-pipeline-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -36,7 +35,7 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
-# --- Extract the REAL block from the formula. --------------------------------
+# --- Extract the REAL block from witness-recovery.sh. ------------------------
 # Pulls the lines between the markers (exclusive). If the markers or the block
 # are removed/renamed, extraction yields nothing and the check below fails
 # loudly — the guardrail cannot silently disappear.
@@ -53,11 +52,6 @@ printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \
   && ok "extracted block is syntactically valid bash" \
   || bad "extracted block failed bash -n"
-
-case "$BLOCK" in
-  *'\'*) bad "the block carries a backslash — TOML triple-quote eats continuations" ;;
-  *)     ok "the block is backslash-free, as the formula header requires" ;;
-esac
 
 # The three filters are stages of this one pipeline, in this order: the owner
 # stamp first, then the state exclusion, then the kind exclusion.
