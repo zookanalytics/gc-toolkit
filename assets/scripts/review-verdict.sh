@@ -5,8 +5,9 @@
 #
 # Sourced (never executed) by the shell readers that act on a PR's approval:
 # pr-facts.sh (the conflict arm brings a branch current only for an approved
-# PR) and bring-current-guard.sh (an approved PR whose bring-current took
-# judgment loses the approval). One definition, no copies:
+# PR), bring-current-guard.sh (an approved PR whose bring-current took judgment
+# loses the approval) and approval-withdraw.sh (a validator ruling that a fresh
+# whole-diff review is warranted withdraws it). One definition, no copies:
 # review-verdict.test.sh fails when a reader stops sourcing this file or
 # carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
 # reviewVerdict) states the same rule natively for the universal approval merge
@@ -40,7 +41,11 @@ REVIEW_VERDICT_DEF='
     latest_opinions($self) as $latest
     | { veto: ([ $latest[] | select(.state == "CHANGES_REQUESTED") | (.user.login // "") ] | .[0] // ""),
         approver: ([ $latest[] | select(.state == "APPROVED") | (.user.login // "") ] | .[0] // "") };
-  # The standing approvals themselves, one review per approving account.
+  # Every approval not yet dismissed, from each account other than $self, and
+  # not only the latest from each. This is the set a withdrawal dismisses. A
+  # dismissed review drops out before the latest is taken, so an older approval
+  # left standing would count again, and so would an approval behind a later
+  # CHANGES_REQUESTED from the same account once that request is dismissed.
   def standing_approvals($self):
-    [ latest_opinions($self)[] | select(.state == "APPROVED") ];
+    [ .[] | select((.user.login // "") != $self) | select(.state == "APPROVED") ];
 '

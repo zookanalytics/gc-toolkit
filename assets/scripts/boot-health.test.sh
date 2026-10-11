@@ -47,8 +47,7 @@ mkdir -p "$TMP/bin"
 # One MARKER LINE per mail in MAIL_LOG (report bodies are multi-line, so
 # counting body lines would count one report as a dozen); the body itself goes
 # to MAIL_BODY for the text assertions.
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
   # Every peek is logged, so a scenario can count the pane reads a pass made.
   # `${STUB_PANE-...}` omits the colon for the same reason STUB_WISPS does: an

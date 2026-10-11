@@ -70,8 +70,7 @@ grep -q 'git checkout temp' "$TMP/push.sh" \
 
 # --- 2. Stub gc: bd show returns $FAKE_META; bd update / drain-ack are no-ops. --
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "bd show")          printf '%s' "${FAKE_META:-[]}" ;;
   "bd update")        exit 0 ;;
