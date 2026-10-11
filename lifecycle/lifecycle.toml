@@ -710,8 +710,10 @@ keys = [
   # validator may overrule or defer a human objection, or send it to them, never
   # in silence.
   "finding.reply",
-  # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
-  # pass does not answer the same thread twice.
+  # Set by pr-facts.sh's write-back once finding.reply's own text is on the PR,
+  # posted by it or found there, and dropped when that text is missing and its
+  # post fails. The write-back reads the reply back off GitHub on every pass, so
+  # this records the read for the review dismissal, which waits for it.
   "finding.reply_posted",
   # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
   # a machine finding ruled must-fix or deferred to its PR: a file-level review
@@ -741,6 +743,15 @@ keys = [
   # raised has closed the write-back dismisses THAT review and re-requests its
   # author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
+  # The rework child dispatched with the batch that raised a finding, recorded by
+  # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
+  # work. A must-fix ruling hangs its close-ordering edge from this child, never
+  # from another rework child on the anchor: an earlier batch's, a stale-base
+  # merge-in, a red-check rework. A later batch re-raising the open finding
+  # records its own child, and on a finding already ruled must-fix hangs that
+  # child's edge too. A finding filed without one falls back to the lane-level
+  # match. A bead id.
+  "finding.fix_unit",
 ]
 
 [metadata.review_quorum]
@@ -912,15 +923,17 @@ keys = [
 #   presence proves the reaction was ATTEMPTED, not that it landed: a record
 #   present with no gc.proactive_reaction=1 is a part-way failure, and the run
 #   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
-#   not this key. Read by that script's own guard, tools/gc-proactive.sh and
-#   mol-first-reaction.toml. Never cleared.
+#   not this key. Read by that script's own guard, tools/gc-proactive.sh,
+#   mol-first-reaction.toml and bead-context.sh. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
 #   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
 #   visit it named, and the timestamp. A ruling or recommend that files its own
-#   gate stamps _target in a second write, once the gate exists. _target and _at
-#   are read only to compose the "already landed" message; _reason has no reader
-#   and is the one collapse candidate this surface still carries. Never cleared.
-#   _at is RFC-3339 UTC.
+#   gate stamps _target in a second write, once the gate exists. _reason is the
+#   closer's brief: mol-validate-close.toml reads it as the claim it re-derives
+#   against live state before it closes or escalates a bead the close exit
+#   handed it. first-reaction-dispose.sh reads _target and _at to compose its
+#   "already landed" message. bead-context.sh returns every key of the record
+#   with a subject's context. Never cleared. _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
