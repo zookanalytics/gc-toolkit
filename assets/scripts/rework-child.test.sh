@@ -6,7 +6,8 @@
 # pins the writer's own contract: exactly one provenance, the required work-order
 # flags, the refusals that come before any write, the stdout result line its
 # callers parse, a provenance key that matches only its own children on its own
-# anchor, and every metadata key it writes registered in lifecycle.toml.
+# anchor, one read of an edge that already stands, and every metadata key it
+# writes registered in lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -230,6 +231,19 @@ eq "$(writes)" "0" "…which is neither stamped nor dispatched"
 reset '{"id":"c9","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-0","source_ruling_bead":"vis-1"}}'
 RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
 eq "$RES" "fix-1 $ROUTE filed" "a closed child on another anchor refuses nothing"
+
+echo "# --- the blocks edge: one read when it stands, a read-back when written ---"
+reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1"}}'
+printf 'anc-1|c1|blocks\n' > "$STUB_DEPS"
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
+eq "$RES" "c1 $ROUTE adopted" "an adopted child whose edge stands is dispatched"
+eq "$(grep -c '^bd dep list anc-1 ' "$STUB_GC_LOG")" "1" "…after one read of the anchor's blockers"
+eq "$(grep -c '^bd dep c1 --blocks' "$STUB_GC_LOG")" "0" "…and no second edge"
+reset
+RES=$("$SUT" "${WORK[@]}" --review-bead rv-1 2>/dev/null); RC=$?
+eq "$RES" "fix-1 $ROUTE filed" "a filed child is dispatched"
+eq "$(grep -c '^bd dep fix-1 --blocks anc-1' "$STUB_GC_LOG")" "1" "…once its edge is written"
+eq "$(grep -c '^bd dep list anc-1 ' "$STUB_GC_LOG")" "2" "…and read back after the write"
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account

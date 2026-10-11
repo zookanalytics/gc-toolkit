@@ -169,9 +169,16 @@ gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 # The child must BLOCK the anchor. Recorded the other way round it waits on an
 # anchor that closes only once the rework lands, so nothing ever claims it. An
 # adopted child already carries the edge, and a second identical edge is one
-# every walk of the anchor's blockers sees twice.
-if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
-     | jq -e --arg f "$FIX_BEAD" 'any(.[]?; .id == $f)' >/dev/null 2>&1; then
+# every walk of the anchor's blockers sees twice. An edge this probe finds is
+# not read again before the pour; only one written here is read back.
+blocks_anchor() {
+  bd_json dep list "$ANCHOR" --direction=down -t blocks \
+    | jq -e --arg f "$FIX_BEAD" 'type == "array" and any(.[]; .id == $f)' >/dev/null 2>&1
+}
+EDGE_STANDS=""
+if blocks_anchor; then
+  EDGE_STANDS=1
+else
   gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
 fi
 
@@ -191,8 +198,7 @@ MISSING=$(bd_json show "$FIX_BEAD" | jq -r \
     (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "existing_pr" end),
     (if $pn == "" or (($m.pr_number // "") | tostring) == $pn then empty else "pr_number" end)
   ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
-if [ "$MISSING" = "ok" ] && ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
-     | jq -e --arg f "$FIX_BEAD" 'type == "array" and any(.[]; .id == $f)' >/dev/null 2>&1; then
+if [ "$MISSING" = "ok" ] && [ -z "$EDGE_STANDS" ] && ! blocks_anchor; then
   MISSING="blocks_edge"
 fi
 [ "$MISSING" = "ok" ] \
