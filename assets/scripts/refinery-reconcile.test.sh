@@ -82,6 +82,8 @@ order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
 eq "$order" "pr-facts.sh,merge.sh,pr-open.sh,pr-facts.sh,pre-open-rebase.sh,gate-ensure.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture, then merge, then pr-open, ahead of every arm whose cost grows with the gating set)"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
+scaf_line=$(grep '^scaffolding-sweep' "$ARM_LOG")
+has "$scaf_line" "|myrig/gc-toolkit.refinery|" "scaffolding-sweep ran as BEADS_ACTOR=<refinery>"
 # pr-stack writes PR bodies and no bead, so it carries neither projection: an
 # identity it does not need is authority it must not be able to spend.
 stack_line=$(grep '^pr-stack' "$ARM_LOG")
