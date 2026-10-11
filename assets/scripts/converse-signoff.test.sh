@@ -1971,17 +1971,21 @@ run_so SO_MERGE_RESULT=pull_request
 eq "$SO_RC" "0" "--no-rework answers it, and the sign-off proceeds"
 lacks "…filing no rework" 'REWORK: ' "$SOGC" "--no-rework ran converse-rework.sh"
 have "…while the discharge still resolves the merge hold" 'bd gate resolve d-x --reason approved' "$SOGC"
+have "…and the PR close text records that the ruling leaves the branch" \
+     'gc.pr_visit_actions=ruling: approved (released to human); ruling leaves the branch of item-x as it stands' "$SOGC"
 
 SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
 run_so SO_MERGE_RESULT=pull_request
 eq "$SO_RC" "0" "--rework answers it, and the sign-off proceeds"
 have "…filing the rework against the open PR, sourced by this visit" \
      'REWORK: --anchor item-x --ruling-bead v-x --ruling approved' "$SOGC"
+lacks "…and its close text does not say the branch stands" 'leaves the branch' "$SOGC" "a --rework sign-off said the branch stands"
 
 SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
 run_so SO_MERGE_RESULT=pre_open_gate
 eq "$SO_RC" "0" "a subject that is not an open PR needs no answer"
 lacks "…and files no rework" 'REWORK: ' "$SOGC" "a sign-off without --rework ran converse-rework.sh"
+lacks "…nor records a branch judgment it was never asked for" 'leaves the branch' "$SOGC" "a sign-off with neither flag said the branch stands"
 run_so SO_SUBJECT_UNREADABLE=1
 eq "$SO_RC" "2" "a subject that will not read is refused as an open PR would be"
 if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…writing nothing" "found: $(cat "$SOLOG" "$SOGC")"

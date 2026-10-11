@@ -39,7 +39,8 @@
 #   --rework | --no-rework (with --ruled yes): whether the ruling changes what an
 #     already-published PR's branch must contain. --rework files the rework
 #     demand against the subject anchor, the fix unit a review verdict files,
-#     sourced by this visit, and --no-rework records that the branch stands. A
+#     sourced by this visit, and --no-rework records in the visit's PR close
+#     text (gc.pr_visit_actions) that the ruling leaves the branch as it stands. A
 #     ruled sign-off on a subject at merge_result=pull_request must give one; it
 #     is refused, with nothing written, when it gives neither. The filing runs
 #     before every other write, and when it does not land nothing else is
@@ -333,6 +334,7 @@ SIGNOFF_ACTIONS=""
 if [ "$RULED" = yes ]; then
   SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }ruling: $RULING (released to $ROUTE)"
   [ -n "$REWORK_FILED" ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; filed ruling-driven rework on $SUBJECT"
+  [ "$REWORK" = no ] && SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS}; ruling leaves the branch of $SUBJECT as it stands"
 elif [ -n "$STILL_OWED" ]; then
   SIGNOFF_ACTIONS="${SIGNOFF_ACTIONS:+$SIGNOFF_ACTIONS; }still owed: $STILL_OWED"
 fi
