@@ -355,6 +355,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/bring-current-guard.sh` | merge | Keeps an approval from covering code it never saw. Run at a merge-in child's handoff, it classifies the bring-current as mechanical, which leaves the approval standing, or as judgment, which files a visit on the anchor and dismisses the approval. |
 | `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
+| `assets/scripts/branch-supersession.sh` | merge | Asked by arms 5 and 7 before they file a merge-in child. When the conflict comes from a landed change that deleted or rewrote the code the branch edits, it files the operator's `rework-base-supersession` decision instead. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
