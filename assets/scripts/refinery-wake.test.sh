@@ -6,7 +6,8 @@
 # AND the refinery's pane has been quiet, with the refinery's own nudge text,
 # paces and caps its wakes per stall, and otherwise does nothing: an empty or
 # young queue, a parked anchor, a busy, attached or absent session, and every
-# read it cannot make all leave the refinery alone.
+# read it cannot make all leave the refinery alone. A bead whose updated_at
+# cannot be read still counts toward the queue.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -140,6 +141,19 @@ queue anchor:9000:pull_request
 run
 eq "$(nudges)" "" "an old anchor alone wakes nothing"
 has "$OUT" "is empty" "the queue reads empty without it"
+
+echo "── a bead whose updated_at cannot be read still counts ──"
+printf 'bead=older\nwakes=1\nlast=%s\n' "$NOW" > "$TMP/state/r1"
+printf '[{"id":"a","updated_at":"garbage","metadata":{"branch":"polecat/a"}},{"id":"b","metadata":{"branch":"polecat/b"}}]\n' > "$STUB_QUEUE"
+run
+eq "$(nudges)" "" "a queue with no readable updated_at nudges nothing"
+has "$OUT" "2 bead(s) queued" "each unreadable bead counts toward the depth"
+has "$OUT" "none carries a readable updated_at" "it says the wait cannot be aged"
+[ -e "$TMP/state/r1" ] && ok "the stall record is kept, not cleared as for an empty queue" \
+  || bad "the stall record is kept, not cleared as for an empty queue" "it was removed"
+printf '[{"id":"a","updated_at":"garbage","metadata":{"branch":"polecat/a"}},{"id":"young","updated_at":"%s","metadata":{"branch":"polecat/young"}}]\n' "$(iso 600)" > "$STUB_QUEUE"
+run
+has "$OUT" "young, the oldest of 2 queued bead(s)" "the readable bead is aged, and the unreadable one still counts"
 
 echo "── a busy, attached, or absent session is left alone ──"
 queue old:3000

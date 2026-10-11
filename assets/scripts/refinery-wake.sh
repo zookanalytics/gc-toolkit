@@ -97,10 +97,12 @@ record() {
   fi
 }
 
-# RFC3339 at any offset, fractional seconds allowed, to epoch seconds; nothing
+# RFC3339 at any offset, fractional seconds allowed, to epoch seconds; null
 # when absent, zero-valued (Go renders an unset time as year 1) or unparseable.
+# Always exactly one value: an object built around an empty one would vanish,
+# taking its bead or session out of the list it is counted in.
 EPOCH_DEF='def epoch:
-  try (
+  (try (
     capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
     | ((.d + "Z") | fromdateiso8601)
       - (if .z == "Z" then 0
@@ -108,7 +110,7 @@ EPOCH_DEF='def epoch:
               * (if .z[0:1] == "-" then -1 else 1 end)
          end)
     | floor | select(. > 0)
-  ) catch empty;'
+  ) catch empty) // null;'
 
 resolve_refinery() {
   local found
