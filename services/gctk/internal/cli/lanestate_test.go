@@ -112,7 +112,7 @@ func TestLaneStateGreenExitCodes(t *testing.T) {
 		if rc != 0 || out != "" || errs != "" {
 			t.Fatalf("rc %d stdout %q stderr %q; want 0 and silence", rc, out, errs)
 		}
-		if !strings.Contains(f.Log(), "bd show tk-anc\n") {
+		if !strings.Contains(f.Log(), "bd show tk-anc --json\n") {
 			t.Fatalf("the fallback read no anchor; calls:\n%s", f.Log())
 		}
 		// --no-remote on the same store: fail-closed.

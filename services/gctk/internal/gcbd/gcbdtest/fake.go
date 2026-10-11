@@ -48,16 +48,20 @@ type Call struct {
 	Args []string
 }
 
-// String renders the STUB_GC_LOG line for the call: "bd show <id>",
-// "bd list <args>", "bd dep list <id> <args>", "bd update <id> <args>". A show
-// line carries no args: the fake takes an id, not the Client's argv, so the
-// `--json` the Client's own `bd show` passes is not logged here.
+// String renders the STUB_GC_LOG line for the call: "bd show <id> --json",
+// "bd list <args>", "bd dep list <id> <args>", "bd update <id> <args>". The
+// fake's Show takes an id, not the Client's argv, so the `--json` the real
+// Client passes on every `bd show` is appended here, and a suite's grep of the
+// show line reads the same text against either store.
 func (c Call) String() string {
 	parts := []string{"bd", c.Op}
 	if c.ID != "" {
 		parts = append(parts, c.ID)
 	}
 	parts = append(parts, c.Args...)
+	if c.Op == "show" {
+		parts = append(parts, "--json")
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -81,7 +85,8 @@ type Fake struct {
 	Beads []gcbd.Bead
 	Deps  []Edge
 
-	// ShowFail (STUB_SHOW_FAIL): Show and ShowDirect return nil.
+	// ShowFail (STUB_SHOW_FAIL): Show and ShowDirect return nil, and ShowHook
+	// does not run — the stub exits on STUB_SHOW_FAIL before it reaches the hook.
 	ShowFail bool
 	// ShowHook (STUB_SHOW_HOOK) runs before each Show/ShowDirect with the id, so
 	// a test can mutate the store between reads.
@@ -89,8 +94,10 @@ type Fake struct {
 	// ListFail (STUB_LIST_FAIL): every List answers ok=false.
 	ListFail bool
 	// ListFailOn (STUB_LIST_FAIL_ON, and the _PARTIAL/_TRAILING knobs as the
-	// strict read sees them): ok=false when the rendered Args joined by spaces
-	// contains it.
+	// strict read sees them): ok=false when the rendered Args, joined by spaces
+	// and padded with one space at each end (the stub's `case " $* "`), contain
+	// it — so a knob like " --status=open " names one whole flag, first or last
+	// in the argv included.
 	ListFailOn string
 	// DepFail (STUB_DEP_GARBAGE/_PARTIAL/_TRAILING): every DepList answers
 	// ok=false.
@@ -163,8 +170,9 @@ func clone(b gcbd.Bead) gcbd.Bead {
 	return out
 }
 
-// Show mirrors `bd show <id>`: the hook runs, then STUB_SHOW_FAIL, then the row
-// matching id — nil when none, as the Client reads the stub's `[]`.
+// Show mirrors `bd show <id>`: STUB_SHOW_FAIL first (the stub exits there,
+// before its hook), then the hook, then the row matching id — nil when none, as
+// the Client reads the stub's `[]`.
 func (f *Fake) Show(id string) *gcbd.Bead { return f.show(id) }
 
 // ShowDirect is Show: the stub serves one `bd show`, whichever path asked.
@@ -172,11 +180,11 @@ func (f *Fake) ShowDirect(id string) *gcbd.Bead { return f.show(id) }
 
 func (f *Fake) show(id string) *gcbd.Bead {
 	f.record(Call{Op: "show", ID: id})
-	if f.ShowHook != nil {
-		f.ShowHook(id)
-	}
 	if f.ShowFail {
 		return nil
+	}
+	if f.ShowHook != nil {
+		f.ShowHook(id)
 	}
 	b := f.Get(id)
 	if b == nil {
@@ -197,7 +205,7 @@ func (f *Fake) List(q gcbd.ListQuery) ([]gcbd.Bead, bool) {
 	if f.ListFail {
 		return nil, false
 	}
-	if f.ListFailOn != "" && strings.Contains(strings.Join(args, " "), f.ListFailOn) {
+	if f.ListFailOn != "" && strings.Contains(" "+strings.Join(args, " ")+" ", f.ListFailOn) {
 		return nil, false
 	}
 	var statuses []string
@@ -306,18 +314,28 @@ func (f *Fake) DepList(id string, q gcbd.DepQuery) ([]gcbd.Bead, bool) {
 var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$`)
 
 // coerce types a --set-metadata value as the stub does: trimmed of
-// space/TAB/CR/LF, a JSON number becomes the number (what json.Unmarshal of
-// the literal yields, a float64, which Meta renders as jq's tostring renders
-// the tonumber: 1.50 reads back "1.5"), true/false/null become the typed
-// value, and anything else — a quoted string included — is the raw, untrimmed
-// text.
+// space/TAB/CR/LF, a JSON number becomes the number, true/false/null become the
+// typed value, and anything else — a quoted string included — is the raw,
+// untrimmed text.
+//
+// A number is stored as json.Number of the trimmed literal, which is what the
+// real Client holds after its UseNumber decode of the store, so Meta renders it
+// as the literal: "42.0" reads back "42.0" and "1.50" reads back "1.50", as
+// jq 1.7's tonumber|tostring keeps them in the stub's store. (jq writes an
+// exponent literal in its own form — 1e2 becomes 1E+2 — which this fake does
+// not reproduce; no cadence writer sets one.)
 func coerce(raw string) any {
 	t := strings.Trim(raw, " \t\r\n")
-	if jsonNumber.MatchString(t) || t == "true" || t == "false" || t == "null" {
-		var v any
-		if err := json.Unmarshal([]byte(t), &v); err == nil {
-			return v
-		}
+	if jsonNumber.MatchString(t) {
+		return json.Number(t)
+	}
+	switch t {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
 	}
 	return raw
 }

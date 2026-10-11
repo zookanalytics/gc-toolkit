@@ -134,7 +134,7 @@ func TestNoVerdictLaneGreensViaGitHubFallback(t *testing.T) {
 	if strings.Join(a.asked, " ") != "zook/gc-toolkit#42" {
 		t.Fatalf("fallback asked %q, want the origin slug and the anchor's pr_number once", a.asked)
 	}
-	if !strings.Contains(f.Log(), "bd show tk-anc\n") {
+	if !strings.Contains(f.Log(), "bd show tk-anc --json\n") {
 		t.Fatalf("the fallback reads the anchor for its pr_number; calls:\n%s", f.Log())
 	}
 }
@@ -303,8 +303,39 @@ func TestApprovedInStream(t *testing.T) {
 		{"commented only", `[{"state":"COMMENTED","id":2}]`, false, true},
 		{"empty page", `[]`, false, true},
 		{"two pages, approval on the second", "[{\"state\":\"COMMENTED\"}]\n[{\"state\":\"CHANGES_REQUESTED\"},{\"state\":\"APPROVED\"}]", true, true},
-		{"a non-array page is skipped", `{"message":"Not Found"} [{"state":"APPROVED"}]`, true, true},
-		{"only non-array pages", `{"message":"Not Found"} null 7`, false, true},
+		// Each object-page row below carries what jq 1.7 printed for the literal
+		// under the script's filter, as `printf '%s' '<pages>' | jq -sr '[ .[][]? |
+		// select(((.state // "") | tostring) == "APPROVED") ] | length > 0'`, so
+		// the expectation is the shell's answer, not a guess at it.
+		//
+		// jq: out="" rc=5 — `.[]?` on an object yields its values, and the string
+		// "Not Found" cannot be indexed with .state; the approving page after it
+		// never saves the stream.
+		{"an object page with a string value fails the stream", `{"message":"Not Found"} [{"state":"APPROVED"}]`, false, false},
+		// jq: out="" rc=5 — the same string value; null and 7 would each have
+		// been skipped (`?` swallows a scalar page's iteration error).
+		{"only non-array pages, one an object with a string value", `{"message":"Not Found"} null 7`, false, false},
+		// jq: out="true" rc=0 — the object page's value is an object, checked
+		// like an array element.
+		{"an object page whose values are objects, one APPROVED", `{"a":{"state":"COMMENTED"},"b":{"state":"APPROVED"}}`, true, true},
+		// jq: out="true" rc=0 — the single-value form.
+		{"an object page with one approving object value", `{"a":{"state":"APPROVED"}}`, true, true},
+		// jq: out="" rc=5 — an array value cannot be indexed with .state.
+		{"an object page with an array value fails the stream", `{"a":[{"state":"APPROVED"}]}`, false, false},
+		// jq: out="false" rc=0 — null.state is null, skipped; nothing approves.
+		{"an object page with a null value only", `{"a":null}`, false, true},
+		// jq: out="true" rc=0 — the null value is skipped and the next page approves.
+		{"an object page with a null value, then an approving page", `{"a":null} [{"state":"APPROVED"}]`, true, true},
+		// jq: out="" rc=5 — a number or boolean value fails like a string.
+		{"an object page with a number value fails the stream", `{"a":5}`, false, false},
+		{"an object page with a boolean value fails the stream", `{"a":true}`, false, false},
+		// jq: out="false" rc=0 for each — a scalar page cannot be iterated and
+		// `?` swallows that: the page yields nothing.
+		{"a string page is skipped", `"x"`, false, true},
+		{"a number page is skipped", `5`, false, true},
+		{"a boolean page is skipped", `true`, false, true},
+		{"a null page is skipped", `null`, false, true},
+		{"scalar pages around an approving page", `"x" 5 [{"state":"APPROVED"}] true null`, true, true},
 		{"a truncated stream is unreadable", `[{"state":"APPROVED"}] [{"state":"COMM`, false, false},
 		{"a truncated stream is unreadable, approval or not", `[{"state":"COMMENTED"},{"sta`, false, false},
 		{"garbage is unreadable", `not json`, false, false},

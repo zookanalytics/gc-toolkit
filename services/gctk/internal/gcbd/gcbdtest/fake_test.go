@@ -24,8 +24,9 @@ func ids(rows []gcbd.Bead) string {
 }
 
 // Show hands out the matching row, nil for an unknown id (the stub's `[]`), nil
-// under STUB_SHOW_FAIL, and runs the hook first — so a hook that writes the
-// store is seen by the read it precedes.
+// under STUB_SHOW_FAIL — which wins before the hook, as the stub exits there —
+// and otherwise runs the hook first, so a hook that writes the store is seen by
+// the read it precedes.
 func TestShow(t *testing.T) {
 	f := New(bead("a", str("open"), map[string]any{"k": "v"}), bead("b", nil, nil))
 	if b := f.Show("a"); b == nil || b.Meta("k") != "v" || b.StatusLower() != "open" {
@@ -52,6 +53,22 @@ func TestShow(t *testing.T) {
 		f.ShowFail = true
 		if f.Show("a") != nil || f.ShowDirect("a") != nil {
 			t.Error("Show under ShowFail != nil")
+		}
+	})
+
+	t.Run("ShowFail is evaluated before the hook", func(t *testing.T) {
+		f := New(bead("a", nil, nil))
+		f.ShowFail = true
+		hooked := 0
+		f.ShowHook = func(string) { hooked++ }
+		if f.Show("a") != nil || f.ShowDirect("a") != nil {
+			t.Error("Show under ShowFail != nil")
+		}
+		if hooked != 0 {
+			t.Errorf("the hook ran %d times under ShowFail; the stub exits on STUB_SHOW_FAIL before STUB_SHOW_HOOK", hooked)
+		}
+		if n := strings.Count(f.Log(), "bd show a --json\n"); n != 2 {
+			t.Errorf("a failed show is still logged: %d lines, want 2", n)
 		}
 	})
 
@@ -141,6 +158,19 @@ func TestListFailKnobs(t *testing.T) {
 	if _, ok := f.List(gcbd.ListQuery{Status: []string{"open"}}); ok {
 		t.Error("ListFailOn spanning two flags did not fail the read")
 	}
+	// The argv is matched space-padded (the stub's `case " $* "`), so a knob
+	// spelled " --status=open " names that whole flag even when it opens the
+	// argv, and does not match a flag it is merely a prefix of.
+	f.ListFailOn = " --status=open "
+	if _, ok := f.List(gcbd.ListQuery{Status: []string{"open"}}); ok {
+		t.Error("a space-padded ListFailOn did not match the flag that opens the argv")
+	}
+	if _, ok := f.List(gcbd.ListQuery{MetadataField: []string{"k=v"}, Status: []string{"open"}}); ok {
+		t.Error("a space-padded ListFailOn did not match the flag mid-argv")
+	}
+	if _, ok := f.List(gcbd.ListQuery{Status: []string{"open,closed"}}); !ok {
+		t.Error("a space-padded ListFailOn matched --status=open,closed, which it is only a prefix of")
+	}
 }
 
 // DepList follows the stub's orientation: A|blocks|B means B depends on A;
@@ -192,6 +222,7 @@ func TestUpdateWrites(t *testing.T) {
 		"--set-metadata", "merge_result=merged",
 		"--set-metadata=pr_number= 42 ",
 		"--set-metadata", "ratio=1.50",
+		"--set-metadata", "whole=42.0",
 		"--set-metadata", "big=1e2",
 		"--set-metadata", "t=true", "--set-metadata", "n=null",
 		"--set-metadata", "quoted=\"1\"", "--set-metadata", "plus=+1", "--set-metadata", "raw= text ",
@@ -208,9 +239,10 @@ func TestUpdateWrites(t *testing.T) {
 	b := f.Get("a")
 	for k, want := range map[string]string{
 		"merge_result": "merged",
-		"pr_number":    "42",  // trimmed, typed as a number
-		"ratio":        "1.5", // a number reads back as jq's tostring of the tonumber
-		"big":          "100",
+		"pr_number":    "42",   // trimmed, typed as a number
+		"ratio":        "1.50", // a number keeps its literal, as jq 1.7's tonumber|tostring does
+		"whole":        "42.0", // and so does a trailing .0
+		"big":          "1e2",  // the literal; jq would write 1E+2 (see coerce)
 		"t":            "true",
 		"n":            "", // null is stored (the key is present) and reads as ""
 		"quoted":       `"1"`,
@@ -356,11 +388,11 @@ func TestLogRendersTheStubLog(t *testing.T) {
 	f.Update("M1", "--set-metadata", "merge_result=merged", "--status=closed")
 	f.ShowDirect("M1")
 	want := strings.Join([]string{
-		"bd show M1",
+		"bd show M1 --json",
 		"bd list --metadata-field merge_result=pull_request --status=open --limit=0 --json",
 		"bd dep list M1 --direction=down -t blocks --json",
 		"bd update M1 --set-metadata merge_result=merged --status=closed",
-		"bd show M1",
+		"bd show M1 --json",
 	}, "\n") + "\n"
 	if got := f.Log(); got != want {
 		t.Errorf("Log() =\n%s\nwant\n%s", got, want)

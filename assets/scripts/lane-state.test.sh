@@ -137,8 +137,19 @@ unset GCTK_FALLBACK
 echo
 echo "## arm: gctk lane-state (reached through lane-state.sh)"
 if [ -n "$GCTK_BUILT" ]; then
-  export GCTK_BIN="$GCTK_BUILT"
+  # The suite body must have run THROUGH the binary, not fallen back to the
+  # shell with the same answers. The arm's GCTK_BIN is a wrapper that logs the
+  # argv it was handed and then execs the real build, so after the body the log
+  # is the proof: one `lane-state green --anchor ...` line per SUT call.
+  LOGGED="$TMP/gctk-logged"; CALLS="$TMP/gctk-calls.log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexec %q "$@"\n' "$CALLS" "$GCTK_BUILT" > "$LOGGED"
+  chmod +x "$LOGGED"
+  : > "$CALLS"
+  export GCTK_BIN="$LOGGED"
   suite
+  # 16 is the number of `green` calls suite() makes; a new case there must bump it.
+  eq "$(grep -c '^lane-state green --anchor ' "$CALLS")" 16 "every suite call reached the gctk binary as \`lane-state green --anchor ...\` (16 calls, one line each)"
+  eq "$(grep -vc -- '--anchor' "$CALLS")" 0 "no call handed to the binary lacks its --anchor"
   out=$(GCTK_BIN="$SENTINEL" "$SUT" green --anchor tk-anc --lane correctness --no-remote 2>&1)
   eq "$out" "SENTINEL-GCTK lane-state green --anchor tk-anc --lane correctness --no-remote" "lane-state.sh execs \$GCTK_BIN with the lane-state subcommand and its arguments verbatim"
 else

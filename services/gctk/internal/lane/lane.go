@@ -151,6 +151,22 @@ func reviewOnLane(b *gcbd.Bead, lane string) bool {
 // githubApproved is the fallback: an APPROVED GitHub review on the anchor's PR
 // backs every lane. Consulted only when no local review bead backs the lane,
 // and fail-closed: any step that cannot be completed is false, never true.
+//
+// The script forked `gc bd show` for the anchor; this reads it through
+// store.Show, which prefers the daemon's cached view. That is safe here because
+// pr_number is written once, at pr-open, and never rewritten, so the cache can
+// hold no stale value for it — only a missing one. A daemon view that lacks
+// pr_number reads as "" and fails closed (not green this pass), so the cached
+// read can only delay a green, never invent one.
+//
+// Order: the script checked pr_number, then `command -v gh`, then resolved the
+// origin, so a host without gh forked no git. Here Approver.ApprovedReviewOnPR
+// owns the gh lookup (GHApprover's LookPath), and the slug it needs is resolved
+// first, so on a host without gh the Go path forks one `git remote get-url`
+// before learning there is no gh. That is the only difference — one extra git
+// fork on a host without gh — and the verdict is unchanged: both paths answer
+// not green. Expressing the gh check through Remote would add a seam to say
+// so; the fork is cheaper than the seam.
 func githubApproved(store gcbd.Store, remote Remote, anchor string) bool {
 	pr := store.Show(anchor).Meta("pr_number")
 	if pr == "" {
@@ -235,13 +251,25 @@ func (GHApprover) ApprovedReviewOnPR(repoSlug, pr string) (bool, bool) {
 // ApprovedInStream reads the body `gh api --paginate` prints — a stream of
 // concatenated JSON arrays, one per page — the way the script's `jq -s '[
 // .[][]? | select(((.state // "") | tostring) == "APPROVED") ] | length > 0'`
-// read it. The body is scrubbed of C0 bytes first (the script's scrub); each
-// page that is an array contributes its elements, a page that is not one is
-// skipped (jq's `?`); approved is true when any element's .state reads
-// "APPROVED". A stream that stops decoding partway — a cut-short page — is
-// ok=false, as jq failed the whole stream, so a partial answer is never read as
-// a verdict. An element that is not an object (jq cannot index a string with
-// .state) fails the same way; a null element indexes to null and is skipped.
+// read it, with the caller testing the output for "true". The body is scrubbed
+// of C0 bytes first (the script's scrub). A stream that stops decoding partway
+// — a cut-short page — is ok=false, as jq failed the whole stream, so a partial
+// answer is never read as a verdict.
+//
+// `.[]?` iterates each page, and `?` suppresses only the iteration error, so
+// the page's shape decides what reaches `.state`:
+//
+//   - an array page contributes its elements;
+//   - an OBJECT page contributes its VALUES, each checked like an element
+//     (`{"a":{"state":"APPROVED"}}` is approved);
+//   - a scalar page (a string, number, boolean or null) cannot be iterated, the
+//     `?` swallows that, and the page yields nothing: skipped.
+//
+// Each element (or object value) then goes through `.state`: an object is
+// checked, null indexes to null and is skipped, and anything else — a string,
+// number, boolean or array — cannot be indexed, so jq exits 5 with no "true"
+// printed and the whole stream is ok=false. `{"message":"Not Found"}` ahead of
+// an approving page is therefore NOT green: its string value fails the stream.
 func ApprovedInStream(body []byte) (approved, ok bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(body)))
 	dec.UseNumber()
@@ -253,11 +281,19 @@ func ApprovedInStream(body []byte) (approved, ok bool) {
 			}
 			return false, false
 		}
-		elems, isArray := page.([]any)
-		if !isArray {
+		var items []any
+		switch p := page.(type) {
+		case []any:
+			items = p
+		case map[string]any:
+			items = make([]any, 0, len(p))
+			for _, v := range p {
+				items = append(items, v)
+			}
+		default:
 			continue
 		}
-		for _, e := range elems {
+		for _, e := range items {
 			switch el := e.(type) {
 			case nil:
 			case map[string]any:
