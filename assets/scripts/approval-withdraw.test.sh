@@ -7,18 +7,20 @@
 #   every outside approval not yet dismissed is dismissed: an account's older
 #   approval, its newer one, and one behind a later CHANGES_REQUESTED, never the
 #   CHANGES_REQUESTED itself, the city's own approval or a dismissed review; the
-#   judgment is noted on the anchor and the review ids stamped on the pass
-#   before the first dismissal, and a note or stamp that does not land
-#   dismisses nothing; nobody is re-requested; the message opens with the
-#   reason; a PR with no approval standing, and an anchor with no PR, write
-#   nothing; an approval carrying an inline comment above the anchor's routing
-#   marks waits, recording nothing, until the feedback loop has read it; a
-#   retry dismisses only the recorded reviews still APPROVED, never an
-#   approval given after them, notes nothing twice, and stops at a recorded
-#   review the PR does not list as approved or dismissed; a dismissal that
-#   fails exits 1 with the set recorded; unreadable reviews, an unresolved
-#   login, a pr_url naming another PR, a pr_number that names no PR, a
-#   malformed stamp and bad usage dismiss nothing.
+#   review ids are stamped on the pass and then the judgment noted on the
+#   anchor, both before the first dismissal; a stamp that does not land notes
+#   and dismisses nothing, a note that does not land dismisses nothing, and the
+#   retry after either notes the anchor exactly once; nobody is re-requested;
+#   the message opens with the reason; a PR with no approval standing, and an
+#   anchor with no PR, write nothing; an approval carrying an inline comment
+#   above the anchor's routing marks waits, recording nothing, until the
+#   feedback loop has read it; a retry dismisses only the recorded reviews
+#   still APPROVED, never an approval given after them, notes nothing twice,
+#   and stops at a recorded review the PR does not list as approved or
+#   dismissed; a dismissal that fails exits 1 with the set recorded;
+#   unreadable reviews, an unresolved login, a pr_url naming another PR, a
+#   pr_number that names no PR, a malformed stamp and bad usage dismiss
+#   nothing.
 # the mol-validate block (formulas/mol-validate.toml, rule-convergence), run
 # verbatim against stub scripts:
 #   either shape first withdraws the approvals, then with the same reason
@@ -165,20 +167,37 @@ eq "$rc" "1" "a pr_url with no pr_number beside it exits 1"
 has "$out" "pr_number reads '<absent>'" "…saying the number is absent"
 eq "$(ghlog)" "" "…without reading GitHub"
 
-echo "# the record lands before any dismissal, or nothing is dismissed"
+echo "# the stamp lands first and the note second, both before any dismissal, and the note lands once"
+noted_once() { eq "$(notes AN1 | grep -o 'Validation pass VP1 ruled that a fresh whole-diff review is warranted' | wc -l | tr -d ' ')" "1" "$1"; }
 store "[$(anchorrow), $(passrow)]"
 reviews "$(rv 501 human1 APPROVED 1)"
-fresh
-out=$(STUB_UPDATE_FAIL="AN1" withdraw); rc=$?
-eq "$rc" "1" "a note the anchor refuses exits 1"
-hasnt "$(ghlog)" "DISMISS" "…and dismisses nothing"
-eq "$(meta VP1 approval_dismissed)" "<absent>" "…and stamps nothing"
-store "[$(anchorrow), $(passrow)]"
 fresh
 out=$(STUB_DROP_KEYS="VP1:approval_dismissed" withdraw); rc=$?
 eq "$rc" "1" "a stamp that does not read back exits 1"
 has "$out" "did not read back" "…saying so"
-hasnt "$(ghlog)" "DISMISS" "…and dismisses nothing"
+hasnt "$(ghlog)" "DISMISS" "…dismissing nothing"
+eq "$(notes AN1)" "" "…and noting nothing on the anchor"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "0" "the retry exits 0"
+eq "$(meta VP1 approval_dismissed)" "501" "…stamping the set"
+noted_once "…noting the anchor once"
+has "$(ghlog)" "reviews/501/dismissals" "…and dismissing the approval"
+store "[$(anchorrow), $(passrow)]"
+fresh
+out=$(STUB_UPDATE_FAIL="AN1" withdraw); rc=$?
+eq "$rc" "1" "a note the anchor refuses exits 1"
+hasnt "$(ghlog)" "DISMISS" "…dismissing nothing"
+eq "$(meta VP1 approval_dismissed)" "501" "…with the set already stamped"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "0" "the retry exits 0"
+noted_once "…noting the anchor the run before could not, once"
+has "$(ghlog)" "reviews/501/dismissals" "…and dismissing the approval"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "0" "a further retry exits 0"
+noted_once "…and adds no second note"
 
 echo "# an approval carrying an inline comment the feedback loop has not routed waits"
 # pr-facts.sh reads a dismissal as retiring the comments under the review, so a

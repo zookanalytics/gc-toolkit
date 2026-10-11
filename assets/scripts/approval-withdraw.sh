@@ -24,11 +24,12 @@
 # review.
 #
 # RECORD FIRST. A dismissal cannot be undone, so before the first one this
-# appends the judgment to the anchor's notes and stamps approval_dismissed (the
-# review ids) on the validation pass, and reads the stamp back. The stamp fixes
-# what this pass withdraws: a retry dismisses only the recorded reviews that
-# still read APPROVED, and stops at a recorded review the PR does not list as
-# approved or dismissed. It finishes an interrupted withdrawal, and it never
+# stamps approval_dismissed (the review ids) on the validation pass and reads
+# it back, then appends the judgment to the anchor's notes, once per pass. The
+# stamp fixes what this pass withdraws: a retry dismisses only the recorded
+# reviews that still read APPROVED, and stops at a recorded review the PR does
+# not list as approved or dismissed. A retry finishes an interrupted
+# withdrawal, notes the anchor when the run before it could not, and never
 # reaches an approval the operator gave after reading this pass's dismissal.
 # When no approval stands, nothing is written, so a retry looks again.
 #
@@ -198,14 +199,20 @@ else
 fi
 
 if [ -z "$recorded" ]; then
-  if ! gc bd update "$anchor" --append-notes "Validation pass $pass ruled that a fresh whole-diff review is warranted, so the $noun from $logins on PR#$num ($rnoun $ids) $verb dismissed: $reason" >/dev/null 2>&1; then
-    echo "$PROG: the dismissal could not be noted on $anchor; nothing is dismissed and the caller retries" >&2
-    exit 1
-  fi
   gc bd update "$pass" --set-metadata "approval_dismissed=$ids" >/dev/null 2>&1
   got=$(bd_json show "$pass" | jq -r '(.[0].metadata.approval_dismissed // "") | tostring' 2>/dev/null)
   if [ "$got" != "$ids" ]; then
-    echo "$PROG: approval_dismissed did not read back on $pass; nothing is dismissed and the caller retries" >&2
+    echo "$PROG: approval_dismissed did not read back on $pass; nothing is noted or dismissed and the caller retries" >&2
+    exit 1
+  fi
+fi
+# The anchor takes the note once per pass. The stamp lands first, so a run that
+# stamped the set and then failed to note it is retried as a retry, which notes
+# it here; a run that already noted it adds nothing.
+judged="Validation pass $pass ruled that a fresh whole-diff review is warranted"
+if ! printf '%s' "$arow" | jq -e --arg j "$judged, " '(.notes // "") | tostring | contains($j)' >/dev/null 2>&1; then
+  if ! gc bd update "$anchor" --append-notes "$judged, so the $noun from $logins on PR#$num ($rnoun $ids) $verb dismissed: $reason" >/dev/null 2>&1; then
+    echo "$PROG: the dismissal could not be noted on $anchor; nothing is dismissed, and the retry notes it before it dismisses" >&2
     exit 1
   fi
 fi
