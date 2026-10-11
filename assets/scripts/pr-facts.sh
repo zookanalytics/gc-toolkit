@@ -23,7 +23,9 @@
 # nothing in flight re-dispatches, not only on the PR's first head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
 # operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
-# since rebasing is one horn of what a demand asks;
+# since rebasing is one horn of what a demand asks; a branch whose conflict is a
+# landed change deleting or rewriting the code it edits gets the operator's
+# supersession decision instead of a child (branch-supersession.sh);
 # dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
 # gc_city_own, never a review that is feedback; signoff_dismissed read back
 # FIRST; skipped under native auto-merge).
@@ -45,17 +47,21 @@
 # posture at that head, keeps it without the per-PR reads; any other anchor is
 # read as before.
 # Unanswered review feedback routes to something — a fix-pool rework child
-# carrying the review bodies and inline comments verbatim, or a visit when a
-# human already holds the anchor — with the watermarks advancing only once that
-# routing reads back. Feedback is decided by provenance, not by author: every
-# review, inline comment and conversation comment that is not the city's own post
-# (pr-post.sh's gc_city_own: marked by pr-post.sh, or under the city's login
-# before the anchor's provenance cutover, pr_provenance_since) is feedback,
-# whoever posted it, so a model review run under the city's own account routes
-# like a person's. This runs even while the anchor still conflicts: the rework
-# child is prepare_mode=merge, so it brings the branch current as it answers, and
-# the CONFLICTING arm above stands down when feedback is owed rather than filing a
-# redundant merge-in child. It routes under posture `commented` and equally under a
+# carrying the review bodies and inline comments verbatim, or a visit when the
+# city has nowhere to route work (no head branch or no fix pool) — with the
+# watermarks advancing only once that routing reads back. A hold on the anchor
+# does not choose the visit: the child is the fix unit a must-fix finding of the
+# batch attaches to, so it is filed whatever holds the anchor. Feedback is
+# decided by provenance, not by author: every review, inline comment and
+# conversation comment that is not the city's own post (pr-post.sh's
+# gc_city_own: marked by pr-post.sh, or under the city's login before the
+# anchor's provenance cutover, pr_provenance_since) is feedback, whoever posted
+# it, so a model review run under the city's own account routes like a person's.
+# This runs even while the anchor still conflicts: the rework child is
+# prepare_mode=merge, so it brings the branch current as it answers, and the
+# CONFLICTING arm above stands down when feedback is owed rather than file a
+# redundant merge-in child or defer the feedback behind a hold. It routes under
+# posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
 # comments under it out of the batch. An unmarked review posted under our own
@@ -154,6 +160,23 @@ PROG="pr-facts"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# True when the fix unit a feedback batch was routed to has CLOSED: a rework
+# child closes when its branch lands, a visit when a person resolves it. That
+# close is the city's exchange with the operator moving off `outstanding` — the
+# reply is there to look at. A bare head move is NOT it: a merge-in of the base
+# branch or an operator's own push leaves the routed child open, and reading the
+# head alone would call such a move an answer. Mirrors the write-back sweep's
+# own landed test, which reads the same close off the same disposition.
+conversation_fix_landed() {
+  case "$1" in
+    rework:?* | visit:?*) : ;;
+    *) return 1 ;;
+  esac
+  local _st
+  _st=$(gc bd show "${1#*:}" --json 2>/dev/null | scrub \
+    | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+  [ "$_st" = "closed" ]
+}
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The single writer of the workflow-owned `status:` PR label. The full pass is its
 # authoritative reconcile: it runs for every open anchor and already mutates the
@@ -390,11 +413,43 @@ anchor_decision_held() { # <anchor-id>
 }
 # <<< anchor-decision-guard
 
+# Whether a conflict is a landed change superseding this branch rather than drift,
+# in which case bringing it current is the operator's decision and no merge-in
+# child goes. branch-supersession.sh owns the classification and the decision
+# visit; this only puts both tips where git can read them. Its own ref namespace,
+# overwritten per anchor, so nothing here moves a branch or a remote-tracking ref.
+# A tip that will not fetch, or a head that moved since GitHub reported it,
+# answers "proceed": the guard only ever withholds a dispatch it has put to a
+# person. 0 = hold.
+SUPERSESSION="$SCRIPTS_DIR/branch-supersession.sh"
+SUPERSESSION_REF="refs/gc-toolkit/pr-facts"
+supersession_holds() { # <anchor> <branch> <target> <head-oid> <pr-number>
+  local base_oid head_tip
+  [ -x "$SUPERSESSION" ] || return 1
+  git fetch --quiet --no-tags origin "+refs/heads/$3:$SUPERSESSION_REF/base" \
+    "+refs/heads/$2:$SUPERSESSION_REF/head" >/dev/null 2>&1 || return 1
+  base_oid=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/base^{commit}" 2>/dev/null)
+  head_tip=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/head^{commit}" 2>/dev/null)
+  [ -n "$base_oid" ] && [ -n "$head_tip" ] && [ "$head_tip" = "$4" ] || return 1
+  "$SUPERSESSION" hold --anchor "$1" --branch "$2" --target "$3" \
+    --base "$base_oid" --head "$head_tip" --pr "$5"
+}
+
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
 # Listed in the precedence the derivation applies, strongest human signal first.
 PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
+# >>> pr-conversation-vocabulary
+# Mirrors lifecycle/lifecycle.toml [conversation]; pr-facts.test.sh fails on drift.
+# The values this script records against the watermarks. asking is the demand
+# edge and carries no key; covered waits on a comment-to-bead link nothing
+# writes yet — neither is recorded here. conv is set only from these literals,
+# so the derivation needs no runtime membership guard; this list exists for the
+# drift check, which eval's the block and compares it to lifecycle.toml.
+# shellcheck disable=SC2034  # read by pr-facts.test.sh's drift check, not here
+PR_CONVERSATIONS="quiet outstanding answered"
+# <<< pr-conversation-vocabulary
 # >>> pr-writeback-contract
 # The trail the operator reads in the PR. EYES marks a comment the city picked
 # up, and THUMBS_UP replaces it once the comment is answered, so a handled
@@ -1424,10 +1479,11 @@ while IFS= read -r tagged; do
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
   # parked and this PR's branch is superseded by the pending re-dispatch, so the
-  # dispatch arms below stand down on it as they do for a merge_hold or a live
-  # demand: a rework minted against a branch about to re-pour is non-hand-offable,
-  # so a polecat can only refuse it and the pool re-offers the refusal until a
-  # human clears it.
+  # stale-base and red-check arms below stand down on it as they do for a
+  # merge_hold or a live demand: a rework minted against a branch about to re-pour
+  # is non-hand-offable, so a polecat can only refuse it and the pool re-offers
+  # the refusal until a human clears it. Review feedback is the exception, and
+  # the feedback arm says why.
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
   # --- the posture basis, as this pass's batched read shows it -----------------
@@ -1778,14 +1834,31 @@ MP_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  posture=""; conv=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; revs_open=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
-  cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
-  rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
-  iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
-  obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
-  orbatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_batch // "") | tostring')
-  oibatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_batch // "") | tostring')
+  # One read of every anchor-metadata key this block needs, not a jq fork per
+  # key — the pass runs for every open anchor every 60s. Joined on the unit
+  # separator (never valid inside these values) and split on the same, so an
+  # empty field keeps its slot instead of collapsing the way a tab or
+  # default-IFS split would.
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m < <(
+    printf '%s' "$row" | jq -r '[
+        (.metadata.pr_comment_watermark // ""),
+        (.metadata.pr_review_watermark // ""),
+        (.metadata.pr_issue_comment_watermark // ""),
+        (.metadata["pr.conversation"] // ""),
+        (.metadata.pr_comment_disposition // ""),
+        (.metadata.pr_comment_batch // ""),
+        (.metadata.pr_review_batch // ""),
+        (.metadata.pr_issue_comment_batch // ""),
+        (.metadata.pr_posture // ""),
+        (.metadata.pr_merge_state // "")
+      ] | map(tostring) | join("\u001f")')
+  # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
+  # key minus its instant), have_cv just the value. The derivation reads the
+  # value; the record below compares the value@head to skip a no-op write.
+  have_cvh=""; case "$have_c" in *@*@*) have_cvh="${have_c%@*}" ;; esac
+  have_cv="${have_cvh%@*}"
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
   case "$iwm" in ''|*[!0-9]*) iwm=0 ;; esac
@@ -1903,6 +1976,29 @@ MP_EOF
       [ "$max_c" -ge "$cwm" ] || max_c="$cwm"
       [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
       [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
+      # quiet is a statement about the COMPLETE raw lists, not the feedback
+      # maxima above — those keep only COMMENTED/CHANGES_REQUESTED bodies (max_r)
+      # and drop a dismissed review's inline comments and what its thread answered
+      # (max_c reads cmts_open), so a dismissed objection or an "approve, but
+      # rename X" would read as no feedback. quiet means no human utterance in ANY
+      # of the three spaces (state-model.md), so count every entry across the raw
+      # lists that is not the city's own post, by the same gc_city_own the
+      # feedback readers apply, with each inline comment dated by its review's
+      # submission the way live_comments dates it. The maxima drive only the
+      # watermark compare below. A count that does not read leaves any_human
+      # empty, and the derivation then records nothing rather than quiet.
+      any_human=$({ printf '%s\n' "$revs_raw"; printf '%s\n' "$cmts_raw"; printf '%s\n' "$icmts_raw"; } \
+        | jq -n --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+            (input) as $revs | (input) as $cmts | (input) as $icmts
+          | ([ $revs[] | select(((.submitted_at // "") | tostring) != "")
+               | { key: ((.id // 0) | tostring), value: (.submitted_at | tostring) } ]
+             | from_entries) as $submitted
+          | [ $revs[],
+              ($cmts[] | ($submitted[((.pull_request_review_id // "") | tostring)] // "") as $at
+                       | if $at != "" then . + { gc_review_submitted_at: $at } else . end),
+              $icmts[]
+            | select(gc_city_own($self; $since) | not) ] | length' 2>/dev/null)
+      case "$any_human" in ''|*[!0-9]*) any_human="" ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # An unmarked review posted under OUR OWN login before the cutover leaves
       # unresolved finding threads arm 7 never counts — it reads them as the city's
@@ -1934,16 +2030,54 @@ MP_EOF
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
+      # --- conversation position: where the exchange with the operator stands --
+      # Read off the watermarks and the durable routing disposition, not a prior
+      # recorded position. quiet is nothing said. outstanding is an utterance
+      # above its space's watermark, or a batch routed to a fix unit that has not
+      # closed yet — the city still working it, held outstanding rather than
+      # collapsed to quiet. answered is that fix unit CLOSED
+      # (conversation_fix_landed): a rework child lands, or a visit is resolved,
+      # so the reply is there to look at. A bare head move is NOT answered — a
+      # merge-in of the base or an operator push leaves the child open.
+      # The disposition lands in the SAME transition as the watermark it routes
+      # past, so outstanding re-derives from it even when the pr.conversation
+      # write was dropped: a routed-but-unanswered comment never decays to
+      # unknown. A caught-up anchor with NO disposition and no carried position
+      # has nothing to assert and stays unknown — conv left empty records nothing,
+      # and the board renders an unrecorded position as unknown. Unanswered
+      # feedback is tested before quiet, so feedback above a watermark never reads
+      # quiet whatever the utterance count says, and an unread count says nothing.
+      if [ "$unanswered" = 1 ]; then
+        conv="outstanding"
+      elif [ -z "$any_human" ]; then
+        conv=""
+      elif [ "$any_human" = 0 ]; then
+        conv="quiet"
+      elif [ "$have_cv" = "answered" ]; then
+        conv="answered"
+      elif [ -n "$adisp" ]; then
+        if conversation_fix_landed "$adisp"; then conv="answered"; else conv="outstanding"; fi
+      elif [ "$have_cv" = "outstanding" ]; then
+        conv="outstanding"
+      else
+        conv=""
+      fi
     fi
   fi
   case " $PR_POSTURES " in
     *" $posture "*) : ;;
     *) [ -z "$posture" ] || { echo "$PROG: $id — refusing to record undeclared posture '$posture'" >&2; posture=""; } ;;
   esac
-  have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
+  # Posture and conversation are both head-pinned and re-pinned together on every
+  # push, so ONE transition records both: merge.sh reads the posture, the board
+  # reads the conversation, and a pass that moved neither writes neither
+  # (lifecycle skips a no-op, and the shell skips the call below when nothing
+  # changed). `pinned` tracks the POSTURE alone — a conversation-only write that
+  # fails still leaves a current posture for merge.sh, which is what
+  # --posture-only reports in its exit code.
+  PC_SETS=(); wrote_p=""; wrote_c=""
   if [ -n "$posture" ]; then
     want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
-    have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
     # pr_posture is a dated key: its review_required value starts an owed clock,
     # so the recorded value carries the instant as a third component and
     # lifecycle.sh preserves it while the posture and the head both hold. Only a
@@ -1953,11 +2087,27 @@ MP_EOF
     case "$have_p" in *@*@*) have_pv="${have_p%@*}" ;; esac
     if [ "$have_pv" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
       pinned=1
-    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           --set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
-      pinned=1
-      postured=$((postured + 1))
-      echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+    else
+      PC_SETS+=(--set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m"); wrote_p="$want_p"
+    fi
+  fi
+  # The conversation rides the same transition on every full or routing pass, and
+  # it MUST: --route-comments-only advances the watermark in its routing arm later
+  # this pass, so a record deferred past that arm would see unanswered=0 with no
+  # prior position and write nothing — outstanding would never land for a comment
+  # routed pre-merge. Record it here, before the route arm consumes unanswered,
+  # never gated on ROUTE_ONLY. --posture-only is the one pass that stops below
+  # without recording (it answers only for merge.sh, which ignores the key). conv
+  # is set only from the literals the vocabulary declares, so no membership guard
+  # is needed — pr-facts.test.sh checks the vocabulary against lifecycle.toml; conv
+  # non-empty implies a resolved head (the derivation above only ran under one).
+  if [ "$POSTURE_ONLY" != 1 ] && [ -n "$conv" ] && [ "$have_cvh" != "$conv@$head_oid" ]; then
+    PC_SETS+=(--set-dated "pr.conversation=$conv@$head_oid"); wrote_c="$conv@$head_oid"
+  fi
+  if [ ${#PC_SETS[@]} -gt 0 ]; then
+    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
+      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); }
+      echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}"
       # The posture value is where a review on the PR lands: an approval, a
       # comment, a change request, or a dismissal. A pass that changes it
       # re-derives the status: label now rather than leaving it for the full
@@ -1965,10 +2115,11 @@ MP_EOF
       # reports UNKNOWN while it computes a PR's mergeability, so most posture
       # writes are a merge state moving into or out of UNKNOWN, often for dozens
       # of open PRs in one arm. Keying on them would buy a derivation per PR in
-      # that arm, and the full pass reconciles those.
-      [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
+      # that arm, and the full pass reconciles those. A conversation-only write
+      # moves no label input.
+      [ -z "$wrote_p" ] || [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
     else
-      echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
+      echo "$PROG: $id posture/conversation record failed for PR#$num; retry next pass" >&2
     fi
   fi
   # merge.sh validates the posture recorded here and never asks GitHub, so an
@@ -2124,20 +2275,18 @@ REAP_EOF
     fi
   fi
 
-  # --- CONFLICTING: bring the branch current, or route its feedback -------------
-  # A conflicting anchor holds the merge. The operator-gate skip guards below — a
-  # hold, a live demand, an armed re-dispatch, a foreign blocker — defer the whole
-  # anchor, feedback included, because each parks the review by design and lifts
-  # on its own; the next pass routes the feedback then. A missing head branch or
-  # fix pool is not such a gate: it blocks only the merge-in dispatch, so an
-  # anchor owing feedback still falls through to the feedback arm, whose visit
-  # fallback dispositions the unresolved-branch and no-fix-pool cases. Past those
-  # guards the anchor is dispatchable, and what it owes decides how: with
-  # unanswered feedback it falls through to the feedback arm below (whose
-  # prepare_mode=merge child brings the branch current as it answers); otherwise
-  # this arm files the one merge-in child, once the PR is approved. The gate that
-  # splits the two, and the approval gate after it, sit just above the dedup.
-  if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+  # --- CONFLICTING: bring the branch current ----------------------------------
+  # A conflicting anchor holds the merge. One that also owes unanswered feedback
+  # belongs to the feedback arm below, whose prepare_mode=merge child brings the
+  # branch current as it answers, whatever holds the anchor. This arm stands
+  # aside for it: a merge-in child here would twin that child on the branch, and
+  # a skip guard here would leave the feedback unanswered behind a hold. With no
+  # feedback owed, this arm files the one merge-in child, after the skip guards
+  # below: a hold, a live demand, an armed re-dispatch or a foreign blocker
+  # defers the merge-in, and a missing head branch or fix pool leaves nowhere to
+  # dispatch it. Past them, the child is filed once the PR is approved, by the
+  # approval gate just above the dedup.
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; } && [ "$unanswered" != 1 ]; then
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -2168,14 +2317,10 @@ REAP_EOF
     fi
     fix_branch="${head_ref:-$branch}"
     # fix_branch and FIX_POOL are needed only to DISPATCH the merge-in child, so
-    # this guard fires under the same condition as that dispatch (below). An anchor
-    # that owes unanswered feedback — or a --route-comments-only pass — does not
-    # dispatch one here; it falls through to the feedback arm, whose visit fallback
-    # dispositions exactly these cases (an unresolved head branch, no configured
-    # fix pool). Skipping the whole anchor would strand that feedback with no
-    # visit, no finding beads, and no validation pass.
+    # this guard fires under the same condition as that dispatch (below): a
+    # --route-comments-only pass dispatches none, so it is not skipped here.
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
-      if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      if [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -2208,15 +2353,11 @@ REAP_EOF
       echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on an early routing pass (--route-comments-only),
-    # this arm files no merge-in child: the feedback arm below dispatches a
-    # prepare_mode=merge child that brings this same branch current (a MERGE of
-    # origin/$base on resume) as it answers, so a merge-in child here would only
-    # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child,
-    # and only on an approved PR.
-    if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    # Past the skip guards, the anchor is dispatchable. An early routing pass
+    # (--route-comments-only) files no merge-in child: routing feedback is its
+    # whole mandate, and this anchor owes none. Only the full pass dispatches this
+    # arm's merge-in child, and only on an approved PR.
+    if [ "$ROUTE_ONLY" != 1 ]; then
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
@@ -2343,6 +2484,15 @@ REAP_EOF
         echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
         skipped=$((skipped + 1)); continue
       fi
+      # A conflict is not always drift. When a change already on the base deleted
+      # or rewrote the code this branch edits, bringing it current decides whether
+      # the branch still has work to do, and a child sent to merge it would stop
+      # and ask. This is read after the dedup above, so a live child (one a sitting
+      # sent to re-scope the branch, say) stands the arm down first, and before the
+      # strand re-route below, so a superseded branch's strand is not routed either.
+      if supersession_holds "$id" "$fix_branch" "$base" "$head_oid" "$num"; then
+        skipped=$((skipped + 1)); continue
+      fi
       reuse=""
       if [ -n "$stranded" ]; then
         reuse="$stranded"
@@ -2404,25 +2554,25 @@ REAP_EOF
   # them.
   if [ "$unanswered" = 1 ]; then
     fix_branch="${head_ref:-$branch}"
-    routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
-    # Read once: the routing choice below turns on whether a person or a sitting
-    # is holding this anchor, and each answer costs a ledger read. The demand may
-    # sit on the anchor or on the live rework child reconciling its branch;
-    # anchor_decision_held reads both.
-    holding=""; anchor_decision_held "$id" && holding=1
 
-    # A human already holding this anchor gets the comments; filing work under a
-    # live human decision fights it, and a child told to answer comments may have
-    # to bring the branch current, which rebase_hold forbids. Absent any of that,
-    # and with a pool to route to, the comments become work.
+    # The batch becomes a rework child whenever there is a branch to work on and
+    # a pool to route it to, whatever holds the anchor. The child is the batch's
+    # fix unit: a must-fix ruling on a finding filed below hangs its
+    # close-ordering edge on the anchor's human-lane rework child (finding.sh
+    # set-disposition). A batch sent to a visit has no child of its own, so a
+    # finding ruled must-fix either holds the merge with nothing acting on it or
+    # attaches to an earlier batch's landed child and closes as answered by work
+    # that never saw it. merge_hold, rebase_hold, a route to a human, a live
+    # demand and an armed re-dispatch therefore choose nothing here. Each still
+    # gates what it gates elsewhere, the merge or the stale-base and red-check
+    # dispatches. The child brings the branch current by merge as it answers, as
+    # every rework child does. On an armed anchor its blocks edge keeps the
+    # anchor out of bd ready, so deferred-dispatch holds the re-pour until the
+    # feedback is answered rather than re-pour the branch under the child. Only
+    # when the city has nowhere to route work does the batch go to a person.
     why=""
     [ -n "$fix_branch" ] || why="the PR head branch is unresolved"
     [ -n "$FIX_POOL" ]   || why="no fix pool is configured"
-    is_held "$rhold"        && why="rebase_hold freezes the branch"
-    is_held "$hold"         && why="merge_hold is set"
-    [ "$routed" = "human" ] && why="the anchor is already routed to a human"
-    [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
-    [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
@@ -3046,9 +3196,10 @@ GATES
         && rc_why="the anchor is already routed to a human"
       anchor_decision_held "$id" && rc_why="a sitting holds it for an operator ruling"
       [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
-      # A held or human-steered anchor is theirs; file nothing under it, exactly
-      # as the conflict and feedback arms stand down on the same gates. The
-      # decision may be filed on the anchor or on the live rework child
+      # A held or human-steered anchor is theirs; file nothing under it, as the
+      # stale-base arm files no merge-in under a hold. Review feedback is the one
+      # batch filed whatever holds the anchor, for the reason the feedback arm
+      # gives. The decision may be filed on the anchor or on the live rework child
       # reconciling its branch; anchor_decision_held reads both.
       if [ -z "$rc_why" ]; then
         required_contexts_for "$base"

@@ -140,8 +140,7 @@ BP_DEFAULT="$(awk '
 #         than an empty roster but must take the same arm.
 mkdir -p "$TMP/bin"
 
-cat > "$TMP/bin/git" <<'GIT'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 case "$1 $2" in
   "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
   "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
@@ -155,8 +154,7 @@ fi
 exit 0
 GIT
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
