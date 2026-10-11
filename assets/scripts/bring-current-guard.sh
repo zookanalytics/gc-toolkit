@@ -36,7 +36,9 @@
 #   the lanes this anchor's rounds reopened (bring_current_reopened) with the
 #   round's time (bring_current_round_at). lane-state.sh lets no approval given
 #   before that time vouch for a reopened lane, so a standing approval neither
-#   lets the merge skip triage nor keeps triage from being dispatched.
+#   lets the merge skip triage nor keeps triage from being dispatched. An anchor
+#   whose check_set declares no triage lane records the round and owes no
+#   ruling.
 #
 # The guard renders no verdict on follow-up, and the worker's rating of an
 # entry gates nothing. Triage decides what the round reopens, and records it
@@ -608,15 +610,17 @@ cmd_guard() {
     return 0
   fi
 
-  cs=$(bca_meta "$AROW" check_set | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')
-  case "$cs" in
-    none|off)
-      gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
-      got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
-      [ "$got" = "$TO" ] || { echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2; return 1; }
-      echo "$PROG: bringing ${BRANCH:-the branch} current conflicted; the audit is recorded on $ANCHOR, whose check_set opts out of review ('$(bca_meta "$AROW" check_set)'), so no triage is owed"
-      return 0 ;;
-  esac
+  # An empty check_set is stamped with the default, which declares triage. A
+  # set that declares no triage lane (an operator's opt-out, or a set without
+  # it) has no triage to reopen, so the round is recorded and owes no ruling.
+  cs=$(bca_meta "$AROW" check_set | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
+  if [ -n "$cs" ] && ! grep -qx -- "$TRIAGE_LANE" <<< "$cs"; then
+    gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
+    got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
+    [ "$got" = "$TO" ] || { echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2; return 1; }
+    echo "$PROG: bringing ${BRANCH:-the branch} current conflicted; the audit is recorded on $ANCHOR, whose check_set ('$(bca_meta "$AROW" check_set)') declares no triage lane, so no ruling is owed"
+    return 0
+  fi
   reopened=$(printf '%s,%s' "$(bca_meta "$AROW" bring_current_reopened)" "$TRIAGE_LANE" \
     | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
   [ -n "$round_at" ] || round_at=$(now)

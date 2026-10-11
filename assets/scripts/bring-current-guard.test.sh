@@ -445,14 +445,16 @@ has "$out" "triage has ruled on it" "…saying the round is settled"
 eq "$(rec_of AN1 | jq -r '.triage.review')" "RV9" "the ruling stays in the record"
 eq "$(cat "$STUB_RO_LOG")" "" "…and nothing is reopened again"
 
-echo "# guard: an anchor that opted out of review records the round and owes no triage"
-store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = "none"')]"
-fresh
-out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
-eq "$rc" "0" "it exits 0"
-has "$out" "opts out of review" "…saying why no triage is owed"
-eq "$(rec_of AN1 | jq -r '.class')" "conflicted" "the round is recorded"
-eq "$(meta AN1 bring_current_reopened)" "<absent>" "…and no lane is reopened"
+echo "# guard: an anchor whose check_set declares no triage lane records the round and owes no ruling"
+for cs in none "correctness, arch"; do
+  store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c --arg cs "$cs" '.metadata.check_set = $cs')]"
+  fresh
+  out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
+  eq "$rc" "0" "check_set '$cs': it exits 0"
+  has "$out" "declares no triage lane, so no ruling is owed" "…saying why"
+  eq "$(rec_of AN1 | jq -r '.class')" "conflicted" "…the round is recorded"
+  eq "$(meta AN1 bring_current_reopened)$(cat "$STUB_RO_LOG")" "<absent>" "…and no lane is reopened"
+done
 
 echo "# guard: a failed record write or supersede hands nothing off"
 store "[$(child MI5 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1)]"
