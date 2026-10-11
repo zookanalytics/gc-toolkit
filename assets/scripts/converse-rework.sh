@@ -19,7 +19,9 @@
 # the merge and gate-ensure's quiescence holds every review dispatch while it is
 # open; when it lands, each lane is re-reviewed at the new head. Without this,
 # the reviews of the pre-ruling head would keep every lane green, and the merge
-# would pass on content no review read.
+# would pass on content no review read. Two backings outlast the supersede, as
+# docs/state-machine.md states: a review already in flight when the ruling is
+# filed, and an operator's GitHub approval.
 #
 # Usage:
 #   converse-rework.sh --anchor <anchor-bead> --ruling-bead <visit> \
@@ -102,7 +104,7 @@ TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 # person rather than taking its landing.
 PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
-[ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty); the child could not keep the rework on it"
+[ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty), so it is not an open PR; nothing filed"
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
 
 if [ -n "$PR_NUMBER" ]; then
