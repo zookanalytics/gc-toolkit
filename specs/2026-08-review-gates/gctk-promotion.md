@@ -68,10 +68,11 @@ readable as a script.
 
 ## Build and deploy
 
-Same pattern as helm-svc, same lessons: a `gctk-build` city order (cooldown,
-staleness by `find -newer` and by the recorded revision, atomic publish, never
-build in the exec path),
-launcher resolves the prebuilt binary. Until the binary exists at the
+Same pattern as helm-svc, same lessons, same script: a `gctk-build` city order
+runs the builder helm-build runs (`assets/scripts/gc-build.sh gctk`), with its
+cooldown, staleness by `find -newer` and by the recorded revision, atomic
+publish, and no build in the exec path. The launcher resolves the prebuilt
+binary. Until the binary exists at the
 deployed path, the shell scripts remain — the driver prefers `gctk` when
 present, falls back to the script during migration, and drops the fallback
 when the last port lands. `lifecycle` dropped its fallback early (tk-crzvfv):
@@ -106,3 +107,7 @@ and answers neither the sharing problem nor deploy as cleanly.
 Linking the beads library directly (changes the observability and permission
 surface); porting anything agents paste; a shared shell library (rejected by
 measured decision, unchanged); rewriting services/helm.
+
+The helm and gctk builders are not a shared library. They are one script,
+`assets/scripts/gc-build.sh`, parameterised by component, so the build logic
+they have in common exists once and no library carries it.
