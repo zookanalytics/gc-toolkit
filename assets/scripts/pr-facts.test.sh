@@ -62,7 +62,7 @@
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout; run directly, the file runs every part in order.
-# run-tests-parts: reconcile posture feedback writeback checks pacing
+# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -239,7 +239,8 @@ child() { # id branch [extra-metadata] [status] [assignee]
 
 ROOT="$(cd "$HERE/../.." && pwd)"
 
-# ==== part reconcile: merged, closed, retargeted and conflicting PRs ====
+# ==== part reconcile: merged, closed, retargeted and conflicting PRs, through
+# the approval a conflicting PR's merge-in waits for ====
 if part reconcile; then
 
 echo "# every section sits inside a part"
@@ -982,6 +983,12 @@ approve 236
 out=$(run)
 has "$out" "re-routing stranded rework ST1" "once the PR is approved, the strand is re-routed as before"
 
+fi # part reconcile
+
+# ==== part rework: the CONFLICTING arm's holds and the feedback it routes, its
+# rework child's birth and stamps, an empty merge commit and a stale gate ====
+if part rework; then
+
 echo "# …a hold vetoes the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 14 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_14.json"
@@ -1467,10 +1474,10 @@ hasnt "$out" "filed re-review" "no re-review child is filed"
 hasnt "$out" "is stale" "…and nothing here calls a moved head stale"
 hasnt "$(cat "$STUB_GC_LOG")" "--on mol-review" "…and no review formula is poured from this arm"
 
-fi # part reconcile
+fi # part rework
 
 # ==== part posture: BLOCKED, dismissals, the posture record, the comment
-# watermark, --posture-only and a sitting's hold ====
+# watermark and the thread reads behind it ====
 if part posture; then
 
 echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
@@ -1997,6 +2004,13 @@ CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG3") | select((.me
 has "$CB" "a new comment" "the work order carries the new comment"
 hasnt "$CB" "confirmed comment" "…and not the one the mark confirmed"
 
+fi # part posture
+
+# ==== part routing: a feedback batch's size, range and ledgers, the
+# comment-rework child its routing stamps and adopts, --posture-only and a
+# sitting's hold ====
+if part routing; then
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # A busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
@@ -2357,7 +2371,7 @@ out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
 
-fi # part posture
+fi # part routing
 
 # ==== part feedback: validation passes, review bodies, CHANGES_REQUESTED and
 # the reads that record nothing ====
@@ -2976,9 +2990,9 @@ eq "$rc" 1 "an unreadable enumeration exits non-zero"
 
 fi # part feedback
 
-# These helpers sit outside every part: parts writeback and checks both use
-# them, and child() here replaces the rework-child helper above for the rest of
-# the file, in every run.
+# These helpers sit outside every part: the parts after them use them, and
+# child() here replaces the rework-child helper above for the rest of the file,
+# in every run.
 # ---- PR write-back: acknowledge on pickup, reply and resolve on landing -------
 # STUB_SELF_LOGIN is gc-city-bot, so "johnzook" is the operator throughout.
 # A write-back fixture states the WHOLE PR, not just its review threads. The
@@ -3025,8 +3039,8 @@ commits() { # num commits-json
     && mv "$TMP/commits.json" "$GH_DIR/threads_$1.json"
 }
 # The provenance cutover the unengaged-thread sections stamp on their anchors.
-# Those sections sit in the writeback and checks parts, and each part runs alone,
-# so the stamp is defined here, outside both.
+# Sections in more than one part stamp it, and each part runs alone, so it is
+# defined here, outside every part.
 UTCUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
@@ -3552,6 +3566,12 @@ FRESHR=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | selec
 hasnt "$FRESHR" "<none>" "…and a fresh OPEN finding is filed, the closed decline not re-adopted in its place"
 eq "$(bstatus DFR)" "closed" "…while the prior declined finding stays closed"
 
+fi # part writeback
+
+# ==== part answers: which batch answers which comment, and the acting identity
+# and the reads an answer rests on ====
+if part answers; then
+
 echo "# a later batch answers its own comments and never the ones before them"
 # The watermark is cumulative and the disposition is overwritten per batch, so
 # an earlier batch's unresolved thread still sits below the mark. It keeps the
@@ -3789,6 +3809,12 @@ threads 50 "$(one_thread 50)"
 out=$(STUB_REPLY_RC=1 run)
 has "$out" "could not reply on thread" "the failed reply is reported"
 eq "$(tresolved 50 T-50)" "false" "…and the thread is left unresolved"
+
+fi # part answers
+
+# ==== part reactions: the reaction cap, the PRs an answer may touch, the
+# Conversation tab, a finding's own answer and the unengaged-thread backstop ====
+if part reactions; then
 
 echo "# over the reaction cap, the batch's answers wait for the acknowledgements"
 # The pickup reaction is what tells the operator their comment was seen. A
@@ -4371,11 +4397,10 @@ eq "$rc" 1 "…and the pre-merge posture pass holds the merge (posture uncurrent
 has "$out" "posture is not current" "…naming the anchor merge must not read this pass"
 eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture merge.sh would clear against"
 
-fi # part writeback
+fi # part reactions
 
-# ==== part checks: merge-hold order, the Conversation tab, red required checks,
-# self-heal, review re-requests, the route-comments-only pass, the status:
-# label and pacing ====
+# ==== part checks: merge-hold order, the Conversation tab and red required
+# checks ====
 if part checks; then
 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
@@ -4573,6 +4598,13 @@ eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unma
 eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
 rm -f "$GH_DIR/rules_main.json"
+
+fi # part checks
+
+# ==== part selfheal: the self-heal reap, parks and the attempt cap, review
+# re-requests, the route-comments-only pass, the status: label and the per-pass
+# bead cache ====
+if part selfheal; then
 
 # ---- self-heal reap: a rework child the branch has outrun, now green, is moot ----
 # The merge-lane analogue of the self-heal the reconcile lane already does. Reaps
@@ -5152,7 +5184,7 @@ unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
-fi # part checks
+fi # part selfheal
 
 # ==== part pacing: the paced walks, their visit order, and the posture basis ====
 if part pacing; then
