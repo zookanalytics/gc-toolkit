@@ -228,6 +228,14 @@ reset "$OTHER" '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{
 OUT=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>&1); RC=$?
 eq "$RC" "2" "the refusal holds beside an undispatched child on this anchor"
 eq "$(writes)" "0" "…which is neither stamped nor dispatched"
+# A live child carrying the key but no anchor_bead was filed before children
+# carried the role marker. It names no other anchor, so it is adopted, and the
+# work order stamps the marker it lacks.
+reset '{"id":"c5","status":"open","assignee":"","notes":"","metadata":{"source_ruling_bead":"vis-1","branch":"polecat/anc-1","target":"main"}}'
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
+eq "$RES" "c5 $ROUTE adopted" "a live child of the source that names no anchor is adopted"
+eq "$(meta c5 anchor_bead)" "anc-1" "…and stamped with this anchor"
+eq "$(created)" "0" "…filing no second child"
 # A dispatched child on the other anchor is refused the same way. Reported as
 # in flight, it would tell the caller a rework stands on this anchor when none
 # was filed here.
