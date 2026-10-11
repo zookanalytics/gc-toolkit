@@ -144,10 +144,12 @@ reference to a dozen live beads.
 
 ## Who asks it
 
-- `escalate.sh` pins every read and write on its board route to its subject's
-  store by path, through `escalation-rig.sh --db`, so a visit lands in the
-  store its subject lives in, the city's included, wherever the caller sits. A
-  subject it cannot place falls back to the caller's `GC_RIG` store. Without
+- `escalate.sh` pins every read and write to its subject's store by path,
+  through `escalation-rig.sh --db`, so a visit lands in the store its subject
+  lives in, the city's included, wherever the caller sits and whichever pool it
+  routes to. A pool never selects the store, so one that does not read the
+  subject's store is refused. A subject it cannot place falls back to the
+  caller's `GC_RIG` store. Without
   `GC_RIG`, what the lookup proved decides. A subject proven to name no bead,
   or a wisp, is filed on the standing triage subject of the store the caller
   sits in. A subject whose store could not be read may still be a real bead,

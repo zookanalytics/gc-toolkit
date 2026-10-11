@@ -293,7 +293,9 @@ The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. A `CHANGES_REQUESTED`
+the operator can judge — files a visit and stays open. Only a fix's thread is
+resolved behind its answer: the thread of a declined or deferred finding stays
+open for the operator to accept or overrule. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
@@ -779,16 +781,30 @@ pool; a child a worker still holds (`in_progress`) or one an operator froze
 resolves. A close with no recorded disposition still transitions to `abandoned`
 and files the rework-or-close visit.
 
-That consummation reaches only the branch-carrying children. The rest of the
-machine review scaffolding carries no branch — the validation pass and the
-finding beads — and each still holds a `blocks` edge on the anchor, directly or
-on a rework that does, so an open one leaves a disposed anchor stuck with
-nothing in the close path reaching it. The cadence's `scaffolding-sweep.sh`
-(arm 10) does reach them: it closes every `task_kind=validation|finding|rework`
-bead whose `anchor_bead` names a disposed, non-merged anchor (`gc.superseded_by`
-or `gc.pr_close_disposition_kind` present) as `gc.outcome=moot`, findings before
-the reworks they block, so the anchor is left with no machine scaffolding
-holding its close. It never touches `task_kind=review` (`review-sweep.sh`'s) or
+That drop reaches only the parked, branch-carrying children. The rest of the
+machine review scaffolding is a fix unit, the finding beads and the validation
+pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
+must-fix finding it answers, so an open one refuses the anchor's close the same
+way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 10 over every
+disposed anchor, and the consummation runs it for its own anchor just before the
+close, so the close is not refused and escalated over scaffolding that arm 10
+would retire later in the same pass. It closes every
+`task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
+non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
+present) as `gc.outcome=moot`, reworks before the findings they block, so no
+close is refused by a blocker still open in the same pass. A bead an operator
+froze (`rebase_hold`) is left standing, like a frozen child.
+
+A finding is mooted only when it objects to the disposed diff: a machine-lane
+finding, a human finding whose locus names no file, or a human comment on a
+line the PR added or removed. A human comment on a line the PR left unchanged
+can cite code the target branch already carries, and the disposal does not
+answer it, so that finding is carried forward instead. A bug bead takes its
+objection, with no `anchor_bead`, so it reaches a first reaction like any
+discovered work, and the finding closes through `bead-rehome.sh` pointed at it.
+When a finding's comment line does not read, the consummation leaves the close
+to the next pass rather than closing the anchor before the finding is judged.
+The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or
 `task_kind=visit`: a disposed PR does not moot the human conversation about why
 it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
 open. Clearing the machine side is what lets that close land once the human side
