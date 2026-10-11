@@ -551,7 +551,7 @@ file the gate through `gc-helm.sh demand` under the topic `first-reaction`, with
 the reaction's takeaway as the question, and hold the subject on it. The topic
 keeps the gate the reaction's own: a re-run refreshes it, and a demand a sitting
 already holds on the subject keeps its question. The sweep's next pass files the
-visit, so a subject can wait up to one cooldown, two minutes, on a gate with no
+visit, so a gated subject can wait up to one pass, a 5-minute cooldown, with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among
@@ -560,6 +560,36 @@ subject's visits. Dismissing the visit without an answer does not close it past
 the gate: `dismiss` exits 5 until the gate is resolved on a ruling or left open,
 and leaving it open clears `gc.gate_visit`, so the sweep offers a second visit
 (see *How a held sitting ends*).
+
+### Two visit channels: keyless conversation, keyed escalation
+
+A visit reaches a person two ways. Both channels file through the one
+`gate-visit` snippet, whose copies `assets/scripts/gate-visit.test.sh` holds to
+the same invariants. Each channel keeps one open visit per situation, and they
+differ in what names the situation.
+
+A **conversation visit** is keyless, and its subject names its situation.
+`gc-helm.sh open` files the operator's board pick, and `gate-visit-sweep` and
+`gc-visit-open.sh` file through it. It folds a second ask into whatever visit is
+already open on the subject. The one deliberate exception is `gc-helm.sh
+engage` when the operator asks for a new visit, which passes `--allow-duplicate`
+to file a fresh visit for a distinct concern. The formula copies of the snippet,
+in `mol-visit`, `mol-validate-close` and `mol-feedback-distiller`, first look
+for a conversation visit already open on the subject and reuse it. That check
+matters when a step runs twice, either because a later command in it failed and
+the block is re-run or because a second session takes a re-offered step.
+Without it the second run files a second visit, which goes on asking after the
+first one is answered. Both paths read coverage through
+`assets/scripts/visit-identity.sh`. It reads the visit's `tracks` edge and falls
+back to the `gc.continuation_group` stamp.
+
+An **escalation visit** is keyed. `assets/scripts/escalate.sh` stamps
+`escalation_key` and keeps one open visit per subject and key. It also carries a
+verdict window, which declines to re-raise a situation a person already ruled
+moot or benign. That is what a detector that re-fires every cycle needs. A
+formula copy never reuses an escalation visit. `escalate.sh --retract` closes
+one as moot when its own situation clears, and the formula's question would
+close with it, unasked.
 
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 

@@ -60,6 +60,22 @@
 #             explicit visit id and a freshly filed visit get no such hint
 #   (MOOT-GATE) a bound pre-existing visit whose blocks-gate has since closed is
 #             flagged possibly-moot from a read-only check of its blocks-deps
+#   (SKILL)   --skill files a NEW visit whose body is the lens brief, the name
+#             checked against the sitting's own roster (rig + model) and a bare
+#             name resolved to its full one; the title and summary name it
+#   (SKILL-TEMPLATE/REASON) an opener follows the lens brief and rides the title
+#   (SKILL-CODEX) the codex roster is read for a codex sitting, and the brief
+#             rides its kick
+#   (SKILL-UNKNOWN/AMBIG/BADNAME) a name the roster lacks, a bare name two packs
+#             carry, and a malformed or empty name are refused before anything
+#             is filed or spawned (exit 2)
+#   (SKILL-VISITID) --skill on an explicit visit id is refused (exit 2): its
+#             brief is already written, so the message points at the subject
+#   (SKILL-UNREAD) an unreadable roster seeds the typed name unverified
+#   (SKILL-NEWSUBJ) --new-subject with --skill: the title is the opener
+#   (IA-SKILL*) on a TTY a new visit is asked for a skill after the model (Enter
+#             = none, ? lists, a number picks, an unknown name is asked again);
+#             an existing visit is not asked
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -271,6 +287,21 @@ case "$1 ${2:-}" in
       printf '%s' "$SID" > "$SPAWNED"
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
+  "skill list")
+    # The sitting's skill roster engage --skill resolves against; the --agent it
+    # was asked about is recorded. Default: review-arch and review-pm, each
+    # listed twice the way the live listing repeats a skill the city and the rig
+    # both import, beside a core skill. $SKILL_AMBIG adds a second pack's
+    # review-arch so the bare name is ambiguous; $SKILL_ROSTER_BROKEN fails the
+    # listing, the fail-open path.
+    printf 'skill list %s\n' "$*" >> "$CALLS"
+    if [ -n "${SKILL_ROSTER_BROKEN:-}" ]; then echo "skill list: data plane down" >&2; exit 1; fi
+    jq -n --arg amb "${SKILL_AMBIG:-}" \
+      '{schema_version:"1", ok:true, agent:"a", entries:(
+          [ "core.gc-work", "gc-toolkit.review-arch", "gc-toolkit.review-arch",
+            "gc-toolkit.review-pm", "gc-toolkit.review-pm" ]
+          + (if $amb != "" then ["contributing.review-arch"] else [] end)
+          | map({name:., source:(split(".")[0]), path:("/skills/" + . + "/SKILL.md")}))}' ;;
   "session attach")
     printf 'session attach %s\n' "$*" >> "$CALLS" ;;
   "session suspend")
@@ -1133,6 +1164,9 @@ has "$OUT" "Subject has open visit" "(IA-VISIT-EXISTING) …after listing the op
 has "$OUT" "[d] discuss broadly" "(IA-VISIT-EXISTING) …in one prompt that also offers the new-visit seed letters"
 hasnt "$CALLED" "bd create" "(IA-VISIT-EXISTING) …files nothing"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISIT-EXISTING) …and engages it"
+# An existing visit's brief was written when it was filed, so there is no new
+# body for a skill to seed: the skill prompt is not asked.
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-EXISTING) …and asks no skill, since its brief is already written"
 unset HAVE_VISIT
 
 echo "# a subject engage grounds the operator with a one-line summary before the visit prompt"
@@ -1183,21 +1217,24 @@ unset HAVE_VISIT
 echo "# a seed letter at the one prompt files a NEW visit carrying that seed, even with a visit present"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter model (Opus)
-run_engage_tty 'd\n\n' tk-subj --no-attach
+# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter
+# model (Opus) · Enter skill (none)
+run_engage_tty 'd\n\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-TEMPLATE) new visit + template exits 0"
 has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
 hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
 has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
 has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
 has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
+has "$OUT" "Skill — Enter = none" "(IA-SKILL-NONE) a new visit is asked for a skill"
+hasnt "$CALLED" "Load that skill" "(IA-SKILL-NONE) …and Enter seeds none, leaving the seed as the whole brief"
 unset HAVE_VISIT
 
 echo "# free text at the one prompt opens a NEW visit carrying it verbatim as the opener"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# free text (not a number or seed letter) · Enter model
-run_engage_tty 'lets revisit the scope\n\n' tk-subj --no-attach
+# free text (not a number or seed letter) · Enter model · Enter skill (none)
+run_engage_tty 'lets revisit the scope\n\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-FREETEXT) new visit + free text exits 0"
 has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new visit is filed"
 has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"
@@ -1251,8 +1288,9 @@ unset VIS_CGROUP VIS_TRACKS
 echo "# a subject given by title search resolves and engages"
 export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SEARCH_HIT=1
 printf 'open' > "$VIS_STATUS"
-# search text · [1] pick the match · starter Enter (none) · model Enter (Opus)
-run_engage_tty 'findme\n1\n\n\n' --no-attach
+# search text · [1] pick the match · starter Enter (none) · model Enter (Opus) ·
+# skill Enter (none)
+run_engage_tty 'findme\n1\n\n\n\n' --no-attach
 eq "$RC" 0 "(IA-SUBJECT-SEARCH) a title-searched subject resolves and engages, exit 0"
 has "$CALLED" "session new converse-opus" "(IA-SUBJECT-SEARCH) …spawning for the resolved subject's visit"
 unset SEARCH_HIT
@@ -1368,16 +1406,160 @@ hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 
 echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"
 # One converse-capable rig in the stub, so the rig step auto-selects (reads no
-# input); the answers then feed the title prompt and the model prompt (Enter=Opus).
+# input); the answers then feed the title prompt, the model prompt (Enter=Opus),
+# and the skill prompt a new visit gets (Enter=none).
 export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
-run_engage_tty 'draft the Q3 plan\n\n' --new-subject --no-attach
+run_engage_tty 'draft the Q3 plan\n\n\n' --new-subject --no-attach
 eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
 has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
 has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
 has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
 has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
+
+# ── --skill: a sitting seeded with a skill as its lens ────────────────
+echo
+echo "# --skill files a NEW visit whose body is the lens brief, even with one parked"
+# The lens brief is the new visit's body, the claim-time brief every sitting
+# reads, so the skill reaches the sitting on any model with no per-skill
+# template. The name is checked against the roster of the sitting that will
+# spawn: its rig, and its model's converse agent.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL) --skill on a subject exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-opus" "(SKILL) the name is checked against the sitting's own roster (its rig and model)"
+has "$CALLED" "bd create" "(SKILL) …a NEW visit is filed, past the parked one"
+hasnt "$OUT" "already open" "(SKILL) …deliberately, past the one-visit dedup"
+has "$CALLED" "visit: tk-subj — review-arch lens" "(SKILL) …titled by the skill, so the board row says whose view it brings"
+has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL) …its body is the lens brief, the bare name resolved to the full one"
+has "$CALLED" "Load that skill" "(SKILL) …which has the sitting load the skill"
+has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, frame through the lens and wait"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(SKILL) …then a sitting spawns for the new visit"
+hasnt "$CALLED" "session nudge" "(SKILL) …and the opus sitting reads the lens from the body, unkicked"
+has "$OUT" "✓ converse-opus with review-arch on new visit" "(SKILL) the summary names the skill the sitting was seeded with"
+
+echo "# a full skill name resolves to exactly that skill"
+run_engage tk-subj --skill gc-toolkit.review-pm --no-input --no-attach
+eq "$RC" 0 "(SKILL-FULL) a full --skill name exits 0"
+has "$CALLED" "through the gc-toolkit.review-pm" "(SKILL-FULL) …and seeds exactly that skill"
+
+echo "# with an opener, the lens brief leads and the opener follows it"
+run_engage tk-subj --skill review-arch --template discuss-broadly --no-input --no-attach
+eq "$RC" 0 "(SKILL-TEMPLATE) --skill with --template exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"talk through tk-subj broadly"*)
+    ok "(SKILL-TEMPLATE) the body is the lens brief, then the seed as the opener that says what to do first" ;;
+  *) bad "(SKILL-TEMPLATE) the body should be the lens brief followed by the seed (got: $CALLED)" ;;
+esac
+has "$CALLED" "visit: tk-subj — review-arch lens: discuss broadly" "(SKILL-TEMPLATE) …and the title carries the skill, then the seed label"
+run_engage tk-subj --skill review-arch --reason "is the split justified" --no-input --no-attach
+eq "$RC" 0 "(SKILL-REASON) --skill with --reason exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"is the split justified"*)
+    ok "(SKILL-REASON) the reason follows the brief as the opener" ;;
+  *) bad "(SKILL-REASON) the body should be the lens brief followed by the reason (got: $CALLED)" ;;
+esac
+has "$CALLED" "visit: tk-subj — review-arch lens: is the split justified" "(SKILL-REASON) …and rides the title after the skill"
+
+echo "# a codex sitting is checked against codex's roster, and the brief rides its kick"
+run_engage tk-subj --skill review-arch --model codex --no-input --no-attach
+eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex" "(SKILL-CODEX) the roster read is the codex sitting's"
+has "$(printf '%s\n' "$CALLED" | grep '^session nudge')" "through the gc-toolkit.review-arch" "(SKILL-CODEX) …and the codex kick carries the lens brief"
+unset HAVE_VISIT
+
+echo "# a name the roster does not carry is refused before anything is filed"
+export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER=""
+run_engage tk-subj --skill nope --no-input --no-attach
+eq "$RC" 2 "(SKILL-UNKNOWN) an unknown --skill exits 2"
+has "$OUT" "unknown --skill 'nope'" "(SKILL-UNKNOWN) …naming the fault"
+has "$OUT" "core.gc-work gc-toolkit.review-arch gc-toolkit.review-pm" "(SKILL-UNKNOWN) …and listing what the sitting carries, deduped"
+hasnt "$CALLED" "bd create" "(SKILL-UNKNOWN) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-UNKNOWN) …nothing spawned"
+
+echo "# a bare name two packs both carry is ambiguous until named in full"
+export SKILL_AMBIG=1
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-AMBIG) an ambiguous bare --skill exits 2"
+has "$OUT" "contributing.review-arch gc-toolkit.review-arch" "(SKILL-AMBIG) …naming both candidates"
+hasnt "$CALLED" "bd create" "(SKILL-AMBIG) …nothing filed"
+run_engage tk-subj --skill gc-toolkit.review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-AMBIG) …and the full name settles it"
+has "$CALLED" "through the gc-toolkit.review-arch" "(SKILL-AMBIG) …seeding the named one"
+unset SKILL_AMBIG
+
+echo "# a malformed or empty --skill is refused before the roster is read"
+run_engage tk-subj --skill 'review|arch' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) a --skill carrying a metacharacter exits 2"
+hasnt "$CALLED" "skill list" "(SKILL-BADNAME) …refused before the roster is read"
+hasnt "$CALLED" "bd create" "(SKILL-BADNAME) …nothing filed"
+run_engage tk-subj --skill '' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) an empty --skill exits 2"
+run_engage tk-subj --skill=review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-BADNAME) the --skill=<name> spelling is accepted"
+
+echo "# --skill on an explicit visit id is refused — its brief is already written"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-VISITID) --skill with an explicit visit id exits 2"
+has "$OUT" "engage tk-subj --skill review-arch" "(SKILL-VISITID) …pointing at the visit's subject"
+hasnt "$CALLED" "bd create" "(SKILL-VISITID) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-VISITID) …nothing spawned"
+
+echo "# a roster that will not read seeds the typed name unverified"
+# The same fail-open reading engage takes for a model it cannot confirm: the
+# operator's choice goes through, says it went unverified, and the brief tells
+# the sitting to say so if it cannot load the skill.
+export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SKILL_ROSTER_BROKEN=1
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-UNREAD) an unreadable roster does not block the engage"
+has "$OUT" "seeded unverified" "(SKILL-UNREAD) …it says the name went unverified"
+has "$CALLED" "through the review-arch" "(SKILL-UNREAD) …and the brief carries the name as typed"
+unset SKILL_ROSTER_BROKEN
+
+echo "# --new-subject with --skill: the subject title is the opener after the brief"
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage "weigh the renderer split" --new-subject --rig gc-toolkit --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-NEWSUBJ) --new-subject with --skill exits 0"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "visit: tk-newsubj — review-arch lens: weigh the renderer split" "(SKILL-NEWSUBJ) the visit is titled by the skill, then the subject"
+has "$CALLED" "look at tk-newsubj through the gc-toolkit.review-arch" "(SKILL-NEWSUBJ) …and briefed with the lens on the new subject"
+
+echo "# on a TTY a new visit is asked for a skill after the model; a name seeds it"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# [d] new visit seeded discuss-broadly · Enter model (Opus) · skill review-arch
+run_engage_tty 'd\n\nreview-arch\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL) a skill typed at the prompt exits 0"
+case "$OUT" in
+  *"Model —"*"Skill — Enter = none"*) ok "(IA-SKILL) the skill prompt follows the model prompt" ;;
+  *) bad "(IA-SKILL) the skill prompt should follow the model prompt" ;;
+esac
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL) …the typed bare name seeds the resolved skill"
+has "$CALLED" "talk through tk-subj broadly" "(IA-SKILL) …with the picked seed following as the opener"
+has "$CALLED" "visit: tk-subj — review-arch lens: discuss broadly" "(IA-SKILL) …and both in the title"
+
+echo "# ? lists the sitting's skills, a number picks one, and an unknown name is asked again"
+# [d] seed · Enter model · "nope" (unknown, re-asked) · ? (list) · [2]
+run_engage_tty 'd\n\nnope\n?\n2\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL-LIST) list-then-pick exits 0"
+has "$OUT" 'no skill "nope" on this sitting' "(IA-SKILL-LIST) an unknown name is asked again, not refused"
+has "$OUT" "[2] gc-toolkit.review-arch" "(IA-SKILL-LIST) ? lists the roster, numbered"
+has "$OUT" "[3] gc-toolkit.review-pm" "(IA-SKILL-LIST) …deduped, each skill once"
+hasnt "$OUT" "[4]" "(IA-SKILL-LIST) …with no repeated entries"
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL-LIST) …and the number picks from that list"
+
+echo "# --skill on a TTY skips the visit/starter prompt: it already chose a new visit"
+run_engage_tty '\n' tk-subj --skill review-arch --no-attach
+eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
+hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no visit/starter prompt"
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
+has "$CALLED" "visit: tk-subj — review-arch lens" "(IA-SKILL-FLAG) …filing the new visit with the lens"
+unset HAVE_VISIT
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"

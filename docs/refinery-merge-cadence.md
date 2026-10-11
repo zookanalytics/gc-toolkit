@@ -347,8 +347,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
    filed with its edge reversed, a landed fix whose finding that release missed
-   — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
-   not a count on the check.
+   — stop the PR moving rather than spin the dispatcher.
    It visits every gating anchor, so its cost grows with the set. It runs after
    merge and pr-open and under its share of the pass budget. It first visits the
    anchors it can act on: one with no `check_set` (it owes the stamp), one with
@@ -428,13 +427,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    a visit when the person closes it. Once the comment's bead has closed, and
    its own finding has closed if it has one, the comment is resolved: an answer
    leading with a check mark says what resolved it, and the comment trades its
-   EYES reaction for THUMBS_UP. A finding ruled needs-you keeps its comment
-   awaiting a person, and a declined or deferred finding resolves its comment;
-   in both cases the finding's own owed reply is the answer, and it carries the
-   same glyph. An inline comment is answered in its thread. The thread is
-   answered once every routed comment in it is resolved, by one reply naming
-   each bead, and is resolved behind that reply. A review body or a Conversation
-   comment has no thread, so a Conversation comment of the city's links to the
+   EYES reaction for THUMBS_UP. An answer for a rework child names the commits
+   it made: the PR's non-merge commits whose message names the child, and of
+   those only the ones naming the comment when any do. It says Fixed when the
+   comment's must-fix finding closed with that rework. It never names the PR
+   head for being the head, since the head can be a merge of the base. A
+   finding ruled needs-you keeps its comment awaiting a person, and its owed
+   reply is the answer, leading with the question mark. A declined or deferred
+   finding's owed reply is its comment's answer too. That reply leads with the
+   ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
+   the PR tells a fix from a pushback, and the comment trades EYES for
+   THUMBS_UP once it is on the PR. Whether an owed reply is on the PR is read
+   back off GitHub on every pass, by its own text, so another reply in the
+   thread never stands in for it. An inline comment is answered in its thread.
+   The thread is answered once every routed comment in it is resolved, by one
+   reply naming each bead. It is resolved behind that reply unless it holds a
+   declined or deferred finding, whose thread stays open for the operator to
+   accept or overrule, as a needs-you finding's does until they rule. A review
+   body or a Conversation comment has no thread, so a Conversation comment of
+   the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves
    out of a batch the feedback the review threads already answered: an inline
    comment in a resolved thread with a later post of the city's, or a review
@@ -461,15 +472,47 @@ the cadence — the arms run whether or not any refinery session is awake.
    each, so it rotates with the rest until the hold lifts. The marks live in
    `pr-facts.cursor.seen`, and a walk with none records them and puts nothing
    first for a change. The write-back sweep reads GitHub only for the anchors
-   carrying a disposition, at least four calls each, so it runs under the same
-   deadline in a rotation of its own
+   carrying a disposition or owed a finding post or answer (below), at least
+   four calls each, so it runs under the same deadline in a rotation of its own
    (`pr-facts.cursor.writeback`), with one anchor visited even on a pass whose
    walk spent the deadline. It visits first an anchor whose disposition, a
    watermark, or its live children changed since the sweep last visited it: a
-   batch routed, or the work answering one closing.
+   batch routed, or the work answering one closing. An anchor with no
+   disposition, there only for the findings its PR is owed, rotates with the
+   rest.
+   The same sweep carries each machine-lane finding ruled worth fixing
+   (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
+   file the diff touches becomes a file-level review comment on that file, and
+   any other locus becomes a Conversation comment. Once the finding closes, the
+   comment is answered with how it closed: the fix units and the commits they
+   made, the deferral's follow-up, or the decline. A fixed finding's
+   thread is then resolved unless a post that is not the city's own has come
+   after it. A declined or deferred finding's thread stays open for the
+   operator to accept or overrule. A Conversation comment is edited to carry the
+   answer. A finding that closed
+   before it was posted, as a pre-open round's findings have, is posted with its
+   answer already in place. A human finding is never posted, because it already
+   sits on the PR where its raiser wrote it and is answered there. One
+   store-wide read of the findings serves the pass, and `finding.pr_comment` and
+   `finding.pr_answered` record each write, so an anchor whose findings are
+   settled costs no GitHub call; at most `WB_FINDING_CAP` posts and answers go
+   out per pass. A posted finding holds nothing, since a `must-fix` holds the
+   merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
+   they carry the city's mark and no feedback reader routes them or reads their
+   thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
+   which is how a later pass finds the finding's comment. The BLOCKED
+   escalation does not count a thread that holds only the city's finding
+   comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
+   a declined or deferred finding's answer adds, since that thread waits for a
+   person.
 8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`.
+   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
+   store. The arm lists the rig's open owned convoys first, then reads each
+   candidate's parent-child children and `tracks` targets, so a rig with no
+   owned integration convoy costs one read. A pass that answers every
+   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
+   reads nothing until that stamp is 15 minutes old.
 9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
@@ -488,18 +531,27 @@ the cadence — the arms run whether or not any refinery session is awake.
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
    machine review scaffolding does not close with it: the validation pass, the
    finding beads, and the rework/fix-unit beads stay open, each holding a
-   `blocks` edge on the anchor or on a rework that blocks it, and each holding
-   gate-ensure's quiescence, so the disposed anchor stands stuck behind work that
-   will never land. Nothing else retires them on a disposal: `close-answered`
-   keys on a fix LANDING, and `review-sweep` on an anchor already closed. This
-   arm closes each `task_kind=validation|finding|rework` bead whose `anchor_bead`
-   names a disposed, non-merged anchor — `gc.outcome=moot`, the reason appended,
-   read back — findings before the reworks they block so a rework's close is not
-   refused the same pass. It leaves `task_kind=review` to review-sweep and
-   `task_kind=visit` to the human side, and never closes the anchor itself: that
-   is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh` while a human
-   visit is owed — which clearing the machine scaffolding here lets land once no
-   visit is. A merged anchor is a landing, never a disposal, and is skipped.
+   `blocks` edge on the anchor (a fix unit also blocks the must-fix findings it
+   answers), and each holding gate-ensure's quiescence, so the disposed anchor
+   stands stuck behind work that will never land. Nothing else retires them on a
+   disposal: `close-answered` keys on a fix LANDING, and `review-sweep` on an
+   anchor already closed. This arm closes each
+   `task_kind=validation|finding|rework` bead whose `anchor_bead` names a
+   disposed, non-merged anchor — `gc.outcome=moot`, the reason appended, read
+   back — reworks before the findings they block so a finding's close is not
+   refused the same pass. A finding is mooted only when it objects to the
+   disposed diff. A human review comment on a line the PR left unchanged can
+   cite code the target branch already carries, so its finding is carried
+   forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
+   inline comments are read once per anchor that carries such a candidate. It
+   leaves `task_kind=review` to review-sweep, `task_kind=visit` to the human
+   side, and a `rebase_hold` freeze to the operator, and never closes the anchor
+   itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
+   while a human visit is owed — which clearing the machine scaffolding here
+   lets land once no visit is. Arm 7 runs this same sweep with `--anchor` for
+   the one anchor whose PR-close disposition it is consummating, just before
+   that close, so the close lands in the pass that reads the closed PR. A
+   merged anchor is a landing, never a disposal, and is skipped.
 11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
@@ -667,6 +719,7 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
+| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

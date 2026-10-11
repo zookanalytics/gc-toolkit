@@ -50,13 +50,16 @@ bash -n "$SUT" && ok "converse-claim.sh: valid bash" \
 #   hook  --claim --json -> a claim for v-x; CLAIM_MODE=nowork drops bead_id,
 #         CLAIM_REASON/CLAIM_GROUP set the reason and continuation group.
 #   bd show <id> --json  -> the visit v-x with optional gc.hold_demand
-#         (HOLD_DEMAND) and gc.outcome (OUTCOME) and status (SHOW_STATUS);
+#         (HOLD_DEMAND), gc.outcome (OUTCOME), gc.work_outcome (WORK_OUTCOME,
+#         or the last one an update wrote) and status (SHOW_STATUS);
 #         SHOW_MODE=unreadable returns [] for the cannot-read-the-visit arm.
 #   bd list ... --json   -> a gate-demand on DEMAND_FOR (default g, the claim's
 #         group, which is the subject), but ONLY when --include-gates is present;
 #         a flagless list returns []. An empty DEMAND_FOR means no demand
 #         exists on any read.
+#   bd update <id> ...   -> records a gc.work_outcome it is handed, exits 0.
 #   bd close <id>        -> exits CLOSE_RC (default 0).
+# Updates and closes are logged to EVENTS, when set, in the order they ran.
 # Any other call exits 2, so a script that grows one fails here, not live.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
@@ -70,14 +73,25 @@ case "${1:-}" in
         case "${2:-}" in
             show)
                 if [ "${SHOW_MODE-}" = unreadable ]; then printf '[]\n'; exit 0; fi
+                wo="${WORK_OUTCOME-}"
+                [ -n "${EVENTS-}" ] && [ -f "$EVENTS.wo" ] && wo="$(cat "$EVENTS.wo")"
                 jq -nc --arg hd "${HOLD_DEMAND-}" \
-                       --arg oc "${OUTCOME-}" --arg st "${SHOW_STATUS-}" \
+                       --arg oc "${OUTCOME-}" --arg st "${SHOW_STATUS-}" --arg wo "$wo" \
                     '{id:"v-x",
                       status:(if $st == "" then "open" else $st end),
                       metadata:({"task_kind":"visit"}
                         + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
-                        + (if $oc == "" then {} else {"gc.outcome":$oc} end))}
+                        + (if $oc == "" then {} else {"gc.outcome":$oc} end)
+                        + (if $wo == "" then {} else {"gc.work_outcome":$wo} end))}
                       | [.]'
+                exit 0 ;;
+            update)
+                [ -n "${EVENTS-}" ] && printf '%s\n' "$*" >>"$EVENTS"
+                for a in "$@"; do
+                    case "$a" in
+                        gc.work_outcome=*) [ -n "${EVENTS-}" ] && printf '%s' "${a#gc.work_outcome=}" >"$EVENTS.wo" ;;
+                    esac
+                done
                 exit 0 ;;
             list)
                 want=0; for a in "$@"; do [ "$a" = "--include-gates" ] && want=1; done
@@ -88,7 +102,9 @@ case "${1:-}" in
                     (if $i != "" and $w == "1" then [{id:"d-x", metadata:{"gc.demand_for":$i}}] else [] end)
                     + (if $o != "" then [{id:"t-ordinary", metadata:{}}] else [] end)'
                 exit 0 ;;
-            close) exit "${CLOSE_RC:-0}" ;;
+            close)
+                [ -n "${EVENTS-}" ] && printf '%s\n' "$*" >>"$EVENTS"
+                exit "${CLOSE_RC:-0}" ;;
             *) exit 2 ;;
         esac ;;
     *) exit 2 ;;
@@ -197,6 +213,26 @@ if grep -qF -- 'close --visit v-x --subject g' "$REC_PVC_LOG"; then
 else
     bad "the finish closes the visit's PR reminder, on the subject GROUP names" "recorder log: $(cat "$REC_PVC_LOG")"
 fi
+
+echo "── the stranded finish stamps the work outcome before its close ──"
+# The close runs the work-record gate, which wants gc.work_outcome. A sitting
+# that died between its outcome stamp and its close, or that predates the key,
+# never stamped it, so the finish stamps it first: one write of its own, then
+# the close.
+EVENTS="$TMPD/finish.events"; rm -f "$EVENTS" "$EVENTS.wo"
+run OUTCOME=settled SHOW_STATUS=closed EVENTS="$EVENTS"
+has  "the finish verdict is unchanged" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
+WO_AT=$(grep -n '^bd update v-x --set-metadata gc.work_outcome=no-op$' "$EVENTS" 2>/dev/null | head -1 | cut -d: -f1)
+CL_AT=$(grep -n '^bd close v-x' "$EVENTS" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -n "$WO_AT" ] && [ -n "$CL_AT" ] && [ "$WO_AT" -lt "$CL_AT" ]; then
+    ok "the finish stamps gc.work_outcome=no-op before the close the gate checks"
+else
+    bad "the finish stamps gc.work_outcome=no-op before the close the gate checks" "events: $(cat "$EVENTS" 2>/dev/null)"
+fi
+rm -f "$EVENTS" "$EVENTS.wo"
+run OUTCOME=settled SHOW_STATUS=closed EVENTS="$EVENTS" WORK_OUTCOME=abandoned
+hasnt "a work outcome the visit already records is not written over" "gc.work_outcome=" "$(cat "$EVENTS" 2>/dev/null)"
+has  "…and the visit is still closed" "bd close v-x" "$(cat "$EVENTS" 2>/dev/null)"
 
 echo "── --sh: the same verdict as eval-able shell assignments ──"
 # The converse prompt runs `eval "$(converse-claim.sh --sh "$SUBJECT")"`, so the

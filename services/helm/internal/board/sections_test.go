@@ -1,6 +1,7 @@
 package board
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -332,35 +333,153 @@ func TestVisitKeptWhenSubjectHasNoTile(t *testing.T) {
 	}
 }
 
-// TestClosedVisitDoesNotFold: a visit that has itself closed is a finished
-// conversation, not a live ask — it stays in the DONE band and does not make its
-// subject owed.
-func TestClosedVisitDoesNotFold(t *testing.T) {
-	v := visitAnchor("tk-vc", "tk-subj", "an ask that ended")
-	v.ClosedAt = daysAgo(1)
-	anchors := []Anchor{
-		v,
-		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
-			Children: []Child{{ID: "tk-c1", Status: "open"}}},
-	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+// TestClosedWrapperDropsBesideItsSubject: a visit or demand that has itself
+// closed is a finished conversation, not a live ask. Its subject's row, live or
+// DONE, already stands for the attention, so the closed wrapper takes no row
+// beside it. Its ask does not fold either, so the subject's row is exactly the
+// row the subject has on its own: not owed, not held, its own needs and band.
+func TestClosedWrapperDropsBesideItsSubject(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		wrapper       Anchor
+		subjectClosed bool
+	}{
+		{"visit, live subject", visitAnchor("tk-wc", "tk-subj", "an ask that ended"), false},
+		{"visit, DONE subject", visitAnchor("tk-wc", "tk-subj", "an ask that ended"), true},
+		{"demand, live subject", demandAnchor("tk-wc", "tk-subj", "an ask that ended"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tc.wrapper
+			w.ClosedAt = daysAgo(1)
+			subject := Anchor{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+				Children: []Child{{ID: "tk-c1", Status: "open"}}}
+			if tc.subjectClosed {
+				subject.ClosedAt = daysAgo(2)
+			}
+			b := BuildBoard([]Anchor{w, subject}, fixtureNow, false, nil, Facts{})
 
-	subj, ok := tileByID(b, "tk-subj")
-	if !ok {
-		t.Fatalf("subject present")
+			if wc, ok := tileByID(b, "tk-wc"); ok {
+				t.Errorf("a closed wrapper beside its subject's row takes no row of its own; got one in %q", wc.Section)
+			}
+			subj := mustTile(t, b, "tk-subj")
+			if subj.Owed || subj.Needs == "an ask that ended" {
+				t.Errorf("a closed wrapper's ask must not fold onto its subject: owed=%v needs=%q", subj.Owed, subj.Needs)
+			}
+			alone := mustTile(t, BuildBoard([]Anchor{subject}, fixtureNow, false, nil, Facts{}), "tk-subj")
+			if !reflect.DeepEqual(subj, alone) {
+				t.Errorf("a closed wrapper leaves its subject's row as the subject has it alone:\n got  %+v\n want %+v", subj, alone)
+			}
+		})
 	}
-	if subj.Owed {
-		t.Errorf("a closed visit must not make its subject owed")
+}
+
+// TestClosedWrapperChainDropsToItsSubject: a demand gates an epic, and a visit
+// and a second demand are filed on that demand; all three have closed. Each one's
+// subject has a row: the epic for the inner demand, the inner demand for the
+// other two. The inner demand's row goes in favour of the epic's, so the epic's
+// row is the one left, exactly as the epic has it on its own.
+func TestClosedWrapperChainDropsToItsSubject(t *testing.T) {
+	epic := Anchor{ID: "tk-epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+		Children: []Child{{ID: "tk-c1", Status: "open"}}}
+	inner := demandAnchor("tk-d1", "tk-epic", "set direction on the epic")
+	visit := visitAnchor("tk-v", "tk-d1", "discuss broadly")
+	outer := demandAnchor("tk-d2", "tk-d1", "what the discussion settles next")
+	for _, w := range []*Anchor{&inner, &visit, &outer} {
+		w.ClosedAt = daysAgo(1)
 	}
-	if subj.Needs == "an ask that ended" {
-		t.Errorf("a closed visit's ask must not become the subject's needs")
+	b := BuildBoard([]Anchor{epic, inner, visit, outer}, fixtureNow, false, nil, Facts{})
+
+	for _, id := range []string{"tk-d1", "tk-v", "tk-d2"} {
+		if w, ok := tileByID(b, id); ok {
+			t.Errorf("%s: a closed wrapper whose subject has a row takes none of its own; got one in %q", id, w.Section)
+		}
 	}
+	alone := mustTile(t, BuildBoard([]Anchor{epic}, fixtureNow, false, nil, Facts{}), "tk-epic")
+	if got := mustTile(t, b, "tk-epic"); !reflect.DeepEqual(got, alone) {
+		t.Errorf("closed wrappers leave the epic's row as the epic has it alone:\n got  %+v\n want %+v", got, alone)
+	}
+}
+
+// TestClosedWrapperLoopKeepsItsRows: two closed visits that each name the other
+// as their subject. Each subject has a row, but dropping each beside the other
+// would leave neither, so a loop of closed wrappers keeps its rows in DONE.
+func TestClosedWrapperLoopKeepsItsRows(t *testing.T) {
+	va := visitAnchor("tk-va", "tk-vb", "first ask")
+	vb := visitAnchor("tk-vb", "tk-va", "second ask")
+	va.ClosedAt, vb.ClosedAt = daysAgo(1), daysAgo(1)
+	b := BuildBoard([]Anchor{va, vb}, fixtureNow, false, nil, Facts{})
+
+	for _, id := range []string{"tk-va", "tk-vb"} {
+		v, ok := tileByID(b, id)
+		if !ok {
+			t.Errorf("%s: a closed wrapper in a loop keeps its row", id)
+			continue
+		}
+		if v.Section != SectionDone {
+			t.Errorf("%s: bands done: got %q", id, v.Section)
+		}
+	}
+}
+
+// TestClosedVisitWithNoSubjectRowStaysDone: a closed visit whose subject has no
+// row is the only trace of the attention it carried, so it keeps its own row in
+// the DONE band, as any closed anchor does.
+func TestClosedVisitWithNoSubjectRowStaysDone(t *testing.T) {
+	v := visitAnchor("tk-vc", "tk-ghost", "an ask that ended")
+	v.ClosedAt = daysAgo(1)
+	b := BuildBoard([]Anchor{v}, fixtureNow, false, nil, Facts{})
+
 	vc, ok := tileByID(b, "tk-vc")
 	if !ok {
-		t.Fatalf("the closed visit stays as its own row")
+		t.Fatalf("a closed visit with no subject row must keep its row")
 	}
 	if vc.Section != SectionDone {
 		t.Errorf("the closed visit bands done: got %q", vc.Section)
+	}
+}
+
+// TestVisitLifecycleKeepsOneRow follows one visit through parked, engaged and
+// dismissed, gathered at each stage the way the source gathers it. The open pass
+// returns the visit while it is parked. Engage's claim moves it to in_progress,
+// which the open pass does not return, so the running sitting is what holds the
+// subject. Dismiss closes it, and the closed pass returns it again. At every
+// stage the subject's row is the visit's only row. An engaged visit stays visible
+// on that row, and a dismissed one does not come back as a second row beside it.
+func TestVisitLifecycleKeepsOneRow(t *testing.T) {
+	subject := heldSubject("tk-subj")
+	open := visitAnchor("tk-v", "tk-subj", "decide the rollout")
+	closed := open
+	closed.ClosedAt = daysAgo(0)
+	running := Facts{Visits: map[string]bool{"tk-subj": true}}
+
+	parkedFacts := running
+	parkedFacts.Sittings = []Sitting{openSitting("tk-subj")}
+	engagedFacts := running
+	engagedFacts.Sittings = []Sitting{engagedSitting("tk-subj")}
+	dismissedFacts := Facts{Sittings: []Sitting{{Subject: "tk-subj", Status: "closed", ClosedAt: daysAgo(0)}}}
+
+	for _, stage := range []struct {
+		name      string
+		anchors   []Anchor
+		facts     Facts
+		wantHeld  bool
+		wantState string
+	}{
+		{"parked", []Anchor{open, subject}, parkedFacts, true, VisitParked},
+		{"engaged", []Anchor{subject}, engagedFacts, true, VisitEngaged},
+		{"dismissed", []Anchor{closed, subject}, dismissedFacts, false, ""},
+	} {
+		t.Run(stage.name, func(t *testing.T) {
+			b := BuildBoard(stage.anchors, fixtureNow, false, nil, stage.facts)
+			if v, ok := tileByID(b, "tk-v"); ok {
+				t.Errorf("the visit must not take a row beside its subject; got one in %q", v.Section)
+			}
+			subj := mustTile(t, b, "tk-subj")
+			if subj.Held != stage.wantHeld || subj.VisitState != stage.wantState {
+				t.Errorf("subject row: held=%v state=%q, want held=%v state=%q",
+					subj.Held, subj.VisitState, stage.wantHeld, stage.wantState)
+			}
+		})
 	}
 }
 

@@ -50,7 +50,10 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "session peek") printf '%s\n' "${STUB_PANE:-deacon idle prompt}" ;;
+  # Every peek is logged, so a scenario can count the pane reads a pass made.
+  # `${STUB_PANE-...}` omits the colon for the same reason STUB_WISPS does: an
+  # explicitly EMPTY pane is the no-deacon answer, not the default pane.
+  "session peek") printf '%s\n' "$*" >> "$PEEK_LOG"; printf '%s\n' "${STUB_PANE-deacon idle prompt}" ;;
   # `${STUB_WISPS-[]}` deliberately omits the colon: UNSET means "the ordinary
   # empty list", but an explicitly EMPTY value means "this probe answered
   # nothing at all", which is the unreadable-read case and a different verdict.
@@ -68,6 +71,7 @@ esac
 STUB
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+export PEEK_LOG="$TMP/peeks"
 # The stub answers reads instantly, so the per-call timeout only ever adds a
 # fork. 0 makes gc_call a passthrough (same no-bound behavior as `timeout 0`).
 # The one case that must see a real timeout — the hang-mail scenario below —
@@ -84,8 +88,8 @@ wisp() { # $1=status  $2=age seconds
 # Run the script one or more passes against a fresh state dir. The first cold
 # pass only records (one observation is not evidence), so a report needs two.
 reset() {
-    rm -rf "$TMP/state" "$TMP/mail" "$TMP/body" "$TMP/argv"
-    mkdir -p "$TMP/state"; : > "$TMP/mail"; : > "$TMP/body"; : > "$TMP/argv"
+    rm -rf "$TMP/state" "$TMP/mail" "$TMP/body" "$TMP/argv" "$TMP/peeks"
+    mkdir -p "$TMP/state"; : > "$TMP/mail"; : > "$TMP/body"; : > "$TMP/argv"; : > "$TMP/peeks"
 }
 # One pass against the CURRENT state dir (for tests that vary input per pass).
 # BOOT_HEALTH_DB pins the ledger the wisp query runs against. It is set here for
@@ -113,6 +117,7 @@ pass_out() {
 # grep -c prints 0 AND exits 1 on no match, so take the count from the
 # assignment and let the failure branch supply the value, never both.
 mails()  { local n; n="$(grep -c '^MAIL$' "$TMP/mail" 2>/dev/null)" || n=0; printf '%s\n' "$n"; }
+peeks()  { local n; n="$(grep -c . "$TMP/peeks" 2>/dev/null)" || n=0; printf '%s\n' "$n"; }
 mailed() { [ "$(mails)" -gt 0 ] && echo yes || echo no; }
 state_get() { awk -F= -v k="$1" '$1 == k {print $2}' "$TMP/state/state" 2>/dev/null; }
 # Has the pacing clock been written? An absent state file reads as "no" rather
@@ -317,9 +322,13 @@ eq "$(mails)" 1 "unconfirmed: not resent this episode"
 
 # The probes keep the SWALLOWING form: a failed read is an empty one, which the
 # script already treats as "no evidence". Only the mail's status is load-bearing.
+# Two passes, because the first cold pass only records: a pane that did not stop
+# the pass would report on the second.
 reset
 pass STUB_PANE='' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_PANE='' STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" no "an unreadable pane exits quietly rather than reporting"
+eq "$(state_get cold_since)" "" "an unreadable pane starts no cold clock (no deacon is not a cold deacon)"
 
 # --- (j) An UNREADABLE wisp probe is not evidence of a wedge. ----------------
 # An empty ARRAY is an answer — no wisp is live — and still reports. No JSON at
@@ -390,6 +399,23 @@ has "$(pass_out STUB_WISPS='[]' BOOT_HEALTH_BUSY='busy (unclosed')" "BOOT_HEALTH
     "an override grep rejects is named"
 eq "$(busy_clears 'patrol step (ctrl+c to interrupt)' BOOT_HEALTH_BUSY='no such marker')" no \
    "an override grep accepts replaces the default markers"
+
+# --- (l) The pane is read only when the wisp cannot settle the pass. ---------
+# A fresh wisp is the whole answer, so a healthy pass reads the ledger and no
+# pane. Anything else needs the pane, and one peek both proves the deacon
+# exists and supplies the pane facts.
+reset
+pass STUB_WISPS="$(wisp in_progress 60)"
+eq "$(peeks)" 0 "a fresh wisp ends the pass with no pane read"
+reset
+pass STUB_WISPS="$(wisp in_progress 7200)"
+eq "$(peeks)" 1 "a stale wisp reads the pane once"
+reset
+pass STUB_WISPS='[]'
+eq "$(peeks)" 1 "an absent wisp reads the pane once"
+reset
+pass STUB_WISPS=''
+eq "$(peeks)" 1 "an unreadable ledger reads the pane once"
 
 echo
 echo "boot-health.test.sh: $PASS passed, $FAIL failed"

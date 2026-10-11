@@ -239,6 +239,8 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
     cp "$BUILD" "$ROOT/assets/scripts/gc-helm-build.sh"
+    # The builder sources its icu4c cgo flags from beside itself.
+    cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
     printf 'module helm\n' > "$ROOT/services/helm/go.mod"
     # The REAL `gc service list --json` reports `service_name`, not `name`, and
