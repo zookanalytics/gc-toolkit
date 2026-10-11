@@ -24,6 +24,7 @@
 # Usage follows the in-variable jq convention (bead-context.sh $ADV): prepend the
 # defs to a jq program that runs against one visit bead object, e.g.
 #   jq -r "$VISIT_IDENTITY_JQ"' select(visit_covers($s)) | .id '
+# shellcheck disable=SC2034  # read by the scripts that source this file
 VISIT_IDENTITY_JQ='
   # The subject ids this visit tracks via its outgoing tracks edge(s).
   def visit_tracked_subjects:
