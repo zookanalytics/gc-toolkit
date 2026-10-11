@@ -518,13 +518,23 @@ the child's first claim is already at its rank. The reconcile then re-ranks the
 child and its live workflow as the PR's posture and the epic's priority change
 (section 3). The rank is:
 
-- once the anchor's PR is approved (`pr_posture=approved`, which pr-facts records
-  on the anchor), at P0;
+- once the anchor's PR is approved, at P0;
 - otherwise one band above the anchor's epic: P1 for a P2 epic, and P0 for a P1 or
   P0 epic;
 - for a parked epic, as if the epic were P3, so its in-flight PRs finish at P2,
   behind every unparked epic's finishing work;
 - for an anchor under no epic, one band above the anchor's own priority.
+
+**Reading the approval.** For the rank, a PR is approved when the review posture
+pr-facts records on its anchor is `approved`. That record, `pr_posture`, is a
+dated key. `lifecycle.sh --set-dated` stores it as `<posture>@<oid>@<since>`, so
+an approved anchor carries `approved@<head>@<since>`, never the bare word
+([state-machine.md](../../docs/state-machine.md#posture)). The priority function
+that `settle` and the reconcile share (section 3) is the one place the rank reads
+the key, and it takes the posture as the part before the first `@`, the way
+`pr-facts.sh` reads its own record. A rank that compared the whole stored value
+with `approved` would never match, so it would rank every approved PR's finishing
+work as unapproved.
 
 **Why.** Finishing turns work already spent into merged work, and it keeps open
 PRs from collecting conflicts. Once a PR is approved, only mechanical work stands
@@ -563,7 +573,7 @@ authoritative statement of the model, and the units after it extend it.
 | 3 | **A sling does not start parked work.** The load-context guard covers a parked bead and lets in-flight beads through; Accept refuses a parked bead. | 2 | 1, 2 | Park, sling, unpark ends with the bead built, held root included. A bead in flight under a parked epic is built. |
 | 4 | **A park does not strand in-flight work.** The refinery patrol's rejection dispatches a pour instead of routing the work bead. | 1 | 1 | A rejected handoff under a parked epic is rebuilt. An unparked one behaves as today. |
 | 5 | **Priority flow.** `reconcile`, `settle` with its `--print` form, and `orders/epic-priority.toml`; the `priority` verb; unpark settles the subtree before it removes the edge; one lock for the order and the verbs; the routing doc's claim-predicate row is corrected. | 3 | 1 | After a priority change, the members and their poured workflows' open steps carry the new priority within one pass. A later sling inherits it. A hand edit reverts. Loose beads are untouched. `settle` and the reconcile give every bead of a shared fixture the same priority. With the scheduled pass off, unparking at P0 releases every member already at P0: the test's recorded writes put each member's priority before the edge's removal. A pass that overlaps a `priority` move does not write the old priority back. Pass time stays inside the order's timeout on the live store. |
-| 6 | **PR-finishing rank and its invariant.** The reconcile ranks anchor children and their workflows. Each PR-finishing creator settles its child before it routes or slings it. Each creator's suite asserts that the child it files has no parent. | 7 | 5 | With the scheduled pass off, each creator routes or slings its child at its rank: an approved PR's merge-in child at P0, a P2 epic's review rework at P1, and a parked epic's in-flight rework at P2. A creator changed to file its child with a parent fails its own suite. |
+| 6 | **PR-finishing rank and its invariant.** The reconcile ranks anchor children and their workflows. Each PR-finishing creator settles its child before it routes or slings it. Each creator's suite asserts that the child it files has no parent. | 7 | 5 | With the scheduled pass off, each creator routes or slings its child at its rank: an approved PR's merge-in child at P0, a P2 epic's review rework at P1, and a parked epic's in-flight rework at P2. Every fixture anchor with a PR records its posture in the stored shape, `approved@<head>@<since>` for an approved PR, so a rank that compares the whole value fails the creators' suites and the reconcile's. A creator changed to file its child with a parent fails its own suite. |
 | 7 | **Checks and converse context read the park.** `check-blocked-work-armed` skips parked beads; `bead-context.sh` reads a park. | 4 | 1 | A parked member draws no finding and no arm remedy. An unparked unarmed blocked member still does. |
 | 8 | **The helm board shows steering.** The board shows each epic's state and priority, parks epics in their own section, and stops calling their idle children stranded. The takeaway notion gets a new name. | 4 | 1 | The board fixture renders a parked epic under its own section and an unparked one with its priority. The Go and shell predicates agree on the shared fixture. |
 | 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; `unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. The sweep runs again. |
