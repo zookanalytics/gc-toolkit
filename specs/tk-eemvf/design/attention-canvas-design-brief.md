@@ -1,3 +1,8 @@
+---
+name: Attention Canvas design brief
+description: The brief handed to a Claude Design visual-exploration session for the Attention Canvas, written for a reader with no Gas City context. It sets out the operator's scarce attention, the jobs the surface does, the canvas idiom, the data each tile renders, and the bar for good.
+---
+
 # Attention Canvas — design brief
 
 > Input for a Claude Design visual-exploration session.
