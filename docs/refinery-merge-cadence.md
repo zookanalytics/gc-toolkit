@@ -402,7 +402,15 @@ the cadence — the arms run whether or not any refinery session is awake.
    rules or thread count — escalates nothing and the next reconcile retries.
    `reviewDecision` cannot name the cause alone, reading EMPTY while threads
    are unresolved, so the rules are read directly),
-   hold-resolved retraction. It re-reviews no moved head: a lane state is a
+   hold-resolved retraction, and the retraction of a bring-current's re-ask
+   visit. `bring-current-guard.sh` files that visit on the anchor when it
+   dismisses the approval, and it holds the merge while it is open. The full
+   pass retracts it `moot` once an outside approval submitted no earlier than
+   the visit stands (`approvals_since` in `review-verdict.sh`), so the merge
+   stops waiting on it, or once its anchor reads closed or merged. An approval
+   from before the visit keeps it holding, and a visit someone is engaged in
+   is left to them. Like the `merge-blocked-approval` retirement, it runs
+   ahead of the no-anchors early-exit. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before

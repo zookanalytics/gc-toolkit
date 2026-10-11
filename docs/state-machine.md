@@ -234,7 +234,11 @@ would land is not the code the approver saw: by `bring-current-guard.sh` when
 bringing the branch current took judgment, and by `approval-withdraw.sh` when
 the validator rules a fresh whole-diff review warranted. Each dismisses every
 approval an account has not had dismissed, not only its latest, because an
-older approval would otherwise count again. No `check.approval` marker and no
+older approval would otherwise count again. A bring-current's dismissal also
+files a visit on the anchor asking for the approval again, and the visit holds
+the merge while it is open. `pr-facts.sh` retracts it once an outside approval
+submitted no earlier than the visit stands, or once the anchor closes, so
+approving again is all it asks of the operator. No `check.approval` marker and no
 `check_set` token arms it or opts out, and GitHub branch protection is an extra
 layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
@@ -821,10 +825,11 @@ it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
 open. Clearing the machine side is what lets that close land once the human side
 is done.
 
-The consummation also retires, before the close, the visits `pr-facts.sh`
-filed on the anchor to hold the PR's merge until a person answered: rework or
-close, a moved base, feedback nothing routed, review threads nobody engaged,
-threads branch protection requires resolved, and red checks parked to a person.
+The consummation also retires, before the close, the visits filed on the anchor
+to hold the PR's merge until a person answered: rework or close, a moved base,
+feedback nothing routed, review threads nobody engaged, threads branch
+protection requires resolved, red checks parked to a person, and a
+bring-current's request for the approval it dismissed.
 A PR closed with a recorded disposition has no merge left to hold, and what
 those visits raised stays on the PR. Each is closed `gc.outcome=moot`. One a
 person is engaged in keeps holding the close until they conclude it. The

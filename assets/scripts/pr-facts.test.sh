@@ -17,6 +17,10 @@
 # gc sling --on (dedup, pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
+# Also covers retracting a bring-current's re-ask visit once an outside approval
+# submitted no earlier than it answers it, or its anchor closed, and never on an
+# approval from before it, the city's own, a visit someone is engaged in, or a
+# read that did not land;
 # Also covers --posture-only (the pre-merge arm: records posture, dispatches
 # nothing, leaves MERGED/CLOSED reconciliation to the full pass, and reports an
 # anchor it could not make current in its EXIT CODE, which is what holds
@@ -1002,6 +1006,138 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0"
 approve 236
 out=$(run)
 has "$out" "re-routing stranded rework ST1" "once the PR is approved, the strand is re-routed as before"
+
+echo "# a bring-current's re-ask visit is retracted once an approval given after it answers it"
+# A merge-in child whose bring-current took judgment dismisses the PR's approval
+# and files the re-ask visit on the anchor, which holds the merge while it is
+# open. An approval submitted no earlier than the visit, from an account whose
+# latest opinion it still is, answers it. One from before the visit, such as an
+# approval whose dismissal failed, does not, and twins under one key are judged
+# against the later filing. These PRs have no view fixture, so the per-anchor
+# walk reads none of them and only the sweep acts.
+rvisit() { # id subject key created_at [assignee]
+  printf '{"id":"%s","status":"open","assignee":"%s","created_at":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
+    "$1" "${5:-}" "$4" "$3" "$2"
+}
+review() { # id login state submitted_at
+  printf '{"id":%s,"user":{"login":"%s"},"state":"%s","body":"","commit_id":"sha-r","submitted_at":"%s"}' "$1" "$2" "$3" "$4"
+}
+retracts() { grep -c -- "^--retract " "$STUB_ESC_LOG"; }
+T1="2026-10-10T21:40:12Z"; T2="2026-10-11T13:37:12Z"
+store "[$(anchor RA1 240), $(rvisit RV1 RA1 bring-current-judgment.240.aaa1 "$T1"),
+        $(anchor RA2 241), $(rvisit RV2 RA2 bring-current-judgment.241.aaa2 "$T1"),
+        $(anchor RA3 242), $(rvisit RV3 RA3 bring-current-judgment.242.aaa3 "$T1" lx-sitting),
+        $(anchor RA4 243), $(rvisit RV4A RA4 bring-current-judgment.243.aaa4 "$T1"), $(rvisit RV4B RA4 bring-current-dismissal.243.bbb4 "$T2"),
+        $(anchor RA5 245), $(rvisit RV5 RA5 bring-current-judgment.245.aaa5 "$T1"),
+        $(anchor RA6 246), $(rvisit RV6 RA6 bring-current-judgment.246.aaa6 "$T1"),
+        $(anchor RA7 247), $(rvisit RV7A RA7 bring-current-judgment.247.aaa7 "$T1"), $(rvisit RV7B RA7 bring-current-judgment.247.aaa7 "$T2")]"
+printf 'RV1|tracks|RA1\nRV2|tracks|RA2\nRV3|tracks|RA3\nRV4A|tracks|RA4\nRV4B|tracks|RA4\nRV5|tracks|RA5\nRV6|tracks|RA6\nRV7A|tracks|RA7\nRV7B|tracks|RA7\n' > "$STUB_DEPS"
+printf '[%s,%s]' "$(review 1 johnzook DISMISSED 2026-10-10T20:00:00Z)" "$(review 2 johnzook APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_240.json"
+printf '[%s]' "$(review 3 human1 APPROVED 2026-10-10T20:00:00Z)" > "$GH_DIR/reviews_241.json"
+printf '[%s]' "$(review 4 human1 APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_242.json"
+printf '[%s]' "$(review 5 human1 APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_243.json"
+printf '[%s]' "$(review 6 gc-city-bot APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_245.json"
+printf '[%s,%s]' "$(review 7 human1 APPROVED 2026-10-11T04:05:12Z)" "$(review 8 human1 CHANGES_REQUESTED 2026-10-11T05:00:00Z)" > "$GH_DIR/reviews_246.json"
+printf '[%s]' "$(review 9 human1 APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_247.json"
+: > "$STUB_ESC_LOG"
+out=$(run_posture)
+eq "$(bstatus RV1)" "open" "the posture-only arm leaves an answered re-ask visit for the full pass"
+eq "$(retracts)" "0" "…and retracts nothing"
+out=$(run)
+eq "$(bstatus RV1)" "closed" "an approval submitted after the re-ask visit retracts it"
+eq "$(meta RV1 'gc.outcome')" "moot" "…moot"
+has "$(meta RV1 'gc.outcome_reason')" "PR#240 was approved by johnzook at 2026-10-11T04:05:12Z, no earlier than this visit asked for it at $T1" "…naming the approval that answered it"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject RA1 --key bring-current-judgment.240.aaa1" "…through escalate.sh's retract verb"
+eq "$(filings RA1 bring-current-judgment.240.aaa1)" "0" "…and nothing is re-filed"
+has "$out" "RA1 — retracted its re-ask visit RV1 (bring-current-judgment.240.aaa1) as moot: PR#240 approved by johnzook" "the retraction is reported"
+eq "$(bstatus RV2)" "open" "an approval from before the visit keeps it holding"
+eq "$(bstatus RV3)" "open" "a visit someone is engaged in is left to them"
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject RA3" "…with no retract called on it"
+eq "$(bstatus RV4A)" "closed" "of two rounds' visits on one PR, the one the approval came after is retracted"
+eq "$(bstatus RV4B)" "open" "…and the later round's visit, keyed bring-current-dismissal and filed after that approval, keeps holding"
+eq "$(bstatus RV5)" "open" "the city's own approval answers nothing"
+eq "$(bstatus RV6)" "open" "nor does an approval its author has since replaced with a CHANGES_REQUESTED"
+eq "$(bstatus RV7A)" "open" "twins under one key are judged against the later filing, so an approval between them retracts neither"
+eq "$(bstatus RV7B)" "open" "…the later twin included"
+eq "$(retracts)" "2" "…so this pass retracts two situations and no more"
+
+echo "# …an approval after the later visits answers them, and a pass with nothing newly answered retracts nothing"
+printf '[%s,%s]' "$(review 5 human1 APPROVED 2026-10-11T04:05:12Z)" "$(review 10 human1 APPROVED 2026-10-11T15:43:00Z)" > "$GH_DIR/reviews_243.json"
+printf '[%s,%s]' "$(review 9 human1 APPROVED 2026-10-11T04:05:12Z)" "$(review 11 human2 APPROVED $T2)" > "$GH_DIR/reviews_247.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus RV4B)" "closed" "the later round's visit is retracted once an approval comes after it"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject RA4 --key bring-current-dismissal.243.bbb4" "…under its own key"
+eq "$(bstatus RV7A)" "closed" "an approval submitted at the later twin's filing time answers both twins"
+eq "$(bstatus RV7B)" "closed" "…the later one included"
+eq "$(bstatus RV2)" "open" "the visit no approval answers still holds"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(retracts)" "0" "a pass with nothing newly answered retracts nothing"
+hasnt "$out" "retracted its re-ask visit" "…and reports none"
+
+echo "# a re-ask visit is left when its subject, its PR, its filing time or the approvals do not read"
+store "[$(rvisit RVG GHOST bring-current-judgment.250.ccc "$T1"),
+        $(anchor RB1 251), $(rvisit RVB1 RB1 bring-current-judgment.251.ccc "$T1"),
+        $(anchor RB2 252), $(rvisit RVB2 RB2 bring-current-judgment.999.ccc "$T1"),
+        $(anchor RB3 253), $(rvisit RVB3 RB3 bring-current-judgment.253.ccc 2026-10-10)]"
+printf 'RVB1|tracks|RB1\nRVB2|tracks|RB2\nRVB3|tracks|RB3\n' > "$STUB_DEPS"
+for n in 250 251 999 253; do
+  printf '[%s]' "$(review "$n" human1 APPROVED 2026-10-11T04:05:12Z)" > "$GH_DIR/reviews_$n.json"
+done
+: > "$STUB_ESC_LOG"
+out=$(STUB_GH_LIST_RC=1 run)
+eq "$(bstatus RVB1)" "open" "a review list that does not read retracts nothing"
+has "$out" "bring-current-judgment.251.ccc — PR#251 reviews unreadable this pass" "…and says so"
+eq "$(bstatus RVG)" "open" "a visit whose subject does not read is left"
+has "$out" "subject GHOST unreadable this pass" "…and says so"
+eq "$(bstatus RVB2)" "open" "a visit naming a PR its anchor does not carry is left, whatever that PR's approvals"
+has "$out" "subject RB2 names PR#252 at 'https://github.com/zook/gc-toolkit/pull/252', not PR#999" "…and says so"
+eq "$(bstatus RVB3)" "open" "a visit whose filing time is not GitHub's form is left"
+has "$out" "the time its re-ask visit was filed did not read" "…and says so"
+out=$(STUB_SELF_LOGIN="" run)
+eq "$(bstatus RVB1)" "open" "an unresolved acting login retracts nothing, since it cannot tell an outside approval from the city's own"
+has "$out" "the acting login is unresolved, so no approval of PR#251 can be told from the city's own" "…and says so"
+eq "$(retracts)" "0" "…and neither pass retracts anything"
+out=$(run)
+eq "$(bstatus RVB1)" "closed" "the next pass that reads the approval retracts the visit"
+eq "$(bstatus RVB2)" "open" "…while the visit naming another PR is still left"
+eq "$(bstatus RVB3)" "open" "…and so is the one whose filing time does not read"
+rm -f "$GH_DIR"/reviews_24[0-7].json "$GH_DIR"/reviews_25[0-3].json "$GH_DIR/reviews_999.json"
+
+echo "# a pre-recorded disposition retires the PR's own re-ask visits before the close, and not another PR's"
+# A PR closed with its disposition recorded has no merge left for a re-ask visit
+# to hold, so the disposition arm retires it with the other merge-path visits.
+# Left open, it would hold the very close the disposition asks for.
+: > "$STUB_DEPS"
+store "[$(anchor RD1 255 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-d1"'), $(rvisit RVD1 RD1 bring-current-judgment.255.e5 "$T1"), $(rvisit RVD2 RD1 bring-current-dismissal.255.f5 "$T2"),
+        $(anchor RD2 256 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-d2"'), $(rvisit RVD3 RD2 bring-current-judgment.998.e6 "$T1")]"
+printf 'RVD1|tracks|RD1\nRVD2|tracks|RD1\nRVD3|tracks|RD2\n' > "$STUB_DEPS"
+printf '%s' "$(prview 255 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_255.json"
+printf '%s' "$(prview 256 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_256.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus RVD1)" "closed" "the PR's own re-ask visit is retired by the disposition"
+eq "$(bstatus RVD2)" "closed" "…under either key"
+has "$out" "retired stale visit RVD1 (bring-current-judgment.255.e5" "…which reports it"
+eq "$(bstatus RD1)" "closed" "…and the anchor closes in the same pass"
+eq "$(bstatus RVD3)" "open" "another PR's re-ask visit is left"
+eq "$(bstatus RD2)" "open" "…and it still holds the anchor's close"
+
+echo "# a re-ask visit whose anchor closed is retracted through the real escalate.sh, though no gating anchor is left"
+# With no gating anchor the pass exits early, so the sweep has to run ahead of
+# that exit. This case runs the real retract verb, as the disposition sweep's
+# case above does: escalate.sh reads the open visits for the situation, and
+# visit-close.sh folds the reading onto the subject and closes the visit.
+store "[$(anchor RC1 254 | jq -c '.status = "closed" | .metadata.merge_result = "merged"'), $(rvisit RVC1 RC1 bring-current-judgment.254.ddd "$T1")]"
+printf 'RVC1|tracks|RC1\n' > "$STUB_DEPS"
+out=$(GC_RIG=gc-toolkit "$SD2/pr-facts.sh" --fix-pool "$FIX" --review-pool "$REV" 2>&1)
+eq "$(bstatus RVC1)" "closed" "the real retract closes the visit on the closed anchor"
+eq "$(meta RVC1 'gc.outcome')" "moot" "…moot, stamped by visit-close.sh"
+has "$(meta RVC1 'gc.outcome_reason')" "RC1 is closed with merge_result merged, so PR#254 has no merge left for this visit to hold" "…with the sweep's reading as its reason"
+has "$(notes RC1)" "visit RVC1 closed moot" "…and the reading folded onto the anchor's notes"
+has "$out" "RC1 — retracted its re-ask visit RVC1 (bring-current-judgment.254.ddd) as moot" "the retraction is reported"
+has "$out" "no gating anchors" "…by a pass that then exits with no anchor to walk"
 
 fi # part reconcile
 

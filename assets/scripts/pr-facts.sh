@@ -29,6 +29,10 @@
 # dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
 # gc_city_own, never a review that is feedback; signoff_dismissed read back
 # FIRST; skipped under native auto-merge).
+# Ahead of the per-anchor walk, a full pass retracts the re-ask visit a
+# bring-current files when it dismisses the PR's approval, once an outside
+# approval submitted no earlier than the visit answers it or its anchor reads
+# closed or merged.
 # No arm here re-reviews a moved head: a lane state is a state of the lane, and
 # gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
@@ -671,7 +675,11 @@ MERGE_PATH_KEYS_JQ='
   def merge_path_key($n):
     test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
-    or . == "merge-blocked-threads";'
+    or . == "merge-blocked-threads"
+    # A merge-in child files the re-ask visit through bring-current-guard.sh,
+    # and it holds the merge too. reask_pr is REASK_KEY_JQ, which a program
+    # using this def puts ahead of it.
+    or reask_pr == $n;'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
   # written onto it, so a row that came back for another subject would stamp a
@@ -749,6 +757,38 @@ $(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
     | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
     | .id' 2>/dev/null)
 REFRESH_EOF
+}
+# The visit that asks again for an approval a bring-current dismissed. A
+# merge-in child's handoff files it on the anchor through bring-current-guard.sh,
+# keyed bring-current-judgment.<n>.<head> or bring-current-dismissal.<n>.<head>
+# for PR number <n> and the head the child pushed, and it holds the merge while
+# it is open (finalize-gate.sh). reask_pr is the PR number such a key names, as
+# a string, and null for any other key.
+REASK_KEY_JQ='
+  def reask_pr:
+    (capture("^bring-current-(judgment|dismissal)\\.(?<n>[0-9]+)\\.[0-9a-f]*$") | .n) // null;'
+# retract_reask_visits <anchor> <key> <visit-ids> <why> <reading> — conclude the
+# re-ask visits under <key> for the anchor once their ask is answered. They are
+# retracted moot through escalate.sh's retract verb, which leaves a visit someone
+# is engaged in to them, and each of <visit-ids> is read back and reported. One
+# still open and unengaged is retried by the next full pass.
+retract_reask_visits() {
+  local a="$1" key="$2" vids="$3" why="$4" reading="$5" v row st who
+  [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
+  for v in $vids; do
+    row=$(gc bd show "$v" --json 2>/dev/null | scrub)
+    st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
+    who=$(printf '%s' "$row" | jq -r '.[0] | ((.assignee // "") | tostring) as $w
+      | ((.metadata["gc.session_name"] // "") | tostring) as $n
+      | if $w != "" then $w elif $n != "" then "session " + $n else "" end' 2>/dev/null)
+    if [ "$st" = "closed" ]; then
+      echo "$PROG: $a — retracted its re-ask visit $v ($key) as moot: $why"
+    elif [ "$st" = "in_progress" ] || [ -n "$who" ]; then
+      echo "$PROG: $a — its re-ask visit $v ($key) is engaged (${who:-$st}); it is theirs to conclude" >&2
+    else
+      echo "$PROG: $a — its re-ask visit $v ($key) is still ${st:-unreadable} although $why; the next full pass retracts it" >&2
+    fi
+  done
 }
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
@@ -1280,6 +1320,85 @@ DF_EOF
   fi
 fi
 
+# --- retract a bring-current's re-ask visit once its ask is answered -------------
+# The re-ask visit (REASK_KEY_JQ) asks the operator to review what a bring-current
+# changed and approve again, and it holds the merge while it is open. Approving
+# on GitHub closes nothing, so every full pass reads the open re-ask visits and
+# retracts each one whose ask is answered. It is answered once the PR carries an
+# approval submitted no earlier than the visit was filed, from an account whose
+# latest opinion it still is (review-verdict.sh's approvals_since). An approval
+# from before the visit, such as one whose dismissal failed, keeps it holding.
+# Its ask is moot once the anchor reads closed or merged, since no merge is left
+# to hold. Each key is judged against the latest filing among its open twins, so
+# a later round's visit is never answered by an approval that came before it. The
+# approval is read only for the anchor's own PR in this checkout's origin. A
+# visit someone is engaged in is theirs to conclude, and a subject or review list
+# that does not read this pass leaves the visit for the next. Like the sweeps
+# above, this runs before the no-anchors early-exit, so a visit whose anchor has
+# closed is still read.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+  if ra_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
+    while IFS="$(printf '\t')" read -r rasubj rakey ranum rasince raids; do
+      [ -n "${rasubj:-}" ] || continue
+      rarow=$(gc bd show "$rasubj" --json 2>/dev/null | scrub)
+      rast=$(printf '%s' "$rarow" | jq -r '.[0].status // empty' 2>/dev/null)
+      if [ -z "$rast" ]; then
+        echo "$PROG: $rakey — subject $rasubj unreadable this pass; its re-ask visit is left for the next" >&2
+        continue
+      fi
+      ramr=$(printf '%s' "$rarow" | jq -r '(.[0].metadata.merge_result // "") | tostring' 2>/dev/null)
+      if [ "$rast" = "closed" ] || [ "$ramr" = "merged" ]; then
+        rawhy="$rasubj is $rast${ramr:+ with merge_result $ramr}"
+        retract_reask_visits "$rasubj" "$rakey" "$raids" "$rawhy" \
+          "$rawhy, so PR#$ranum has no merge left for this visit to hold."
+        continue
+      fi
+      rapn=$(printf '%s' "$rarow" | jq -r '(.[0].metadata.pr_number // "") | tostring' 2>/dev/null)
+      raurl=$(printf '%s' "$rarow" | jq -r '(.[0].metadata.pr_url // "") | tostring' 2>/dev/null)
+      if [ "$rapn" != "$ranum" ] || { [ -n "$raurl" ] && [ "$(url_repo_q "$raurl")" != "$ORIGIN_REPO_Q" ]; }; then
+        echo "$PROG: $rakey — subject $rasubj names PR#${rapn:-<none>} at '${raurl:-<none>}', not PR#$ranum of $ORIGIN_REPO_Q; its re-ask visit is left for a person" >&2
+        continue
+      fi
+      if [ -z "$SELF_LOGIN" ]; then
+        echo "$PROG: $rakey — the acting login is unresolved, so no approval of PR#$ranum can be told from the city's own; its re-ask visit is left for the next pass" >&2
+        continue
+      fi
+      if [ "$rasince" = "-" ]; then
+        echo "$PROG: $rakey — the time its re-ask visit was filed did not read, so no approval can be counted against it; left for the next pass" >&2
+        continue
+      fi
+      rarevs=$(gh_rows "repos/$ORIGIN_REPO/pulls/$ranum/reviews?per_page=100") || rarevs=""
+      if [ -z "$rarevs" ]; then
+        echo "$PROG: $rakey — PR#$ranum reviews unreadable this pass; its re-ask visit is left for the next" >&2
+        continue
+      fi
+      raby=$(printf '%s' "$rarevs" | jq -r --arg self "$SELF_LOGIN" --arg since "$rasince" "$REVIEW_VERDICT_DEF"'
+        approvals_since($self; $since) | sort_by((.submitted_at // ""), (.id // 0)) | .[0] // empty
+        | "\(.user.login // "") at \(.submitted_at // "")"' 2>/dev/null)
+      [ -n "$raby" ] || continue
+      retract_reask_visits "$rasubj" "$rakey" "$raids" "PR#$ranum approved by $raby" \
+        "PR#$ranum was approved by $raby, no earlier than this visit asked for it at $rasince, so the re-review it asked for is answered."
+    done <<RA_EOF
+$(printf '%s' "$ra_visits" | jq -r "$REASK_KEY_JQ"'
+    [ .[]? | select((.metadata.task_kind // "") == "visit")
+      | ((.metadata.escalation_key // "") | tostring) as $k
+      | ($k | reask_pr) as $n
+      | select($n != null)
+      | ((.metadata["gc.continuation_group"] // "") | tostring) as $g
+      | select($g | test("^[A-Za-z0-9._-]+$"))
+      | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+      | {g: $g, k: $k, n: $n, at: ((.created_at // "") | tostring), id: ((.id // "") | tostring)} ]
+    | group_by([.g, .k])[]
+    | [ .[0].g, .[0].k, .[0].n,
+        (if all(.[]; .at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+         then (map(.at) | max) else "-" end),
+        (map(.id) | join(" ")) ] | @tsv' 2>/dev/null)
+RA_EOF
+  else
+    echo "$PROG: re-ask visit sweep skipped — could not list visits (retry next pass)" >&2
+  fi
+fi
+
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 # --- the open PRs, in one read -----------------------------------------------------
@@ -1688,7 +1807,7 @@ CHILDREN_EOF
               echo "$PROG: $id — could not retire stale visit $mpvid; leaving it for the operator" >&2
             fi
           done <<MP_EOF
-$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$REASK_KEY_JQ$MERGE_PATH_KEYS_JQ"'
     .[] | select((.metadata.task_kind // "") == "visit")
         | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
         | ((.metadata.escalation_key // "") | tostring) as $k
