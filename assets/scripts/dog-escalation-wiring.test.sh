@@ -33,17 +33,16 @@ grep -q -- '--subject' "$TOML" && grep -q -- '--key' "$TOML" \
   && ok "escalate.sh calls carry --subject and --key (the dedup identity)" \
   || bad "escalate.sh calls must carry --subject and --key"
 
-# A rig-qualified --pool is the other accepted form: escalate.sh adopts that
-# pool's rig segment into GC_RIG for the whole run, so route and store agree.
+# A --pool is not a binding: escalate.sh never takes the store from a pool's
+# rig segment, so only GC_RIG names the store where the subject names none.
 UNBOUND=$(grep -n 'escalate\.sh' "$TOML" \
   | grep -v 'GC_RIG=' \
-  | grep -Ev -- '--pool[[:space:]]+[A-Za-z0-9._-]+/' \
   | grep -E '\$SCRIPTS/escalate\.sh|escalate\.sh --')
 if [ -n "$UNBOUND" ]; then
-  bad "escalate.sh call sites with neither a GC_RIG binding nor a rig-qualified --pool:"
+  bad "escalate.sh call sites with no GC_RIG binding:"
   printf '%s\n' "$UNBOUND" | sed 's/^/       /'
 else
-  ok "every escalate.sh call site is rig-bound or carries a rig-qualified --pool"
+  ok "every escalate.sh call site is rig-bound"
 fi
 
 # The binding is only as good as the value it carries. It comes from the

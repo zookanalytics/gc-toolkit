@@ -20,6 +20,19 @@ Covered here:
 
 For Gas City background, see [`gascity-reference.md`](gascity-reference.md).
 
+## Scope
+
+**Mandate.** Wiring gc-toolkit into a Gas City: importing the pack, the
+city-level declarations an import cannot make for itself, the sub-pack a rig
+opts into, and verifying the result.
+
+**Boundaries.** It assumes a working Gas City and a created city. Gas City
+itself is documented upstream, indexed by
+[gascity-reference.md](gascity-reference.md). What each imported agent, order,
+and check does is its own doc's, starting from
+[architecture.md](architecture.md). The sub-pack's complete wiring lives in
+`packs/gascity-keeper/pack.toml`, and the board's in `services/helm/README.md`.
+
 ---
 
 ## 1. Importing gc-toolkit

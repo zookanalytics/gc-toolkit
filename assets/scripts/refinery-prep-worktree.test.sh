@@ -20,6 +20,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-prep-worktree-test.XXXXXX")"
+# git names the prep worktree under the repository's resolved path, so every
+# path is built on a resolved root and compares to git's as a string, a TMPDIR
+# behind a symlink or ending in a slash (as macOS's is) included.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
