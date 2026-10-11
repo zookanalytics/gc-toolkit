@@ -17,6 +17,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-resolve-test.XXXXXX")"
+# gctk-resolve.sh exports its own directory, named through cd and pwd, as
+# GCTK_SCRIPTS_DIR. cd and pwd drop the doubled slash that a TMPDIR ending in /
+# leaves in mktemp's path, so TMP is resolved before any expected path is built.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # the assertion helpers only; no stubs are installed
