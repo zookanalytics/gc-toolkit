@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for review-context.sh: a correctness review reads the page as it
-# will be published, and the pack's work-quality standards and exemplars.
+# Hermetic test for review-context.sh: a review reads the page as it will be
+# published, and the pack's work-quality standards and exemplars.
 #
 # What it holds:
 #   1. POST-OPEN — the page is read through the repository pinned from the

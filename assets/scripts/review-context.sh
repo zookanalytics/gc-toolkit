@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# review-context — print what a correctness review holds a diff against beyond
-# the diff itself: the PR page as it will be published, and the pack's
-# work-quality standards and exemplars.
+# review-context — print what a review holds a diff against beyond the diff
+# itself: the PR page as it will be published, and the pack's work-quality
+# standards and exemplars.
 #
 #   review-context.sh --review-bead <id> [--pack <dir>]
 #
