@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # molecule-hold — hold a graph.v2 molecule at the step this shell is executing,
-# without closing anything, or end it once the work it was poured for is over.
+# without closing anything, and end it once the work it was poured for is over.
 #
 #   molecule-hold.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [--dry-run]
 #
 # A hold lasts no longer than the work the molecule was poured for, so
-# molecule-end.sh runs before the hold. When that work has already closed,
-# there is nothing left to hold for: the molecule ends there, through
-# dead-molecule-dispose.sh with this session's own claim set aside, and the
-# hold writes nothing. When the work is still open, the hold goes ahead and the
-# molecule's end bead is armed on that work, so the pool is offered the end the
-# moment it closes. A hold whose end could not be armed exits 1: the molecule
-# is quiet, but it would outlive its work.
+# molecule-end.sh runs as the hold's last act, after the blocking write and the
+# quiesce. When that work has closed, the molecule ends there, the held step
+# with it, through dead-molecule-dispose.sh with this session's own claim set
+# aside. When the work is still open, the molecule's end bead is armed on that
+# work, so the pool is offered the end the moment it closes. A hold whose end
+# could not be armed exits 1: the molecule is quiet, but it would outlive its
+# work.
+#
+# The end runs last because the work can close while the hold runs, and the
+# molecule's end bead is offered as soon as it does. Its claimant leaves the
+# molecule to a live session still running a step of it. A claimant that reads
+# this session's claims before the writes below finish sees it running one and
+# leaves the molecule to it; the end this script runs after those writes then
+# finds the work closed, and ends the molecule. A claimant that reads after
+# them sees this session running none, and ends the molecule itself.
 #
 # For the refusal arms that must NOT close: closing advances the graph into the
 # next step, and for mol-polecat-work that step recreates the branch and
@@ -72,7 +80,8 @@ env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
 
 Never touches the work bead — record the reason there and escalate separately.
 Closes nothing while that work is open, and arms the molecule's end on it; once
-it has closed, ends the molecule instead of holding it (molecule-end.sh).
+it has closed, ends the molecule, the held step with it (molecule-end.sh, run
+after the hold's own writes).
 
 exit: 0 the molecule is quiet: held with its end armed, or ended · 1 the hold
       or its end did not fully land · 2 refused, nothing written
@@ -94,7 +103,7 @@ require_value() {
   esac
 }
 
-STEP=""; REASON=""; HINT=""; DRY_RUN=0; HELD_ALREADY=0; QUIESCE_FAILED=0; END_FAILED=0
+STEP=""; REASON=""; HINT=""; DRY_RUN=0; HELD_ALREADY=0; QUIESCE_FAILED=0; END_FAILED=0; END_OUT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -247,40 +256,37 @@ else
   ROOT_READABLE=0
 fi
 
-# ── Bound the hold by the molecule's work, before anything is written.
-# molecule-end.sh ends the molecule when the work it was poured for has closed,
-# and otherwise arms the end bead that ends it once that work does. An end bead
-# is never held: it has to stay open for the pool to be offered it when its
-# blockers close, so a hold asked for at that step is the end's own run and
-# stops there. A root this script could not resolve skips the end, and the
-# quiesce below fails closed on it. The end bead's own step reaches no quiesce,
-# so it fails closed on that root itself.
-if [ "$ROOT_READABLE" = "1" ] && [ -n "$ROOT" ]; then
-  if [ "$DRY_RUN" = "1" ]; then
-    END_OUT=$("$END_TOOL" "$TARGET" --dry-run 2>&1) || END_FAILED=1
-  else
-    END_OUT=$("$END_TOOL" "$TARGET" 2>&1) || END_FAILED=1
-  fi
+# molecule-end.sh, run last below, ends the molecule when the work it was
+# poured for has closed, and otherwise arms the end bead that ends it once that
+# work does. The bead it is handed is the step this shell is executing; a root
+# this script could not resolve skips it, and the quiesce fails closed on that
+# root. run_end <extra args...>
+run_end() {
+  [ "$ROOT_READABLE" = "1" ] && [ -n "$ROOT" ] || return 0
+  END_OUT=$("$END_TOOL" "$TARGET" "$@" 2>&1) || END_FAILED=1
   [ -n "$END_OUT" ] && printf '%s\n' "$END_OUT"
-  if [ "$END_FAILED" = "0" ]; then
-    case "$END_OUT" in
-      *"result=ended"*)
-        echo "$PROG: molecule $ROOT ended with the work it was poured for; there is nothing left to hold"
-        exit 0 ;;
-      *"result=would_end"*)
-        echo "$PROG: DRY RUN — the work molecule $ROOT was poured for has closed; would end the molecule instead of holding $TARGET"
-        exit 0 ;;
-    esac
-  fi
-fi
+  return 0
+}
+
+# ── An end bead is never held: it has to stay open for the pool to be offered
+# it when its blockers close, so a hold asked for at that step is the end's own
+# run and stops there. That step reaches no quiesce, so it fails closed on a
+# root it could not resolve itself.
 if [ "$STEP" = "molecule-end" ]; then
   if [ "$ROOT_READABLE" != "1" ] || [ -z "$ROOT" ]; then
     echo "$PROG: FATAL — could not resolve the molecule of end bead $TARGET, so molecule-end.sh did not run and the end bead is neither re-armed nor retired. Do not drain; re-run once the store answers." >&2
     exit 1
   fi
+  if [ "$DRY_RUN" = "1" ]; then run_end --dry-run; else run_end; fi
   [ "$END_FAILED" = "0" ] || exit 1
   exit 0
 fi
+
+# The pool a new end bead is routed to. The hold clears the step's route and
+# the quiesce the root's before the end runs, so it is read here, and from the
+# root just before the quiesce clears it.
+END_ROUTE=""
+[ "$ROOT_READABLE" = "1" ] && END_ROUTE=$(printf '%s' "$TARGET_JSON" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
 
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$HELD_ALREADY" = "1" ]; then
@@ -288,6 +294,11 @@ if [ "$DRY_RUN" = "1" ]; then
   else
     echo "$PROG: DRY RUN — would block $TARGET ($STEP), de-route it and root ${ROOT:-<unresolved>}, and quiesce that root's other steps"
   fi
+  run_end --dry-run
+  case "$END_OUT" in
+    *"result=would_end"*)
+      echo "$PROG: DRY RUN — the work molecule $ROOT was poured for has closed; after the hold, would end the molecule, $TARGET with it" ;;
+  esac
   exit 0
 fi
 
@@ -317,14 +328,25 @@ fi
 # steps stay `open`, so their claims are not inert and are cleared below.
 
 # Reporting 0 is what lets the caller drain, so it has to mean the whole
-# molecule went quiet, not just that the blocking write landed.
+# molecule went quiet, not just that the blocking write landed. The end runs
+# here, after every write above it, for the reason the header gives. A molecule
+# it ended is quiet whatever the quiesce left: the disposer de-routes every
+# member before it closes any, and reports a partial teardown as a failure.
 finish() {
+  run_end ${END_ROUTE:+--route "$END_ROUTE"}
+  if [ "$END_FAILED" = "0" ]; then
+    case "$END_OUT" in
+      *"result=ended"*)
+        echo "$PROG: molecule $ROOT ended with the work it was poured for; $TARGET ($STEP) closed with it"
+        exit 0 ;;
+    esac
+  fi
   if [ "$QUIESCE_FAILED" = "1" ]; then
     echo "$PROG: FATAL — $TARGET ($STEP) is blocked, but the quiesce above is incomplete and this molecule can still be re-offered. Do not drain." >&2
     exit 1
   fi
   if [ "$END_FAILED" = "1" ]; then
-    echo "$PROG: FATAL — $TARGET ($STEP) is blocked and the molecule is quiet, but molecule-end.sh could not arm its end on the work it was poured for, so it would outlive that work. Do not drain; re-run this hold, which re-checks the molecule, once the store answers." >&2
+    echo "$PROG: FATAL — $TARGET ($STEP) is blocked and the molecule is quiet, but molecule-end.sh could neither end it nor arm its end on the work it was poured for, so it could outlive that work. Do not drain; re-run this hold, which re-checks the molecule, once the store answers." >&2
     exit 1
   fi
   exit 0
@@ -338,6 +360,7 @@ if [ "$ROOT_READABLE" = "0" ]; then
 elif [ -n "$ROOT" ]; then
   if ROOT_JSON=$(bd_json_array show "$ROOT"); then
     ROOT_ROUTE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+    [ -n "$END_ROUTE" ] || END_ROUTE="$ROOT_ROUTE"
     if [ -n "$ROOT_ROUTE" ]; then
       if gc bd update "$ROOT" --unset-metadata gc.routed_to >/dev/null 2>&1; then
         echo "$PROG: de-routed root $ROOT (was $ROOT_ROUTE)"

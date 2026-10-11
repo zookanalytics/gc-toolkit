@@ -17,8 +17,10 @@
 #     owning it. A non-closed root is disposed ONLY when all three guards hold:
 #       - NO LIVE SESSION: no session the root or a non-closed member names
 #         (assignee, gc.session_id, gc.session_name) is active in `gc session
-#         list`. Liveness that cannot be read at all refuses — an unprovable
-#         death is not a death. This is dead-wisp and no-live-step together.
+#         list`; under --if-source-closed, no session named by a step it has
+#         claimed and can still run. Liveness that cannot be read at all
+#         refuses — an unprovable death is not a death. This is dead-wisp and
+#         no-live-step together.
 #       - EVERY ESCALATION ANSWERED: no visit carrying an escalation_key tracks
 #         the root or its input-convoy work bead while still open. An open visit
 #         is a human owning the decision, and disposing would strand it.
@@ -51,6 +53,18 @@
 #                       exactly one bead refuses (no_source). A closed root is
 #                       residue whatever its source says, so the flag does not
 #                       apply to one.
+#                       With the work closed, the one session that still owns
+#                       the molecule's end is a session running a step of it,
+#                       so the liveness guard reads names only off a step a
+#                       session has claimed (assigned, or in_progress) and can
+#                       still run. The root runs no step. A held step
+#                       (`blocked`) runs nothing: its claim stays only so a
+#                       re-run of the hold can find it, and the hold ends the
+#                       molecule itself once its own writes are done. An end
+#                       bead's claimant is there to end the molecule. Counted
+#                       live, any of these would leave two callers each
+#                       deferring the end to the other, and the molecule would
+#                       outlive its work.
 #
 # TWO PHASES, and the order is the safety property. Closing a step readies its
 # successor, so a chain torn down close-first passes through states where a
@@ -289,6 +303,9 @@ if [ "$ROOT_NOT_CLOSED" = "1" ]; then
     # Under --owner the caller's own record contributes none of its names. The
     # record is dropped whole rather than its names struck from the set, so a
     # name it shares with another active session still counts for that one.
+    # Under --if-source-closed the names come only off a step a session has
+    # claimed (assigned, or in_progress) and can still run: not the root, not a
+    # held (`blocked`) step, not an end bead.
     declare -A LIVE_SET=()
     while IFS= read -r _id; do
         [ -n "$_id" ] && LIVE_SET["$_id"]=1
@@ -306,7 +323,15 @@ EOF
         [ -n "$_cand" ] || continue
         if [ -n "${LIVE_SET[$_cand]:-}" ]; then LIVE_SESSION="$_cand"; break; fi
     done <<EOF
-$(printf '%s' "$ALL" | jq -r --arg r "$ROOT" '.[] | select(((.metadata["gc.root_bead_id"] // "") | tostring) == $r or .id == $r) | (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "")' 2>/dev/null)
+$(printf '%s' "$ALL" | jq -r --arg r "$ROOT" --arg runnable "$IF_SOURCE_CLOSED" '
+    .[]
+    | select(((.metadata["gc.root_bead_id"] // "") | tostring) == $r or .id == $r)
+    | select($runnable != "1"
+             or ((.id != $r)
+                 and ((.status // "") != "blocked")
+                 and (((.metadata["gc.step_ref"] // "") | tostring) != "molecule-end")
+                 and (((.assignee // "") != "") or ((.status // "") == "in_progress"))))
+    | (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "")' 2>/dev/null)
 EOF
     if [ -n "$LIVE_SESSION" ]; then
         echo "$PROG: root $ROOT is $ROOT_STATUS and a live session ($LIVE_SESSION) still stands behind it — machinery, not residue; nothing disposed" >&2
@@ -411,7 +436,7 @@ note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 # Why the chain is residue — a closed root, a molecule whose work closed, or a
 # dead husk the guards cleared.
 if [ "$ROOT_NOT_CLOSED" = "1" ] && [ "$WB_STATUS" = "closed" ]; then
-    DISPOSE_REASON="molecule root $ROOT ends with its work bead $WORK_BEAD, which is closed (root status=$ROOT_STATUS, no live session$([ "$OWNER" = "1" ] && printf ' besides the caller'), no open escalation)"
+    DISPOSE_REASON="molecule root $ROOT ends with its work bead $WORK_BEAD, which is closed (root status=$ROOT_STATUS, no live session$([ "$OWNER" = "1" ] && printf ' besides the caller')$([ "$IF_SOURCE_CLOSED" = "1" ] && printf ' running a step'), no open escalation)"
 elif [ "$ROOT_NOT_CLOSED" = "1" ]; then
     DISPOSE_REASON="molecule root $ROOT is a dead husk (status=$ROOT_STATUS, no live session, no open escalation, no in-flight PR)"
 else

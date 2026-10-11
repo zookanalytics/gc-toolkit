@@ -446,10 +446,13 @@ OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
 has "$OUT" "detail=no_source" "a convoy tracking two beads names no single source"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "no source draws no write"
 # The other refusals still hold when the work has closed.
-husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+husk '{"sessions":[{"id":"lx-worker","session_name":"","alias":"","state":"active"}]}'
 close_work
+jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .metadata["gc.session_id"]="lx-worker") else . end)' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
 OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
-has "$OUT" "result=live_root" "a live session still keeps a molecule whose work closed"
+has "$OUT" "result=live_root" "a live session running a step still keeps a molecule whose work closed"
+has "$OUT" "live_session=lx-worker" "and is named"
 husk
 close_work
 jq -c '. + [{"id":"tk-hvisit","status":"open","assignee":"","title":"visit","metadata":{"escalation_key":"k","task_kind":"visit"}}]' \
@@ -457,6 +460,46 @@ jq -c '. + [{"id":"tk-hvisit","status":"open","assignee":"","title":"visit","met
 printf 'tk-hvisit|tracks|tk-hwork\n' >> "$STUB_DEPS"
 OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
 has "$OUT" "open_escalation=tk-hvisit" "an open escalation still keeps a molecule whose work closed"
+
+echo "--- --if-source-closed: only a session running a step keeps the molecule ---"
+# With the work closed, a live session named only by the held step, the root,
+# an end bead, or a step nobody has claimed runs nothing of the molecule.
+LIVE_HOLDER='{"sessions":[{"id":"lx-dead-wisp","session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","alias":"","state":"active"}]}'
+husk "$LIVE_HOLDER"; close_work
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=live_root" "without the flag, a live session on the held step and the root keeps the molecule"
+husk "$LIVE_HOLDER"; close_work
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "with it, a live session named only by the held step and the root does not"
+has "$(notes tk-hload)" "running a step" "the note says no live session was running a step"
+# A hold keeps its claim on the held step, so the holder is its assignee too.
+husk '{"sessions":[{"id":"lx-holder","session_name":"","alias":"","state":"active"}]}'
+close_work
+jq -c 'map(if .id=="tk-hload" then (.assignee="lx-holder" | .metadata["gc.session_id"]="lx-holder") else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "live_session=lx-holder" "without the flag, the holder's claim on its held step keeps the molecule"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "with it, the holder's claim on its held step does not"
+husk '{"sessions":[{"id":"lx-claimer","session_name":"","alias":"","state":"active"}]}'
+close_work
+jq -c '. + [{"id":"tk-hend","status":"in_progress","assignee":"lx-claimer","title":"End molecule",
+  "metadata":{"gc.step_ref":"molecule-end","gc.root_bead_id":"tk-hroot","gc.session_id":"lx-claimer"}}]' \
+  "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "live_session=lx-claimer" "without the flag, an end bead's live claimant keeps the molecule"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "with it, an end bead's live claimant does not"
+eq "$(bstatus tk-hend)" "closed" "and the end bead closes with the molecule"
+husk '{"sessions":[{"id":"lx-gone","session_name":"","alias":"","state":"active"}]}'
+close_work
+jq -c 'map(if .id=="tk-himpl" then .metadata["gc.session_id"]="lx-gone" else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "result=disposed" "a session stamp left on a step nobody has claimed does not keep it"
+husk '{"sessions":[{"id":"lx-next","session_name":"","alias":"","state":"active"}]}'
+close_work
+jq -c 'map(if .id=="tk-himpl" then .assignee="lx-next" else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+OUT=$("$SCRIPT" tk-hroot --apply --if-source-closed 2>&1)
+has "$OUT" "live_session=lx-next" "a step pre-assigned to a live session still keeps it"
 
 echo "--- --owner: the caller's own claim is not a live worker ---"
 OWN_ROSTER='{"sessions":[{"id":"lx-me","session_name":"gc-toolkit__polecat-lx-me","alias":"","name":"gc-toolkit__polecat-lx-me","agent_name":"gc-toolkit/gc-toolkit.polecat-3","state":"active"},
@@ -476,7 +519,7 @@ OUT=$(GC_SESSION_NAME=gc-toolkit__polecat-lx-me "$SCRIPT" tk-hload --apply --own
 has "$OUT" "result=disposed" "the caller is found by GC_SESSION_NAME as well"
 # Any other live session still keeps it.
 husk "$OWN_ROSTER"; close_work; own_claim
-jq -c 'map(if .id=="tk-himpl" then .metadata["gc.session_id"]="lx-live-other" else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
+jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .metadata["gc.session_id"]="lx-live-other") else . end)' "$STUB_STORE" > "$TMP/s" && mv "$TMP/s" "$STUB_STORE"
 OUT=$(GC_SESSION_ID=lx-me "$SCRIPT" tk-hload --apply --owner --if-source-closed 2>&1)
 has "$OUT" "live_session=lx-live-other" "another live session still keeps the molecule under --owner"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a molecule another session holds draws no write"

@@ -242,19 +242,26 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# molecule-end.sh runs before every hold. It is exercised end to end, against
-# the real disposer, in molecule-end.test.sh; here it is a stub that answers
-# FAKE_END_OUT (default: nothing bounds the molecule) and exits FAKE_END_RC, so
-# these assertions stay on the hold's own writes. Each call is logged to
-# $END_LOG with the bead it was handed.
+# molecule-end.sh runs as the last act of every hold. It is exercised end to
+# end, against the real disposer, in molecule-end.test.sh; here it is a stub
+# that answers FAKE_END_OUT (default: nothing bounds the molecule) and exits
+# FAKE_END_RC, so these assertions stay on the hold's own writes. Each call is
+# logged to $END_LOG with its arguments, and $END_SNAP records the store as the
+# end found it: the held step's status and route, a sibling's route and claim,
+# and the root's route.
 cat > "$TMP/bin/molecule-end-stub" <<'ENDSTUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${END_LOG:?}"
+jq -r '
+  def m($i; $k): ((.[] | select(.id == $i) | .metadata[$k]) // "<absent>");
+  def f($i; $k): ((.[] | select(.id == $i) | .[$k]) // "<absent>");
+  "load=\(f("s-load"; "status")) load_route=\(m("s-load"; "gc.routed_to")) setup_route=\(m("s-setup"; "gc.routed_to")) setup_assignee=\(f("s-setup"; "assignee")) root_route=\(m("root-1"; "gc.routed_to"))"
+' "${FAKE_STORE:?}" >> "${END_SNAP:?}" 2>/dev/null
 printf '%s\n' "${FAKE_END_OUT:-result=unbound bead=${1:-} detail=stub}"
 exit "${FAKE_END_RC:-0}"
 ENDSTUB
 chmod +x "$TMP/bin/molecule-end-stub"
-export GC_MOLECULE_END_TOOL="$TMP/bin/molecule-end-stub" END_LOG="$TMP/end.log"
+export GC_MOLECULE_END_TOOL="$TMP/bin/molecule-end-stub" END_LOG="$TMP/end.log" END_SNAP="$TMP/end.snap"
 export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" FAKE_UPDFAIL="$TMP/updfail"
 export FAKE_UPDFAIL_ROUTE="$TMP/updfail.route" FAKE_UPDFAIL_ASSIGNEE="$TMP/updfail.assignee"
 export FAKE_SHOWFAIL="$TMP/showfail"
@@ -564,25 +571,53 @@ has "$OUT" "could not enumerate sibling steps" "the unparseable enumeration is n
 eq "$(bstatus s-load)" "blocked" "the step is still held"
 eq "$(bassignee s-setup)" "$MINE" "the siblings keep their claims"
 
-echo "== the hold is bounded by the molecule's work: molecule-end.sh runs first =="
-reset_store; : > "$END_LOG"
+echo "== the hold is bounded by the molecule's work: molecule-end.sh runs last =="
+reset_store; : > "$END_LOG"; : > "$END_SNAP"
 OUT=$("$SCRIPT" --step "$STEP" --reason "duplicate dispatch" 2>&1); RC=$?
 eq "$RC" "0" "a molecule nothing bounds is held as before"
-eq "$(head -1 "$END_LOG")" "s-load" "molecule-end.sh is handed the step this session holds"
-# The work has closed: the molecule ended, so the hold writes nothing.
+eq "$(head -1 "$END_LOG")" "s-load --route $POOL" "molecule-end.sh is handed the step this session holds, and the pool its route named before the hold cleared it"
+eq "$(wc -l < "$END_LOG" | tr -d ' ')" "1" "molecule-end.sh runs once"
+SNAP=$(head -1 "$END_SNAP")
+has "$SNAP" "load=blocked " "the end runs after the blocking write"
+has "$SNAP" "load_route=<absent> " "after the held step's route is cleared"
+has "$SNAP" "setup_route=<absent> setup_assignee= " "after the siblings are released"
+has "$SNAP" "root_route=<absent>" "and after the root is de-routed"
+# The step's route already cleared: the root's route, read before the quiesce
+# clears it, names the pool.
+reset_store; : > "$END_LOG"
+jq -c 'map(if .id == "s-load" then (.metadata |= del(.["gc.routed_to"])) else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+"$SCRIPT" --step "$STEP" --reason "duplicate dispatch" >/dev/null 2>&1
+eq "$(head -1 "$END_LOG")" "s-load --route $POOL" "with the step unrouted, the root's route names the pool"
+# Neither routed: no --route, and molecule-end.sh falls back on its own.
+reset_store; : > "$END_LOG"
+jq -c 'map(if .id == "s-load" or .id == "root-1" then (.metadata |= del(.["gc.routed_to"])) else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+"$SCRIPT" --step "$STEP" --reason "duplicate dispatch" >/dev/null 2>&1
+eq "$(head -1 "$END_LOG")" "s-load" "with nothing routed, no --route is passed"
+# The work has closed: the hold lands, and the end closes the molecule after it.
 reset_store; : > "$END_LOG"
 OUT=$(FAKE_END_OUT="result=ended bead=s-load root=root-1 source=tk-w" "$SCRIPT" --step "$STEP" --reason "work closed" 2>&1); RC=$?
 eq "$RC" "0" "a molecule that ended with its work exits 0, so the caller drains"
-has "$OUT" "nothing left to hold" "and says the hold had nothing to do"
-eq "$(bstatus s-load)" "in_progress" "the hold wrote nothing over the ended molecule"
-hasnt "$(gclog)" "bd update" "no update is issued once the molecule ended"
+has "$OUT" "closed with it" "and says the held step closed with the molecule"
+has "$(gclog)" "--status=blocked" "the hold was written before the end ran"
+# A molecule the end closed is quiet whatever the quiesce left.
+reset_store
+echo "s-setup" > "$FAKE_UPDFAIL_ROUTE"
+OUT=$(FAKE_END_OUT="result=ended bead=s-load root=root-1 source=tk-w" "$SCRIPT" --step "$STEP" --reason "work closed" 2>&1); RC=$?
+eq "$RC" "0" "an ended molecule exits 0 though a sibling's route clear failed: the disposer de-routed every member"
 # The end could not be armed: the hold still lands, and the exit stops a drain.
 reset_store
 OUT=$(FAKE_END_RC=1 FAKE_END_OUT="result=failed bead=s-load detail=create_failed" "$SCRIPT" --step "$STEP" --reason "duplicate dispatch" 2>&1); RC=$?
 eq "$RC" "1" "a hold whose end could not be armed exits 1"
-has "$OUT" "could not arm its end" "the failure names the end, not the quiesce"
+has "$OUT" "could neither end it nor arm its end" "the failure names the end, not the quiesce"
 eq "$(bstatus s-load)" "blocked" "the step is still held"
 eq "$(meta s-setup 'gc.routed_to')" "<absent>" "and the molecule is still quiesced"
+# A step whose molecule cannot be resolved is held, but no end runs on it.
+reset_store; : > "$END_LOG"
+echo "s-load" > "$FAKE_SHOWFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --bead s-load --reason "duplicate dispatch" 2>&1); RC=$?
+: > "$FAKE_SHOWFAIL"
+eq "$RC" "1" "a hold whose molecule cannot be resolved exits 1"
+eq "$(cat "$END_LOG")" "" "and molecule-end.sh never runs on it"
 # Dry run asks molecule-end.sh for its own dry run and reports an end.
 reset_store; : > "$END_LOG"
 OUT=$(FAKE_END_OUT="result=would_end bead=s-load" "$SCRIPT" --step "$STEP" --reason "peek" --dry-run 2>&1); RC=$?

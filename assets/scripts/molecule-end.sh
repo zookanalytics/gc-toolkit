@@ -2,7 +2,7 @@
 # molecule-end.sh — bound a graph.v2 molecule's lifetime by the work it was
 # poured for.
 #
-#   molecule-end.sh <bead-id> [--dry-run]
+#   molecule-end.sh <bead-id> [--route <pool>] [--dry-run]
 #
 # A molecule is poured for one source: the single bead its input convoy tracks.
 # Once that source closes, whichever writer closes it, nothing the molecule
@@ -28,11 +28,15 @@
 #
 # A disposer refusal is a wait on what it names. An open visit joins the end
 # bead's blockers, and a source reopened since it was read keeps the end bead
-# behind the source. A live session still standing behind the molecule owns
-# its end: that session's own exits (its terminal step, or a hold, which runs
-# this script) end it, so nothing is armed, and an end bead the caller claimed
-# is retired. Any other refusal is one the disposer will repeat, so a visit is
-# filed through escalate.sh, keyed to the molecule, and the end waits on it.
+# behind the source. A live session still running a step of the molecule owns
+# its end, so nothing is armed, and an end bead the caller claimed is retired.
+# The molecule ends on that session's way out or at a later step: a hold runs
+# this script as its last act, the steps gated on closed work send it through a
+# hold, and a molecule that runs on finishes at its terminal step. A held step,
+# the root, and an end bead's claimant run no step, so the disposer does not
+# count them live (its --if-source-closed). Any other refusal is one the
+# disposer will repeat, so a visit is filed through escalate.sh, keyed to the
+# molecule, and the end waits on it.
 #
 # The end bead is created unrouted, its blocks edges are added, and only then
 # is it routed, so it is never offerable without its blockers. Re-arming one
@@ -40,8 +44,9 @@
 # with its route kept. The source and the molecule's steps are only ever
 # written through the disposer.
 #
-# Callers: molecule-hold.sh, before every hold; the worker that claims an end
-# bead (polecat doctrine).
+# Callers: molecule-hold.sh, as the last act of every hold, naming the pool
+# with --route because the hold has already cleared the step's route and the
+# root's; the worker that claims an end bead (polecat doctrine).
 # exit: 0 ended, armed, live, or nothing to bound · 1 a read or a write failed,
 #       and the molecule is as it was · 2 usage
 set -uo pipefail
@@ -60,10 +65,12 @@ scrub() { tr -d '\000-\037'; }
 
 usage() {
   cat <<'USAGE'
-usage: molecule-end.sh <bead-id> [--dry-run]
+usage: molecule-end.sh <bead-id> [--route <pool>] [--dry-run]
 
   <bead-id>  a member of the molecule the caller holds: the step being held,
              or the end bead the caller claimed
+  --route    the pool a new end bead is routed to, ahead of the bead's own
+             route, the root's, and GC_TEMPLATE
   --dry-run  resolve and report what would happen; write nothing
 
 Ends the molecule when the work it was poured for has closed, and otherwise
@@ -79,9 +86,13 @@ USAGE
 
 BEAD=""
 DRY_RUN=0
+ROUTE_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
+    --route)
+      case "${2:-}" in ""|-*) echo "$PROG: --route requires a pool" >&2; usage >&2; exit 2 ;; esac
+      ROUTE_ARG="$2"; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "$PROG: unknown flag '$1'" >&2; usage >&2; exit 2 ;;
     *)
@@ -203,11 +214,11 @@ retire_end() { # <reason>
     || fail "could not retire end bead $END" "retire_failed=$END"
 }
 
-# The pool the molecule runs on: the held step's route, else the root's, else
-# the caller's own pool template.
+# The pool the molecule runs on: the caller's --route, else the held step's
+# route, else the root's, else the caller's own pool template.
 pool_route() {
-  local r
-  r=$(meta_of "$SELF_JSON" gc.routed_to)
+  local r="$ROUTE_ARG"
+  [ -n "$r" ] || r=$(meta_of "$SELF_JSON" gc.routed_to)
   [ -n "$r" ] || r=$(meta_of "$ROOT_JSON" gc.routed_to)
   [ -n "$r" ] || r="${GC_TEMPLATE:-}"
   printf '%s' "$r"
@@ -308,8 +319,8 @@ case "$D_RESULT" in
     case "$D_DETAIL" in
       *liveness_undetermined*) fail "session liveness could not be read, so the end of $ROOT could not be proven safe — nothing done" "$D_DETAIL" ;;
     esac
-    # A live session owns the molecule's end. The caller's own end bead, if it
-    # holds one, has nothing left to wait for.
+    # A live session running a step owns the molecule's end (see the header).
+    # The caller's own end bead, if it holds one, has nothing left to wait for.
     if [ "$SELF_REF" = "$END_REF" ]; then
       retire_end "a live session still holds molecule $ROOT ($D_DETAIL), and its own exits end it"
     fi

@@ -16,13 +16,18 @@
 #     worker that claims it closes the molecule, the end bead included. No
 #     sweep runs anywhere in it;
 #   * the PARK-AFTER-CLOSE case — a hold whose work has already closed ends the
-#     molecule at once, with the holding session's own claim set aside, and
-#     writes no hold;
+#     molecule once its own writes are done, the held step with it, with the
+#     holding session's own claim set aside;
+#   * the RACES — the work closes while a hold is still running, or before the
+#     parker drains, and the end bead's run ends the molecule; a session whose
+#     only claim is a held step or the end bead never keeps it, so the end is
+#     never left with two sessions each deferring it to the other;
 #   * an OPEN source leaves a parked molecule as it is, and an end run on it
 #     only re-arms;
 #   * the disposer's REFUSALS still hold, each as a wait: an open escalation
-#     visit becomes a blocker of the end bead, a live session owns the end, and
-#     a refusal the disposer would repeat files a visit the end then waits on;
+#     visit becomes a blocker of the end bead, a live session running a step
+#     owns the end and its own hold ends the molecule, and a refusal the
+#     disposer would repeat files a visit the end then waits on;
 #   * ANY FORMULA — a mol-validate molecule whose source is a validation pass
 #     ends the same way;
 #   * ORDER — a new end bead is routed only after its blockers are in place,
@@ -126,7 +131,7 @@ echo "--- park on open work: the end is armed, nothing ends ---"
 molecule
 OUT=$(park "the work is moot"); rc=$?
 eq "$rc" "0" "the hold exits 0, so the parker drains"
-has "$OUT" "result=armed" "molecule-end.sh armed the end before the hold"
+has "$OUT" "result=armed" "molecule-end.sh armed the end"
 END=$(end_bead)
 [ -n "$END" ] && [ "${END#*,}" = "$END" ] && ok "exactly one end bead was created ($END)" || bad "one end bead expected, got '$END'"
 eq "$(meta "$END" gc.root_bead_id)" "tk-root" "the end bead is a member of the molecule"
@@ -181,11 +186,72 @@ close_bead tk-work
 OUT=$(park "already closed"); rc=$?
 eq "$rc" "0" "the hold exits 0"
 has "$OUT" "result=ended" "molecule-end.sh ended it"
-has "$OUT" "nothing left to hold" "and the hold says it had nothing to do"
+has "$OUT" "closed with it" "and the hold says the held step closed with the molecule"
 for B in $MEMBERS; do eq "$(bstatus "$B")" "closed" "$B is closed"; done
 eq "$(end_bead)" "" "no end bead is armed"
-hasnt "$(cat "$STUB_GC_LOG")" "--status=blocked" "no hold is written over the ended molecule"
+HOLD_L=$(grep -n -- "bd update tk-load --status=blocked" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+CLOSE_L=$(grep -n -- "bd update tk-load --status=closed" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$HOLD_L" ] && [ -n "$CLOSE_L" ] && [ "$HOLD_L" -lt "$CLOSE_L" ]; then
+  ok "the hold is written first, and the end closes the held step after it"
+else
+  bad "hold and end out of order (hold=$HOLD_L close=$CLOSE_L)"
+fi
 has "$(notes tk-load)" "besides the caller" "the parker's own claim was set aside, and the note says so"
+
+echo "--- the work closes before the parker drains: a held step does not keep the molecule ---"
+# The parker has blocked its step, released the rest and armed the end, and is
+# still live when the work closes and another session claims the end bead.
+molecule
+park "the work is moot" >/dev/null 2>&1; END=$(end_bead)
+close_bead tk-work
+roster "$PARKER" "$CLAIMER"; as_session "$CLAIMER"; claim "$END" "$CLAIMER"
+OUT=$("$END_SH" "$END" 2>&1); rc=$?
+eq "$rc" "0" "the end run exits 0"
+has "$OUT" "result=ended" "the end ends the molecule while the parker is still live"
+for B in $MEMBERS "$END"; do eq "$(bstatus "$B")" "closed" "$B is closed"; done
+
+echo "--- the work closes and the end is claimed and run while the hold is still running ---"
+# The molecule-end.sh the hold runs is wrapped: once the hold's own end has
+# armed, and before the hold returns, the work closes and a second session
+# claims the end bead and runs it. That run must end the molecule, not retire
+# the only end bead against a parker that never reads the work again.
+cat > "$TMP/end-race" <<'RACE'
+#!/usr/bin/env bash
+out=$("${REAL_END:?}" "$@" 2>&1); rc=$?
+printf '%s\n' "$out"
+if [ ! -e "${RACE_DONE:?}" ]; then
+  : > "$RACE_DONE"
+  end=$(jq -r '[ .[] | select((.metadata["gc.step_ref"] // "") == "molecule-end" and .status != "closed") | .id ] | (.[0] // "")' "$STUB_STORE")
+  gc bd update tk-work --status=closed >/dev/null
+  gc bd update "$end" --status=in_progress --assignee "$RACE_CLAIMER" --set-metadata "gc.session_id=$RACE_CLAIMER" >/dev/null
+  GC_SESSION_ID="$RACE_CLAIMER" GC_SESSION_NAME="gc-toolkit__polecat-$RACE_CLAIMER" "$REAL_END" "$end" > "${RACE_OUT:?}" 2>&1
+fi
+exit "$rc"
+RACE
+chmod +x "$TMP/end-race"
+molecule
+roster "$PARKER" "$CLAIMER"; as_session "$PARKER"
+rm -f "$TMP/race-done"
+OUT=$(GC_MOLECULE_END_TOOL="$TMP/end-race" REAL_END="$END_SH" RACE_DONE="$TMP/race-done" RACE_OUT="$TMP/race-out" \
+  RACE_CLAIMER="$CLAIMER" park "the work is moot"); rc=$?
+eq "$rc" "0" "the hold exits 0"
+[ -e "$TMP/race-done" ] && ok "the race ran inside the hold" || bad "the race never ran"
+has "$(cat "$TMP/race-out")" "result=ended" "the claimant's end ended the molecule"
+for B in $MEMBERS; do eq "$(bstatus "$B")" "closed" "$B is closed"; done
+eq "$(jq -r '[ .[] | select((.metadata["gc.step_ref"] // "") == "molecule-end" and .status != "closed") | .id ] | join(",")' "$STUB_STORE")" "" "no end bead is left standing"
+
+echo "--- an end bead's claimant does not keep the molecule from a hold that ends it ---"
+# A second session runs the held step again, the work closes, and the end bead
+# is claimed but not yet run when that session's hold reads the work.
+molecule; park "x" >/dev/null 2>&1; END=$(end_bead)
+gc bd update tk-load --status=in_progress --assignee lx-second --set-metadata gc.session_id=lx-second >/dev/null
+close_bead tk-work
+roster lx-second "$CLAIMER"; claim "$END" "$CLAIMER"
+as_session lx-second
+OUT=$("$HOLD_SH" --step mol-polecat-work.load-context --bead tk-load --reason "work closed" 2>&1); rc=$?
+eq "$rc" "0" "the second session's hold exits 0"
+has "$OUT" "result=ended" "its hold ends the molecule though the end bead's claimant is live"
+for B in $MEMBERS "$END"; do eq "$(bstatus "$B")" "closed" "$B is closed"; done
 
 echo "--- the disposer's refusals still hold, each as a wait ---"
 # A live session: another session holds a member when the end runs.
@@ -200,6 +266,12 @@ eq "$(bstatus tk-root)" "in_progress" "the molecule stays while a live session h
 eq "$(bstatus tk-impl)" "in_progress" "the live session's step is untouched"
 eq "$(bstatus "$END")" "closed" "the claimed end bead is retired, so it is not offered again and again"
 eq "$(meta "$END" gc.work_outcome)" "no-op" "the retire records no work"
+# That session ends the molecule on its way out: its hold runs the end last.
+as_session lx-other
+OUT=$("$HOLD_SH" --step mol-polecat-work.implement --bead tk-impl --reason "work closed" 2>&1); rc=$?
+eq "$rc" "0" "the live session's hold exits 0"
+has "$OUT" "result=ended" "and its hold ends the molecule"
+for B in $MEMBERS; do eq "$(bstatus "$B")" "closed" "$B is closed"; done
 # An open escalation: a visit filed after the arm.
 molecule; park "x" >/dev/null 2>&1; END=$(end_bead)
 jq -c '. + [{"id":"tk-visit","status":"open","assignee":"","title":"visit","metadata":{"escalation_key":"polecat-premise","task_kind":"visit"}}]' \
