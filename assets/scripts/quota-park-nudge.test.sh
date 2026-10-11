@@ -87,7 +87,11 @@
 # be created or written is answered as `unknown`/`state-dir-unavailable` in full
 # closed fields rather than by exiting silently, and the sweep it does stop says
 # so in the log and nudges nothing; (at) every reason the script emits is one the
-# doc documents, and both patrols state what to do with no helper output at all.
+# doc documents, and both patrols state what to do with no helper output at all;
+# (au) a pass reads the session list once and peeks only the panes it cannot
+# vouch for — none that are working or unchanged since a clean read of them while
+# quiet — while an episode, a nudge since the read, a read missing or past
+# REPEEK_AFTER, or an output time it cannot trust always means a peek.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -307,6 +311,8 @@ case "$1 $2" in
   # script may not treat the two alike: an empty list is a complete pass over
   # nothing, a failed one is no pass at all.
   "session list")
+    # Logged when asked, so a run can count the list reads a pass made.
+    [ -n "${FAKE_LIST_LOG:-}" ] && printf 'list\n' >> "$FAKE_LIST_LOG"
     [ "${FAKE_FAIL_LIST:-0}" = "1" ] && exit 3
     # A list fetch slow enough to spend a whole sweep budget before the peek
     # loop starts — the load case the sweep clock must not count against itself.
@@ -316,6 +322,8 @@ case "$1 $2" in
   # and an orphaned sleep would hold the caller's command-substitution pipe open
   # long past the bound, hiding the very thing this fixture tests.
   "session peek")
+    # Logged when asked, one id per peek, so a run can count and name them.
+    [ -n "${FAKE_PEEK_LOG:-}" ] && printf '%s\n' "$3" >> "$FAKE_PEEK_LOG"
     [ "${FAKE_HANG_PEEK:-}" = "$3" ] && exec sleep 30
     # A whole CLASS of sessions that hang, not just one: a single wedged peek
     # tests the per-call bound, but a wedged PREFIX is what starves the sessions
@@ -701,7 +709,7 @@ eq "$(nudges_for lx-codex)" "1" \
 # --- Run 13b: ZERO is not a valid value for most of these knobs. ------------
 # `0` passes an is-it-an-integer test and then disables recovery just as
 # thoroughly as garbage does, which is worse than garbage because it looks
-# deliberate. It is an off switch for exactly the three knobs documented as
+# deliberate. It is an off switch for exactly the four knobs documented as
 # having one; everywhere else it falls back to the default like any other
 # out-of-range value. Each case below is the silent failure that knob buys.
 rm -f "$TMP/state"/*
@@ -735,8 +743,9 @@ eq "$(nudges_for lx-codex)" "1" \
     "QUOTA_PARK_PEEK_LINES=0 falls back (a zero-line capture reads as an unreadable pane)"
 
 # The other side of the same rule: where zero IS documented as the off switch it
-# must keep working, or tightening the validation just breaks three knobs the
-# other way.
+# must keep working, or tightening the validation just breaks those knobs the
+# other way. REPEEK_AFTER's zero is asserted with the rest of its behaviour in
+# Run 36.
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"; : > "$TMP/mail"
 printf 'first_seen=%s\nlast_nudge=0\nlast_try=0\nattempts=3\nunconfirmed=0\nescalated=\n' \
@@ -1242,22 +1251,24 @@ fi
 # where it is meant to be bounded.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 : > "$TMP/nudges"
-rm -f "$TMP/outside-state" "$TMP/outside-hb" "$TMP/outside-cursor" "$TMP/outside-cov"
+rm -f "$TMP/outside-state" "$TMP/outside-hb" "$TMP/outside-cursor" "$TMP/outside-cov" \
+    "$TMP/outside-reads"
 : > "$TMP/outside-state"
 ln -s "$TMP/outside-state"  "$TMP/state/lx-codex"
 ln -s "$TMP/outside-hb"     "$TMP/state/.heartbeat"
 ln -s "$TMP/outside-cursor" "$TMP/state/.sweep-cursor"
 ln -s "$TMP/outside-cov"    "$TMP/state/.sweep-coverage"
+ln -s "$TMP/outside-reads"  "$TMP/state/.pane-reads"
 FAKE_SESSIONS="$TMP/sessions-one.json" bash "$SCRIPT" > /dev/null
 [ -s "$TMP/outside-state" ] \
     && bad "episode state must not be written through a planted symlink" \
     || ok "episode state is not written through a planted symlink"
-for f in outside-hb outside-cursor outside-cov; do
+for f in outside-hb outside-cursor outside-cov outside-reads; do
     [ -e "$TMP/$f" ] \
         && bad "a planted symlink target must not be created ($f)" \
         || ok "a planted symlink target is not created ($f)"
 done
-for f in lx-codex .heartbeat .sweep-cursor .sweep-coverage; do
+for f in lx-codex .heartbeat .sweep-cursor .sweep-coverage .pane-reads; do
     if [ -f "$TMP/state/$f" ] && [ ! -L "$TMP/state/$f" ]; then
         ok "the planted symlink was replaced by a regular file ($f)"
     else
@@ -1886,6 +1897,193 @@ for broken in "${BROKEN_DIRS[@]}"; do
         "the $what state-dir sweep nudges nothing (it could not record a verdict)"
 done
 chmod 700 "$UNWRITABLE" 2>/dev/null || true
+
+# --- Run 36: one session list a pass, and a peek only where it cannot vouch. --
+# The list's last_active is the time of each pane's last output. A pane that
+# printed within ACTIVE_WITHIN is working, and a pane with no output since this
+# order read it clean while quiet still shows the screen that was read; the list
+# vouches for both without a peek. It never vouches for a session with an
+# episode, one a nudge reached since its read, one whose read is missing or older
+# than REPEEK_AFTER, or one whose output time it cannot trust.
+S36="$TMP/state36"; P36="$TMP/panes36"; L36="$TMP/sessions36.json"
+rm -rf "$S36" "$P36"; mkdir -p "$S36" "$P36"
+NOW36="$(date +%s)"
+QUIET36=$((NOW36 - 600))
+for n in $(seq -w 1 18); do printf '• Done. Nothing queued.\n❯\n' > "$P36/lx-q$n"; done
+cat > "$TMP/pane36-parked" <<'PANE'
+  ⎿  You’ve hit your session limit · resets 10:10am (UTC)
+     /usage-credits to finish what you're working on.
+
+❯
+PANE
+# The live list renders last_active at the host's UTC offset and the nudge stamp
+# in UTC. Both forms are written here, so the offset arithmetic is exercised.
+at_offset36() { jq -rn --argjson s "$1" '($s - 21600) | strftime("%Y-%m-%dT%H:%M:%S-06:00")'; }
+at_utc36()    { jq -rn --argjson s "$1" '$s | todateiso8601'; }
+# time_field36 <key> <spec> <formatter>: an epoch, "-" to leave the key out, or
+# raw:<text> to write the text as it stands.
+time_field36() {
+    case "$2" in
+        -) ;;
+        raw:*) printf ',"%s":"%s"' "$1" "${2#raw:}" ;;
+        *) printf ',"%s":"%s"' "$1" "$("$3" "$2")" ;;
+    esac
+}
+# The 18-session list: every pane quiet since QUIET36 with no nudge, except the
+# overrides given as "<id> <last_active> <last_nudge>".
+list36() {
+    local n id la ln over oid ola oln sep=""
+    {
+        printf '{"sessions":['
+        for n in $(seq -w 1 18); do
+            id="lx-q$n"; la="$QUIET36"; ln="-"
+            for over in "$@"; do
+                read -r oid ola oln <<< "$over"
+                if [ "$oid" = "$id" ]; then la="$ola"; ln="${oln:--}"; fi
+            done
+            printf '%s{"id":"%s","alias":"gc-toolkit/%s","state":"active","attached":false' "$sep" "$id" "$id"
+            time_field36 last_active "$la" at_offset36
+            time_field36 last_nudge_delivered_at "$ln" at_utc36
+            printf '}'
+            sep=","
+        done
+        printf ']}\n'
+    } > "$L36"
+}
+# One sweep over that list. PEEKED and LISTED count its peeks and list reads.
+pass36() {
+    : > "$TMP/peeks36"; : > "$TMP/lists36"
+    env FAKE_SESSIONS="$L36" FAKE_PANES="$P36" FAKE_NUDGES="$TMP/nudges36" \
+        FAKE_PEEK_LOG="$TMP/peeks36" FAKE_LIST_LOG="$TMP/lists36" \
+        QUOTA_PARK_STATE_DIR="$S36" "$@" bash "$SCRIPT" > "$TMP/out36"
+    PEEKED="$(grep -c . "$TMP/peeks36" || true)"
+    LISTED="$(grep -c . "$TMP/lists36" || true)"
+}
+# Move every pane read on record to <epoch>, as though the reads happened then.
+# No record to move is not this helper's failure: the assertions report it.
+reads_at36() {
+    [ -f "$S36/.pane-reads" ] || return 0
+    awk -v t="$1" 'NF == 3 { $2 = t } { print }' "$S36/.pane-reads" > "$S36/.pane-reads.new" \
+        && mv "$S36/.pane-reads.new" "$S36/.pane-reads"
+}
+: > "$TMP/nudges36"
+
+list36
+pass36
+eq "$LISTED" "1" "a pass reads the session list once"
+eq "$PEEKED" "18" "a pane with no read on record is peeked"
+eq "$(grep -c ' 1$' "$S36/.pane-reads" 2>/dev/null || true)" "18" \
+    "each clean read of a quiet pane is recorded as quiet"
+READ36=$((NOW36 - 300))
+reads_at36 "$READ36"
+pass36
+eq "$LISTED" "1" "the next pass reads the session list once"
+eq "$PEEKED" "0" "and peeks no pane that is unchanged since a clean read of it while quiet"
+grep -q "0 checked, 0 parked, 0 nudged, 18 classified from the session list" "$TMP/out36" \
+    && ok "the summary counts the sessions the list vouched for" \
+    || bad "the summary counts the sessions the list vouched for ($(tail -1 "$TMP/out36"))"
+QUOTA_PARK_STATE_DIR="$S36" bash "$SCRIPT" --status lx-q07 > "$TMP/status36"
+grep -q '^session=lx-q07 quota_park=no .*reason=-$' "$TMP/status36" \
+    && ok "a session the list vouched for answers quota_park=no" \
+    || bad "a session the list vouched for answers quota_park=no ($(tail -1 "$TMP/status36"))"
+pass36 QUOTA_PARK_REPEEK_AFTER=oops
+eq "$PEEKED" "0" "malformed QUOTA_PARK_REPEEK_AFTER falls back to its default"
+
+list36 "lx-q02 $(date +%s) -"
+pass36
+eq "$PEEKED" "0" "a pane printing now is working, not parked: no peek"
+pass36 QUOTA_PARK_ACTIVE_WITHIN=0
+eq "$PEEKED" "0" "QUOTA_PARK_ACTIVE_WITHIN=0 falls back (a zero window counts no pane as working)"
+
+# A pane with output since its read is peeked, and a park found there is handled
+# exactly as before: nudged at once, then held by its episode and backoff.
+cp "$TMP/pane36-parked" "$P36/lx-q03"
+list36 "lx-q03 $((NOW36 - 200)) -"
+pass36
+eq "$PEEKED" "1" "a pane with output since its read is peeked"
+eq "$(grep -c '^nudge lx-q03$' "$TMP/nudges36" || true)" "1" "and the park found there is nudged at once"
+grep -q "1 checked, 1 parked, 1 nudged" "$TMP/out36" \
+    && ok "the summary counts the park the peek found" \
+    || bad "the summary counts the park the peek found ($(tail -1 "$TMP/out36"))"
+# A read on record the list would vouch from, so only the episode can force the peek.
+printf 'lx-q03 %s 1\n' "$(date +%s)" >> "$S36/.pane-reads"
+pass36
+eq "$PEEKED" "1" "a session with an episode is peeked though the list would vouch for it"
+eq "$(grep -c '^nudge lx-q03$' "$TMP/nudges36" || true)" "1" "and its backoff holds"
+cp "$P36/lx-q01" "$P36/lx-q03"
+pass36
+eq "$PEEKED" "1" "the pane that ends an episode is peeked"
+[ -e "$S36/lx-q03" ] && bad "a clean peek ends the episode" || ok "a clean peek ends the episode"
+pass36
+eq "$PEEKED" "0" "the pane an episode ended on is not peeked again while unchanged"
+
+# gc's last_active discounts gc's own keystroke echo, which can hide a banner
+# printed straight after a nudge, so a nudge since the read forces the peek.
+list36 "lx-q03 $((NOW36 - 200)) -" "lx-q04 $QUIET36 $((READ36 + 1))"
+pass36
+eq "$(cat "$TMP/peeks36")" "lx-q04" "a pane a nudge reached since its read is peeked"
+pass36
+eq "$PEEKED" "0" "and a read after the nudge settles it"
+
+# Reads 300s old with every pane unchanged since, under a 200s window.
+reads_at36 "$READ36"
+pass36 QUOTA_PARK_REPEEK_AFTER=200
+eq "$PEEKED" "18" "a read older than QUOTA_PARK_REPEEK_AFTER vouches for nothing"
+pass36
+eq "$PEEKED" "0" "and the fresh reads vouch again"
+pass36 QUOTA_PARK_REPEEK_AFTER=0
+eq "$PEEKED" "18" "QUOTA_PARK_REPEEK_AFTER=0 peeks every pane every pass"
+
+list36 "lx-q06 - -" "lx-q07 raw:0001-01-01T00:00:00Z -" "lx-q08 raw:yesterday -" \
+    "lx-q09 $(( $(date +%s) + 3600 )) -"
+pass36
+eq "$PEEKED" "4" "a pane whose output time is missing, zero, unparseable or after the list is peeked"
+pass36
+eq "$PEEKED" "4" "and peeked every pass, since the list cannot vouch for it"
+
+# A read taken while the pane was still printing may sit inside gc's echo
+# window, so it vouches only while the pane keeps printing, never for the quiet
+# that follows. Two panes with the same times, one record each way.
+T36=$(( $(date +%s) - 30 ))
+{ for n in $(seq -w 1 18); do
+      if [ "$n" = 10 ]; then echo "lx-q$n $T36 0"; else echo "lx-q$n $T36 1"; fi
+  done; } | mkstate "$S36/.pane-reads"
+list36 "lx-q10 $((T36 - 60)) -" "lx-q11 $((T36 - 60)) -"
+pass36
+eq "$(cat "$TMP/peeks36")" "lx-q10" \
+    "a read taken while the pane was printing does not vouch for its later quiet"
+# And the read records it so: lx-q12 is read with no record while printing, then
+# a narrower ACTIVE_WITHIN makes the same output time quiet.
+rm -f "$S36/.pane-reads"
+list36 "lx-q12 $(( $(date +%s) - 10 )) -"
+pass36
+pass36 QUOTA_PARK_ACTIVE_WITHIN=5
+eq "$(cat "$TMP/peeks36")" "lx-q12" "a pane read while it was printing is recorded as not quiet"
+
+# The row keeps its four fields whatever the metadata holds. A session with no
+# id is dropped, never read with its alias in the id's place, and an empty alias
+# falls back like a missing one rather than shifting the times along.
+printf '{"sessions":[%s,%s]}\n' \
+    '{"id":null,"alias":"lx-q01","state":"active","attached":false}' \
+    '{"id":"","alias":"lx-q02","state":"active","attached":false}' > "$TMP/sessions36-noid.json"
+: > "$TMP/peeks36"
+FAKE_SESSIONS="$TMP/sessions36-noid.json" FAKE_PANES="$P36" FAKE_PEEK_LOG="$TMP/peeks36" \
+    FAKE_NUDGES="$TMP/nudges36" QUOTA_PARK_STATE_DIR="$S36" bash "$SCRIPT" > /dev/null
+eq "$(grep -c . "$TMP/peeks36" || true)" "0" "a session row with no id is dropped, not read under its alias"
+S36B="$TMP/state36b"; rm -rf "$S36B"; mkdir -p "$S36B"
+printf 'lx-q01 %s 1\n' "$READ36" | mkstate "$S36B/.pane-reads"
+printf '{"sessions":[{"id":"lx-q01","alias":"","session_name":"","state":"active","attached":false,"last_active":"%s","last_nudge_delivered_at":"%s"}]}\n' \
+    "$(at_offset36 $((NOW36 - 200)))" "$(at_utc36 $((READ36 - 100)))" > "$TMP/sessions36-noalias.json"
+: > "$TMP/peeks36"
+FAKE_SESSIONS="$TMP/sessions36-noalias.json" FAKE_PANES="$P36" FAKE_PEEK_LOG="$TMP/peeks36" \
+    FAKE_NUDGES="$TMP/nudges36" QUOTA_PARK_STATE_DIR="$S36B" bash "$SCRIPT" > /dev/null
+eq "$(cat "$TMP/peeks36")" "lx-q01" "an empty alias leaves the row's times in place (output since the read is seen)"
+
+# The record is this order's own, like every other file it reads.
+{ for n in $(seq -w 1 18); do echo "lx-q$n $T36 1"; done; } > "$S36/.pane-reads"
+list36
+pass36
+eq "$PEEKED" "18" "a pane-reads file this order did not write vouches for nothing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

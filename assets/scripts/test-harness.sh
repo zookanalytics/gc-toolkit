@@ -117,12 +117,13 @@ mk_sut_dir() { # <dir> <file>...
   # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
-  # posts or reads feedback runs it by sibling path. Copy all four beside the SUT
-  # so those calls resolve in the private dir; cp keeps pr-post.sh's executable
-  # bit. They sit beside this harness, so they are found whatever the
-  # SUT's own directory is.
+  # posts or reads feedback runs it by sibling path. work-outcome.sh is the
+  # gc.work_outcome stamp every visit closer (visit-close.sh among them) sources
+  # by sibling path. Copy all five beside the SUT so those calls resolve in the
+  # private dir; cp keeps pr-post.sh's executable bit. They sit beside this
+  # harness, so they are found whatever the SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, is sourced by sibling path the same way.

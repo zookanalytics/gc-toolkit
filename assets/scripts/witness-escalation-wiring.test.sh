@@ -9,11 +9,13 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+PROMPT="$ROOT/agents/witness/prompt.template.md"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
+[ -s "$PROMPT" ] || { echo "missing $PROMPT" >&2; exit 1; }
 
 grep -q 'patrol-finding\.sh' "$TOML" \
   && ok "witness patrol files findings through patrol-finding.sh" \
@@ -50,6 +52,37 @@ fi
 grep -q 'escalate\.sh' "$TOML" \
   && ok "escalate.sh is still reachable for an emergency" \
   || bad "the emergency escalation path is gone"
+
+# Mail that reports shared state or asks for an act the witness may not take is
+# a request with no other record. Archived as chatter, it is lost. The
+# check-inbox step makes the conversion a rule rather than a judgment, and
+# notice-finding.test.sh executes the block that carries it.
+INBOX=$(awk '/^id = "check-inbox"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")
+case "$INBOX" in
+  *'A `NOTICE:` is never chatter.'*) ok "check-inbox rules that a NOTICE is never chatter" ;;
+  *) bad "check-inbox no longer rules a NOTICE out of chatter, so archiving one unfiled is a judgment again" ;;
+esac
+case "$INBOX" in
+  *'# >>> notice-finding'*) ok "check-inbox carries the notice-finding block" ;;
+  *) bad "check-inbox lost the notice-finding block" ;;
+esac
+case "$INBOX" in
+  *reaping*reconciling*) ok "a request for an act the witness may not take is filed like a NOTICE" ;;
+  *) bad "check-inbox no longer names reap and reconcile requests as findings" ;;
+esac
+NOTICE_CALL=$(printf '%s\n' "$INBOX" | grep 'patrol-finding\.sh" --scope' || true)
+case "$NOTICE_CALL" in
+  *'--scope witness-findings'*'--key "$KEY"'*'--about'*) ok "notice-finding files a keyed, --about-scoped witness finding" ;;
+  *) bad "notice-finding's patrol-finding.sh call must carry --scope witness-findings, --key and --about" ;;
+esac
+
+# The witness may not close another agent's beads, so the request to do it
+# needs a route onward. The prompt carries that next to the ban itself.
+if awk '/Close another agent.s step beads/ {f=NR} f && NR <= f + 4 && /reap/ {r=1} f && NR <= f + 4 && /notice-finding/ {n=1} END {exit !(r && n)}' "$PROMPT"; then
+  ok "the witness prompt files a reap request as a finding, beside its ban on reaping"
+else
+  bad "the witness prompt's ban on closing another agent's beads no longer says where a reap request goes"
+fi
 
 if grep -n 'gc mail send' "$TOML"; then
   bad "formula still contains a bare 'gc mail send' — findings are beads now"
