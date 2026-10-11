@@ -47,6 +47,19 @@
 # treat that as not green, never as green by default).
 set -uo pipefail
 
+# THE SHELL BELOW IS THE FALLBACK. `gctk lane-state` (services/gctk, package
+# internal/lane) is the ported implementation and answers whenever the build
+# order has published a binary; this script runs when it has not — a fresh
+# city, a build that failed, a rig checkout ahead of the deployed binary. The
+# same package is what `gctk merge` calls in-process, so the merge predicate and
+# every caller of this script derive green from one code path. Both must stay
+# correct while the fallback stands, so lane-state.test.sh runs its whole body
+# against both. gctk-resolve.sh decides which one answers.
+_lane_state_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=gctk-resolve.sh
+. "$_lane_state_dir/gctk-resolve.sh" || { echo "lane-state: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+gctk_resolve lane-state "$@"
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes

@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 # lane-state.test.sh — hermetic tests for the green derivation.
+#
+# TWO ARMS, ONE BODY. The derivation exists twice during the gctk migration —
+# `gctk lane-state` (services/gctk/internal/lane) and the shell fallback in
+# lane-state.sh — and a caller cannot tell which answered. So every assertion
+# below runs against both: arm "shell" forces the fallback with
+# GCTK_FALLBACK=lane-state, arm "gctk" reaches the freshly built binary through
+# lane-state.sh, which also proves the hand-off wiring.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lane-state-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 unset GC_RIG 2>/dev/null || true
+# The gctk arm's binary is built from this checkout, before harness_init puts
+# the stub git on PATH.
+harness_build_gctk
 harness_init
 SUT="$HERE/lane-state.sh"
 
@@ -15,6 +25,8 @@ review() { # <status> <verdict> <outcome> [check_name]
   printf '{"id":"rv-1","status":"%s","assignee":"","title":"review","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"tk-anc","reviewed_oid":"deadbeef","signoff_verdict":"%s","gc.outcome":"%s"}}' "$1" "$g" "$2" "$3"
 }
 green() { "$SUT" green "$@"; }   # exit 0 green, 1 not green, 2 unreadable
+
+suite() {
 
 # ---------------------------------------------------------------------------
 # No review bead at all: a lane no one reviewed is not green.
@@ -103,5 +115,36 @@ if green --anchor tk-anc --lane correctness; then bad "a non-approving GitHub re
 STUB_LIST_FAIL=1 green --anchor tk-anc --lane correctness --no-remote; rc=$?
 eq "$rc" 2 "an unreadable store exits 2 (fail-closed, not green)"
 
+rm -f "$GH_DIR/reviews_42.json"
+}
+
+# An arm proves nothing about which implementation answered unless the hand-off
+# is checked directly. lane-state writes nothing on either path, so a sentinel
+# on the resolved path is the discriminator: it names itself and the subcommand
+# it was handed.
+SENTINEL="$TMP/sentinel-gctk"
+printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s\\n" "$*"\n' > "$SENTINEL"
+chmod +x "$SENTINEL"
+store "[$ANCHOR]"
+
+echo "## arm: shell fallback (GCTK_FALLBACK=lane-state)"
+export GCTK_FALLBACK=lane-state
+suite
+out=$(GCTK_BIN="$SENTINEL" "$SUT" green --anchor tk-anc --lane correctness --no-remote 2>&1)
+hasnt "$out" "SENTINEL-GCTK" "GCTK_FALLBACK=lane-state keeps lane-state.sh on its shell with a binary named"
+unset GCTK_FALLBACK
+
+echo
+echo "## arm: gctk lane-state (reached through lane-state.sh)"
+if [ -n "$GCTK_BUILT" ]; then
+  export GCTK_BIN="$GCTK_BUILT"
+  suite
+  out=$(GCTK_BIN="$SENTINEL" "$SUT" green --anchor tk-anc --lane correctness --no-remote 2>&1)
+  eq "$out" "SENTINEL-GCTK lane-state green --anchor tk-anc --lane correctness --no-remote" "lane-state.sh execs \$GCTK_BIN with the lane-state subcommand and its arguments verbatim"
+else
+  bad "gctk was not built, so the gctk lane-state port was NOT exercised, and this suite is its acceptance bar"
+fi
+
+echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -14,10 +14,13 @@
 // gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
 // the beads library. Same observability, same stubs, same permissions surface.
 //
-// Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
-// cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
-// as shell. assets/scripts/merge.sh remains as the fallback for a city whose
-// gctk build has not landed yet. lifecycle has no shell fallback:
+// Ported so far: lifecycle, merge, pr-status and lane-state. The rest of the
+// merge-cadence cluster (gate-ensure, pr-open, pr-facts, convoy-graduate,
+// signoff) still runs as shell. assets/scripts/merge.sh and
+// assets/scripts/lane-state.sh remain as the fallbacks for a city whose gctk
+// build has not landed yet; lane-state's derivation (internal/lane) is also what
+// gctk merge calls in-process, so the merge predicate and the script's callers
+// derive green from one code path. lifecycle has no shell fallback:
 // assets/scripts/lifecycle.sh only execs this binary, and refuses the call when
 // there is none to run. pr-status has none by design — its tri-state lives only
 // in gctk so the status: label and the helm board share one code path, so when
@@ -37,9 +40,10 @@ const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
+  gctk lane-state green [flags]   a review lane's derived green state (assets/scripts/lane-state.sh)
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle" or "gctk pr-status" for that subcommand's verbs.
+Run "gctk lifecycle", "gctk pr-status" or "gctk lane-state" for that subcommand's verbs.
 `
 
 func main() {
@@ -58,6 +62,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return cli.Merge(args[1:], stdout, stderr)
 	case "pr-status":
 		return cli.PRStatus(args[1:], stdout, stderr)
+	case "lane-state":
+		return cli.LaneState(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version())
 		return 0
