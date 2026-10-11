@@ -239,6 +239,11 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   }
+  # The keys the probes below find a child by: the branch the listing above
+  # selects on, and the rejection_reason that names the head. A fresh child
+  # short of one is a child no later pass can find, so they are bd_create's
+  # --select below, and the orphan close before it names them too.
+  FIX_SELECT="branch,rejection_reason"
   # A child of a prior pass whose route stamp exited 0 without writing. The
   # route is what makes it reachable, and the dedup below matches it, so nothing
   # retries it. Narrowed to open/unassigned/unrouted at THIS head: a metadata
@@ -340,19 +345,42 @@ while IFS= read -r row; do
   FIX_META=$(jq -nc --arg a "$id" --arg b "$branch" --arg t "$target" --arg r "$FIX_REASON" --arg m "$prepare_mode" \
     '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r,
       prepare_mode: $m, merge_strategy: "mr"}' 2>/dev/null)
+  # The route makes the child someone's work order, so it waits until every key
+  # of that order reads back, for a fresh child and a stranded one alike. Both
+  # kinds are open, unassigned and unrouted, so nobody holds the bead a write
+  # lands on. A child still short is left unrouted, and the strand probe finds
+  # it again next pass by its branch and the head its rejection_reason names.
+  fix_rc=0
   if [ -n "$stranded" ]; then
     FIX="$stranded"
     echo "$PROG: $id re-routing stranded rework $FIX for '$branch' (a prior pass's route stamp did not land)"
     gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
       || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
+    # A stranded child is written the whole order once and read back again
+    # (bd_meta_ensure). It was found by both FIX_SELECT keys, so it is only ever
+    # left for the retry.
+    if ! short=$(bd_meta_ensure "$FIX" "$FIX_META"); then
+      echo "$PROG: WARN rework $FIX did not record its whole work order (short: $short); left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
   else
+    # A child an earlier two-write create left behind carries this title but
+    # not the branch and head the probes above find a child by, while its
+    # blocks edge holds the anchor beside the child filed below. It is closed
+    # first. An unreadable listing dispatches nothing (retry next pass).
+    if ! bd_unmake_orphans "$FIX_SELECT" "$FIX_TITLE" \
+         "Unmade by $PROG: a merge-in child of $id filed without the branch and head the strand and dedup probes find it by, so no pass could find it to route it, while its blocks edge held $id. A child carrying them is filed in its place." >/dev/null; then
+      echo "$PROG: $id — '$branch' conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     # A fresh child is filed whole: the work order and the blocks edge ride the
     # create, so a create whose reply is lost has still landed with the branch
     # the dedup above finds it by, and the next pass re-routes it as stranded.
-    # bd_create prints the id of a child whose work order did not read back as
-    # written too (its rc 2), so the id says the child exists, not that it can
-    # be routed. The work-order check below says that.
-    FIX=$(bd_create "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id")
+    # bd_create writes a short child its whole order once more, closes one
+    # still short of a FIX_SELECT key, since no later pass could find it while
+    # its blocks edge held the anchor (rc 1, no id), and prints the id of one
+    # short of any other key (rc 2), which the strand probe finds next pass.
+    FIX=$(bd_create --select "$FIX_SELECT" "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2
@@ -362,28 +390,8 @@ while IFS= read -r row; do
   # the per-pass bd_list cache so a later anchor on the same branch does not read
   # a stale "no child" and file a duplicate. No-op outside a reconcile pass.
   bd_cache_clear
-  # The route makes the child someone's work order, so it waits until every key
-  # of that order reads back. This holds for a fresh child and a stranded one
-  # alike. A child short of any key is written the whole order once and read
-  # back again (bd_meta_ensure). Both kinds are open, unassigned and unrouted, so
-  # nobody holds the bead the write lands on. A child still short is left
-  # unrouted, and the strand probe finds it again next pass by its branch and
-  # the head its rejection_reason names. A fresh child short of either of those
-  # is one the probe can never find, yet its blocks edge holds the anchor, so it
-  # is closed instead. A stranded child was found by both, so it is only ever
-  # left for the retry.
-  if ! short=$(bd_meta_ensure "$FIX" "$FIX_META"); then
-    lost=""
-    [ -z "$stranded" ] && case ",$short," in *,branch,*|*,rejection_reason,*) lost=1 ;; esac
-    if [ -z "$lost" ]; then
-      echo "$PROG: WARN rework $FIX did not record its whole work order (short: $short); left unrouted (retry next pass)" >&2
-    elif gc bd update "$FIX" --status=closed --set-metadata gc.outcome=abandoned \
-           --append-notes "Unmade by $PROG: its work order did not read back (short: $short). Without its branch and head key no later pass can find it to finish it, and its blocks edge held $id. The next pass files the merge-in child afresh." \
-           >/dev/null 2>&1; then
-      echo "$PROG: WARN rework $FIX did not record its work order (short: $short), and no later pass could find it; closed it, and the next pass files afresh" >&2
-    else
-      echo "$PROG: WARN rework $FIX did not record its work order (short: $short), no later pass can find it, and it would not close; it holds $id until it is closed by hand" >&2
-    fi
+  if [ "$fix_rc" -ne 0 ]; then
+    echo "$PROG: WARN rework $FIX did not record its whole work order; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such

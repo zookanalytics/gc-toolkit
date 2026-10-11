@@ -1008,12 +1008,30 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 echo "# a validation pass whose shape does not read back is exit 2, review left open"
 reset "$ANCHOR_PR"
 # The pass is the second bead created (after the rework child fix-1); dropping
-# its task_kind models a shaping write that half-landed and the validator path
-# could never see, so the verdict must not close past it.
+# its task_kind models a create that half-landed and the validator path could
+# never see, so bd_create closes it and the verdict must not close past it.
 out=$(STUB_DROP_KEYS="fix-2:task_kind" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "a pass missing its task_kind exits 2"
-has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+has "$out" "fix-2 did not read back carrying task_kind, so no reader could find it; closed it" "…the pass no probe could find is closed"
+has "$out" "could not open a validation pass for lane correctness" "…and no pass is reported opened"
+eq "$(status fix-2)|$(meta fix-2 gc.outcome)" "closed|abandoned" "…closed as abandoned, so its edge holds nothing"
 eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
+reset "$ANCHOR_PR"
+# Short only of its pin, the pass is one the lane probe finds, so it is kept
+# and the shape gate holds the verdict until the pin reads back.
+out=$(STUB_DROP_KEYS="fix-2:reviewed_oid" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a pass missing its reviewed_oid exits 2"
+has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+eq "$(status fix-2)|$(status rv-1)" "open|in_progress" "…and the pass and the review are left open for a retry"
+
+echo "# a pass an earlier two-write create left without its shape is closed before a fresh one is filed"
+reset "$ANCHOR_PR" ',{"id":"vp-orph","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+printf 'tk-anc|vp-orph|blocks\n' >> "$STUB_DEPS"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+eq "$(status vp-orph)|$(meta vp-orph gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .status ] | join(",")' "$STUB_STORE")" "open" \
+  "…and one whole pass is filed in its place"
 
 echo "# pre-open request-changes opens a branch-titled validation pass"
 reset "$ANCHOR_PRE"

@@ -2602,25 +2602,39 @@ $CBODY"
         '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
          + (if $sr == "" then {} else {source_review: $sr} end)
          + {prepare_mode: $m, merge_strategy: "mr", existing_pr: $u, pr_url: $u, pr_number: $n}' 2>/dev/null)
+      # anchor_bead is the key the batch probe finds a child by, among the
+      # children the title probe above lists. A fresh child short of it is one
+      # no later pass can find, so it is bd_create's --select below, and the
+      # orphan close before that create names it too.
+      CSELECT="anchor_bead"
       CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
         [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
-      cnew=""
       if [ -n "$CFIX" ]; then
         echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; re-checking its route before the watermark"
       else
+        # A child an earlier two-write create left behind carries this batch's
+        # title but no anchor_bead, so the batch probe never found it, while its
+        # blocks edge holds the anchor beside the child filed below. It is
+        # closed first. An unreadable listing files nothing (retry next pass).
+        if ! bd_unmake_orphans "$CSELECT" "$CTITLE" \
+             "Unmade by $PROG: a comment rework for PR#$num filed without the anchor_bead the batch probe finds it by, so no pass could find it to route it, while its blocks edge held $id. A child carrying it is filed in its place." >/dev/null; then
+          echo "$PROG: $id — PR#$num comment-rework orphan probe failed; nothing dispatched (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
         # The child is filed whole: its work order and the blocks edge that
         # holds the anchor ride the create. A create whose reply is lost has
         # still landed with the anchor_bead the batch probe above matches, so
-        # the next pass finds it rather than minting a twin. bd_create prints
-        # the id of a child whose work order did not read back as written too
-        # (its rc 2), so the id says the child exists, not that it can be
-        # routed. The work-order check below says that.
-        CFIX=$(printf '%s\n' "$CBODY" | bd_create "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -)
+        # the next pass finds it rather than minting a twin. bd_create writes a
+        # short child its whole order once more, and closes one still short of
+        # anchor_bead, since no later pass could find it while its blocks edge
+        # held the merge (no id comes back). It prints the id of a child short
+        # of any other key too (its rc 2), so the id says the child exists, not
+        # that it can be routed. The work-order check below says that.
+        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -)
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
         fi
-        cnew=1
         # The comment-rework child now exists; drop the per-pass bd_list cache
         # so the title/anchor_bead dedup probe reads it on the next anchor and
         # does not twin it. The gc bd show reads below do not repopulate the
@@ -2630,44 +2644,43 @@ $CBODY"
       # An unrouted child still holds the merge through its blocks edge, but no
       # pool can claim it, and the mark would retire the only signal that could
       # re-file it. A CLOSED child is already dispositioned, so refusing on one
-      # could never converge. Only a definitively closed status skips the check;
-      # an unreadable one still demands the work order and the route.
-      crow=$(gc bd show "$CFIX" --json 2>/dev/null | scrub)
+      # could never converge. Only a definitively closed status skips the check.
+      # The one read of the child here serves its status, whether anyone has
+      # taken it, its work order and its route.
+      crow=$(bd_json show "$CFIX" </dev/null)
       cst=$(printf '%s' "$crow" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
       if [ "$cst" != "closed" ]; then
+        # A child that does not read back shows neither its status nor who
+        # holds it, so nothing is written to it and nothing moves: a write
+        # ignores bd's claim guard, and could land on a child a polecat is
+        # working.
+        if ! printf '%s' "$crow" | jq -e --arg c "$CFIX" 'type == "array" and ((.[0].id // "") == $c)' >/dev/null 2>&1; then
+          echo "$PROG: WARN comment rework $CFIX did not read back; nothing written or routed, and NOT watermarking (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
         # The route makes the child a polecat's work order, and the watermark
         # retires the comments it answers, so neither moves until every key of
         # that order reads back. A child nobody has taken (open, unassigned, and
         # not poured) that is short of a key is written the whole order once and
-        # read back again (bd_meta_ensure). It is this pass's order, so a child
-        # filed at an older head is brought up to this one before anyone works
-        # it. A child someone has taken was held to this check before it was
-        # routed, and its holder owns its metadata now: the resume clears its
-        # rejection_reason, and the hand-back clears its route. So it is not
-        # written. A fresh child still short of anchor_bead is one the batch
-        # probe can never find, yet its blocks edge holds the merge, so it is
-        # closed and the next pass files afresh. A child the probe found carries
-        # that key, so it is only ever left for the retry.
+        # read back again (bd_meta_ensure, judging the row read above). It is
+        # this pass's order, so a child filed at an older head is brought up to
+        # this one before anyone works it. A child someone has taken was held to
+        # this check before it was routed, and its holder owns its metadata now:
+        # the resume clears its rejection_reason, and the hand-back clears its
+        # route. So it is not written. A child still short is left for the
+        # retry: the batch probe found it by its anchor_bead, or bd_create kept
+        # it only because it carried that key.
         ctaken=$(printf '%s' "$crow" | jq -r '.[0] // {}
           | if (((.assignee // "") | tostring) != "")
                or (((.status // "open") | tostring | ascii_downcase) != "open")
                or (((.metadata["gc.execution_routed_to"] // "") | tostring) != "")
             then "taken" else "" end' 2>/dev/null)
-        if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure "$CFIX" "$CMETA"); then
-          clost=""
-          [ -n "$cnew" ] && case ",$cshort," in *,anchor_bead,*) clost=1 ;; esac
-          if [ -z "$clost" ]; then
-            echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
-          elif gc bd update "$CFIX" --status=closed --set-metadata gc.outcome=abandoned \
-                 --append-notes "Unmade by $PROG: its work order did not read back (short: $cshort). Without anchor_bead no later pass can find it to finish it, and its blocks edge held $id. The next pass files the comment rework afresh." \
-                 >/dev/null 2>&1; then
-            echo "$PROG: WARN comment rework $CFIX did not record its work order (short: $cshort), and no later pass could find it; closed it and NOT watermarking, and the next pass files afresh" >&2
-          else
-            echo "$PROG: WARN comment rework $CFIX did not record its work order (short: $cshort), no later pass can find it, and it would not close; it holds $id until it is closed by hand. NOT watermarking" >&2
-          fi
+        if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure --row "$crow" "$CFIX" "$CMETA"); then
+          echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+        # The work order holds no route, so the row read above still shows it.
+        rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         if [ "$rgot" != "$FIX_POOL" ]; then
           gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
           rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
@@ -2757,21 +2770,27 @@ $CBODY"
         echo "$PROG: $id — PR#$num already carries a human-lane validation pass $VPASS; re-checking its shape before watermarking"
       else
         vtitle="Validate PR#$num feedback (through $vcoord)"
+        # A pass an earlier two-write create left behind carries a title of
+        # this PR's feedback passes but not the shape the human-lane probe above
+        # reads, while its blocks edge holds the anchor beside the pass filed
+        # below, so it is closed first. Best-effort: an unreadable listing
+        # closes nothing and the pass is filed anyway.
+        bd_unmake_orphans "$VALIDATION_SELECT" "Validate PR#$num feedback" \
+          "Unmade by $PROG: a human-lane validation pass for PR#$num filed without the shape the human-lane probe selects it by, so no validator could rule it, while its blocks edge held $id. A pass carrying it is filed in its place." >/dev/null || true
         # The pass is filed whole: the shape mol-validate reads and the blocks
         # edge that holds the anchor ride the create. A create whose reply is
         # lost has still landed with anchor_bead, task_kind and check_name, so
         # the next pass's human-lane probe above finds it rather than minting a
-        # twin that would double-block the anchor.
-        vident=$(jq -nc --arg a "$id" --arg o "$head_oid" \
-          '{task_kind: "validation", anchor_bead: $a, check_name: "human"}
-           + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)
+        # twin that would double-block the anchor. One that stays short of a
+        # VALIDATION_SELECT key is closed by bd_create, which then prints no id.
+        vident=$(validation_work_order "$id" human "$head_oid")
         vbody=""
         [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
         if [ -n "$vbody" ]; then
-          VPASS=$(printf '%s' "$vbody" | bd_create "$vident" "$vtitle" -t task --deps "blocks:$id" --body-file -)
+          VPASS=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$id" --body-file -)
         else
           echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
-          VPASS=$(bd_create "$vident" "$vtitle" -t task --deps "blocks:$id")
+          VPASS=$(bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$id")
         fi
         if [ -z "$VPASS" ]; then
           echo "$PROG: WARN $id — PR#$num could not open a validation pass; nothing watermarked (retry next pass)" >&2

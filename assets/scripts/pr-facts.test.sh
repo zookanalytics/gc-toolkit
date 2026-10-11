@@ -2302,10 +2302,11 @@ printf '%s' "$(prview 46 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 echo '[]' > "$GH_DIR/reviews_46.json"
 printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_46.json"
 out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
-has "$out" "comment rework new-2 did not record its work order (short: anchor_bead), and no later pass could find it; closed it" "a child the batch probe cannot see is never routed"
+has "$out" "new-2 did not read back carrying anchor_bead, so no reader could find it; closed it" "a child the batch probe cannot see is never routed"
+has "$out" "could not file the comment rework for PR#46" "…and reads as nothing filed"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and cannot be claimed"
 eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…and is closed, so its blocks edge no longer holds the merge"
-has "$(notes new-2)" "Unmade by pr-facts" "…with a note naming why"
+has "$(notes new-2)" "Unmade by bd_create" "…with a note naming why"
 eq "$(meta W2 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
 out=$(run)
 CW2=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "W2") | .id ] | .[0] // "<none>"' "$STUB_STORE")
@@ -2442,6 +2443,73 @@ has "$out" "comment rework cw-347 already covers this batch" "the batch probe fi
 hasnt "$(grep '^bd update cw-347' "$STUB_GC_LOG")" "--set-metadata" "…and writes nothing onto it"
 eq "$(meta cw-347 rejection_reason)" "<absent>" "…so the reason its holder cleared stays cleared"
 eq "$(meta WK2 pr_comment_watermark)" "34701" "…and the batch is marked handled by it"
+
+echo "# …a covering child that does not read back is not written, routed or marked"
+# A failed read shows neither the child's status nor who holds it, so a write
+# could land on a child a polecat is working.
+cat > "$TMP/gc-show-fail" <<'SHIM'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-} ${3:-}" = "bd show $FAIL_SHOW_ID" ] && { echo "gc: simulated show failure" >&2; exit 1; }
+exec "$REAL_GC" "$@"
+SHIM
+chmod +x "$TMP/gc-show-fail"
+mkdir -p "$TMP/show-fail-bin"; ln -sf "$TMP/gc-show-fail" "$TMP/show-fail-bin/gc"
+store "[$(anchor WK3 348),$(printf '{"id":"cw-348","status":"open","assignee":"","title":"Address review comments on PR#348 (through review 0, comment 34801)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"WK3"}}')]"
+printf '%s' "$(prview 348 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_348.json"
+echo '[]' > "$GH_DIR/reviews_348.json"; echo '[]' > "$GH_DIR/issue_comments_348.json"
+printf '[{"id":34801,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_348.json"
+: > "$STUB_GC_LOG"
+out=$(FAIL_SHOW_ID=cw-348 REAL_GC="$(command -v gc)" PATH="$TMP/show-fail-bin:$PATH" run)
+has "$out" "comment rework cw-348 did not read back; nothing written or routed, and NOT watermarking" "the unreadable child is reported"
+eq "$(grep -c '^bd update cw-348' "$STUB_GC_LOG")" "0" "…and nothing is written to it"
+eq "$(meta cw-348 'gc.routed_to')|$(meta WK3 pr_comment_watermark)" "<absent>|<absent>" "…so it is not routed, and the comment stays above the mark"
+
+echo "# …a covering child already whole and routed is checked on one read of it"
+store "[$(anchor WK4 349)]"
+printf '%s' "$(prview 349 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_349.json"
+echo '[]' > "$GH_DIR/reviews_349.json"; echo '[]' > "$GH_DIR/issue_comments_349.json"
+printf '[{"id":34901,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_349.json"
+out=$(STUB_DROP_KEYS="WK4:pr_comment_watermark" run)
+CW4=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WK4") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+eq "$(meta "$CW4" 'gc.routed_to')|$(meta WK4 pr_comment_watermark)" "$FIX|<absent>" "(the first pass routes the child, and its mark does not land)"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "comment rework $CW4 already covers this batch; re-checking its route" "the next pass finds the child"
+# The arm's reads of the child all come before the watermark write; a later
+# arm of the same pass reads the child for its own reasons.
+eq "$(awk -v c="bd show $CW4 " -v w="bd update WK4 " 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
+  "…and checks its status, holder, work order and route on one read"
+eq "$(grep -c "^bd update $CW4 " "$STUB_GC_LOG")" "0" "…writing nothing to it"
+eq "$(meta WK4 pr_comment_watermark)" "34901" "…and the mark lands"
+
+echo "# …a comment rework an earlier two-write create left without its anchor_bead is closed before a fresh one is filed"
+# Its title is this batch's and its blocks edge holds the anchor, but the batch
+# probe finds a child by anchor_bead, so it never sees this one.
+store "[$(anchor WK5 350),$(printf '{"id":"co-350","status":"open","assignee":"","title":"Address review comments on PR#350 (through review 0, comment 35001)","notes":"","metadata":{}}')]"
+printf 'co-350|blocks|WK5\n' > "$STUB_DEPS"
+printf '%s' "$(prview 350 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_350.json"
+echo '[]' > "$GH_DIR/reviews_350.json"; echo '[]' > "$GH_DIR/issue_comments_350.json"
+printf '[{"id":35001,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_350.json"
+out=$(run)
+eq "$(bstatus co-350)|$(meta co-350 gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"
+has "$(notes co-350)" "Unmade by pr-facts" "…with a note naming why"
+CW5=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WK5") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$CW5" "<none>" "…a whole child is filed in its place"
+eq "$(meta "$CW5" 'gc.routed_to')|$(meta WK5 pr_comment_watermark)" "$FIX|35001" "…routed, and only then is the mark moved"
+
+echo "# …a human-lane pass an earlier two-write create left half-stamped is closed before a fresh one is filed"
+# It carries anchor_bead, so the anchor probe lists it, but the human-lane
+# selector skips it for want of task_kind, while its blocks edge holds the anchor.
+store "[$(anchor WK6 351),$(printf '{"id":"vo-351","status":"open","assignee":"","title":"Validate PR#351 feedback (through review 0, comment 35100)","notes":"","metadata":{"anchor_bead":"WK6"}}')]"
+printf 'vo-351|blocks|WK6\n' > "$STUB_DEPS"
+printf '%s' "$(prview 351 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_351.json"
+echo '[]' > "$GH_DIR/reviews_351.json"; echo '[]' > "$GH_DIR/issue_comments_351.json"
+printf '[{"id":35101,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_351.json"
+out=$(run)
+eq "$(bstatus vo-351)|$(meta vo-351 gc.outcome)" "closed|abandoned" "the half-stamped pass is closed as abandoned"
+VP6=$(vpass_id WK6)
+hasnt "$VP6" "<none>" "…a whole human-lane pass is filed in its place"
+eq "$(meta "$VP6" check_name)|$(meta "$VP6" reviewed_oid)" "human|sha-351" "…carrying its lane and the head it rules"
 
 echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
 # merge.sh reads pr_posture off the bead and never asks GitHub. The full arm

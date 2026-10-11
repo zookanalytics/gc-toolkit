@@ -1000,7 +1000,8 @@ oid h2 > "$GH_DIR/head_polecat_h2"
 : > "$STUB_GC_LOG"
 out=$(STUB_DROP_KEYS="new-2:review_pool" run); rc=$?
 eq "$rc" 0 "a short read-back leaves rc=0 (check armed, merge held)"
-has "$out" "review new-2 did not record its whole work order (short: review_pool); not slung" "the short read-back is reported, the key named"
+has "$out" "new-2 was filed but its metadata did not read back as written (short: review_pool)" "the short read-back is reported, the key named"
+has "$out" "review new-2 did not record its whole work order; not slung" "…and the review is not slung"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is poured"
 eq "$(bstatus new-2)" "open" "…and the review is left as it landed"
 # The next pass finds it as stranded. Its pour still waits on the whole work
@@ -1038,9 +1039,10 @@ echo "# a review whose create will not take a key inflight_review selects it by 
 store "[$(anchor H2c pull_request correctness "" polecat/h2c)]"
 oid h2c > "$GH_DIR/head_polecat_h2c"
 out=$(STUB_DROP_KEYS="new-2:check_name" run)
-has "$out" "review new-2 did not record its work order (short: check_name), and no later pass could find it; closed it" "a review no later pass could find is closed rather than left holding the anchor"
+has "$out" "new-2 did not read back carrying check_name, so no reader could find it; closed it" "a review no later pass could find is closed rather than left holding the anchor"
+has "$out" "could not create the review bead for check 'correctness'" "…and reads as nothing filed"
 eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…closed as abandoned"
-has "$(notes new-2)" "Unmade by gate-ensure" "…with a note naming why"
+has "$(notes new-2)" "Unmade by bd_create" "…with a note naming why"
 out=$(run)
 has "$out" "dispatched review new-3" "the next pass files the review afresh"
 
@@ -1053,6 +1055,40 @@ eq "$(bstatus new-2)|$(meta new-2 gc.outcome)" "closed|abandoned" "…and the ba
 out=$(run)
 has "$out" "dispatched review new-3" "the next pass files a whole review"
 eq "$(jq '[.[] | select((.id | startswith("new-")) and .status != "closed")] | length' "$STUB_STORE")" "1" "…and exactly one review is live"
+
+echo "# a review an earlier two-write create left without its keys is closed before a fresh one is filed"
+# Its title is this lane's, it carries none of the keys inflight_review reads,
+# and its blocks edge holds the anchor, so a review filed beside it would leave
+# the merge held by a bead nothing slings or closes.
+store "[$(anchor H4 pull_request correctness "" polecat/h4),
+  {\"id\":\"tk-orph\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Review branch polecat/h4 -> main (correctness): t H4\",\"notes\":\"\",\"metadata\":{}},
+  {\"id\":\"tk-held\",\"status\":\"open\",\"assignee\":\"lx-9\",\"title\":\"Review branch polecat/h4 -> main (correctness): t H4\",\"notes\":\"\",\"metadata\":{}},
+  {\"id\":\"tk-tri\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Review branch polecat/h4 -> main (triage): t H4\",\"notes\":\"\",\"metadata\":{}}]"
+oid h4 > "$GH_DIR/head_polecat_h4"
+printf 'tk-orph|blocks|H4\n' > "$STUB_DEPS"
+out=$(run)
+eq "$(bstatus tk-orph)|$(meta tk-orph gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"
+has "$(notes tk-orph)" "Unmade by gate-ensure" "…with a note naming why"
+eq "$(bstatus tk-held)|$(bstatus tk-tri)" "open|open" "…while one someone holds and another lane's are left alone"
+has "$out" "dispatched review new-5 for check 'correctness'" "…and a whole review is filed in its place"
+eq "$(meta new-5 anchor_bead)|$(meta new-5 task_kind)" "H4|review" "…carrying the keys inflight_review reads"
+
+echo "# an orphan probe that does not answer dispatches nothing"
+cat > "$TMP/gc-title-fail" <<'SHIM'
+#!/usr/bin/env bash
+if [ "${1:-} ${2:-}" = "bd list" ]; then
+  case " $* " in *" --title-contains "*) echo "gc: simulated list failure" >&2; exit 1 ;; esac
+fi
+exec "$REAL_GC" "$@"
+SHIM
+chmod +x "$TMP/gc-title-fail"
+mkdir -p "$TMP/title-fail-bin"; ln -sf "$TMP/gc-title-fail" "$TMP/title-fail-bin/gc"
+store "[$(anchor H5 pull_request correctness "" polecat/h5)]"
+oid h5 > "$GH_DIR/head_polecat_h5"
+: > "$STUB_GC_LOG"
+out=$(REAL_GC="$(command -v gc)" PATH="$TMP/title-fail-bin:$PATH" run)
+has "$out" "H5 orphan-review probe unreadable; dispatching nothing" "the unreadable probe is reported"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no review is filed"
 
 echo "# a pour whose exec stamp does not read back is held, not dispatched"
 store "[$(anchor G1 pull_request correctness "" polecat/g1)]"

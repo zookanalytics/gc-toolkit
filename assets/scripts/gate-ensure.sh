@@ -31,8 +31,12 @@
 # (signoff.sh binds the verdict) with fix_target_pool for the rework route. A
 # create whose reply is lost has still landed whole, so the next pass's stranded
 # arm re-slings it rather than filing a twin. Either sling waits until the
-# review's whole work order reads back (bd_meta_ensure), and a failed sling is
-# never retried in-pass (a re-pour mints a second workflow root). Reach carried by the pour ALONE is qualified before it counts: a review
+# review's whole work order reads back (bd_create for a fresh review,
+# bd_meta_ensure for a stranded one), and a failed sling is never retried
+# in-pass (a re-pour mints a second workflow root). An open review a two-write
+# create left with its title but short of the keys inflight_review reads is
+# closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
+# would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. There is no dispatch
@@ -191,6 +195,11 @@ review_work_order() {
     + (if $oid == "" then {} else {reviewed_oid: $oid} end)
     + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null
 }
+
+# The keys inflight_review selects a review by. A review short of one is a
+# review no pass can find, so a fresh dispatch hands them to bd_create as its
+# --select, and the orphan close before it names them too.
+REVIEW_SELECT="task_kind,check_name,anchor_bead"
 
 # A live review bead already owed to <anchor> for check <g>? Echoes its id.
 # Poured (gc.execution_routed_to), routed, or claimed counts; an open,
@@ -1072,43 +1081,41 @@ STRAY
     # — a reviewer that dies after claim, a fix unit filed with its edge reversed
     # — stop the PR moving rather than spin the dispatcher.
 
+    # A review an earlier two-write create left behind carries this title but
+    # not the keys inflight_review reads, so the probe above never saw it, and
+    # its blocks edge would hold the anchor beside the review filed below. It is
+    # closed first. An unreadable listing dispatches nothing (retry next pass).
+    if ! bd_unmake_orphans "$REVIEW_SELECT" "Review branch $branch -> $target ($g):" \
+         "Unmade by $PROG: a review of $id's '$g' lane filed without the keys inflight_review selects it by, so no pass could find it to sling it, while its blocks edge held $id. A review carrying them is filed in its place." >/dev/null; then
+      echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+
     # The review is filed whole. One create carries every key a reader selects
     # it by and the blocks edge that holds the anchor, so no review exists that
     # inflight_review cannot see. A create whose reply is lost has still landed
     # whole, and the next pass finds it in flight and re-slings it as stranded.
+    # A review short of a REVIEW_SELECT key after bd_create's second write is
+    # one no later pass could find, so bd_create closes it and files nothing
+    # (rc 1). One short of any other key (rc 2) is not slung, because a pour
+    # onto it could run against a work order the bead does not carry; the
+    # stranded arm above finds it next pass and slings it once it is whole.
     RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head")
     RID_TITLE="Review branch $branch -> $target ($g): $title"
     body=""
     [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
     if [ -n "$body" ]; then
-      RID=$(printf '%s' "$body" | bd_create "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
+      RID=$(printf '%s' "$body" | bd_create --select "$REVIEW_SELECT" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
     else
       echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-      RID=$(bd_create "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
+      RID=$(bd_create --select "$REVIEW_SELECT" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
     fi
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # bd_create prints the id of a review whose work order did not read back as
-    # written (its rc 2). A pour onto it could run against a work order the bead
-    # does not carry, so it is slung only once one write of the whole order has
-    # read back (bd_meta_ensure). Nobody holds a review this pass just filed. A
-    # review still short of a key inflight_review selects it by is one no later
-    # pass can find, yet its blocks edge holds the anchor, so it is closed. One
-    # short of anything else is left for the stranded arm above, next pass.
-    if [ "$rid_rc" -ne 0 ] && ! rshort=$(bd_meta_ensure "$RID" "$RID_META"); then
-      rlost=""
-      case ",$rshort," in *,task_kind,*|*,check_name,*|*,anchor_bead,*) rlost=1 ;; esac
-      if [ -z "$rlost" ]; then
-        echo "$PROG: WARN review $RID did not record its whole work order (short: $rshort); not slung, merge stays held, retry next pass" >&2
-      elif gc bd update "$RID" --status=closed --set-metadata gc.outcome=abandoned \
-             --append-notes "Unmade by $PROG: its work order did not read back (short: $rshort). Without the keys inflight_review selects it by no later pass can find it to sling it, and its blocks edge held $id. The next pass files the review afresh." \
-             >/dev/null 2>&1; then
-        echo "$PROG: WARN review $RID did not record its work order (short: $rshort), and no later pass could find it; closed it, and the next pass files afresh" >&2
-      else
-        echo "$PROG: WARN review $RID did not record its work order (short: $rshort), no later pass can find it, and it would not close; it holds $id until it is closed by hand" >&2
-      fi
+    if [ "$rid_rc" -ne 0 ]; then
+      echo "$PROG: WARN review $RID did not record its whole work order; not slung, merge stays held, the stranded arm re-slings it next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
     ge_mark_child "$id" "$RID"

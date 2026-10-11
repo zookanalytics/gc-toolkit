@@ -822,9 +822,17 @@ eq "$(visits)" "1" "exactly the visit"
 eq "$(meta vis-1 gc.continuation_group)" "lx-wisp-aaaaa" "on the wisp, nothing durable having been resolved"
 has "$out" "will be lost when it burns" "and says what that costs"
 
-echo "# markers that do not read back cost the NEXT escalation, not this one"
+echo "# a standing subject whose create drops a marker is written whole in the same call"
 reset
 out=$(STUB_CREATE_DROP="triage.scope" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "the escalation files"
+eq "$(meta vis-1 triage.scope)" "ephemeral-subject-findings" "the subject carries the marker its create dropped"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "…and the visit hangs on it"
+hasnt "$out" "markers did not read back" "…with nothing left to report"
+
+echo "# markers that do not read back cost the NEXT escalation, not this one"
+reset
+out=$(STUB_CREATE_DROP="triage.scope" STUB_UPD_FAIL_MATCH="triage.scope=" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "the escalation files"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on it — an unmarked bead is still durable"
 has "$out" "markers did not read back" "the lost markers are reported"

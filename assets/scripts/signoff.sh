@@ -487,6 +487,7 @@ close_review() {
 # shape or edge that does not read back exits non-zero.
 ensure_validation_pass() {
   local rows vpass vtitle vctx vbody vident vmeta vfix vblk
+  # The lane probe selects a pass by the VALIDATION_SELECT keys (bd-lib.sh).
   if ! rows=$(bd_list --metadata-field anchor_bead="$ANCHOR" \
        --metadata-field task_kind=validation --metadata-field check_name="$CHECK_NAME" \
        --status="$LIVE_STATUSES"); then
@@ -504,20 +505,26 @@ ensure_validation_pass() {
   if [ -n "$vpass" ]; then
     echo "signoff: reusing open validation pass $vpass for lane $CHECK_NAME on $ANCHOR"
   else
+    # A pass an earlier two-write create left behind carries this title but
+    # not the shape the lane probe reads, while its blocks edge holds the anchor
+    # beside the pass filed below, so it is closed first. Best-effort: an
+    # unreadable listing closes nothing and the pass is filed anyway.
+    bd_unmake_orphans "$VALIDATION_SELECT" "$vtitle" \
+      "Unmade by signoff: a $CHECK_NAME validation pass on $ANCHOR filed without the shape the lane probe selects it by, so no validator could rule it, while its blocks edge held $ANCHOR. A pass carrying it is filed in its place." >/dev/null || true
     # The pass is filed whole: the shape the validator path reads and the blocks
     # edge that holds the anchor ride the create. A create whose reply is lost
     # has still landed where the lane probe above finds it, so the retry reuses
-    # it rather than minting a twin that would double-block the anchor.
-    vident=$(jq -nc --arg a "$ANCHOR" --arg l "$CHECK_NAME" --arg o "$REVIEWED_OID" \
-      '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-       + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)
+    # it rather than minting a twin that would double-block the anchor. One that
+    # stays short of a VALIDATION_SELECT key is closed by bd_create, which then
+    # prints no id.
+    vident=$(validation_work_order "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID")
     vbody=""
     [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
     if [ -n "$vbody" ]; then
-      vpass=$(printf '%s' "$vbody" | bd_create "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR" --body-file -)
+      vpass=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR" --body-file -)
     else
       warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
-      vpass=$(bd_create "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR")
+      vpass=$(bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR")
     fi
     if [ -z "$vpass" ]; then
       warn "could not open a validation pass for lane $CHECK_NAME on $ANCHOR; review left open for a retry"
