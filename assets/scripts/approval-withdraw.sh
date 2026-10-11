@@ -75,7 +75,8 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
-# What a dismissal retires, REVIEW_DISMISSAL_DEF.
+# What a dismissal retires, REVIEW_DISMISSAL_DEF, and the PR and approval naming
+# the two dismissers share (pr_coords, approval_phrase).
 # shellcheck source=review-dismissal.sh
 . "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 # The city's-own rule unrouted_comment_ids reads, from the writer of the city's
@@ -128,12 +129,11 @@ case "$num" in
     echo "$PROG: $anchor's pr_number reads '${num:-<absent>}', which names no pull request${url:+, beside pr_url '$url'}; nothing is dismissed and the caller retries" >&2
     exit 1 ;;
 esac
-host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
-repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
-if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
+if ! pr_coords "$url" "$num"; then
   echo "$PROG: $anchor names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
   exit 1
 fi
+host="$PR_HOST"; repo="$PR_REPO"
 
 if ! reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/reviews?per_page=100" --jq '.[]' 2>/dev/null); then
   echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
@@ -193,12 +193,9 @@ if [ -n "$unread" ]; then
 fi
 
 ids=$(printf '%s' "$targets" | jq -r '[ .[].id | tostring ] | join(",")')
-logins=$(printf '%s' "$targets" | jq -r '[ .[].login ] | unique | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
-if [ "$(printf '%s' "$targets" | jq 'length')" -gt 1 ]; then
-  noun="approvals"; rnoun="reviews"; verb="are"
-else
-  noun="approval"; rnoun="review"; verb="is"
-fi
+approval_phrase "$targets"
+logins="$APPROVERS"; noun="$APPROVAL_NOUN"; verb="$APPROVAL_VERB"
+if [ "$noun" = "approvals" ]; then rnoun="reviews"; else rnoun="review"; fi
 
 if [ -z "$recorded" ]; then
   gc bd update "$pass" --set-metadata "approval_dismissed=$ids" >/dev/null 2>&1

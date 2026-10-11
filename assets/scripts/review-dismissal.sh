@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# review-dismissal.sh — what dismissing a pull request review retires. Sourced,
-# never executed.
+# review-dismissal.sh — what dismissing a pull request review retires, and what
+# the approval dismissers share. Sourced, never executed.
 #
 # A dismissal drops the review out of the approval rule (review-verdict.sh),
 # and it retires the inline comments the review carried. GitHub keeps those
@@ -12,6 +12,10 @@
 # (unrouted_comment_ids), so it never drops feedback nobody has read. One
 # definition, no copies: review-dismissal.test.sh fails when a reader stops
 # sourcing this file or carries a rule of its own.
+#
+# The approval dismissers, approval-withdraw.sh and bring-current-guard.sh,
+# also share how they name the PR they act on (pr_coords) and the approvals
+# they dismiss (approval_phrase).
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
 # defs to a jq program. unrouted_comment_ids reads gc_city_own, the city's-own
@@ -66,3 +70,30 @@ REVIEW_DISMISSAL_DEF='
         | (.id // 0) ];
 '
 
+# pr_coords <pr-url> <pr-number> — the host and owner/repo of the pull request
+# <pr-url> names, set into PR_HOST and PR_REPO. Returns 1, with both empty, when
+# the url is not a pull request URL or names a number other than <pr-number>.
+pr_coords() {
+  PR_HOST=$(printf '%s' "$1" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
+  PR_REPO=$(printf '%s' "$1" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
+  if [ -z "$PR_HOST" ] || [ -z "$PR_REPO" ] \
+     || [ "$(printf '%s' "$1" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$2" ]; then
+    PR_HOST=""; PR_REPO=""
+    return 1
+  fi
+}
+
+# approval_phrase <approvals-json> — the words a dismisser's messages name its
+# approvals with, from the [{id, login}] list it dismisses. APPROVERS lists the
+# logins once each ("a", "a and b", "a, b and c"). APPROVAL_NOUN and
+# APPROVAL_VERB agree with how many approvals there are: "approval" and "is"
+# for one, "approvals" and "are" for more, an account that approved twice
+# counting twice.
+approval_phrase() {
+  APPROVERS=$(printf '%s' "$1" | jq -r '[ .[].login ] | unique | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
+  if [ "$(printf '%s' "$1" | jq 'length')" -gt 1 ]; then
+    APPROVAL_NOUN="approvals"; APPROVAL_VERB="are"
+  else
+    APPROVAL_NOUN="approval"; APPROVAL_VERB="is"
+  fi
+}

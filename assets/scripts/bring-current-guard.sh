@@ -71,6 +71,10 @@ ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# The PR and approval naming the two approval dismissers share (pr_coords,
+# approval_phrase).
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 TAB=$(printf '\t')
@@ -398,13 +402,12 @@ cmd_guard() {
   fi
 
   # Judgment. Whether it costs an approval depends on whether one stands.
-  local host repo self reviews approvals logins noun covers them are key msg dmsg visit rows failed="" dismissed="" rid login
-  host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
-  repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
-  if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
+  local host repo self reviews approvals logins noun covers them are key msg dmsg visit rows failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN APPROVAL_VERB
+  if ! pr_coords "$url" "$num"; then
     echo "$PROG: $bead names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
     return 1
   fi
+  host="$PR_HOST"; repo="$PR_REPO"
   self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
   if [ -z "$self" ]; then
     echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
@@ -424,12 +427,9 @@ cmd_guard() {
     echo "$PROG: PR#$num's bring-current took judgment, but no approval stands to dismiss; the next review sees the change"
     return 0
   fi
-  logins=$(printf '%s' "$approvals" | jq -r '[ .[].login ] | unique | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
-  if [ "$(printf '%s' "$approvals" | jq 'length')" -gt 1 ]; then
-    noun="approvals"; covers="cover"; them="them"; are="are"
-  else
-    noun="approval"; covers="covers"; them="it"; are="is"
-  fi
+  approval_phrase "$approvals"
+  logins="$APPROVERS"; noun="$APPROVAL_NOUN"; are="$APPROVAL_VERB"
+  if [ "$noun" = "approvals" ]; then covers="cover"; them="them"; else covers="covers"; them="it"; fi
 
   if [ -z "$anchor" ]; then
     rows=$(bd_list --status=open --metadata-field branch="$branch") || rows=""
