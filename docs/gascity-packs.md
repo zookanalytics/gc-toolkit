@@ -552,3 +552,29 @@ script lives in the owning pack's tree under it. Do **not** reach for
 `$GC_PACK_DIR` or `$GC_CONFIG_DIR` — they are populated only for order/command
 execution and are **not exported to agent or worker sessions**, so a formula
 that references them resolves an empty path.
+
+## 11. A step's description must fit inside one hook string
+
+gc hands an agent its current step as a `<system-reminder>` carrying the step
+bead's whole description, through the SessionStart `additionalContext` of
+`gc prime --hook` and the stdout of `gc nudge drain --inject` on
+UserPromptSubmit. Claude Code caps each hook string at 10,000 characters. A
+longer one reaches the agent as a saved-file path and a 2,000-character
+preview, and nothing asks the agent to read the file, so the agent works from
+the first fifth of its step.
+
+`assets/scripts/formula-step-size.test.sh` renders every step the way the
+reminder does and fails one over 9,000 characters, which leaves the rest of the
+cap for the session header, mail, nudges and var values longer than their
+placeholders. A step that does not fit:
+
+- keeps its instructions and decision points inline;
+- moves mechanical blocks into a script under `assets/scripts/` that the step
+  calls by name, as `submit-and-exit.sh` and `refinery-stuck-escalate.sh` do, or
+  into a library of stage functions the step sources when its blocks hand state
+  to one another through shell variables, as `witness-recovery.sh` does;
+- moves rationale into the script's header, or into a doc the step names.
+
+A `description_file` larger than 4 KiB is no way to fit a step whose blocks run
+as written: gascity pours it as a stub telling the agent to read the file, and
+leaves the file's `{{var}}` placeholders unsubstituted.
