@@ -165,8 +165,9 @@ func callerWrites(sets, unsets []string, key string) bool {
 }
 
 // landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
-// does not answer delays the record rather than stalling it.
-const landingFetchTimeout = 60 * time.Second
+// does not answer delays the record rather than stalling it. A variable so a
+// test can shorten it.
+var landingFetchTimeout = 60 * time.Second
 
 // fetchLanding makes the commit a `merged` close records reachable where the
 // runtime's work-record gate looks for it. The gate runs inside the close's own
@@ -213,12 +214,14 @@ func fetchLanding(id string, sets []string, stderr io.Writer) {
 // gitIn runs one git command in dir, bounded by landingFetchTimeout, and
 // returns its exit status. GIT_TERMINAL_PROMPT=0 makes a remote that asks for
 // credentials fail the call instead of waiting on a terminal nobody is at.
+// git's output goes to the null device, never to a pipe. The fetch reaches
+// origin through ssh and the timeout kills only git, so a pipe would hold the
+// wait open for as long as that ssh holds its end.
 func gitIn(dir string, args ...string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), landingFetchTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return gcbd.ExitCode(cmd.Run())
 }
 

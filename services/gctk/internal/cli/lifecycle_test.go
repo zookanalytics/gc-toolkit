@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -265,5 +268,42 @@ func TestTakeawayCapIsMeasuredInCodepoints(t *testing.T) {
 		t.Errorf("%d codepoints was accepted over the cap", lifecycle.TakeawayMax+1)
 	} else if !strings.Contains(refusal[0], "141 chars") {
 		t.Errorf("the refusal does not report the measured length: %q", refusal[0])
+	}
+}
+
+func TestGitInReturnsAtItsBoundWhileAChildOfGitHoldsItsOutput(t *testing.T) {
+	// The landing fetch reaches origin through ssh, and the timeout kills only
+	// git. An ssh that outlives it still holds the stdout and stderr git handed
+	// it, so a wait that reads them through a pipe lasts as long as the ssh does,
+	// and a remote that does not answer stalls the merged record past its bound.
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	fake := "#!/bin/sh\nsleep 10 &\necho $! > '" + pidFile + "'\nsleep 10\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Cleanup(func() {
+		b, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				_ = p.Kill()
+			}
+		}
+	})
+	restore := landingFetchTimeout
+	landingFetchTimeout = time.Second
+	defer func() { landingFetchTimeout = restore }()
+
+	start := time.Now()
+	rc := gitIn(dir, "fetch", "origin")
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("gitIn returned after %s, past its %s bound, because git's child still held its output", elapsed.Round(time.Millisecond), landingFetchTimeout)
+	}
+	if rc == 0 {
+		t.Errorf("a git killed at its bound reported exit status 0")
 	}
 }
