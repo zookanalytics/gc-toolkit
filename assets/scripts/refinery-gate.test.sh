@@ -10,6 +10,8 @@
 #   - an empty check is skipped, and run_tests=false skips the test command;
 #   - a gate a previous session left running is stopped before the new one
 #     starts;
+#   - a wait that cannot find its launcher exits 1, leaves the gate running,
+#     and does not drain;
 #   - with no detached-job.sh reachable, nothing runs and the cycle drains.
 set -uo pipefail
 
@@ -137,6 +139,21 @@ eq "$RC/$(field "$OUT" state)" 0/started "the new gate starts over a running one
 kill -0 -- "-$OLD" 2>/dev/null && bad "the old gate's process group is gone" "it survived" || ok "the old gate's process group is gone"
 OUT=$(run_block "$TMP/wait.sh" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" rc)" 0/0 "the new gate's result is the one reported"
+
+echo "── a wait that cannot find its launcher leaves the gate running ──"
+render "$TMP/start.raw" "$TMP/s6.sh" '' '' 'sleep 45' '' '' true
+run_block "$TMP/s6.sh" "$CITY" >/dev/null
+: > "$STUB_GC_LOG"
+OUT=$(run_block "$TMP/wait.sh" "$EMPTY_CITY" 2>&1); RC=$?
+eq "$RC" 1 "with no detached-job.sh reachable, the wait exits 1"
+has "$OUT" "detached-job.sh not found" "it says what it could not find"
+has "$OUT" "keeps running" "it says the gate keeps running"
+kill -0 "$(cat "$GATE/pid")" 2>/dev/null && ok "the gate is still running" || bad "the gate is still running" "it is gone"
+case "$(cat "$STUB_GC_LOG")" in
+  *"runtime drain-ack"*) bad "the wait does not drain the session while the gate runs" "drain-ack was called" ;;
+  *) ok "the wait does not drain the session while the gate runs" ;;
+esac
+"$HERE/detached-job.sh" stop "$GATE" >/dev/null
 
 echo "── no detached-job.sh: nothing runs, and the cycle drains ──"
 : > "$STUB_GC_LOG"

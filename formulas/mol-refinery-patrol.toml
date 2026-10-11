@@ -378,6 +378,9 @@ call with a ten-minute timeout (`timeout: 600000` in Claude Code), never with
 runs: a gate that finishes while you sit idle wakes nothing, and the queue
 behind it waits. The wait stops a gate still running after two hours and
 reports `state=exceeded`.
+A wait that cannot find its launcher says so and exits 1 without touching the
+gate, which keeps running. Point it at the pack and wait again; do not drain
+on it.
 ```bash
 # >>> refinery-gate-wait
 RIG_ROOT="${GC_RIG_ROOT:-}"
@@ -388,6 +391,7 @@ JOB=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
+[ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
 "$JOB" wait "$GATE" --limit 7200
 # <<< refinery-gate-wait
 ```
