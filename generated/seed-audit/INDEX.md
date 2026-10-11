@@ -36,17 +36,17 @@ covers that dimension.
 | [`converse-codex`](agents/converse-codex.md) | 37,093 | 9,273 |
 | [`converse-fable`](agents/converse-fable.md) | 37,093 | 9,273 |
 | [`converse-opus`](agents/converse-opus.md) | 37,093 | 9,273 |
-| [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
+| [`deacon`](agents/deacon.md) | 15,930 | 3,982 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
+| [`mechanik`](agents/mechanik.md) | 34,423 | 8,605 |
 | [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,797 | 6,949 |
-| [`proactive`](agents/proactive.md) | 12,882 | 3,220 |
-| [`refinery`](agents/refinery.md) | 11,265 | 2,816 |
-| [`witness`](agents/witness.md) | 16,229 | 4,057 |
+| [`proactive`](agents/proactive.md) | 14,964 | 3,741 |
+| [`refinery`](agents/refinery.md) | 13,347 | 3,336 |
+| [`witness`](agents/witness.md) | 18,311 | 4,577 |
 
 ## Formula recipes
 
@@ -81,7 +81,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
-| [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
+| [`mol-validate`](formulas/mol-validate.md) | `city` | 4,410 | 1,102 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,244 | 311 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,653 | 913 |

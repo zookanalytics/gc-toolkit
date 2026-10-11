@@ -26,8 +26,7 @@ mkdir -p "$TMP/bin"
 # --- stubs --------------------------------------------------------------------
 # One ORDER log across every stub: the disposition record must be written
 # before the act, so a run that dies part-way is still auditable.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "bd update")
     printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG"

@@ -101,8 +101,7 @@ S
 : > "$TMP/updates"     # one line per `gc bd update` invocation (the full argv)
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -2209,8 +2208,7 @@ JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
 : > "$LIVE_LOG"
 
-cat > "$LIVE/bin/gc" <<'GCL'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$LIVE/bin/gc" <<'GCL'
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
 # Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
@@ -2432,8 +2430,7 @@ PATH="$SAVED_PATH"
 # Its own stub: the release-quiesce fixture above answers `bd list` with step
 # beads, and demand reads `bd list` for an existing open demand.
 mkdir -p "$TMP/bin2"
-cat > "$TMP/bin2/gc" <<'GC2'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin2/gc" <<'GC2'
 printf '%s\n' "$*" >> "$D_LOG"
 case "$1 ${2:-}" in
   "rig list")
@@ -2987,8 +2984,7 @@ printf '[]\n' > "$D_LIST"
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^rigs_count() {/,/^}/p;/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
-cat > "$TMP/enumbin/gc" <<'ENUMGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
 [ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
 exit 0
 ENUMGC

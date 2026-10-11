@@ -34,8 +34,7 @@ mkdir -p "$TMP/bin"
 # Stub gc: only `agent list` is consulted. $ROSTER is the JSON it prints.
 # $ROSTER_FAIL makes the listing exit non-zero (gc could not answer). Every call
 # appends a byte to $ROSTER_CALLS so the memoization case can count fetches.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 if [ "$1 ${2:-}" = "agent list" ]; then
   printf 'x' >> "${ROSTER_CALLS:-/dev/null}"
   [ -n "${ROSTER_FAIL:-}" ] && { echo "agent list: data plane down" >&2; exit 1; }

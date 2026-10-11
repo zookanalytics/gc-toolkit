@@ -33,8 +33,7 @@ mkdir -p "$BIN"
 # `bd show` the shared close (visit-close.sh) runs between the stamp and the
 # close reads back exactly what was written — the readback that gates the close
 # on BOTH stamps landing, and the status read that proves the close took.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 O="$LOG.o"; R="$LOG.r"; ST="$LOG.st"
 case "${2:-}" in

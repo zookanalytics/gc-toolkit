@@ -35,8 +35,7 @@ git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 # only when $RIG_PATH is planted (mapping $RIG_PREFIX to that path); empty
 # otherwise, so the subject-rig lookup finds nothing and the helper falls back to
 # the cwd origin — the path the git-repo-cwd cases below exercise.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
   [ -n "${RIG_PATH:-}" ] || { printf '{"rigs":[]}\n'; exit 0; }
   jq -nc --arg p "${RIG_PREFIX:-tk}" --arg path "$RIG_PATH" '{rigs:[{name:"fixture",prefix:$p,path:$path}]}'
@@ -63,8 +62,7 @@ chmod +x "$BIN/gc"
 #   api GET .../issues/<n>/comments  -> print $STATE  (list)
 #   api PATCH .../issues/comments/<id> -f body=..     -> replace that body (edit)
 # Every call is logged to $GHLOG.
-cat >"$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 printf '%s\0' "$@" >>"${GHLOG:?}.argv"
 printf '%s\n' "$*" >>"${GHLOG:?}"
 STATE="${STATE:?}"
