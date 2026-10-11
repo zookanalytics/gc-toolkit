@@ -20,15 +20,14 @@
 # happen to exist: a database with no backup dir at all emits no verdict from a
 # dir-walk, which is the same false-clean the fix exists to kill.
 #
-# This test EXECUTES the real snippet extracted verbatim from the shipped
-# formula (between the `backup-manifest-check` markers) against synthetic
-# backup dirs, and separately asserts over the shipped dolt-health step TEXT
-# that the retired `dolt_stale` threshold row has not come back anywhere in the
-# step — the snippet markers only cover the snippet.
+# This test runs dolt-backup-check.sh against synthetic backup dirs, and
+# separately asserts over the shipped dolt-health step TEXT that the retired
+# `dolt_stale` threshold row has not come back anywhere in the step, and that
+# the step runs the script.
 #
-# One case runs the snippet with `find` shimmed on PATH to force directory
+# One case runs the script with `find` shimmed on PATH to force directory
 # traversal order (see "Deterministic forced-order tie"), because the mtime-tie
-# rule the snippet encodes is precisely a rule about not depending on that
+# rule the script encodes is precisely a rule about not depending on that
 # order — and a fixture that merely hopes for the unlucky order proves nothing.
 # No live city, Dolt, network, or backups.
 set -euo pipefail
@@ -43,32 +42,27 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
-# --- Extract the shipped snippet -------------------------------------------
-# The formula description is a TOML *basic* multi-line string, so any literal
-# backslash is escaped as `\\`. Un-escape to recover the literal shell text.
-sed -n '/# >>> backup-manifest-check/,/# <<< backup-manifest-check/p' "$TOML" \
-    | sed 's/\\\\/\\/g' > "$TMP/check.sh"
+# --- The script ------------------------------------------------------------
+# Every case below runs the script by path, as `bash "$TMP/check.sh"`, under
+# the environment each fixture sets.
+cp "$HERE/dolt-backup-check.sh" "$TMP/check.sh" \
+  || { echo "FAIL - dolt-backup-check.sh is missing from $HERE"; exit 1; }
+ok "copied dolt-backup-check.sh"
 
-if [ ! -s "$TMP/check.sh" ]; then
-    echo "FAIL - could not extract backup-manifest-check snippet from $TOML"
-    echo "       (markers missing — did a reconciliation drop them?)"
-    exit 1
-fi
-ok "extracted backup-manifest-check snippet from the shipped formula"
+bash -n "$TMP/check.sh" || { echo "FAIL - dolt-backup-check.sh is not valid bash"; exit 1; }
+ok "dolt-backup-check.sh parses as bash"
 
-bash -n "$TMP/check.sh" || { echo "FAIL - extracted snippet is not valid bash"; exit 1; }
-ok "extracted snippet parses as bash"
-
-# The snippet must not have regressed to the dolt_stale key it replaced.
-if grep -q 'dolt_stale' "$TMP/check.sh"; then
-    bad "snippet keys off dolt_stale (the false-clean field it exists to replace)"
+# The script must not have regressed to the dolt_stale key it replaced. Its
+# header names the field to say why it is never trusted, so only code counts.
+if grep -v '^[[:space:]]*#' "$TMP/check.sh" | grep -q 'dolt_stale'; then
+    bad "the script keys off dolt_stale (the false-clean field it exists to replace)"
 else
-    ok "snippet does not key off dolt_stale"
+    ok "the script does not key off dolt_stale"
 fi
 
-# --- Assert over the SHIPPED dolt-health step, not just the snippet ---------
-# The snippet markers fence a code block; the retired threshold row lived in the
-# step's prose table OUTSIDE them. A test that only reads the snippet would
+# --- Assert over the SHIPPED dolt-health step, not just the script ----------
+# The retired threshold row lived in the step's prose table, outside the code
+# the script carries. A test that only reads the script would
 # happily pass while `| backups.dolt_stale == true | >30 min | ... |` was
 # restored one screen above it — exactly the drift a reconciliation against the
 # upstream base would reintroduce.
@@ -78,6 +72,11 @@ if [ -z "$STEP" ]; then
     exit 1
 fi
 ok "extracted the shipped dolt-health step"
+if grep -qF '/dolt-backup-check.sh"' <<< "$STEP"; then
+    ok "the dolt-health step runs dolt-backup-check.sh"
+else
+    bad "the dolt-health step no longer runs dolt-backup-check.sh"
+fi
 
 # Threshold rows are `| Signal | Threshold | Meaning |`. Field 2 is the SIGNAL
 # cell — the thing the verdict is keyed off. dolt_stale must never appear
@@ -119,9 +118,9 @@ fi
 # The scan must be driven by the live database list (finding: a database with
 # no backup dir is invisible to a dir-walk).
 if grep -q 'EXPECTED_DBS' "$TMP/check.sh"; then
-    ok "snippet drives the scan from an expected-database list"
+    ok "the script drives the scan from an expected-database list"
 else
-    bad "snippet does not drive the scan from an expected-database list"
+    bad "the script does not drive the scan from an expected-database list"
 fi
 
 # --- Step 3 alert templates must be FLAG-class-neutral ----------------------
@@ -133,7 +132,7 @@ fi
 # verdict is already a complete one-line reason: the templates carry it
 # verbatim, and these assertions keep the class-specific field from creeping
 # back. Asserted over the shipped step TEXT, because the templates are prose —
-# no snippet marker fences them.
+# no script carries them.
 ALERT_LINES="$(grep -E 'FLAG line, verbatim' <<< "$STEP" || true)"
 if [ -z "$ALERT_LINES" ]; then
     bad "could not find the Step 3 backup alert template in the dolt-health step"

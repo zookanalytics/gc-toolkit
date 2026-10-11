@@ -92,10 +92,13 @@ title = "Run Dolt data-plane health check"
 needs = ["orphan-process-cleanup"]
 description = """
 **1. Run the check once and keep the payload** (re-probing costs ~5s per
-database against the very data plane being watched):
+database against the very data plane being watched). The same command runs
+step 2's backup check on that payload:
 ```bash
 HEALTH_JSON=$(gc dolt health --json)
 printf '%s' "$HEALTH_JSON" | jq .
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/dolt-backup-check.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+HEALTH_JSON="$HEALTH_JSON" "${SCRIPTS:?dolt-backup-check.sh not found in the pack}/dolt-backup-check.sh"
 ```
 Key decisions off `server.reachable`, never `server.running` — a process
 can hold the port with wedged goroutines. Thresholds: unreachable server =
@@ -104,144 +107,15 @@ compactor stalled; zombie PIDs = kill them; `orphans[]` = ADVISORY only
 (verify with the dry-run `gc dolt-cleanup --json` before believing it, and
 never run a destructive `--force` from this step).
 
-**2. Verify backups by manifest mtime — never by `backups.dolt_stale`.**
-Absent backup data renders as `dolt_stale=false`, so that field reads
-false-clean through a TOTAL outage. The contract, carried by the block
-below: a backup is restorable only up to its committed manifest (Dolt
-writes chunks first, manifest LAST, so a healthy dir's newest file IS the
-manifest and an equal-second tie resolves TO it); the scan is driven by the
-live `databases[].name` list, never a walk of the backup dirs (a database
-with no dir at all is invisible to a walk); missing/empty roots are
-FLAG-ROOT findings naming every affected database; an in-flight sync gets a
-bounded RECHECK grace that a stale manifest bypasses; and an unreadable
-directory is UNPROVEN, never clean.
-
-```bash
-# >>> backup-manifest-check
-BACKUP_ROOT="${GC_CITY_PATH:-$GC_CITY}/.dolt-backup"
-# Expected databases come from the Step 1 health report: reuse $HEALTH_JSON
-# if you still have it, otherwise probe again. Lazy by design — set
-# EXPECTED_DBS to run this snippet against a fixture (the test does) and
-# neither the probe nor jq is invoked.
-: "${EXPECTED_DBS:=$(printf '%s' "${HEALTH_JSON:-$(gc dolt health --json)}" | jq -r '.databases[].name')}"
-# In-flight grace: mid-sync the newest file IS a chunk, because the manifest
-# is committed last. Only call that a failure once the writes have stopped
-# advancing for GRACE_SEC — or once the manifest is already stale, which no
-# healthy in-flight run can explain.
-GRACE_SEC="${GRACE_SEC:-900}"
-STALE_H="${STALE_H:-12}"
-NOW=$(date +%s)
-# Portable mtime: GNU (-c), BSD/macOS (-f), 0 when the file is absent.
-mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
-# Split the list ONCE, with awk rather than with shell word-splitting, and
-# derive both forms from it: one name per line for the loop below, and the
-# space-joined one-liner a root-level finding names every affected database on.
-# (zsh does not word-split unquoted expansions, so a shell split runs once on
-# the whole list joined into a single token.)
-DB_LIST=$(mktemp "${TMPDIR:-/tmp}/gctk-deacon-patrol.XXXXXX")
-trap 'rm -f "$DB_LIST"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-printf '%s' "$EXPECTED_DBS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$DB_LIST"
-DB_NAMES=$(awk '{ if (s == "") s = $0; else s = s " " $0 } END { print s }' "$DB_LIST")
-
-if [ -z "$EXPECTED_DBS" ]; then
-    echo "FLAG-ROOT: health report listed no databases - cannot verify any backup"
-elif [ ! -d "$BACKUP_ROOT" ]; then
-    echo "FLAG-ROOT: no backup root at $BACKUP_ROOT - NO restorable backup for: $DB_NAMES"
-elif [ -z "$(ls -A "$BACKUP_ROOT" 2>/dev/null)" ]; then
-    echo "FLAG-ROOT: backup root $BACKUP_ROOT is empty - NO restorable backup for: $DB_NAMES"
-else
-    while IFS= read -r name; do
-        db="$BACKUP_ROOT/$name"
-        if [ ! -d "$db" ]; then
-            echo "FLAG $name: no backup directory at $db - never backed up"
-            continue
-        fi
-        m_t=$(mtime_of "$db/manifest")
-        # Seed the scan WITH the manifest so an mtime tie resolves to it: stat
-        # reads whole seconds and Dolt commits the manifest LAST, so a tie is a
-        # fast healthy sync. Only a chunk STRICTLY newer than the manifest
-        # displaces it — the torn-backup signature.
-        newest="manifest"; newest_t=$m_t
-        # ...but a seed is only safe once the directory has actually been READ:
-        # capture the scan and its exit status, because an enumeration that
-        # fails (or lists nothing while the manifest is readable) would let the
-        # seed carry a fresh manifest to OK and hide a newer chunk behind an
-        # unreadable directory. Unread is UNPROVEN, never clean. `||` marks the
-        # expected failure as handled so a strict-shell paste survives.
-        scan_rc=0
-        scan_out=$(find "$db" -type f 2>/dev/null) || scan_rc=$?
-        scan_fail=""
-        if [ "$scan_rc" -ne 0 ]; then
-            scan_why=$(find "$db" -type f 2>&1 >/dev/null | sed -n 1p || true)
-            scan_fail="find exited $scan_rc${scan_why:+: $scan_why}"
-        elif [ "$m_t" -gt 0 ] && [ -z "$scan_out" ]; then
-            scan_fail="find listed no files though $db/manifest is readable"
-        fi
-        # Buffer the scan through a CHECKED temp file, never a `<<<` here-string:
-        # bash backs a here-string with a temp it creates silently, so under disk
-        # pressure the redirect fails, the loop runs zero times, `newest` keeps
-        # its seeded manifest, and a chunk newer than the manifest reads OK
-        # unseen. A buffer whose creation and write are both checked turns that
-        # blackout into a scan_fail the arms below report.
-        scan_buf=""
-        if [ -z "$scan_fail" ]; then
-            scan_buf=$(mktemp "${TMPDIR:-/tmp}/gctk-deacon-backup-scan.XXXXXX" 2>/dev/null) || scan_buf=""
-            if [ -z "$scan_buf" ]; then
-                scan_fail="could not create a temp file to buffer the directory scan for $db (disk pressure?)"
-            elif ! printf '%s' "$scan_out" | awk 'NF { print }' > "$scan_buf"; then
-                scan_fail="could not buffer the directory scan for $db - temp file unwritable (disk pressure?)"
-            fi
-        fi
-        if [ -z "$scan_fail" ]; then
-            while IFS= read -r f; do
-                [ -n "$f" ] || continue
-                t=$(mtime_of "$f")
-                if [ "$t" -gt "$newest_t" ]; then newest_t="$t"; newest="${f##*/}"; fi
-            done < "$scan_buf"
-        fi
-        [ -z "$scan_buf" ] || rm -f "$scan_buf"
-        since=$(( NOW - newest_t ))
-        age_h=$(( (NOW - m_t) / 3600 ))
-        if [ -n "$scan_fail" ]; then
-            if [ "$m_t" -eq 0 ]; then
-                echo "FLAG $name: backup directory scan failed ($scan_fail) and there is no manifest - nothing verifiably restorable"
-            elif [ "$age_h" -gt "$STALE_H" ]; then
-                echo "FLAG $name: backup directory scan failed ($scan_fail) and the manifest is ${age_h}h old (>${STALE_H}h = 2x backup cadence)"
-            else
-                echo "RECHECK $name: backup directory scan failed ($scan_fail) - cannot rule out a file newer than the ${age_h}h-old manifest"
-            fi
-        elif [ "$m_t" -eq 0 ]; then
-            if [ "$newest_t" -gt 0 ] && [ "$since" -le "$GRACE_SEC" ]; then
-                echo "RECHECK $name: no manifest yet, '$newest' written ${since}s ago - first commit may be in flight"
-            else
-                echo "FLAG $name: no manifest - nothing restorable"
-            fi
-        elif [ "$newest" != "manifest" ]; then
-            if [ "$since" -le "$GRACE_SEC" ] && [ "$age_h" -le "$STALE_H" ]; then
-                echo "RECHECK $name: newest file is '$newest' written ${since}s ago, manifest ${age_h}h old - sync may be in flight"
-            else
-                echo "FLAG $name: newest file is '$newest', not the manifest - uploaded but never committed; not restorable past ${age_h}h ago"
-            fi
-        elif [ "$age_h" -gt "$STALE_H" ]; then
-            echo "FLAG $name: manifest is ${age_h}h old (>${STALE_H}h = 2x backup cadence)"
-        else
-            echo "OK $name: manifest is newest, ${age_h}h old"
-        fi
-    done < "$DB_LIST"
-    for d in "$BACKUP_ROOT"/*/; do
-        [ -d "$d" ] || continue
-        extra="${d%/}"; extra="${extra##*/}"
-        case " $DB_NAMES " in
-            *" $extra "*) ;;
-            *) echo "INFO $extra: backup dir with no live database (advisory)" ;;
-        esac
-    done
-fi
-# <<< backup-manifest-check
-```
+**2. Read the backup verdicts — by manifest mtime, never by
+`backups.dolt_stale`.** Absent backup data renders as `dolt_stale=false`, so
+that field reads false-clean through a TOTAL outage. `dolt-backup-check.sh`
+checks each live database's backup on disk against its committed manifest (its
+header carries the contract) and prints one verdict line per database: OK,
+FLAG, RECHECK, FLAG-ROOT, or an advisory INFO.
 
 "Healthy" requires an explicit `OK` for EVERY database in `databases[]` —
-no FLAG, no FLAG-ROOT, no outstanding RECHECK (re-run the block; a RECHECK
+no FLAG, no FLAG-ROOT, no outstanding RECHECK (re-run the check; a RECHECK
 whose cause is an unreadable directory never clears by waiting — fix the
 read or treat as FLAG).
 
@@ -252,9 +126,8 @@ re-template it):
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-# GC_RIG is bound because the deacon is city-scoped: it selects the store the
-# finding bead lands in, and it rig-qualifies the proactive pool whose worker
-# reacts to it.
+# The deacon is city-scoped: GC_RIG picks the store the finding lands in and
+# the proactive pool that reacts to it.
 ESC_RIG="${GC_RIG:-gc-toolkit}"
 GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key dolt-backup-<db> --title "Dolt backup: <db> is not restorable" --message "<the Step 2 FLAG line, verbatim>"
 # server unreachable: --key dolt-server-unreachable --priority 0 (CRITICAL)
@@ -296,23 +169,18 @@ needs = ["dolt-health"]
 description = """
 **Config: doctor_interval = {{doctor_interval}}**
 
-A full sweep costs about ten minutes at this city's ordinary load, and the
-harness kills any one call at 600s. So the sweep never runs in the foreground:
-it would be killed before it emitted a payload, and this cycle would report
-"not clean" with nothing read. `doctor-sweep.sh` starts it detached and reads
-the result on a later cycle. It opens one sweep window per `doctor_interval`; a
-run that ends failed or exceeded earns one capped retry inside that window
-(`GC_DOCTOR_SWEEP_MAX_ATTEMPTS`, default 2), so on the failure path a second
-sweep can start within the same interval, while a completed run arms no retry.
-Run the script once per cycle and let it decide whether to start a sweep, wait
-for one, or collect it:
+A full sweep outlasts the harness's 600s limit on one call, so it never runs in
+the foreground: `doctor-sweep.sh` starts it detached and collects it on a later
+cycle, one sweep window per `doctor_interval`, with one capped retry for a run
+that ended failed or exceeded. Run the script once per cycle and let it decide
+whether to start a sweep, wait for one, or collect it:
 ```bash
 # >>> doctor-sweep-run
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/doctor-sweep.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-# A runner that cannot sweep reports why and exits 2. An uncaptured non-zero
-# aborts the assignment under a strict shell, before the report is echoed.
+# Capture the rc: under a strict shell an uncaptured non-zero ends the block
+# before the report is echoed.
 RC=0
 SWEEP=$(GC_DOCTOR_SWEEP_INTERVAL='{{doctor_interval}}' "$SCRIPTS/doctor-sweep.sh") || RC=$?
 echo "$SWEEP"
@@ -324,39 +192,22 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 
 - `idle`, `started`, `running`, `deferred` or `throttled`: there is no payload
   to read. Say which one and close the step. A `started` sweep is collected a
-  cycle or two later. A `deferred` one did not start because the pre-spawn `gc
-  dolt health` gate found the data plane unreachable or overloaded — a sweep
-  queries every store's Dolt, so it stands down rather than amplify a
-  degradation. A `throttled` one did not start because a sweep had already
-  started within the inter-sweep cadence floor; that floor holds the hourly
-  cadence across sessions even when one session's state directory cannot see
-  another's start, so it is the one-per-interval ceiling doing its job, not a
-  fault. The dolt-health step above already filed any finding for a degradation,
-  so this files nothing of its own and resumes on a later cycle.
-- `stale`: there is no payload to read either. A sweep finished, but more than
-  one `doctor_interval` before this cycle reached it, so what it found is an
-  old observation, not the city's state now. The runner discarded the run
-  without handing its payload on, and the next cycle is due to start a fresh
-  sweep in its place. `finished_at=` says when it finished and `age=` how many
-  seconds ago. Say so, file nothing for it, and close the step.
+  cycle or two later. A `deferred` one stood down because the pre-spawn `gc
+  dolt health` gate found the data plane degraded (dolt-health already filed
+  that). A `throttled` one met the inter-sweep cadence floor, the
+  one-per-interval ceiling working, not a fault. File nothing for these.
+- `stale`: there is no payload to read either. A sweep finished more than one
+  `doctor_interval` before this cycle reached it, so the runner discarded it as
+  an old observation and the next cycle starts a fresh one (`finished_at=`,
+  `age=`). Say so, file nothing for it, and close the step.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
-  `finished_at=` is the second the sweep finished and `age=` is how many
-  seconds ago that was, never more than one `doctor_interval`.
-- `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
-  the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
-  the message. `failed` and `exceeded` carry `elapsed=`, and `exceeded` names
-  the check the sweep was inside when its bound stopped it. A `failed` sweep
-  that vanished (`reason=sweep-vanished`) carries `cause=`: the signal that
-  ended it, or `unknown` for an untrappable kill, with `launch=`/`unit=` to
-  find the run's own journal. `blocked` carries
-  `reason=` instead: the runner could not sweep at all, because the state
-  directory is unwritable, the run directory is contended, or `gc` is not on
-  PATH. Nothing was started, and the next cycle meets the same wall. Do not run
-  the actionable-subset filter — there is no payload.
-- Any other state, or a non-zero `RC`: a FAILED scan too, filed the same way. A
-  state this table does not name is a runner the step no longer understands,
-  and the failure it exists to prevent is a sweep going dark with no finding
-  behind it.
+- `failed`, `exceeded` or `blocked`: a FAILED scan. File it with the recipe
+  below, `--key doctor-sweep-failed` and the whole `state=` block as the
+  message. `exceeded` names the check its bound stopped; a vanished `failed`
+  sweep carries `cause=` and `launch=`/`unit=`; `blocked` carries `reason=`,
+  the wall the next cycle meets too. There is no payload to filter.
+- Any other state, or a non-zero `RC`: a FAILED scan too, filed the same way:
+  a state this table does not name is a sweep going dark.
 
 A FAILED scan carries no payload to filter, so it files one finding under the
 shared key and the step is done:
@@ -370,18 +221,14 @@ done
 ESC_RIG="${GC_RIG:-gc-toolkit}"
 GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key doctor-sweep-failed --title "doctor sweep did not complete: state=${STATE:-unknown} rc=$RC" --message "$SWEEP"
 ```
-One key spans every failed cycle, so a sweep that keeps failing updates the one
-bead the first reaction disposes instead of filing another.
+One key spans every failed cycle, so a sweep that keeps failing updates one
+bead instead of filing another.
 
-The script validates `.results` before it will say `complete`, so a drifted
-schema arrives as `failed` and can never read as clean. A check that hit its
-own `--check-timeout` is reported as a finding: a non-`ok` status carrying
-`timed_out: true`. The actionable-subset filter below already selects it, and
-the `--check` recipe files it on the check's one canonical bead. So
-`abandoned=` and `abandoned_checks=` are a summary to report in the step's
-output, not a second finding to file. Never hand-key an abandoned check under
-`doctor.<check>` or any other spelling; that splits the check `--check`
-already tracks. The missing verdicts are not passes, so say so in the report.
+A check that hit its own `--check-timeout` arrives as a non-`ok` status with
+`timed_out: true`, so the filter below selects it and `--check` files it on the
+check's one bead. `abandoned=` and `abandoned_checks=` are a summary for the
+report, never a second finding under another key; say the missing verdicts
+are not passes.
 
 The actionable subset:
 ```bash
@@ -404,15 +251,11 @@ VERDICT=$(printf '%s' "$FINDING" | jq -r '.message')
 ESC_RIG="${GC_RIG:-gc-toolkit}"
 GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --check "$CHECK" --title "doctor $CHECK: $VERDICT" --message "$FINDING"
 ```
-Pass the finding's `.name` verbatim through `--check`; it derives the key
-`doctor-<check>`, stripping the `<rig>:` prefix the doctor JSON carries, so
-every rendering of one check's name dedups to one bead.
-Do not hand-search for an existing bead first. The key is what decides
-whether this finding already has one, and a bead filed elsewhere for the
-same cause is the reaction's judgment to make: it reads the bead's
-neighborhood and can hold this one on that bead as its `blocked` exit.
-Report the bead id the writer names, and say whether it filed or counted an
-occurrence.
+Pass the finding's `.name` verbatim through `--check`, which derives the key
+`doctor-<check>` so every rendering of one check dedups to one bead. Do not
+hand-search for an existing bead first: the key decides that, and a related
+bead elsewhere is the first reaction's judgment. Report the bead id the writer
+names, and whether it filed or counted an occurrence.
 
 A finding you FIXED yourself leaves no visit behind it, so it leaves no
 record unless you write one:
@@ -440,12 +283,8 @@ Also run every cycle, whatever the sweep is doing:
   SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/file-warrant.sh" ] && [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
-  # file-warrant.sh resolves the owner to a live session id, validates it against
-  # dance-probe.sh's charset, dedups on that id, and files the warrant: exit 0
-  # filed a new one, 3 found one already open, 1 refused (no live session). Ledger
-  # the filing, not the skip — a warrant that already stood was recorded when it
-  # opened — so ledger only on 0. The filer's stdout is the warrant id (empty only
-  # when its re-read failed, which the entry then defaults to "-").
+  # exit 0 filed a new warrant (its id on stdout), 3 one already stood (ledgered
+  # when it opened), 1 refused: no live session. Ledger only the filing.
   FILED=$("$SCRIPTS/file-warrant.sh" --owner "<session>" --role "<rig>/<role>" --reason "<what is stale and for how long>" --requester deacon --dog "{{binding_prefix}}dog")
   case $? in
     0) "$SCRIPTS/gc-deacon-ledger.sh" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}" ;;
