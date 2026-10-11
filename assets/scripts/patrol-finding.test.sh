@@ -32,8 +32,7 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 # uses. --metadata rides the create, exactly as bd merges it, because the
 # script's duplicate-recovery depends on the key being present on a bead whose
 # id the create did not return.
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "${STUB_GC_LOG:?}"

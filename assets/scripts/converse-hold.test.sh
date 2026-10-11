@@ -48,8 +48,7 @@ bash -n "$SUT" && ok "converse-hold.sh: valid bash" \
 # persists the stamped id unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
 # the landed-wrong case, and exits STAMP_RC. Anything else exits 2 so a script
 # that grows a third call fails here rather than reaching the live store.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
