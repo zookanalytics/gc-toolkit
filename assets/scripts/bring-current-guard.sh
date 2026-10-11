@@ -78,15 +78,15 @@
 #
 # CLOSED RULING. A conflicted round on an anchor whose check_set declares no
 # triage lane (correctness alone, say, or the none opt-out) has no review to
-# rule on it, and approval is a merge rule no check_set opts out of. So the guard rules on the round itself and
-# assumes the worst: every lane the anchor declares runs again on the merged
-# code (the lanes review-checks.sh resolves for the merge, none for the none
-# opt-out), and where a PR stands the approvals given before the round are
-# dismissed the way `decide` dismisses them, re-ask visit first. The ruling is
-# stored in the record where triage's goes, marked `by: guard`, so every reader
-# treats the round as ruled, and a re-run of the same hand-off carries it out
-# again. A person who wants triage to rule instead adds the triage lane to the
-# anchor's check_set.
+# rule on it, and approval is a merge rule no check_set opts out of. So the
+# guard rules on the round itself and assumes the worst: every lane the anchor
+# declares runs again on the merged code (the lanes review-checks.sh resolves
+# for the merge, none for the none opt-out), and where a PR stands the
+# approvals given before the round are dismissed the way `decide` dismisses
+# them, re-ask visit first. The ruling is stored in the record where triage's
+# goes, marked `by: guard`, so every reader treats the round as ruled, and a
+# re-run of the same hand-off carries it out again. A person who wants triage
+# to rule instead adds the triage lane to the anchor's check_set.
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]
