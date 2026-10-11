@@ -30,8 +30,8 @@ covers that dimension.
 
 | agent | bytes | est. tokens |
 |---|---:|---:|
-| [`claude`](agents/claude.md) | 5,999 | 1,499 |
-| [`codex`](agents/codex.md) | 5,999 | 1,499 |
+| [`claude`](agents/claude.md) | 5,876 | 1,469 |
+| [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
 | [`converse-codex`](agents/converse-codex.md) | 37,093 | 9,273 |
 | [`converse-fable`](agents/converse-fable.md) | 37,093 | 9,273 |
@@ -39,7 +39,7 @@ covers that dimension.
 | [`deacon`](agents/deacon.md) | 15,930 | 3,982 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
-| [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
+| [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
 | [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
 | [`mechanik`](agents/mechanik.md) | 34,423 | 8,605 |
 | [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
@@ -62,14 +62,14 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
-| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
+| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
 | [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,344 | 586 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 5,577 | 1,394 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,179 | 1,544 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |

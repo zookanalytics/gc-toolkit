@@ -36,7 +36,7 @@ current with MERGE (never rebase or force-push), don't redo the work.
 
 
 Variables:
-  {{affected_tests_command}}: Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command. (default=)
+  {{affected_tests_command}}: Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command. The default is this pack's own runner over the branch's diff: tools/run-tests.sh selects the suites a change to those paths can break (the changed suites, each changed script's sibling suite, every suite that names a changed file, and the tree-wide suites) and treats an empty subset as a pass. The full suite runs off-host, in the tests workflow, on every pull request and every push to main, so the self-review spends the city host's cycles only on what the branch touched. A rig whose tests the runner does not select sets this to its own subset command, or to an empty string to run test_command in full. (default=tools/run-tests.sh $(git diff --name-only origin/main...HEAD))
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
   {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: an empty prefix renders `<rig>/refinery`, an address no agent holds, and the refinery's exact-match find-work makes that strand silent. (default=gc-toolkit.)
   {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)

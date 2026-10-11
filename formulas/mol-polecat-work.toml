@@ -46,8 +46,8 @@ description = "Agent identity prefix with trailing dot. Non-empty default on pur
 default = "gc-toolkit."
 
 [vars.affected_tests_command]
-description = "Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command."
-default = ""
+description = "Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command. The default is this pack's own runner over the branch's diff: tools/run-tests.sh selects the suites a change to those paths can break (the changed suites, each changed script's sibling suite, every suite that names a changed file, and the tree-wide suites) and treats an empty subset as a pass. The full suite runs off-host, in the tests workflow, on every pull request and every push to main, so the self-review spends the city host's cycles only on what the branch touched. A rig whose tests the runner does not select sets this to its own subset command, or to an empty string to run test_command in full."
+default = "tools/run-tests.sh $(git diff --name-only origin/main...HEAD)"
 
 [[steps]]
 id = "load-context"
