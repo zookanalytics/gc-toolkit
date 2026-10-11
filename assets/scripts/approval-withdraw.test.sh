@@ -16,7 +16,8 @@
 #   retry dismisses only the recorded reviews still APPROVED, never an
 #   approval given after them, and notes nothing twice; a dismissal that fails
 #   exits 1 with the set recorded; unreadable reviews, an unresolved login, a
-#   pr_url naming another PR, a malformed stamp and bad usage dismiss nothing.
+#   pr_url naming another PR, a pr_number that names no PR, a malformed stamp
+#   and bad usage dismiss nothing.
 # the mol-validate block (formulas/mol-validate.toml, rule-convergence), run
 # verbatim against stub scripts:
 #   either shape first withdraws the approvals, then with the same reason
@@ -128,6 +129,22 @@ fresh
 out=$(withdraw); rc=$?
 eq "$rc" "0" "an anchor with no PR exits 0"
 has "$out" "has no pull request" "…saying so"
+eq "$(ghlog)" "" "…without reading GitHub"
+
+echo "# a damaged PR record is not read as no PR"
+store "[$(anchorrow ",\"pr_number\":\"7x\",\"pr_url\":\"$PURL\""), $(passrow)]"
+reviews "$(rv 501 human1 APPROVED 1)"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "1" "a pr_number that is not a number exits 1"
+has "$out" "pr_number reads '7x', which names no pull request, beside pr_url '$PURL'" "…naming both fields"
+eq "$(ghlog)" "" "…without reading GitHub"
+eq "$(meta VP1 approval_dismissed)" "<absent>" "…and records nothing"
+store "[$(anchorrow ",\"pr_url\":\"$PURL\""), $(passrow)]"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "1" "a pr_url with no pr_number beside it exits 1"
+has "$out" "pr_number reads '<absent>'" "…saying the number is absent"
 eq "$(ghlog)" "" "…without reading GitHub"
 
 echo "# the record lands before any dismissal, or nothing is dismissed"

@@ -53,8 +53,9 @@
 # approver reads on GitHub: what the change will be, and why it needs another
 # look.
 # Exit: 0 nothing stood to dismiss, or every approval this pass recorded reads
-# dismissed · 1 a read or a write failed, or an approval carries feedback not yet
-# routed, and the caller retries · 2 usage
+# dismissed · 1 a read or a write failed, the anchor's PR record or this pass's
+# stamp is malformed, or an approval carries feedback not yet routed, and the
+# caller retries · 2 usage
 set -u
 
 PROG="approval-withdraw"
@@ -105,11 +106,19 @@ arow=$(bd_json show "$anchor" | jq -c '.[0] | select(type == "object")' 2>/dev/n
 [ -n "$arow" ] || { echo "$PROG: anchor $anchor could not be read; nothing is dismissed and the caller retries" >&2; exit 1; }
 num=$(printf '%s' "$arow" | jq -r '(.metadata.pr_number // "") | tostring')
 url=$(printf '%s' "$arow" | jq -r '(.metadata.pr_url // .metadata.existing_pr // "") | tostring')
-case "$num" in ''|*[!0-9]*) num="" ;; esac
-if [ -z "$num" ]; then
+if [ -z "$num" ] && [ -z "$url" ]; then
   echo "$PROG: $anchor has no pull request, so no approval stands to dismiss"
   exit 0
 fi
+# An anchor's PR is recorded as pr_url and pr_number in one write (pr-open.sh,
+# or the refinery adopting existing_pr), and neither is ever cleared. A url
+# beside no usable number is a damaged record, not an absent PR, and an
+# approval may stand on the PR it half names, so it fails closed.
+case "$num" in
+  ''|*[!0-9]*)
+    echo "$PROG: $anchor's pr_number reads '${num:-<absent>}', which names no pull request${url:+, beside pr_url '$url'}; nothing is dismissed and the caller retries" >&2
+    exit 1 ;;
+esac
 host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
 repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
 if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
