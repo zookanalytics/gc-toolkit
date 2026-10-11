@@ -1,3 +1,8 @@
+---
+name: V2 AI-native prior art survey
+description: Validation report V2 for the escalation work (tk-px5od), surveying what AI-native practitioners propose or run today to find patterns missing from the candidate list. It catalogs the patterns, analyzes overlap and gaps against R1 to R5, and recommends additions.
+---
+
 # V2 — AI-Native Prior Art Survey
 
 > **Status: drafting.** Survey of what serious AI-native practitioners are
