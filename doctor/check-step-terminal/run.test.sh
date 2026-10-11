@@ -80,6 +80,15 @@ printf ',"meta":{}}'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# No case here tests the check's time budget. assets/scripts/doctor-budget.test.sh
+# tests that block, every copy of it. The scale cases run the check over thousands
+# of rows, and on a loaded host one such pass takes tens of seconds. The check's
+# 60 s default caps any one probe at 30 s, so host load alone could cut a pass
+# short and turn its verdict into "NOT checked". Every run here therefore gets a
+# budget sized for the largest fixture, whatever the caller's environment holds.
+# It still bounds each probe, at 300 s, well inside run-tests.sh's 900 s per-file
+# timeout.
+export GC_DOCTOR_CHECK_TIMEOUT=600
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 iso_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 step() { # id root [extra-metadata-json-fragment] [top-level-fragment] [status]
