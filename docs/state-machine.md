@@ -463,17 +463,24 @@ list does not carry, stands on its own and is counted.
 
 **Outstanding feedback routes to something.** It becomes a fix-pool rework
 child carrying the review bodies and inline comments verbatim in its
-description, or, when a human already holds the anchor (`merge_hold`,
-`rebase_hold`, `gc.routed_to=human`, or a live demand bead stamped
-`gc.demand_for=<anchor>`) or there is nowhere to route work, one `escalate.sh`
-visit per batch. A `gc.takeaway` is not one of those conditions: it records a
-sitting rather than naming a live wait, so on its own it forces no visit. Either
-way the filed bead holds the merge until it closes — the rework child through a
-`blocks` edge, the visit through the `pr_number` stamp that `merge.sh`'s
-in-flight-holder probe reads. A visit takes no `blocks` edge: `escalate.sh`
-files it *depending on* its subject, so an edge back would be a cycle.
-`pr_comment_disposition` records which was chosen. Silence is not one of the
-options.
+description, or, when there is nowhere to route work (no fix pool, or the PR
+head branch is unresolved), one `escalate.sh` visit per batch. A hold on the
+anchor does not choose the visit. `merge_hold`, `rebase_hold`,
+`gc.routed_to=human`, a live demand bead stamped `gc.demand_for=<anchor>` and
+an armed re-dispatch all leave the batch a rework child, routed like any other,
+and each keeps gating what it gates elsewhere, among them the merge, the
+stale-base merge-in and the red-check rework. The child is the batch's fix
+unit: a must-fix ruling on one of the batch's findings hangs its close-ordering
+edge on it, so a held batch with no child would leave those findings holding
+the merge with nothing acting on them. The child brings the branch current by
+merge as it answers, as every rework child does, and a conflicting branch is no
+exception: an anchor that owes feedback skips the stale-base arm and its skip
+guards entirely. Either way the filed bead holds the merge until it closes —
+the rework child through a `blocks` edge, the visit through the `pr_number`
+stamp that `merge.sh`'s in-flight-holder probe reads. A visit takes no
+`blocks` edge: `escalate.sh` files it *depending on* its subject, so an edge
+back would be a cycle. `pr_comment_disposition` records which was chosen.
+Silence is not one of the options.
 
 ## The status label (GitHub projection)
 
@@ -705,7 +712,15 @@ review's result set.
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child
   filed under one answers the question by performing it. Closing the demand is
-  what releases the dispatch.
+  what releases the dispatch. A conflict that is not drift gets no child
+  either. When a change that landed first deleted or rewrote code the branch
+  edits, `branch-supersession.sh` files a `rework-base-supersession` visit on the
+  anchor, because whether the branch still has work to do is the operator's
+  call. That visit holds the dispatch while it is open and its route addresses
+  somebody; one routed nowhere holds nothing until `escalate.sh` repoints it.
+  Closing it `benign` (the overlap was incidental) lets the next pass send the
+  merge-in child.
+  `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
 - **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes

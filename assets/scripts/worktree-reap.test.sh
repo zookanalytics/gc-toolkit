@@ -56,8 +56,7 @@ export PATH="$BIN:$PATH"
 # `gc bd list --json` emits metadata as an OBJECT, which is what the running
 # binary does; a stub that emitted a string would let a parse the tool never
 # needs pass for a parse it does.
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 # A store selector travels right after the top-level command group. Strip it,
 # keeping the group as $1 so the case key stays "<group> <sub>", and resolve it
@@ -107,8 +106,7 @@ case "${1:-} ${2:-}" in
   *) exit 0 ;;
 esac
 STUB
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 set -u
 [ "${STUB_PR_RC:-0}" = "0" ] || { echo "gh: simulated failure" >&2; exit "${STUB_PR_RC}"; }
 cat "${STUB_PR_BRANCHES:?}"
@@ -413,8 +411,7 @@ new_repo
 mk_wt "$REPO/wt/liar" polecat/liar
 bead b-liar closed 100 "$REPO/wt/liar" polecat/liar
 REAL_GIT="$(command -v git)"
-cat > "$BIN/git" <<STUB
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<STUB
 for a in "\$@"; do [ "\$a" = "remove" ] && found=1; done
 if [ "\${found:-}" = "1" ]; then exit 0; fi
 exec "$REAL_GIT" "\$@"

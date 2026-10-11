@@ -710,8 +710,7 @@ fi
 
 CTMP="$TMPD/claim"
 mkdir -p "$CTMP/bin"
-cat > "$CTMP/bin/gc" <<'GCC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$CTMP/bin/gc" <<'GCC'
 case "$1 ${2:-}" in
   "hook --claim") cat "$FAKE_CLAIM" ;;
   "bd update")    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
@@ -1635,8 +1634,7 @@ mkdir -p "$SOBIN" "$SOPACK/assets/scripts" "$SOFOR" "$SOCITY/rigs/gc-toolkit/ass
 SOLOG="$SO/log"    # gc-helm.sh + lifecycle.sh calls, in order
 SOGC="$SO/gclog"   # gc bd gate/close calls
 
-cat >"$SOBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SOBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
