@@ -43,6 +43,10 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "converse-claim: cannot source visit-identity.sh from $HERE" >&2; exit 3; }
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || { echo "converse-claim: cannot source work-outcome.sh from $HERE" >&2; exit 3; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -196,9 +200,13 @@ OUTCOME=$(printf '%s' "$BEAD_JSON" \
 # refusal escalates to --force the way gc-helm.sh's dismiss does; the holder
 # being overridden here is this session. The READ decides, not either exit
 # status — a close that reported success and left the visit open is the strand
-# again, one door over.
+# again, one door over. The work-record gate the close runs wants
+# gc.work_outcome, and the stranded sitting may never have stamped it, so
+# work-outcome.sh stamps it first, in a write of its own that never decides
+# whether the visit closes.
 finish_close() {
     _why="stranded after gc.outcome=$2 was stamped; close completed by $PROG"
+    work_outcome_noop "$1" gc bd
     gc bd close "$1" --reason "$_why" >/dev/null 2>&1 \
         || gc bd close "$1" --reason "$_why" --force >/dev/null 2>&1
     gc bd show "$1" --json 2>/dev/null | scrub \
