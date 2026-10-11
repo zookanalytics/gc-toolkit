@@ -38,6 +38,12 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { printf '%s: cannot source converse-capability.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-helm.sh's engage so this intake's note and that guard read them the same
+# way. Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { printf '%s: cannot source city-liveness.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
@@ -186,13 +192,11 @@ enumerate_rigs() {
         5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
         *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
     esac
-    # Each rig's suspended rides through, and running on the HQ row only, where
-    # it is gc's probe of the city controller, so the liveness note below reads
-    # them from this same enumeration. A rig row's running reads false on an
-    # idle rig, which the reconciler still launches sessions in, so it is not
-    # carried. A `gc rig list` that omits a flag leaves it null, which the note
+    # The projection carries the flags the wait-note below reads from this same
+    # enumeration (city-liveness.sh says which, and why a rig row's running is
+    # not one). A `gc rig list` that omits a flag leaves it null, which the note
     # treats as unknown and says nothing about.
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, hq, suspended} + (if .hq == true then {running} else {} end)]' 2>/dev/null)
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null)
     [ -n "$RIGS" ] || RIGS='[]'
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
         || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
@@ -321,17 +325,16 @@ else
     # refusing would deny a legitimate target (a rig paused on purpose, filed
     # into to process later). So do not refuse — just note that the report
     # waits. A rig with no agents running is idle, and the reconciler launches
-    # its triage like anywhere else, so it gets no note. suspended and the
-    # controller's running come from the enumeration above; a gc that reports
-    # neither leaves the field null, read here as unknown, which says nothing.
-    RIG_SUSPENDED=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
-        '.[] | select(.name==$n) | if (.suspended==null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1)
-    CONTROLLER_RUNNING=$(printf '%s' "$RIGS" | jq -r \
-        '.[] | select(.hq == true) | if (.running==null) then "" else (.running|tostring) end' 2>/dev/null | head -n1)
-    if [ "$RIG_SUSPENDED" = "true" ]; then
+    # its triage like anywhere else, so it gets no note. Both readings come from
+    # city-liveness.sh; a gc that reports neither flag leaves them empty, read
+    # here as unknown, which says nothing.
+    if [ "$(rig_suspended "$RIG")" = "true" ]; then
         note "$PROG: rig '$RIG' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $RIG)."
-    elif [ "$CONTROLLER_RUNNING" = "false" ]; then
-        note "$PROG: the city controller is down — the report is recorded now and triaged once the controller is back up (gc status and gc supervisor status show why)."
+    else
+        city_controller_state
+        if [ "$CONTROLLER_RUNNING" = "false" ]; then
+            note "$PROG: the city controller did not answer ($CONTROLLER_SEEN) — the report is recorded now and triaged once it answers (gc status and gc supervisor status show why)."
+        fi
     fi
 
     # A question is a decision, everything else a task; --type overrides.

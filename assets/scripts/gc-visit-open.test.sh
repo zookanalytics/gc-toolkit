@@ -111,6 +111,16 @@ case "$1 ${2:-}" in
               ({name:"gascity",    path:$g, prefix:"gc", hq:false}
                + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
                + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "status --json")
+    # The supervisor-aware controller reading the wait-note asks before an HQ
+    # running=false counts. $STATUS_CONTROLLER sets .controller.running
+    # ("true"/"false"); unset prints nothing, a gc status that gave no reading.
+    # Each call is logged to $FAKE_STATUS_CALLS, apart from the mutating calls.
+    printf 'status --json\n' >> "$FAKE_STATUS_CALLS"
+    case "${STATUS_CONTROLLER-}" in
+      true)  printf '{"controller":{"running":true,"pid":7,"mode":"supervisor"}}\n' ;;
+      false) printf '{"controller":{"running":false,"mode":"supervisor"}}\n'; exit 1 ;;
+    esac ;;
   "agent list")
     # A reaction roster: proactive + converse for each rig named in
     # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
@@ -209,20 +219,22 @@ export FAKE_CALLS="$TMP/calls"
 export FAKE_TITLE="$TMP/title"
 export FAKE_BODY="$TMP/body"
 export FAKE_RIGS="$TMP/rigs"
+export FAKE_STATUS_CALLS="$TMP/status-calls"
 export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
 export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 export TMPDIR="$TMP"
 
-# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
+# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
 # RUN_SH names the shell that runs the script; the default is sh, as shipped.
 run() {
-    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
+    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"; : > "$FAKE_STATUS_CALLS"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
     OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
+    STATUS_CALLS="$(cat "$FAKE_STATUS_CALLS")"
 }
 
 # --- (DIRECT) --no-react files the visit now, via gc-helm.sh open ------------
@@ -348,22 +360,31 @@ has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
 has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
 unset GASCITY_SUSPENDED
 
-export HQ_RUNNING=false
+export HQ_RUNNING=false STATUS_CONTROLLER=false
 run no "a report while the controller is down" --rig gascity
 eq "$RC" "0" "(LIVENESS) a report filed while the controller is down files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the target rig"
-has "$ERR" "city controller is down" "(LIVENESS) and the note names the downed controller"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the note names the controller"
+has "$ERR" "both report it not running" "(LIVENESS) and the two readings that agree"
 has "$ERR" "gc status" "(LIVENESS) and points at the city's status"
+unset STATUS_CONTROLLER
+
+# A missed ping that gc status contradicts is no wait at all.
+STATUS_CONTROLLER=true run no "a report when the ping missed" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed when gc status contradicts the HQ row files normally"
+has "$STATUS_CALLS" "status --json" "(LIVENESS) after asking gc status"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
 unset HQ_RUNNING
 
 # A rig row's running=false is what gc reports for an idle rig, and an idle rig
 # is not a down one: the reconciler launches its triage like anywhere else, so
-# the report gets no wait-note.
+# the report gets no wait-note. An HQ running=true asks gc status nothing.
 export HQ_RUNNING=true GASCITY_RUNNING=false
 run no "a report for an idle rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) an idle target rig files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the idle rig"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for an idle rig"
+eq "$STATUS_CALLS" "" "(LIVENESS) and gc status is not asked while the HQ row reads running"
 unset HQ_RUNNING GASCITY_RUNNING
 
 # Explicit-live files with no note — the control that proves the note fires on
@@ -796,10 +817,13 @@ mkdir -p "$TMP/enumbin"
 exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
 PROG=probe; RIGS=""
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
+. "$2"
 . "$1"
 before="$(trap)"
 enumerate_rigs
@@ -809,7 +833,7 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
 has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, so the temp-file path really ran"
 has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
 eq  "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \

@@ -226,6 +226,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-visit-open.sh so engage's guard and the intake's note cannot diverge.
+# Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { echo "$PROG: cannot source city-liveness.sh from $SCRIPT_DIR" >&2; exit 3; }
 # The one gc.work_outcome stamp a visit gets before it closes, shared with every
 # other visit closer so dismiss cannot diverge from them. Exposes
 # work_outcome_noop.
@@ -288,9 +294,10 @@ sitting_is_gone() {
 
 # ── Rig enumeration ──────────────────────────────────────────────────
 # Sets RIGS (JSON array of {name,path,prefix,hq,suspended}, plus running on the
-# HQ row); exits 3 with a per-cause sentence otherwise. Each failure names its
-# own operator move because for a non-CLI caller (the web board's open button)
-# the code plus the sentence is the whole signal.
+# HQ row; city-liveness.sh's RIG_PROJECTION_JQ); exits 3 with a per-cause
+# sentence otherwise. Each failure names its own operator move because for a
+# non-CLI caller (the web board's open button) the code plus the sentence is
+# the whole signal.
 RIGS=""
 rigs_count() {
     # jq emits nothing on empty input; normalize so arithmetic never throws.
@@ -352,13 +359,11 @@ enumerate_rigs() {
            exit 3 ;;
     esac
 
-    # Carry the flags engage's liveness guard reads from this same enumeration:
-    # each rig's suspended, and running on the HQ row only, where it is gc's probe
-    # of the city controller. A rig row's running reads false on an idle rig,
-    # which the reconciler still launches sessions in, so it is not carried. A
-    # `gc rig list` that omits a flag leaves it null, which the guard treats as
-    # unknown and never refuses on.
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, hq, suspended} + (if .hq == true then {running} else {} end)]' 2>/dev/null || printf '[]')
+    # The projection carries the flags engage's liveness guard reads from this
+    # same enumeration (city-liveness.sh says which, and why a rig row's running
+    # is not one). A `gc rig list` that omits a flag leaves it null, which the
+    # guard treats as unknown and never refuses on.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null || printf '[]')
     if [ "$(rigs_count)" -eq 0 ]; then
         # gc answered correctly: this city really has no rigs. Not a malfunction.
         echo "$PROG: no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." >&2
@@ -376,24 +381,6 @@ rig_path_for_bead() {
 rig_name_for_bead() {
     enumerate_rigs
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
-}
-
-# rig_suspended_for_bead <bead-id> — the suspended flag `gc rig list` reports
-# for the rig owning the bead. city_controller_running — the running flag on
-# its HQ row, gc's probe of the city controller. Each prints "true" or "false",
-# or EMPTY when the field is absent (an older gc that does not report it).
-# engage's guard refuses only on an explicit suspended=true or running=false,
-# so an empty read is unknown and never refuses — the flag is a safety net
-# over today's behaviour, not a new precondition on every engage.
-rig_suspended_for_bead() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
-        '.[] | select(.prefix==$p) | if (.suspended == null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1
-}
-city_controller_running() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r \
-        '.[] | select(.hq == true) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
 }
 
 # rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
@@ -3249,17 +3236,17 @@ cmd_engage() {
     # bound to a session that never registers, recoverable only by hand. Refuse
     # before spawning and name the fix. A rig with no agents running is idle, not
     # down, and the reconciler launches the sitting there like anywhere else.
-    # Both flags come from the `gc rig list` enumerate_rigs already read; a gc
-    # that reports neither leaves them empty, which reads as unknown and does not
-    # refuse.
-    rig_suspended=$(rig_suspended_for_bead "$bead")
-    controller_running=$(city_controller_running)
-    if [ "$rig_suspended" = "true" ]; then
+    # Both flags come from the `gc rig list` enumerate_rigs already read, and
+    # city_controller_state asks gc status before an HQ running=false counts
+    # (city-liveness.sh). A gc that reports neither flag leaves them empty, which
+    # reads as unknown and does not refuse.
+    if [ "$(rig_suspended "$rig")" = "true" ]; then
         echo "$PROG: engage: rig '${rig:-?}' is suspended, so the reconciler skips its agents and a spawned converse sitting would never come up — the visit would strand bound to it. Resume the rig, then re-engage: gc rig resume ${rig:-<rig>}" >&2
         exit 4
     fi
-    if [ "$controller_running" = "false" ]; then
-        echo "$PROG: engage: the city controller is down, so nothing would launch a spawned converse sitting — the visit would strand bound to a session that never registers. Check 'gc status' and 'gc supervisor status', bring the controller back up, then re-engage." >&2
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        echo "$PROG: engage: the city controller did not answer ($CONTROLLER_SEEN), so nothing would launch a spawned converse sitting — the visit would strand bound to a session that never registers. Check 'gc status' and 'gc supervisor status', then re-engage once the controller answers." >&2
         exit 4
     fi
 

@@ -76,6 +76,10 @@
 #   (IA-SKILL*) on a TTY a new visit is asked for a skill after the model (Enter
 #             = none, ? lists, a number picks, an unknown name is asked again);
 #             an existing visit is not asked
+#   (SUSPENDED, CTRL-*) a suspended subject rig refuses before anything spawns
+#             (exit 4), and so does an HQ running=false that gc status does not
+#             contradict. An idle rig, a missed ping gc status contradicts, and
+#             a rig list with no controller reading all engage
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,6 +127,19 @@ case "$1 ${2:-}" in
                ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
                + (if $run  != "" then {running:   ($run  == "true")} else {} end)) ]}' ;;
+  "status --json")
+    # The supervisor-aware controller reading the liveness guard asks before an
+    # HQ running=false counts. $STATUS_CONTROLLER sets .controller.running
+    # ("true"/"false"); "unknown" is the supervisor that is up but cannot say;
+    # "broken" prints something that is not JSON. Unset prints nothing, a
+    # gc status that gave no reading.
+    printf 'status --json\n' >> "$CALLS"
+    case "${STATUS_CONTROLLER-}" in
+      true)    printf '{"controller":{"running":true,"pid":7,"mode":"supervisor"}}\n' ;;
+      false)   printf '{"controller":{"running":false,"mode":"supervisor"}}\n'; exit 1 ;;
+      unknown) printf '{"controller":{"running":false,"pid":7,"mode":"supervisor","status":"unknown"}}\n' ;;
+      broken)  printf 'gc status: not json\n' ;;
+    esac ;;
   "session list")
     # Sessions the reclaim probe (sitting_is_gone) reads. Default: the current
     # $VIS_OWNER counts as live, so the pending/busy refusals hold unchanged. A
@@ -1053,15 +1070,40 @@ unset RIG_SUSPENDED
 
 echo "# a city whose controller is down is refused before anything spawns"
 # The reconciler, the controller's loop, is what launches the sitting; the HQ
-# row's running is gc's probe of that controller.
-export HQ_RUNNING=false
+# row's running is gc's probe of that controller, and gc status confirms it.
+export HQ_RUNNING=false STATUS_CONTROLLER=false
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(CTRL-DOWN) engaging while the city controller is down exits 4"
 hasnt "$CALLED" "session new" "(CTRL-DOWN) …and spawns nothing"
-has "$OUT" "city controller is down" "(CTRL-DOWN) …saying the controller is down"
+has "$CALLED" "status --json" "(CTRL-DOWN) …having asked gc status about the HQ reading"
+has "$OUT" "city controller did not answer" "(CTRL-DOWN) …saying the controller did not answer"
+has "$OUT" "both report it not running" "(CTRL-DOWN) …and that both readings agree"
 has "$OUT" "gc status" "(CTRL-DOWN) …and pointing at the city's status"
 hasnt "$OUT" "gc rig status" "(CTRL-DOWN) …not at the subject rig's"
+unset HQ_RUNNING STATUS_CONTROLLER
+
+echo "# an HQ running=false that gc status cannot confirm or clear still refuses"
+# The ping missed and the second reading has nothing to say: a gc status that
+# prints nothing, prints something that is not JSON, or reports a supervisor
+# that is up but cannot tell. The HQ reading stands.
+export HQ_RUNNING=false
+for _st in "" broken unknown; do
+    STATUS_CONTROLLER="$_st" run_engage tk-vis --no-attach
+    eq "$RC" 4 "(CTRL-NOREAD:${_st:-empty}) an unconfirmed HQ running=false exits 4"
+    hasnt "$CALLED" "session new" "(CTRL-NOREAD:${_st:-empty}) …and spawns nothing"
+    has "$OUT" "'gc status' could not tell" "(CTRL-NOREAD:${_st:-empty}) …saying gc status could not tell"
+done
 unset HQ_RUNNING
+
+echo "# an HQ running=false that gc status contradicts engages"
+# A loaded controller can miss the socket ping that sets the HQ row; the
+# supervisor-aware reading in gc status answering running clears it.
+export HQ_RUNNING=false STATUS_CONTROLLER=true
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(CTRL-PING-MISSED) engaging when gc status reports the controller running exits 0"
+has "$CALLED" "status --json" "(CTRL-PING-MISSED) …after asking gc status"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(CTRL-PING-MISSED) …and spawns the sitting"
+unset HQ_RUNNING STATUS_CONTROLLER
 
 echo "# an idle subject rig (running=false) engages while the controller is up"
 # A rig row's running=false is what gc reports for an idle rig, and an idle rig
@@ -1070,6 +1112,7 @@ export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=false
 run_engage tk-vis --no-attach
 eq "$RC" 0 "(IDLE) engaging on an idle rig exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IDLE) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(IDLE) …and an HQ running=true asks gc status nothing"
 unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
 
 echo "# a suspended rig is refused even while the controller is up"
