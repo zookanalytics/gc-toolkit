@@ -10,9 +10,11 @@
 # branch and head against a live child, a stranded child re-routed rather than
 # buried, and a child filed with its work order and blocks edge on the create,
 # so a lost create reply is re-routed rather than twinned; the read-backs that
-# leave a child unrouted when prepare_mode or the route did not persist; anchors that
-# already carry a PR left to pr-facts.sh; and an unreadable enumeration failing
-# loudly rather than reporting a false all-clear.
+# route a child only once every key of its work order and the route persist, a
+# short fresh child completed in the pass or left for the strand probe, and one
+# that probe could never find closed rather than left holding the anchor;
+# anchors that already carry a PR left to pr-facts.sh; and an unreadable
+# enumeration failing loudly rather than reporting a false all-clear.
 # The premise under the ref guard is asserted directly: `git merge-tree` exits 1
 # for a ref it cannot resolve as well as for a conflict.
 set -uo pipefail
@@ -192,6 +194,20 @@ OUT=$(run --fix-pool "$POOL")
 eq "$(newcount)" "0" "a child stranded by a lost route stamp is not twinned"
 has "$OUT" "re-routing stranded rework S1" "it is re-routed instead"
 eq "$(meta S1 "gc.routed_to")" "$POOL" "and the route it was missing is stamped"
+eq "$(meta S1 task_kind)|$(meta S1 anchor_bead)|$(meta S1 target)|$(meta S1 prepare_mode)|$(meta S1 merge_strategy)" "rework|AA|main|merge|mr" \
+  "…once it carries the whole work order, brought up to it before the route"
+has "$(meta S1 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…the reason included, so the polecat routed to it reads this pass's work order"
+
+# A stranded child whose work order will not take stays unrouted. The strand
+# probe found it by its branch and head, so it is left for the next pass, never
+# closed.
+reset "$(pre AA2 polecat/tk-c1)" "$(printf '{"id":"S2","status":"open","assignee":"","title":"stranded","metadata":{"branch":"polecat/tk-c1","rejection_reason":"stale base at head %s: ..."}}' "$C1_HEAD")"
+export STUB_DROP_KEYS="S2:merge_strategy"
+OUT=$(run --fix-pool "$POOL")
+export STUB_DROP_KEYS=""
+has "$OUT" "rework S2 did not record its whole work order (short: merge_strategy); left unrouted" "a stranded child short of a key after the re-stamp is named with the key"
+eq "$(meta S2 "gc.routed_to")|$(bstatus S2)" "<absent>|open" "…and left open and unrouted, for the next pass to finish"
+hasnt "$OUT" "filed merge-mode rework" "…not counted as dispatched"
 
 # A create whose reply is lost has still landed with its work order, so the
 # next pass finds it on its branch and re-routes it rather than filing a twin.
@@ -221,7 +237,7 @@ echo "# the read-backs: a stamp that did not persist leaves the child unrouted"
 reset "$(pre AD polecat/tk-c1)"
 export STUB_DROP_KEYS="new-2:prepare_mode"
 OUT=$(run --fix-pool "$POOL")
-has "$OUT" "did not record prepare_mode" "a dropped prepare_mode is caught by the read-back"
+has "$OUT" "did not record its whole work order (short: prepare_mode)" "a dropped prepare_mode is caught by the read-back"
 eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than routed with incomplete metadata"
 hasnt "$OUT" "filed merge-mode rework" "it is not counted as dispatched"
 
@@ -235,10 +251,66 @@ export STUB_DROP_KEYS=""
 reset "$(pre AH polecat/tk-c1)"
 export STUB_DROP_KEYS="new-2:task_kind"
 OUT=$(run --fix-pool "$POOL")
-has "$OUT" "did not record task_kind=rework/anchor_bead" "a role marker that will not persist is caught before the route is stamped"
+has "$OUT" "did not record its whole work order (short: task_kind)" "a role marker that will not persist is caught before the route is stamped"
 eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than dispatched as an anchor-lookalike"
 hasnt "$OUT" "filed merge-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
 export STUB_DROP_KEYS=""
+
+# bd_create prints the id of a child whose work order did not read back (its
+# rc 2). The id is not taken as a routable child: a create short of the keys the
+# hand-back runs on (where it lands, and how) is not routed.
+reset "$(pre AI polecat/tk-c1)"
+export STUB_DROP_KEYS="new-2:target,merge_strategy"
+OUT=$(run --fix-pool "$POOL")
+export STUB_DROP_KEYS=""
+has "$OUT" "did not record its whole work order (short: target,merge_strategy)" "a create short of target and merge_strategy is caught, every short key named"
+eq "$(meta new-2 "gc.routed_to")|$(bstatus new-2)" "<absent>|open" "…and the child is left open and unrouted"
+hasnt "$OUT" "filed merge-mode rework" "…and not counted as dispatched"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "1" "the next pass files no twin"
+has "$OUT" "re-routing stranded rework new-2" "…it finds the short child by its branch and head"
+eq "$(meta new-2 target)|$(meta new-2 merge_strategy)|$(meta new-2 "gc.routed_to")" "main|mr|$POOL" "…and routes it only once its work order is whole"
+
+# A create that read back short is completed in the same pass when one write of
+# the whole order takes: the hook strips target from the newborn before the
+# create's read-back, once.
+cat > "$TMP/strip-target-once" <<'HOOK'
+#!/usr/bin/env bash
+[ "${1:-}" = new-2 ] && [ ! -e "$STUB_STORE.stripped" ] || exit 0
+: > "$STUB_STORE.stripped"
+tmp="$(mktemp "${STUB_STORE%/*}/.hook.XXXXXX")"
+jq -c 'map(if .id == "new-2" then (.metadata |= del(.target)) else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+HOOK
+chmod +x "$TMP/strip-target-once"
+reset "$(pre AL polecat/tk-c1)"
+rm -f "$STUB_STORE.stripped"
+OUT=$(STUB_SHOW_HOOK="$TMP/strip-target-once" run --fix-pool "$POOL")
+[ -e "$STUB_STORE.stripped" ] && ok "(the newborn read back without its target)" || bad "(the hook never stripped the newborn's target)"
+has "$OUT" "filed merge-mode rework new-2 routed to $POOL" "a create that read back short is routed once one write of its whole order takes"
+eq "$(meta new-2 target)|$(meta new-2 "gc.routed_to")" "main|$POOL" "…carrying the target it was short of"
+has "$(grep "^bd update new-2" "$STUB_GC_LOG")" "--set-metadata target=main" "…written back before the route"
+
+# A fresh child that will not take its branch is one the strand probe can never
+# find, yet its blocks edge holds the anchor. It is closed, and the next pass
+# files afresh.
+reset "$(pre AM polecat/tk-c1)"
+export STUB_DROP_KEYS="new-2:branch"
+OUT=$(run --fix-pool "$POOL")
+export STUB_DROP_KEYS=""
+has "$OUT" "no later pass could find it; closed it" "a fresh child short of its branch is closed rather than left holding the anchor"
+eq "$(bstatus new-2)|$(meta new-2 gc.outcome)|$(meta new-2 "gc.routed_to")" "closed|abandoned|<absent>" "…closed as abandoned, never routed"
+has "$(notes new-2)" "Unmade by pre-open-rebase" "…with a note naming why"
+OUT=$(run --fix-pool "$POOL")
+has "$OUT" "filed merge-mode rework new-3 routed to $POOL" "the next pass files the merge-in child afresh and routes it"
+
+reset "$(pre AN polecat/tk-c1)"
+export STUB_DROP_KEYS="new-2:rejection_reason"
+OUT=$(run --fix-pool "$POOL")
+export STUB_DROP_KEYS=""
+has "$OUT" "no later pass could find it; closed it" "a fresh child short of the reason that names its head is closed too"
+eq "$(bstatus new-2)" "closed" "…since the strand probe matches a child by that head"
+OUT=$(run --fix-pool "$POOL")
+has "$OUT" "filed merge-mode rework new-3 routed to $POOL" "…and the next pass files afresh rather than standing down to it"
 
 echo "# what this arm does not enumerate"
 reset '{"id":"P1","status":"open","assignee":"","notes":"","title":"pr anchor","description":"d","metadata":{"merge_result":"pull_request","branch":"polecat/tk-c1","merged_target":"main","pr_number":"7"}}'
