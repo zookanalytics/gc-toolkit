@@ -144,13 +144,21 @@ LIVE_STATUSES=$(gc bd --db "$STORE" statuses --json </dev/null 2>/dev/null | scr
            | select(.category != "done") | .name] | unique | join(",")' 2>/dev/null)
 [ -n "$LIVE_STATUSES" ] \
   || not_ended "the status contract of rig $RIG did not read, so a live owner cannot be ruled out"
-LIVE_ROWS=$(gc bd --db "$STORE" list --status "$LIVE_STATUSES" --limit=0 --json </dev/null 2>/dev/null) \
-  || not_ended "the live beads of rig $RIG did not read, so a live owner cannot be ruled out"
-LIVE_ROWS=$(printf '%s' "$LIVE_ROWS" | scrub)
-# A listing is read only once it parses as exactly one array: an error object,
-# an empty payload or anything else would read as "no owners".
-printf '%s' "$LIVE_ROWS" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 \
-  || not_ended "the live beads of rig $RIG did not parse as a bead list, so a live owner cannot be ruled out"
+# The store is asked only for the live beads that name the branch, one listing
+# per field, so the read stays a few beads however many are live. The exact
+# match below still decides; the store's comparison only narrows what is read.
+LIVE_ROWS='[]'
+for FIELD in branch target; do
+  ROWS=$(gc bd --db "$STORE" list --status "$LIVE_STATUSES" --metadata-field "$FIELD=$BRANCH" --limit=0 --json </dev/null 2>/dev/null) \
+    || not_ended "the live beads of rig $RIG naming it in metadata.$FIELD did not read, so a live owner cannot be ruled out"
+  ROWS=$(printf '%s' "$ROWS" | scrub)
+  # A listing is read only once it parses as exactly one array: an error object,
+  # an empty payload or anything else would read as "no owners".
+  printf '%s' "$ROWS" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 \
+    || not_ended "the live beads of rig $RIG naming it in metadata.$FIELD did not parse as a bead list, so a live owner cannot be ruled out"
+  LIVE_ROWS=$(printf '%s\n%s\n' "$LIVE_ROWS" "$ROWS" | jq -cs 'add | unique_by(.id)' 2>/dev/null) \
+    || not_ended "the live beads of rig $RIG naming it could not be combined, so a live owner cannot be ruled out"
+done
 
 # The retired bead's scaffolding stops counting only once that bead reads
 # closed. While it is open it owns its branch, and so does its scaffolding.

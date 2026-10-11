@@ -63,7 +63,9 @@
 #   (ai) a close that does not read back closed leaves the branch, with a WARN;
 #   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
 #       ends the branch with its tip pinned, and a delete origin refuses leaves
-#       the close standing.
+#       the close standing;
+#   (ak) the command a WARN names, pasted, hands branch-end a branch name that
+#       carries shell metacharacters as one argument and runs nothing it spells.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -151,11 +153,15 @@ if [ "$sub" = "statuses" ]; then
   exit 0
 fi
 if [ "$sub" = "list" ]; then
-  st=""
+  # --metadata-field is bd's: split at the first `=`, every pair must match.
+  st=""; mf='[]'
   while [ $# -gt 0 ]; do
     case "$1" in
       --status) st="$2"; shift 2 ;;
       --status=*) st="${1#--status=}"; shift ;;
+      --metadata-field)
+        mf=$(jq -cn --argjson m "$mf" --arg k "${2%%=*}" --arg v "${2#*=}" '$m + [{k: $k, v: $v}]')
+        shift 2 ;;
       *) shift ;;
     esac
   done
@@ -171,7 +177,8 @@ if [ "$sub" = "list" ]; then
     rows=$(jq -nc --argjson r "$rows" --arg id "${bf##*/}" --arg st "$bs" --argjson m "$meta" \
       '$r + [{id: $id, status: $st, metadata: $m}]')
   done
-  printf '%s\n' "$rows"
+  printf '%s\n' "$rows" | jq -c --argjson mf "$mf" \
+    '[.[] | select(. as $row | all($mf[]; $row.metadata[.k] as $x | $x != null and ($x | tostring) == .v))]'
   exit 0
 fi
 
@@ -848,6 +855,19 @@ eq "$(gm_tip polecat/gm-e2e2)" "$TIP2" "end to end: the branch stays at its tip"
 has "$(cat "$TMP/err")" "branch-end: did NOT end polecat/gm-e2e2: origin refused the delete" "end to end: branch-end's reason reaches the caller"
 has "$(cat "$TMP/err")" "the close stands" "end to end: and the WARN says the close stands"
 has "$(field gamma notes gm-e2e2)" "Branch polecat/gm-e2e2 is still on the git remote" "end to end: the bead records that its branch is still there"
+
+# --- (ak) the command a WARN names survives a paste --------------------------
+mkbead alpha open al-br10
+printf 'm.branch=%s\n' 'polecat/al-br10;$(touch pwned)' >> "$TMP/rigs/alpha/.beads/al-br10"
+mkbead beta open bt-br10
+rc=0; BE_RC=4 run --origin al-br10 --successor bt-br10 --kind re-homed || rc=$?
+eq "$rc" 0 "a retire whose branch name carries shell metacharacters succeeds"
+PASTE=$(sed -n 's/.*(branch-end exit 4); end it with: //p' "$TMP/err" | tail -1)
+: > "$BE_LOG"
+( cd "$TMP" && eval "$PASTE" ) >/dev/null 2>&1 || true
+has "$(cat "$BE_LOG")" '--branch polecat/al-br10;$(touch pwned) --bead al-br10 ' \
+    "the WARN's command, pasted, hands branch-end the branch as one argument"
+if [ -e "$TMP/pwned" ]; then bad "…and runs nothing the branch name spells"; else ok "…and runs nothing the branch name spells"; fi
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

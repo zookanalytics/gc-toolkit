@@ -259,7 +259,8 @@ if [ -n "$DRY_RUN" ]; then
     fi
     PLAN_BRANCH=$(origin_branch "$ORIGIN_JSON")
     if [ -n "$PLAN_BRANCH" ]; then
-        BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close reads back, unless a live owner names it ($BRANCH_END --rig ${ORIGIN_STORE#rig:} --branch $PLAN_BRANCH --bead $ORIGIN --dry-run previews it)"
+        PLAN_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$PLAN_BRANCH" --bead "$ORIGIN" --dry-run)
+        BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close reads back, unless a live owner names it (${PLAN_CMD% } previews it)"
     else
         BRANCH_PLAN="none ($ORIGIN names no metadata.branch)"
     fi
@@ -396,7 +397,9 @@ bd_at "$SUCCESSOR_PATH" update "$SUCCESSOR" \
 # end costs a warning, never the close.
 RETIRED_BRANCH=$(origin_branch "$CHECK_JSON")
 if [ -n "$RETIRED_BRANCH" ]; then
-    END_CMD="$BRANCH_END --rig ${ORIGIN_STORE#rig:} --branch $RETIRED_BRANCH --bead $ORIGIN"
+    # Quoted for a paste: a branch name may carry shell metacharacters.
+    END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
+    END_CMD="${END_CMD% }"
     FINAL_STATUS=$(bead_json "$ORIGIN_PATH" "$ORIGIN" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
     if [ "$FINAL_STATUS" != "closed" ]; then
         echo "bead-rehome: WARN $ORIGIN did not read back closed (status '${FINAL_STATUS:-unreadable}'), so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2

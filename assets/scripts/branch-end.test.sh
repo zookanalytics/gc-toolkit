@@ -74,17 +74,27 @@ case "$sub" in
     [ "${STUB_STATUSES_RC:-0}" = 0 ] || exit "$STUB_STATUSES_RC"
     cat "${STUB_STATUSES:?}" ;;
   list)
-    [ "${STUB_LIST_RC:-0}" = 0 ] || { echo "stub gc: list failure" >&2; exit "$STUB_LIST_RC"; }
-    if [ -n "${STUB_LIST_PAYLOAD:-}" ]; then cat "$STUB_LIST_PAYLOAD"; exit 0; fi
-    st=""
+    # --metadata-field is bd's: split at the first `=`, every pair must match.
+    # STUB_LIST_FAIL_FIELD fails only a listing filtered on that key.
+    st=""; mf='[]'; fields=" "
     while [ $# -gt 0 ]; do
       case "$1" in
         --status) st="$2"; shift 2 ;;
         --status=*) st="${1#--status=}"; shift ;;
+        --metadata-field)
+          fields="$fields${2%%=*} "
+          mf=$(jq -cn --argjson m "$mf" --arg k "${2%%=*}" --arg v "${2#*=}" '$m + [{k: $k, v: $v}]')
+          shift 2 ;;
         *) shift ;;
       esac
     done
-    jq -c --arg st "$st" '[.[] | select(.status as $s | ($st | split(",") | index($s)) != null)]' "${STUB_LEDGER:?}" ;;
+    [ "${STUB_LIST_RC:-0}" = 0 ] || { echo "stub gc: list failure" >&2; exit "$STUB_LIST_RC"; }
+    if [ -n "${STUB_LIST_FAIL_FIELD:-}" ]; then
+      case "$fields" in *" $STUB_LIST_FAIL_FIELD "*) echo "stub gc: list failure" >&2; exit 1 ;; esac
+    fi
+    if [ -n "${STUB_LIST_PAYLOAD:-}" ]; then cat "$STUB_LIST_PAYLOAD"; exit 0; fi
+    jq -c --arg st "$st" --argjson mf "$mf" '[.[] | select(.status as $s | ($st | split(",") | index($s)) != null)
+      | select(. as $row | all($mf[]; ($row.metadata // {})[.k] as $x | $x != null and ($x | tostring) == .v))]' "${STUB_LEDGER:?}" ;;
   show)
     [ "${STUB_SHOW_RC:-0}" = 0 ] || exit "$STUB_SHOW_RC"
     out=$(jq -c --arg id "${1:-}" '[.[] | select(.id == $id)]' "${STUB_LEDGER:?}")
@@ -181,6 +191,9 @@ eq "$(git -C "$BARE" rev-parse refs/pull/7/head)" "$TIP" "the PR's head ref stil
 eq "$(tags_on_origin)" "" "a PR-pinned tip gets no archive tag"
 has "$(out)" "kept by refs/pull/7/head" "the output names what keeps the tip"
 has "$(cat "$STUB_GC_LOG")" "bd --db $RIG/.beads list" "the owner check reads the rig's own store"
+has "$(cat "$STUB_GC_LOG")" "--metadata-field branch=polecat/tk-a" "…asking for the live beads that name the branch in metadata.branch"
+has "$(cat "$STUB_GC_LOG")" "--metadata-field target=polecat/tk-a" "…and for those that name it in metadata.target"
+eq "$(grep '/\.beads list ' "$STUB_GC_LOG" | grep -vc -- '--metadata-field' || true)" 0 "…and never for every live bead"
 
 # =============================================================================
 # The archive pin: no PR ref holds the tip, so a tag is pushed and read back
@@ -313,6 +326,10 @@ rc=0; STUB_STATUSES_RC=1 run --rig demo --branch polecat/tk-u --bead tk-u || rc=
 eq "$rc" 4 "a status contract that does not read is not ended"
 rc=0; STUB_SHOW_RC=1 run --rig demo --branch polecat/tk-u --bead tk-u || rc=$?
 eq "$rc" 4 "a --bead that does not read is not ended"
+# Each field's listing has to read: one that reads does not stand in for both.
+rc=0; STUB_LIST_FAIL_FIELD=target run --rig demo --branch polecat/tk-u --bead tk-u || rc=$?
+eq "$rc" 4 "a failed listing of the beads naming it in metadata.target is not ended"
+has "$(out)" "naming it in metadata.target did not read" "…and the refusal names the listing that did not read"
 # A listing that exits 0 is read only once it parses as exactly one array.
 for payload in 'not-json-but-exit-zero' '{"error":"store busy"}' '' '[] []'; do
   printf '%s' "$payload" > "$TMP/payload"
