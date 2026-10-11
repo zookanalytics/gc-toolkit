@@ -813,9 +813,11 @@ the anchor declares runs again on the merged code (the lanes `review-checks.sh`
 resolves for the merge, none for `none`), and where a PR stands, each approval
 given before the round is dismissed the way a triage dismissal is, re-ask visit
 first. The ruling is stored in the record where triage's goes, marked
-`by: guard`, so gate-ensure, `signoff.sh` and `lane-state.sh` read the round as
-ruled, and a re-run of the hand-off carries it out again. A person who adds the
-triage lane to the anchor's `check_set` gives the next round to triage.
+`by: guard`, so gate-ensure and `signoff.sh` read the round as ruled, and a
+re-run of the hand-off carries it out again. The lanes it reopens are added to
+`bring_current_reopened` with the round's time, so `lane-state.sh` lets no
+approval given before the round back them. A person who adds the triage lane
+to the anchor's `check_set` gives the next round to triage.
 
 **Every message is composed from the audit.** The round section that opens
 triage's posted verdict, the dismissal note and the re-ask visit render from
