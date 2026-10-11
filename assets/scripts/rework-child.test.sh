@@ -228,6 +228,14 @@ reset "$OTHER" '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{
 OUT=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>&1); RC=$?
 eq "$RC" "2" "the refusal holds beside an undispatched child on this anchor"
 eq "$(writes)" "0" "…which is neither stamped nor dispatched"
+# A dispatched child on the other anchor is refused the same way. Reported as
+# in flight, it would tell the caller a rework stands on this anchor when none
+# was filed here.
+reset "$(printf '%s' "$OTHER" | jq -c '.metadata["gc.execution_routed_to"] = "gc-toolkit/gc-toolkit.polecat"')"
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
+eq "$RC" "2" "a dispatched child of the same source on another anchor refuses the filing too"
+eq "$RES" "" "…reporting no child as in flight for this anchor"
+eq "$(writes)" "0" "…and writing nothing"
 reset '{"id":"c9","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-0","source_ruling_bead":"vis-1"}}'
 RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
 eq "$RES" "fix-1 $ROUTE filed" "a closed child on another anchor refuses nothing"
