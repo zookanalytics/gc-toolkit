@@ -20,9 +20,7 @@
 # no-op or on another anchor; a promotion to an anchor of its own counts only
 # once merged) refuses on its own; the review-open hold; a
 # prior pointer finished or refused; the earliest-filed of two landed
-# siblings; idempotence; and a ruling's twin, keyed on its visit, disposed the
-# same way once the visit is closed, never paired with a review's child, and
-# held when it names both source keys.
+# siblings; and idempotence.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

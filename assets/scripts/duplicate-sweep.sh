@@ -214,13 +214,15 @@ CANDS_EOF
 # review's id in source_review_bead, and one per ruling converse-rework.sh files
 # for, stamped with the visit's id in source_ruling_bead. A second child of the
 # same source that was never dispatched is a duplicate of the one that was, once
-# that one has landed. No marker says so, so each gate below re-establishes it:
-#   - the population is the OPEN task_kind=rework children naming exactly one
-#     source key whose metadata records no dispatch: unassigned, and no route,
-#     deferred dispatch, claim, worktree, commit, prepare or outcome. A child
-#     carrying any of those is in flight or done, not a twin, so it is not read
-#     further. One naming both keys answers no single source, so it is held. A
-#     duplicate_of marker leaves it to the marker pass;
+# that one has landed. The gates are stated for a review; a ruling's child meets
+# each with source_ruling_bead and its visit in their place, and a child naming
+# both keys answers no single source, so it is held. No marker says a child is
+# a twin, so each gate below re-establishes it:
+#   - the population is the OPEN task_kind=rework children naming a
+#     source_review_bead whose metadata records no dispatch: unassigned, and no
+#     route, deferred dispatch, claim, worktree, commit, prepare or outcome. A
+#     child carrying any of those is in flight or done, not a twin, so it is
+#     not read further. A duplicate_of marker leaves it to the marker pass;
 #   - it names an anchor_bead, and no hold_reason parks it (a park is
 #     somebody's judgement in progress);
 #   - no convoy tracks it. A pour mints one, and that edge survives what the

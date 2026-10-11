@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# bd-lib.test.sh — hermetic tests for the bd_list memoization, the
-# bd_live_children read, and the row_meta field read.
+# bd-lib.test.sh — hermetic tests for the bd_list memoization and the
+# bd_live_children read.
 #
 # The cache is off unless GC_RECONCILE_BD_CACHE names a directory, and the
 # refinery-reconcile order is its only caller (it clears per arm and removes the
 # dir at END). harness_init unsets every GC_* var, so each cache case exports the
 # variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
+#
+# row_meta, the metadata read the library shares with every script that sources
+# it, is pinned first; it reads no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 . "$HERE/bd-lib.sh"
+
+# --- row_meta: one metadata value off a show row, as a string -----------------
+ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'
+eq "$(row_meta "$ROW" branch)" "polecat/tk-m" "row_meta reads a metadata value"
+eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
+eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
+eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
+eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
@@ -107,14 +118,6 @@ lc=$(bd_live_children); rc=$?
 unset STUB_LIST_FAIL
 [ "$rc" -ne 0 ] && ok "an unreadable store is reported non-zero" || bad "an unreadable store read as no children"
 eq "$lc" "" "…with nothing printed, so no caller reads it as no children"
-
-# --- row_meta: one metadata value off a show row, as a string -----------------
-ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'
-eq "$(row_meta "$ROW" branch)" "polecat/tk-m" "row_meta reads a metadata value"
-eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
-eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
-eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
-eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

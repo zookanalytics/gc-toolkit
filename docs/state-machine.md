@@ -721,8 +721,8 @@ review's result set.
   twin, an open rework child that was never dispatched (no dispatch metadata,
   no convoy tracking it) whose source is closed (the review it answers, or the
   visit a ruling's child answers) and whose same-source, same-anchor sibling
-  landed. That twin would otherwise hold its anchor forever. It writes nothing to the successor's branch or PR, and holds on
-  anything it cannot establish.
+  landed. That twin would otherwise hold its anchor forever. It writes nothing
+  to the successor's branch or PR, and holds on anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
