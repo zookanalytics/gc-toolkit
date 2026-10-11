@@ -3,10 +3,11 @@
 # durable conversation. Usage: tmux-visit-prompt.sh <config-dir>
 # Bound by tmux-bindings.sh (run-shell -b). A first popup picks the target rig,
 # because the rig is the scope the report is filed against — defaulted to the
-# pane's own rig, offering the non-hq rigs and tagging any that is suspended or
-# not running. A suspended rig keeps its beads store, so a report filed there is
-# recorded and triaged on resume; the hq store is withheld because it runs no
-# reaction pool, though its bead ids stay valid subjects. The rig set is read
+# pane's own rig, offering the non-hq rigs and tagging any that is suspended. A
+# suspended rig keeps its beads store, so a report filed there is recorded and
+# triaged on resume. A rig with no agents running is idle, not paused, so it is
+# offered untagged. The hq store is withheld because it runs no reaction pool,
+# though its bead ids stay valid subjects. The rig set is read
 # from `gc rig list --json`, whose cost is the per-rig liveness probe, and is
 # cached for GC_VISIT_RIG_CACHE_TTL seconds so a burst of presses opens the
 # picker without re-paying that wait. A second popup then runs `gum write`
@@ -35,9 +36,9 @@ INTAKE_TIMEOUT="${GC_VISIT_INTAKE_TIMEOUT:-300}"
 
 # Seconds to cache the rig set. `gc rig list --json` costs a per-rig liveness
 # probe, and asking the operator to pick a rig FIRST would pay it before the
-# popup opens; caching it lets a burst of presses reuse one lookup. running and
-# suspended can go stale within the window, but the intake validates the actual
-# target, so the staleness is bounded and benign. 0 disables the cache.
+# popup opens; caching it lets a burst of presses reuse one lookup. The
+# suspended tag can go stale within the window, but the intake validates the
+# actual target, so the staleness is bounded and benign. 0 disables the cache.
 RIG_CACHE_TTL="${GC_VISIT_RIG_CACHE_TTL:-900}"
 case "$RIG_CACHE_TTL" in ''|*[!0-9]*) RIG_CACHE_TTL=900 ;; esac
 
@@ -130,11 +131,12 @@ fi
 # board-context rig, override to any non-hq rig (Enter confirms the highlighted
 # default). The hq/city-workspace store is dropped from the offer (see below):
 # it runs no reaction pool, so a topic filed there would park with no session to
-# engage it. A suspended or not-running rig is tagged, not withheld: gc rig
-# suspend keeps its beads store, so a report filed there is recorded and triaged
-# on resume, and the intake allows it. A broken or empty `gc rig list` skips the
-# chooser and lets the intake apply its own default; an Esc cancels the whole
-# press, and nothing is typed yet to keep.
+# engage it. A suspended rig is tagged, not withheld: gc rig suspend keeps its
+# beads store, so a report filed there is recorded and triaged on resume, and the
+# intake allows it. A rig with no agents running is idle, not paused, so it is
+# not tagged: the reconciler launches its triage like anywhere else. A broken or
+# empty `gc rig list` skips the chooser and lets the intake apply its own
+# default; an Esc cancels the whole press, and nothing is typed yet to keep.
 #
 # The rig set comes from `gc rig list --json`, whose cost is the per-rig
 # liveness probe. It runs in the foreground before the message popup and outside
@@ -187,7 +189,7 @@ if [ -n "$RIG_LIST" ]; then
     RIG_ARGS=""
     for _r in $RIG_CHOICES; do
         _tag=$(printf '%s' "$RIG_LIST_JSON" | jq -r --arg n "$_r" \
-            '.rigs[]? | select(.name==$n) | if .suspended==true then " (suspended)" elif .running==false then " (not running)" else "" end' 2>/dev/null | head -n1)
+            '.rigs[]? | select(.name==$n) | if .suspended==true then " (suspended)" else "" end' 2>/dev/null | head -n1)
         RIG_ARGS="$RIG_ARGS $(sq "$_r$_tag")"
     done
     # A dedicated temp file: the rig is chosen before the draft exists, so the

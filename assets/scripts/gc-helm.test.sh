@@ -2989,10 +2989,13 @@ mkdir -p "$TMP/enumbin"
 exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
 PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
 with_timeout() { shift; "$@"; }
+. "$2"
 . "$1"
 before="$(trap)"
 enumerate_rigs
@@ -3002,7 +3005,7 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
 grep -q 'RIGS\[\[' <<< "$EOUT" \
   && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
   || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
