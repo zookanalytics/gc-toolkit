@@ -24,6 +24,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-husk-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
@@ -44,11 +45,11 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 GUARD="$(awk '
   /# >>> husk-guard/ {f=1; next}
   /# <<< husk-guard/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$GUARD" ] \
   && ok "guard extracted between husk-guard markers" \
-  || bad "guard extraction EMPTY — markers missing from $TOML"
+  || bad "guard extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$GUARD" > "$TMP/guard.sh"
 bash -n "$TMP/guard.sh" \
@@ -144,11 +145,11 @@ grep -q "REFUSING salvage" "$TMP/err" \
 # the gate fails here rather than silently re-exposing the town repo.
 for marker in \
   'REFUSING salvage writes'; do
-  grep -qF "$marker" "$TOML" \
+  grep -qF "$marker" "$LIB" \
     && ok "(H) salvage writes gated: '$marker'" \
     || bad "(H) missing WORKTREE_SAFE gate: '$marker'"
 done
-grep -qF 'if [ "$WORKTREE_SAFE" = "1" ]' "$TOML" \
+grep -qF 'if [ "$WORKTREE_SAFE" = "1" ]' "$LIB" \
   && ok "(H2) the salvage block branches on WORKTREE_SAFE" \
   || bad "(H2) the salvage block must branch on WORKTREE_SAFE"
 
@@ -157,8 +158,8 @@ grep -qF 'if [ "$WORKTREE_SAFE" = "1" ]' "$TOML" \
 # Both patterns anchor to line start so prose and comments that merely *mention*
 # `git add -A` / `WORKTREE_SAFE=0` (there are several) don't match — only real
 # command lines and the guard's actual assignment count.
-GUARD_LINE=$(grep -nE '^WORKTREE_SAFE=0' "$TOML" | head -1 | cut -d: -f1)
-FIRST_ADD=$(grep -nE '^[[:space:]]*git add -A' "$TOML" | head -1 | cut -d: -f1)
+GUARD_LINE=$(grep -nE '^WORKTREE_SAFE=0' "$LIB" | head -1 | cut -d: -f1)
+FIRST_ADD=$(grep -nE '^[[:space:]]*git add -A' "$LIB" | head -1 | cut -d: -f1)
 [ -n "$GUARD_LINE" ] && [ -n "$FIRST_ADD" ] && [ "$GUARD_LINE" -lt "$FIRST_ADD" ] \
   && ok "(I) HUSK GUARD is defined before the first 'git add -A' in the formula" \
   || bad "(I) HUSK GUARD must be defined before any 'git add -A' (got guard@${GUARD_LINE:-none} add@${FIRST_ADD:-none})"

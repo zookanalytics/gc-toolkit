@@ -37,6 +37,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-host-bead-skip-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -54,11 +55,11 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 FILTER="$(awk '
   /# >>> host-bead-skip/ {f=1; next}
   /# <<< host-bead-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$FILTER" ] \
   && ok "filter extracted between host-bead-skip markers" \
-  || bad "filter extraction EMPTY — markers missing from $TOML"
+  || bad "filter extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
 bash -n "$TMP/filter.sh" \
@@ -93,10 +94,10 @@ assignee_only_ids() {
 TOPOSKIP="$(awk '
   /# >>> topology-root-skip/ {f=1; next}
   /# <<< topology-root-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 [ -n "$TOPOSKIP" ] \
   && ok "topology-root-skip extracted (needed for the composed-candidate case)" \
-  || bad "topology-root-skip extraction EMPTY — markers missing from $TOML"
+  || bad "topology-root-skip extraction EMPTY — markers missing from $LIB"
 printf '%s\n' "$TOPOSKIP" > "$TMP/toposkip.sh"
 candidate_ids() {
   printf '%s' "$1" | bash "$TMP/filter.sh" 2>/dev/null | bash "$TMP/toposkip.sh" 2>/dev/null \

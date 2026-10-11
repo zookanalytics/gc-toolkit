@@ -56,9 +56,11 @@ echo "# no step anywhere in the formula builds an address it does not resolve"
 # The same rule holds for every step, the stamps above and the refinery queue
 # read alike: a query by an address no agent holds returns a valid empty array.
 # Outside the resolver and a diagnostic, the token appears only where a pour
-# forwards the variable to the next patrol wisp.
+# forwards the variable to the next patrol wisp, or where a step hands it to a
+# script that resolves it (refinery-stuck-escalate.sh runs resolve-route.sh).
 FORMULA_STRAY=$(grep -n '{{binding_prefix}}' "$TOML" \
   | sed "s/--var binding_prefix='{{binding_prefix}}'//g" \
+  | sed 's|refinery-stuck-escalate.sh" --binding-prefix "{{binding_prefix}}"||g' \
   | grep '{{binding_prefix}}' | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true)
 eq "$FORMULA_STRAY" "" "every {{binding_prefix}} in the formula is resolved, a diagnostic, or forwarded to the next pour"
 

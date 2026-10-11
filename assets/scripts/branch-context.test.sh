@@ -232,24 +232,31 @@ RC=0; "$SCRIPT" bogus-subcommand >/dev/null 2>&1 || RC=$?
 [ "$RC" = "2" ] && ok "(S3) an unknown subcommand is a usage error (exit 2)" || bad "(S3) expected exit 2 for a bad subcommand (got $RC)"
 
 # ============================ formula wiring ================================
-# The formula calls the script and gates the salvage push; the moved geometry
-# lives in the script, not inline in the step.
-grep -qF 'branch-context.sh' "$TOML" \
+# The witness's salvage stages (witness-recovery.sh, which the formula sources)
+# call the script and gate the salvage push; the moved geometry lives in the
+# script, not in the stages or the step.
+WR="$ROOT/assets/scripts/witness-recovery.sh"
+grep -qF 'witness-recovery.sh' "$TOML" \
+  && ok "(T0) the formula sources the witness's recovery stages" || bad "(T0) the formula must source witness-recovery.sh"
+grep -qF 'branch-context.sh' "$WR" \
   && ok "(T1) the formula calls branch-context.sh" || bad "(T1) the formula must call branch-context.sh"
-grep -qF '"$BC" resolve' "$TOML" \
+grep -qF '"$BC" resolve' "$WR" \
   && ok "(T2) the formula evals resolve for the repo context" || bad "(T2) the formula must eval branch-context.sh resolve"
-grep -qF '"$BC" merged' "$TOML" \
+grep -qF '"$BC" merged' "$WR" \
   && ok "(T3) the formula reads the merged verdict" || bad "(T3) the formula must read branch-context.sh merged"
-grep -qF 'if [ "$BRANCH_ON_ORIGIN" = "present" ]' "$TOML" \
+grep -qF 'if [ "$BRANCH_ON_ORIGIN" = "present" ]' "$WR" \
   && ok "(T4) salvage branches on BRANCH_ON_ORIGIN" || bad "(T4) salvage must branch on BRANCH_ON_ORIGIN"
-GUARD_LN=$(grep -nF 'push-target-ok' "$TOML" | head -1 | cut -d: -f1)
-PUSH_LN=$(grep -nE '^[[:space:]]*git push origin HEAD' "$TOML" | head -1 | cut -d: -f1)
+GUARD_LN=$(grep -nF 'push-target-ok' "$WR" | head -1 | cut -d: -f1)
+PUSH_LN=$(grep -nE '^[[:space:]]*git push origin HEAD' "$WR" | head -1 | cut -d: -f1)
 [ -n "$GUARD_LN" ] && [ -n "$PUSH_LN" ] && [ "$GUARD_LN" -lt "$PUSH_LN" ] \
   && ok "(T5) push-target-ok gates and precedes the salvage push" \
   || bad "(T5) push-target-ok must gate the salvage push (guard@${GUARD_LN:-none} push@${PUSH_LN:-none})"
 absent "$TOML" 'is-shallow-repository' "(T6) shallow-detect geometry moved out of the formula"
+absent "$WR" 'is-shallow-repository' "(T6) shallow-detect geometry moved out of the recovery stages"
 absent "$TOML" 'gh -R ' "(T7) gh calls moved out of the formula"
+absent "$WR" 'gh -R ' "(T7) gh calls moved out of the recovery stages"
 absent "$TOML" 'ls-remote' "(T8) existence check moved out of the formula"
+absent "$WR" 'ls-remote' "(T8) existence check moved out of the recovery stages"
 
 # The geometry the formula used to inline now lives in the script, still pinned.
 grep -qF 'is-shallow-repository' "$SCRIPT" \

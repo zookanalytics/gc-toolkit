@@ -46,6 +46,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 SCRIPT="$HERE/orphan-dispose.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-salvage-scope-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -59,11 +60,11 @@ harness_init
 GATE="$(awk '
   /# >>> salvage-scope-gate/ {f=1; next}
   /# <<< salvage-scope-gate/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$GATE" ] \
   && ok "gate extracted between salvage-scope-gate markers" \
-  || bad "gate extraction EMPTY — markers missing from $TOML"
+  || bad "gate extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$GATE" > "$TMP/gate.sh"
 bash -n "$TMP/gate.sh" \
@@ -162,10 +163,10 @@ echo "--- the nothing-to-salvage gate ---"
 NTS="$(awk '
   /# >>> nothing-to-salvage-gate/ {f=1; next}
   /# <<< nothing-to-salvage-gate/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 [ -n "$NTS" ] \
   && ok "nothing-to-salvage gate extracted between its markers" \
-  || bad "nothing-to-salvage gate extraction EMPTY — markers missing from $TOML"
+  || bad "nothing-to-salvage gate extraction EMPTY — markers missing from $LIB"
 printf '%s\n' "$NTS" > "$TMP/nts.sh"
 bash -n "$TMP/nts.sh" \
   && ok "extracted nothing-to-salvage gate is syntactically valid bash" \
@@ -188,10 +189,10 @@ echo "--- static wiring: salvage and verify must honor the gate ---"
 # The gate protects anything only if the salvage refuse-branch and part 4 branch
 # on IS_WORK_BEAD. Assert both, so an edit that drops a gate fails here rather
 # than silently filing the no-signal escalations.
-grep -qF 'if [ "$IS_WORK_BEAD" != "1" ]; then' "$TOML" \
+grep -qF 'if [ "$IS_WORK_BEAD" != "1" ]; then' "$LIB" \
   && ok "salvage block short-circuits when IS_WORK_BEAD != 1" \
   || bad "salvage block must branch on IS_WORK_BEAD"
-grep -qF 'if [ "$IS_WORK_BEAD" = "1" ]; then' "$TOML" \
+grep -qF 'if [ "$IS_WORK_BEAD" = "1" ]; then' "$LIB" \
   && ok "part 4 verify runs only when IS_WORK_BEAD = 1" \
   || bad "part 4 verify must branch on IS_WORK_BEAD"
 
@@ -199,25 +200,25 @@ grep -qF 'if [ "$IS_WORK_BEAD" = "1" ]; then' "$TOML" \
 # Assert both, so an edit that drops it fails here rather than silently filing
 # the no-signal escalations. The salvage arm and the verify skip carry distinct
 # strings, so neither assertion matches the other.
-grep -qF 'elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then' "$TOML" \
+grep -qF 'elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then' "$LIB" \
   && ok "salvage block skips a nothing-to-salvage bead (no witness-salvage-refused)" \
   || bad "salvage block must branch on NOTHING_TO_SALVAGE"
-grep -qF 'BRANCH_MERGED=skip   # never had a branch' "$TOML" \
+grep -qF 'BRANCH_MERGED=skip   # never had a branch' "$LIB" \
   && ok "part 4 verify skips a nothing-to-salvage bead (no witness-branch-recovery-unknown)" \
   || bad "part 4 verify must set BRANCH_MERGED=skip for NOTHING_TO_SALVAGE"
 
 # The gate must be DEFINED before the first salvage `git add -A`, or salvage
 # would run against an unset IS_WORK_BEAD. Anchor both to line start so prose
 # mentioning either does not match.
-GATE_LINE=$(grep -nE '^IS_WORK_BEAD=' "$TOML" | head -1 | cut -d: -f1)
-FIRST_ADD=$(grep -nE '^[[:space:]]*git add -A' "$TOML" | head -1 | cut -d: -f1)
+GATE_LINE=$(grep -nE '^IS_WORK_BEAD=' "$LIB" | head -1 | cut -d: -f1)
+FIRST_ADD=$(grep -nE '^[[:space:]]*git add -A' "$LIB" | head -1 | cut -d: -f1)
 [ -n "$GATE_LINE" ] && [ -n "$FIRST_ADD" ] && [ "$GATE_LINE" -lt "$FIRST_ADD" ] \
   && ok "scope gate is defined before the first salvage 'git add -A'" \
   || bad "scope gate must be defined before any 'git add -A' (got gate@${GATE_LINE:-none} add@${FIRST_ADD:-none})"
 
 # The nothing-to-salvage gate sits downstream of the scope gate and upstream of
 # salvage, so it too must be defined before the first `git add -A`.
-NTS_LINE=$(grep -nE '^NOTHING_TO_SALVAGE=0' "$TOML" | head -1 | cut -d: -f1)
+NTS_LINE=$(grep -nE '^NOTHING_TO_SALVAGE=0' "$LIB" | head -1 | cut -d: -f1)
 [ -n "$NTS_LINE" ] && [ -n "$FIRST_ADD" ] && [ "$NTS_LINE" -lt "$FIRST_ADD" ] \
   && ok "nothing-to-salvage gate is defined before the first salvage 'git add -A'" \
   || bad "nothing-to-salvage gate must be defined before any 'git add -A' (got nts@${NTS_LINE:-none} add@${FIRST_ADD:-none})"

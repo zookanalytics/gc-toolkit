@@ -35,6 +35,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-lookup-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -54,11 +55,11 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 LOOKUP="$(awk '
   /# >>> liveness-lookup/ {f=1; next}
   /# <<< liveness-lookup/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$LOOKUP" ] \
   && ok "lookup extracted between liveness-lookup markers" \
-  || bad "lookup extraction EMPTY — markers missing from $TOML"
+  || bad "lookup extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$LOOKUP" > "$TMP/lookup.sh"
 bash -n "$TMP/lookup.sh" \
@@ -89,18 +90,18 @@ state() {
 FILTER="$(awk '
   /# >>> host-bead-skip/ {f=1; next}
   /# <<< host-bead-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 TOPOSKIP="$(awk '
   /# >>> topology-root-skip/ {f=1; next}
   /# <<< topology-root-skip/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$FILTER" ] \
   && ok "owner filter extracted between host-bead-skip markers" \
-  || bad "owner filter extraction EMPTY — markers missing from $TOML"
+  || bad "owner filter extraction EMPTY — markers missing from $LIB"
 [ -n "$TOPOSKIP" ] \
   && ok "topology-root-skip extracted (a topology root never reaches the lookup)" \
-  || bad "topology-root-skip extraction EMPTY — markers missing from $TOML"
+  || bad "topology-root-skip extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
 printf '%s\n' "$TOPOSKIP" > "$TMP/toposkip.sh"
@@ -270,11 +271,11 @@ eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.ro
 GUARD="$(awk '
   /# >>> liveness-map-guard/ {f=1; next}
   /# <<< liveness-map-guard/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$GUARD" ] \
   && ok "guard extracted between liveness-map-guard markers" \
-  || bad "guard extraction EMPTY — markers missing from $TOML"
+  || bad "guard extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$GUARD" > "$TMP/guard.sh"
 bash -n "$TMP/guard.sh" \
@@ -430,8 +431,8 @@ for v in OWNER STATE '$bead' '.owner'; do
     || ok "(AB) guard does not reference per-bead state '$v'"
 done
 # (AB) And it must run BEFORE the per-bead lookup, not beside it.
-GUARD_LINE=$(grep -n '# >>> liveness-map-guard' "$TOML" | cut -d: -f1)
-LOOKUP_LINE=$(grep -n '# >>> liveness-lookup' "$TOML" | cut -d: -f1)
+GUARD_LINE=$(grep -n '# >>> liveness-map-guard' "$LIB" | cut -d: -f1)
+LOOKUP_LINE=$(grep -n '# >>> liveness-lookup' "$LIB" | cut -d: -f1)
 [ "$GUARD_LINE" -lt "$LOOKUP_LINE" ] \
   && ok "(AB) the map guard is specified before the per-bead lookup" \
   || bad "(AB) the map guard must precede the per-bead lookup"
@@ -439,20 +440,20 @@ LOOKUP_LINE=$(grep -n '# >>> liveness-lookup' "$TOML" | cut -d: -f1)
 # (AC) The prose must hand the decision to the variable and must say, in the
 #      formula itself, that an absent owner on a populated map is not drift.
 #      A named predicate is what leaves no judgment call to make.
-grep -qF 'MAP_TRIP` is the entire test' "$TOML" \
+grep -qF 'MAP_TRIP` is the entire test' "$TOML" "$LIB" \
   && ok "(AC) fail-safe prose binds the decision to MAP_TRIP" \
   || bad "(AC) fail-safe prose must bind the decision to MAP_TRIP"
-grep -qF 'resolves `absent` against a POPULATED map is never grounds' "$TOML" \
+grep -qF 'resolves `absent` against a POPULATED map is never grounds' "$TOML" "$LIB" \
   && ok "(AC) prose rules out an absent owner as fail-safe grounds" \
   || bad "(AC) prose must rule out an absent owner as fail-safe grounds"
-grep -qF 'never returns a row' "$TOML" \
+grep -qF 'never returns a row' "$TOML" "$LIB" \
   && ok "(AC) prose records that closed sessions are excluded by design" \
   || bad "(AC) prose must record that closed sessions are excluded by design"
 
 # --- Static wiring: no un-normalized lookup may survive elsewhere. ------------
 # The fix only holds if the marked snippet is the ONLY place an assignee is
 # resolved. A second exact-only `.[$a] // "absent"` would re-open the hole.
-EXACT_LOOKUPS=$(grep -cF '.[$a] // "absent"' "$TOML" || true)
+EXACT_LOOKUPS=$(grep -cF '.[$a] // "absent"' "$LIB" || true)
 eq "$EXACT_LOOKUPS" "1" \
    "(M) exactly one exact-match lookup in the formula (the guarded first pass)"
 
@@ -463,7 +464,7 @@ grep -qF 'if [ "$STATE" = "absent" ]; then' "$TMP/lookup.sh" \
 
 # The classification prose must not tell a future reader to decide on the exact
 # lookup alone — that instruction is what the bug was made of.
-grep -qF 'after BOTH the exact lookup and the' "$TOML" \
+grep -qF 'after BOTH the exact lookup and the' "$TOML" "$LIB" \
   && ok "(O) classification prose requires both passes before orphaning" \
   || bad "(O) classification prose must require both passes before orphaning"
 

@@ -35,6 +35,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-downstream-court-skip-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -53,7 +54,7 @@ extract() {
   awk -v tag="$1" '
     $0 ~ ("# >>> " tag "$") {f=1; next}
     $0 ~ ("# <<< " tag "$") {f=0}
-    f' "$TOML"
+    f' "$LIB"
 }
 
 FILTER="$(extract downstream-court-skip)"
@@ -61,10 +62,10 @@ HOSTSKIP="$(extract host-bead-skip)"
 
 [ -n "$FILTER" ] \
   && ok "filter extracted between downstream-court-skip markers" \
-  || bad "filter extraction EMPTY — markers missing from $TOML"
+  || bad "filter extraction EMPTY — markers missing from $LIB"
 [ -n "$HOSTSKIP" ] \
   && ok "host-bead-skip extracted (needed for the composed-pipeline case)" \
-  || bad "host-bead-skip extraction EMPTY — markers missing from $TOML"
+  || bad "host-bead-skip extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
 printf '%s\n' "$HOSTSKIP" > "$TMP/hostskip.sh"

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol refinery stuck-handoff escalation.
+# Hermetic test for refinery-stuck-escalate.sh, the witness patrol's refinery
+# stuck-handoff escalation.
 #
 # check-refinery escalates ONLY a refinery handoff that has sat past the stuck
 # bound. Transient churn (a fresh handoff, a rebase task the fix pool is
 # working) and gating anchors (the cadence's own, carrying merge_result) must
-# never escalate, and a false escalation here is the defect this block fixes. A
-# count-nudge is gone: it went stale the moment the assignee set drained. The
+# never escalate, and a false escalation here is the defect the check exists to
+# prevent. No count is nudged: a count goes stale the moment the queue drains. The
 # counterpart retract withdraws a visit only when the handoff's own row shows it
 # left the refinery; absence from the queue listing alone withdraws nothing.
 #
 # The queue is read at the refinery's live identity, resolved by the real
 # resolve-route.sh against a stubbed roster. The store stub answers only that
 # owner's queue and lists any other address as a valid empty array, the way bd
-# does, so a block that read an address it never resolved would see an empty
+# does, so a script that read an address it never resolved would see an empty
 # queue and report it clean.
 set -euo pipefail
 
@@ -31,39 +32,31 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in '$1')" ;; *) ok "$3" ;; es
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
-BLOCK="$(awk '
-  /# >>> refinery-stuck-escalate/ {f=1; next}
-  /# <<< refinery-stuck-escalate/ {f=0}
-  f' "$TOML")"
+SUT="$HERE/refinery-stuck-escalate.sh"
+BLOCK="$(cat "$SUT")"
+[ -x "$SUT" ] && ok "refinery-stuck-escalate.sh is executable" || bad "refinery-stuck-escalate.sh missing or not executable"
+grep -qF '/refinery-stuck-escalate.sh" --binding-prefix "{{binding_prefix}}"' "$TOML" \
+  && ok "check-refinery runs the script with the poured binding prefix" \
+  || bad "check-refinery no longer runs refinery-stuck-escalate.sh"
 
-[ -n "$BLOCK" ] \
-  && ok "block extracted between refinery-stuck-escalate markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+has "$BLOCK" 'gc bd list' "the script reads the queue itself"
+has "$BLOCK" 'escalate.sh' "the script escalates a stuck handoff"
+has "$BLOCK" 'resolve-route.sh' "the script resolves the refinery address"
+hasnt "$BLOCK" 'gc session nudge' "the script nudges no count"
 
-has "$BLOCK" 'gc bd list' "the block reads the queue itself"
-has "$BLOCK" 'escalate.sh' "the block escalates a stuck handoff"
-has "$BLOCK" 'resolve-route.sh' "the block resolves the refinery address"
-hasnt "$BLOCK" 'gc session nudge' "the block no longer nudges a count"
+# The binding prefix is a live input: the patrol's steps are never
+# materialized, so each session fills the token by hand from the unrendered
+# formula. An empty prefix renders gc-toolkit/refinery, the address a wisp
+# poured with binding_prefix='' builds and no agent holds. A prefix missing its
+# trailing dot renders an address whose role is not a refinery's. PREFIX picks
+# the prefix a case passes.
+bash -n "$SUT" \
+  && ok "the script is syntactically valid bash" \
+  || bad "the script failed bash -n"
 
-# {{binding_prefix}} must be substituted exactly as the materializer does it.
-# The patrol's steps are never materialized: each session fills the token by
-# hand from the unrendered formula, so a wrong or empty prefix is a live input.
-# An empty prefix renders gc-toolkit/refinery, the address a wisp poured with
-# binding_prefix='' builds and no agent holds. A prefix missing its trailing dot
-# renders an address whose role is not a refinery's.
-render() { printf '%s\n' "$BLOCK" | sed "s|{{binding_prefix}}|$1|g"; }
-render gc-toolkit. > "$TMP/block.sh"
-render '' > "$TMP/block-noprefix.sh"
-render typo. > "$TMP/block-typo.sh"
-render gc-toolkit > "$TMP/block-nodot.sh"
-
-bash -n "$TMP/block.sh" \
-  && ok "extracted block is syntactically valid bash" \
-  || bad "extracted block failed bash -n"
-
-# Stub `gc` (bd list and agent list) and a stub escalate.sh resolved via
-# GC_RIG_ROOT, which the block probes first, so the real pack escalate.sh is
-# never reached. The rig root also holds a copy of the real resolver.
+# Stub `gc` (bd list and agent list) and a stub escalate.sh resolved through
+# GC_ESCALATE_TOOL, so the real pack escalate.sh is never reached. The real
+# resolve-route.sh beside the script resolves the address.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 cp "$ROOT/assets/scripts/resolve-route.sh" "$TMP/rig/assets/scripts/"
 chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
@@ -148,8 +141,9 @@ AGENTS_DEFAULT='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
 # retract arm's open-escalation set; omitted leaves it an empty array, so the
 # queue-only tests never retract. The 6th is the rows its by-id read of the
 # candidate handoffs serves; omitted leaves it an empty array, so every
-# candidate reads as unread. Overrides, set on the call: BLOCK_FILE_OVERRIDE
-# (a block rendered with another prefix), AGENTS_OVERRIDE (the roster),
+# candidate reads as unread. The 4th arg, a strict-shell prelude, becomes the
+# bash options the script runs under. Overrides, set on the call: PREFIX (the
+# binding prefix passed, default gc-toolkit.), AGENTS_OVERRIDE (the roster),
 # AGENTS_FAIL (an unreadable roster), QUEUE_OWNER_OVERRIDE (whose queue the
 # fixture is), HANDOFF_RC_OVERRIDE (fails the by-id read),
 # HANDOFF_FILTER_OVERRIDE=0 (serves its rows unfiltered), GC_RIG_OVERRIDE.
@@ -159,7 +153,11 @@ run() {
   local esc_list=""
   if [ -n "${5:-}" ]; then printf '%s' "$5" > "$TMP/esc_list.json"; esc_list="$TMP/esc_list.json"; fi
   printf '%s' "${6:-[]}" > "$TMP/handoffs.json"
-  { printf '%s\n' "${4:-}"; cat "${BLOCK_FILE_OVERRIDE:-$TMP/block.sh}"; } > "$TMP/run.sh"
+  local opts=""
+  case "${4:-}" in
+    'set -e')            opts="-e" ;;
+    'set -euo pipefail') opts="-euo pipefail" ;;
+  esac
   ( cd "$TMP"
     QUEUE_FIXTURE="$TMP/queue.json" ESC_LOG="$TMP/esc" LIST_LOG="$TMP/lists" \
     ESC_LIST_FIXTURE="$esc_list" HANDOFF_FIXTURE="$TMP/handoffs.json" \
@@ -167,8 +165,8 @@ run() {
     QUEUE_STDERR="${2:-}" GC_RIG="${GC_RIG_OVERRIDE-gc-toolkit}" LIST_RC="${3:-0}" \
     STUB_AGENTS="${AGENTS_OVERRIDE-$AGENTS_DEFAULT}" STUB_AGENTS_FAIL="${AGENTS_FAIL:-}" \
     QUEUE_OWNER="${QUEUE_OWNER_OVERRIDE-gc-toolkit/gc-toolkit.refinery}" \
-    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="$TMP/nocity" \
-      bash "$TMP/run.sh" > "$TMP/out" 2>&1 || true )
+    GC_ESCALATE_TOOL="$TMP/rig/assets/scripts/escalate.sh" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="$TMP/nocity" \
+      bash $opts "$SUT" --binding-prefix "${PREFIX-gc-toolkit.}" > "$TMP/out" 2>&1 || true )
   cat "$TMP/esc"
 }
 out() { cat "$TMP/out"; }
@@ -287,12 +285,6 @@ eq "$(awk '
   !inside && /gc session nudge/ && /refinery/ {print FNR ": " $0}
 ' "$TOML")" "" "no refinery nudge anywhere in the formula"
 
-# A TOML basic multi-line string rewrites a backslash, so the block has to stay
-# free of them to survive the pour intact.
-case "$BLOCK" in
-  *'\'*) bad "block contains a backslash — the TOML \"\"\" string mangles it" ;;
-  *)     ok "block is backslash-free" ;;
-esac
 
 # --- Retract arm: a departed handoff's escalation is withdrawn moot -----------
 # A handoff that an open witness-refinery-queue visit escalates and that the
@@ -340,7 +332,7 @@ has "$(out)" "tk-gone is missing from the queue listing but is still unprepared 
 # An empty binding_prefix renders the address gc-toolkit/refinery, which no
 # handoff carries. The block reads it only when the roster cannot be read to
 # refute it, and its listing comes back empty.
-RBW="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-noprefix.sh" run '[]' "" "" "" "$ESC_GONE" "$H_HELD")"
+RBW="$(AGENTS_FAIL=1 PREFIX="" run '[]' "" "" "" "$ESC_GONE" "$H_HELD")"
 has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/refinery" "the empty-prefix render under an unreadable roster lists under the wrong address"
 hasnt "$RBW" "--retract" "a wrong-address listing retracts nothing while the handoff is still with the refinery"
 
@@ -434,7 +426,8 @@ done
 # escalate. Here tk-stuck is in the live queue and its visit is open.
 ESC_STUCK_OPEN='[{"id":"tk-v-stuck","metadata":{"task_kind":"visit","escalation_key":"witness-refinery-queue","gc.continuation_group":"tk-stuck"}}]'
 for PFX in noprefix typo; do
-  NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-$PFX.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
+  case "$PFX" in noprefix) PFX_VALUE="" ;; *) PFX_VALUE="typo." ;; esac
+  NESC="$(PREFIX="$PFX_VALUE" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN")"
   has "$NESC" "--key witness-refinery-queue-unroutable" \
      "$PFX: an address no agent holds escalates the blind monitor"
   hasnt "$NESC" "--retract" "$PFX: and retracts no escalation, though its handoff is unseen"
@@ -444,7 +437,7 @@ for PFX in noprefix typo; do
   has "$(out)" "no live refinery identity resolves" "$PFX: the diagnostic says why"
 done
 for PRELUDE in 'set -e' 'set -euo pipefail'; do
-  NESC="$(BLOCK_FILE_OVERRIDE="$TMP/block-noprefix.sh" run "$STUCK_ONE" '' 0 "$PRELUDE" "$ESC_STUCK_OPEN")"
+  NESC="$(PREFIX="" run "$STUCK_ONE" '' 0 "$PRELUDE" "$ESC_STUCK_OPEN")"
   has "$NESC" "--key witness-refinery-queue-unroutable" \
      "$PRELUDE: an address no agent holds still escalates the blind monitor"
   hasnt "$NESC" "--retract" "$PRELUDE: and still retracts nothing"
@@ -474,7 +467,7 @@ hasnt "$UESC" "--retract" "unreadable roster: nothing is retracted on an unverif
 # while the handoff is still held by the refinery. No live escalation is
 # withdrawn.
 H_STUCK_HELD='[{"id":"tk-stuck","status":"open","assignee":"gc-toolkit/gc-toolkit.refinery","title":"handoff","metadata":{"branch":"polecat/tk-stuck"}}]'
-DESC="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-noprefix.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN" "$H_STUCK_HELD")"
+DESC="$(AGENTS_FAIL=1 PREFIX="" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN" "$H_STUCK_HELD")"
 hasnt "$DESC" "--retract" "unreadable roster and empty prefix: no live escalation is withdrawn"
 
 # A prefix missing its trailing dot renders gc-toolkit/gc-toolkitrefinery, whose
@@ -482,7 +475,7 @@ hasnt "$DESC" "--retract" "unreadable roster and empty prefix: no live escalatio
 # candidates' assignees would be compared against, and a handoff the refinery
 # still holds would compare as reassigned. The verified-address gate keeps its
 # escalation open.
-NDESC="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-nodot.sh" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN" "$H_STUCK_HELD")"
+NDESC="$(AGENTS_FAIL=1 PREFIX="gc-toolkit" run "$STUCK_ONE" "" "" "" "$ESC_STUCK_OPEN" "$H_STUCK_HELD")"
 has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/gc-toolkitrefinery " \
    "unreadable roster and a dotless prefix: the unverified address is read"
 hasnt "$NDESC" "--retract" "unreadable roster and a dotless prefix: a held handoff's escalation is not withdrawn"

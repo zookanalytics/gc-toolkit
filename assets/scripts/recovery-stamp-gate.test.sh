@@ -20,6 +20,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-recovery-stamp-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -34,11 +35,11 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 BLOCK="$(awk '
   /# >>> recovery-stamp-gate/ {f=1; next}
   /# <<< recovery-stamp-gate/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$BLOCK" ] \
   && ok "block extracted between recovery-stamp-gate markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+  || bad "block extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \

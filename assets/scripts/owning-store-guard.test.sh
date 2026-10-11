@@ -18,6 +18,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-owning-store-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -31,13 +32,14 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 GUARD="$(awk '
   /# >>> owning-store-guard/ {f=1; next}
   /# <<< owning-store-guard/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 [ -n "$GUARD" ] \
   && ok "guard extracted between owning-store-guard markers" \
-  || bad "guard extraction EMPTY — markers missing from $TOML"
+  || bad "guard extraction EMPTY — markers missing from $LIB"
 
-# The witness substitutes the bead it is disposing of for the <bead> placeholder.
-printf '%s\n' "${GUARD//<bead>/tk-subject}" > "$TMP/guard.sh"
+# The stage reads the bead it is disposing of from BEAD.
+printf '%s\n' "$GUARD" > "$TMP/guard.sh"
+export BEAD=tk-subject
 bash -n "$TMP/guard.sh" \
   && ok "extracted guard is syntactically valid bash" \
   || bad "extracted guard failed bash -n"
@@ -86,7 +88,7 @@ case "$(cat "$TMP/err")" in
 esac
 
 # --- static wiring: the removal must actually branch on the guard -----------
-grep -qF 'if [ "$OWNED" = "1" ]' "$TOML" \
+grep -qF 'if [ "$OWNED" = "1" ]' "$LIB" \
   && ok "the worktree removal branches on OWNED" \
   || bad "the worktree removal must branch on OWNED"
 
@@ -94,7 +96,7 @@ grep -qF 'if [ "$OWNED" = "1" ]' "$TOML" \
 # and a graph.v2 root carry no metadata.work_dir, so WORKTREE is empty for them,
 # and `git worktree remove "" --force` exits 128, which under set -e aborts part
 # 5 before orphan-dispose.sh releases the bead.
-RM_IF=$(grep -nE '^[[:space:]]*if \[ "\$OWNED" = "1" \]' "$TOML" | head -1)
+RM_IF=$(grep -nE '^[[:space:]]*if \[ "\$OWNED" = "1" \]' "$LIB" | head -1)
 case "$RM_IF" in
   *'-n "$WORKTREE"'*) ok "the worktree removal also requires a nonempty worktree" ;;
   *) bad "the worktree removal must also require [ -n \"\$WORKTREE\" ] (got: ${RM_IF#*:})" ;;
@@ -103,8 +105,8 @@ esac
 # No `git worktree remove` may appear before the guard is defined. Anchored to
 # line start, with the optional `if ! ` catch-wrapper, so the prose and the echo
 # diagnostic that mention the command do not match.
-GUARD_LINE=$(grep -nE '^OWNED=0' "$TOML" | head -1 | cut -d: -f1)
-FIRST_RM=$(grep -nE '^[[:space:]]*(if ! )?git .*worktree remove' "$TOML" | head -1 | cut -d: -f1)
+GUARD_LINE=$(grep -nE '^OWNED=0' "$LIB" | head -1 | cut -d: -f1)
+FIRST_RM=$(grep -nE '^[[:space:]]*(if ! )?git .*worktree remove' "$LIB" | head -1 | cut -d: -f1)
 [ -n "$GUARD_LINE" ] && [ -n "$FIRST_RM" ] && [ "$GUARD_LINE" -lt "$FIRST_RM" ] \
   && ok "the guard is defined before the first 'git worktree remove' in the formula" \
   || bad "the guard must precede any 'git worktree remove' (guard@${GUARD_LINE:-none} rm@${FIRST_RM:-none})"

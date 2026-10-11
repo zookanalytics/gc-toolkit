@@ -18,6 +18,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-crash-loop-window-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -34,11 +35,11 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 BLOCK="$(awk '
   /# >>> crash-loop-window/ {f=1; next}
   /# <<< crash-loop-window/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$BLOCK" ] \
   && ok "block extracted between crash-loop-window markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+  || bad "block extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \

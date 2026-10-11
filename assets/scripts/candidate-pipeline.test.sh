@@ -25,6 +25,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
+LIB="$ROOT/assets/scripts/witness-recovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-candidate-pipeline-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -42,11 +43,11 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 BLOCK="$(awk '
   /# >>> candidate-pipeline$/ {f=1; next}
   /# <<< candidate-pipeline$/ {f=0}
-  f' "$TOML")"
+  f' "$LIB")"
 
 [ -n "$BLOCK" ] \
   && ok "block extracted between candidate-pipeline markers" \
-  || bad "block extraction EMPTY — markers missing from $TOML"
+  || bad "block extraction EMPTY — markers missing from $LIB"
 
 printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 bash -n "$TMP/block.sh" \
