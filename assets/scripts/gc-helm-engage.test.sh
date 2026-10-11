@@ -118,12 +118,15 @@ case "$1 ${2:-}" in
     # injected via $RIG_SUSPENDED/$RIG_RUNNING. Unset means the field is ABSENT (an
     # older gc that does not report it), which the liveness guard reads as unknown
     # and does not refuse on — the default for every case that does not set them.
+    # $NO_HQ_ROW drops the HQ row altogether, which reads as unknown the same way.
     # The rig's checkout path is $RIG_PATH, a fixture that carries converse
     # templates so the converse-template guard passes; a case points it at a
     # template-less dir to exercise the refusal.
     jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
-      '{rigs:[ ({name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
-               + (if $hq   != "" then {running:   ($hq   == "true")} else {} end)),
+          --arg nohq "${NO_HQ_ROW-}" \
+      '{rigs:[ (if $nohq != "" then empty
+                else {name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+                     + (if $hq   != "" then {running:   ($hq   == "true")} else {} end) end),
                ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
                + (if $run  != "" then {running:   ($run  == "true")} else {} end)) ]}' ;;
@@ -1104,6 +1107,28 @@ eq "$RC" 0 "(CTRL-PING-MISSED) engaging when gc status reports the controller ru
 has "$CALLED" "status --json" "(CTRL-PING-MISSED) …after asking gc status"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(CTRL-PING-MISSED) …and spawns the sitting"
 unset HQ_RUNNING STATUS_CONTROLLER
+
+echo "# a rig list with no HQ row reads as unknown and does not refuse"
+# An older gc, or one that stops listing the HQ, gives no controller reading.
+# Unknown never refuses, and gc status is not asked for a reading nothing
+# contradicts.
+export NO_HQ_ROW=1 STATUS_CONTROLLER=false
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(NO-HQ) engaging with no HQ row in the rig list exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(NO-HQ) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(NO-HQ) …without asking gc status"
+unset NO_HQ_ROW STATUS_CONTROLLER
+
+echo "# a suspended rig is refused on its suspension even while the controller is down"
+# The suspension is checked first, so the refusal names the fix that is the
+# subject rig's own, and gc status is never asked.
+export HQ_RUNNING=false RIG_SUSPENDED=true STATUS_CONTROLLER=false
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-DOWN) a suspended rig with the controller down exits 4"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-DOWN) …on the suspension"
+hasnt "$OUT" "city controller" "(SUSPENDED-CTRL-DOWN) …not on the controller"
+hasnt "$CALLED" "status --json" "(SUSPENDED-CTRL-DOWN) …and gc status is not asked"
+unset HQ_RUNNING RIG_SUSPENDED STATUS_CONTROLLER
 
 echo "# an idle subject rig (running=false) engages while the controller is up"
 # A rig row's running=false is what gc reports for an idle rig, and an idle rig
