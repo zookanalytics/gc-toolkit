@@ -598,6 +598,27 @@ eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
 has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
 has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
 
+echo "# …nor from the release: a checkless anchor's must-fix finding closes once its fix unit lands"
+# The human batch a checkless anchor receives files a must-fix finding and the fix
+# unit answering it like any other anchor's. The release runs before the none|off
+# opt-out, so the finding stops holding the merge on the first pass after its fix
+# lands, rather than holding it with the fix already on the branch.
+for cs in none off; do
+  store "[$(anchor "N6$cs" pull_request "$cs" "" "polecat/n6$cs"),
+          $(mustfix "find-n6$cs" "N6$cs" human),
+          $(fixunit "fix-n6$cs" "N6$cs" closed)]"
+  printf 'find-n6%s|blocks|N6%s\nfix-n6%s|blocks|find-n6%s\nfix-n6%s|blocks|N6%s\n' "$cs" "$cs" "$cs" "$cs" "$cs" "$cs" >> "$STUB_DEPS"
+  out=$(run)
+  eq "$(bstatus "find-n6$cs")" "closed" "check_set=$cs: the must-fix finding closes once its fix unit has landed"
+  has "$out" "0 reviews dispatched" "…while check_set=$cs still dispatches no review"
+done
+store "[$(anchor N6h pull_request none "" polecat/n6h),
+        $(mustfix find-n6h N6h human),
+        $(fixunit fix-n6h N6h in_progress)]"
+printf 'find-n6h|blocks|N6h\nfix-n6h|blocks|find-n6h\nfix-n6h|blocks|N6h\n' >> "$STUB_DEPS"
+run >/dev/null
+eq "$(bstatus find-n6h)" "open" "…and a checkless anchor's finding whose fix unit is still in flight stays open"
+
 echo "# …a clear that does not persist is reported, not counted"
 store "[$(anchor N5 pull_request correctness green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"
 oid n5 > "$GH_DIR/head_polecat_n5"

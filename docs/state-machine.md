@@ -664,9 +664,15 @@ review's result set.
   review that read a mid-change diff would raise only the no-op rework the
   declination texts are full of.
   There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
-  would have bounded, and the runaway shapes left — a reviewer that dies after
-  claim, a rework child filed with its dependency edge reversed — stop the PR
-  moving rather than spin the dispatcher.
+  would have bounded, and each shape that would stall a PR instead is prevented
+  where it arises. A review whose reviewer dies after claim returns to its pool
+  through the witness's orphan recovery (`orphan-dispose.sh`). Every writer
+  that files a rework child hangs its `blocks` edge onto the anchor through
+  `bd_wire_rework` (`bd-lib.sh`), which takes off an edge running the other way
+  and reads the result back from the anchor's side. No writer routes a child
+  whose edge did not read back. A `must-fix` finding whose fix unit has landed
+  is released by the same authority on every anchor it visits, a `check_set` of
+  `none` or `off` included.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR that is approved — a
   standing APPROVED review from an account other than the city's and no
   standing CHANGES_REQUESTED, the rule merge.sh lands on

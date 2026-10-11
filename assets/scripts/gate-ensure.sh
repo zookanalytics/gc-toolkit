@@ -35,8 +35,13 @@
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. There is no dispatch
 # ceiling: quiescence forbids the redundant round the ceiling used to bound, and
-# the runaway shapes left — a reviewer that dies after claim, a fix unit filed
-# with its edge reversed — stop the PR moving rather than spin the dispatcher.
+# each shape that would stall a PR instead is prevented where it arises. A review
+# whose reviewer dies after claim returns to its pool through the witness's
+# orphan recovery (orphan-dispose.sh). Every writer that files a fix unit hangs
+# its edge onto the anchor through bd_wire_rework (bd-lib.sh), which takes off an
+# edge running the other way, and no writer routes a fix unit whose edge does not
+# read back. This arm releases a must-fix finding once its fix unit lands, on
+# every anchor it visits.
 # A lane entering validating — an open task_kind=validation bead on the anchor
 # (quiescence clause c), opened by pr-facts.sh on a human feedback batch or the
 # machine-review path — gets mol-validate dispatched ONTO that pass so the
@@ -754,6 +759,21 @@ STRAY
     done <<< "$VPASSES"
   fi
 
+  # Close any must-fix finding on this anchor whose fix unit has landed — every
+  # blocks-blocker closed. The fix unit's close leaves the finding it answered
+  # unblocked but open, and nothing else closes it, so the open finding would
+  # hold the publish (pr-open.sh) and the merge (merge.sh) with its fix already
+  # on the branch. This is the close review-cycle-architecture.md assigns here.
+  # It runs on every anchor this arm visits, ahead of the none|off opt-out: a
+  # checkless anchor carries must-fix findings too, since pr-facts.sh routes a
+  # human feedback batch without consulting check_set and the validator above
+  # rules it. It also runs before the lane-state and quiescence reads, so a
+  # landed fix no longer reads as owed and a lane an approve already backs reads
+  # green rather than provoking a dispatch. Best-effort: an unreadable store
+  # leaves the finding open, and quiescence below (which reads the same
+  # findings) fails the dispatch closed.
+  "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
+
   case "$canon" in none|off) continue ;; esac
 
   # The live head is no longer part of the classification — a lane state is a
@@ -797,18 +817,6 @@ STRAY
   # moot and close in one batched call after the gate loop — one finding-set read
   # per anchor, not one per green lane.
   green_lanes=""
-
-  # Close any must-fix finding on this anchor whose fix unit has landed — every
-  # blocks-blocker closed. The fix unit's close leaves the finding it answered
-  # unblocked but open, and nothing else closes it, so the open finding would
-  # hold the publish (pr-open.sh) and the merge (merge.sh) with its fix already
-  # on the branch. This is the close review-cycle-architecture.md assigns here,
-  # run before the lane-state and quiescence reads so a landed fix no longer
-  # reads as owed and a lane an approve already backs reads green rather than
-  # provoking a dispatch. Best-effort: an unreadable store leaves the finding
-  # open, and quiescence below (which reads the same findings) fails the
-  # dispatch closed.
-  "$FINDING" close-answered --anchor "$id" >/dev/null 2>&1 || true
 
   # Dispatch is scoped to the anchor's stage, which advances with the PR: before
   # the PR exists only pre-open checks run (they read the diff); a draft PR
@@ -1036,9 +1044,11 @@ STRAY
     # stamp were a convergence proxy — a converging PR could spend its budget on
     # redundant rounds and park on the board as a failure that never happened.
     # Quiescence above forbids the redundant round, so there is no budget left to
-    # bound and no anchor carries a dispatch tally. The runaway shapes that remain
-    # — a reviewer that dies after claim, a fix unit filed with its edge reversed
-    # — stop the PR moving rather than spin the dispatcher.
+    # bound and no anchor carries a dispatch tally. A review whose reviewer dies
+    # after claim returns to its pool through the witness's orphan recovery
+    # (orphan-dispose.sh), and every writer that files a fix unit hangs its edge
+    # onto the anchor through bd_wire_rework, which never leaves it reversed, so
+    # neither leaves the PR stalled with nothing acting on it.
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
     # failed carries the deterministic title but no anchor_bead — invisible to

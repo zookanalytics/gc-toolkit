@@ -342,12 +342,20 @@ the cadence — the arms run whether or not any refinery session is awake.
    unanswered. The same authority also releases a finding: on the first pass
    after every fix unit answering a `must-fix` finding has closed, it closes the
    finding, so a fix that has landed on the branch stops holding the publish
-   and the merge. A review that read a mid-change diff would raise
-   only the no-op rework the declination texts are full of. There is no dispatch
-   ceiling: quiescence forbids the redundant round a ceiling would have bounded,
-   and the runaway shapes left — a reviewer that dies after claim, a fix unit
-   filed with its edge reversed, a landed fix whose finding that release missed
-   — stop the PR moving rather than spin the dispatcher.
+   and the merge. The release runs on every anchor the arm visits, a
+   `check_set` of `none` or `off` included, because `pr-facts.sh` routes a human
+   feedback batch on such an anchor too. A review that read a mid-change diff
+   would raise only the no-op rework the declination texts are full of. There is
+   no dispatch ceiling: quiescence forbids the redundant round a ceiling would
+   have bounded, and each shape that would stall a PR instead is prevented where
+   it arises. A review whose reviewer dies after claim returns to its pool
+   through the witness's orphan recovery (`orphan-dispose.sh`). Every writer
+   that files a fix unit (`signoff.sh`, `pr-facts.sh` and `pre-open-rebase.sh`)
+   hangs its `blocks` edge onto the anchor through `bd_wire_rework`
+   (`bd-lib.sh`), which takes off an edge running the other way and reads the
+   result back from the anchor's side. A writer routes no fix unit whose edge
+   did not read back. A fix that has landed releases its finding through the
+   release above.
    It visits every gating anchor, so its cost grows with the set. It runs after
    merge and pr-open and under its share of the pass budget. It first visits the
    anchors it can act on: one with no `check_set` (it owes the stamp), one with
