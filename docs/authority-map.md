@@ -9,6 +9,19 @@ Every power in this pack has exactly one holder, and every holder has named
 prohibitions. A component that needs a power not granted here is a design
 change, not an implementation detail — amend this table in the same PR.
 
+## Scope
+
+**Mandate.** Who may exercise each destructive or state-bearing power in the
+pack, over beads and over sessions: the sole holder of each power, the
+evidence an act requires, and what the holder may never do.
+
+**Boundaries.** It names holders and their limits, not how an act runs; each
+holder's own script or doc carries its mechanics. The anchor lifecycle these
+powers move is [state-machine.md](state-machine.md), and how a visit reaches a
+person is [gascity-human-engagement.md](gascity-human-engagement.md). Powers the
+Gas City runtime holds appear only so the pack's own actuators can be told
+apart from them.
+
 ## Powers over beads
 
 | Power | Sole holder | Evidence required | May never |
