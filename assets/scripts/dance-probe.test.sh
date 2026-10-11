@@ -33,8 +33,7 @@ export FAKE_PANES="$TMP/panes"
 export FAKE_NUDGES="$TMP/nudges"
 export FAKE_QPN="$TMP/qpn-status"
 
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 set -u
 sub="${1:-}"; verb="${2:-}"; shift 2 || true
 [ "$sub" = "session" ] || exit 0

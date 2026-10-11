@@ -81,8 +81,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esa
 # asserts the script honored the answer.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
-cat > "$BIN/bd" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/bd" <<'STUB'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
@@ -243,8 +242,7 @@ case "${1:-}" in
 esac
 STUB
 
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 if [ "${1:-}" = "bd" ]; then
     shift
