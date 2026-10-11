@@ -191,7 +191,12 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
   launches its own `chromium-headless-shell` build from its browser cache:
   `PLAYWRIGHT_BROWSERS_PATH` when set, else `~/Library/Caches/ms-playwright` on
   macOS and `${XDG_CACHE_HOME:-~/.cache}/ms-playwright` on Linux. A browser on
-  `PATH` is not used.
+  `PATH` is not used. `PLAYWRIGHT_BROWSERS_PATH=0` keeps the browsers in
+  `.local-browsers` inside the engine's own `playwright-core` package instead,
+  so install from the engine checkout under that setting:
+  `cd "$SS_DIR" && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium-headless-shell`.
+  With the published engine, that package is npx's copy, which the doctor
+  check cannot see.
 - **ffmpeg** — a host `ffmpeg` on `PATH` (or `FFMPEG_BIN`) is used when present;
   otherwise the engine's bundled `ffmpeg-static` provides it.
 - **`OPENAI_API_KEY`** — read from the environment. The host places it in

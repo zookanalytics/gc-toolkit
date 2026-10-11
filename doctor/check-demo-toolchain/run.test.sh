@@ -42,8 +42,9 @@ stub_ffmpeg() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/ffmpeg"; chmod +x "$STUBS
 stub_chromium() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/chromium"; chmod +x "$STUBS/chromium"; }
 stub_gh() { printf '#!/bin/sh\necho "gh version %s (2026-01-01)"\n' "$1" > "$STUBS/gh"; chmod +x "$STUBS/gh"; }
 stub_uname() { printf '#!/bin/sh\necho %s\n' "$1" > "$STUBS/uname"; chmod +x "$STUBS/uname"; }
-stub_gc_ss() { # stub_gc_ss <sprintshow-path>
-  printf '#!/bin/sh\nif [ "$1" = rig ]; then printf %s\x27{"rigs":[{"name":"sprintshow","path":"%s"}]}\x27; fi\n' '' "$1" > "$STUBS/gc"
+GC_CALLS="$TMP/gc-calls"
+stub_gc_ss() { # stub_gc_ss <sprintshow-path> — each call appends its arguments to $GC_CALLS
+  printf '#!/bin/sh\necho "$*" >> "%s"\nif [ "$1" = rig ]; then printf %s\x27{"rigs":[{"name":"sprintshow","path":"%s"}]}\x27; fi\n' "$GC_CALLS" '' "$1" > "$STUBS/gc"
   chmod +x "$STUBS/gc"
 }
 # Every tool but the browser and the key in place, so a case's one warning is
@@ -66,6 +67,25 @@ XDG_NO="$TMP/xdg-no"; mkdir -p "$XDG_NO"
 # A sprintshow checkout whose ffmpeg-static binary is provisioned.
 SS_FIX="$TMP/rigs/sprintshow"; mkdir -p "$SS_FIX/node_modules/ffmpeg-static"
 printf '#!/bin/sh\n' > "$SS_FIX/node_modules/ffmpeg-static/ffmpeg"; chmod +x "$SS_FIX/node_modules/ffmpeg-static/ffmpeg"
+# Checkouts for PLAYWRIGHT_BROWSERS_PATH=0, under which Playwright keeps its
+# browsers in .local-browsers inside the playwright-core package the engine
+# loads: an engine with the build (and ffmpeg-static), one without the build,
+# one whose deps are not installed, one whose playwright carries its own nested
+# playwright-core, and a rig whose package.json names some other app.
+checkout() { # checkout <dir-name> <package name> — a checkout root with its package.json
+  mkdir -p "$TMP/$1"; printf '{"name":"%s"}\n' "$2" > "$TMP/$1/package.json"; printf '%s' "$TMP/$1"
+}
+pw_core() { # pw_core <package dir> [build] — a playwright-core package, holding the build when asked
+  mkdir -p "$1"; printf '{"name":"playwright-core"}\n' > "$1/package.json"
+  [ "$#" -lt 2 ] || mkdir -p "$1/.local-browsers/chromium_headless_shell-1243"
+}
+ENGINE_YES="$(checkout engine-yes @zookanalytics/sprintshow)"; pw_core "$ENGINE_YES/node_modules/playwright-core" build
+mkdir -p "$ENGINE_YES/node_modules/ffmpeg-static"; cp "$SS_FIX/node_modules/ffmpeg-static/ffmpeg" "$ENGINE_YES/node_modules/ffmpeg-static/ffmpeg"
+ENGINE_NOBUILD="$(checkout engine-nobuild @zookanalytics/sprintshow)"; pw_core "$ENGINE_NOBUILD/node_modules/playwright-core"
+ENGINE_NODEPS="$(checkout engine-nodeps @zookanalytics/sprintshow)"
+ENGINE_NESTED="$(checkout engine-nested @zookanalytics/sprintshow)"; pw_core "$ENGINE_NESTED/node_modules/playwright-core"
+pw_core "$ENGINE_NESTED/node_modules/playwright/node_modules/playwright-core" build
+NOT_ENGINE="$(checkout not-engine some-other-app)"; pw_core "$NOT_ENGINE/node_modules/playwright-core" build
 
 gc_home() { # gc_home <name> <secrets.env content> — a GC_HOME dir holding that secrets.env
   mkdir -p "$TMP/gchome-$1"; printf '%s' "$2" > "$TMP/gchome-$1/secrets.env"; printf '%s' "$TMP/gchome-$1"
@@ -211,6 +231,58 @@ for form in 'OPENAI_API_KEY=' 'OPENAI_API_KEY=""' "OPENAI_API_KEY=''" '# OPENAI_
   OUT="$(run_env HOME="$HOME_BARE" GC_HOME="$GCH" PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_YES")"
   has "$OUT" "OPENAI_API_KEY is not set" "case15: no usable key reads as not set: $form"
 done
+
+# --- Case 16: PLAYWRIGHT_BROWSERS_PATH=0 reads the engine's .local-browsers ---
+# Not a directory named "0", and not the platform cache: Playwright keeps the
+# browsers inside the playwright-core package the engine loads.
+stub_rest; stub_uname Darwin; stub_gc_ss "$ENGINE_YES"
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 0 "case16: =0 finds the build in the engine's playwright-core/.local-browsers"
+has "$OUT" "Chromium (headless shell in $ENGINE_YES/node_modules/playwright-core/.local-browsers)" "case16: names the engine's .local-browsers"
+stub_gc_ss "$ENGINE_NOBUILD"
+OUT="$(run_env HOME="$HOME_MAC" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 1 "case16: =0 does not take a build in ~/Library/Caches"
+has "$OUT" "No chromium-headless-shell build in $ENGINE_NOBUILD/node_modules/playwright-core/.local-browsers" "case16: names the .local-browsers it read"
+has "$OUT" "install one: cd $ENGINE_NOBUILD && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium-headless-shell" "case16: installs from the engine checkout under the same setting"
+hasnt "$OUT" "build in 0" "case16: never reads 0 as a directory"
+
+# --- Case 17: =0 follows Node to a playwright-core nested under playwright ---
+# The engine's playwright package requires playwright-core, and Node takes the
+# copy in playwright's own node_modules over the engine's.
+stub_rest; stub_gc_ss "$ENGINE_NESTED"
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 0 "case17: =0 takes the nested playwright-core Node loads first"
+has "$OUT" "Chromium (headless shell in $ENGINE_NESTED/node_modules/playwright/node_modules/playwright-core/.local-browsers)" "case17: names the nested package's .local-browsers"
+
+# --- Case 18: =0 with the engine's deps not installed → Warning ----------
+stub_rest; stub_gc_ss "$ENGINE_NODEPS"
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 1 "case18: =0 with no playwright-core installed exits Warning"
+has "$OUT" "No playwright-core package in $ENGINE_NODEPS/node_modules" "case18: names the missing package"
+has "$OUT" "cd $ENGINE_NODEPS && npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium-headless-shell" "case18: installs the deps, then the browser"
+
+# --- Case 19: =0 with no local engine checkout → Warning: unchecked ------
+# Without the checkout a capture runs npx's copy of the published engine, whose
+# playwright-core this check cannot see. A sprintshow rig whose package.json
+# names some other app is not the engine, so it is not looked in either.
+stub_rest   # no gc, so no rig to find
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 1 "case19: =0 with no engine checkout exits Warning"
+has "$OUT" "which this check cannot see, so the browser is unchecked" "case19: says the browser is unchecked"
+hasnt "$OUT" "No chromium-headless-shell build" "case19: does not report a browser it could not look for as missing"
+stub_gc_ss "$NOT_ENGINE"
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 1 "case19: a sprintshow rig that is not the engine exits Warning"
+has "$OUT" "the browser is unchecked" "case19: does not look in a rig that is not the engine"
+
+# --- Case 20: the browser and ffmpeg probes share one 'gc rig list' -------
+# With no host ffmpeg, both probes need the sprintshow rig; the lookup runs once.
+clear_stubs; stub_node 22.18.0; stub_gh 2.99.0; stub_gc_ss "$ENGINE_YES"
+: > "$GC_CALLS"
+OUT="$(run_env HOME="$HOME_BARE" PLAYWRIGHT_BROWSERS_PATH=0 OPENAI_API_KEY=sk-env-value)"; RC=$?
+eq "$RC" 0 "case20: the engine checkout serves both the browser and ffmpeg"
+has "$OUT" "ffmpeg (ffmpeg-static (sprintshow engine))" "case20: ffmpeg comes from the engine checkout"
+eq "$(grep -c '^rig list' "$GC_CALLS")" 1 "case20: one 'gc rig list' call serves both probes"
 
 echo "check-demo-toolchain: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

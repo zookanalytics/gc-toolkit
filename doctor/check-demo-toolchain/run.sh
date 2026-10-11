@@ -34,24 +34,60 @@ else
     warnings+=("Node not found — the SprintShow engine needs Node >= 22.18 to run.")
 fi
 
-# --- Chromium: Playwright's headless-shell build, in Playwright's cache ----
+# The sprintshow rig checkout, looked up on first use and at most once, so the
+# browser and ffmpeg probes share one 'gc rig list' call.
+ss_dir=""; ss_looked=""
+find_ss_dir() {
+    [ -z "$ss_looked" ] || return 0
+    ss_looked=1
+    if command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        ss_dir=$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -1)
+    fi
+    return 0
+}
+
+# --- Chromium: Playwright's headless-shell build, where Playwright keeps it ---
 # A capture runs the engine headless, and the engine calls chromium.launch()
 # with no channel or executablePath, so Playwright starts its own
-# chromium-headless-shell build and never a browser on PATH. It looks for that
-# build in PLAYWRIGHT_BROWSERS_PATH when set, else in ms-playwright under the
-# platform cache directory: ~/Library/Caches on macOS, ${XDG_CACHE_HOME:-~/.cache}
-# on Linux (playwright-core's registryDirectory). PLAYWRIGHT_BROWSERS_PATH=0,
-# which keeps the browsers inside the engine's node_modules, is not followed.
+# chromium-headless-shell build and never a browser on PATH. Where it looks
+# for that build follows playwright-core's registryDirectory.
+# PLAYWRIGHT_BROWSERS_PATH=0 means .local-browsers inside the playwright-core
+# package the engine loads. Any other non-empty value is the directory itself.
+# Unset or empty, it is ms-playwright under the platform cache directory:
+# ~/Library/Caches on macOS, ${XDG_CACHE_HOME:-~/.cache} on Linux.
 browser_ok=""
-case "$(uname -s 2>/dev/null)" in
-    Darwin) pw_cache_root="$HOME/Library/Caches" ;;
-    *)      pw_cache_root="${XDG_CACHE_HOME:-$HOME/.cache}" ;;
-esac
-pw_cache="${PLAYWRIGHT_BROWSERS_PATH:-$pw_cache_root/ms-playwright}"
-if ls -d "$pw_cache"/chromium_headless_shell-* >/dev/null 2>&1; then
-    browser_ok="headless shell in $pw_cache"
+pw_cache=""
+pw_install="npx playwright install chromium-headless-shell"
+if [ "${PLAYWRIGHT_BROWSERS_PATH:-}" = 0 ]; then
+    # A capture runs the engine from the sprintshow rig checkout when its
+    # package.json names the engine, and from npx's copy of the published
+    # package otherwise (rig-demo-capture.sh). The engine's playwright package
+    # requires playwright-core, which Node looks for in playwright's own
+    # node_modules first and in the engine's after that.
+    find_ss_dir
+    if [ -n "$ss_dir" ] && [ "$(jq -r '.name // empty' "$ss_dir/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
+        pw_install="cd $ss_dir && PLAYWRIGHT_BROWSERS_PATH=0 $pw_install"
+        for pw_core in "$ss_dir/node_modules/playwright/node_modules/playwright-core" "$ss_dir/node_modules/playwright-core"; do
+            if [ -f "$pw_core/package.json" ]; then pw_cache="$pw_core/.local-browsers"; break; fi
+        done
+        [ -n "$pw_cache" ] || warnings+=("No playwright-core package in $ss_dir/node_modules, so PLAYWRIGHT_BROWSERS_PATH=0 leaves the engine no .local-browsers to launch from — install the engine's deps, then the browser: cd $ss_dir && npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium-headless-shell.")
+    else
+        warnings+=("PLAYWRIGHT_BROWSERS_PATH=0 keeps Playwright's browsers inside the engine's own playwright-core package. With no local sprintshow engine checkout, a capture runs the published engine from npx's copy of that package, which this check cannot see, so the browser is unchecked. Unset PLAYWRIGHT_BROWSERS_PATH to keep browsers in Playwright's shared cache, which this check reads.")
+    fi
+else
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) pw_cache_root="$HOME/Library/Caches" ;;
+        *)      pw_cache_root="${XDG_CACHE_HOME:-$HOME/.cache}" ;;
+    esac
+    pw_cache="${PLAYWRIGHT_BROWSERS_PATH:-$pw_cache_root/ms-playwright}"
 fi
-[ -n "$browser_ok" ] || warnings+=("No chromium-headless-shell build in $pw_cache, the Playwright cache a headless capture launches from — install one: npx playwright install chromium-headless-shell (add --with-deps on a bare host).")
+if [ -n "$pw_cache" ]; then
+    if ls -d "$pw_cache"/chromium_headless_shell-* >/dev/null 2>&1; then
+        browser_ok="headless shell in $pw_cache"
+    else
+        warnings+=("No chromium-headless-shell build in $pw_cache, the Playwright cache a headless capture launches from — install one: $pw_install (add --with-deps on a bare host).")
+    fi
+fi
 
 # --- ffmpeg: a host binary, FFMPEG_BIN, or the engine's ffmpeg-static -----
 ffmpeg_ok=""
@@ -59,8 +95,8 @@ if command -v ffmpeg >/dev/null 2>&1; then
     ffmpeg_ok="host ffmpeg"
 elif [ -n "${FFMPEG_BIN:-}" ] && [ -x "${FFMPEG_BIN:-}" ]; then
     ffmpeg_ok="FFMPEG_BIN"
-elif command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    ss_dir=$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -1)
+else
+    find_ss_dir
     if [ -n "$ss_dir" ] && [ -x "$ss_dir/node_modules/ffmpeg-static/ffmpeg" ]; then
         ffmpeg_ok="ffmpeg-static (sprintshow engine)"
     fi
