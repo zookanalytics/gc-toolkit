@@ -708,8 +708,10 @@ keys = [
   # validator may overrule or defer a human objection, or send it to them, never
   # in silence.
   "finding.reply",
-  # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
-  # pass does not answer the same thread twice.
+  # Set by pr-facts.sh's write-back once finding.reply's own text is on the PR,
+  # posted by it or found there, and dropped when that text is missing and its
+  # post fails. The write-back reads the reply back off GitHub on every pass, so
+  # this records the read for the review dismissal, which waits for it.
   "finding.reply_posted",
   # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
   # a machine finding ruled must-fix or deferred to its PR: a file-level review
