@@ -94,7 +94,7 @@ clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
 finalizes merge anchors, and `bead-rehome.sh` stamps the disposition before it
-runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I14
+runs the gate. A bare `gc bd close` runs no gate, and the doctor invariant I15
 (`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
 without its ruling.
 

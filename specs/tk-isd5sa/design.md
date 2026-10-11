@@ -1,6 +1,6 @@
 ---
 name: Epic steward — design record (tk-isd5sa)
-description: Why the epic steward ships as a gate-only v1 — the continue/shift/close ruling with close terminal and carrying its outcome, the finalize-gate clause, and the I14 invariant — what the operator ruling removed from the first build and why, and what the follow-on epic owns, with the cost of waiting. The authoritative mechanism doc is docs/epic-stewardship.md.
+description: Why the epic steward ships as a gate-only v1 — the continue/shift/close ruling with close terminal and carrying its outcome, the finalize-gate clause, and the I15 invariant — what the operator ruling removed from the first build and why, and what the follow-on epic owns, with the cost of waiting. The authoritative mechanism doc is docs/epic-stewardship.md.
 ---
 
 # Epic steward — design record
@@ -30,7 +30,7 @@ build carried that v1 does not, and what is deferred.
 The first build of #977 (through 213cb356) was a proactive steward: a rig-scoped
 exec order (`orders/epic-steward.toml`, `assets/scripts/epic-steward.sh`) whose
 floor, contract and ruling arms filed and retracted operator visits, plus the
-gate clause and I14. Its ruling arm counted an epic's `parent-child` children,
+gate clause and I15. Its ruling arm counted an epic's `parent-child` children,
 filed a visit once every one had closed, and asked for persevere, pivot, or
 close; any of the three satisfied the gate. Review kept finding defects in the
 proactive arms: arms firing out of contract order, visits never retracted, a
@@ -50,7 +50,7 @@ The sitting settled the model rather than patch the arms:
   followed by an operator-judged Epic Checkpoint whose judge is never the
   worker. "Checkpoint" stays as a family of qualified terms (Epic, PR, Bead
   Checkpoint). The goal primitive folds into the epic.
-- v1 is the mechanical close gate, renamed to the new vocabulary, plus the I14
+- v1 is the mechanical close gate, renamed to the new vocabulary, plus the I15
   invariant. The proactive layer comes back as the follow-on epic tk-wmwcdlc,
   after the checkpoint motion is proven by hand.
 
@@ -73,13 +73,13 @@ as absent.
 **One predicate, two readers.** `finalize-gate.sh clause_epic_ruling_recorded`
 and `doctor/check-epic-closed-implies-ruled` apply the same predicate: an epic
 that carries a hypothesis, is not disposed, and is not ruled close with an
-outcome is held (gate) or is an error once closed (I14). A continue or shift
+outcome is held (gate) or is an error once closed (I15). A continue or shift
 ruling and an off-enum value each get their own message. Each reader's test
 pins the predicate, and a mutant that accepts continue or shift, or drops the
 outcome, fails in both suites. The steward script carried a third copy of the
 enum, which left with it.
 
-**The clause holds no close path wired today; I14 is the enforcement that sees
+**The clause holds no close path wired today; I15 is the enforcement that sees
 every close.** Review of #977 (thread on finalize-gate.sh:176) showed that
 neither gate-running path reaches an undisposed epic. `merge.sh` finalizes merge
 anchors, and `bead-rehome.sh` stamps `gc.superseded_by` before it gates, which
@@ -101,7 +101,7 @@ now runs every clause with the cache off (`local GC_RECONCILE_BD_CACHE=""`), and
 finalize-gate.test.sh case 26 reproduces the stale re-assert, failing without
 the fix.
 
-**I14's remedy is bd's.** `lifecycle.sh reopen` refuses a closed bead with no
+**I15's remedy is bd's.** `lifecycle.sh reopen` refuses a closed bead with no
 `merge_result`, which is every epic. The finding now names the write that clears
 it (record `epic_ruling=close` and `epic_ruling_reason` on the closed epic) and
 bd's own reopen for an epic that should go on.
@@ -136,7 +136,7 @@ Tracked:
   primitive. docs/epics.md states the model as direction. Cost while deferred:
   nothing prompts a ruling. An epic whose work has landed waits for the operator
   to call a sitting, so an answered or stalled epic stays open until someone
-  looks. The close requirement holds meanwhile, through I14.
+  looks. The close requirement holds meanwhile, through I15.
 - **Membership scope-reading audit** — tk-lt585p, blocked on the repair
   primitive tk-8bzuc2 and on a scope classification that is LLM judgment. It was
   framed as a fourth steward arm in epic-steward.sh; with that script removed,
@@ -154,4 +154,4 @@ the removed order, and the checkpoint layer decides them afresh.
 - tk-lt585p — the membership audit; its notes record that the steward it would
   have extended is gone.
 - tk-td0fpz — doctor-check-count drift in docs/architecture.md and
-  docs/component-model.md, found while adding I14 and left out of scope.
+  docs/component-model.md, found while adding I15 and left out of scope.

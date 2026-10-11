@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# doctor/check-epic-closed-implies-ruled — I14: a closed epic was ruled closed.
+# doctor/check-epic-closed-implies-ruled — I15: a closed epic was ruled closed.
 # An epic closes on a ruling on its hypothesis, never as a side effect of its last
 # unit merging (docs/epics.md). The ruling is continue, shift, or close, and only
 # close is terminal; a close ruling carries its outcome (epic_ruling_reason). A
@@ -82,7 +82,7 @@ scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
     | join("\u001f")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
-    echo "cannot determine whether closed epics were ruled (I14)"
+    echo "cannot determine whether closed epics were ruled (I15)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
     exit 1
 fi
@@ -96,13 +96,13 @@ fi
 # shell so the finding arrays survive it. A staging failure is loud, never a
 # forged all-clear. The dir and its files die with this process.
 ENUM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-epic-closed-implies-ruled.XXXXXX" 2>/dev/null) || {
-    echo "cannot determine whether closed epics were ruled (I14)"
+    echo "cannot determine whether closed epics were ruled (I15)"
     detail "could not create a temp directory to stage the store enumerations (mktemp -d failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
     exit 1
 }
 trap 'rm -rf "$ENUM_TMP" 2>/dev/null' EXIT
 if ! printf '%s\n' "$scopes" > "$ENUM_TMP/scopes"; then
-    echo "cannot determine whether closed epics were ruled (I14)"
+    echo "cannot determine whether closed epics were ruled (I15)"
     detail "could not stage the store enumeration (temp-file write failed — e.g. /tmp under disk pressure); nothing was scanned, so this run is not an all-clear"
     exit 1
 fi
@@ -191,14 +191,14 @@ if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
 fi
 if [ "${#errors[@]}" -ne 0 ]; then
-    echo "closed-but-unruled epics (I14): ${#errors[@]} epic(s)"
+    echo "closed-but-unruled epics (I15): ${#errors[@]} epic(s)"
     detail "${errors[@]}"
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
     exit 2
 fi
 if [ "${#warnings[@]}" -ne 0 ]; then
-    echo "epic-closed-implies-ruled holds with gaps (I14)"
+    echo "epic-closed-implies-ruled holds with gaps (I15)"
     detail "${warnings[@]}"
     detail ${notes[@]+"${notes[@]}"}
     exit 1

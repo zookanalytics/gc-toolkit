@@ -80,10 +80,10 @@ reason and passes.
    `merge.sh` finalizes merge anchors, and `bead-rehome.sh` records its
    disposition before it gates. The clause is the precondition any gate-running
    close of an epic inherits, not a choke point on today's closes.
-2. **The doctor invariant** (I14, `doctor/check-epic-closed-implies-ruled`) sees
+2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees
    every close after the fact. A closed epic the predicate would have held is an
    error, whatever path closed it. A bare `gc bd close` is the ordinary way an
-   epic closes, and I14 is what reports one closed without its ruling. Its
+   epic closes, and I15 is what reports one closed without its ruling. Its
    remedy is to record the ruling on the closed epic, or to reopen the epic
    (`gc bd reopen`) when it should go on.
 
@@ -95,7 +95,7 @@ The follow-on epic *Epic Checkpoints & Features* builds the layer that runs it.
 When a Feature has landed and no checkpoint is open on its epic, a formula
 gathers the evidence and analysis the ruling needs and files the checkpoint
 sitting for the operator to judge. The ruling that sitting records is the one
-the gate and I14 read. It is a formula, not a doctor check: doctor is already
+the gate and I15 read. It is a formula, not a doctor check: doctor is already
 over-leveraged, and its role here stays the after-the-fact invariant. The first
 checkpoints run by hand, and the machinery is built from what they show.
 

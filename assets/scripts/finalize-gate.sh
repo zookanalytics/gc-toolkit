@@ -172,7 +172,7 @@ clause_no_open_visit() {
 # finalizes merge anchors, and bead-rehome.sh stamps the epic's disposition before
 # it runs the gate, which this clause passes. The clause therefore holds only a
 # gate-running close that reaches an undisposed epic. A bare `gc bd close` runs no
-# gate, and doctor/check-epic-closed-implies-ruled (I14) reports it after the fact.
+# gate, and doctor/check-epic-closed-implies-ruled (I15) reports it after the fact.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
@@ -205,7 +205,7 @@ clause_epic_ruling_recorded() {
     }
     IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling _fgr_hasreason <<< "$_fgr_fields"
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
-    # The predicate doctor/check-epic-closed-implies-ruled (I14) applies to a
+    # The predicate doctor/check-epic-closed-implies-ruled (I15) applies to a
     # closed epic: an epic is held once it carries a hypothesis, unless it is
     # disposed or ruled close with its outcome. An epic that never carried a
     # hypothesis predates the model, and a disposition pointer (bead-rehome's

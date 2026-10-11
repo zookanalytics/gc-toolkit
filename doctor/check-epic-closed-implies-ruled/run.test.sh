@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-epic-closed-implies-ruled (I14). Stub gc/bd only.
+# Hermetic test for doctor/check-epic-closed-implies-ruled (I15). Stub gc/bd only.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -94,7 +94,7 @@ eq "$RC" "2" "an epic_ruling stamped EMPTY is not a ruling"
 has "$OUT" "E4" "the empty-ruling epic is named"
 
 # --- 3b. a present-but-off-enum ruling ("pending", a typo) is not a ruling: the
-# enum is continue|shift|close (docs/epics.md), so I14 reads it as unruled. -----
+# enum is continue|shift|close (docs/epics.md), so I15 reads it as unruled. -----
 store "$(epic E4off closed '{"epic_hypothesis":"for X","epic_ruling":"pending"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an off-enum epic_ruling ('pending') reads as unruled"
