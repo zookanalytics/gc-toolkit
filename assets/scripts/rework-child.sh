@@ -12,12 +12,13 @@
 # run started:
 #   - The pool route is proved before any write (pool-route.sh). A refusal there
 #     is simply retried, while a child no pool claims is found only by a human.
-#   - A source key owns at most one live child. A live child carrying the key is
-#     adopted, preferring one already dispatched. Otherwise the child is created
-#     with its identity (task_kind, anchor_bead and the source key) inside the
-#     create, so no run leaves a child its retry cannot find. A dedup query that
-#     does not answer files nothing, because an unreadable answer cannot be told
-#     from no child.
+#   - A source key owns at most one live child. A live child carrying the key on
+#     this anchor is adopted, preferring one already dispatched, and one on
+#     another anchor refuses the filing. Otherwise the child is created with its
+#     identity (task_kind, anchor_bead and the source key) inside the create, so
+#     no run leaves a child its retry cannot find. A dedup query that does not
+#     answer files nothing, because an unreadable answer cannot be told from no
+#     child.
 #   - The work order and the child's blocks edge onto the anchor are written,
 #     then read back before dispatch. The edge is what holds the merge.
 #   - The child is slung with mol-polecat-work, and the dispatch is proved by
@@ -93,16 +94,30 @@ POOL=$("$SCRIPT_DIR/pool-route.sh" "$POOL_NAME") \
   || fail "the rework child would route to '$POOL_NAME', which no live pool claims; nothing filed"
 
 # The source key is the dedup key: a review bead or a visit id names one review of
-# one anchor, or one sitting's ruling, and only a rework child carries it. When
-# more than one live child carries it, the one already dispatched wins: a prior
+# one anchor, or one sitting's ruling, and only a rework child carries it. A live
+# child is adopted only when it also names this anchor. A live child of the same
+# source on another anchor refuses the filing before any write, as when one visit
+# is signed off twice against different subjects: adopting it would re-stamp it
+# onto this anchor while its blocks edge still holds the other one, and filing
+# beside it would give the source two live children. When more than one live
+# child carries the key on this anchor, the one already dispatched wins: a prior
 # run filed one and died before dispatch while a retry filed and dispatched
 # another, and re-slinging the inert one would double-dispatch the molecule the
 # routed one owns.
 if ! PRIOR=$(bd_list --metadata-field "$SRC_KEY=$SRC_BEAD" --status="$LIVE_STATUSES"); then
   fail "could not read prior rework children for $SRC_KEY=$SRC_BEAD (dedup query failed); nothing filed rather than risk a second child"
 fi
-FIX_BEAD=$(printf '%s' "$PRIOR" | jq -r --arg k "$SRC_KEY" --arg v "$SRC_BEAD" '
-    [ .[]? | select(((.metadata[$k] // "") | tostring) == $v) ]
+ELSEWHERE=$(printf '%s' "$PRIOR" | jq -r --arg k "$SRC_KEY" --arg v "$SRC_BEAD" --arg a "$ANCHOR" '
+    [ .[]? | select(((.metadata[$k] // "") | tostring) == $v)
+           | ((.metadata.anchor_bead // "") | tostring) as $on
+           | select($on != $a)
+           | "\(.id) on anchor \(if $on == "" then "(none)" else $on end)" ]
+    | join(", ")' 2>/dev/null)
+[ -z "$ELSEWHERE" ] \
+  || fail "$SRC_KEY=$SRC_BEAD already has a live rework child on another anchor ($ELSEWHERE), and a source owns one live child; nothing filed on $ANCHOR. Close that child if it answers the wrong anchor, then re-run"
+FIX_BEAD=$(printf '%s' "$PRIOR" | jq -r --arg k "$SRC_KEY" --arg v "$SRC_BEAD" --arg a "$ANCHOR" '
+    [ .[]? | select(((.metadata[$k] // "") | tostring) == $v)
+           | select(((.metadata.anchor_bead // "") | tostring) == $a) ]
     | sort_by(.created_at // .id) as $all
     | ( ( [ $all[] | select((.metadata["gc.execution_routed_to"] // "") != "") ][0] )
         // $all[0] )

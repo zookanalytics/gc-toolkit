@@ -5,8 +5,8 @@
 # a review verdict and converse-rework.test.sh for an operator ruling. This suite
 # pins the writer's own contract: exactly one provenance, the required work-order
 # flags, the refusals that come before any write, the stdout result line its
-# callers parse, a provenance key that matches only its own children, and every
-# metadata key it writes registered in lifecycle.toml.
+# callers parse, a provenance key that matches only its own children on its own
+# anchor, and every metadata key it writes registered in lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -194,7 +194,7 @@ eq "$RES" "fix-1 $ROUTE in-flight" "stdout is '<child> <route> in-flight' for a 
 eq "$(created)" "1" "…and files no second child"
 
 echo "# --- the result line: adopted ---"
-reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"source_ruling_bead":"vis-1"}}'
+reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1"}}'
 RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 --pr-url https://github.com/o/r/pull/42 --pr-number 42 2>/dev/null); RC=$?
 eq "$RC" "0" "an adopted child exits 0"
 eq "$RES" "c1 $ROUTE adopted" "stdout is '<child> <route> adopted'"
@@ -207,6 +207,29 @@ reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"source_r
 RES=$("$SUT" "${WORK[@]}" --review-bead rv-1 2>/dev/null)
 eq "$RES" "fix-1 $ROUTE filed" "a ruling's child is not adopted for a review whose id happens to match"
 eq "$(meta c1 source_review_bead)" "" "…and is left unkeyed by the review"
+
+echo "# --- a source's live child on another anchor refuses the filing ---"
+# One visit signed off twice against different subjects: the first run's child
+# names the first anchor. Adopting it would re-stamp it onto this anchor while
+# its blocks edge still holds the first, so the source is refused before any
+# write, even beside an undispatched child of its own on this anchor.
+OTHER='{"id":"c9","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-0","source_ruling_bead":"vis-1","branch":"polecat/anc-0","target":"main"}}'
+writes() { grep -cE '^bd (update|create) |^bd dep [^ ]+ --blocks |^sling ' "$STUB_GC_LOG"; }
+reset "$OTHER"
+OUT=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>&1); RC=$?
+eq "$RC" "2" "a live child of the same source on another anchor refuses the filing"
+has "$OUT" "c9 on anchor anc-0" "…naming that child and its anchor"
+eq "$(created)" "0" "…filing no second child"
+eq "$(writes)" "0" "…and writing nothing"
+eq "$(meta c9 anchor_bead)" "anc-0" "the other anchor's child keeps its anchor"
+eq "$(meta c9 gc.execution_routed_to)" "" "…and is not dispatched"
+reset "$OTHER" '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1"}}'
+OUT=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>&1); RC=$?
+eq "$RC" "2" "the refusal holds beside an undispatched child on this anchor"
+eq "$(writes)" "0" "…which is neither stamped nor dispatched"
+reset '{"id":"c9","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-0","source_ruling_bead":"vis-1"}}'
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null); RC=$?
+eq "$RES" "fix-1 $ROUTE filed" "a closed child on another anchor refuses nothing"
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account
