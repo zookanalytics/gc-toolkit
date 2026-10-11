@@ -4,6 +4,12 @@ gc-toolkit is a pack for Gas City, the multi-agent runtime, that gets work done 
 
 AI changed the cost of work. Agent iteration, parallel exploration, and self-critique are cheap. Human attention is scarce, context-bound, and not restartable on demand. gc-toolkit turns that asymmetry into operating discipline: agents do the cheap work before they interrupt, the surface makes judgment easier rather than transferring work back to the operator, and every lesson compounds into the pack so attention is never spent twice.
 
+## Scope
+
+**Mandate.** What gc-toolkit is, what it believes, whom it serves, and the goals it answers to.
+
+**Boundaries.** How the pack realizes these beliefs is [architecture.md](architecture.md). What the goals ask of a change, from the operator's side, is [product-goals.md](product-goals.md).
+
 ## Core Beliefs
 
 **Human attention is the budget.** Attention is genuinely scarce and not restartable on demand.
