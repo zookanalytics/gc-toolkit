@@ -17,8 +17,7 @@ mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha"
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"}]}
 EOF
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
@@ -32,8 +31,7 @@ GC
 # rather than assumed, BD_STATUS_LOG records what the listing asked the store
 # for, and BD_STEPS_BODY substitutes an arbitrary payload for the listing so the
 # shapes a reader must refuse can be handed to it.
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
@@ -80,6 +78,15 @@ printf ',"meta":{}}'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# No case here tests the check's time budget. assets/scripts/doctor-budget.test.sh
+# tests that block, every copy of it. The scale cases run the check over thousands
+# of rows, and on a loaded host one such pass takes tens of seconds. The check's
+# 60 s default caps any one probe at 30 s, so host load alone could cut a pass
+# short and turn its verdict into "NOT checked". Every run here therefore gets a
+# budget sized for the largest fixture, whatever the caller's environment holds.
+# It still bounds each probe, at 300 s, well inside run-tests.sh's 900 s per-file
+# timeout.
+export GC_DOCTOR_CHECK_TIMEOUT=600
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 iso_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate'; }
 step() { # id root [extra-metadata-json-fragment] [top-level-fragment] [status]

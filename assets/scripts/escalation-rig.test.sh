@@ -16,8 +16,7 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { if grep -qF -- "$2" <<< "$1"; then ok "$3"; else bad "$3 (missing '$2')"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ] || exit 0
 [ -n "${STUB_RIGS_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }

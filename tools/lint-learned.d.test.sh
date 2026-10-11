@@ -1725,6 +1725,24 @@ for n in 2 3 4 5 6 7; do
     has "$OUT" "params.toml:$n:" "params.toml line $n is reported"
 done
 
+# A block fenced as sh or shell is shell, and so is an untagged block.
+cat > "$TMP/formulas/tags.toml" <<'FIX'
+```sh
+for x in $LIST; do echo "$x"; done
+```
+```shell
+for x in $LIST; do echo "$x"; done
+```
+```
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/formulas/tags.toml"
+eq "$RC" 1 "sh, shell and untagged blocks are shell"
+for n in 2 5 8; do
+    has "$OUT" "tags.toml:$n:" "tags.toml line $n is reported"
+done
+
 echo "── formula-unquoted-for: what is not ──"
 
 # A quoted list, zsh's explicit \${=VAR} split, and a literal list are all fine;
@@ -1942,12 +1960,14 @@ done
 eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is, the commented-out loops included"
 
 # Scope excludes rendered and frozen trees even when they carry the defect: the
-# fix belongs in the source they render from or froze.
+# fix belongs in the source they render from or froze. lint-learned.d/ is
+# excluded too, because the text there states the rule.
 mkdir -p "$TMP/specs/b/formulas" "$TMP/generated/seed-audit/agents/a" \
-         "$TMP/base-snapshots/x/formulas"
+         "$TMP/base-snapshots/x/formulas" "$TMP/lint-learned.d/skills/s"
 for p in specs/b/formulas/f.toml \
          generated/seed-audit/agents/a/prompt.template.md \
-         base-snapshots/x/formulas/f.toml; do
+         base-snapshots/x/formulas/f.toml \
+         lint-learned.d/skills/s/SKILL.md; do
     cat > "$TMP/$p" <<'FIX'
 ```bash
 for x in $LIST; do echo "$x"; done
@@ -1956,8 +1976,9 @@ FIX
 done
 runf "$TMP/specs/b/formulas/f.toml" \
      "$TMP/generated/seed-audit/agents/a/prompt.template.md" \
-     "$TMP/base-snapshots/x/formulas/f.toml"
-eq "$RC" 0 "specs/, generated/, and base-snapshots/ are excluded"
+     "$TMP/base-snapshots/x/formulas/f.toml" \
+     "$TMP/lint-learned.d/skills/s/SKILL.md"
+eq "$RC" 0 "specs/, generated/, base-snapshots/ and lint-learned.d/ are excluded"
 
 # Docs are named one at a time, not matched by a docs/* glob — an ordinary doc
 # whose fenced example happens to hold an unquoted loop is illustrative, not a
@@ -1969,6 +1990,90 @@ for x in $LIST; do echo "$x"; done
 FIX
 runf "$TMP/docs/other-doc.md"
 eq "$RC" 0 "a doc not on the runbook list is not scanned"
+
+echo "── formula-unquoted-for: a fence closes the block it opened ──"
+
+# A fence closes whichever block is open, so the bare fence that closes a json
+# block opens nothing: each shell block after it is scanned, and the prose
+# between them is not.
+cat > "$TMP/formulas/after-json.toml" <<'FIX'
+```json
+{"a": 1}
+```
+```bash
+for x in $LIST; do echo "$x"; done
+```
+for x in $LIST; do echo "$x"; done
+```bash
+for y in $LIST; do echo "$y"; done
+```
+FIX
+runf "$TMP/formulas/after-json.toml"
+eq "$RC" 1 "the shell blocks after a non-shell block are scanned"
+for n in 5 9; do
+    has "$OUT" "after-json.toml:$n:" "after-json.toml line $n is reported"
+done
+hasnt "$OUT" "after-json.toml:7:" "the prose between them is not"
+
+# A canary loop goes in before the closing fence of every block in every
+# in-scope file of this checkout, and another just after it. The scan must
+# report the canary inside each shell block and no other: a fence misread
+# that skips a shell block hides its canary, and one that runs past the end
+# of a block reports the canary after it. The test pairs the fences with a
+# tracker of its own, so a fence-state error in the detector cannot also
+# decide where the canaries go.
+FUF_ROOT="$(cd "$HERE/.." && pwd)"
+FCAN="$TMP/fuf-canary"
+mkdir -p "$FCAN"
+: > "$FCAN/.want"
+planted=()
+while IFS= read -r p; do
+    case "$p" in
+        specs/* | */specs/* | generated/* | */generated/* \
+        | base-snapshots/* | */base-snapshots/*) continue ;;
+        formulas/*.toml | */formulas/*.toml \
+        | template-fragments/*.template.md | */template-fragments/*.template.md \
+        | agents/*/prompt.template.md | */agents/*/prompt.template.md \
+        | skills/*/SKILL.md | */skills/*/SKILL.md \
+        | docs/gascity-dispatch-containment.md) ;;
+        *) continue ;;
+    esac
+    mkdir -p "$(dirname "$FCAN/$p")"
+    awk -v want="$FCAN/.want" -v m="$FCAN/$p" '
+        function shell_fence(l,   lang) {
+            lang = l
+            sub(/^[[:space:]]*```[[:space:]]*/, "", lang)
+            sub(/[[:space:]].*$/, "", lang)
+            return (lang == "" || lang == "bash" || lang == "sh" || lang == "shell")
+        }
+        /^[[:space:]]*```/ {
+            if (open) {
+                print "for c in $CANARY; do :; done"; n++
+                if (shell) print m ":" n >> want
+                print; n++
+                print "for c in $CANARY; do :; done"; n++
+                open = 0
+                next
+            }
+            open = 1; shell = shell_fence($0)
+        }
+        { print; n++ }
+    ' "$FUF_ROOT/$p" > "$FCAN/$p"
+    planted+=("$FCAN/$p")
+done < <(git -C "$FUF_ROOT" ls-files)
+sort "$FCAN/.want" > "$FCAN/.want.sorted"
+"$DET_FUF" ${planted[@]+"${planted[@]}"} | cut -d: -f1,2 | sort > "$FCAN/.got"
+FENCES="$(grep -c . "$FCAN/.want.sorted")"
+if [ "$FENCES" -gt 0 ]; then
+    ok "the checkout has shell blocks to plant ($FENCES in ${#planted[@]} files)"
+else
+    bad "the checkout has shell blocks to plant" "no in-scope shell block found under $FUF_ROOT"
+fi
+if cmp -s "$FCAN/.want.sorted" "$FCAN/.got"; then
+    ok "the canary inside every shell block is reported, and no other canary is"
+else
+    bad "the canary inside every shell block is reported, and no other canary is" "$(diff "$FCAN/.want.sorted" "$FCAN/.got" | head -20)"
+fi
 
 echo "── pr-post-bypass: what is a finding ──"
 
