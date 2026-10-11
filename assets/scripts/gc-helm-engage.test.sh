@@ -100,8 +100,7 @@ mkdir -p "$TMP/bin"
 # argv; `bd update --assignee` records the assignee to $ASSIGNEE so the read-back
 # `bd show tk-vis` reflects it, the way the real store would. $VIS_STATUS drives
 # the busy guard. Every session/mutating call is appended to $CALLS.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 SNAME="gc-toolkit__converse-1"
 SID="gc-77"
 # A mkdir lock, so two concurrent engages see one atomic check-and-write: the

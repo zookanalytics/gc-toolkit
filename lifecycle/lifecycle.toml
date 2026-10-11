@@ -301,11 +301,12 @@ issue_comment_watermark_key = "pr_issue_comment_watermark"
 # the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
-# child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
-# the merge until it closes — the child through a blocks edge, the visit through
-# the pr_number stamp merge.sh's in-flight-holder probe reads. A visit takes no
-# blocks edge: escalate.sh files it depending on its subject, so an edge back
-# would be a cycle.
+# child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
+# no fix pool, or the PR head branch unresolved). Either holds the merge until it
+# closes — the child through a blocks edge, the visit through the pr_number stamp
+# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge:
+# escalate.sh files it depending on its subject, so an edge back would be a
+# cycle.
 disposition_key = "pr_comment_disposition"
 
 [machine_axis]
@@ -337,6 +338,33 @@ machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
 
+[conversation]
+# Where the exchange with the operator stands, recorded on the anchor by
+# pr-facts.sh against the [posture] watermarks. A dated key,
+# `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
+# moved on never reads as current, and the board's board.prConversation gates it
+# on the pr.machine head the same way the approval clause gates the posture.
+conversation_key = "pr.conversation"
+# The values pr-facts.sh records, derived from the watermarks and the routing
+# disposition each pass:
+#   quiet        no human utterance in any of the three id spaces — and a pre-open
+#                anchor, where no PR yet exists to speak on
+#   outstanding  a human utterance sits above its space's watermark, or a batch
+#                routed to a fix unit that has not closed yet — the city still
+#                working it, the coarser truth, never collapsed into quiet
+#   answered     the routed fix unit has closed — a rework child when its branch
+#                lands, a visit when a person resolves it — so the city's reply is
+#                there to look at. A head move alone is not answered: a merge-in of
+#                the base or an operator push leaves the fix unit open.
+# The position re-derives from the disposition, which lands in the same
+# transition as the watermark it routes past, so a routed batch survives a
+# dropped conversation write; an anchor with no disposition and no recorded
+# position stays unknown until a new utterance.
+# asking is NOT here: it is the demand edge, read from the graph with no key of
+# its own. covered is NOT here: it waits on a comment-to-bead link nothing
+# records yet, so an utterance the city works reads outstanding until then.
+conversations = ["quiet", "outstanding", "answered"]
+
 [dated_keys]
 # Keys in the shape <value>@<oid>@<since>. The queue the helm board renders is
 # ordered by how long a row has been owed, so a cause of an owed row has to
@@ -344,7 +372,7 @@ writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle
 # rather than in a key beside it: a timestamp that can be written when the value
 # is not ends up dating a state that no longer holds, with nothing in either key
 # saying so.
-keys = ["pr.machine", "pr_posture"]
+keys = ["pr.machine", "pr.conversation", "pr_posture"]
 # lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
 # the existing instant while the value and the oid both hold, stamp the current
 # one when either differs. Set, preserve and clear all fall out of it — the
@@ -567,7 +595,8 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
+  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "signoff_verdict", "visual",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -588,6 +617,15 @@ keys = [
 #   back before the irreversible dismissal, so no dismissal goes unrecorded. A
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
+# approval_dismissed — on a validation-pass bead, the outside approvals that
+#   pass dismissed when it ruled a fresh whole-diff review warranted: the GitHub
+#   review ids, comma-separated. A lone id can read back as a number, so a
+#   reader compares it with tostring. Written by approval-withdraw.sh and read
+#   back before it notes the judgment on the anchor and before the first
+#   irreversible dismissal. A retry of the same pass reads it and dismisses only
+#   those reviews, so it never dismisses an approval given after them. Absent
+#   means the pass dismissed nothing: it converged, or no approval stood. Never
+#   cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -708,8 +746,10 @@ keys = [
   # validator may overrule or defer a human objection, or send it to them, never
   # in silence.
   "finding.reply",
-  # Set by pr-facts.sh's write-back once it has posted finding.reply, so a later
-  # pass does not answer the same thread twice.
+  # Set by pr-facts.sh's write-back once finding.reply's own text is on the PR,
+  # posted by it or found there, and dropped when that text is missing and its
+  # post fails. The write-back reads the reply back off GitHub on every pass, so
+  # this records the read for the review dismissal, which waits for it.
   "finding.reply_posted",
   # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
   # a machine finding ruled must-fix or deferred to its PR: a file-level review
@@ -843,11 +883,14 @@ keys = [
 ]
 
 [metadata.pr_round_trip]
+# pr.machine and pr.conversation are the two round-trip axes, both dated keys
+# (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
+# pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
 # pr.machine_reason is the human sentence naming why a `blocked` machine verdict
 # cannot merge (which thread, which base, which blocker). It is plain, not dated:
 # it is read only while pr.machine is `blocked`, and merge.sh writes the two
 # together and clears the reason whenever it records any other verdict.
-keys = ["pr.machine", "pr.machine_reason"]
+keys = ["pr.machine", "pr.machine_reason", "pr.conversation"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
@@ -871,8 +914,10 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
-# rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
-# in-flight-holder count. The pack never writes or clears either.
+# rebasing or dispatching it, save the one dispatch pr-facts.sh files whatever
+# holds the anchor: a review-feedback batch's rework child, which brings the
+# branch current by merge as it answers. tracking_only opts a PR out of
+# merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
@@ -917,15 +962,17 @@ keys = [
 #   presence proves the reaction was ATTEMPTED, not that it landed: a record
 #   present with no gc.proactive_reaction=1 is a part-way failure, and the run
 #   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
-#   not this key. Read by that script's own guard, tools/gc-proactive.sh and
-#   mol-first-reaction.toml. Never cleared.
+#   not this key. Read by that script's own guard, tools/gc-proactive.sh,
+#   mol-first-reaction.toml and bead-context.sh. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
-#   visit it named, and the timestamp. A ruling or recommend that files its own
-#   gate stamps _target in a second write, once the gate exists. _target and _at
-#   are read only to compose the "already landed" message; _reason has no reader
-#   and is the one collapse candidate this surface still carries. Never cleared.
-#   _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, named agent, waiting-ids,
+#   human gate or visit it named, and the timestamp. A ruling or recommend that
+#   files its own gate stamps _target in a second write, once the gate exists.
+#   _reason is the closer's brief: mol-validate-close.toml reads it as the claim
+#   it re-derives against live state before it closes or escalates a bead the
+#   close exit handed it. first-reaction-dispose.sh reads _target and _at to
+#   compose its "already landed" message. bead-context.sh returns every key of
+#   the record with a subject's context. Never cleared. _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an

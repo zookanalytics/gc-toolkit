@@ -56,8 +56,7 @@ export PATH="$BIN:$PATH"
 # `gc bd list --json` emits metadata as an OBJECT, which is what the running
 # binary does; a stub that emitted a string would let a parse the tool never
 # needs pass for a parse it does.
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 # A store selector travels right after the top-level command group. Strip it,
 # keeping the group as $1 so the case key stays "<group> <sub>", and resolve it
@@ -107,8 +106,7 @@ case "${1:-} ${2:-}" in
   *) exit 0 ;;
 esac
 STUB
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 set -u
 [ "${STUB_PR_RC:-0}" = "0" ] || { echo "gh: simulated failure" >&2; exit "${STUB_PR_RC}"; }
 cat "${STUB_PR_BRANCHES:?}"
@@ -413,8 +411,7 @@ new_repo
 mk_wt "$REPO/wt/liar" polecat/liar
 bead b-liar closed 100 "$REPO/wt/liar" polecat/liar
 REAL_GIT="$(command -v git)"
-cat > "$BIN/git" <<STUB
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<STUB
 for a in "\$@"; do [ "\$a" = "remove" ] && found=1; done
 if [ "\${found:-}" = "1" ]; then exit 0; fi
 exec "$REAL_GIT" "\$@"
@@ -518,7 +515,9 @@ mk_wt "$REPO/wt/second" polecat/second
 bead b-first  closed 100 "$REPO/wt/first"  polecat/first
 bead b-second closed 100 "$REPO/wt/second" polecat/second
 REAL_GIT="$(command -v git)"
-printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_GIT" > "$BIN/git"
+# 1.1s per call: the budget is measured in whole seconds, and a call that takes
+# more than one of them is past a one-second budget whichever tick it starts on.
+printf '#!/bin/sh\nsleep 1.1\nexec %s "$@"\n' "$REAL_GIT" > "$BIN/git"
 chmod +x "$BIN/git"
 OUT="$(WORKTREE_REAP_BUDGET=1 run)"
 rm -f "$BIN/git"
