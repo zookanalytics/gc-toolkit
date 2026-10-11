@@ -107,7 +107,9 @@ with the head it reviewed for; that pin wins when present. The diff you read,
 the tests you run, and the OID you hand off are all that one commit — a verdict
 recorded against a head you never read certifies unreviewed code. The tests run
 in a worktree detached at the pin, inside this review's workspace: a directory
-named for the review bead, which every later shell finds again by that id:
+named for the review bead, which every later shell finds again by that id. A
+verdict an earlier attempt at this review left there is removed, so only this
+attempt's verdict can satisfy the review step's close:
 ```bash
 git fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
@@ -123,6 +125,7 @@ done
 REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
+rm -f "$(dirname "$REVIEW_WT")/findings.md" "$(dirname "$REVIEW_WT")/findings.json"
 ```
 
 **5. Read the intent.** The anchor bead (`metadata.anchor_bead`), the PR or

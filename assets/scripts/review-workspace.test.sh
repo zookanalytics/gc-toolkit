@@ -11,7 +11,8 @@
 # subtree, while another worktree's stale registration is left for
 # worktree-reap; the formulas' own add and remove lines, run verbatim; the
 # review step's close, run verbatim, which refuses until both verdict files are
-# in the workspace, and the verdict step handing signoff.sh those files; and
+# in the workspace, the verdict step handing signoff.sh those files, and
+# load-dispatch removing the verdict files an earlier attempt left; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -232,6 +233,19 @@ WS_LINE='review-workspace.sh" path --review-bead "$REVIEW_BEAD")'
 has "$(step_text review)" "$WS_LINE" "the review step finds the workspace by the review bead"
 has "$(step_text verdict-and-drain)" "$WS_LINE" "so does the verdict step"
 has "$(step_text verdict-and-drain)" '--notes-file "$WS/findings.md" --findings-file "$WS/findings.json"' "the verdict step hands signoff.sh the files the review step's close checked"
+# A failed verdict leaves the workspace for the next attempt, so load-dispatch
+# removes the verdict files it finds there and keeps the worktree.
+CLEAR="$(step_text load-dispatch | grep -E '^rm -f .*findings\.md')"
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fv REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
+printf 'VERDICT: approve\n' > "$WS/gc-review-tk-fv/findings.md"; printf '[]\n' > "$WS/gc-review-tk-fv/findings.json"
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fv REVIEWED_OID="$C1" bash -c "$ADD
+$CLEAR" >/dev/null 2>&1
+if exists "$WS/gc-review-tk-fv/findings.md" || exists "$WS/gc-review-tk-fv/findings.json"; then
+    bad "load-dispatch removes an earlier attempt's verdict files"
+else
+    ok "load-dispatch removes an earlier attempt's verdict files"
+fi
+eq "$(git -C "$WS/gc-review-tk-fv/wt" rev-parse HEAD 2>/dev/null)" "$C1" "and keeps the review's worktree"
 
 # --- reap ----------------------------------------------------------------------
 export REVIEW_WORKSPACE_DIR="$TMP/ws-reap"

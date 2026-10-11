@@ -48,7 +48,9 @@ mol-review makes the worktree once, in its load-dispatch step, and every later
 shell rebuilds the directory's path from the bead id this way. That is also
 what carries the verdict across the review step's close: the close refuses
 until both verdict files are in the directory, so a session that compacts or
-restarts before the verdict step still finds them there.
+restarts before the verdict step still finds them there. The load-dispatch step
+removes any verdict files an earlier attempt at the same review left in the
+directory, so only the current attempt's verdict satisfies the close.
 
 ## When it is removed
 
