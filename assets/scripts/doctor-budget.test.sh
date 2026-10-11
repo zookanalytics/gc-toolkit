@@ -142,8 +142,7 @@ for i in 1 2 3 4 5 6; do
     printf '{"name":"r%s","path":"%s/rigs/r%s"}' "$i" "$TMP" "$i" >> "$TMP/rigs.json"
 done
 printf ']}' >> "$TMP/rigs.json"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "rig list") cat "$RIGS_JSON" ;;
   "bd list")  sleep 60 ;;            # the wedged data plane

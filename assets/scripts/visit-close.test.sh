@@ -39,9 +39,10 @@ mkdir -p "$BIN"
 #   FAIL_XFER   an update carrying pr_number exits 0 but records nothing (the
 #               fold hold-transfer's silent drop)
 #   FAIL_CLOSE  the close logs but the status never becomes closed
+#   RECLOSE_REFUSED  a close of a bead already closed exits 1 (bd answers it
+#               as a no-op success; this knob covers a store that refuses it)
 #   NEED_FORCE  a plain close is refused; only a --force close takes
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
@@ -63,6 +64,9 @@ case "$sub" in
         if [ -n "${NEED_FORCE:-}" ] && [ "$forced" -eq 0 ]; then
             printf 'close-refused %s\n' "$*" >>"$LOG"; exit 1
         fi
+        if [ -n "${RECLOSE_REFUSED:-}" ] && [ "$(cat "$MDIR/$id.status" 2>/dev/null)" = "closed" ]; then
+            printf 'reclose-refused %s\n' "$*" >>"$LOG"; exit 1
+        fi
         printf 'close %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_CLOSE:-}" ] || { mkdir -p "$MDIR"; printf 'closed' >"$MDIR/$id.status"; } ;;
     show)
@@ -70,7 +74,7 @@ case "$sub" in
         s="open"; [ -f "$MDIR/$id.status" ] && s=$(cat "$MDIR/$id.status")
         jq -nc --arg id "$id" --arg s "$s" --argjson m "$m" \
           '[{id:$id,status:$s,metadata:$m}]' ;;
-    *) exit 2 ;;
+    *) printf 'other %s\n' "$*" >>"$LOG"; exit 2 ;;
 esac
 STUB
 chmod +x "$BIN/gc"
@@ -133,8 +137,7 @@ echo "── the work-record outcome never holds the close ──"
 #                   ones land
 WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
 mkdir -p "$WBIN"
-cat >"$WBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$WBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update)
@@ -213,6 +216,23 @@ has "the forced close is the one that took" 'close v-x --reason dismissed: opera
 reset; RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" NEED_FORCE=1 bash "$SUT" --visit v-x --outcome dismissed --reason "operator ended it" >/dev/null 2>&1 ) || RC=$?
 is "without --force a refused close is not silently a success" "$RC" "4"
+
+# A visit someone closed by hand carries no outcome, and visit-close.sh is the
+# repair the role prompts name for it: it records both keys on the closed visit
+# and leaves the close standing. The store answers the re-close as a no-op, or
+# refuses it; either way the status read decides, and nothing reopens the visit.
+echo "── on a visit already closed by hand it records the outcome and exits 0 ──"
+for knob in "" RECLOSE_REFUSED; do
+    reset; mkdir -p "$LOG.m"; printf 'closed' >"$LOG.m/v-x.status"; RC=0
+    ( PATH="$BIN:$PATH" LOG="$LOG" env ${knob:+"$knob=1"} bash "$SUT" --visit v-x --outcome moot \
+        --reason "filed in error" >/dev/null 2>&1 ) || RC=$?
+    label="${knob:-re-close is a no-op}"
+    is "$label: it exits 0" "$RC" "0"
+    has "$label: the outcome word is stamped" 'set-metadata gc.outcome=moot' "$LOG"
+    has "$label: the board-visible reason is stamped" 'set-metadata gc.outcome_reason=filed in error' "$LOG"
+    hasnt "$label: no status write reopens the visit" '--status' "$LOG"
+    hasnt "$label: no other bd verb runs" 'other ' "$LOG"
+done
 
 echo "── fold: the merge-hold keys move to the holder, then the folded visit closes ──"
 reset

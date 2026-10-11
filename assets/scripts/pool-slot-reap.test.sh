@@ -121,8 +121,7 @@ CLOCK
 chmod +x "$TMP/clock/date"
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 all="$*"
 advance() { echo $(( $(cat "$CLOCK_FILE") + $1 )) > "$CLOCK_FILE"; }
 case "$1 ${2:-}" in

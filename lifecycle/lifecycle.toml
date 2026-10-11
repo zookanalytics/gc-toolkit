@@ -301,11 +301,12 @@ issue_comment_watermark_key = "pr_issue_comment_watermark"
 # the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
-# child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
-# the merge until it closes — the child through a blocks edge, the visit through
-# the pr_number stamp merge.sh's in-flight-holder probe reads. A visit takes no
-# blocks edge: escalate.sh files it depending on its subject, so an edge back
-# would be a cycle.
+# child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
+# no fix pool, or the PR head branch unresolved). Either holds the merge until it
+# closes — the child through a blocks edge, the visit through the pr_number stamp
+# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge:
+# escalate.sh files it depending on its subject, so an edge back would be a
+# cycle.
 disposition_key = "pr_comment_disposition"
 
 [machine_axis]
@@ -594,7 +595,8 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
+  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "signoff_verdict", "visual",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -615,6 +617,15 @@ keys = [
 #   back before the irreversible dismissal, so no dismissal goes unrecorded. A
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
+# approval_dismissed — on a validation-pass bead, the outside approvals that
+#   pass dismissed when it ruled a fresh whole-diff review warranted: the GitHub
+#   review ids, comma-separated. A lone id can read back as a number, so a
+#   reader compares it with tostring. Written by approval-withdraw.sh and read
+#   back before it notes the judgment on the anchor and before the first
+#   irreversible dismissal. A retry of the same pass reads it and dismisses only
+#   those reviews, so it never dismisses an approval given after them. Absent
+#   means the pass dismissed nothing: it converged, or no approval stood. Never
+#   cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -903,8 +914,10 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
-# rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
-# in-flight-holder count. The pack never writes or clears either.
+# rebasing or dispatching it, save the one dispatch pr-facts.sh files whatever
+# holds the anchor: a review-feedback batch's rework child, which brings the
+# branch current by merge as it answers. tracking_only opts a PR out of
+# merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
