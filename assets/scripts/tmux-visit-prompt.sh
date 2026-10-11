@@ -3,10 +3,11 @@
 # durable conversation. Usage: tmux-visit-prompt.sh <config-dir>
 # Bound by tmux-bindings.sh (run-shell -b). A first popup picks the target rig,
 # because the rig is the scope the report is filed against — defaulted to the
-# pane's own rig, offering the non-hq rigs and tagging any that is suspended or
-# not running. A suspended rig keeps its beads store, so a report filed there is
-# recorded and triaged on resume; the hq store is withheld because it runs no
-# reaction pool, though its bead ids stay valid subjects. The rig set is read
+# pane's own rig, offering the non-hq rigs and tagging any that is suspended. A
+# suspended rig keeps its beads store, so a report filed there is recorded and
+# triaged on resume. A rig with no agents running is idle, not paused, so it is
+# offered untagged. The hq store is withheld because it runs no reaction pool,
+# though its bead ids stay valid subjects. The rig set is read
 # from `gc rig list --json`, whose cost is the per-rig liveness probe, and is
 # cached for GC_VISIT_RIG_CACHE_TTL seconds so a burst of presses opens the
 # picker without re-paying that wait. A second popup then runs `gum write`
@@ -35,9 +36,9 @@ INTAKE_TIMEOUT="${GC_VISIT_INTAKE_TIMEOUT:-300}"
 
 # Seconds to cache the rig set. `gc rig list --json` costs a per-rig liveness
 # probe, and asking the operator to pick a rig FIRST would pay it before the
-# popup opens; caching it lets a burst of presses reuse one lookup. running and
-# suspended can go stale within the window, but the intake validates the actual
-# target, so the staleness is bounded and benign. 0 disables the cache.
+# popup opens; caching it lets a burst of presses reuse one lookup. The
+# suspended tag can go stale within the window, but the intake validates the
+# actual target, so the staleness is bounded and benign. 0 disables the cache.
 RIG_CACHE_TTL="${GC_VISIT_RIG_CACHE_TTL:-900}"
 case "$RIG_CACHE_TTL" in ''|*[!0-9]*) RIG_CACHE_TTL=900 ;; esac
 
