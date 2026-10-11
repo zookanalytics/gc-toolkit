@@ -398,15 +398,20 @@ declared lane, since the whole diff owes a fresh look. Superseding only the
 `human` pseudo-lane would leave the real checks green and let the anchor merge
 without the review this ruling requires.
 
-Either shape then withdraws the approvals on the PR. An approval stands across
+Either shape first withdraws the approvals on the PR. An approval stands across
 later pushes, so one left standing would land the change this ruling calls for
 without its approver seeing it. It would also keep the fresh review from
 pouring: lane-state.sh reads an APPROVED GitHub review as the green of any lane
 with no backing of its own, and gate-ensure.sh dispatches no review to a lane
 that reads green. `approval-withdraw.sh` dismisses every approval on the PR
-from an account other than the city's that has not been dismissed, notes the
-dismissal on the anchor, and records the dismissed reviews on this pass. On a
+from an account other than the city's that has not been dismissed, records the
+dismissed reviews on this pass, and notes the dismissal on the anchor. On a
 PR with no approval standing it changes nothing.
+
+The supersede runs only once the withdrawal exits 0. It retires the lane's own
+backing, so over an approval still standing the lane would read green on that
+approval alone, and only the `blocks` edge this pass holds on the anchor would
+keep the change from merging on it.
 
 Write `REASON` for the approver. It opens the dismissal message they read on
 GitHub, and it is the note on each review the supersede retires. Say in plain
@@ -414,20 +419,20 @@ words what the change will be and why it needs another look.
 ```bash
 # >>> validate-not-converged
 REASON="<what the change will be, and why it needs a fresh whole-diff look>"
-if [ "$LANE" = human ]; then
+"$SCRIPTS/approval-withdraw.sh" --pass "$VALIDATION_PASS" --reason "$REASON" && if [ "$LANE" = human ]; then
   "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "$REASON"
 else
   "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "$REASON"
-fi && "$SCRIPTS/approval-withdraw.sh" --pass "$VALIDATION_PASS" --reason "$REASON"
+fi
 # <<< validate-not-converged
 ```
-A non-zero exit means the ruling is not fully recorded: a lane may still read
-green, or an approval may still stand over the change. Do not close this step.
+A non-zero exit means the ruling is not fully recorded: an approval may still
+stand over the change, or a lane may still read green. Do not close this step.
 Append what failed to the validation-pass bead (`gc bd update
 "$VALIDATION_PASS" --append-notes ...`) and leave the chain open for the next
-claim. That claim re-runs this block. The supersede finds nothing left to
-retire, and the withdrawal dismisses only the approvals this pass recorded,
-never one given after them.
+claim. That claim re-runs this block. The withdrawal dismisses only the
+approvals this pass recorded, never one given after them, and a supersede that
+already landed finds nothing left to retire.
 
 Record exactly one outcome: back-lane on a converged reviewer's batch, nothing on
 a converged human batch, and the block above on any batch that has not
@@ -446,7 +451,7 @@ done
 **Exit criteria:** convergence ruled and recorded through review-outcome.sh — a
 reviewer's batch backs (converged) or supersedes (not) its lane; a human batch
 supersedes every lane (not converged) or writes nothing (converged). A batch
-that has not converged has also withdrawn every outside approval on the PR
+that has not converged has first withdrawn every outside approval on the PR
 through approval-withdraw.sh. The anchor is not closed, routed or marked, and
 this step is closed.
 """

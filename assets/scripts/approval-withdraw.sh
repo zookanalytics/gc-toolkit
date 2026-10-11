@@ -11,7 +11,8 @@
 # review is warranted. Without the dismissal the old approval would merge the
 # reworked PR. It would also keep the fresh review the ruling ordered from being
 # dispatched, because lane-state.sh reads an APPROVED GitHub review as the green
-# of a lane with no backing of its own.
+# of a lane with no backing of its own. So the validator runs this before it
+# supersedes the lane, and supersedes only once this exits 0.
 #
 # WHAT IT DISMISSES. Every approval on the PR that has not been dismissed, from
 # every account other than the city's: standing_approvals in review-verdict.sh,

@@ -19,11 +19,11 @@
 #   pr_url naming another PR, a malformed stamp and bad usage dismiss nothing.
 # the mol-validate block (formulas/mol-validate.toml, rule-convergence), run
 # verbatim against stub scripts:
-#   a reviewer's batch supersedes its lane and a human batch every lane, and
-#   either then withdraws the approvals with the same reason; a supersede that
-#   fails withdraws nothing, and a withdrawal that fails fails the block; no
-#   other place in the formula runs the withdrawal, so a converged batch keeps
-#   its approval.
+#   either shape first withdraws the approvals, then with the same reason
+#   supersedes its lane (a reviewer's batch) or every lane (a human batch); a
+#   withdrawal that fails supersedes nothing, and a supersede that fails fails
+#   the block; no other place in the formula runs the withdrawal, so a
+#   converged batch keeps its approval.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -278,16 +278,18 @@ runblock() { # <lane> — prints "<rc>|<log>"
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/block.log")"
 }
 eq "$(runblock correctness)" \
-   "0|review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;approval-withdraw --pass VP1 --reason the reason;" \
-   "a reviewer's batch supersedes its lane, then withdraws the approvals with the same reason"
+   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
+   "a reviewer's batch withdraws the approvals, then supersedes its lane with the same reason"
 eq "$(runblock human)" \
-   "0|review-outcome supersede-anchor --anchor AN1 --reason the reason;approval-withdraw --pass VP1 --reason the reason;" \
-   "a human batch supersedes every lane, then withdraws the approvals"
-eq "$(review_outcome_rc=2 runblock correctness)" "2|review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
-   "a supersede that fails withdraws nothing and fails the block"
-eq "$(approval_withdraw_rc=1 runblock human)" \
-   "1|review-outcome supersede-anchor --anchor AN1 --reason the reason;approval-withdraw --pass VP1 --reason the reason;" \
-   "a withdrawal that fails fails the block"
+   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --reason the reason;" \
+   "a human batch withdraws the approvals, then supersedes every lane"
+eq "$(approval_withdraw_rc=1 runblock correctness)" "1|approval-withdraw --pass VP1 --reason the reason;" \
+   "a withdrawal that fails supersedes nothing and fails the block, so no lane reads green on the approval it left standing"
+eq "$(approval_withdraw_rc=1 runblock human)" "1|approval-withdraw --pass VP1 --reason the reason;" \
+   "…on a human batch too"
+eq "$(review_outcome_rc=2 runblock human)" \
+   "2|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --reason the reason;" \
+   "a supersede that fails after the withdrawal fails the block"
 STEP=$(awk '/^id = "rule-convergence"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")
 has "$STEP" '[ -x "$c/assets/scripts/approval-withdraw.sh" ]' "the step resolves its scripts only where the withdrawal is present"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$TOML")" "1" "the formula runs the withdrawal in one place"
