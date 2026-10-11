@@ -20,20 +20,25 @@
 # generated/ (render duplicates, reported at their source).
 #
 # A finding is one `bd update` (bare, as `gc bd`, or through a wrapper such as
-# `gc_bd`) whose first argument is a variable holding a bead that a `bd create`
-# with no --metadata filed, and whose own words include --set-metadata. The
+# `gc_bd`) whose id is a variable holding a bead that a `bd create` with no
+# --metadata filed, and whose own words include --set-metadata. The id is the
+# first word after any flags, so a write that names its store first
+# (`--db "$DB"`, or `${STORE_DB:+--db "$STORE_DB"}`) is read the same way. The
 # variable holds that bead when it was assigned from the create's command
-# substitution, or from a substitution that reads `.id` out of a variable that
-# holds it (the `VISIT=$(printf '%s' "$VISIT_JSON" | jq … .id …)` step). Any other
-# assignment to the variable, a create that carries --metadata, and the start of
-# a shell function forget it, so the scan tracks a bead only along the straight
-# line from its create.
+# substitution, quoted or not, or from a substitution that reads `.id` out of a
+# variable that holds it (the `VISIT=$(printf '%s' "$VISIT_JSON" | jq … .id …)`
+# step). Any other assignment to the variable, a create that carries
+# --metadata, and the start of a shell function forget it, so the scan tracks a
+# bead only along the straight line from its create.
 #
 # The scan folds continuation lines, carries quote state across lines, and
 # skips comments and here-doc bodies. Quoted text is data, so a message that
 # quotes the shape is not a finding; a double-quoted word that is exactly one
 # variable (`"$VISIT"`) stays a word, because that is how a script names the
-# bead it writes. A fence boundary resets the scan.
+# bead it writes, and one that is exactly one substitution (`"$(…)"`) stays
+# that substitution. The commands of one line are judged in the order they
+# run, after the words that only open one (if, then, do, a group, a function
+# header). A fence boundary resets the scan.
 #
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
 # be scanned.
@@ -46,15 +51,26 @@ SCAN_AWK='
 # quotes too, and its `)` returns to the context below. Code characters are
 # appended to the statement buffer; quoted text is not, except that a
 # double-quoted span holding exactly one variable reference is kept as that
-# reference.
-function reset_lex() { top = 1; st[1] = "c"; nhd = 0; hdi = 0; inhd = 0; stmt = ""; raw = ""; sline = 0; dq = ""; dqx = 0 }
+# reference, and one holding exactly one `$(…)` is kept as that substitution.
+# Each double-quoted level keeps its own state, so a span nested inside a
+# substitution inside another span does not overwrite the outer one: dqv holds
+# the literal text of the span, dqn counts its substitutions, and dqp is where
+# the `$(` of the first one sits in the statement buffer.
+function reset_lex() { top = 1; st[1] = "c"; nhd = 0; hdi = 0; inhd = 0; stmt = ""; raw = ""; sline = 0 }
 function reset_track(   k) { for (k in trk) delete trk[k] }
 
 function emit(s) { stmt = stmt s }
 
-function dq_render(   v) {
-    v = dq
-    if (!dqx && (v ~ /^\$[A-Za-z_][A-Za-z0-9_]*$/ || v ~ /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/)) return " " v " "
+function dq_open() { st[++top] = "d"; dqv[top] = ""; dqn[top] = 0; dqp[top] = 0 }
+
+# Closes the double-quoted span at the top of the stack and renders it.
+function dq_close(   v, n, p) {
+    v = dqv[top]; n = dqn[top]; p = dqp[top]; top--
+    if (n == 1 && p > 0 && v == "") return " "
+    # The `$(` the span opened with stands for a substitution the span does not
+    # hold alone, so it is no longer an assignment of the substitution.
+    if (p > 0) stmt = substr(stmt, 1, p - 1) "_" substr(stmt, p + 1)
+    if (n == 0 && (v ~ /^\$[A-Za-z_][A-Za-z0-9_]*$/ || v ~ /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/)) return " " v " "
     return " _ "
 }
 
@@ -66,17 +82,21 @@ function lex(line,   n, i, c, ctx, prev, r, d, tok) {
         if (c == "\\") {
             if (i == n) { cont = 1; break }
             i++; prev = "\\"
-            if (ctx == "d") { dq = dq "\\" substr(line, i, 1) } else emit("_")
+            if (ctx == "d") { dqv[top] = dqv[top] "\\" substr(line, i, 1) } else emit("_")
             continue
         }
         if (ctx == "d") {
-            if (c == "\"") { top--; emit(dq_render()); dq = ""; dqx = 0; prev = c; continue }
-            if (c == "$" && substr(line, i + 1, 1) == "(") { i++; dqx = 1; st[++top] = "c"; emit(" "); prev = "("; continue }
-            dq = dq c; continue
+            if (c == "\"") { emit(dq_close()); prev = c; continue }
+            if (c == "$" && substr(line, i + 1, 1) == "(") {
+                i++; dqn[top]++
+                if (dqn[top] == 1 && dqv[top] == "") { dqp[top] = length(stmt) + 1; emit("$(") } else emit(" ")
+                st[++top] = "c"; prev = "("; continue
+            }
+            dqv[top] = dqv[top] c; continue
         }
         if (c == "#" && prev ~ /[[:space:];&|(]/) break
         if (c == "\047") { st[++top] = "s"; emit(" "); prev = c; continue }
-        if (c == "\"") { st[++top] = "d"; dq = ""; dqx = 0; prev = c; continue }
+        if (c == "\"") { dq_open(); prev = c; continue }
         if (c == "(") { st[++top] = "c"; emit(c); prev = c; continue }
         if (c == ")") {
             if (top > 1) top--
@@ -104,10 +124,36 @@ function one_command(s, p,   t) {
     return t
 }
 
-function judge(s, r, ln,   asg, rhs, k, pat, cmd, src) {
+# Splits a statement into its commands at the separators outside any
+# parenthesis, so a create and the stamp after it on one line are judged in
+# order. Returns the count; the commands are in parts[1..n].
+function split_commands(s, parts,   n, i, c, d, cur, two) {
+    n = 0; d = 0; cur = ""
+    for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1); two = substr(s, i, 2)
+        if (c == "(") d++
+        else if (c == ")") { if (d > 0) d-- }
+        else if (d == 0 && (two == "&&" || two == "||" || two == ";;")) { parts[++n] = cur; cur = ""; i++; continue }
+        else if (d == 0 && (c == ";" || c == "&" || c == "|")) { parts[++n] = cur; cur = ""; continue }
+        cur = cur c
+    }
+    parts[++n] = cur
+    return n
+}
+
+function judge(s, r, ln,   parts, n, k) {
     if (s ~ /^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/) reset_track()
+    n = split_commands(s, parts)
+    for (k = 1; k <= n; k++) judge_command(parts[k], r, ln)
+}
+
+function judge_command(s, r, ln,   asg, rhs, k, pat, cmd, src) {
+    # The words that can open a command without being its name: a function
+    # header, a group, a negation, and the reserved words of if, while and for.
+    sub(/^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/, "", s)
+    while (match(s, /^[[:space:]]*(if|elif|while|until|then|do|else|[{]|!)([[:space:]]|$)/)) s = substr(s, RSTART + RLENGTH)
     for (k in trk) {
-        pat = "(^|[^[:alnum:]_.-])(gc[[:space:]]+bd|gc_bd|bd)[[:space:]]+update[[:space:]]+[$][{]?" k "[}]?([^[:alnum:]_]|$)"
+        pat = "(^|[^[:alnum:]_.-])(gc[[:space:]]+bd|gc_bd|bd)[[:space:]]+update[[:space:]]+" UPDATE_FLAGS "[$][{]?" k "[}]?([^[:alnum:]_]|$)"
         if (match(s, pat)) {
             cmd = one_command(s, RSTART)
             if (cmd ~ /--set-metadata/) print ln "\t" k "\t" trk[k]
@@ -135,6 +181,10 @@ function judge(s, r, ln,   asg, rhs, k, pat, cmd, src) {
 
 BEGIN {
     CREATE = "(^|[^[:alnum:]_.-])(gc[[:space:]]+bd|gc_bd|bd)[[:space:]]+create([^[:alnum:]_-]|$)"
+    # The words an update can carry ahead of its id: a flag, with its value as
+    # the next word or after `=`, and a `${VAR:+…}` expansion that adds one, the
+    # form a write pinned to a store takes (`${STORE_DB:+--db "$STORE_DB"}`).
+    UPDATE_FLAGS = "((--?[A-Za-z][A-Za-z0-9_-]*(=[^[:space:]]*)?([[:space:]]+[^-[:space:]][^[:space:]]*)?|[$][{][A-Za-z_][A-Za-z0-9_]*:?[-+=?][^}]*[}])[[:space:]]+)*"
     reset_lex(); reset_track(); infence = 0; inmark = 0
 }
 

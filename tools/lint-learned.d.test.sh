@@ -2281,6 +2281,30 @@ has "$OUT" "create-then-stamp" "the finding names the rule"
 has "$OUT" "at line 2 " "the finding names the create's line"
 has "$OUT" "fix: carry the keys on the create" "the finding names the fix"
 
+# The spellings a substitution and a stamp also take: the substitution quoted
+# whole (with quotes of its own inside), a create and its stamp on one line, a
+# stamp guarded by if, and a stamp that names its store ahead of the id.
+plantcs "$TMP/cs-spellings.sh" <<'FIX'
+#!/usr/bin/env bash
+X="$(gc @CREATE@ "t" -t task --json | jq -r '.id')"
+gc bd update "$X" @STAMP@ task_kind=review
+Y=$(gc @CREATE@ "t" --json | jq -r .id); gc bd update "$Y" @STAMP@ k=v
+if Z=$(gc @CREATE@ "t" --json | jq -r .id); then gc bd update "$Z" @STAMP@ k=v; fi
+W=$(gc @CREATE@ "t" --json | jq -r .id)
+gc bd update --db "$DB" "$W" @STAMP@ k=v
+gc bd update ${STORE_DB:+--db "$STORE_DB"} "$W" --status=open @STAMP@ k=v
+gc bd update --status=closed "$W" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-spellings.sh"
+eq "$RC" 1 "the other spellings of a bare create and its stamp exit 1"
+has "$OUT" "cs-spellings.sh:3:" "a create whose substitution is quoted whole is tracked to its stamp"
+has "$OUT" "cs-spellings.sh:4:" "a create and its stamp on one line are judged in order"
+has "$OUT" "cs-spellings.sh:5:" "…and so are an assignment and a stamp inside if and then"
+has "$OUT" "cs-spellings.sh:7:" "a stamp naming its store with --db before the id is reported"
+has "$OUT" "cs-spellings.sh:8:" "…and so is one naming it through a \${VAR:+--db …} expansion"
+has "$OUT" "cs-spellings.sh:9:" "…and one with another flag before the id"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 6 "and nothing else is"
+
 # A formula recipe is run as written: a fenced create whose body spans lines,
 # then its stamp, is a finding.
 plantcs "$TMP/cs-recipe.toml" <<'FIX'
@@ -2327,6 +2351,24 @@ h() { gc bd update "$F" @STAMP@ k=v; }
 FIX
 runcs "$TMP/cs-clean.sh"
 eq "$RC" 0 "stamped creates, reassigned and other ids, unstamped writes, data and another function are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+# A quoted substitution that holds more than the create, a stamp that runs
+# before the create on its line, a quoted create that carries --metadata, and
+# a stamp whose id is another variable after the store flag are clean.
+plantcs "$TMP/cs-spellings-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+A="$(gc @CREATE@ "t" --json | jq -r .id)-suffix"
+gc bd update "$A" @STAMP@ k=v
+gc bd update "$B" @STAMP@ k=v; B=$(gc @CREATE@ "t" --json | jq -r .id)
+C="$(gc @CREATE@ "t" --metadata "$M" --json | jq -r .id)"
+gc bd update --db "$DB" "$C" @STAMP@ k=v
+D=$(gc @CREATE@ "t" --json | jq -r .id)
+gc bd update --db "$DB" "$OTHER" @STAMP@ k=v
+gc bd update "$OTHER" --append-notes "$D" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-spellings-clean.sh"
+eq "$RC" 0 "a substitution holding more than the create, a stamp before its create, a stamped create and another id are clean"
 [ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
 
 # A fence boundary ends the recipe, so a create in one fence does not reach a
