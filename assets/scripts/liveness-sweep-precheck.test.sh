@@ -84,8 +84,7 @@ bash -n "$SCRIPT" && ok "liveness-sweep-precheck.sh: valid bash" \
 # ignores BEADS_DIR, so an unpinned read on the controller answers about the
 # wrong store — the pin is worth a test of its own.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # The holder-liveness read, served before the bd guard so it is not recorded to
 # $FIXDIR/reads (the store-pin assertion counts bd reads only). GC_SESSION_FAIL =
 # an outage; default (no FAKE_SESSIONS) is a readable, empty session set.

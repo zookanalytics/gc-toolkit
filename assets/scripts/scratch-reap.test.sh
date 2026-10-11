@@ -255,7 +255,9 @@ head -c $((10 * 1024 * 1024)) /dev/zero > "$ROOT/stray.json"
 touch -d "$(iso $((NOW - 100 * HOUR)))" "$ROOT/stray.json"
 SLOWBIN="$TMP/slowbin"; mkdir -p "$SLOWBIN"
 REAL_DU="$(command -v du)"
-printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_DU" > "$SLOWBIN/du"
+# 1.1s per call: the budget is measured in whole seconds, and a call that takes
+# more than one of them is past a one-second budget whichever tick it starts on.
+printf '#!/bin/sh\nsleep 1.1\nexec %s "$@"\n' "$REAL_DU" > "$SLOWBIN/du"
 chmod +x "$SLOWBIN/du"
 OUT="$(PATH="$SLOWBIN:$PATH" SCRATCH_REAP_BUDGET=1 run)"
 if exists "$ROOT/slug-k/ancient"; then bad "over budget: tree removal still runs"; else ok "over budget: tree removal still runs"; fi

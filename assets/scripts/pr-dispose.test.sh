@@ -36,8 +36,7 @@ SUT="$SD/pr-dispose.sh"
 # serves a canned state (per PR, default OPEN), a url built from the pinned
 # --repo and a canned conversation, and logs the closing comment and the close,
 # honouring the refusal knobs. Written after harness_init so it wins on PATH.
-cat > "$BIN/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'GH'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 [ "${1:-}" = "pr" ] || { echo "gh stub: only 'pr' supported" >&2; exit 2; }

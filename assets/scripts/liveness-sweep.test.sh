@@ -33,8 +33,7 @@ mkdir -p "$TMP/bin" "$TMP/show"
 # --- gc stub -------------------------------------------------------------------
 # Serves the census reads from fixture files, `bd show` from $SHOW_DIR/<id>.json,
 # the refile guard's closed listing from $PRIOR_VISITS, and records every write.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
 case "$sub" in
@@ -114,8 +113,7 @@ chmod +x "$TMP/bin/gc"
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
 # It serves $GH_PRS verbatim, an updatedAt on every row, so a test can date the
 # open PRs and show that no age changes how their anchors classify.
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
