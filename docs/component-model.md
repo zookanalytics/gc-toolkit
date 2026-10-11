@@ -345,6 +345,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
 | `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
 | `assets/scripts/review-outcome.sh` | review | The write side of a lane's approve outcome, the bead lane-state.sh reads: `back-lane` files the closed approve outcome that greens a lane, `supersede-lane` stamps it superseded to return the lane to `unreviewed`. |
+| `assets/scripts/demo-repo-artifact.sh` | review | The demo check's repo-artifact modality: lists the visuals a reviewed commit carries that its change adds, names, or sits beside, and attaches the chosen one to the PR inline, as the commit stores it, through `demo-deliver.sh`. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
