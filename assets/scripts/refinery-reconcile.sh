@@ -13,7 +13,8 @@
 # projection), convoy-graduate (GC_AGENT projected: graduation assigns the
 # convoy), review-sweep (cleanup over closed anchors; no projection, no merge
 # authority), scaffolding-sweep (retires validation/finding/rework on a disposed
-# anchor; no projection, no merge authority), duplicate-sweep (BEADS_ACTOR
+# anchor; BEADS_ACTOR projected: it closes a finding it carries forward through
+# bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
 # projected: it closes duplicate dispatches through bead-rehome; no merge
 # authority), pr-stack (PR bodies only — both managed regions; no projection,
 # no merge authority).
@@ -447,10 +448,14 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # the disposed anchor can finalize instead of standing stuck behind scaffolding
 # that will never resolve. Late, beside review-sweep, because it keys on a
 # terminal disposition no earlier arm produces, and a disposal this pass is
-# cleaned on the same tick. No projection and no merge authority: it writes only
-# scaffolding beads, never the anchor — bead-rehome (via pr-facts' close arm)
-# closes that, held by finalize-gate while a human visit is still owed.
-run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh || FAILED="${FAILED}scaffolding-sweep rc=$?; "
+# cleaned on the same tick. No merge authority: it writes scaffolding beads, and
+# a bug bead for a finding it carries forward, never the anchor — bead-rehome
+# (via pr-facts' close arm) closes that, held by finalize-gate while a human
+# visit is still owed. BEADS_ACTOR projected — the close of a carried-forward
+# finding is delegated to bead-rehome and attributed in the events table.
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh ) \
+  || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
 # (11) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
 # never-dispatched rework twins whose same-review sibling landed. Late, and
