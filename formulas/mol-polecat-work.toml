@@ -117,10 +117,14 @@ each refusal holds and which ones file a visit.
 Any other reason you decline this bead takes the same exit. That covers work you
 judge already delivered and a premise you find falsified. Record the visit,
 hold, and drain with `escalate-hold-drain.sh`, and never leave a claimable step
-behind:
+behind. The block derives what it needs itself, because each command you run is
+a fresh shell:
 
 ```bash
-"${SCRIPTS:?run the gate block above in this shell first}/escalate-hold-drain.sh" --step mol-polecat-work.load-context --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "<why you declined, and what releases the hold>" --subject "$WORK_BEAD_ID" --key "<situation-key>" --message "<why you declined, and what releases the hold>"
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
+WORK_BEAD_ID=$(gc convoy status {{convoy_id}} --json | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/escalate-hold-drain.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+"${SCRIPTS:?escalate-hold-drain.sh not found in the pack}/escalate-hold-drain.sh" --step mol-polecat-work.load-context --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "<why you declined, and what releases the hold>" --subject "$WORK_BEAD_ID" --key "<situation-key>" --message "<why you declined, and what releases the hold>"
 exit 1
 ```
 
