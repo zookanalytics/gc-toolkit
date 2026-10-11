@@ -102,17 +102,23 @@ writes.
 
 A bead that hangs off an anchor (a review, a rework child, a finding, a
 validation pass, a visit) names the anchor in `anchor_bead`, and that key is
-what makes it a child. It also carries a `related` edge onto the anchor.
+what makes it a child. The child also has an edge onto the anchor, its
+membership edge, and that edge can be of any type. bd keeps one edge per ordered
+pair and refuses a second type on it, so an edge the pair already carries is the
+membership edge. The pack joins a child whose pair has no edge with a `related`
+edge. A visit whose subject is the anchor is usually joined already, because
+`escalate.sh` puts a `tracks` edge from the visit onto its subject.
 
 The live children are read by `anchor_bead` over the live statuses. That read
 scans only the live beads, and it sees a child whatever filed it, edge or not.
 The closed children are read through the edge, one
 `gc bd dep list <anchor> --direction=up`, because a
 `--metadata-field anchor_bead=<id>` query that covers closed has no index to use
-and reads the whole closed ledger. A dependent is a closed child when its
-`anchor_bead` names the anchor, so a convoy tracking the anchor is not one, and a
-bead moved to another anchor leaves the old one's set with its old edge still in
-place.
+and reads the whole closed ledger. That read takes every dependent whatever its
+edge type, so a visit joined by its `tracks` edge is read, and a dependent is a
+closed child when its `anchor_bead` names the anchor. A convoy tracking the
+anchor is therefore not one, and a bead moved to another anchor leaves the old
+one's set with its old edge still in place.
 
 The edge answers for the closed children only in a store marked joined.
 `tools/anchor-edges-backfill.sh` joins each anchor's children to it, and

@@ -9,8 +9,8 @@
 # [metadata.review_findings]):
 #
 #   task_kind            finding
-#   anchor_bead          the gating anchor, which the finding also carries a
-#                        `related` edge onto (bd-lib.sh's anchor graph)
+#   anchor_bead          the gating anchor, which the finding also has its
+#                        membership edge onto (bd-lib.sh's anchor graph)
 #   finding.lane         the lane whose review raised it, or `human`
 #   finding.key          lane name + normalized locus + message; the dedup handle
 #   finding.disposition  unvalidated | must-fix | deferred | declined | needs-you

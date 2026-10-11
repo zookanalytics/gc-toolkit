@@ -4,14 +4,14 @@
 #
 #   anchor-edges-backfill.sh [--check | --mark] [<anchor>...]
 #
-# A bead that hangs off a PR anchor names it in anchor_bead and carries a
-# `related` edge onto it (bd-lib.sh, "The anchor graph"). In a store marked
+# A bead that hangs off a PR anchor names it in anchor_bead and has an edge
+# onto it of any type (bd-lib.sh, "The anchor graph"). In a store marked
 # joined, an anchor's closed children are read through that edge, so a closed
 # child without it goes unread. For each anchor this reads the anchor_bead
-# children once, every status, and joins the ones the edge read does not reach,
-# in one write per anchor. When bd refuses that write, each pair is joined
-# alone, and a pair bd refuses on its own is printed with bd's reason.
-# Idempotent: a second run joins nothing.
+# children once, every status, and joins each one the edge read does not reach
+# with a `related` edge, in one write per anchor. When bd refuses that write,
+# each pair is joined alone, and a pair bd refuses on its own is printed with
+# bd's reason. Idempotent: a second run joins nothing.
 #
 # With no anchor named it visits every anchor a reader asks about: each
 # non-closed bead carrying merge_result, the key the anchor arms enumerate by,

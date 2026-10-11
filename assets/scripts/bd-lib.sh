@@ -149,9 +149,10 @@ bd_list() {
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
 # child, a finding, a validation pass, a visit) names the anchor in
-# anchor_bead, and that key is what makes it a child. Each child also carries a
-# `related` edge onto its anchor, child -> anchor, the side parent-child uses,
-# so the anchor's dependents include it.
+# anchor_bead, and that key is what makes it a child. Each child also has an
+# edge onto its anchor, child -> anchor, the side parent-child uses, so the
+# anchor's dependents include it. A pair with no edge is joined with a `related`
+# edge, and a pair already carrying another type is joined by that edge.
 #
 # The live children are read by anchor_bead over the live statuses. That read
 # scans only the live beads, and it is complete whatever filed the child, the

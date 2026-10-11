@@ -652,9 +652,14 @@ keys = [
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
 # anchor_bead — the gating anchor a review, rework, finding, validation or visit
-#   child names; the key is what makes it a child. The child also carries a
-#   `related` edge onto the anchor. A reader enumerates the live children by
+#   child names; the key is what makes it a child. The child also has an edge
+#   onto the anchor, its membership edge, of any type. bd keeps one edge per
+#   ordered pair, so an edge the pair already carries is the membership edge.
+#   A visit whose subject is the anchor is usually joined by the `tracks` edge
+#   escalate.sh puts from the visit onto its subject. A pair with no edge is
+#   joined with `related`. A reader enumerates the live children by
 #   `--metadata-field anchor_bead=<id>`, and the closed ones through that edge
+#   (every dependent of the anchor, whatever the edge's type)
 #   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
 #   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, pr-facts.sh,
 #   pre-open-rebase.sh and visit-close.sh, each on a child joined to the anchor
