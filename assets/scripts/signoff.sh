@@ -541,7 +541,7 @@ ensure_validation_pass() {
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
   # A pass about to take anchor_bead is joined to the anchor first (a fresh one
   # carries the edge from its create, an adopted orphan does not), so the stamp
-  # never lands on a pass the anchor's children read cannot see.
+  # never lands on a pass the anchor's closed-children read cannot reach.
   if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
     warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
     exit 2
@@ -915,8 +915,8 @@ else
 fi
 
 # An adopted child is joined to the anchor before the work order re-stamps its
-# anchor_bead, so the stamp never lands on a child the anchor's children read
-# cannot see. A fresh child carries the edge from its create.
+# anchor_bead, so the stamp never lands on a child the anchor's closed-children
+# read cannot reach. A fresh child carries the edge from its create.
 if [ -z "$FIX_JOINED" ] && ! bd_anchor_link "$ANCHOR" "$FIX_BEAD"; then
   warn "rework child $FIX_BEAD could not be joined to anchor $ANCHOR; review left open for a retry"
   exit 2

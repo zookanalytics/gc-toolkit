@@ -117,6 +117,12 @@ bd_cache_clear() {
   return 0
 }
 
+# _bd_call <gc-bd-args...> — the `gc bd` call bd_list and the anchor-graph
+# reads make. A script that pins its reads to one store redefines it after
+# sourcing this file (liveness-sweep.sh adds its --db pin and per-call time
+# bound), and those reads follow the pin.
+_bd_call() { gc bd "$@"; }
+
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
 # client-side filter sees every row; a non-zero exit or a non-array (an errored
 # ledger) returns non-zero without printing, so a caller reads "could not tell"
@@ -133,7 +139,7 @@ bd_list() {
   if cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
-  raw=$(gc bd list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
+  raw=$(_bd_call list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   raw=$(printf '%s' "$raw" | scrub)
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
@@ -142,28 +148,56 @@ bd_list() {
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
-# child, a finding, a validation pass, a visit) carries anchor_bead=<anchor>
-# and a `related` edge onto the anchor, child -> anchor, the side parent-child
-# uses. So an anchor's children are its dependents, one edge read
-# (`gc bd dep list <anchor> --direction=up`), where an anchor_bead metadata
-# query has no index to use and reads every bead in the statuses it asks for.
-# A child is a dependent whose anchor_bead names the anchor. A bead moved to
-# another anchor keeps its old edge but leaves the old anchor's set, and
-# anchor_bead stays the read from a child up to its anchor. bd keeps one edge
-# per ordered pair, so a child joined to its anchor by another type (a visit's
-# `tracks` edge) is a member through that edge.
+# child, a finding, a validation pass, a visit) names the anchor in
+# anchor_bead, and that key is what makes it a child. Each child also carries a
+# `related` edge onto its anchor, child -> anchor, the side parent-child uses,
+# so the anchor's dependents include it.
+#
+# The live children are read by anchor_bead over the live statuses. That read
+# scans only the live beads, and it is complete whatever filed the child, the
+# edge or not. The closed children are read through the edge, one
+# `gc bd dep list <anchor> --direction=up`, because an anchor_bead query that
+# covers closed has no index to use and reads the whole closed ledger. A
+# dependent is a closed child when its anchor_bead names the anchor. bd keeps
+# one edge per ordered pair, so a child joined by another type (a visit's
+# `tracks` edge) is one too, and a bead moved to another anchor leaves the old
+# one's set with its old edge still in place.
+#
+# The edge answers for the closed children only in a store marked joined:
+# `gc bd kv` carries ANCHOR_JOINED_KEY, which tools/anchor-edges-backfill.sh
+# --mark sets after a run that found no child missing its edge. An unmarked
+# store reads its closed children by anchor_bead too. Each child the pack files
+# or adopts is joined to its anchor no later than anchor_bead lands on it
+# (bd_create_child, bd_anchor_link), so a marked store stays joined. A child
+# filed some other way without the edge still reads while it is live, and
+# tools/anchor-edges-backfill.sh --check reports it.
 #
 # `related` holds nothing: it gates neither bd ready nor a close, and merge.sh's
 # blocker probe reads the `blocks` edges down from the anchor, never these.
-#
-# An anchor none of whose children carries the edge is read by its anchor_bead
-# metadata instead, and migrated: its anchor_bead children, every status, are
-# joined in one `dep add --file` write, which bd commits as one transaction, so
-# no anchor reads with some of its children joined and others missing.
-# bd_anchor_link migrates an anchor before it joins a new child to it, and
-# tools/anchor-edges-backfill.sh joins any child a live anchor is still missing.
 ANCHOR_EDGE_TYPE=related
+ANCHOR_JOINED_KEY=anchor_edges.joined
 _BD_ANCHOR_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
+
+# _bd_store_joined — 0 when the store is marked joined (ANCHOR_JOINED_KEY in
+# `gc bd kv`), served through the bd_list memo. An unset key and a read that did
+# not answer are both non-zero, and either way the caller reads the closed
+# children by anchor_bead, which is right whether the store is joined or not.
+_bd_store_joined() {
+  local cache_file cached found
+  cache_file=$(_bd_cache_file kv get "$ANCHOR_JOINED_KEY")
+  if cached=$(_bd_cache_hit "$cache_file"); then
+    [ "$cached" = 1 ]; return
+  fi
+  # `kv get` exits 1 for an unset key and still prints {"found": false}, so the
+  # answer is read from the JSON, not the exit status.
+  found=$(_bd_call kv get "$ANCHOR_JOINED_KEY" --json </dev/null 2>/dev/null | scrub | jq -r '
+    if type == "object" and has("found")
+    then (if .found == true and ((.value // "") | tostring) != "" then "1" else "0" end)
+    else empty end' 2>/dev/null)
+  [ -n "$found" ] || return 1
+  _bd_cache_put "$cache_file" "$found"
+  [ "$found" = 1 ]
+}
 
 # _bd_anchor_up <anchor> [--cached] — every dependent of <anchor>, of any edge
 # type, as one array of bead rows. --cached serves and stores it through the
@@ -175,7 +209,7 @@ _bd_anchor_up() {
   if cached=$(_bd_cache_hit "$cache_file"); then
     printf '%s' "$cached"; return 0
   fi
-  raw=$(gc bd dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
+  raw=$(_bd_call dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   raw=$(printf '%s' "$raw" | scrub)
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
@@ -183,64 +217,38 @@ _bd_anchor_up() {
   printf '%s' "$raw"
 }
 
-# _bd_anchor_migrated <anchor> <up-json> — 0 when a child of <anchor> carries
-# the membership edge, the mark that the anchor's children were joined.
-_bd_anchor_migrated() {
-  printf '%s' "$2" | jq -e --arg a "$1" --arg t "$ANCHOR_EDGE_TYPE" '
-    any(.[]; ((.dependency_type // "") == $t)
-             and (((.metadata.anchor_bead // "") | tostring) == $a))' >/dev/null 2>&1
-}
-
-# _bd_anchor_stamp <anchor> <children-json> <up-json> — join every child that
-# is not yet on its pair with <anchor>, in one write. A child the up read shows
-# on the pair already, whatever its type, is left out, because bd refuses a
-# second type on a pair and one refused pair refuses the whole batch. Non-zero
-# = the write did not land, and then none of the batch did.
-_bd_anchor_stamp() {
-  local on kids edges
-  on=$(printf '%s' "$3" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null) || return 1
-  kids=$(printf '%s' "$2" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null) || return 1
-  edges=$(jq -nc --arg a "$1" --arg t "$ANCHOR_EDGE_TYPE" --argjson on "$on" --argjson kids "$kids" '
-    $kids | unique | .[] | . as $k
-    | select($k != "" and $k != $a and (any($on[]; . == $k) | not))
-    | {from: $k, to: $a, type: $t}' 2>/dev/null) || return 1
-  [ -n "$edges" ] || return 0
-  printf '%s\n' "$edges" | gc bd dep add --file - >/dev/null 2>&1
-}
-
-# _bd_csv_covers <csv> <required-csv> — 0 when <csv> names every status in
-# <required-csv>.
-_bd_csv_covers() {
-  local s
-  for s in $(printf '%s' "$2" | tr ',' ' '); do
-    case ",$1," in *",$s,"*) : ;; *) return 1 ;; esac
-  done
-  return 0
-}
-
 # bd_anchor_children <anchor> <status-csv> — the children of <anchor> in those
 # statuses, as one array of bead rows: the bd_list contract, so non-zero without
 # output means "could not tell", never "none". A row carries the bead's own
-# fields and metadata, but not its outgoing .dependencies. The edge read rides
-# the bd_list memo. An anchor not yet migrated answers from its anchor_bead
-# metadata, and a read that asked for every status migrates it.
+# fields and metadata, but not its outgoing .dependencies. Every read rides the
+# bd_list memo, and none writes. The live statuses are read by anchor_bead, and
+# closed through the edge in a store marked joined, else by anchor_bead with
+# them. The live read goes first, so a child that closes between the two reads
+# is reported live rather than missed.
 bd_anchor_children() {
-  local anchor="${1:-}" statuses="${2:-}" up rows
+  local anchor="${1:-}" statuses="${2:-}" s live="" closed="" rows='[]' up
   [ -n "$anchor" ] && [ -n "$statuses" ] || return 1
+  for s in $(printf '%s' "$statuses" | tr ',' ' '); do
+    if [ "$s" = closed ]; then closed=1; else live="${live:+$live,}$s"; fi
+  done
+  if [ -z "$closed" ]; then
+    bd_list --metadata-field anchor_bead="$anchor" --status="$live"; return
+  fi
+  if ! _bd_store_joined; then
+    bd_list --metadata-field anchor_bead="$anchor" --status="$statuses"; return
+  fi
+  if [ -n "$live" ]; then
+    rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$live") || return 1
+  fi
   up=$(_bd_anchor_up "$anchor" --cached) || return 1
-  if _bd_anchor_migrated "$anchor" "$up"; then
-    printf '%s' "$up" | jq -c --arg a "$anchor" --arg st "$statuses" '
-      ($st | split(",")) as $want
-      | [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $a)
-              | select(((.status // "") | tostring | ascii_downcase) as $s | any($want[]; . == $s)) ]' 2>/dev/null || return 1
-    return 0
-  fi
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$statuses") || return 1
-  if _bd_csv_covers "$statuses" "$_BD_ANCHOR_STATUSES" \
-     && _bd_anchor_stamp "$anchor" "$rows" "$up"; then
-    _bd_cache_drop dep list "$anchor" --direction=up
-  fi
-  printf '%s' "$rows"
+  # Both arrays ride stdin: an anchor's rows can carry long descriptions, and
+  # one jq argument is bounded by the OS per-argument limit.
+  printf '%s\n%s' "$rows" "$up" | jq -sc --arg a "$anchor" '
+    .[0] as $live | ([ $live[] | (.id // "") | tostring ]) as $seen
+    | $live + [ .[1][]
+        | select(((.metadata.anchor_bead // "") | tostring) == $a)
+        | select(((.status // "") | tostring | ascii_downcase) == "closed")
+        | select(((.id // "") | tostring) as $i | any($seen[]; . == $i) | not) ]' 2>/dev/null
 }
 
 # _bd_on_pair <child> <anchor> — 0 when <child> has an edge onto <anchor>, of
@@ -250,104 +258,109 @@ _bd_on_pair() {
     | jq -e --arg a "$2" 'type == "array" and any(.[]; (.id // "") == $a)' >/dev/null 2>&1
 }
 
-# _bd_anchor_link_now <anchor> [<child>...] — bd_anchor_link's work, with the
-# bd_list memo off: a migration that read a stale scan would join only part of
-# the anchor's children.
-_bd_anchor_link_now() {
-  local GC_RECONCILE_BD_CACHE=""
-  local anchor="${1:-}" up kids child
-  shift || true
-  [ -n "$anchor" ] || return 1
-  up=$(_bd_anchor_up "$anchor") || return 1
-  if ! _bd_anchor_migrated "$anchor" "$up"; then
-    kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 1
-    _bd_anchor_stamp "$anchor" "$kids" "$up" || return 1
-  fi
-  for child in "$@"; do
-    [ -n "$child" ] && [ "$child" != "$anchor" ] || continue
-    gc bd dep add "$child" "$anchor" --type "$ANCHOR_EDGE_TYPE" </dev/null >/dev/null 2>&1 \
-      || _bd_on_pair "$child" "$anchor" || return 1
-  done
-  return 0
+# _bd_join <child> <anchor> — one membership edge. A pair already joined, by
+# this type or another, counts as joined. Non-zero prints bd's refusal.
+_bd_join() {
+  local err
+  err=$(gc bd dep add "$1" "$2" --type "$ANCHOR_EDGE_TYPE" </dev/null 2>&1 >/dev/null) && return 0
+  _bd_on_pair "$1" "$2" && return 0
+  echo "bd-lib: could not join $1 to anchor $2: $(printf '%s' "${err:-bd gave no reason}" | tr '\n' ' ')" >&2
+  return 1
 }
 
 # bd_anchor_link <anchor> [<child>...] — join each <child> to <anchor> by the
-# membership edge, for a bead whose anchor_bead is stamped after it exists. The
-# anchor is migrated first, so the first edge it carries never stands beside an
-# older sibling that has none. Idempotent: a pair already joined, by this type
-# or another, is left as it is. Non-zero = the anchor did not migrate or an edge
-# did not land, so the caller must not count the child as joined.
+# membership edge, for a bead that exists before anchor_bead is stamped on it.
+# Idempotent. Non-zero = an edge did not land (bd's refusal is printed), so the
+# caller must not count the child as joined.
 bd_anchor_link() {
-  local rc
-  _bd_anchor_link_now "$@"; rc=$?
-  _bd_cache_drop dep list "${1:-}" --direction=up
+  local anchor="${1:-}" child rc=0
+  shift || true
+  [ -n "$anchor" ] || return 1
+  for child in "$@"; do
+    [ -n "$child" ] && [ "$child" != "$anchor" ] || continue
+    _bd_join "$child" "$anchor" || rc=1
+  done
+  _bd_cache_drop dep list "$anchor" --direction=up
   return "$rc"
-}
-
-# bd_anchor_backfill <anchor> [--check] — read the anchor_bead children of
-# <anchor>, every status, and join each one its edge read does not reach, in one
-# write. Unlike bd_anchor_link it reads the metadata of a migrated anchor too,
-# so it also joins a child some writer filed without the edge. Prints the ids it
-# joined, or with --check the ids it would join and joins nothing, one per line.
-# Exit 1 = the write did not land; 2 = a read did not answer.
-bd_anchor_backfill() {
-  local GC_RECONCILE_BD_CACHE=""
-  local anchor="${1:-}" check="${2:-}" up kids missing
-  [ -n "$anchor" ] || return 2
-  up=$(_bd_anchor_up "$anchor") || return 2
-  kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 2
-  missing=$(jq -rn --arg a "$anchor" \
-      --argjson on "$(printf '%s' "$up" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null || echo null)" \
-      --argjson kids "$(printf '%s' "$kids" | jq -c '[ .[] | (.id // "") | tostring ]' 2>/dev/null || echo null)" '
-    if ($on | type) != "array" or ($kids | type) != "array" then error("unreadable")
-    else $kids | unique | .[] | . as $k | select($k != "" and $k != $a and (any($on[]; . == $k) | not))
-    end' 2>/dev/null) || return 2
-  [ -n "$missing" ] || return 0
-  printf '%s\n' "$missing"
-  [ "$check" = --check ] && return 0
-  _bd_anchor_stamp "$anchor" "$kids" "$up" || return 1
 }
 
 # bd_create_child <anchor> <gc bd create args...> — `gc bd create` for a bead
 # that hangs off <anchor>. The membership edge rides the create (--deps), so the
-# bead is born joined to its anchor or not at all, once bd_anchor_link has
-# migrated the anchor. Prints the create's stdout and returns its exit status;
-# an anchor that did not migrate creates nothing and returns non-zero. stdin
-# passes through to the create (--body-file -).
+# bead is born joined to its anchor or not at all. Prints the create's stdout
+# and returns its exit status. stdin passes through to the create
+# (--body-file -).
 bd_create_child() {
-  local anchor="${1:-}"
+  local anchor="${1:-}" rc
   shift || true
   [ -n "$anchor" ] || return 1
-  bd_anchor_link "$anchor" || return 1
-  gc bd create "$@" --deps "$ANCHOR_EDGE_TYPE:$anchor"
+  gc bd create "$@" --deps "$ANCHOR_EDGE_TYPE:$anchor"; rc=$?
+  _bd_cache_drop dep list "$anchor" --direction=up
+  return "$rc"
 }
 
-# bd_live_children <anchor>... — the live children of each named anchor, in
-# one edge read across all of them. Prints one line per anchor that has any:
+# _bd_anchor_stamp <anchor> <children-json> <up-json> [--check] — join each
+# child the up read does not show on its pair with <anchor>. A child on the pair
+# already, whatever its type, is left out, because bd refuses a second type on a
+# pair. Prints each id it joins, one per line; --check prints the ids it would
+# join and writes nothing. The joins go in one `dep add --file` write, which bd
+# commits as one transaction, so one refused pair refuses all of it; then each
+# pair is joined alone, and only a pair bd refuses on its own is left out, with
+# bd's reason printed. Exit 1 = a pair did not land; 2 = an input did not parse.
+_bd_anchor_stamp() {
+  local anchor="$1" check="${4:-}" missing edges k bad=0
+  missing=$(printf '%s\n%s' "$2" "$3" | jq -rs --arg a "$anchor" '
+    if (.[0] | type) != "array" or (.[1] | type) != "array" then error("unreadable") else . end
+    | ([ .[1][] | (.id // "") | tostring ]) as $on
+    | [ .[0][] | (.id // "") | tostring ] | unique | .[]
+    | select(. != "" and . != $a) | . as $k | select(any($on[]; . == $k) | not)' 2>/dev/null) || return 2
+  [ -n "$missing" ] || return 0
+  if [ "$check" = --check ]; then printf '%s\n' "$missing"; return 0; fi
+  edges=$(printf '%s\n' "$missing" | jq -Rc --arg a "$anchor" --arg t "$ANCHOR_EDGE_TYPE" \
+    'select(. != "") | {from: ., to: $a, type: $t}' 2>/dev/null) || return 1
+  if printf '%s\n' "$edges" | gc bd dep add --file - >/dev/null 2>&1; then
+    printf '%s\n' "$missing"; return 0
+  fi
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    if _bd_join "$k" "$anchor"; then printf '%s\n' "$k"; else bad=1; fi
+  done <<STAMP_EOF
+$missing
+STAMP_EOF
+  return "$bad"
+}
+
+# bd_anchor_backfill <anchor> [--check] — read the anchor_bead children of
+# <anchor>, every status, and join each one its up read does not reach
+# (_bd_anchor_stamp). Both reads skip the memo, so the comparison never rests on
+# an older read. Prints the ids it joined, or with --check the ids it would
+# join. Exit 1 = a join did not land; 2 = a read did not answer.
+bd_anchor_backfill() {
+  local GC_RECONCILE_BD_CACHE=""
+  local anchor="${1:-}" check="${2:-}" up kids
+  [ -n "$anchor" ] || return 2
+  up=$(_bd_anchor_up "$anchor") || return 2
+  kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 2
+  _bd_anchor_stamp "$anchor" "$kids" "$up" "$check"
+}
+
+# bd_live_children — the live beads hung on each anchor through anchor_bead:
+# its reviews, validation passes, findings, rework children and visits, in one
+# read of the store. Prints one line per anchor that has any:
 #   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
 # A walking arm compares the id list with what it saw at its last visit, so a
-# child that opened or closed since then shows without a read per anchor. No
-# anchor prints nothing. Non-zero without output = the store did not answer,
-# which is also the answer when a named id does not resolve. An anchor not yet
-# migrated shows only the children already joined to it.
+# child that opened or closed since then shows without a read per anchor.
+# Non-zero without output = the store did not answer.
 bd_live_children() {
-  local raw rc
-  [ "$#" -gt 0 ] || return 0
-  raw=$(gc bd dep list "$@" --direction=up --json </dev/null 2>/dev/null); rc=$?
-  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw" | jq -r '
-    ($ARGS.positional) as $anchors
-    | [ .[] | { a: ((.metadata.anchor_bead // "") | tostring), id: ((.id // "") | tostring),
-                st: ((.status // "") | tostring | ascii_downcase),
-                rw: (((.metadata.task_kind // "") | tostring) == "rework") }
-            | . as $r
-            | select($r.a != "" and $r.id != "" and any($anchors[]; . == $r.a))
-            | select(any(["open","in_progress","blocked","deferred","hooked","pinned"][]; . == $r.st)) ]
-    | unique_by(.id) | group_by(.a)[]
+  local rows
+  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --has-metadata-key anchor_bead) || return 1
+  printf '%s' "$rows" | jq -r '
+    [ .[] | { a: ((.metadata.anchor_bead // "") | tostring), id: ((.id // "") | tostring),
+              rw: (((.metadata.task_kind // "") | tostring) == "rework") }
+          | select(.a != "" and .id != "") ]
+    | group_by(.a)[]
     | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
-    | @tsv' --args "$@" 2>/dev/null
+    | @tsv' 2>/dev/null
 }
 
 # The gating-PR read. The merge arm (merge.sh) and the pr-facts arm

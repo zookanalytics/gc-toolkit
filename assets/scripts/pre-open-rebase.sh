@@ -280,7 +280,7 @@ while IFS= read -r row; do
         else "restamp" end' 2>/dev/null)
     if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
       # The join lands before the marker, so a marker never stands on a child
-      # the anchor's edge read cannot reach.
+      # the anchor's closed-children read cannot reach.
       echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
     elif [ "$dneed" = "restamp" ]; then
       # `gc bd update` returns 0 without writing (the claim guard is one such
@@ -342,7 +342,7 @@ while IFS= read -r row; do
   # The child is joined to the anchor before its role marker lands: a create
   # carries the edge (bd_create_child), and a stranded or adopted child is
   # joined here. A failed join stamps nothing, so no marked child sits where
-  # the anchor's edge read cannot see it.
+  # the anchor's closed-children read cannot reach it.
   if [ -z "$FIX_JOINED" ] && ! bd_anchor_link "$id" "$FIX"; then
     echo "$PROG: $id could not join rework $FIX to the anchor; left unstamped and unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue

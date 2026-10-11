@@ -103,37 +103,51 @@ if green --anchor tk-anc --lane correctness; then bad "a non-approving GitHub re
 rm -f "$GH_DIR/reviews_42.json"
 
 # ---------------------------------------------------------------------------
-# An unreadable store is not green (exit 2, never green-by-default): the edge
-# read failing, and an anchor not yet migrated whose metadata read fails.
+# The cases above run in a store not marked joined, where every review is read
+# by anchor_bead. A store marked joined reads the open reviews by anchor_bead
+# and the closed ones through the anchor's edges, and derives the same green.
+# ---------------------------------------------------------------------------
+mark_store() { printf 'anchor_edges.joined=2026-10-11T00:00:00Z\n' > "$STUB_KV"; }
+OPEN_RV='{"id":"rv-2","status":"open","assignee":"","title":"re-review","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-anc"}}'
+mark_store
+case_store "[$ANCHOR,$(review closed approve recorded)]" rv-1
+: > "$STUB_GC_LOG"
+if green --anchor tk-anc --lane correctness --no-remote; then ok "marked: a closed approve the edge reaches derives green"; else bad "marked: the edge-read approve did not derive green"; fi
+has "$(grep '^bd list' "$STUB_GC_LOG")" "--status=open,in_progress,blocked,deferred,hooked,pinned " "marked: …the anchor_bead read covering the live statuses"
+eq "$(grep -c '^bd list.*closed' "$STUB_GC_LOG")" 0 "marked: …and none covering closed"
+case_store "[$ANCHOR,$(review closed approve superseded)]" rv-1
+if green --anchor tk-anc --lane correctness --no-remote; then bad "marked: a superseded approve derived green"; else ok "marked: a superseded approve does not derive green"; fi
+case_store "[$ANCHOR,$(review closed request-changes recorded)]" rv-1
+if green --anchor tk-anc --lane correctness --no-remote; then bad "marked: a request-changes verdict derived green"; else ok "marked: a closed request-changes review is not green"; fi
+case_store "[$ANCHOR,$(review closed approve recorded),$OPEN_RV]" rv-1 rv-2
+if green --anchor tk-anc --lane correctness --no-remote; then bad "marked: green while a review is in flight"; else ok "marked: an in-flight review holds the lane out of green"; fi
+# A review filed without the edge (by a writer outside the pack, or one an
+# older script filed) is still read while it is open, so it holds the lane.
+case_store "[$ANCHOR,$(review closed approve recorded),$OPEN_RV]" rv-1
+if green --anchor tk-anc --lane correctness --no-remote; then bad "marked: an open review filed without the edge let the lane derive green"; else ok "marked: an open review filed without the edge holds the lane out of green"; fi
+# A review the edge reaches whose anchor_bead names another anchor is not this
+# anchor's.
+MOVED='{"id":"rv-9","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-other","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'
+case_store "[$ANCHOR,$MOVED]" rv-9
+if green --anchor tk-anc --lane correctness --no-remote; then bad "marked: a review moved to another anchor backed this one"; else ok "marked: a review whose anchor_bead names another anchor backs nothing here"; fi
+
+# ---------------------------------------------------------------------------
+# An unreadable store is not green (exit 2, never green-by-default).
 # ---------------------------------------------------------------------------
 case_store "[$ANCHOR,$(review closed approve recorded)]" rv-1
 STUB_DEP_PARTIAL=1 green --anchor tk-anc --lane correctness --no-remote; rc=$?
-eq "$rc" 2 "an unreadable edge read exits 2 (fail-closed, not green)"
-case_store "[$ANCHOR,$(review closed approve recorded)]"
+eq "$rc" 2 "marked: an unreadable edge read exits 2 (fail-closed, not green)"
 STUB_LIST_FAIL=1 green --anchor tk-anc --lane correctness --no-remote; rc=$?
-eq "$rc" 2 "an unreadable metadata read on an anchor not yet migrated exits 2"
+eq "$rc" 2 "marked: an unreadable live read exits 2"
+: > "$STUB_KV"
+STUB_LIST_FAIL=1 green --anchor tk-anc --lane correctness --no-remote; rc=$?
+eq "$rc" 2 "unmarked: an unreadable store exits 2"
 
-# ---------------------------------------------------------------------------
-# The backing is read through the anchor's edges. A review the edge reaches
-# whose anchor_bead names another anchor is not this anchor's, and a migrated
-# anchor answers from the edge read with no metadata query.
-# ---------------------------------------------------------------------------
-MOVED='{"id":"rv-9","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"correctness","anchor_bead":"tk-other","reviewed_oid":"deadbeef","signoff_verdict":"approve","gc.outcome":"recorded"}}'
-OPEN_REVIEW='{"id":"rv-3","status":"open","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"arch","anchor_bead":"tk-anc"}}'
-case_store "[$ANCHOR,$MOVED,$OPEN_REVIEW]" rv-9 rv-3
-: > "$STUB_GC_LOG"
-if green --anchor tk-anc --lane correctness --no-remote; then bad "a review moved to another anchor backed this one"; else ok "a review whose anchor_bead names another anchor backs nothing here"; fi
-eq "$(grep -c '^bd list' "$STUB_GC_LOG")" 0 "a migrated anchor is read from its edges, with no metadata query"
-
-# An anchor none of whose children carries the edge answers from the metadata
-# and is migrated by the read, which covers every status: the next read needs
-# no metadata query.
+# A store not marked joined reads its closed reviews by anchor_bead, so a review
+# filed before the edge still backs the lane, and the read writes no edge.
 case_store "[$ANCHOR,$(review closed approve recorded)]"
-if green --anchor tk-anc --lane correctness --no-remote; then ok "an anchor not yet migrated still derives green from its metadata"; else bad "an unmigrated anchor lost its backing"; fi
-eq "$(grep -c 'rv-1|related|tk-anc' "$STUB_DEPS")" 1 "…and the read joined its review to it"
-: > "$STUB_GC_LOG"
-if green --anchor tk-anc --lane correctness --no-remote; then ok "the migrated anchor derives the same green"; else bad "migration lost the backing"; fi
-eq "$(grep -c '^bd list' "$STUB_GC_LOG")" 0 "…from its edges alone"
+if green --anchor tk-anc --lane correctness --no-remote; then ok "unmarked: a closed approve with no edge still derives green"; else bad "unmarked: an edgeless approve lost its backing"; fi
+eq "$(grep -c '' "$STUB_DEPS")" 0 "unmarked: …and the read wrote no edge"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

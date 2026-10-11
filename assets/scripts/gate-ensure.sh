@@ -572,13 +572,7 @@ ge_mark_child() {
 }
 if [ -n "$CURSOR" ]; then
   ge_kids_ok=0
-  GE_ANCHOR_IDS=()
-  while IFS= read -r ge_aid; do
-    [ -n "$ge_aid" ] && GE_ANCHOR_IDS+=("$ge_aid")
-  done <<GE_IDS
-$(printf '%s' "$ROWS" | jq -r '.id // empty' 2>/dev/null)
-GE_IDS
-  if kid_lines=$(bd_live_children ${GE_ANCHOR_IDS[@]+"${GE_ANCHOR_IDS[@]}"}); then
+  if kid_lines=$(bd_live_children); then
     ge_kids_ok=1
     while IFS=$'\t' read -r ka kids _krw; do
       [ -n "$ka" ] && GE_KIDS["$ka"]="$kids"
@@ -1057,9 +1051,9 @@ STRAY
     #
     # The review is joined to the anchor BEFORE anchor_bead is stamped: a create
     # carries the edge (bd_create_child), and an adopted orphan is joined first.
-    # So a stamp that lands always lands on a joined review, and a failed join
-    # leaves an orphan the next pass adopts again, never a stamped review that
-    # inflight_review cannot see.
+    # So a stamp that lands always lands on a joined review, whose verdict the
+    # anchor's closed-children read reaches once it closes, and a failed join
+    # leaves an orphan the next pass adopts again.
     RID_TITLE="Review branch $branch -> $target ($g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2

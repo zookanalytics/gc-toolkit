@@ -97,8 +97,8 @@ cmd_green() {
 
   # Read live AND closed review beads: an open one must be SEEN to exclude the
   # lane, and a closed one is the backing — a status filter that skipped either
-  # would derive green from an absence. They are the anchor's children, read
-  # through its edges (bd-lib.sh's anchor graph).
+  # would derive green from an absence. They are the anchor's children
+  # (bd-lib.sh's anchor graph).
   local rows
   rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") \
     || { warn "could not read review beads on $anchor"; return 2; }

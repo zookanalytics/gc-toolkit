@@ -101,24 +101,29 @@ writes.
 ### An anchor's children
 
 A bead that hangs off an anchor (a review, a rework child, a finding, a
-validation pass, a visit) names the anchor in `anchor_bead` and carries a
-`related` edge onto it. The edge is how a reader finds the children: one
-`gc bd dep list <anchor> --direction=up` read, where a
-`--metadata-field anchor_bead=<id>` query has no index to use and reads every
-bead in the statuses it asks for. `anchor_bead` is what makes a dependent a
-child. The read keeps the dependents whose `anchor_bead` names the anchor, so a
-convoy tracking the anchor is not a child, and a bead moved to another anchor
-leaves the old one's set with its old edge still in place.
+validation pass, a visit) names the anchor in `anchor_bead`, and that key is
+what makes it a child. It also carries a `related` edge onto the anchor.
 
-`assets/scripts/bd-lib.sh` holds the read (`bd_anchor_children`) and both
-writes. A child is created joined to its anchor, the edge riding the create
-(`bd_create_child`), and an existing bead is joined before `anchor_bead` is
-stamped on it (`bd_anchor_link`), so no bead carries `anchor_bead` without the
-edge the readers follow. An anchor none of whose children carries the edge yet
-is read by its metadata instead, and is joined in one write by the first read
-that covers every status. `related` holds nothing: it gates neither `bd ready`
-nor a close, and the merge hold stays on the `blocks` edges read down from the
-anchor.
+The live children are read by `anchor_bead` over the live statuses. That read
+scans only the live beads, and it sees a child whatever filed it, edge or not.
+The closed children are read through the edge, one
+`gc bd dep list <anchor> --direction=up`, because a
+`--metadata-field anchor_bead=<id>` query that covers closed has no index to use
+and reads the whole closed ledger. A dependent is a closed child when its
+`anchor_bead` names the anchor, so a convoy tracking the anchor is not one, and a
+bead moved to another anchor leaves the old one's set with its old edge still in
+place.
+
+The edge answers for the closed children only in a store marked joined.
+`tools/anchor-edges-backfill.sh` joins each anchor's children to it, and
+`--mark` records the store joined (`anchor_edges.joined` in `gc bd kv`) after a
+run that found no child missing its edge. A store without the mark reads its
+closed children by `anchor_bead` too. `assets/scripts/bd-lib.sh` holds the read
+(`bd_anchor_children`) and both writes. A child is created joined to its anchor,
+the edge riding the create (`bd_create_child`), and an existing bead is joined
+before `anchor_bead` is stamped on it (`bd_anchor_link`), so a marked store
+stays joined. `related` holds nothing: it gates neither `bd ready` nor a close,
+and the merge hold stays on the `blocks` edges read down from the anchor.
 
 ---
 

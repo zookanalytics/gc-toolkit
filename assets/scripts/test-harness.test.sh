@@ -362,6 +362,31 @@ eq "$(grep -c "tk-b|blocks|$nid" "$STUB_DEPS")" "1" "create --deps X: the new be
 before=$(jq 'length' "$STUB_STORE")
 gc bd create "orphan" --deps "related:tk-gone" --json >/dev/null 2>&1; rc=$?
 eq "$rc:$(jq 'length' "$STUB_STORE")" "1:$before" "create --deps with a target that does not resolve is refused whole"
+# STUB_DEP_ADD_FAIL refuses a dep add whose source it names, alone or inside a
+# --file batch, which then writes none of its edges.
+out=$(STUB_DEP_ADD_FAIL=tk-b gc bd dep add tk-b tk-a --type related 2>&1); rc=$?
+eq "$rc" "1" "STUB_DEP_ADD_FAIL: a named source's dep add is refused"
+has "$out" "simulated refusal for tk-b" "…with a reason on stderr"
+eq "$(grep -c 'tk-b|related|tk-a' "$STUB_DEPS")" "0" "…and writes no edge"
+printf '%s\n' '{"from":"tk-c1","to":"tk-b","type":"related"}' '{"from":"tk-b","to":"tk-a","type":"related"}' \
+  | STUB_DEP_ADD_FAIL=tk-b gc bd dep add --file - 2>/dev/null; rc=$?
+eq "$rc:$(grep -c 'tk-c1|related|tk-b' "$STUB_DEPS")" "1:0" "STUB_DEP_ADD_FAIL: a --file batch naming the source is refused whole"
+
+# The kv store, as real bd answers it: get --json is {found, key, value}, at exit
+# 1 for an unset key; set and clear write one key=value line each; a --db pin is
+# accepted anywhere; STUB_KV_FAIL fails every kv call with no answer.
+out=$(gc bd kv get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '1:[false,""]' "kv get: an unset key answers found=false at exit 1"
+gc bd kv set some.key "a value"
+out=$(gc bd kv --db /x get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '0:[true,"a value"]' "kv set then get: found, with the value, through a --db pin"
+gc bd kv set some.key2 other
+gc bd kv set some.key replaced
+eq "$(grep -c '^some\.key=' "$STUB_KV"):$(gc bd kv get some.key --json | jq -r '.value')" "1:replaced" "kv set replaces the key's one line"
+gc bd kv clear some.key
+eq "$(gc bd kv get some.key --json | jq -r '.found'):$(gc bd kv get some.key2 --json | jq -r '.value')" "false:other" "kv clear drops only that key"
+out=$(STUB_KV_FAIL=1 gc bd kv get some.key2 --json 2>/dev/null); rc=$?
+eq "$rc:$out" "1:" "STUB_KV_FAIL: a kv call fails with no answer"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

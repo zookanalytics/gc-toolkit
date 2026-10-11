@@ -709,8 +709,8 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   #
   # The child is joined to the anchor before anchor_bead lands on it: a create
   # carries the edge (bd_create_child), and a reused strand or orphan is joined
-  # first. A join that fails stamps nothing, so no child ever carries anchor_bead
-  # without the edge every anchor-children reader follows.
+  # first. A join that fails stamps nothing, so no child carries anchor_bead
+  # without the edge the anchor's closed-children read follows.
   local reuse="$1" title="$2" anchor="$3" branch="$4" target="$5" reason="$6" mode="$7" prurl="$8" prnum="$9"
   local meta fix ok
   meta=$(jq -nc --arg ab "$anchor" --arg br "$branch" --arg tg "$target" --arg rr "$reason" \
@@ -1348,13 +1348,7 @@ if [ -n "$CURSOR" ]; then
   open_prs_read "" 100 \
     || echo "$PROG: WARN the open-PR list did not answer; this walk orders by what the anchors record" >&2
   if [ "$ROUTE_ONLY" != 1 ]; then
-    PF_ANCHOR_IDS=()
-    while IFS= read -r pf_aid; do
-      [ -n "$pf_aid" ] && PF_ANCHOR_IDS+=("$pf_aid")
-    done <<PF_IDS
-$(printf '%s' "$ANCHORS" | jq -r '.[].id // empty' 2>/dev/null)
-PF_IDS
-    if kid_lines=$(bd_live_children ${PF_ANCHOR_IDS[@]+"${PF_ANCHOR_IDS[@]}"}); then
+    if kid_lines=$(bd_live_children); then
       while IFS=$'\t' read -r ka _kids krw; do
         [ -n "$ka" ] && KIDS_REWORK["$ka"]="$krw"
       done <<< "$kid_lines"
@@ -2315,7 +2309,7 @@ REAP_EOF
             else "restamp" end' 2>/dev/null)
         if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
           # The join lands before the marker, so a marker never stands on a child
-          # the anchor's edge read cannot reach.
+          # the anchor's closed-children read cannot reach.
           echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
         elif [ "$dneed" = "restamp" ]; then
           # `gc bd update` returns 0 without writing (the claim guard is one such
@@ -2486,7 +2480,8 @@ $CBODY"
         # The child is joined to the anchor before anchor_bead lands on it: a
         # create carries the edge (bd_create_child), and an adopted orphan is
         # joined first, so a failed join leaves an orphan the next pass adopts
-        # again rather than a stamped child the anchor's edge read cannot see.
+        # again rather than a stamped child the anchor's closed-children read
+        # misses once it closes.
         if [ -n "$CFIX" ]; then
           echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
           if ! bd_anchor_link "$id" "$CFIX"; then
@@ -2732,7 +2727,7 @@ $CBODY"
       v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
       # A pass about to take anchor_bead is joined to the anchor first (a fresh
       # one carries the edge from its create, an adopted orphan does not), so the
-      # stamp never lands on a pass the anchor's children read cannot see.
+      # stamp never lands on a pass the anchor's closed-children read cannot reach.
       if [ "$v_anchor" != "$id" ] && ! bd_anchor_link "$id" "$VPASS"; then
         echo "$PROG: WARN $id — PR#$num validation pass $VPASS could not be joined to the anchor; nothing stamped or watermarked (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
@@ -3585,13 +3580,7 @@ declare -A WB_MARK=()
 if [ -n "$WB_CURSOR" ] && [ -n "$WB_ANCHORS" ]; then
   declare -A WB_KIDS=()
   wb_kids_ok=0
-  WB_ANCHOR_IDS=()
-  while IFS= read -r wb_aid; do
-    [ -n "$wb_aid" ] && WB_ANCHOR_IDS+=("$wb_aid")
-  done <<WB_IDS
-$(printf '%s' "$WB_ANCHORS" | jq -r '.[].id // empty' 2>/dev/null)
-WB_IDS
-  if kid_lines=$(bd_live_children ${WB_ANCHOR_IDS[@]+"${WB_ANCHOR_IDS[@]}"}); then
+  if kid_lines=$(bd_live_children); then
     wb_kids_ok=1
     while IFS=$'\t' read -r ka kids _krw; do
       [ -n "$ka" ] && WB_KIDS["$ka"]="$kids"

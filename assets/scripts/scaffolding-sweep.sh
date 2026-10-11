@@ -248,7 +248,7 @@ ROW_JQ='.[] | select(((.metadata.task_kind // "") | tostring) == $k)
   | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")'
 CANDS=""
 if [ -n "$ANCHOR_ONLY" ]; then
-  ROWS=$(bd_list --metadata-field anchor_bead="$ANCHOR_ONLY" --status="$LIVE_STATUSES") || {
+  ROWS=$(bd_anchor_children "$ANCHOR_ONLY" "$LIVE_STATUSES") || {
     echo "$PROG: could not enumerate the live scaffolding on $ANCHOR_ONLY; nothing swept, retry next pass" >&2
     exit 1
   }

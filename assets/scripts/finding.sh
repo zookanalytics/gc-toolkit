@@ -346,7 +346,7 @@ cmd_upsert() {
   desc=$(printf 'Locus: %s\n\n%s\n\nRaised by %s reviewing anchor %s.' "$locus" "$msg" "$source" "$anchor")
   # The identity rides the create, one insert, so a finding bead exists fully
   # stamped or not at all, and so does its edge onto the anchor
-  # (bd_create_child), which is how every finding reader reaches it. A bead
+  # (bd_create_child), which the anchor's closed-children read follows. A bead
   # stamped in a second write is left with no metadata when that write fails: no
   # finding reader selects it, and with no finding.key the next pass's dedup
   # misses it and files a stamped twin. The fix unit rides it too, so no ruling
@@ -482,8 +482,8 @@ cmd_set_disposition() {
       # it must release — and fail closed if it survives; strip inbound blocks so the
       # close is not refused by a cross-wired fix unit. The hold is the pair with the
       # anchor depending on the finding, and only that pair is removed: the reverse
-      # pair is the finding's membership edge onto its anchor, which every finding
-      # reader follows.
+      # pair is the finding's membership edge onto its anchor, which the
+      # anchor's closed-children read follows.
       if edge_exists "$finding" "$anchor"; then
         gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
       fi

@@ -68,6 +68,7 @@ harness_init() {
   export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
+  export STUB_KV="$TMP/kv.txt"
   export STUB_GC_LOG="$TMP/gc.log"
   export STUB_GH_LOG="$TMP/gh.log"
   export STUB_GH_DIR="$GH_DIR"
@@ -78,7 +79,7 @@ harness_init() {
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
-  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
+  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
@@ -92,7 +93,7 @@ harness_init() {
   export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
   # The `close` verb's ownership check (see its handler). Off = any actor closes.
   export STUB_ENFORCE_CLOSE_OWNER=""
-  echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
+  echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_KV"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
   chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
@@ -572,6 +573,7 @@ case "$verb" in
             || { echo "Error: invalid JSONL in --file" >&2; exit 1; }
           while IFS='|' read -r fa ft fb; do
             [ -n "$fa" ] || continue
+            case " ${STUB_DEP_ADD_FAIL:-} " in *" $fa "*) echo "Error: add deps: simulated refusal for $fa" >&2; exit 1 ;; esac
             if [ "$ft" = "blocks" ]; then have=$(dep_have "$fb" "$ft" "$fa"); else have=$(dep_have "$fa" "$ft" "$fb"); fi
             if [ -n "$have" ] && [ "$have" != "$ft" ]; then
               echo "Error: add deps: dependency $fa -> $fb already exists with type \"$have\" (requested \"$ft\")" >&2
@@ -589,6 +591,9 @@ case "$verb" in
           case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
           shift || true
         done
+        # STUB_DEP_ADD_FAIL="id id2" — refuse a dep add whose source is named, by
+        # itself or inside a --file batch (which then writes none of its edges).
+        case " ${STUB_DEP_ADD_FAIL:-} " in *" $a "*) echo "Error: simulated refusal for $a" >&2; exit 1 ;; esac
         # Real bd reads `dep add <blocked> <blocker> --type blocks` with the
         # SECOND operand as the blocker — `dep add Y X` is the documented
         # equivalent of `dep X --blocks Y`. Stored rows are blocker-first
@@ -618,6 +623,35 @@ case "$verb" in
         [ "${1:-}" = "--blocks" ] && { dep_put "$src" blocks "${2:-}" || exit 1; } ;;
     esac
     ;;
+  kv)
+    # gc bd kv get|set|clear over STUB_KV, one key=value line each. `get --json`
+    # answers {found, key, value} and exits 1 for an unset key, the shape real
+    # bd prints. A --db pin anywhere is ignored. STUB_KV_FAIL fails every kv
+    # call with no answer.
+    [ -n "${STUB_KV_FAIL:-}" ] && { echo "gc: simulated kv failure" >&2; exit 1; }
+    K="${STUB_KV:?}"; kverb=""; kargs=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --db) shift ;;
+        --db=*|--json) : ;;
+        *) if [ -z "$kverb" ]; then kverb="$1"; else kargs+=("$1"); fi ;;
+      esac
+      shift || true
+    done
+    key="${kargs[0]:-}"
+    case "$kverb" in
+      get)
+        if kval=$(awk -v k="$key" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); f = 1 } END { exit !f }' "$K"); then
+          jq -nc --arg k "$key" --arg v "$kval" '{found: true, key: $k, schema_version: 1, value: $v}'
+        else
+          jq -nc --arg k "$key" '{found: false, key: $k, schema_version: 1, value: ""}'; exit 1
+        fi ;;
+      set|clear)
+        awk -v k="$key" 'index($0, k "=") != 1' "$K" > "$K.tmp"
+        [ "$kverb" = clear ] || printf '%s=%s\n' "$key" "${kargs[1]:-}" >> "$K.tmp"
+        mv "$K.tmp" "$K" ;;
+      *) echo "gc bd stub: unsupported 'kv $kverb'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;
 esac
 STUB

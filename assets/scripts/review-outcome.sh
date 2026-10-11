@@ -63,7 +63,7 @@ scrub() { tr -d '\000-\037'; }
 warn() { echo "review-outcome: $*" >&2; }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# The review beads on an anchor are its children, read through its edges.
+# The review beads on an anchor are its children (bd-lib.sh's anchor graph).
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "review-outcome: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # The one resolver of the check index: the anchor-wide supersede asks it for
