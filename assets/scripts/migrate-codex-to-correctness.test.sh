@@ -35,8 +35,7 @@ SUT="$SD/migrate-codex-to-correctness.sh"
 mkdir -p "$TMP/bin2"
 export STUB_RIGS="$TMP/rigs.json"
 export STUB_BD_LIST_GARBAGE=""
-cat > "$TMP/bin2/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin2/gc" <<SHIM
 if [ "\${1:-}" = "rig" ] && [ "\${2:-}" = "list" ]; then cat "\${STUB_RIGS:?}"; exit 0; fi
 if [ "\${1:-}" = "bd" ] && [ "\${2:-}" = "list" ] && [ -n "\${STUB_BD_LIST_GARBAGE:-}" ]; then
   printf '%s\n' "\$STUB_BD_LIST_GARBAGE"; exit 0

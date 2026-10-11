@@ -212,8 +212,7 @@ echo "── the read-back actually repairs (executed, not grepped) ──"
 EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
-cat > "$EXTMP/bin/gc" <<'GVSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$EXTMP/bin/gc" <<'GVSTUB'
 # Serves the reads the block makes. The create carries the group stamp in its
 # --metadata; LOST=1 makes that first stamp vanish — the observed failure: the
 # write returns 0 and the value reads back empty.

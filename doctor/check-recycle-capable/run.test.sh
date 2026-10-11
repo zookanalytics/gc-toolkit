@@ -31,8 +31,7 @@ install_real_overlay
 
 # gc is the only external the check still calls. Every invocation is logged, so
 # a re-introduced city/API probe shows up as a call this check no longer makes.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 printf '%s\n' "$*" >> "${GC_LOG:-/dev/null}"
 case "$*" in
   "cities --json")    [ -n "${CITIES_RC:-}" ] && exit "$CITIES_RC"; cat "$CITIES_JSON" ;;
