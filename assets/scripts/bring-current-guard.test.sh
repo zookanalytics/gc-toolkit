@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/bring-current-guard.sh, the guard that holds a
 # bring-current round to the worker's audit and routes a conflicted one to
-# triage.
+# triage, or rules it closed on an anchor that declares no triage lane.
 #
 # classify, over real git histories built here:
 #   clean: a merge of the base git made on its own; a generated-tier conflict;

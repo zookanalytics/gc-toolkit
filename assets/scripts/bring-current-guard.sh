@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bring-current-guard — holds a bring-current to the worker's audit of it, and
-# routes a conflicted one to triage, so no review covers code it never saw.
+# routes a conflicted one to triage, or rules it closed on an anchor that
+# declares no triage lane, so no review covers code it never saw.
 #
 # Bringing a branch current merges its base in. Run at every hand-off
 # (submit-and-exit in formulas/mol-polecat-work.toml, right after the push),
