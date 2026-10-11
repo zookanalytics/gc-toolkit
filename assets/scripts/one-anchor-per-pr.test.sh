@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for the one-anchor-per-PR rework hand-back arm
-# (formulas/mol-refinery-patrol.toml merge-push step 4).
+# Hermetic test for one-anchor-per-pr.sh, the refinery merge-push step's
+# mr-mode terminal transition and its rework hand-back arm.
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating
@@ -18,15 +18,15 @@
 # second anchor. (merge.sh independently HOLDS any PR claimed by >1 open
 # anchor; doctor/check-one-anchor-per-pr asserts it structurally.)
 #
-# This EXECUTES the real resolve snippet extracted verbatim from the formula
-# (between the one-anchor-per-pr-resolve markers) against a fake `gc`, so it
-# cannot drift from the shipped instruction, plus static guards on the
-# terminal arm's shape. No live city, Dolt, network, or PRs.
+# This runs one-anchor-per-pr.sh against a fake `gc`, `git` and lifecycle.sh,
+# plus static guards on the rework arm's shape and a wiring check that the
+# merge-push step runs it. No live city, Dolt, network, or PRs.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
+SUT="$HERE/one-anchor-per-pr.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-one-anchor-per-pr-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -101,21 +101,16 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors"
 
-# --- Extract the REAL resolve snippet from the formula. -----------------------
-SNIPPET="$(awk '
-  /# >>> one-anchor-per-pr-resolve/ {f=1; next}
-  /# <<< one-anchor-per-pr-resolve/ {f=0}
-  f' "$TOML")"
-
-[ -n "$SNIPPET" ] \
-  && ok "resolve snippet extracted between one-anchor-per-pr-resolve markers" \
-  || bad "resolve snippet extraction EMPTY — markers missing from $TOML"
-
-{ printf '%s\n' "$SNIPPET"; printf 'printf "%%s|%%s\\n" "$EXISTING_ANCHOR" "$GATING_ANCHOR"\n'; } > "$TMP/run.sh"
+# --- The script, and the step that runs it. ------------------------------------
+[ -x "$SUT" ] && ok "one-anchor-per-pr.sh is executable" || bad "one-anchor-per-pr.sh missing or not executable"
+grep -qE '/one-anchor-per-pr\.sh" land --work "\$WORK" --branch "\$BRANCH" --target "\$TARGET" --check-set "\$CHECK_SET" --pre-open "\$PRE_OPEN"' "$TOML" \
+  && ok "merge-push runs one-anchor-per-pr.sh land with the step's pins" \
+  || bad "merge-push no longer runs one-anchor-per-pr.sh land"
 
 # resolve <work> <branch> -> echo "EXISTING_ANCHOR|GATING_ANCHOR"
 resolve() {
-  WORK="$1" BRANCH="$2" bash "$TMP/run.sh" 2>/dev/null | tail -1
+  "$SUT" resolve --work "$1" --branch "$2" 2>/dev/null \
+    | sed -n 's/^EXISTING_ANCHOR=//p; s/^GATING_ANCHOR=//p' | paste -sd'|' -
 }
 
 # (1) First handoff: no other anchor on the branch -> no existing anchor, the
@@ -209,19 +204,18 @@ A
 eq "$(resolve rework-2 polecat/parent)" "tk-aaaa1|tk-aaaa1" \
    "(5b) no created_at on any row -> deterministic \$WORK-independent id tiebreak"
 
-# --- Static guards: the terminal arm's shape in the formula. ------------------
-# Extract the rework arm: from the terminal marker's `if [ -n "$EXISTING_ANCHOR"`
-# up to its `elif` (the pre-open arm). It must close $WORK as landed-on-branch
-# and must NOT stamp merge_result (that is the whole point — a rework child
-# never enters the anchor class).
+# --- Static guards: the rework arm's shape in the script. -----------------------
+# The rework arm runs from `if [ -n "$EXISTING_ANCHOR" ]` up to its `elif` (the
+# pre-open arm). It must close $WORK as landed-on-branch and must NOT stamp
+# merge_result (that is the whole point — a rework child never enters the
+# anchor class).
 REWORK_ARM="$(awk '
-  /# >>> one-anchor-per-pr-terminal/ {f=1}
-  /# <<< one-anchor-per-pr-terminal/ {f=0}
+  /^if \[ -n "\$EXISTING_ANCHOR" \]; then$/ {f=1}
   f && /^elif / {f=0}
-  f' "$TOML")"
+  f' "$SUT")"
 [ -n "$REWORK_ARM" ] \
-  && ok "(6) terminal rework arm extracted between one-anchor-per-pr-terminal markers" \
-  || bad "(6) terminal rework arm extraction EMPTY — markers missing from $TOML"
+  && ok "(6) the rework arm is found in the script" \
+  || bad "(6) the rework arm's opening line is missing from $SUT"
 grep -q 'gc bd update "\$WORK" --status=closed' <<< "$REWORK_ARM" \
   && ok "(7) rework arm closes \$WORK (landed-on-branch terminal)" \
   || bad "(7) rework arm must close \$WORK"
@@ -244,16 +238,12 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
 # An empty pr_url/pr_number on a pull_request anchor is skipped by merge.sh and
 # pr-facts.sh forever; the arm must fall back to pre_open_gate (pr-open.sh then
 # adopts the recorded PR and stamps real coordinates).
-TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-per-pr-terminal/{f=0} f' "$TOML")"
-[ -n "$TERMINAL" ] \
-  && ok "(9a) terminal snippet extracted for execution" \
-  || bad "(9a) terminal snippet extraction EMPTY"
 # Ref-aware git stub for the terminal arm's origin read-back gate. `fetch`
 # exits $STUB_FETCH_RC (0 unless set) to model a read-back that fails; `rev-parse`
 # of HEAD echoes $STUB_PREPARED_HEAD and of any origin/* ref echoes
 # $STUB_REMOTE_HEAD — an empty env var models an absent ref (empty output).
-# -C <dir> is ignored: the arm's PREP_WT is unset under test, so the stub answers
-# from the environment, not a real repository. Anything else exits 0 with no
+# -C <dir> is ignored: the stub answers from the environment, not a real
+# repository. Anything else exits 0 with no
 # output, as the dumb stub did.
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
@@ -281,12 +271,15 @@ printf '%s\n' "$*" >> "${LCLOG:?}"
 exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
-printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
+export GC_LIFECYCLE_TOOL="$TMP/bin/lc-stub"
+# land <work> <branch> <pre_open> <pr_url> <pr_number>: the terminal transition.
+land() {
+  "$SUT" land --work "$1" --branch "$2" --target main --check-set correctness \
+    --pre-open "$3" --pr-url "$4" --pr-number "$5" --prep-wt "$TMP"
+}
 run_terminal() { # <pre_open> <pr_url> <pr_number>
-  : > "$LCLOG"
-  EXISTING_ANCHOR="" WORK=w1 BRANCH=polecat/w1 TARGET=main CHECK_SET=correctness \
-    LC="$TMP/bin/lc-stub" PRE_OPEN="$1" PR_URL="$2" PR_NUMBER="$3" \
-    bash "$TMP/terminal.sh" >/dev/null 2>&1
+  : > "$LCLOG"; : > "$FAKE_ANCHORS"
+  land w1 polecat/w1 "$1" "$2" "$3" >/dev/null 2>&1 || true
   cat "$LCLOG"
 }
 lc_out=$(run_terminal 0 "https://github.com/o/r/pull/7" 7)
@@ -301,6 +294,38 @@ case "$lc_out" in
   *) bad "(9c) expected a pre_open_gate fallback transition (got: $lc_out)" ;;
 esac
 
+# --- The recorded PR is read through gh and must match the branch. ------------
+# gh answers $FAKE_PR_VIEW for `pr view`; an empty value models a PR gh cannot
+# read, whose coordinates then resolve to nothing.
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+[ "$1 $2" = "pr view" ] && printf 'GH %s\n' "$*" >> "${GHLOG:-/dev/null}" && printf '%s' "${FAKE_PR_VIEW:-}"
+exit 0
+GH
+chmod +x "$TMP/bin/gh"
+export GHLOG="$TMP/gh.log"
+run_recorded() { # <pr-view-json> [pre-open] -> "<rc>|<lifecycle calls>"
+  : > "$LCLOG"; : > "$FAKE_ANCHORS"; : > "$GHLOG"; local rc=0
+  FAKE_PR_VIEW="$1" "$SUT" land --work w1 --branch polecat/w1 --target main --check-set correctness \
+    --pre-open "${2:-0}" --prep-wt "$TMP" --recorded-pr https://github.com/o/r/pull/7 >/dev/null 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$LCLOG")"
+}
+VIEW_OK='{"url":"https://github.com/o/r/pull/7","number":7,"state":"OPEN","headRefName":"polecat/w1","baseRefName":"main"}'
+case "$(run_recorded "$VIEW_OK")" in
+  "0|transition w1 --to pull_request"*"--set pr_url=https://github.com/o/r/pull/7 --set pr_number=7"*)
+    ok "(9d) a recorded PR that is OPEN on this branch and target stamps pull_request with gh's coordinates" ;;
+  *) bad "(9d) a matching recorded PR must stamp pull_request (got: $(run_recorded "$VIEW_OK"))" ;;
+esac
+eq "$(run_recorded "${VIEW_OK/OPEN/CLOSED}")" "4|" "(9e) a recorded PR that is not OPEN exits 4 and writes nothing"
+eq "$(run_recorded "${VIEW_OK/polecat\/w1/polecat\/other}")" "4|" "(9f) a recorded PR on another head exits 4 and writes nothing"
+eq "$(run_recorded "${VIEW_OK/\"main\"/\"release\"}")" "4|" "(9g) a recorded PR on another base exits 4 and writes nothing"
+case "$(run_recorded '')" in
+  "0|transition w1 --to pre_open_gate"*) ok "(9h) a recorded PR gh cannot read parks at pre_open_gate for pr-open.sh to adopt" ;;
+  *) bad "(9h) an unreadable recorded PR must park at pre_open_gate (got: $(run_recorded ''))" ;;
+esac
+run_recorded "$VIEW_OK" 1 >/dev/null
+eq "$(cat "$GHLOG")" "" "(9i) a pre-open land asks gh nothing"
+
 # --- The rework hand-back's exit from the anchor class. -----------------------
 # THE INVARIANT (doctor/check-one-anchor-per-pr, I4): after a child's submit is
 # processed, exactly ONE open bead on that metadata.branch carries a non-empty
@@ -310,15 +335,14 @@ esac
 # never had one) takes the same path. Closing while still carrying one is an I5
 # error (doctor/check-closed-implies-landed), which is why the close is
 # conditional on the transition.
+# The branch's existing anchor, as the fake store answers the resolve.
+printf 'anchor-po|pull_request|polecat/parent|2026-07-01T00:00:00Z\n' > "$TMP/parent-anchor"
 run_rework() { # <lc-rc> -> "<lifecycle calls>#<gc bd calls>"
-  : > "$LCLOG"; : > "$TMP/gc.log"
+  : > "$LCLOG"; : > "$TMP/gc.log"; cp "$TMP/parent-anchor" "$FAKE_ANCHORS"
   # origin holds exactly the prepared head, so the read-back gate passes and the
   # arm proceeds to record + close (10f/10g cover the mismatch).
-  EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
-    LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" \
-    LCRC="$1" GCLOG="$TMP/gc.log" \
-    STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
-    bash "$TMP/terminal.sh" >/dev/null 2>&1
+  LCRC="$1" GCLOG="$TMP/gc.log" STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
+    land w1 polecat/parent 0 "" "" >/dev/null 2>&1 || true
   printf '%s#%s' "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
 }
 
@@ -341,11 +365,9 @@ esac
 # A refused close is reported, not swallowed. The transition already landed, so
 # the child sits unanchored, open and assigned — the shape that reads as work
 # still in flight, and the one a silent close leaves behind every pass.
-: > "$LCLOG"; : > "$TMP/gc.log"
-refused_out=$(EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
-  LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 \
-  STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
-  GCLOG="$TMP/gc.log" GCUPDRC=1 bash "$TMP/terminal.sh" 2>&1 >/dev/null)
+: > "$LCLOG"; : > "$TMP/gc.log"; cp "$TMP/parent-anchor" "$FAKE_ANCHORS"
+refused_out=$(LCRC=0 STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
+  GCLOG="$TMP/gc.log" GCUPDRC=1 land w1 polecat/parent 0 "" "" 2>&1 >/dev/null || true)
 case "$refused_out" in
   *"did not close"*|*"close was refused"*) ok "(10b3) a refused close is reported" ;;
   *) bad "(10b3) a refused close must be reported (got: '$refused_out')" ;;
@@ -382,11 +404,9 @@ esac
 # a branch the fix never reached, while origin/$BRANCH still points at the pre-fix
 # tip.
 run_gate() { # <prepared-head> <remote-head> [fetch-rc] -> "<rc>#<lifecycle>;<gc>"
-  : > "$LCLOG"; : > "$TMP/gc.log"; local rc
-  if EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
-       LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
-       STUB_PREPARED_HEAD="$1" STUB_REMOTE_HEAD="$2" STUB_FETCH_RC="${3:-0}" \
-       bash "$TMP/terminal.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+  : > "$LCLOG"; : > "$TMP/gc.log"; cp "$TMP/parent-anchor" "$FAKE_ANCHORS"; local rc
+  if LCRC=0 GCLOG="$TMP/gc.log" STUB_PREPARED_HEAD="$1" STUB_REMOTE_HEAD="$2" STUB_FETCH_RC="${3:-0}" \
+       land w1 polecat/parent 0 "" "" >/dev/null 2>&1; then rc=0; else rc=$?; fi
   printf '%s#%s;%s' "$rc" "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
 }
 
@@ -436,18 +456,15 @@ esac
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
 # duty is that the transitions land on the right bead, checked below.
 
-# The gating transitions (both sub-states, written through lifecycle.sh) must
-# sit INSIDE the terminal markers, downstream of the rework arm, so a rework
-# hand-back can never reach them.
-T_START=$(grep -n '# >>> one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
-T_END=$(grep -n '# <<< one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
-PREOPEN_LINE=$(grep -n -- '--to pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
-POSTOPEN_LINE=$(grep -n -- '--to pull_request' "$TOML" | head -1 | cut -d: -f1)
-{ [ -n "$T_START" ] && [ -n "$T_END" ] && [ -n "$PREOPEN_LINE" ] && [ -n "$POSTOPEN_LINE" ] \
-  && [ "$PREOPEN_LINE" -gt "$T_START" ] && [ "$PREOPEN_LINE" -lt "$T_END" ] \
-  && [ "$POSTOPEN_LINE" -gt "$T_START" ] && [ "$POSTOPEN_LINE" -lt "$T_END" ]; } \
-  && ok "(11) both gating transitions sit inside the terminal arm (rework path bypasses them)" \
-  || bad "(11) gating transitions must sit inside the one-anchor-per-pr-terminal markers (got start=$T_START end=$T_END pre=$PREOPEN_LINE post=$POSTOPEN_LINE)"
+# The gating transitions (both sub-states, written through lifecycle.sh) must sit
+# in the arms after the rework arm, so a rework hand-back can never reach them.
+REWORK_START=$(grep -n '^if \[ -n "\$EXISTING_ANCHOR" \]; then$' "$SUT" | head -1 | cut -d: -f1)
+PREOPEN_LINE=$(grep -n -- '--to pre_open_gate' "$SUT" | head -1 | cut -d: -f1)
+POSTOPEN_LINE=$(grep -n -- '--to pull_request' "$SUT" | head -1 | cut -d: -f1)
+{ [ -n "$REWORK_START" ] && [ -n "$PREOPEN_LINE" ] && [ -n "$POSTOPEN_LINE" ] \
+  && [ "$PREOPEN_LINE" -gt "$REWORK_START" ] && [ "$POSTOPEN_LINE" -gt "$REWORK_START" ]; } \
+  && ok "(11) both gating transitions sit after the rework arm (rework path bypasses them)" \
+  || bad "(11) gating transitions must follow the rework arm (got rework=$REWORK_START pre=$PREOPEN_LINE post=$POSTOPEN_LINE)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

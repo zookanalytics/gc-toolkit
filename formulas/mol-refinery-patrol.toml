@@ -389,24 +389,17 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 "$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 # >>> rejection-branch-keep
-# $BEAD_JSON is the read the repool above shape-validated, so an unreadable
-# bead has already exited and the branch it names is kept. A wrongly kept
-# branch is swept later; a wrongly deleted one strands a PR.
+# $BEAD_JSON is the read the repool shape-validated. A wrongly kept branch is
+# swept later; a wrongly deleted one strands a PR.
 # >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
+# The one reading of the merge strategy: every step that branches on it reads it
+# here, so the step that keeps a branch and the step that opens its PR agree.
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
+# A polecat/ target is another bead's PR head, and work landing there folds into
+# that PR: mr with no PR of its own would open a nested PR, so it resolves to
+# direct, and MS_FOLD_IN tells the branch decision why.
 MS_FOLD_IN=
 MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
 MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
@@ -420,10 +413,8 @@ case "$MS_TARGET" in
 esac
 # <<< merge-strategy-resolve
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-# Nothing PR-shaped on the bead means "no PR will ever want this branch" only
-# in direct mode. In mr mode the PR is opened later, by the cadence's pr-open,
-# so that test is true for the whole pre-open window. A first-pass rejection
-# lands inside it.
+# Nothing PR-shaped on the bead means no PR will want the branch only in direct
+# mode: in mr mode pr-open opens the PR later, after a first-pass rejection.
 PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
 if [ -z "$BRANCH" ]; then
   echo "no metadata.branch on $WORK — no branch to delete"
@@ -448,34 +439,21 @@ with the merge. One block, one shell — a probe result that does not survive
 into the filing arm reads as "no duplicate":
 ```bash
 # >>> preexisting-failure-dedup
-# ONE short, distinctive token, reused for BOTH the probe below and the
-# title of any bead it files. Dedup only works while the two agree: the
-# probe is a title SUBSTRING match, so a prose failure summary — reworded
-# every cycle — never matches the bead the last cycle filed, and each
-# patrol files another P1 for the same failure. Use the failing test name,
-# the failing target, or an error symbol.
+# ONE short distinctive token (the failing test name, target, or error symbol)
+# serves the probe AND the filed title: the probe is a title-substring match,
+# so a reworded summary never finds the bead the last cycle filed.
 FAIL_TOKEN="<failing test name or error symbol>"
-# The evidence that makes the bead workable. A title-only P1 cannot be
-# dispositioned by anyone: nothing in it separates a host-load flake from a
-# real regression, which is the judgment the bead exists to enable. Keep the
-# heredoc QUOTED. Pasted failure output carries backticks and $, and an
-# unquoted heredoc runs them.
+# The evidence that tells a host-load flake from a regression. Keep the heredoc
+# QUOTED: pasted output carries backticks and $.
 FAIL_LOG=$(cat <<'FAILLOG'
 <the check that failed, the package or target it ran in, and its raw output>
 FAILLOG
 )
-# --title-contains is the real flag (case-insensitive title substring).
-# NOT --search: bd has no such flag, and rejects it with "unknown flag" on
-# stderr while leaving stdout EMPTY — which reads as "no duplicate found".
+# --title-contains, never --search: bd rejects that on stderr with an empty
+# stdout, which reads as "no duplicate".
 DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
-# SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
-# so an unreadable list cannot be told from a genuine "no match" — and
-# guessing "no match" is precisely what files the duplicate. A readable
-# empty result is the JSON array []; anything that is not an array is
-# UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
-# cannot be satisfied by a bead you were unable to check for, and the same
-# unavailable bd would fail the `gc bd create` anyway. The next patrol
-# re-probes.
+# bd fails open, so only a JSON array is a readable answer. Anything else is
+# unknown: file nothing and merge nothing, and the next patrol re-probes.
 if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
   gc runtime drain-ack
@@ -485,22 +463,11 @@ DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
 if [ -n "$DUP_ID" ]; then
   echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
 else
-  # The SAME token goes in the title, so the NEXT patrol's probe finds it,
-  # and nothing else does: a placeholder left in the title ships as literal
-  # filler, and the detail belongs in the body anyway.
-  # The evidence goes in -d, which fills .description. That is the field
-  # pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
-  # Nothing in this pack reads .design, so a body filed there is a body no
-  # reader ever sees.
-  # The observed-on branch comes off the work bead, so that read is
-  # SHAPE-validated the way the probe above is. `gc bd show` fails open the
-  # same way, and it answers an OBJECT instead of an array when the id
-  # resolves to nothing, both of them at exit 0. An unvalidated read leaves
-  # TARGET empty and takes the formula default silently, which files a P1
-  # naming the default branch for a failure observed on an integration
-  # branch. A readable bead is a NON-EMPTY array. Anything else is UNKNOWN,
-  # and unknown files nothing and merges nothing. The default stands in only
-  # for a bead that was read and genuinely carries no target.
+  # The token alone titles the bead, so the next probe finds it; the evidence
+  # goes in -d (.description), the field every reader reads. `gc bd show`
+  # fails open too, answering an object at exit 0 for an unknown id, so only a
+  # non-empty array is a readable bead; the default target stands in only for
+  # a bead read and genuinely carrying none.
   WORK_JSON=$(gc bd show "$WORK" --json 2>/dev/null)
   if ! printf '%s' "$WORK_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     echo "work bead $WORK unreadable — filing nothing and NOT merging $WORK; the next patrol re-reads"
@@ -537,20 +504,14 @@ BEAD_JSON=$(gc bd show $WORK --json)
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch')
 TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
 # >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
+# The one reading of the merge strategy: every step that branches on it reads it
+# here, so the step that keeps a branch and the step that opens its PR agree.
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
+# A polecat/ target is another bead's PR head, and work landing there folds into
+# that PR: mr with no PR of its own would open a nested PR, so it resolves to
+# direct, and MS_FOLD_IN tells the branch decision why.
 MS_FOLD_IN=
 MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
 MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
@@ -568,125 +529,56 @@ if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
   echo "metadata.existing_pr requires the PR pipeline; using merge_strategy=mr."
   MERGE_STRATEGY="mr"
 fi
-LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/lifecycle.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-if [ -z "$LC" ]; then
+if [ -z "$SCRIPTS" ]; then
   echo "lifecycle.sh not found — cannot transition $WORK; leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
-branch_has_real_change() {
-  # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
-  # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
-  # 2 = could not compute (fail closed — a tool error is a suspect).
-  bhrc_base=$(git merge-base "$1" "$2" 2>/dev/null) || return 2
-  git diff --quiet "$bhrc_base" "$2"
-  case "$?" in 0) return 1 ;; 1) : ;; *) return 2 ;; esac
-  [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
-  return 0
-}
+LC="$SCRIPTS/lifecycle.sh"
 ```
 
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
-branch that merges to a no-op is a false completion. Never silently retry. The
-prepared head is the detached prep worktree's HEAD (the rebase step staged it
-there), so resolve that path and read its commit rather than a `temp` branch:
+branch that merges to a no-op is a false completion. `zero-diff-guard.sh`
+passes a prepared head with a real change against origin/$TARGET, and
+otherwise parks the bead for a human, escalates and drains; never silently
+retry:
 ```bash
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
-  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
-  gc runtime drain-ack
-  exit 1
-fi
+"$SCRIPTS/zero-diff-guard.sh" --work "$WORK" --branch "$BRANCH" --target "$TARGET" || exit 1
 ```
 
-**If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
-(the real target branch may be checked out in the rig's canonical
-worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. A push rejected for branch protection (GH006/GH013/
-"protected branch"/"Changes must be made through a pull request"/"approving
-review"/"Cannot update this protected ref") auto-promotes the bead to
-`merge_strategy=pr` and falls through to the mr block — the prep worktree is
-untouched and still holds the prepared head for the PR push. Any other push
-failure stops the wisp.
+**If MERGE_STRATEGY = "direct":** `direct-merge-push.sh` merges the prepared
+head onto origin/$TARGET in a throwaway worktree, pushes, verifies the remote
+ref, and records and closes the bead in ONE lifecycle transition. Exit 3 means
+branch protection refused the push: the bead is now `merge_strategy=pr`, so
+take the mr path below. Any other non-zero exit has drained; stop the wisp.
 ```bash
-# >>> direct-merge-push
-set -e
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
-MERGE_WT="$MERGE_PARENT/target"
-# $PUSH_ERR is allocated further down but torn down here: every arm that reads
-# it exits without reaching a removal of its own.
-PUSH_ERR=""
-merge_scratch_rm() { git -C "$RIG_ROOT" worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
-trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-git -C "$RIG_ROOT" worktree add --detach "$MERGE_WT" "origin/$TARGET"
-git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
-MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
-if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-  REMOTE=$(git -C "$RIG_ROOT" rev-parse "origin/$TARGET")
-  if [ "$MERGED_SHA" != "$REMOTE" ]; then
-    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
-    gc runtime drain-ack; exit 1
-  fi
-  "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
-else
-  case "$(cat "$PUSH_ERR")" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
-      echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-      gc bd update "$WORK" --set-metadata merge_strategy=pr
-      MERGE_STRATEGY=mr ;;
-    *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
-  esac
-fi
-# <<< direct-merge-push
+"$SCRIPTS/direct-merge-push.sh" --work "$WORK" --target "$TARGET"; DIRECT_RC=$?
+[ "$DIRECT_RC" = 3 ] && MERGE_STRATEGY=mr
 ```
-After a successful direct merge: tear down the prep worktree (`git -C
-"$RIG_ROOT" worktree remove --force "$PREP_WT"` — it is detached and holds no
-branch, and the rig root's HEAD was never moved, so nothing is restored); if
-delete_merged_branches = "true", `git -C "$RIG_ROOT" push origin --delete
-"$BRANCH"`; and if auto_ff_rig_main = "true", best-effort ff the rig canonical
-checkout (`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort
-on its failure.
+After a successful direct merge, tear down the prep worktree (`git -C
+"$RIG_ROOT" worktree remove --force "$PREP_WT"`, both resolved as the push block
+below does). If delete_merged_branches = "true", also `git -C "$RIG_ROOT" push
+origin --delete "$BRANCH"`; if auto_ff_rig_main = "true", best-effort ff the
+rig checkout when it is on `$TARGET` and clean.
 
-**If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
-pushes the prepared branch and transitions the anchor into the gated
-pipeline; the cadence's gate-ensure dispatches the review, pr-open opens the
-PR, merge.sh lands it. Check dispatch does NOT happen here.
+**If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It pushes
+it and moves the anchor into the gated pipeline, where the cadence reviews,
+opens and lands it.
 
-1. Push the prepared branch. Force ONLY when the push actually rewrites
-history — derived from ancestry, not the branch name:
+1. Push the prepared branch. Force ONLY when the push rewrites history —
+derived from ancestry, not the branch name:
 ```bash
 # >>> shared-branch-push-mode
-# The prepared head is the detached prep worktree's HEAD (the rebase step staged
-# it there), never a branch in the rig root; push it from there so the root's
-# HEAD is never moved to it.
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-# Deliberately NO fetch here. `--force-with-lease` with no explicit expected
-# value compares against the LOCAL remote-tracking ref, so a fetch immediately
-# before the push refreshes the very ref the lease is checked against and
-# quietly degrades it to a plain --force. The rebase step's fetch is the
-# snapshot both the ancestry test and the lease are taken against, which is
-# what makes "the branch moved under us" detectable at all.
+# NO fetch here: a bare --force-with-lease checks against the local
+# remote-tracking ref, so a fetch right before the push would degrade it to a
+# plain --force. The rebase step's fetch is the snapshot the lease checks.
 if git -C "$PREP_WT" merge-base --is-ancestor "origin/$BRANCH" HEAD; then
   git -C "$PREP_WT" push origin "HEAD:$BRANCH"
 else
@@ -698,25 +590,18 @@ A rejected push means the branch moved since the fetch: STOP, re-fetch,
 re-run the prepare block, retry. Never plain `--force`, and never force a
 branch the prepare block put in merge mode.
 
-2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
-base==$TARGET, in the origin repo — `gh pr view <ref> --json
-url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
-not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
-`--takeaway` the one line the operator's board renders as what this bead
-needs, capped at 140 characters.
+2. Validate a caller-supplied `existing_pr`: OPEN, head==$BRANCH,
+base==$TARGET, in the origin repo (`gh pr view <ref> --json
+url,number,state,headRefName,baseRefName`). A mismatch is a durable block, not
+a retry: fill `blocked_reason` (the detail) and `--takeaway` (the board's one
+line, at most 140 characters), then jump to next-iteration.
 ```bash
 "$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-[ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
+"$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
 ```
-Then jump to next-iteration (pour before burn).
 
-3. Decide pre-open vs post-open. PRE_OPEN means "no PR is recorded under
-ANY key" — the refinery's own `pr_url`/`pr_number` count, not just the
-caller's `existing_pr`, so a post-open anchor reaching this step by any
-route converges on its PR instead of being re-parked:
+3. Decide pre-open vs post-open: PRE_OPEN means no PR is recorded under ANY
+key, the refinery's own `pr_url`/`pr_number` included:
 ```bash
 # >>> pre-open-recorded-pr
 RECORDED_PR="$EXISTING_PR"
@@ -728,26 +613,15 @@ if [ -z "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
   PRE_OPEN=1
 fi
 if [ -n "$RECORDED_PR" ] && [ -z "$EXISTING_PR" ]; then
-  echo "merge-push: $WORK already records PR $RECORDED_PR (pr_url/pr_number); taking the POST-OPEN path so the existing PR is reused, not re-parked to pre_open_gate." >&2
-fi
-# The post-open transition needs BOTH url and number; resolve them here so the
-# terminal arm never stamps an unaddressable pull_request (empty pr_number is
-# skipped by merge.sh and pr-facts.sh forever).
-PR_URL=""; PR_NUMBER=""
-if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
-  PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
-  PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
+  echo "merge-push: $WORK already records PR $RECORDED_PR; taking the POST-OPEN path to reuse it." >&2
 fi
 # <<< pre-open-recorded-pr
 ```
-On the post-open path, verify `$PR_VIEW` reports OPEN + head==$BRANCH
-+ base==$TARGET; a caller-supplied PR that fails goes to the blocked arm
-above, anything else stops the wisp for debugging without mutating state.
+Post-open, step 5 reads the recorded PR through gh and refuses one that is not
+OPEN with head $BRANCH and base $TARGET.
 
-4. Normalize the check-set. Empty never out-ranks the declared default (the
---root-only pour path can mis-substitute), and the `none`/`off` sentinel is
-STAMPED as the canonical `none` rather than collapsed to empty:
+4. Normalize the check-set. Empty never out-ranks the declared default, and
+the `none`/`off` sentinel is STAMPED as the canonical `none`:
 ```bash
 CHECK_SET="{{check_set}}"
 # >>> check-set-normalize
@@ -760,108 +634,21 @@ unset _cs_canon
 # <<< check-set-normalize
 ```
 
-5. One-anchor-per-PR guard, then ONE lifecycle transition. If another OPEN
-bead already gates this branch, $WORK is a rework hand-back: move it to
-`unanchored` and close it landed-on-branch, never stamp `merge_result` on it
-(a merge_result-carrying rework child joins the anchor enumeration as a
-gateless second anchor), and let gating continue on the existing anchor: its
-lane markers are states of the lane, not of the head, so the rework's push does
-not touch them — the cadence re-reads the existing anchor's check and holds
-until it reads green.
-
-Branch is the join key and `merge_result` present is the whole predicate: any
-declared state carries one, so an anchor parked for a person (`blocked`,
-`held`, `abandoned`, `retargeted`, `refused_false_completion`) still owns its
-PR, and a search restricted to the two gating states walks past it and mints
-the second anchor it was written to prevent. Multi-candidate tiebreak: the
-OLDEST anchor (the original predates any rework-minted duplicate);
-`created_at` is the real field, `.created`/`.id` only defensive fallbacks.
-
-The child leaves through `lifecycle.sh` because `merge_result` is the
-lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
-declared edge out of every gating state. A child closed still carrying one is
-an I5 error (`doctor/check-closed-implies-landed`), so a refused transition
-leaves it open for the next pass instead.
-
-The close itself is `gc bd update --status=closed`, never `gc bd close`. bd's
-ownership check is a property of the `close` verb: it compares the actor
-against the assignee and refuses a bead held by another principal, pointing at
-`--force`. Everything the refinery closes is a bead someone handed it, so the
-verb that carries that check is the one verb it cannot use — and the refusal is
-per-anchor and permanent, so a retry meets it unchanged every pass. The
-`update` form reaches the same status with no such check, which is why every
-other close in the pack goes through `lifecycle.sh`'s single atomic update.
-`unanchored` is an open state, so `--close` is not available here and this arm
-writes the status itself; its result is checked, because a close that reports
-nothing leaves a bead that is unanchored, open, and assigned, which reads like
-work still in flight.
+5. ONE terminal transition. `one-anchor-per-pr.sh land` closes a rework
+hand-back landed-on-branch when another open bead already anchors this branch,
+never stamping a merge_result on it, and otherwise stamps $WORK as the anchor:
+pull_request when the PR's url and number both resolved, else pre_open_gate.
+Exit 4 means the recorded PR does not match the branch and nothing was
+written: a caller-supplied `existing_pr` takes the blocked arm above, and
+anything else stops the wisp for debugging:
 ```bash
-# >>> one-anchor-per-pr-resolve
-EXISTING_ANCHOR=""
-if [ -n "${BRANCH:-}" ]; then
-  ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
-    --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
-  EXISTING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
-    '[ .[]? | select(.id != $self)
-       | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
-     | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
-fi
-GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
-# <<< one-anchor-per-pr-resolve
-# >>> one-anchor-per-pr-terminal
-if [ -n "$EXISTING_ANCHOR" ]; then
-  # This arm closes the rework landed-on-branch, so the landing must be provable
-  # against origin: the mr push above can be rejected or skipped and leave
-  # origin/$BRANCH at its pre-fix tip, and a sha read from the local prep
-  # worktree would then close the rework and note it landed over a branch the
-  # fix never reached. A stale local origin/$BRANCH is the same trap — a failed
-  # fetch leaves it at its last cached value, which can coincidentally equal the
-  # prepared head. So fail closed on the fetch first, then require the refreshed
-  # remote tip to equal the prepared head; on either failure record nothing,
-  # close nothing, and leave $WORK routed for the next pass to re-push.
-  if ! git -C "$PREP_WT" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
-    echo "merge-push: could not fetch origin/$BRANCH to read back the rework landing; recording no landing and closing nothing. $WORK stays routed for the next pass to re-push." >&2
-    gc runtime drain-ack
-    exit 1
-  fi
-  PREPARED_HEAD=$(git -C "$PREP_WT" rev-parse HEAD 2>/dev/null || echo "")
-  REMOTE_HEAD=$(git -C "$PREP_WT" rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
-  if [ -z "$PREPARED_HEAD" ] || [ -z "$REMOTE_HEAD" ] || [ "$PREPARED_HEAD" != "$REMOTE_HEAD" ]; then
-    echo "merge-push: origin/$BRANCH is '${REMOTE_HEAD:-absent}', want prepared head '${PREPARED_HEAD:-absent}' — the rework fix is not on origin; recording no landing and closing nothing. $WORK stays routed for the next pass to re-push." >&2
-    gc runtime drain-ack
-    exit 1
-  fi
-  REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
-  gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
-  if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
-    if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
-      echo "merge-push: $WORK left the anchor class but the close was refused; it stays unanchored and open, and the next pass retries both idempotently" >&2
-    fi
-  else
-    echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
-  fi
-elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
-  if [ "$PRE_OPEN" != 1 ]; then
-    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
-  fi
-  "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
-else
-  "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
-fi
-# <<< one-anchor-per-pr-terminal
+"$SCRIPTS/one-anchor-per-pr.sh" land --work "$WORK" --branch "$BRANCH" --target "$TARGET" --check-set "$CHECK_SET" --pre-open "$PRE_OPEN" --prep-wt "$PREP_WT" --recorded-pr "$RECORDED_PR"
 ```
-The anchor stays OPEN, detached from both work queues (`assignee=""` keeps
-it out of find-work; empty route keeps it out of pool demand). It closes
-later, on a verified merge, via the cadence — never here. A failed
-transition leaves $WORK assigned and open; the next patrol retries
-idempotently (push and anchor resolution are both re-runnable).
+The anchor stays OPEN and closes later, on a verified merge. A failed
+transition leaves $WORK assigned and open for the next patrol to retry.
 
 6. Cleanup: tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove
---force "$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the push block did; an
-interrupted teardown is cleared by the next iteration's rebase step). The prep
-worktree is detached and holds no branch, so nothing else has to be deleted.
-Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
-never moved, so nothing has to be restored here.
+--force "$PREP_WT"`). Never delete `$BRANCH` in mr mode — the PR needs it.
 
 **Unsupported strategies (e.g. `local`):** transition nothing; escalate
 via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and

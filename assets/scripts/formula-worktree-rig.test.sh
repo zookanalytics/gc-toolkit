@@ -344,9 +344,13 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
   && ok "prep/nomatch: the refinery drains, leaving the work to retry" \
   || bad "prep/nomatch: the refinery drains, leaving the work to retry"
 
-echo "── mol-refinery-patrol: direct-merge-push ──"
-block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
-eq "$(bare_git "$TMP/merge.sh")" "" "direct-merge: every git call in the block names its repo with -C"
+echo "── mol-refinery-patrol: direct-merge-push.sh ──"
+MERGE_SH="$ROOT/assets/scripts/direct-merge-push.sh"
+[ -x "$MERGE_SH" ] && ok "direct-merge-push.sh is executable" || bad "direct-merge-push.sh is executable"
+eq "$(bare_git "$MERGE_SH")" "" "direct-merge: every git call in the script names its repo with -C"
+grep -qF '/direct-merge-push.sh" --work "$WORK" --target "$TARGET"' "$PATROL_TOML" \
+  && ok "direct-merge: merge-push runs direct-merge-push.sh on the step's pins" \
+  || bad "direct-merge: merge-push runs direct-merge-push.sh on the step's pins"
 
 merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   local d="$TMP/merge-$1" rc=0
@@ -355,14 +359,14 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   # The rebase step leaves the prepared head staged here, detached.
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      LC="$BIN/lifecycle" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" GC_LIFECYCLE_TOOL="$BIN/lifecycle" \
+      FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" "$MERGE_SH" --work wb --target main ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
 for mode in env roster; do
   merge_case "$mode"
-  eq "$RC" 0 "direct-merge/$mode: the block runs from a foreign cwd"
+  eq "$RC" 0 "direct-merge/$mode: the script runs from a foreign cwd"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "direct-merge/$mode: the merge landed on the RIG's origin"
   eq "$(git -C "$D/foreign.git" rev-parse main)" "$FOREIGN" "direct-merge/$mode: the cwd repo's origin is untouched"
   eq "$(git -C "$D/rig" rev-parse origin/main)" "$FEATURE" "direct-merge/$mode: the push is verified against the rig's refreshed origin/main"
@@ -387,10 +391,11 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
 eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: refused before creating any scratch directory"
 
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
-# Every refinery block derives the prep worktree's path from RIG_ROOT, so two
-# blocks that resolved it differently could stage and read different repos.
+# Every refinery block, direct-merge-push.sh and zero-diff-guard.sh derive the
+# prep worktree's path from RIG_ROOT, so two that resolved it differently could
+# stage and read different repos.
 echo "── mol-refinery-patrol: one rig-root lookup ──"
-LOOKUPS=$(awk '/^RIG_ROOT=/ { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML")
+LOOKUPS=$(awk '/^RIG_ROOT=/ { l = $0; getline a; getline b; print l " " a " " b }' "$PATROL_TOML" "$ROOT/assets/scripts/direct-merge-push.sh" "$ROOT/assets/scripts/zero-diff-guard.sh")
 N=$(printf '%s\n' "$LOOKUPS" | count)
 [ "$N" -ge 2 ] && ok "patrol: $N RIG_ROOT resolutions found" || bad "patrol: RIG_ROOT resolutions found" "$N"
 eq "$(printf '%s\n' "$LOOKUPS" | sort -u | count)" 1 "patrol: every RIG_ROOT resolution is the same lookup, copied verbatim"
