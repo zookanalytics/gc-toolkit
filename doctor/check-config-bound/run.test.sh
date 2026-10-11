@@ -37,8 +37,7 @@ cat > "$P/packs/sub/agents/kid/agent.toml" <<'EOF'
 inject_fragments = ["sub-only", "by-file"]
 EOF
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 while [ "${1:-}" = "--city" ]; do shift 2; done
 case "$1 $2" in
   "config show") rc="${CFG_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$CFG_FILE" ;;

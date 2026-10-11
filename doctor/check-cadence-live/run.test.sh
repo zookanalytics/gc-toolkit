@@ -32,8 +32,7 @@ EOF
 cat > "$TMP/rigs.json" <<'EOF'
 {"rigs":[{"name":"alpha","suspended":false},{"name":"beta","suspended":false}]}
 EOF
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "order list")    rc="${ORDERS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$ORDERS_JSON" ;;
   "rig list")      rc="${RIGS_RC:-0}";   [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;

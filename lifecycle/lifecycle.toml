@@ -595,7 +595,8 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
+  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "signoff_verdict", "visual",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -616,6 +617,15 @@ keys = [
 #   back before the irreversible dismissal, so no dismissal goes unrecorded. A
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
+# approval_dismissed — on a validation-pass bead, the outside approvals that
+#   pass dismissed when it ruled a fresh whole-diff review warranted: the GitHub
+#   review ids, comma-separated. A lone id can read back as a number, so a
+#   reader compares it with tostring. Written by approval-withdraw.sh and read
+#   back before it notes the judgment on the anchor and before the first
+#   irreversible dismissal. A retry of the same pass reads it and dismisses only
+#   those reviews, so it never dismisses an approval given after them. Absent
+#   means the pass dismissed nothing: it converged, or no approval stood. Never
+#   cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -959,14 +969,14 @@ keys = [
 #   not this key. Read by that script's own guard, tools/gc-proactive.sh,
 #   mol-first-reaction.toml and bead-context.sh. Never cleared.
 # gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
-#   visit it named, and the timestamp. A ruling or recommend that files its own
-#   gate stamps _target in a second write, once the gate exists. _reason is the
-#   closer's brief: mol-validate-close.toml reads it as the claim it re-derives
-#   against live state before it closes or escalates a bead the close exit
-#   handed it. first-reaction-dispose.sh reads _target and _at to compose its
-#   "already landed" message. bead-context.sh returns every key of the record
-#   with a subject's context. Never cleared. _at is RFC-3339 UTC.
+#   update as gc.first_reaction: the reason, the route, named agent, waiting-ids,
+#   human gate or visit it named, and the timestamp. A ruling or recommend that
+#   files its own gate stamps _target in a second write, once the gate exists.
+#   _reason is the closer's brief: mol-validate-close.toml reads it as the claim
+#   it re-derives against live state before it closes or escalates a bead the
+#   close exit handed it. first-reaction-dispose.sh reads _target and _at to
+#   compose its "already landed" message. bead-context.sh returns every key of
+#   the record with a subject's context. Never cleared. _at is RFC-3339 UTC.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an

@@ -44,7 +44,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 34,423 | 8,605 |
 | [`polecat`](agents/polecat.md) | 27,767 | 6,941 |
 | [`polecat-codex`](agents/polecat-codex.md) | 27,797 | 6,949 |
-| [`proactive`](agents/proactive.md) | 14,519 | 3,629 |
+| [`proactive`](agents/proactive.md) | 14,964 | 3,741 |
 | [`refinery`](agents/refinery.md) | 13,347 | 3,336 |
 | [`witness`](agents/witness.md) | 18,311 | 4,577 |
 
@@ -65,7 +65,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,302 | 575 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,344 | 586 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
@@ -81,7 +81,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
-| [`mol-validate`](formulas/mol-validate.md) | `city` | 3,878 | 969 |
+| [`mol-validate`](formulas/mol-validate.md) | `city` | 4,410 | 1,102 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,244 | 311 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,653 | 913 |

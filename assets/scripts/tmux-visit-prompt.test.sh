@@ -273,8 +273,7 @@ exit 4'
 # same exit-code propagation `-E` performs. So the redirect, the shell quoting
 # of the tmpfile path and the read-back are exercised, not simulated.
 mkdir -p "$TMP/bin" "$TMP/gumbin" "$TMP/tmpfiles"
-cat > "$TMP/bin/tmux" <<'TMUXSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUXSTUB'
 printf 'tmux %s\n' "$*" >> "$TMUX_CALLS"
 case "$1" in
   display-popup)
@@ -352,8 +351,7 @@ chmod +x "$TMP/bin/mktemp"
 # and pays no real-`gc` latency. A chooser case sets FAKE_RIGS_JSON to the rig
 # array to exercise selection; suspended/running ride in that JSON, so a case
 # can offer a dead rig and prove the picker leaves it out.
-cat > "$TMP/bin/gc" <<'GCSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCSTUB'
 case "$1 ${2:-}" in
   "rig list")
     # A wedged data plane. `exec` so `timeout` kills THIS process and the
@@ -933,8 +931,7 @@ fi
 # selection (the chooser is covered hermetically above). livebin holds ONLY gc,
 # so the real tmux/gum/script the live half needs still resolve on the suffix.
 mkdir -p "$TMP/livebin"
-cat > "$TMP/livebin/gc" <<'LGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/livebin/gc" <<'LGC'
 [ "$1 ${2:-}" = "rig list" ] && { printf '{"rigs":[]}\n'; exit 0; }
 exit 0
 LGC
