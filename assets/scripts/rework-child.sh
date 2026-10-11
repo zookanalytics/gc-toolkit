@@ -51,7 +51,6 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 warn()  { echo "rework-child: $*" >&2; }
 usage() { warn "$1"; exit 1; }
 fail()  { warn "$1"; exit 2; }
-row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 ANCHOR=""; SRC_KEY=""; SRC_BEAD=""; BRANCH=""; TARGET=""; TITLE=""; REASON=""

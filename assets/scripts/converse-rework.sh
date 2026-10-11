@@ -28,7 +28,6 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 
 die() { echo "converse-rework: $1" >&2; exit 2; }
-row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
 ANCHOR=""; RULING_BEAD=""; RULING=""; POOL_NAME=""
 while [ $# -gt 0 ]; do

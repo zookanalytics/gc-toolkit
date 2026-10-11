@@ -56,7 +56,6 @@ bd_show() {
   printf '%s' "$raw"
 }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
-row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
 # poured <id> — the first convoy tracking <id>, empty when none. A graph.v2 pour
 # mints a convoy that tracks the bead it pours over, and that edge outlives the
