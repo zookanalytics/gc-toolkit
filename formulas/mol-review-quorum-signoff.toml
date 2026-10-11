@@ -267,7 +267,7 @@ lanes covered what, and any reduced coverage.
 
 **5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
 per BLOCKING (P0/P1) finding, `[]` on approve — exactly as
-`formulas/mol-review.toml`'s `review` step 6b specifies (rebase-stable locus:
+`formulas/mol-review.toml`'s `verdict-and-drain` step specifies (rebase-stable locus:
 a file and a symbol or section, never a line number or oid).
 
 **6. One call, through the one writer.** Resolve signoff.sh from the pack and

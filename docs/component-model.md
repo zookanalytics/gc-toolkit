@@ -342,6 +342,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
+| `assets/scripts/review-context.sh` | review | Prints what a correctness review holds the diff against beyond the diff: the PR page as it will be published, and the pack's work-quality standards and exemplars. |
+| `assets/scripts/review-file-bug.sh` | review | Files a review finding that is real but out of the diff's scope as a bug, once per finding token, and files nothing on an unreadable store. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
 | `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the worktree the review tests in, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor; deferred files a claimable follow-up that the anchor `blocks` and that is `discovered-from` the finding, then closes; declined closes; needs-you files a visit and stays open), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
