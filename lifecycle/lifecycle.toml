@@ -569,7 +569,9 @@ keys = [
 #   bead's whole job: merge-only for a conflict or stale-base rejection, else
 #   with-work. Written by the resume block beside bring_current_from. On a
 #   merge-only bead the guard counts a commit of the bead's own as an edit
-#   beyond the merge, which owes an audit entry. Absent reads as with-work.
+#   beyond the merge, which owes an audit entry. Absent reads as with-work;
+#   absent beside a bring_current_from stamp, it marks a resume step that asks
+#   for no audit, so the round owes no entries.
 # conflict_audit — the worker's audit of the round, on the bead it holds: a
 #   JSON array of {path, collided, resolution, check, rating}, one per item the
 #   guard names, rating routine or judgment. Written by bring-current-audit.sh

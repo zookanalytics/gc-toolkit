@@ -122,8 +122,11 @@ adjacent-line collision, an overlapping comment edit or an obvious
 composition, and `judgment` for an informed decision, such as an inferred
 intent, a side chosen on substance, or something new written. The rating is
 the worker's, and it gates nothing; the guard's evidence beside each entry says
-what git could and could not merge on its own. Look at the merged code where an
-entry tells you to, then decide what the round reopens:
+what git could and could not merge on its own. An item listed with no entry
+from the worker comes from a resume that asked for no audit, and only the
+guard's evidence describes it, so read the merged code there yourself. Look at
+the merged code where an entry tells you to, then decide what the round
+reopens:
 
 - **Nothing** (`--reopen none`). The resolution preserved both intents in a way
   a reader can confirm from the account, and nothing reviewed before the round

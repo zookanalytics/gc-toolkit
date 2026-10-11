@@ -27,16 +27,19 @@
 #   idempotent, and one after triage ruled reopens nothing; an opted-out
 #   check_set records without reopening; a merge-only bead owes entries for its
 #   own commits; a pre-open-rebase child and a re-queued anchor are guarded; an
-#   earlier round awaiting triage rides into the next record; no stamp and
-#   nothing pushed is refused; the resume stamp marks the start; the anchor
-#   resolves from the branch; a failed write or supersede exits 1.
+#   earlier round awaiting triage rides into the next record, and a re-run keeps
+#   where it began; no stamp and nothing pushed is refused; the resume stamp
+#   marks the start; a start stamped with no scope owes no entries, and its
+#   round is recorded and routed all the same; the anchor resolves from the
+#   branch; a failed write or supersede exits 1.
+# coverage: lists each item and whether the audit covers it, writing nothing.
 # decide: refuses with no conflicted round, a lane the anchor does not declare,
 #   or a round another review already ruled on; records the ruling, unions the
 #   reopened lanes, supersedes each, renders the round's account; a dismissal
 #   files the visit composed from the audit FIRST, then re-requests and
-#   dismisses with a note composed from it; no approval dismisses nothing; a
-#   visit that does not land dismisses nothing; a retry carries out what was
-#   recorded.
+#   dismisses with a note composed from it; an approval given after the round
+#   stands; no approval dismisses nothing; a visit that does not land dismisses
+#   nothing; a retry carries out what was recorded.
 # The resume block, extracted from mol-polecat-work, stamps the start and the
 # scope and clears the last round's audit before its merge, and the filers'
 # rejection prefixes it reads are pinned.
@@ -516,6 +519,11 @@ eq "$(printf '%s' "$REC" | jq -r '.class')" "conflicted" "the record stays confl
 eq "$(printf '%s' "$REC" | jq -r '.audit[0].path + "@" + .audit[0].round')" "v.txt@$MODIFY_H" "…carrying the earlier entry, tagged with its round"
 eq "$(printf '%s' "$REC" | jq -r '.from')" "f0" "…from where the earlier round began"
 eq "$(printf '%s' "$REC" | jq -r '.head')" "$CLEAN_H" "…up to the new head"
+fresh
+out=$(guard --bead MI8 --from "$A" --to "$CLEAN_H"); rc=$?
+eq "$rc" "0" "a re-run of that hand-off exits 0"
+eq "$(rec_of AN1 | jq -r '.from')" "f0" "…and keeps where the earlier round began"
+eq "$(rec_of AN1 | jq -r '[ .audit[] | select(.path == "v.txt") ] | length')" "1" "…carrying the earlier entry once"
 
 echo "# guard: a bead that does not name its anchor finds it on the branch"
 R="$MODIFY_R"; A="$MODIFY_A"; git -C "$R" reset -q --hard "$MODIFY_H"
@@ -524,6 +532,39 @@ fresh
 out=$(guard --bead MI9 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
 eq "$(rec_of AN9 | jq -r '.class')" "conflicted" "the round lands on the branch's anchor"
+
+echo "# coverage: each item and whether the audit covers it, with nothing written"
+store "[$(child MC1 ",\"bring_current_from\":\"$A\",\"bring_current_scope\":\"merge-only\""), $(anchorrow AN1)]"
+fresh
+out=$( cd "$R" && "$SUT" coverage --bead MC1 --to "$MODIFY_H" 2>&1 ); rc=$?
+eq "$rc" "3" "an item with no entry exits 3"
+has "$out" "NEEDS AN ENTRY  v.txt" "…naming it"
+eq "$(rec_of AN1)$(cat "$STUB_RO_LOG")" "null" "…and nothing is recorded or reopened"
+store "[$(child MC1 ",\"bring_current_from\":\"$A\",\"bring_current_scope\":\"merge-only\"$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1)]"
+out=$( cd "$R" && "$SUT" coverage --bead MC1 --to "$MODIFY_H" 2>&1 ); rc=$?
+eq "$rc" "0" "a covered round exits 0"
+has "$out" "covered (routine)  v.txt" "…showing each entry's rating"
+
+echo "# guard: a round whose resume stamped its start but no scope owes no entries"
+# That resume step asks for no audit, and the submit step poured with it drains
+# on any refusal, so a refusal would only re-offer the same hand-off.
+store "[$(child MI10 ",\"bring_current_from\":\"$A\",\"bring_current_scope\":\"with-work\""), $(anchorrow AN1)]"
+fresh
+out=$(guard --bead MI10 --to "$MODIFY_H"); rc=$?
+eq "$rc" "3" "control: with a scope stamped beside the start, the missing entry is refused"
+store "[$(child MI10 ",\"bring_current_from\":\"$A\""), $(anchorrow AN1)]"
+fresh
+out=$(guard --bead MI10 --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "with no scope beside the start it exits 0"
+has "$out" "asked for no audit" "…saying why no entry is owed"
+REC=$(rec_of AN1)
+eq "$(printf '%s' "$REC" | jq -r '.class + " " + (.audit | length | tostring)')" "conflicted 0" "the round is recorded conflicted, with no entry"
+has "$(printf '%s' "$REC" | jq -r '.evidence[] | select(.path == "v.txt") | .detail')" "the merge base had lines" "…and the guard's evidence for its item"
+eq "$(meta AN1 bring_current_reopened)" "triage" "triage is reopened to rule on it"
+has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane triage" "…its standing review superseded"
+out=$( cd "$R" && "$SUT" coverage --bead MI10 --to "$MODIFY_H" 2>&1 ); rc=$?
+eq "$rc" "0" "coverage on such a round exits 0"
+has "$out" "owes no entries" "…saying it owes none"
 
 # --- decide ----------------------------------------------------------------------
 decide() { ( cd "$R" && "$SUT" decide "$@" 2>&1 ); }
@@ -607,6 +648,25 @@ has "$(cat "$STUB_GH_LOG")" "Triage: the merge chose the branch value" "…and c
 order_ok "ESCALATE" "DISMISS" && ok "the visit is filed before any dismissal" || bad "the visit must be filed before any dismissal"
 order_ok "requested_reviewers" "reviews/501/dismissals" && ok "…and the re-request comes before the dismissal" || bad "the re-request must come before the dismissal"
 eq "$(rec_of AN1 | jq -r '.triage.dismiss')" "true" "the ruling records the dismissal"
+
+echo "# decide: an approval given after the round saw the merged code, and stands"
+store "[$(round_anchor)]"
+reviews "$(approve human1 501 APPROVED 2026-10-02T00:00:00Z),$(approve human2 502)"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$rc" "0" "it exits 0"
+has "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "the approval from before the round is dismissed"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "…and the one given after it stands"
+hasnt "$(cat "$STUB_GH_LOG")" "reviewers[]=human1" "…its approver is not re-requested"
+has "$(cat "$STUB_ESC_LOG")" "the approval from human2 did not see" "…and the visit names only the approval it dismisses"
+store "[$(round_anchor)]"
+reviews "$(approve human1 501 APPROVED 2026-10-02T00:00:00Z)"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$rc" "0" "with every approval given after the round it exits 0"
+has "$out" "every standing approval was given after the round" "…saying so"
+eq "$(cat "$STUB_ESC_LOG")" "" "…filing no visit"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and dismissing nothing"
 
 echo "# decide: no standing approval dismisses nothing; a visit that does not land dismisses nothing"
 store "[$(round_anchor)]"

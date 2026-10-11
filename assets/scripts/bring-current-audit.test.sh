@@ -9,8 +9,9 @@
 # show: prints a bead's entries and question, and an anchor's record.
 # render: composes the comment, the dismissal note and the re-ask visit from the
 #   anchor's record (the headline counts, judgment entries first, each entry's
-#   collision, decision and check beside the guard's evidence, triage's ruling,
-#   the generated renders); refuses an anchor with no record.
+#   collision, decision and check beside the guard's evidence, an item no entry
+#   covers beside its evidence alone, triage's ruling, the generated renders);
+#   refuses an anchor with no record.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
 #   then the branch, then the bead itself; refuses an empty question; a visit
@@ -124,6 +125,16 @@ eq "$(printf '%s\n' "$out" | head -1)" "PR#7 approval dismissed: triage ruled th
 has "$out" "changed code the approval from human1 did not see" "…the body names the approver"
 has "$out" "File by file:" "…lists the entries"
 has "$out" "Your call: review the change on the PR and approve again to let it land, or say what to change." "…and ends with the operator's call"
+
+echo "# render: an item no entry covers is listed with the guard's evidence alone"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit |= map(select(.path != "c.sh"))' | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as comment)
+has "$out" "No entry from the worker covers 1 item, so only the evidence from git describes it." "the headline counts the item no entry covers"
+has "$out" "- \`c.sh\`, no entry from the worker. Git: changed beyond what merging x produces." "…and the account lists it with the guard's evidence"
+has "$("$SUT" render --anchor AN1 --as visit)" "- \`c.sh\`, no entry from the worker." "the re-ask visit lists it too"
+has "$("$SUT" render --anchor AN1 --as dismissal)" "No entry from the worker covers c.sh." "…and the dismissal note names it"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
+hasnt "$("$SUT" render --anchor AN1 --as comment)" "no entry from the worker" "a round every entry covers lists no such item"
 
 echo "# render: an anchor with no record is refused"
 store "[$(anchorrow AN1)]"

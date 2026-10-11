@@ -761,7 +761,11 @@ An anchor whose `check_set` declares no triage lane records the round and owes
 no ruling. Generated renders (linguist-generated) owe no entry. A hand-off with no
 `bring_current_from` stamp that pushed nothing past the origin head it started
 from is refused rather than read as clean, because nothing records where its
-work began.
+work began. A round whose resume stamped `bring_current_from` but not
+`bring_current_scope` owes no entries: that resume step asks for no audit, and
+the submit step poured with it drains on any refusal, so a refusal would only
+re-offer the same hand-off. Its items are stored with the guard's evidence
+alone, and the round is routed to triage like any other.
 
 **Triage decides what reopens.** gate-ensure dispatches triage again, and its
 verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
@@ -770,19 +774,20 @@ that run again on the merged code (any the anchor declares, and any it adds with
 `--add-gates`); and whether the human approval still covers what would land.
 `bring-current-guard.sh decide` records the ruling in the anchor's record,
 supersedes each reopened lane, and on a dismissal files the re-ask visit first,
-then re-requests and dismisses each standing approval. A lane in
-`bring_current_reopened` is backed by a GitHub approval only when the approval
-was submitted after `bring_current_round_at` (`lane-state.sh`), so a standing
-approval neither lets the merge skip a reopened lane nor keeps its review from
-being dispatched. A routine round can therefore keep the approval while its
-lanes re-run, and material judgment removes it.
+then re-requests and dismisses each standing approval given before the round;
+one submitted after `bring_current_round_at` saw the merged code and stands. A
+lane in `bring_current_reopened` is backed by a GitHub approval only when the
+approval was submitted after `bring_current_round_at` (`lane-state.sh`), so a
+standing approval neither lets the merge skip a reopened lane nor keeps its
+review from being dispatched. A routine round can therefore keep the approval
+while its lanes re-run, and material judgment removes it.
 
 **Every message is composed from the audit.** The round section that opens
 triage's posted verdict, the dismissal note and the re-ask visit render from
 the stored record with `bring-current-audit.sh`: a headline of what the round
 needed, then per entry what collided, what was decided and why, and what to
-check. The question visit renders from the worker's entries so far and its
-question.
+check. An item no entry covers is listed with the guard's evidence alone. The
+question visit renders from the worker's entries so far and its question.
 
 What no guard reaches: the refinery's own prepare merge, which aborts on any
 conflict and so only ever pushes git's own result; and a merge the worker ran

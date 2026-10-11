@@ -30,8 +30,12 @@
 #       evidence and owes no entry.
 #   A round whose audit lacks an entry for an item, or whose entry is
 #   incomplete, is REFUSED (exit 3): nothing is handed off, and the worker
-#   writes the missing entries and re-runs. A covered round is stored on the
-#   anchor with the evidence, and routed to triage: the triage lane is
+#   writes the missing entries and re-runs. A round whose resume stamped
+#   bring_current_from but not bring_current_scope owes no entries: that resume
+#   step asks for no audit, and the submit step poured with it drains on any
+#   refusal, so a refusal would only re-offer the same hand-off. A covered
+#   round, or one that owes no entries, is stored on the anchor with the
+#   evidence, and routed to triage: the triage lane is
 #   superseded, so gate-ensure.sh dispatches it again, and triage is added to
 #   the lanes this anchor's rounds reopened (bring_current_reopened) with the
 #   round's time (bring_current_round_at). lane-state.sh lets no approval given
@@ -64,6 +68,8 @@
 # re-asks for the review is filed and read back first, so no dismissal strands
 # a PR without a signal; each approving account is then re-requested and its
 # approval dismissed, the order pr-facts.sh uses when it clears a human review.
+# An approval submitted after bring_current_round_at saw the merged code, so it
+# stands, the same line lane-state.sh draws.
 # A dismissal that does not land is noted on the visit, which still holds the
 # merge. The visit, the dismissal note and the round section of triage's
 # posted verdict are all rendered from the stored record.
@@ -428,7 +434,8 @@ cmd_classify() {
 }
 
 # --- the hand-off's reading, shared by guard and coverage -----------------------
-# Sets ROW, BEAD, ANCHOR, AROW, BRANCH, TARGET, SCOPE, FROM, TO and the round.
+# Sets ROW, BEAD, ANCHOR, AROW, BRANCH, TARGET, SCOPE, OWED, FROM, TO and the
+# round. OWED is empty when the round owes no audit entries.
 # rc: 0 a round to judge · 10 nothing to guard (printed) · 1 a read failed ·
 # 3 nothing records where the work began
 read_handoff() { # <bead> <to> <from-arg>
@@ -456,8 +463,12 @@ read_handoff() { # <bead> <to> <from-arg>
   TARGET=$(bca_meta "$ROW" target); [ -n "$TARGET" ] || TARGET=$(bca_meta "$AROW" target)
   [ -n "$TARGET" ] || { echo "$PROG: neither $BEAD nor anchor $ANCHOR names the target the branch is brought current with; nothing is guarded and the caller retries" >&2; return 1; }
   SCOPE=$(bca_meta "$ROW" bring_current_scope)
-  [ "$SCOPE" = "merge-only" ] || SCOPE="with-work"
   stamp=$(bca_meta "$ROW" bring_current_from)
+  # A start stamped with no scope beside it is the mark of a resume step that
+  # asks for no audit (see the header).
+  OWED=1
+  [ -n "$stamp" ] && [ -z "$SCOPE" ] && OWED=""
+  [ "$SCOPE" = "merge-only" ] || SCOPE="with-work"
   FROM="${stamp:-$3}"
   if [ -z "$stamp" ] && { [ -z "$FROM" ] || [ "$(git rev-parse -q --verify "$FROM^{commit}" 2>/dev/null)" = "$TO" ]; }; then
     echo "$PROG: nothing records where $BEAD's work on ${BRANCH:-its branch} began (no bring_current_from stamp, and nothing was pushed past ${FROM:-an unknown head} by this hand-off), so whether it brought the branch current cannot be read. Stamp the head the branch had before this bead's first commit or merge: gc bd update $BEAD --set-metadata bring_current_from=<oid>, then re-run" >&2
@@ -527,12 +538,16 @@ cmd_coverage() {
   coverage_report "$audit"
   missing=$(missing_entries "$audit")
   [ -z "$missing" ] && return 0
+  if [ -z "$OWED" ]; then
+    echo "$PROG: $BEAD's resume asked for no audit, so the round owes no entries; the guard records the items without one by its own evidence"
+    return 0
+  fi
   return 3
 }
 
 # --- guard ---------------------------------------------------------------------
 cmd_guard() {
-  local bead="" to="" from_arg="" rc audit missing ev_json existing same_round triage_prev round_at prior record cs reopened got
+  local bead="" to="" from_arg="" rc audit missing="" ev_json existing same_round triage_prev round_at prior record cs reopened got
   while [ $# -gt 0 ]; do
     case "$1" in
       --bead) bead="${2:-}"; shift 2 ;;
@@ -548,7 +563,7 @@ cmd_guard() {
   audit=$(audit_of "$ROW")
   if [ "$CLASS" = "conflicted" ]; then
     missing=$(missing_entries "$audit")
-    if [ -n "$missing" ]; then
+    if [ -n "$missing" ] && [ -n "$OWED" ]; then
       {
         echo "$PROG: the audit on $BEAD does not cover the round $(short "$FROM")..$(short "$TO"), so it is not handed off. Each item and the entry it owes:"
         coverage_report "$audit"
@@ -558,6 +573,7 @@ cmd_guard() {
       } >&2
       return 3
     fi
+    [ -z "$missing" ] || echo "$PROG: $BEAD's resume asked for no audit, so the round's items without an entry are recorded with the guard's evidence alone"
   fi
 
   ev_json=$(evidence_json)
@@ -569,7 +585,7 @@ cmd_guard() {
   if [ -n "$same_round" ]; then
     triage_prev=$(printf '%s' "$existing" | jq -c '.triage // null')
     round_at=$(bca_meta "$AROW" bring_current_round_at)
-    prior=$(printf '%s' "$existing" | jq -c '{audit: [ .audit[]? | select(.round != null) ], evidence: [ .evidence[]? | select(.round != null) ]}')
+    prior=$(printf '%s' "$existing" | jq -c '{audit: [ .audit[]? | select(.round != null) ], evidence: [ .evidence[]? | select(.round != null) ], from: .from}')
   elif printf '%s' "$existing" | jq -e 'type == "object" and .class == "conflicted" and .triage == null' >/dev/null 2>&1; then
     # An earlier round still awaiting triage: its account rides into this record,
     # tagged with its own head, so triage rules on everything it has not seen.
@@ -646,11 +662,11 @@ cmd_guard() {
 }
 
 # --- dismiss -------------------------------------------------------------------
-# Dismiss the standing approvals on the anchor's PR, the re-ask visit first.
-# rc 0 nothing stood, or the visit holds the merge · 1 nothing was dismissed and
-# the caller retries.
+# Dismiss the standing approvals on the anchor's PR given before the round, the
+# re-ask visit first. rc 0 nothing stood, or the visit holds the merge · 1
+# nothing was dismissed and the caller retries.
 dismiss_approvals() { # <anchor> <anchor-row> <record-json>
-  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals logins noun key msg dmsg rows visit failed="" dismissed="" rid login
+  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun key msg dmsg rows visit failed="" dismissed="" rid login
   url=$(bca_meta "$arow" pr_url); [ -n "$url" ] || url=$(bca_meta "$arow" existing_pr)
   num=$(bca_meta "$arow" pr_number)
   [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
@@ -673,14 +689,24 @@ dismiss_approvals() { # <anchor> <anchor-row> <record-json>
     echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
     return 1
   fi
-  approvals=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" "$REVIEW_VERDICT_DEF"'
-    [ standing_approvals($self)[] | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
+  # An approval submitted after the round saw the merged code, so it stands.
+  since=$(bca_meta "$arow" bring_current_round_at)
+  approvals=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
+    [ standing_approvals($self)[]
+      | select($since == "" or (((.submitted_at // "") | tostring) <= $since))
+      | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
   if [ -z "$approvals" ]; then
     echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2
     return 1
   fi
   if [ "$approvals" = "[]" ]; then
-    echo "$PROG: triage ruled the approval on PR#$num dismissed, but no approval stands to dismiss"
+    later=$(printf '%s' "$reviews" | scrub | jq -s --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
+      [ standing_approvals($self)[] | select(((.submitted_at // "") | tostring) > $since) ] | length' 2>/dev/null)
+    if [ -n "$since" ] && [ "${later:-0}" != "0" ]; then
+      echo "$PROG: triage ruled the approval on PR#$num dismissed, but every standing approval was given after the round and saw the merged code, so none is dismissed"
+    else
+      echo "$PROG: triage ruled the approval on PR#$num dismissed, but no approval stands to dismiss"
+    fi
     return 0
   fi
   logins=$(printf '%s' "$approvals" | jq -r '[ .[].login ] | unique | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')

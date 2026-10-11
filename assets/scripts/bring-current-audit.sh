@@ -121,6 +121,11 @@ def joinand: if length == 0 then "" elif length == 1 then .[0]
   elif length == 2 then "\(.[0]) and \(.[1])" else (.[:-1] | join(", ")) + ", and " + .[-1] end;
 def covered: [ .evidence[]? | select(.covered == true) ];
 def entries: [ .audit[]? | select(type == "object") ];
+def unaccounted: . as $r
+  | [ covered[] | . as $i
+      | select([ $r | entries[] | select(.path == $i.path and (.round // "") == ($i.round // "")) ] | length == 0) ]
+  | unique_by([.path, (.round // "")]);
+def bare_line: "`\(.path)`, no entry from the worker. Git: \(.detail | sentence)";
 def judgment_first: (map(select(.rating == "judgment")) + map(select(.rating != "judgment")));
 def git_detail($p): [ .evidence[]? | select(.path == $p and .covered == true) | .detail ] | .[0] // "";
 def headline:
@@ -128,11 +133,14 @@ def headline:
   | (covered | map(select(.kind != "conflict")) | length) as $b
   | (entries | map(select(.rating == "judgment")) | map(.path)) as $jp
   | (entries | map(select(.rating == "routine")) | length) as $r
+  | (unaccounted | length) as $u
   | "Merging \(.target // "the base") in (pushed head \(.head | short)) needed "
     + (if $c > 0 then count($c; "conflicted file"; "conflicted files") + " resolved by hand" else "no conflicted file resolved by hand" end)
     + (if $b > 0 then ", and " + count($b; "edit"; "edits") + " beyond what git merges on its own" else "" end)
     + ". The worker rated \($r) routine and \($jp | length) judgment"
-    + (if ($jp | length) > 0 then " (" + ($jp | map("`" + . + "`") | joinand) + ")" else "" end) + ".";
+    + (if ($jp | length) > 0 then " (" + ($jp | map("`" + . + "`") | joinand) + ")" else "" end) + "."
+    + (if $u > 0 then " No entry from the worker covers " + count($u; "item"; "items")
+         + ", so only the evidence from git describes " + (if $u == 1 then "it" else "them" end) + "." else "" end);
 def lanes: ((.triage.reopen // []) + (.triage.add // [])) | unique;
 def decision:
   if .triage == null then "Triage has not ruled on this round yet."
@@ -161,7 +169,8 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
         + headline + "\n\n"
         + "**Triage:** " + decision
         + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
-        + (entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))) | join("\n"))
+        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
+           + (unaccounted | map("- " + bare_line)) | join("\n"))
         + (if (generated | length) > 0
            then "\n\nGenerated files the merge re-rendered, which need no entry: " + (generated | map("`" + . + "`") | joinand) + "."
            else "" end)
@@ -170,6 +179,7 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
         | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) took judgment this approval did not see. "
           + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" "))
           + (if ($e | length) > $max then " And \(($e | length) - $max) more." else "" end)
+          + (unaccounted | if length > 0 then " No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end)
           + (if (.triage.reason // "") != "" then " Triage: " + (.triage.reason | clip(300) | sentence) else "" end)
           + " The triage comment on this PR has the round in full. Please review the change and approve again."
       else
@@ -179,7 +189,8 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
         + headline
         + (if (.triage.reason // "") != "" then " Triage ruled: " + (.triage.reason | sentence) else "" end) + "\n\n"
         + "File by file:\n"
-        + (entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))) | join("\n")) + "\n\n"
+        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
+           + (unaccounted | map("- " + bare_line)) | join("\n")) + "\n\n"
         + "Your call: review the change on the PR and approve again to let it land, or say what to change. This visit holds the merge while it is open."
       end' 2>/dev/null
 }
