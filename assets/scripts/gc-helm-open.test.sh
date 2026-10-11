@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test for the gc-helm `open` subject-existence gate.
 #
-# THE BUG: `gc-helm open <bead-id>` resolved the id PREFIX to a rig, pointed bd
-# at that rig's ledger, and then filed a visit — never confirming the bead
-# actually resolves there. A typo or a stale id produced a REAL visit bead,
-# parked on the helm board with gc.continuation_group=<the typo>. Engaging it
-# spawns a converse sitting whose prime step (`gc bd show $SUBJECT`) cannot
-# resolve anything, so it holds a conversation about a bead that does not
-# exist. Reproduced 2026-08-09 in signal-loom: `gc-helm open sl-nope1` filed a
-# visit and exited 0. This is the operator front door for the visit spine, so a
-# fat-fingered id manufactures junk work and an agent to hold it.
-#
-# THE FIX: resolve the subject (`gc bd show`) BEFORE the gate-visit block and
-# exit 4 ("verb runtime failure", the documented bead-not-found code) with
-# nothing filed. Fail CLOSED on every unhappy reading — the only alternative is
-# filing a visit on an unverified subject, which is the bug.
+# `gc-helm open <bead-id>` resolves the subject (`gc bd show`) BEFORE the
+# gate-visit block, and exits 4 ("verb runtime failure", the documented
+# bead-not-found code) with nothing filed when the id does not resolve. A visit
+# filed on an unresolvable id would park on the helm board with
+# gc.continuation_group=<the typo>, and engaging it would spawn a converse
+# sitting whose prime step (`gc bd show $SUBJECT`) has no bead to read. open is
+# the operator's front door to the visit spine, so a mistyped id files nothing.
+# The gate fails CLOSED on every unhappy reading, because the only alternative
+# is a visit on an unverified subject.
 #
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
@@ -82,7 +77,7 @@ case "$1 ${2:-}" in
     esac ;;
   "bd list")
     # The already-held lookup. $FAKE_VISIT set => one open visit on the subject.
-    # FAKE_VISIT_EDGE=1 emits the su-ab9je shape instead: the
+    # FAKE_VISIT_EDGE=1 emits an edge-only visit instead: the
     # gc.continuation_group stamp landed EMPTY and only the tracks edge names the
     # subject. Rendered in the `gc bd list` key pair (.type + .depends_on_id),
     # which is the shape this call returns.
@@ -145,9 +140,9 @@ grep -q 'task_kind=visit' <<< "$CALLS" \
   && ok "(EXISTS) task_kind=visit stamped" || bad "(EXISTS) task_kind stamp"
 grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
   && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
-# The converse routed-pool is retired: a successful open parks the visit on the
-# board and spawns no session, so its message must report the board and the
-# engage action, not the old spawn/vacuum/attach-via-picker advice.
+# A successful open parks the visit on the board and spawns no session, so its
+# message reports the board and the engage action, and gives no spawn, vacuum
+# or attach-via-picker advice.
 grep -q 'parked on the helm board' <<< "$OUT" \
   && ok "(EXISTS) success message reports a board-parked visit" || bad "(EXISTS) success names the board (out: $OUT)"
 grep -q 'engage tk-visit1' <<< "$OUT" \
@@ -165,10 +160,11 @@ grep -q 'engage tk-visit0' <<< "$OUT" \
 [ -z "$CALLS" ] \
   && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
 
-# --- (HELDEDGE) the su-ab9je shape: stamp EMPTY, tracks edge intact ------------
-# A visit records its subject twice and only the edge proved
-# reliable; keyed on the stamp alone this verb files the duplicate it exists to
-# prevent — and this is the OPERATOR's front door, so the duplicate is filed by
+# --- (HELDEDGE) an edge-only visit: stamp EMPTY, tracks edge intact -----------
+# A visit records its subject twice, as a tracks edge and as the
+# gc.continuation_group stamp, and the stamp can land empty while the edge
+# holds. Keyed on the stamp alone, this verb would file the duplicate it exists
+# to prevent. This is the OPERATOR's front door, so that duplicate is filed by
 # hand, on a subject a converse session is still holding.
 run_open found tk-real1 tk-visit0 edge
 eq "$RC" "0" "(HELDEDGE) a subject held by an edge-only visit exits 0"
@@ -243,7 +239,7 @@ eq "$RC" "0" "(ALLOWDUP-CONTROL) open without the flag on a held subject exits 0
   || bad "(ALLOWDUP-CONTROL) default must still dedup (calls: $CALLS)"
 unset FAKE_VISIT
 
-# --- (MISSING) the bug: a typo must file NOTHING -------------------------------
+# --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1
 eq "$RC" "4" "(MISSING) an unresolvable id exits 4 (verb runtime failure)"
 [ -z "$CALLS" ] \
@@ -322,7 +318,7 @@ fi
 
 # --- (ORDER static) the gate precedes the gate-visit block --------------------
 # Placement is the invariant, not just presence: a check that ran after the
-# create would leave the junk visit behind, which is the whole defect.
+# create would leave behind the visit it exists to refuse.
 # `|| true`: with `pipefail`, a grep that finds NOTHING — exactly the regression
 # this case exists to catch — would otherwise kill the run under `set -e` before
 # it could report, turning a legible failure into a silent early exit.
@@ -435,11 +431,11 @@ grep -qi 'cannot index object' <<< "$ERR" \
   || ok "(CREATEFAIL) no raw jq error leaked"
 
 # --- (RIGTIMEOUT) the rig-enumeration bound is generous, and tunable ----------
-# `gc rig list` measured 2.6-8.4s in a loaded city against a 10s bound, so open
-# could exit 3 having filed nothing. Harmless for the board picker, not for
-# gc-visit-open.sh's topic path — by the time open runs there, the subject bead
-# already exists, so a timeout strands it visit-less. TIMEOUT is set only by
-# cmd_board's parser, so the one-shot verbs take the tunable below.
+# `gc rig list` can take several seconds to answer in a loaded city, and a bound
+# it overruns makes open exit 3 having filed nothing. That is harmless for the
+# board picker, but gc-visit-open.sh's topic path creates the subject bead
+# before open runs, so a timeout there leaves that bead with no visit.
+# enumerate_rigs bounds the call by GC_HELM_RIG_TIMEOUT, default 30s.
 mkdir -p "$TMP/slowbin"
 cat > "$TMP/slowbin/gc" <<'SLOW'
 #!/usr/bin/env bash
@@ -473,19 +469,16 @@ grep -q 'GC_HELM_RIG_TIMEOUT:-30' "$SCRIPT" \
   || bad "(RIGTIMEOUT) shipped default changed — a one-shot verb must not inherit the board budget"
 
 # --- (RIGWHY) enumerate_rigs names WHICH failure it hit ----------------------
-# THE BUG: every unhappy reading of `gc rig list` ended in one
-# sentence — "could not enumerate rigs (gc rig list returned nothing)" — and
-# exit 3. `|| true` threw away the exit status and `2>/dev/null` threw away the
-# stderr, so a timeout kill, a wedged data plane, unparseable output and a city
-# that genuinely has no rigs were indistinguishable. Four different operator
-# moves, one string. On the CLI that is a bad message; behind the web board's
-# open button the exit code plus that string is the ENTIRE signal the
-# browser gets, so all four render as the same dead end.
+# Every unhappy reading of `gc rig list` exits 3 having filed nothing, with a
+# message that names its own cause: a timeout kill, a non-zero exit, an empty
+# answer, output that is not JSON, JSON with no '.rigs' array, or a city that
+# genuinely has no rigs. Each calls for a different operator move, and behind
+# the web board's open button the exit code plus that message is the ENTIRE
+# signal the browser gets.
 #
 # Each case below drives ONE cause through the real script and asserts the
-# message names that cause. (DISTINCT) is the assertion the bead is actually
-# about: the six sentences must be pairwise different, so no two causes can
-# collapse back together.
+# message names that cause. (DISTINCT) requires the messages to be pairwise
+# different, so no two causes share one.
 mkdir -p "$TMP/rigbin"
 cat > "$TMP/rigbin/gc" <<'RIGSTUB'
 #!/usr/bin/env bash
@@ -540,8 +533,8 @@ says notjson  30 "is not JSON"                             "unparseable output s
 says shape    30 "no '.rigs' array"                        "valid JSON of the wrong shape is a gc contract change"
 says rigless  30 "no rigs in this city"                    "a genuinely rigless city is reported as a CITY state"
 
-# (DISTINCT) is the whole point of the bead: the causes must not collapse back
-# into one string. Collect every message and require six unique ones.
+# (DISTINCT) no two causes share a message: collect every cause's message and
+# require as many unique messages as there are causes.
 : > "$TMP/rigmsgs"
 for m in slow exitfail empty notjson shape rigless; do
   if [ "$m" = slow ]; then rigwhy "$m" 1; else rigwhy "$m" 30; fi
@@ -557,22 +550,20 @@ case "$RIGWHY_ERR" in
   *"gc doctor"*|*Dolt*) bad "(RIGWHY-DISTINCT) an empty city is blamed on the data plane: $RIGWHY_ERR" ;;
   *)                    ok  "(RIGWHY-DISTINCT) an empty city is not blamed on the data plane" ;;
 esac
-# …and the happy path still works through the same stub, so none of the new
-# gates fire on a good answer.
+# …and the happy path still works through the same stub, so none of the cause
+# checks fire on a good answer.
 rigwhy ok 30
 eq "$RIGWHY_RC" "0" "(RIGWHY) a well-formed rig list still enumerates and files"
 
-# MUTATION CHECK (static): the evidence the taxonomy is built on must still be
-# captured. If either of these reverts to the old discard-everything form, the
-# cases above keep passing only because the stub is cooperative — so assert the
-# source directly.
+# MUTATION CHECK (static): the causes are told apart by gc's exit status and
+# stderr, so enumerate_rigs must capture both. The stubbed runs above never take
+# its mktemp-failure fallback, so assert the source directly.
 grep -q 'gc rig list --json 2>"\$_er_errf"' "$SCRIPT" \
   && ok "(RIGWHY-EVIDENCE) gc's stderr is captured, not sent to /dev/null" \
   || bad "(RIGWHY-EVIDENCE) stderr capture removed — messages will lose their 'why'"
-# Match the ASSIGNMENT lines only, bounded to the function body. An earlier
-# version of this check matched the first line containing "gc rig list", which
-# in both the fixed and the broken script is a COMMENT — so it passed against
-# the very code it was meant to catch. Anchor guards to code, never to prose.
+# Match the ASSIGNMENT lines only, bounded to the function body. The first line
+# in enumerate_rigs naming "gc rig list" is a COMMENT, so a check anchored there
+# passes whatever the code does. Anchor guards to code, never to prose.
 grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw=\$\(/' "$SCRIPT") \
   && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
   || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
@@ -614,11 +605,12 @@ case "$1 ${2:-}" in
     esac ;;
   "bd list")
     case "$*" in
-      # The widened live-status query (open,in_progress,blocked,deferred,hooked,
-      # pinned) carries `deferred`; a deferred/hooked/pinned anchor is visible
-      # only to it. FAKE_DEFERRED_ROWS models that anchor; unset, the widened
-      # query still answers the ordinary PR rows, so the narrow-query PR cases
-      # are unaffected by the fix.
+      # The resolver's PR search carries the full live-status set
+      # (open,in_progress,blocked,deferred,hooked,pinned). FAKE_DEFERRED_ROWS
+      # models an anchor only a query carrying `deferred` can see, and falls
+      # back to the ordinary PR rows when unset. A query carrying `blocked`
+      # without `deferred` sees only the ordinary rows, so a resolver on that
+      # narrower set fails RESOLVE-PR-DEFERRED while every other PR case passes.
       *deferred*) printf '%s' "${FAKE_DEFERRED_ROWS:-${FAKE_PR_ROWS:-[]}}" ;;
       *blocked*)  printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
       *)          printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
@@ -630,14 +622,14 @@ esac
 exit 0
 RESGC
 chmod +x "$TMP/resbin/gc"
-# The rig's ledger must exist as a real .beads dir: the resolver now fails closed
-# on any listed rig it cannot pin with --db, so a no-.beads path would refuse
-# every PR resolution below rather than exercise it.
+# The rig's ledger must exist as a real .beads dir: the resolver fails closed on
+# any listed rig it cannot pin with --db, so a no-.beads path would refuse every
+# PR resolution below rather than exercise it.
 mkdir -p "$TMP/resrig/.beads"
 export RESRIG="$TMP/resrig"
-# FAKE_DEFERRED_ROWS is intentionally left UNSET by default so the widened PR
-# query falls back to FAKE_PR_ROWS and every narrow-query PR case is unaffected;
-# the deferred case exports it to model an anchor only the widened query sees.
+# FAKE_DEFERRED_ROWS is left UNSET by default, so the PR search falls back to
+# FAKE_PR_ROWS for every case but the deferred one, which exports it to model an
+# anchor only a query carrying `deferred` sees.
 export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
 
 # run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
@@ -765,10 +757,10 @@ grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candid
 
 # (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
 # resolves too. The resolver's status set must be the pack's live-PR set
-# (open,in_progress,blocked,deferred,hooked,pinned), matching pr-facts.sh:247 and
-# merge.sh:126; the narrow open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS
-# is visible only to the widened query, so this is red before the fix (the narrow
-# query finds nothing and exits 4) and green after.
+# (open,in_progress,blocked,deferred,hooked,pinned), the LIVE_STATUSES that
+# pr-facts.sh and merge.sh both define. FAKE_DEFERRED_ROWS is visible only to a
+# query carrying `deferred`, so a resolver searching open,in_progress,blocked
+# alone finds nothing here and exits 4.
 FAKE_PR_ROWS='[]'
 export FAKE_DEFERRED_ROWS='[{"id":"tk-defbead","status":"deferred","metadata":{"pr_number":"616","pr_url":"https://github.com/o/r/pull/616"}}]'
 run_resolve 616
