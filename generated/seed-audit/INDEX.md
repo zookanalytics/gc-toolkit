@@ -36,17 +36,17 @@ covers that dimension.
 | [`converse-codex`](agents/converse-codex.md) | 37,093 | 9,273 |
 | [`converse-fable`](agents/converse-fable.md) | 37,093 | 9,273 |
 | [`converse-opus`](agents/converse-opus.md) | 37,093 | 9,273 |
-| [`deacon`](agents/deacon.md) | 13,848 | 3,462 |
+| [`deacon`](agents/deacon.md) | 15,930 | 3,982 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 32,341 | 8,085 |
+| [`mechanik`](agents/mechanik.md) | 34,423 | 8,605 |
 | [`polecat`](agents/polecat.md) | 28,076 | 7,019 |
 | [`polecat-codex`](agents/polecat-codex.md) | 28,106 | 7,026 |
-| [`proactive`](agents/proactive.md) | 12,437 | 3,109 |
-| [`refinery`](agents/refinery.md) | 11,265 | 2,816 |
-| [`witness`](agents/witness.md) | 16,229 | 4,057 |
+| [`proactive`](agents/proactive.md) | 14,519 | 3,629 |
+| [`refinery`](agents/refinery.md) | 13,347 | 3,336 |
+| [`witness`](agents/witness.md) | 18,311 | 4,577 |
 
 ## Formula recipes
 
