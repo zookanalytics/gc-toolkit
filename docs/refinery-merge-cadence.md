@@ -347,8 +347,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    ceiling: quiescence forbids the redundant round a ceiling would have bounded,
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
    filed with its edge reversed, a landed fix whose finding that release missed
-   — stop the PR moving and are caught by `liveness-sweep.sh`'s stale-gate pass,
-   not a count on the check.
+   — stop the PR moving rather than spin the dispatcher.
    It visits every gating anchor, so its cost grows with the set. It runs after
    merge and pr-open and under its share of the pass budget. It first visits the
    anchors it can act on: one with no `check_set` (it owes the stamp), one with
