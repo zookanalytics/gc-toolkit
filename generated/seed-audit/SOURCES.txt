@@ -66,7 +66,7 @@ formulas/mol-dog-shutdown-dance.toml
 formulas/mol-feedback-distiller.toml
 a8b13496407eb7d88eb8bb02e5104d878eebbc17e746fd5c2e130416ca10338d
 formulas/mol-feedback-miner.toml
-3479365685a06839f76c3d0b57372c4f64163af52d8b2b489f31a2f5e99155af
+342e5e18e50915f8092235b2eb5b46013331a035ad78bab704f1da400a12d057
 formulas/mol-first-reaction.toml
 48af9bb636e0eef6f3df93ec1ce9bc16e0b3aba88817a02a3d417e4ad4ac2ca7
 formulas/mol-polecat-work.toml
