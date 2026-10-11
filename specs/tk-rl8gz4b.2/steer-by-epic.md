@@ -180,8 +180,10 @@ not reach.
   direct blocker. `merge.sh` holds an anchor's merge on any open blocker of its
   own, and bd refuses its close after the merge (fact 5). Any bead can be
   parked, so a loose item the operator wants held takes its own edge, as today.
-- `unpark <epic> <P>` removes the edge, sets the priority and runs the priority
-  reconcile for the subtree. It also names every other open `blocks` edge on the
+- `unpark <epic> <P>` sets the epic's priority and writes it to every member and
+  to each member's live workflow while the park still holds them. It removes the
+  edge only once those writes read back, so no member is released at its old
+  priority (section 3). It also names every other open `blocks` edge on the
   epic, because each one still holds the subtree. Today the Checkpoints epic
   (tk-wmwcdlc) and the responsive-PR-workflow epic (tk-hf7nadf) both wait on the
   close-gate task (tk-isd5sa).
@@ -273,10 +275,17 @@ epic is not parked. A bead under no epic keeps its own priority. PR-finishing wo
 ranks by section 7. Emergencies, meaning a red main or a broken gate, stay outside
 every epic at P0.
 
-**The writer.** One reconcile does the writing: `epic-steer.sh reconcile`, run by a
-rig-scoped cooldown order, `orders/epic-priority.toml`, every five minutes, the
-same shape as `orders/deferred-dispatch.toml`. `priority` and `unpark` also run it
-immediately for the epic's subtree. Each pass works through these steps.
+**Two writers, one function.** The reconcile carries a priority change to work
+that is already queued. `settle` sets a bead's priority at the moment the bead
+becomes claimable. Both compute a bead's priority with one function, so they
+cannot disagree.
+
+**The reconcile.** `epic-steer.sh reconcile` runs from a rig-scoped cooldown
+order, `orders/epic-priority.toml`, every five minutes, the same shape as
+`orders/deferred-dispatch.toml`. `priority` also runs it at once for the epic's
+subtree. `unpark` runs it for the subtree at the new priority while the park
+still holds the subtree, and only then removes the edge (section 1). Each pass
+works through these steps.
 
 1. It reads the store's open epics and its park gates.
 2. It reads the open beads with their edges and finds each one's nearest epic.
@@ -289,12 +298,44 @@ immediately for the epic's subtree. Each pass works through these steps.
 6. It writes only the differences, one multi-id update per priority value, so a
    settled store costs reads only.
 
-Members of a parked epic are skipped. Their next unpark sets them.
+Members of a parked epic are skipped. Unpark sets them before it releases them.
 
-**Sling and arm.** The sling copies the bead's priority into the pour (fact 2),
-and the reconcile keeps the bead at its epic's priority. So a sling, or an arm
-that fires, inherits the right priority. A pour made in the window before the next
-pass is corrected by that pass.
+The scheduled pass and the two verbs take one per-rig lock, as
+`refinery-reconcile.sh` does for its passes. So a pass that read an epic's old
+priority cannot write it back after a `priority` move.
+
+**Settle before a bead can be claimed.** Claims follow bead priority (fact 1),
+and a pour copies it once (fact 2). A bead that becomes claimable between two
+passes would be claimed at whatever priority it carries, so the reconcile alone
+is too late for it. Every writer that makes a member or a PR-finishing child
+claimable therefore settles the bead first.
+
+`epic-steer.sh settle <bead>` computes the bead's priority, writes it to the bead
+and to any live workflow the bead has, and reads it back. It exits non-zero when
+the read-back does not match. A writer that slings or releases a bead does so
+only after settle exits zero. When settle fails, the writer stops and says so. A
+writer that routes a bead directly asks settle for the priority and puts it in
+the same `bd update` as the route. bd writes a metadata patch in the same row
+write as the field edits (beads `internal/storage/issueops/execution.go:192-213`),
+so the route is never visible before the priority.
+
+These writers settle:
+
+- `place` routes the item with its settled priority in the route's own update
+  (section 5).
+- `unpark` writes the subtree at the new priority while the park still holds it
+  (section 1).
+- Deferred dispatch slings every armed bead through one function, `sling_bead`,
+  and that function settles the bead before it slings. So an arm fires at the
+  right priority, whoever wrote it.
+- `gc-helm.sh takeaway --route` puts the settled priority in its route's update.
+  First reaction's actionable exit routes through it.
+- `gc-helm.sh accept` settles before it pours.
+- Each PR-finishing creator settles its child before it routes or slings it
+  (section 7).
+
+A bead under no epic and outside section 7 settles to its own priority, so
+settle changes nothing for it.
 
 **Edges of the rule.**
 
@@ -304,11 +345,21 @@ pass is corrected by that pass.
 - A gascity store transaction can write a stale snapshot back over a concurrent
   priority write (gascity `internal/beads/bdstore.go:2205-2209`). The next pass
   re-applies the priority.
+- A writer outside the list above, such as a raw `gc sling` or a route written
+  by hand, runs no settle. It queues the bead at the priority the bead carries.
+  That is already the epic's once `place` or one pass has settled the bead. The
+  gap left is a bead made a member by a raw edge write and then made claimable
+  by hand before the next pass. Until that pass, it queues at its old priority.
+- A `priority` move re-ranks queued work as its pass writes each bead. A claim
+  made before the pass reached a bead was made at the rank then in force.
 
 **Rejected.**
 
-- *Stamping priority at each sling site.* Every creator in sections 5 and 7 would
-  need it, and none would follow a later priority change.
+- *The reconcile alone.* A bead routed between passes would queue at the
+  priority it was filed with, and a polecat could claim it there before the next
+  pass.
+- *Stamping alone, at each route and sling.* No stamp follows a later priority
+  change, so the reconcile is still needed.
 - *A polecat `work_query` that computes the epic's priority at claim time.* The
   proactive pool overrides its own query in this way
   (`agents/proactive/agent.toml`). For polecats it would replace gascity's tiered
@@ -395,15 +446,19 @@ unparked.
 
 **The placement verb (unit 10).** `place <item> <epic>` first removes any
 relates-to edge between the two, because bd refuses a parent-child edge beside one
-on the same pair. It then writes the parent edge, routes the item to the polecat
-pool, and records who placed it and when. That is the unrelate-then-reparent
-primitive tk-8bzuc2 names, which sits under the parked first-class-epics epic, and
-unit 10 builds it here. It refuses a bead carrying `anchor_bead`, because
-PR-finishing work stays outside every epic (section 7). `place <item> --standalone`
-routes a loose item at its own priority. The sitting's other outcomes, a new epic
-or a close, use the existing tools. An item the sitting does not place stays
-without an epic until the operator judges a group of such items material enough to
-become an epic, with a hypothesis, a first Feature and a Checkpoint after it.
+on the same pair. It then writes the parent edge and records who placed it and
+when. That is the unrelate-then-reparent primitive tk-8bzuc2 names, which sits
+under the parked first-class-epics epic, and unit 10 builds it here. Last,
+`place` routes the item to the polecat pool, with the item's settled priority in
+the route's own update, so the item is never routed at its old priority
+(section 3). Under a parked epic, the parent edge already holds the item when the
+route lands, and unpark settles it before release. `place` refuses a bead
+carrying `anchor_bead`, because PR-finishing work stays outside every epic
+(section 7). `place <item> --standalone` routes a loose item at its own priority.
+The sitting's other outcomes, a new epic or a close, use the existing tools. An
+item the sitting does not place stays without an epic until the operator judges a
+group of such items material enough to become an epic, with a hypothesis, a first
+Feature and a Checkpoint after it.
 
 **Who associates.** The operator associates at the placement sitting, using the
 verb. A first reaction proposing or making the association is the create-time
@@ -453,7 +508,10 @@ Each creator's own suite asserts that the child it files has no parent (unit 6),
 and the placement verb refuses a bead carrying `anchor_bead` (unit 10). So no
 creator, sitting or future classifier can file one under an epic.
 
-**The rank.** The reconcile ranks each child and its live workflow (section 3):
+**The rank.** Each creator settles its child before it routes or slings it, so
+the child's first claim is already at its rank. The reconcile then re-ranks the
+child and its live workflow as the PR's posture and the epic's priority change
+(section 3). The rank is:
 
 - once the anchor's PR is approved (`pr_posture=approved`, which pr-facts records
   on the anchor), at P0;
@@ -493,20 +551,21 @@ pack-side, and none needs gascity. Each unit updates the central documents its
 change makes stale. The first unit creates `docs/epic-steering.md` as the
 authoritative statement of the model, and the units after it extend it.
 
-| # | Unit | Settles | Needs | Done when |
+| # | Unit | Section | Needs | Done when |
 |---|---|---|---|---|
 | 1 | **Park gate and the park moves.** `epic-steer.sh` `park`, `unpark`, `status`; `park-lib.sh`; the `gc.park_gate` marker, registered and backfilled on every store's gate; `--evidence`; `docs/epic-steering.md`; I1's park-gate exception; an authority-map row for the verbs. | 1 | — | Park, unpark and status pass fixture tests on a scratch store. Every live park gate carries the marker. Unpark names the other blockers that still hold a subtree. |
 | 2 | **Armed work stays parked.** The bypass narrows to ancestors held only by decision gates; `PARKED` and `WAITING` states in `list` and the pass log; `check-armed-dispatch-owed` applies the same predicate; the fact 4 corrections. This unit is tk-rl8gz4b.1, re-scoped. | 2 | 1 | An armed child of a parked epic is neither slung nor reported owed, and neither is one two levels down. One held only by a demand gate still dispatches; the tk-so8clv case stays green. One whose epic waits on a real blocker waits too. |
 | 3 | **A sling does not start parked work.** The load-context guard covers a parked bead and lets in-flight beads through; Accept refuses a parked bead. | 2 | 1, 2 | Park, sling, unpark ends with the bead built, held root included. A bead in flight under a parked epic is built. |
 | 4 | **A park does not strand in-flight work.** The refinery patrol's rejection dispatches a pour instead of routing the work bead. | 1 | 1 | A rejected handoff under a parked epic is rebuilt. An unparked one behaves as today. |
-| 5 | **Priority flow.** `reconcile` and `orders/epic-priority.toml`; the `priority` verb; unpark runs the reconcile; the routing doc's claim-predicate row is corrected. | 3 | 1 | After a priority change, the members and their poured workflows' open steps carry the new priority within one pass. A later sling inherits it. A hand edit reverts. Loose beads are untouched. Pass time stays inside the order's timeout on the live store. |
-| 6 | **PR-finishing rank and its invariant.** The reconcile ranks anchor children and their workflows. Each PR-finishing creator's suite asserts that the child it files has no parent. | 7 | 5 | An approved PR's merge-in child queues at P0. A P2 epic's review rework queues at P1. A parked epic's in-flight rework queues at P2. A creator changed to file its child with a parent fails its own suite. |
+| 5 | **Priority flow.** `reconcile`, `settle` and `orders/epic-priority.toml`; the `priority` verb; unpark settles the subtree before it removes the edge; one lock for the order and the verbs; the routing doc's claim-predicate row is corrected. | 3 | 1 | After a priority change, the members and their poured workflows' open steps carry the new priority within one pass. A later sling inherits it. A hand edit reverts. Loose beads are untouched. `settle` and the reconcile give every bead of a shared fixture the same priority. With the scheduled pass off, unparking at P0 releases every member already at P0: the test's recorded writes put each member's priority before the edge's removal. A pass that overlaps a `priority` move does not write the old priority back. Pass time stays inside the order's timeout on the live store. |
+| 6 | **PR-finishing rank and its invariant.** The reconcile ranks anchor children and their workflows. Each PR-finishing creator settles its child before it routes or slings it. Each creator's suite asserts that the child it files has no parent. | 7 | 5 | With the scheduled pass off, each creator routes or slings its child at its rank: an approved PR's merge-in child at P0, a P2 epic's review rework at P1, and a parked epic's in-flight rework at P2. A creator changed to file its child with a parent fails its own suite. |
 | 7 | **Checks and converse context read the park.** `check-blocked-work-armed` skips parked beads; `bead-context.sh` reads a park. | 4 | 1 | A parked member draws no finding and no arm remedy. An unparked unarmed blocked member still does. |
 | 8 | **The helm board shows steering.** The board shows each epic's state and priority, parks epics in their own section, and stops calling their idle children stranded. The takeaway notion gets a new name. | 4 | 1 | The board fixture renders a parked epic under its own section and an unparked one with its priority. The Go and shell predicates agree on the shared fixture. |
 | 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; `unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. The sweep runs again. |
-| 10 | **The placement verb.** `place`, with unrelate-then-reparent, route and the placement record; `--standalone`; the refusal of PR-finishing work. | 5 | — | Placing an item with a relates-to edge to its epic makes it a member and routes it. Under a parked epic the cascade holds it. Placing a bead that carries `anchor_bead` is refused. |
+| 10 | **The placement verb.** `place`, with unrelate-then-reparent, a route that carries the settled priority, and the placement record; `--standalone`; the refusal of PR-finishing work. | 5 | 5 | Placing an item with a relates-to edge to its epic makes it a member and routes it. With the scheduled pass off, an item filed at P3 and placed under a P0 epic is routed at P0, in the same write as its route. Under a parked epic the cascade holds it. Placing a bead that carries `anchor_bead` is refused. |
 | 11 | **The Checkpoint records the next priority.** epics.md and epic-stewardship.md state the section 6 rule. | 6 | 1, PR #977 (tk-isd5sa) | The docs carry it, and a checkpoint sitting's recipe applies the verb with its visit as evidence. |
 | 12 | **Retire the ancestor bypass.** Reconcile reads `bd ready` alone. | 2 | 2, tk-n18e15 | No open demand bead blocks an epic, and the bypass code and its tests are gone. |
+| 13 | **The existing writers settle.** Deferred dispatch's `sling_bead` and `gc-helm.sh accept` settle before they sling, and `gc-helm.sh takeaway --route` puts the settled priority in its route's update. | 3 | 5 | With the scheduled pass off, a member filed at P2 under a P0 epic is first claimable at P0 through each writer. An arm that fires pours at P0, a takeaway route lands at P0 in the same write as the route, and an Accept pours at P0. A settle that fails leaves the bead unslung. |
 
 A successor bead under the epic (tk-rl8gz4b.3) waits on this spec, and its
 dispatch is armed. Once the spec merges, it files these units with the dependencies
