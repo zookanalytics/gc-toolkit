@@ -153,7 +153,9 @@ out="$(run 'RUN_REPORT=narrated + music bed' -- --script "$SCRIPT" --output "$OU
 has "captured $OUT (narrated," "$out" "a music bed does not hide the narration"
 
 echo "# a clip in which a step failed its proof -> exit 3, naming the clip and the engine's kept working files"
-TMPD_PWD="$(cd "$TMPD" && pwd)"
+# env -i drops PWD, so the script's pwd is the physical path, which differs from
+# the logical one where TMPDIR runs through a symlink (macOS /var).
+TMPD_PWD="$(cd "$TMPD" && pwd -P)"
 out="$(run RUN_FAILED=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "a failed step proof exits 3" "[ '$rc' = 3 ]"
 ok "the clip stays on disk" "[ -s '$OUT' ]"
