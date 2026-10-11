@@ -536,6 +536,13 @@ the key, and it takes the posture as the part before the first `@`, the way
 with `approved` would never match, so it would rank every approved PR's finishing
 work as unapproved.
 
+The posture is not the approval rule that `merge.sh` lands on
+(`review-verdict.sh`). `pr-facts.sh` derives it from GitHub's review decision,
+and an unanswered review comment outranks an approval. So a PR that rule calls
+approved ranks as unapproved while one of its review comments is unanswered, and
+whenever GitHub reports no review decision for it, as on a base that requires no
+approving review.
+
 **Why.** Finishing turns work already spent into merged work, and it keeps open
 PRs from collecting conflicts. Once a PR is approved, only mechanical work stands
 between the operator's decision and the merge. Running one band up puts an epic's
