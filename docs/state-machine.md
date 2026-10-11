@@ -672,11 +672,9 @@ review's result set.
   none is in flight. An unapproved one records its posture and gets nothing: a
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
-  The child's handoff runs `bring-current-guard.sh`: a bring-current git made
-  on its own, or whose conflicts kept both sides' insertions whole, leaves the
-  approval standing, and one that took judgment files a visit on the anchor and
-  dismisses the approval, so materially changed code is re-reviewed rather than
-  landed under the approval given before it.
+  The child's handoff runs `bring-current-guard.sh`, which holds the round to
+  the worker's audit and routes it to triage when it conflicted
+  ([Bringing a branch current](#bringing-a-branch-current)).
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
   closed child does not, so a branch still CONFLICTING with nothing in flight is
@@ -709,7 +707,8 @@ review's result set.
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator makes, not a trigger a push pulls. gate-ensure holds dispatch
+  the validator makes, or triage ruling on a bring-current round that
+  conflicted, not a trigger a push pulls. gate-ensure holds dispatch
   rather than pouring a second review while an open rework child is already in
   flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
   `source_review_bead` (the review bead the rework answers) — and reads a
@@ -717,6 +716,78 @@ review's result set.
   `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
   marker sweep leaves that shape alone rather than clearing it, for the same
   reason.
+
+### Bringing a branch current
+
+A branch is brought current by merging its base in, never by a rebase. The
+shapes that do it are the merge-in child `pr-facts.sh` files for an approved PR
+that conflicts, the child `pre-open-rebase.sh` files for a pre-open branch that
+no longer merges, a review-feedback rework that merges the base in as it
+resumes, and an anchor the refinery's prepare re-queues on a conflict. Each resumes
+through `mol-polecat-work`'s resume block, which starts a round: it stamps
+`bring_current_from` (the PR head the round starts from) and
+`bring_current_scope` (`merge-only` when the rejection asked for nothing but the
+bring-current, else `with-work`), and clears the previous round's audit.
+
+**The worker writes the audit.** For each file git could not merge, the worker
+resolves it and records one entry with `bring-current-audit.sh add`: what
+collided (the two intents), what it decided and why, what a reviewer should
+check, and its own rating, `routine` (an adjacent-line collision, an
+overlapping comment edit, an obvious composition) or `judgment` (an inferred
+intent, a side chosen on substance, something new). An edit beyond what the
+merge needed owes an entry too, and on a `merge-only` bead so does each file a
+commit of the bead's own changes. A conflict the worker cannot resolve without
+guessing is a question, not a guess: `bring-current-audit.sh ask` files a visit
+on the anchor carrying the entries so far and the question, the merge is
+aborted, nothing is pushed, and the bead is held until a person answers.
+
+**The guard enforces coverage and routes; it renders no verdict.** At the
+handoff, `bring-current-guard.sh` reads the round on any branch that carries a
+review to keep current (its anchor is gating, or a PR stands on it):
+
+- **Clean**: every commit the round adds is a merge of the base whose tree is
+  git's own result. Nothing was resolved by hand; the round is recorded on the
+  anchor and lands quietly.
+- **Conflicted**: anything else. Each item git did not produce on its own (a
+  conflicted file, an edit beyond the merge, a merge of something but the base,
+  a rewritten history) must have an audit entry, or the handoff is refused and
+  the worker completes the audit. A covered round is stored on the anchor as
+  `bring_current_record` with the guard's evidence beside each entry (what git's
+  replay of the conflict shows the resolution kept), and the triage lane is
+  reopened: it is added to `bring_current_reopened` with the round's time,
+  `bring_current_round_at`, and its standing review is superseded.
+
+An anchor whose `check_set` declares no triage lane records the round and owes
+no ruling. Generated renders (linguist-generated) owe no entry. A hand-off with no
+`bring_current_from` stamp that pushed nothing past the origin head it started
+from is refused rather than read as clean, because nothing records where its
+work began.
+
+**Triage decides what reopens.** gate-ensure dispatches triage again, and its
+verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
+[--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
+that run again on the merged code (any the anchor declares, and any it adds with
+`--add-gates`); and whether the human approval still covers what would land.
+`bring-current-guard.sh decide` records the ruling in the anchor's record,
+supersedes each reopened lane, and on a dismissal files the re-ask visit first,
+then re-requests and dismisses each standing approval. A lane in
+`bring_current_reopened` is backed by a GitHub approval only when the approval
+was submitted after `bring_current_round_at` (`lane-state.sh`), so a standing
+approval neither lets the merge skip a reopened lane nor keeps its review from
+being dispatched. A routine round can therefore keep the approval while its
+lanes re-run, and material judgment removes it.
+
+**Every message is composed from the audit.** The round section that opens
+triage's posted verdict, the dismissal note and the re-ask visit render from
+the stored record with `bring-current-audit.sh`: a headline of what the round
+needed, then per entry what collided, what was decided and why, and what to
+check. The question visit renders from the worker's entries so far and its
+question.
+
+What no guard reaches: the refinery's own prepare merge, which aborts on any
+conflict and so only ever pushes git's own result; and a merge the worker ran
+by hand, outside the resume block, and pushed before submit, which the guard
+reads only from the push's own start.
 
 ## Disposition
 
