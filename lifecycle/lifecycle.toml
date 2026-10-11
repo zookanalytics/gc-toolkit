@@ -1235,9 +1235,11 @@ keys = [
 #   with the branch the work is cut on, since the claim stamps the pool
 #   worktree's base checkout. The lifecycle writer's transition into `merged`
 #   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
-#   the landing it records. duplicate-sweep.sh reads gc.work_dir and
-#   gc.work_commit — with the pack-written bare work_dir defined in
-#   merge_identity — as proof a run produced work before disposing a duplicate.
+#   the landing it records. mol-refinery-patrol.toml's rework hand-back close
+#   writes them from the head it read back from origin and the branch that head
+#   is on. duplicate-sweep.sh reads gc.work_dir and gc.work_commit — with the
+#   pack-written bare work_dir defined in merge_identity — as proof a run
+#   produced work before disposing a duplicate.
 #   The runtime's work-record close gate reads the commit and the branch: a
 #   `shipped` close needs gc.work_commit reachable on gc.work_branch in the
 #   bead's checkout (warn-only by default). No pack script reads gc.work_branch,
@@ -1249,7 +1251,8 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
-#   from the lifecycle writer's transition into `merged`, and `no-op` from
+#   from the lifecycle writer's transition into `merged` and from
+#   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
 #   dead-molecule-dispose.sh, mol-validate-close, work-outcome.sh on every visit
 #   close, the observation-filing recipes, and converse by hand.
 #   duplicate-sweep.sh reads it to confirm a no-op duplicate is disposable,

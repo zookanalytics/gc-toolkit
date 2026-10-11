@@ -801,6 +801,12 @@ other close in the pack goes through `lifecycle.sh`'s single atomic update.
 writes the status itself; its result is checked, because a close that reports
 nothing leaves a bead that is unanchored, open, and assigned, which reads like
 work still in flight.
+
+The close also records the rework's work record, which the runtime's
+work-record gate reads on it: `gc.work_outcome=shipped`, `gc.work_commit` set
+to the head read back from origin, and `gc.work_branch` set to `$BRANCH`, the
+branch that head is on. The read-back fetch has just put that head on
+`origin/$BRANCH` in the rig's refs, which is where the gate looks for it.
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
@@ -840,7 +846,9 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
-    if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
+    if ! gc bd update "$WORK" --status=closed \
+         --set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit="$REMOTE_HEAD" --set-metadata gc.work_branch="$BRANCH" \
+         --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
       echo "merge-push: $WORK left the anchor class but the close was refused; it stays unanchored and open, and the next pass retries both idempotently" >&2
     fi
   else

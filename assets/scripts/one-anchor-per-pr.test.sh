@@ -251,24 +251,27 @@ TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-
 # Ref-aware git stub for the terminal arm's origin read-back gate. `fetch`
 # exits $STUB_FETCH_RC (0 unless set) to model a read-back that fails; `rev-parse`
 # of HEAD echoes $STUB_PREPARED_HEAD and of any origin/* ref echoes
-# $STUB_REMOTE_HEAD — an empty env var models an absent ref (empty output).
-# -C <dir> is ignored: the arm's PREP_WT is unset under test, so the stub answers
-# from the environment, not a real repository. Anything else exits 0 with no
-# output, as the dumb stub did.
+# $STUB_REMOTE_HEAD, cut to its first 8 characters under --short — an empty env
+# var models an absent ref (empty output). -C <dir> is ignored: the arm's
+# PREP_WT is unset under test, so the stub answers from the environment, not a
+# real repository. Anything else exits 0 with no output, as the dumb stub did.
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
-op=""
+op=""; short=0
 for a in "$@"; do
   case "$a" in
     fetch)     exit "${STUB_FETCH_RC:-0}" ;;
     rev-parse) op="rev-parse" ;;
+    --short)   short=1 ;;
   esac
 done
 [ "$op" = "rev-parse" ] || exit 0
 for a in "$@"; do
   case "$a" in
     HEAD)     printf '%s\n' "${STUB_PREPARED_HEAD:-}"; exit 0 ;;
-    origin/*) printf '%s\n' "${STUB_REMOTE_HEAD:-}";   exit 0 ;;
+    origin/*)
+      if [ "$short" = 1 ]; then printf '%.8s\n' "${STUB_REMOTE_HEAD:-}"; else printf '%s\n' "${STUB_REMOTE_HEAD:-}"; fi
+      exit 0 ;;
   esac
 done
 exit 0
@@ -431,6 +434,35 @@ case "$GATE_FETCH_FAIL" in
     bad "(10j) a failed fetch recorded a landing or closed the child off a stale ref (got: $GATE_FETCH_FAIL)" ;;
   1#*) ok "(10j) fetch failure -> no anchor note, no transition, no close; arm exits non-zero even when the stale origin ref equals HEAD" ;;
   *) bad "(10j) a failed fetch must fail closed non-zero, mutating nothing (got: $GATE_FETCH_FAIL)" ;;
+esac
+
+# --- The landed-on-branch close carries the rework's work record. -------------
+# The runtime's work-record gate reads gc.work_outcome, gc.work_commit and
+# gc.work_branch on this close. The record is the landing the read-back proved:
+# shipped, the FULL head read back from origin (the note carries the short
+# one), on the branch that head is on.
+FULL_HEAD=cafef00dcafef00dcafef00dcafef00dcafef00d
+: > "$LCLOG"; : > "$TMP/gc.log"
+EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=correctness \
+  LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
+  STUB_PREPARED_HEAD="$FULL_HEAD" STUB_REMOTE_HEAD="$FULL_HEAD" \
+  bash "$TMP/terminal.sh" >/dev/null 2>&1 || true
+CLOSE_LINE="$(grep -- 'update w1 --status=closed' "$TMP/gc.log" || true)"
+case "$CLOSE_LINE" in
+  *"--set-metadata gc.work_outcome=shipped "*) ok "(10k) the landed-on-branch close records gc.work_outcome=shipped" ;;
+  *) bad "(10k) the landed-on-branch close must record gc.work_outcome=shipped (got: '$CLOSE_LINE')" ;;
+esac
+case "$CLOSE_LINE" in
+  *"--set-metadata gc.work_commit=$FULL_HEAD "*) ok "(10l) gc.work_commit is the full head read back from origin" ;;
+  *) bad "(10l) gc.work_commit must be the full origin head $FULL_HEAD (got: '$CLOSE_LINE')" ;;
+esac
+case "$CLOSE_LINE" in
+  *"--set-metadata gc.work_branch=polecat/parent "*) ok "(10m) gc.work_branch is the branch the rework landed on" ;;
+  *) bad "(10m) gc.work_branch must be the branch the rework landed on, polecat/parent (got: '$CLOSE_LINE')" ;;
+esac
+case "$CLOSE_LINE" in
+  *"Rework landed on polecat/parent at cafef00d;"*) ok "(10n) the close note still carries the short sha" ;;
+  *) bad "(10n) the close note must carry the short sha (got: '$CLOSE_LINE')" ;;
 esac
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
