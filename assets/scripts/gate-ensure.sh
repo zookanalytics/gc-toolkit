@@ -902,7 +902,8 @@ STRAY
     fi
     why="lane '$g' does not derive green (no non-superseded approve review backs it)"
     # A lane the latest bring-current round reopened: the review reads that
-    # round's account, and the triage dispatch also rules on the round.
+    # round's account, and the triage dispatch also rules on the round when no
+    # ruling is recorded yet.
     round_lane=$(printf '%s' "$row" | jq -r --arg g "$g" '(.metadata.bring_current_record // null)
       | if type == "string" then (fromjson? // null) else . end
       | if type != "object" or .class != "conflicted" then ""
@@ -911,7 +912,7 @@ STRAY
         else "" end' 2>/dev/null)
     case "$round_lane" in
       rule) why="lane '$g' was reopened by a bring-current round that conflicted: rule on the round (signoff.sh --reopen, --round-reason, --dismiss-approval) after reading its account, bring-current-audit.sh render --anchor $id --as comment" ;;
-      read) why="lane '$g' was reopened by triage's ruling on a bring-current round: read the round's account first, bring-current-audit.sh render --anchor $id --as comment" ;;
+      read) why="lane '$g' was reopened by the ruling on a bring-current round: read the round's account first, bring-current-audit.sh render --anchor $id --as comment" ;;
     esac
 
     # A lane short of green is what machine `progressing` names — not the outcome

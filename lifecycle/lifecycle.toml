@@ -610,17 +610,18 @@ keys = [
 # bring_current_record — the anchor's record of its latest bring-current round
 #   (bring-current-guard.sh guard): the head, the start, the target, the class
 #   (clean or conflicted), the guard's evidence per item, the worker's audit,
-#   and triage's ruling once made (bring-current-guard.sh decide, run by
-#   signoff.sh). A conflicted round triage has not ruled on is carried into the
-#   next round's record. Every message about a round renders from it. A JSON
-#   object, overwritten each round.
+#   and the round's ruling once made: triage's (bring-current-guard.sh decide,
+#   run by signoff.sh), or the guard's closed ruling, marked by=guard, on an
+#   anchor whose check_set declares no triage lane. A conflicted round no
+#   ruling covers yet is carried into the next round's record. Every message
+#   about a round renders from it. A JSON object, overwritten each round.
 # bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
-#   triage, written by the guard, and the lanes triage's rulings reopened or
-#   added. lane-state.sh lets no GitHub approval submitted before
-#   bring_current_round_at back one of these lanes. A comma list that only
-#   grows.
+#   triage, written by the guard; the lanes triage's rulings reopened or added;
+#   and every lane a closed ruling reopened. lane-state.sh lets no GitHub
+#   approval submitted before bring_current_round_at back one of these lanes.
+#   A comma list that only grows.
 # bring_current_round_at — when the latest conflicted round was recorded (UTC,
-#   ISO 8601), written with bring_current_reopened.
+#   ISO 8601), written by the guard with that round's record.
 
 [metadata.gates]
 keys = [

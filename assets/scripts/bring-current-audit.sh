@@ -7,7 +7,8 @@
 # what collided and why it chose what it chose, so it writes that down as it
 # resolves: one entry per conflicted file, and one per edit beyond the merge.
 # bring-current-guard.sh holds the hand-back to that coverage, stores the entries
-# on the anchor beside its own diff evidence, and routes the round to triage.
+# on the anchor beside its own diff evidence, and routes the round to triage, or
+# rules it closed on an anchor that declares no triage lane.
 # Every message about the round is rendered here from that stored record: the
 # triage verdict posted on the PR, the note on a dismissed approval, the visit
 # that re-asks for one, and the visit that asks for a decision the worker could
@@ -142,6 +143,8 @@ def headline:
     + (if $u > 0 then " No entry from the worker covers " + count($u; "item"; "items")
          + ", so only the evidence from git describes " + (if $u == 1 then "it" else "them" end) + "." else "" end);
 def lanes: ((.triage.reopen // []) + (.triage.add // [])) | unique;
+def by_guard: (.triage.by? // "") == "guard";
+def cap: if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end;
 def decision:
   if .triage == null then "Triage has not ruled on this round yet."
   else lanes as $l
@@ -167,7 +170,7 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
     | if $as == "comment" then
         "**Bringing this branch current with \(.target // "the base")**\n\n"
         + headline + "\n\n"
-        + "**Triage:** " + decision
+        + (if by_guard then "**Ruling:** " else "**Triage:** " end) + decision
         + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
         + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n"))
@@ -176,18 +179,25 @@ bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
            else "" end)
       elif $as == "dismissal" then
         (entries | judgment_first) as $e
-        | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) took judgment this approval did not see. "
+        | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) "
+          + (if by_guard then "changed code by hand that this approval did not see. " else "took judgment this approval did not see. " end)
           + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" "))
           + (if ($e | length) > $max then " And \(($e | length) - $max) more." else "" end)
           + (unaccounted | if length > 0 then " No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end)
-          + (if (.triage.reason // "") != "" then " Triage: " + (.triage.reason | clip(300) | sentence) else "" end)
-          + " The triage comment on this PR has the round in full. Please review the change and approve again."
+          + (if (.triage.reason // "") == "" then ""
+             elif by_guard then " " + (.triage.reason | clip(300) | sentence | cap)
+             else " Triage: " + (.triage.reason | clip(300) | sentence) end)
+          + (if by_guard then "" else " The triage comment on this PR has the round in full." end)
+          + " Please review the change and approve again."
       else
-        "PR#\($num) approval dismissed: triage ruled that bringing it current took judgment\n"
+        (if by_guard then "PR#\($num) approval dismissed: bringing it current changed code by hand, and no triage lane weighs it\n"
+         else "PR#\($num) approval dismissed: triage ruled that bringing it current took judgment\n" end)
         + "Bringing PR#\($num) (\($url)) current with \(.target // "the base") changed code the approval"
         + (if $logins != "" then " from \($logins)" else "" end) + " did not see. "
         + headline
-        + (if (.triage.reason // "") != "" then " Triage ruled: " + (.triage.reason | sentence) else "" end) + "\n\n"
+        + (if (.triage.reason // "") == "" then ""
+           elif by_guard then " " + (.triage.reason | sentence | cap)
+           else " Triage ruled: " + (.triage.reason | sentence) end) + "\n\n"
         + "File by file:\n"
         + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n")) + "\n\n"

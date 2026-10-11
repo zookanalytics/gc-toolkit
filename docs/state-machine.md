@@ -166,8 +166,8 @@ check_set may carry, but it is a universal merge rule, not a check (below). The
 one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase>`,
 drops all three and returns the checks whose phase gates `<phase>`, so no reader
 re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
-`review-outcome.sh` and `liveness-sweep.sh` all ask it rather than tokenizing
-`check_set` themselves.
+`review-outcome.sh`, `liveness-sweep.sh` and `bring-current-guard.sh` all ask it
+rather than tokenizing `check_set` themselves.
 
 Every other name is opaque to the machinery: gate-ensure dispatches whatever
 it finds there, `signoff.sh` writes `check.<name>`, and `merge.sh` requires
@@ -758,7 +758,7 @@ guessing is a question, not a guess: `bring-current-audit.sh ask` files a visit
 on the anchor carrying the entries so far and the question, the merge is
 aborted, nothing is pushed, and the bead is held until a person answers.
 
-**The guard enforces coverage and routes; it renders no verdict.** At the
+**The guard enforces coverage and routes; it weighs no round.** At the
 handoff, `bring-current-guard.sh` reads the round on any branch that carries a
 review to keep current (its anchor is gating, or a PR stands on it):
 
@@ -774,8 +774,7 @@ review to keep current (its anchor is gating, or a PR stands on it):
   reopened: it is added to `bring_current_reopened` with the round's time,
   `bring_current_round_at`, and its standing review is superseded.
 
-An anchor whose `check_set` declares no triage lane records the round and owes
-no ruling. Generated renders (linguist-generated) owe no entry. A hand-off with no
+Generated renders (linguist-generated) owe no entry. A hand-off with no
 `bring_current_from` stamp that pushed nothing past the origin head it started
 from is refused rather than read as clean, because nothing records where its
 work began. A round whose resume stamped `bring_current_from` but not
@@ -798,6 +797,18 @@ approval was submitted after `bring_current_round_at` (`lane-state.sh`), so a
 standing approval neither lets the merge skip a reopened lane nor keeps its
 review from being dispatched. A routine round can therefore keep the approval
 while its lanes re-run, and material judgment removes it.
+
+**With no triage lane, the guard rules closed.** An anchor whose `check_set`
+declares no triage lane (`correctness` alone, say, or the `none` opt-out) has no
+review to rule on the round, and approval is a merge rule no `check_set` opts
+out of. So the guard rules on the round itself and assumes the worst: every lane
+the anchor declares runs again on the merged code (the lanes `review-checks.sh`
+resolves for the merge, none for `none`), and where a PR stands, each approval
+given before the round is dismissed the way a triage dismissal is, re-ask visit
+first. The ruling is stored in the record where triage's goes, marked
+`by: guard`, so gate-ensure, `signoff.sh` and `lane-state.sh` read the round as
+ruled, and a re-run of the hand-off carries it out again. A person who adds the
+triage lane to the anchor's `check_set` gives the next round to triage.
 
 **Every message is composed from the audit.** The round section that opens
 triage's posted verdict, the dismissal note and the re-ask visit render from
