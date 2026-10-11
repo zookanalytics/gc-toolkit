@@ -240,6 +240,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-visit-open.sh so engage's guard and the intake's note cannot diverge.
+# Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { echo "$PROG: cannot source city-liveness.sh from $SCRIPT_DIR" >&2; exit 3; }
 # The one gc.work_outcome stamp a visit gets before it closes, shared with every
 # other visit closer so dismiss cannot diverge from them. Exposes
 # work_outcome_noop.
@@ -301,7 +307,8 @@ sitting_is_gone() {
 }
 
 # ── Rig enumeration ──────────────────────────────────────────────────
-# Sets RIGS (JSON array of {name,path,prefix,suspended,running}); exits 3 with a per-cause
+# Sets RIGS (JSON array of {name,path,prefix,hq,suspended}, plus running on the
+# HQ row; city-liveness.sh's RIG_PROJECTION_JQ); exits 3 with a per-cause
 # sentence otherwise. Each failure names its own operator move because for a
 # non-CLI caller (the web board's open button) the code plus the sentence is
 # the whole signal.
@@ -366,10 +373,11 @@ enumerate_rigs() {
            exit 3 ;;
     esac
 
-    # Carry suspended/running through: engage's liveness guard reads them from
-    # this same enumeration. A `gc rig list` that omits either leaves it null,
-    # which the guard treats as unknown and never refuses on.
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, suspended, running}]' 2>/dev/null || printf '[]')
+    # The projection carries the flags engage's liveness guard reads from this
+    # same enumeration (city-liveness.sh says which, and why a rig row's running
+    # is not one). A `gc rig list` that omits a flag leaves it null, which the
+    # guard treats as unknown and never refuses on.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null || printf '[]')
     if [ "$(rigs_count)" -eq 0 ]; then
         # gc answered correctly: this city really has no rigs. Not a malfunction.
         echo "$PROG: no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." >&2
@@ -387,23 +395,6 @@ rig_path_for_bead() {
 rig_name_for_bead() {
     enumerate_rigs
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
-}
-
-# rig_suspended_for_bead <bead-id> / rig_running_for_bead <bead-id> — the
-# liveness flags `gc rig list` reports for the rig owning the bead: "true" or
-# "false", or EMPTY when the field is absent (an older gc that does not report
-# it). engage's guard refuses only on an explicit suspended=true or
-# running=false, so an empty read is unknown and never refuses — the flag is a
-# safety net over today's behaviour, not a new precondition on every engage.
-rig_suspended_for_bead() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
-        '.[] | select(.prefix==$p) | if (.suspended == null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1
-}
-rig_running_for_bead() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
-        '.[] | select(.prefix==$p) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
 }
 
 # rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
@@ -3105,17 +3096,18 @@ engage_create_subject() {
         exit 4
     fi
     # Arm the abort backstop the instant the marked subject exists. Every gate
-    # from here to the visit-filing in cmd_engage can still abort (a suspended or
-    # not-running rig, an unknown --template or --model, a store read that will
-    # not confirm the bead), and until the visit is filed an abort would leave this
-    # operator-origin subject owing a visit that nothing supplies: its own
-    # stand-down marker hides it from the async worker (gc-proactive drops a marked
-    # bead, mol-first-reaction consumes-and-ignores it), and even unmarked a first
-    # reaction does not force a visit for gc.origin=operator (actionable/blocked/
-    # close file none). So engage_new_subject_cleanup files that one visit itself on
-    # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at
-    # the top of this function) already set and cleared its own trap and memoizes on
-    # every later call, so it never clobbers this one.
+    # from here to the visit-filing in cmd_engage can still abort (a suspended
+    # rig, a downed controller, an unknown --template or --model, a store read
+    # that will not confirm the bead), and until the visit is filed an abort
+    # would leave this operator-origin subject owing a visit that nothing
+    # supplies: its own stand-down marker hides it from the async worker
+    # (gc-proactive drops a marked bead, mol-first-reaction consumes-and-ignores
+    # it), and even unmarked a first reaction does not force a visit for
+    # gc.origin=operator (actionable/blocked/close file none). So
+    # engage_new_subject_cleanup files that one visit itself on exit; cmd_engage
+    # disarms it once the visit is filed. enumerate_rigs (called at the top of
+    # this function) already set and cleared its own trap and memoizes on every
+    # later call, so it never clobbers this one.
     _ens_cleanup_bead="$bead"
     trap 'engage_new_subject_cleanup' EXIT
     trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
@@ -3306,23 +3298,25 @@ cmd_engage() {
     [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     [ -n "$rig" ] && export GC_RIG="$rig"
 
-    # A spawned converse sitting is sustained by the RECONCILER — a converse slot
-    # sets nudge="" and idle_timeout=0, so no pool backstop cycles it. A suspended
-    # rig has its agents skipped by the reconciler, and a rig with no agents
-    # running has no live runtime tending it, so on either the sitting never comes
-    # up: engage would report success while the visit sits bound to a session that
-    # never registers, recoverable only by hand. Refuse before
-    # spawning and name the fix. Both flags come from the `gc rig list`
-    # enumerate_rigs already read; a gc that reports neither leaves them empty,
-    # which reads as unknown and does not refuse.
-    rig_suspended=$(rig_suspended_for_bead "$bead")
-    rig_running=$(rig_running_for_bead "$bead")
-    if [ "$rig_suspended" = "true" ]; then
+    # A spawned converse sitting is launched and sustained by the RECONCILER, the
+    # city controller's loop — a converse slot sets nudge="" and idle_timeout=0,
+    # so no pool backstop cycles it. The reconciler skips a suspended rig's
+    # agents and does not run while the controller is down, so on either the
+    # sitting never comes up: engage would report success while the visit sits
+    # bound to a session that never registers, recoverable only by hand. Refuse
+    # before spawning and name the fix. A rig with no agents running is idle, not
+    # down, and the reconciler launches the sitting there like anywhere else.
+    # Both flags come from the `gc rig list` enumerate_rigs already read, and
+    # city_controller_state asks gc status before an HQ running=false counts
+    # (city-liveness.sh). A gc that reports neither flag leaves them empty, which
+    # reads as unknown and does not refuse.
+    if [ "$(rig_suspended "$rig")" = "true" ]; then
         echo "$PROG: engage: rig '${rig:-?}' is suspended, so the reconciler skips its agents and a spawned converse sitting would never come up — the visit would strand bound to it. Resume the rig, then re-engage: gc rig resume ${rig:-<rig>}" >&2
         exit 4
     fi
-    if [ "$rig_running" = "false" ]; then
-        echo "$PROG: engage: rig '${rig:-?}' has no agents running, so nothing would sustain a spawned converse sitting — the visit would strand bound to a session that never registers. Start the rig first ('gc rig status ${rig:-<rig>}' to see why it is down), then re-engage." >&2
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        echo "$PROG: engage: the city controller did not answer ($CONTROLLER_SEEN), so nothing would launch a spawned converse sitting — the visit would strand bound to a session that never registers. Check 'gc status' and 'gc supervisor status', then re-engage once the controller answers." >&2
         exit 4
     fi
 
