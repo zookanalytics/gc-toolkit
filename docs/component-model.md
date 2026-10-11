@@ -381,7 +381,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize; leaves reviews, human visits, and the anchor itself alone. No merge authority. |
+| `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize, and carries a finding that can cite code the target branch already carries forward to a bug bead instead of mooting it. `pr-facts.sh` runs it for one anchor before consummating that anchor's PR-close disposition. Leaves reviews, human visits, operator freezes, and the anchor itself alone. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches, and of never-dispatched rework twins whose same-review sibling landed, via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/pr-stack.sh` | merge | Arm 12: keeps each open PR current with its anchor — the branch-beads section, the `pr-summary` region a rework moved past, and the title composed from the anchor's. Writes only PR bodies and titles. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
@@ -409,6 +409,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/tmux-status-line-override.sh` | visit | Sets the gc-toolkit status bar. |
 | `assets/scripts/gc-toolkit-status-line.sh` | visit | Renders what that status bar shows. |
+| `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each corrective-feedback hit as one observation bead. |
@@ -428,13 +429,13 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/notification-wisp-reap.toml` | patrol | Fires the notification-wisp reaper hourly, city-wide. |
 | `orders/dolt-reclaim.toml` | patrol | Fires the Dolt reclaim pass daily, city-wide: runs `gc dolt compact --gc-only` on each store whose noms size is over the per-database line. |
 | `orders/pool-slot-reap.toml` | patrol | Fires the pool-slot reaper every five minutes, city-wide. |
-| `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
+| `assets/scripts/boot-health.sh` | patrol | Mechanical reads: the patrol-wisp ledger, and the deacon's pane only when the wisp is not fresh. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in, and reports a sweep that finished more than an interval before it was collected as stale, never as current findings. |
 | `assets/scripts/gc-deacon-ledger.sh` | patrol | The deacon's rolling incident ledger: one open `deacon-ledger` bead, one comment per non-routine action, rotated so it stays skimmable. Reconstructs a shift for an operator or a recycled deacon without a transcript. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
-| `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. An anchor whose gating PR has stopped moving is escalated on its own, deduped by a stamp on the anchor. |
+| `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |
 | `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
 | `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
@@ -451,6 +452,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. `doctor/check-seed-audit-current` reports its freshness in a checkout; its `--check-merge` mode is what `merge.sh` gates a landing on. |
 | `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
+| `assets/scripts/gh-origin-guard.sh` | shared primitive | The `PreToolUse` hook every agent's provider runs ahead of a shell command: refuses a typed `gh` write aimed outside a repository the session owns, and an unmarked post on one it does own ([gh-origin-guard.md](gh-origin-guard.md)). |
+| `assets/scripts/gh-origin-guard-codex.sh` | shared primitive | Agent `pre_start` for the codex-provider templates, polecat-codex, converse-codex and dog: registers the gh origin guard in the Codex home's hooks file, the one every Codex session reads. |
 | `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
 | `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan (visit) sources it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. |
 | `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |

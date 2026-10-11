@@ -1,3 +1,8 @@
+---
+name: R2 What changed when prototyping became cheap
+description: Research report R2 for the escalation work (tk-px5od), on disciplines that absorbed a collapse in prototyping cost. Its finding is that cheap iteration moves the bottleneck to framing and selection, and it maps the practices that followed onto AI-assisted development.
+---
+
 # R2: What Changed When Prototyping Became Cheap
 
 *Background research for the gas city pack — patterns from disciplines that already weathered an iteration-cost collapse.*
