@@ -176,6 +176,16 @@ session active false "0001-01-01T00:00:00Z"
 run
 eq "$(nudges)" "" "a pane whose last output cannot be read is treated as busy"
 
+echo "── a session id that is not a plain token never reaches gc ──"
+printf '{"sessions":[{"id":"-n","agent_name":"r1/gc-toolkit.refinery","state":"active","attached":false,"last_active":"%s"}]}\n' "$(iso 1200)" > "$STUB_SESSIONS"
+run
+eq "$(nudges)" "" "an id that would parse as a flag is not passed to gc session nudge"
+has "$(tail -1 "$TMP/state/r1.log")" "carries no usable id ('-n')" "the refused id is logged"
+printf '{"sessions":[{"agent_name":"r1/gc-toolkit.refinery","state":"active","attached":false,"last_active":"%s"}]}\n' "$(iso 1200)" > "$STUB_SESSIONS"
+run
+eq "$(nudges)" "" "a session with no id is not nudged"
+has "$OUT" "carries no usable id ('')" "a missing id is named as missing, not read from the next field"
+
 echo "── a read it cannot make does nothing ──"
 idle_session
 STUB_QUEUE_RC=1 run

@@ -55,6 +55,10 @@ if [ -z "$RIG" ]; then
 fi
 
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+# True for a session id safe as a command argument: letters, digits, dot,
+# underscore and dash, with no leading dot or dash and no `..`. A quoted `-n`
+# still reaches `gc session nudge` as a flag.
+safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;; *) return 0 ;; esac }
 setting() { # <value> <default>: a value that is not a whole number takes the default
   if num "$1"; then printf '%s' "$1"; else printf '%s' "$2"; fi
 }
@@ -161,7 +165,8 @@ fi
 
 # The refinery's live session, and how long its pane has been quiet, read
 # against the clock when the list arrives: a busy pane's last output is that
-# moment, later than this pass's start.
+# moment, later than this pass's start. The fields are joined by the unit
+# separator, so an empty one keeps its place.
 SESS_RAW=$(bounded gc session list --json 2>/dev/null); RC=$?
 SESS=$(printf '%s' "$SESS_RAW" | scrub | jq -r --arg a "$AGENT" "$EPOCH_DEF"'
   if (.sessions | type) != "array" then error("no sessions") else . end
@@ -172,7 +177,7 @@ SESS=$(printf '%s' "$SESS_RAW" | scrub | jq -r --arg a "$AGENT" "$EPOCH_DEF"'
     else .[0] | [(.id // ""), ((.attached // false) | tostring),
                  (((.last_active // "") | tostring | epoch) as $e
                   | if $e == null then "" else ([(now | floor) - $e, 0] | max) end)]
-         | map(tostring) | join(" ")
+         | map(tostring) | join("\u001f")
     end' 2>/dev/null)
 if [ "$RC" -ne 0 ] || [ -z "$SESS" ]; then
   record "could not read the session list (rc=$RC); $OLDEST has waited $((WAITED / 60))m; nothing done this pass"
@@ -182,9 +187,9 @@ if [ "$SESS" = none ]; then
   say "$OLDEST has waited $((WAITED / 60))m and $AGENT has no active session; nothing to nudge"
   exit 0
 fi
-read -r SID ATTACHED QUIET <<< "$SESS"
-if [ -z "$SID" ]; then
-  record "the active session of $AGENT carries no id; nothing done this pass"
+IFS=$'\037' read -r SID ATTACHED QUIET <<< "$SESS"
+if ! safe_id "$SID"; then
+  record "the active session of $AGENT carries no usable id ('$SID'); nothing done this pass"
   exit 0
 fi
 if [ "$ATTACHED" = true ]; then
