@@ -1992,6 +1992,33 @@ SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r 
 run_so; eq "$SO_RC" "2" "--rework with --no-rework is refused"
 have "the settle skill teaches the forced answer" '--no-rework' "$SK_SETTLE"
 
+# Every script the sign-off runs is found by one search order: the rig root, then
+# the working directory's checkout, then the city's gc-toolkit rig. A rig root
+# carrying none of them sends all three to the city root, each logging its root.
+echo "── one search order finds every script the sign-off runs ──"
+SOCITY2="$SO/city2"; mkdir -p "$SOCITY2/rigs/gc-toolkit/assets/scripts"
+so_helm "$SOCITY2/rigs/gc-toolkit" CITY2
+cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" <<'LC'
+#!/usr/bin/env bash
+case "${1:-}" in
+    state)      printf '%s\n' "${STUB_STATE:-held}" ;;
+    transition) printf 'lc[CITY2] %s\n' "$*" >>"$SOLOG"; exit 0 ;;
+    *) exit 2 ;;
+esac
+LC
+cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh" <<'CR'
+#!/usr/bin/env bash
+printf 'REWORK[CITY2]: %s\n' "$*" >>"$SOGC"
+echo "converse-rework: filed rework rw-1 on anchor item-x"
+CR
+chmod +x "$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" "$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$SOCITY2" SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "a sign-off whose scripts sit only on the city root runs"
+have "…finding the rework script there" 'REWORK[CITY2]: --anchor item-x' "$SOGC"
+have "…the takeaway writer" 'helm[CITY2] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
+have "…and the lifecycle writer" 'lc[CITY2] transition item-x --to unanchored --route human' "$SOLOG"
+
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

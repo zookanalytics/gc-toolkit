@@ -21,8 +21,9 @@
 #
 # What is waiting on the subject is the caller's to state: one --waiting-on per
 # bead it ROUTED work into, --no-wait when it settled the subject and nothing is
-# waiting, and NEITHER where the subject is parked for a person. The writers
-# (gc-helm.sh, lifecycle.sh) are SEARCHED for on the candidate roots.
+# waiting, and NEITHER where the subject is parked for a person. The scripts it
+# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh) are SEARCHED for on the
+# candidate roots, in the one order pack_script holds.
 #
 # Usage:
 #   converse-signoff.sh --visit <id> --outcome "<takeaway, ≤140 chars>" \
@@ -68,6 +69,19 @@ REWORK=""
 WAIT=()
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
+
+# pack_script <name> — the first candidate root's assets/scripts/<name>: the rig
+# root, then the git checkout of the working directory, then the city's
+# gc-toolkit rig. Every script this sign-off runs is found through it, so the
+# three share one search order. Non-zero, printing nothing, when no root
+# carries it.
+pack_script() {
+  local cand
+  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$cand/assets/scripts/$1" ] && { printf '%s' "$cand/assets/scripts/$1"; return 0; }
+  done
+  return 1
+}
 
 # The one definition of what subject a visit covers (its tracks edge, the
 # gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
@@ -163,10 +177,7 @@ DEMAND_TOPIC=()
 # a second.
 REWORK_FILED=""
 if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
-  CR=""
-  for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$cand/assets/scripts/converse-rework.sh" ] && { CR="$cand/assets/scripts/converse-rework.sh"; break; }
-  done
+  CR=$(pack_script converse-rework.sh)
   if [ -z "$CR" ]; then
     REWORK_OUT="no converse-rework.sh on any candidate root"
   elif REWORK_OUT=$("$CR" --anchor "$SUBJECT" --ruling-bead "$VISIT" --ruling "$RULING" 2>&1); then
@@ -180,10 +191,7 @@ if [ "$RULED" = yes ] && [ "$REWORK" = yes ]; then
     exit 1
   fi
 fi
-HELM=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
-done
+HELM=$(pack_script gc-helm.sh)
 [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the subject carries no trace of this sitting"
 # What is waiting on $SUBJECT now that this sitting is over. Three shapes,
 # exactly one true, and this sitting is the last reader that can tell them
@@ -298,10 +306,7 @@ fi
 # this sitting's outcome rather than to the state read off the subject. Erring
 # toward the hold leaves a bead visibly routed to a person; erring the other
 # way restores the untraceable wait this state exists to end.
-LC=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
-done
+LC=$(pack_script lifecycle.sh)
 if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$SUBJECT" 2>/dev/null)" = "held" ]; then
   "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
     || echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
