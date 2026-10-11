@@ -36,8 +36,7 @@ harness_init
 # CLEAN for every anchor and this suite would pass against a script that
 # observes nothing. Real git over a real fixture repository; only the bead store
 # is stubbed.
-cat > "$BIN/git" <<GITW
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<GITW
 exec "$REAL_GIT" "\$@"
 GITW
 chmod +x "$BIN/git"

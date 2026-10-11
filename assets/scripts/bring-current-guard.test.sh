@@ -43,9 +43,12 @@
 #   or a round another review already ruled on; records the ruling, unions the
 #   reopened lanes, supersedes each, renders the round's account; a dismissal
 #   files the visit composed from the audit FIRST, then re-requests and
-#   dismisses with a note composed from it; an approval given after the round
-#   stands; no approval dismisses nothing; a visit that does not land dismisses
-#   nothing; a retry carries out what was recorded.
+#   dismisses with a note composed from it; it dismisses every standing
+#   approval given before the round, every one of an account that approved
+#   twice and one behind a later CHANGES_REQUESTED, re-requesting each account
+#   once; an approval given after the round stands; no approval dismisses
+#   nothing; a visit that does not land dismisses nothing; a retry carries out
+#   what was recorded.
 # The resume block, extracted from mol-polecat-work, stamps the start and the
 # scope and clears the last round's audit before its merge, and the filers'
 # rejection prefixes it reads are pinned.
@@ -267,8 +270,7 @@ has "$(cls HEAD merge-only)" "audit notes.txt: changed by" "a commit outside the
 echo "# classify: a git read that fails is never clean"
 REAL_GIT=$(command -v git)
 mkdir -p "$TMP/failgit"
-cat > "$TMP/failgit/git" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/failgit/git" <<SHIM
 sub=""; i=1
 while [ "\$i" -le "\$#" ]; do
   case "\${!i}" in
@@ -752,6 +754,23 @@ eq "$rc" "0" "with every approval given after the round it exits 0"
 has "$out" "every standing approval was given after the round" "…saying so"
 eq "$(cat "$STUB_ESC_LOG")" "" "…filing no visit"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and dismissing nothing"
+
+echo "# decide: every standing approval is dismissed, not only each account's latest"
+# A dismissed review drops out of the approval rule before each account's latest
+# is taken, so an older approval left standing would count again, and so would
+# one behind a later CHANGES_REQUESTED once pr-facts.sh dismisses that request.
+store "[$(round_anchor)]"
+reviews "$(approve human1 501),$(approve human1 504),$(approve human3 505),$(approve human3 506 CHANGES_REQUESTED)"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$rc" "0" "it exits 0 once the visit holds the merge"
+has "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "an account's older approval is dismissed"
+has "$(cat "$STUB_GH_LOG")" "reviews/504/dismissals" "…and its newer one"
+has "$(cat "$STUB_GH_LOG")" "reviews/505/dismissals" "an approval behind its author's later CHANGES_REQUESTED is dismissed too"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/506/dismissals" "…and the CHANGES_REQUESTED is left alone"
+eq "$(grep -c 'reviewers\[\]=human1' "$STUB_GH_LOG")" "1" "an account that approved twice is re-requested once"
+order_ok "reviewers\[\]=human1" "reviews/501/dismissals" && ok "…before its approvals are dismissed" || bad "the re-request must come before the dismissals"
+has "$out" "the approvals from human1 and human3 dismissed" "the outcome names each account once"
 
 echo "# decide: no standing approval dismisses nothing; a visit that does not land dismisses nothing"
 store "[$(round_anchor)]"

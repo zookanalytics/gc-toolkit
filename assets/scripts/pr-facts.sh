@@ -640,6 +640,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # brings only an approved PR current.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
+# Which inline comments a dismissal retires, REVIEW_DISMISSAL_DEF; the comment
+# space counts only the live ones.
+# shellcheck source=review-dismissal.sh
+. "$_bd_lib_dir/review-dismissal.sh" || { echo "cannot source review-dismissal.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -1023,32 +1027,14 @@ drop_ids() { # <rows-json> <ids-json>
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
 # out of the batch leaves the comments under it routing. A dismissal is the only
-# thing that retires them. The review space's filter is narrower than that and
-# cannot stand in for this one: it also drops an APPROVED review, whose inline
-# comments are live feedback, and a PR green everywhere else would merge over
-# them. A comment naming no review, or naming one the review list does not
-# carry, is standalone and stays.
-# Each kept comment is stamped with its review's submission instant as
-# gc_review_submitted_at, the instant gc_city_own dates an inline comment by: a
-# comment drafted in a pending review is published when the review is submitted,
-# so a review drafted before the provenance cutover and submitted after it reads
-# as feedback whole, never its body as feedback and its comments as the city's.
+# thing that retires them, and live_comments in review-dismissal.sh is that rule,
+# the one a dismisser reads to know what its dismissal would retire. The review
+# space's filter is narrower and cannot stand in for it: it also drops an
+# APPROVED review, whose inline comments are live feedback, and a PR green
+# everywhere else would merge over them.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
   { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
-  jq -nc '
-    (input) as $revs | (input) as $cmts |
-    ([ $revs[]
-       | select(((.state // "") | tostring) == "DISMISSED")
-       | ((.id // 0) | tostring) ]) as $retired
-  | ([ $revs[]
-       | select(((.submitted_at // "") | tostring) != "")
-       | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
-     | from_entries) as $submitted
-  | [ $cmts[]
-      | (((.pull_request_review_id // "") | tostring)) as $parent
-      | select(($retired | index($parent)) == null)
-      | if ($submitted[$parent] // "") != ""
-        then . + { gc_review_submitted_at: $submitted[$parent] } else . end ]' 2>/dev/null
+  jq -nc "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'(input) as $revs | input | live_comments($revs)' 2>/dev/null
 }
 # A batch names the reviews it answers, the way a signoff-sourced child names
 # its review bead. An empty-bodied CHANGES_REQUESTED is named here even though

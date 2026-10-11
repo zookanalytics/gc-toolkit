@@ -66,13 +66,15 @@
 # standing review so gate-ensure.sh dispatches it again, and, when triage rules
 # the approval no longer covers what would land, dismisses it. The visit that
 # re-asks for the review is filed and read back first, so no dismissal strands
-# a PR without a signal; each approving account is then re-requested and its
-# approval dismissed, the order pr-facts.sh uses when it clears a human review.
-# An approval submitted after bring_current_round_at saw the merged code, so it
-# stands, the same line lane-state.sh draws.
-# A dismissal that does not land is noted on the visit, which still holds the
-# merge. The visit, the dismissal note and the round section of triage's
-# posted verdict are all rendered from the stored record.
+# a PR without a signal; each approving account is then re-requested and every
+# approval it has standing is dismissed, the order pr-facts.sh uses when it
+# clears a human review. An account that approved twice before the round loses
+# both approvals, because a dismissed review drops out of the approval rule and
+# the older approval would count again. An approval submitted after
+# bring_current_round_at saw the merged code, so it stands, the same line
+# lane-state.sh draws. A dismissal that does not land is noted on the visit,
+# which still holds the merge. The visit, the dismissal note and the round
+# section of triage's posted verdict are all rendered from the stored record.
 #
 # CLOSED RULING. A conflicted round on an anchor whose check_set declares no
 # triage lane (correctness alone, say, or the none opt-out) has no review to
@@ -126,10 +128,14 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # The audit's reads and every rendering of a round come from one place.
 # shellcheck source=bring-current-audit.sh
 . "$SCRIPTS_DIR/bring-current-audit.sh" || { echo "$PROG: cannot source bring-current-audit.sh beside this script" >&2; exit 2; }
-# The approval rule merge.sh lands on: standing_approvals($self) is one review per
-# approving account other than the city's.
+# The approval rule merge.sh lands on: standing_approvals($self) is every
+# approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# The PR and approval naming the two approval dismissers share (pr_coords,
+# approval_phrase).
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 TAB=$(printf '\t')
@@ -743,7 +749,9 @@ closed_ruling() { # <record-json> <round-at, empty for a new round>
 # re-ask visit first. rc 0 nothing stood, or the visit holds the merge · 1
 # nothing was dismissed and the caller retries.
 dismiss_approvals() { # <anchor> <anchor-row> <record-json>
-  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun key msg dmsg rows visit failed="" dismissed="" rid login
+  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun key msg dmsg rows visit failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN
+  # shellcheck disable=SC2034  # approval_phrase sets it; these messages render from the record and use no verb
+  local APPROVAL_VERB
   url=$(bca_meta "$arow" pr_url); [ -n "$url" ] || url=$(bca_meta "$arow" existing_pr)
   num=$(bca_meta "$arow" pr_number)
   [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
@@ -751,12 +759,11 @@ dismiss_approvals() { # <anchor> <anchor-row> <record-json>
     echo "$PROG: no PR stands on $anchor, so no approval stands to dismiss"
     return 0
   fi
-  host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
-  repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
-  if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
+  if ! pr_coords "$url" "$num"; then
     echo "$PROG: $anchor names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
     return 1
   fi
+  host="$PR_HOST"; repo="$PR_REPO"
   self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
   if [ -z "$self" ]; then
     echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
@@ -786,8 +793,8 @@ dismiss_approvals() { # <anchor> <anchor-row> <record-json>
     fi
     return 0
   fi
-  logins=$(printf '%s' "$approvals" | jq -r '[ .[].login ] | unique | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
-  if [ "$(printf '%s' "$approvals" | jq 'length')" -gt 1 ]; then noun="approvals"; else noun="approval"; fi
+  approval_phrase "$approvals"
+  logins="$APPROVERS"; noun="$APPROVAL_NOUN"
 
   key="bring-current-dismissal.$num.$(printf '%s' "$record" | jq -r '.head // ""')"
   msg=$(bca_render_record "$record" visit "$num" "$url" "$logins")
@@ -821,7 +828,7 @@ APPROVERS
     [ -n "$rid" ] || continue
     if gh api --hostname "$host" -X PUT "repos/$repo/pulls/$num/reviews/$rid/dismissals" \
          -f message="$dmsg" </dev/null >/dev/null 2>&1; then
-      dismissed="$dismissed${dismissed:+, }$login"
+      dismissed="$dismissed${dismissed:+, }$login (review $rid)"
     else
       failed="$failed; the approval from $login (review $rid) could not be dismissed"
     fi
