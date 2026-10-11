@@ -39,10 +39,10 @@ type PackBuild struct {
 
 	// ProbeStatus is what `helm-svc probe` said about the binary this row
 	// describes: "ok", "unreadable", or "unprobed" when no city was resolved to
-	// ask about. A binary that compiles but cannot read the stores it serves
-	// renders no board at all, so the revisions alone cannot say a row is
-	// healthy. ProbeDetail is the probe's one-line reason, empty unless
-	// ProbeStatus is "unreadable".
+	// ask about, and empty for a component nothing probes. A binary that
+	// compiles but cannot read the stores it serves renders no board at all, so
+	// the revisions alone cannot say a row is healthy. ProbeDetail is the
+	// probe's one-line reason, empty unless ProbeStatus is "unreadable".
 	ProbeStatus string `json:"probe_status,omitempty"`
 	ProbeDetail string `json:"probe_detail,omitempty"`
 
@@ -51,14 +51,14 @@ type PackBuild struct {
 	// one that can say the builder itself has stopped.
 	CheckedAt time.Time `json:"checked_at,omitzero"`
 
-	// BehindMain is how many commits origin/main carries under the helm source
-	// paths that this checkout does not — the checkout serving the board is
-	// off-main by that many commits. Every other field here measures the LOCAL
-	// checkout (its sources against its binary), so a checkout parked off-main
-	// reads perfectly current on those while it serves code main has moved past;
-	// this is the one field that sees that gap. It is off the wire because the
-	// drift it signals is spoken by Detail, which the dashboard and the CLI both
-	// render, so no consumer needs the raw count.
+	// BehindMain is how many commits origin/main carries under the component's
+	// source paths that this checkout does not — the checkout the binary is
+	// built from is off-main by that many commits. Every other field here
+	// measures the LOCAL checkout (its sources against its binary), so a
+	// checkout parked off-main reads perfectly current on those while it serves
+	// code main has moved past; this is the one field that sees that gap. It is
+	// off the wire because the drift it signals is spoken by Detail, which the
+	// dashboard and the CLI both render, so no consumer needs the raw count.
 	BehindMain int `json:"-"`
 
 	Severity Severity `json:"severity"`
@@ -162,7 +162,7 @@ func bandBuild(r PackBuild, now time.Time) (Severity, string) {
 	// the false "ok" this check exists to prevent. A nonzero gap against main is
 	// staleness, so it speaks instead of the clean "current at" line.
 	if r.BehindMain > 0 {
-		return SevElevated, fmt.Sprintf("serving %s, but origin/main is %d commit(s) ahead under the helm sources; the checkout is off-main", shortRev(r.BinaryRev), r.BehindMain)
+		return SevElevated, fmt.Sprintf("serving %s, but origin/main is %d commit(s) ahead under its sources; the checkout is off-main", shortRev(r.BinaryRev), r.BehindMain)
 	}
 	return SevNormal, fmt.Sprintf("current at %s", shortRev(r.BinaryRev))
 }
