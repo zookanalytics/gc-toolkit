@@ -445,16 +445,30 @@ next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
-into the filing arm reads as "no duplicate":
+into the filing arm reads as "no duplicate". Run it once per failure: each
+failing test function, each failing target that has none, and each file a
+linter flagged is its own key and its own tracker:
 ```bash
 # >>> preexisting-failure-dedup
-# ONE short, distinctive token, reused for BOTH the probe below and the
-# title of any bead it files. Dedup only works while the two agree: the
-# probe is a title SUBSTRING match, so a prose failure summary — reworded
-# every cycle — never matches the bead the last cycle filed, and each
-# patrol files another P1 for the same failure. Use the failing test name,
-# the failing target, or an error symbol.
-FAIL_TOKEN="<failing test name or error symbol>"
+# preexisting-failure.sh owns the key, the lookup and the filing. A polecat's
+# pre-flight files these trackers through it too, so both gates derive one key
+# per failure and find each other's trackers.
+PF=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
+if [ -z "$PF" ]; then
+  echo "preexisting-failure.sh not found — filing nothing and NOT merging $WORK; the next patrol retries"
+  gc runtime drain-ack
+  exit 1
+fi
+# The failure's KEY comes from the script, never from prose: a summary is
+# reworded every cycle and never meets the tracker the last cycle filed. A test
+# function is --test <name>. A failing suite file, package or build target with
+# no test function is --target <repo-relative path>. A lint finding is
+# --lint <linter> <repo-relative path of the flagged file>.
+if ! FAIL_KEY=$("$PF" key --test "<failing test function>"); then
+  echo "no failure key derived — filing nothing and NOT merging $WORK"
+  gc runtime drain-ack
+  exit 1
+fi
 # The evidence that makes the bead workable. A title-only P1 cannot be
 # dispositioned by anyone: nothing in it separates a host-load flake from a
 # real regression, which is the judgment the bead exists to enable. Keep the
@@ -464,49 +478,28 @@ FAIL_LOG=$(cat <<'FAILLOG'
 <the check that failed, the package or target it ran in, and its raw output>
 FAILLOG
 )
-# --title-contains is the real flag (case-insensitive title substring).
-# NOT --search: bd has no such flag, and rejects it with "unknown flag" on
-# stderr while leaving stdout EMPTY — which reads as "no duplicate found".
-# The probe reads every status a live tracker can hold, in one comma list,
-# because a repeated --status keeps only its last value. A red persists while
-# someone fixes it, so the next gate to see it usually finds its tracker
-# in_progress, or blocked under a hold. Closed is left out, because a red that
-# outlives a landed fix is new information and gets its own bead.
-LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
-DUP_JSON=$(gc bd list --type=bug --status="$LIVE_STATUSES" --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
-# SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
-# so an unreadable list cannot be told from a genuine "no match" — and
-# guessing "no match" is precisely what files the duplicate. A readable
-# empty result is the JSON array []; anything that is not an array is
-# UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
-# cannot be satisfied by a bead you were unable to check for, and the same
-# unavailable bd would fail the `gc bd create` anyway. The next patrol
+# The lookup matches the failure_key stamp, which a retitle leaves in place,
+# over every live status, because a red persists while someone fixes it. A
+# lookup that could not read the store exits non-zero. That is UNKNOWN, never
+# "no duplicate": file nothing and merge nothing, and the next patrol
 # re-probes.
-if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+if ! DUP_ID=$("$PF" find "$FAIL_KEY"); then
   echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
   gc runtime drain-ack
   exit 1
 fi
-DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
 if [ -n "$DUP_ID" ]; then
   echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
 else
-  # The SAME token goes in the title, so the NEXT patrol's probe finds it,
-  # and nothing else does: a placeholder left in the title ships as literal
-  # filler, and the detail belongs in the body anyway.
-  # The evidence goes in -d, which fills .description. That is the field
-  # pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
-  # Nothing in this pack reads .design, so a body filed there is a body no
-  # reader ever sees.
   # The observed-on branch comes off the work bead, so that read is
-  # SHAPE-validated the way the probe above is. `gc bd show` fails open the
-  # same way, and it answers an OBJECT instead of an array when the id
-  # resolves to nothing, both of them at exit 0. An unvalidated read leaves
-  # TARGET empty and takes the formula default silently, which files a P1
-  # naming the default branch for a failure observed on an integration
-  # branch. A readable bead is a NON-EMPTY array. Anything else is UNKNOWN,
-  # and unknown files nothing and merges nothing. The default stands in only
-  # for a bead that was read and genuinely carries no target.
+  # SHAPE-validated. `gc bd show` fails open, and it answers an OBJECT instead
+  # of an array when the id resolves to nothing, both at exit 0. An
+  # unvalidated read leaves TARGET empty and takes the formula default
+  # silently, which files a P1 naming the default branch for a failure
+  # observed on an integration branch. A readable bead is a NON-EMPTY array.
+  # Anything else is UNKNOWN, and unknown files nothing and merges nothing.
+  # The default stands in only for a bead that was read and genuinely carries
+  # no target.
   WORK_JSON=$(gc bd show "$WORK" --json 2>/dev/null)
   if ! printf '%s' "$WORK_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     echo "work bead $WORK unreadable — filing nothing and NOT merging $WORK; the next patrol re-reads"
@@ -515,18 +508,26 @@ else
   fi
   TARGET=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.target // empty')
   [ -n "$TARGET" ] || TARGET="{{target_branch}}"
-  gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN" -d "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
+  # The script titles the bug with the key, stamps the key on it in the same
+  # write, and puts the evidence in -d, the field every reader reads. A
+  # filing that did not land leaves the GATE unmet.
+  if ! DUP_ID=$("$PF" file "$FAIL_KEY" --message "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
 
 ## Failure
 
-$FAIL_LOG"
+$FAIL_LOG"); then
+    echo "no tracker filed for $FAIL_KEY — NOT merging $WORK; the next patrol re-probes"
+    gc runtime drain-ack
+    exit 1
+  fi
+  echo "pre-existing failure tracked as $DUP_ID — proceeding with merge"
 fi
 # <<< preexisting-failure-dedup
 ```
 Note the resulting bug id in your merge notes — it satisfies the GATE.
 
-**GATE**: no merge without all checks passing OR the pre-existing bug
-filed/found."""
+**GATE**: no merge without all checks passing OR every pre-existing
+failure's bug filed/found."""
 
 [[steps]]
 id = "merge-push"

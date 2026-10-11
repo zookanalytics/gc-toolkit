@@ -607,42 +607,36 @@ assignment.
 FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing
 failures. FORBIDDEN: Filing before searching.
 
-**3a. Derive a stable symptom key.** Two agents describe one defect in two
-different ways, so free-text prose cannot match; a symptom key can.
+**3a. Derive the failure's key with the script.** Two agents describe one
+defect in two different ways, so free-text prose cannot match; a key the
+script derives can. `preexisting-failure.sh key` takes one of three forms.
+`--test <function>` takes a failing test function and drops a Go subtest
+suffix, because two polecats often trip different subtests of one function;
+note the subtest in the description. `--target <path>` takes a failure with no
+test function, such as a suite file, a package or a build target, by its
+repo-relative path. `--lint <linter> <path>` takes a lint finding: the linter
+or learned rule, and the repo-relative path of the file it flagged, one key
+per file. Handle each distinct key on its own.
 
-Use the failing **test function** name, with any Go subtest suffix stripped
-at the first `/`. Two polecats often trip different subtests of the same
-function — `TestDisableAndPurge.../clean_config_with_residual_files` versus
-`.../peer_successor_cross-device_tree` — and searching the full subtest path
-means neither finds the other's bead. Key on the function; note the subtest
-in the description.
-
-```bash
-RAW_FAILURE="<failing test as reported, e.g. TestFoo/some_subtest>"
-SYMPTOM_KEY="${RAW_FAILURE%%/*}"
-```
-
-When the failure has no test name at all, use the failing package or target
-path (`internal/api/genclient`). Handle each distinct failure under its own
-key.
-
-**3b. Search before filing — and fail CLOSED on lookup error.** A lookup
-that errors is not an all-clear. Include claimed beads: the existing report
-is usually already `in_progress` with someone fixing it.
+**3b. Search before filing — and fail CLOSED on lookup error.** The lookup
+matches the key stamped on a tracker, which a retitle leaves in place, or the
+key in the title of a bug filed before the stamp. It reads every live status:
+the existing report is usually already `in_progress` with someone fixing it.
+A lookup that errors is not an all-clear.
 
 ```bash
+# >>> preflight-failure-lookup
+PF=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
+SYMPTOM_KEY=$("$PF" key --test "<failing test function, e.g. TestFoo/some_subtest>")
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-EXISTING=""
-MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status open,in_progress,blocked --json)
+EXISTING=$("$PF" find "$SYMPTOM_KEY")
 LOOKUP_RC=$?
 if [ "$LOOKUP_RC" -ne 0 ]; then
     echo "Ledger lookup failed (rc=$LOOKUP_RC). NOT filing — a failed lookup is not proof the bead is missing."
-    gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" \
-      -m "Symptom: $SYMPTOM_KEY. Lookup exited $LOOKUP_RC so nothing was filed. Proceeding with $WORK_BEAD_ID."
-else
-    EXISTING=$(printf '%s' "$MATCHES" | jq -r '.[0].id // empty')
+    gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" -m "Symptom: $SYMPTOM_KEY. Lookup exited $LOOKUP_RC so nothing was filed. Proceeding with $WORK_BEAD_ID."
 fi
+# <<< preflight-failure-lookup
 ```
 
 **3b2. If the exact key matched nothing, widen to the family.** Sibling
@@ -690,32 +684,43 @@ is already fixed puts a ready bead in the pool, and the next sling sends a
 polecat to redo merged work:
 
 ```bash
+# >>> preflight-fix-landed-check
+PF=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
 CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)
-CLOSED_MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status closed --closed-after "$CUTOFF" --json)
+CLOSED_MATCH=$("$PF" find "$SYMPTOM_KEY" --closed-after "$CUTOFF")
 CLOSED_RC=$?
+# <<< preflight-fix-landed-check
 ```
 
-On a match — or on a non-zero `$CLOSED_RC`, since a failed lookup is not
-proof the fix has not landed — re-fetch `origin/{{base_branch}}`, reset your
-worktree to the current tip, and re-run the pre-flight before filing
-anything.
+On a match (`$CLOSED_MATCH` names a closed tracker) — or on a non-zero
+`$CLOSED_RC`, since a failed lookup is not proof the fix has not landed —
+re-fetch `origin/{{base_branch}}`, reset your worktree to the current tip, and
+re-run the pre-flight before filing anything.
 
-**3e. Only now file it** — with the symptom key verbatim in the title, so
-the next polecat's 3b lookup finds your bead. Put the full failure,
-including the subtest you stripped in 3a and the package, in the body:
+**3e. Only now file it.** The script titles a P1 bug with the key and
+stamps the key on it in the same write, so the next 3b lookup finds it even
+after a retitle. Put the full failure, with the subtest 3a dropped and the
+package, in the log. When another gate filed the key since your lookup, the
+script files nothing and prints that tracker's id; confirm on it as in 3c.
 
 ```bash
-gc bd create --title "Pre-existing failure: $SYMPTOM_KEY — <short description>" \
-  --type bug --priority 1 \
-  --design "Observed on {{base_branch}}. Full failure: $RAW_FAILURE"
-gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" \
-  -m "Filed: <bead-id> for $SYMPTOM_KEY. Proceeding with $WORK_BEAD_ID."
+# >>> preflight-failure-file
+PF=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
+FAIL_LOG=$(cat <<'FAILLOG'
+<the full failure: the test or check, its subtest or lines, the package, and the raw output>
+FAILLOG
+)
+TRACKER=$("$PF" file "$SYMPTOM_KEY" --summary "<short description>" --message "Observed on {{base_branch}} while starting $WORK_BEAD_ID.
+
+$FAIL_LOG")
+gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" -m "Symptom: $SYMPTOM_KEY. Tracked as: ${TRACKER:-nothing, the filing failed}. Proceeding with $WORK_BEAD_ID."
+# <<< preflight-failure-file
 ```
 
 **Exit criteria:** Pre-flights pass, or the failure is recorded exactly once
 — a new bead you filed, or your comment on the bead that already had it —
-or, when the ledger lookup itself was broken, `{{escalation_target}}` has been notified
-instead."""
+or, when the ledger lookup or the filing itself was broken,
+`{{escalation_target}}` has been notified instead."""
 
 [[steps]]
 id = "implement"
