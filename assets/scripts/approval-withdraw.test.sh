@@ -14,10 +14,11 @@
 #   nothing; an approval carrying an inline comment above the anchor's routing
 #   marks waits, recording nothing, until the feedback loop has read it; a
 #   retry dismisses only the recorded reviews still APPROVED, never an
-#   approval given after them, and notes nothing twice; a dismissal that fails
-#   exits 1 with the set recorded; unreadable reviews, an unresolved login, a
-#   pr_url naming another PR, a pr_number that names no PR, a malformed stamp
-#   and bad usage dismiss nothing.
+#   approval given after them, notes nothing twice, and stops at a recorded
+#   review the PR does not list as approved or dismissed; a dismissal that
+#   fails exits 1 with the set recorded; unreadable reviews, an unresolved
+#   login, a pr_url naming another PR, a pr_number that names no PR, a
+#   malformed stamp and bad usage dismiss nothing.
 # the mol-validate block (formulas/mol-validate.toml, rule-convergence), run
 # verbatim against stub scripts:
 #   either shape first withdraws the approvals, then with the same reason
@@ -42,9 +43,10 @@ SUT="$SD/approval-withdraw.sh"
 NUM=7
 PURL="https://github.com/zook/gc-toolkit/pull/$NUM"
 REASON="The fix rewrites how merge.sh reads approvals"
-anchorrow() { # [pr-metadata]
-  printf '{"id":"AN1","status":"open","assignee":"","notes":"","title":"the PR","metadata":{"merge_result":"pull_request","check_set":"correctness"%s}}' \
-    "${1-,\"pr_number\":\"$NUM\",\"pr_url\":\"$PURL\"}"
+PRMETA=",\"pr_number\":\"$NUM\",\"pr_url\":\"$PURL\""
+anchorrow() { # [pr-metadata] [notes]
+  printf '{"id":"AN1","status":"open","assignee":"","notes":%s,"title":"the PR","metadata":{"merge_result":"pull_request","check_set":"correctness"%s}}' \
+    "$(jq -Rn --arg n "${2:-}" '$n')" "${1-$PRMETA}"
 }
 passrow() { # [extra-metadata]
   printf '{"id":"VP1","status":"in_progress","assignee":"validator","notes":"","title":"Validate PR#%s","metadata":{"task_kind":"validation","anchor_bead":"AN1","check_name":"correctness","reviewed_oid":"abc123"%s}}' \
@@ -86,7 +88,8 @@ has "$(notes AN1)" "Validation pass VP1 ruled that a fresh whole-diff review is 
 has "$out" "dismissed the approvals from human1, human2 and human3 (reviews 501,502,504,505)" "the outcome is reported"
 
 echo "# a retry finishes the recorded set and dismisses nothing given after it"
-store "[$(anchorrow), $(passrow ',"approval_dismissed":"501,504"')]"
+NOTED="Validation pass VP1 ruled that a fresh whole-diff review is warranted, so the approvals from human1 on PR#$NUM (reviews 501,504) are dismissed: $REASON."
+store "[$(anchorrow "$PRMETA" "$NOTED"), $(passrow ',"approval_dismissed":"501,504"')]"
 reviews "$(rv 501 human1 DISMISSED 1),$(rv 504 human1 APPROVED 3),$(rv 508 human1 APPROVED 5)"
 fresh
 out=$(withdraw); rc=$?
@@ -102,6 +105,21 @@ out=$(withdraw); rc=$?
 eq "$rc" "0" "once the recorded set reads dismissed, a retry exits 0"
 has "$out" "reads dismissed" "…saying so"
 hasnt "$(ghlog)" "DISMISS" "…and dismisses nothing"
+
+echo "# a recorded review the PR does not list as approved or dismissed stops the retry"
+store "[$(anchorrow "$PRMETA" "$NOTED"), $(passrow ',"approval_dismissed":"501,504"')]"
+reviews "$(rv 501 human1 DISMISSED 1)"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "1" "a recorded review missing from the list exits 1"
+has "$out" "review 504, which VP1 recorded" "…naming it"
+hasnt "$out" "reads dismissed" "…without reporting the set dismissed"
+reviews "$(rv 601 human4 APPROVED 1)"
+fresh
+out=$(withdraw); rc=$?
+eq "$rc" "1" "a list carrying none of the recorded reviews, as another PR's would, exits 1"
+has "$out" "review 501,504" "…naming every recorded review it lacks"
+hasnt "$(ghlog)" "DISMISS" "…and dismisses nothing on that PR"
 
 echo "# one approval: singular wording, and a numeric id reads back"
 store "[$(anchorrow), $(passrow)]"

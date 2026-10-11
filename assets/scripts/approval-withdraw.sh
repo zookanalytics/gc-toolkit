@@ -27,7 +27,8 @@
 # appends the judgment to the anchor's notes and stamps approval_dismissed (the
 # review ids) on the validation pass, and reads the stamp back. The stamp fixes
 # what this pass withdraws: a retry dismisses only the recorded reviews that
-# still read APPROVED. It finishes an interrupted withdrawal, and it never
+# still read APPROVED, and stops at a recorded review the PR does not list as
+# approved or dismissed. It finishes an interrupted withdrawal, and it never
 # reaches an approval the operator gave after reading this pass's dismissal.
 # When no approval stands, nothing is written, so a retry looks again.
 #
@@ -132,12 +133,24 @@ if ! reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/revi
 fi
 
 if [ -n "$recorded" ]; then
-  # A retry of this pass: finish the recorded set and nothing else.
-  targets=$(printf '%s' "$reviews" | scrub | jq -sc --arg ids "$recorded" '
+  # A retry of this pass: finish the recorded set and nothing else. An approval
+  # only ever turns DISMISSED, so each recorded review reads APPROVED, still to
+  # dismiss, or DISMISSED, done. A recorded review the list does not carry in
+  # either state is not read as done: the list may be another PR's, or cut short.
+  rset=$(printf '%s' "$reviews" | scrub | jq -sc --arg ids "$recorded" '
     ($ids | split(",")) as $want
-    | [ .[] | select(.state == "APPROVED") | select((.id | tostring) as $i | any($want[]; . == $i))
-        | {id: .id, login: (.user.login // "")} ]' 2>/dev/null)
-  [ -n "$targets" ] || { echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
+    | (map({key: ((.id // "") | tostring), value: .}) | from_entries) as $by
+    | { targets: [ $want[] | ($by[.] // empty) | select(.state == "APPROVED")
+                   | {id: .id, login: (.user.login // "")} ],
+        stray: [ $want[] | select((($by[.] // {}).state // "") as $s
+                                  | $s != "APPROVED" and $s != "DISMISSED") ] }' 2>/dev/null)
+  [ -n "$rset" ] || { echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
+  stray=$(printf '%s' "$rset" | jq -r '.stray | join(",")')
+  if [ -n "$stray" ]; then
+    echo "$PROG: PR#$num lists no approved or dismissed review $stray, which $pass recorded as an approval it withdraws; nothing is dismissed and the caller retries" >&2
+    exit 1
+  fi
+  targets=$(printf '%s' "$rset" | jq -c '.targets')
   if [ "$targets" = "[]" ]; then
     echo "$PROG: every approval $pass withdrew on PR#$num (review $recorded) reads dismissed"
     exit 0
