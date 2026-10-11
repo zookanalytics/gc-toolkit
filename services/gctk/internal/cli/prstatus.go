@@ -90,13 +90,11 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	// task_kind, the membership test pr-facts.sh applies in its own arms.
 	// metadata-field selection lists non-closed by default; the explicit --status
 	// keeps it robust, one comma list because a repeated flag drops earlier
-	// values, and --limit 0 so the client-side field filter sees every candidate.
-	rows, ok := client.List(
-		"--metadata-field", "anchor_bead="+anchor,
-		"--status", "open,in_progress,blocked,deferred,hooked,pinned",
-		"--limit", "0",
-		"--json",
-	)
+	// values, and --limit=0 so the client-side field filter sees every candidate.
+	rows, ok := client.List(gcbd.ListQuery{
+		MetadataField: []string{"anchor_bead=" + anchor},
+		Status:        []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"},
+	})
 	if !ok {
 		fmt.Fprintf(stderr, "%s: could not read the in-flight set for %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2

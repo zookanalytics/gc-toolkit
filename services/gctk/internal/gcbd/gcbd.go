@@ -309,21 +309,21 @@ func gcDebug() bool {
 	}
 }
 
-// List runs `gc bd list <args>` and decodes the JSON array it prints, under the
-// strict contract of bd-lib.sh's bd_list: ok is false on a non-zero exit, on
+// List runs `gc bd list <q.Args()>` and decodes the JSON array it prints, under
+// the strict contract of bd-lib.sh's bd_list: ok is false on a non-zero exit, on
 // output that is not an array, or on anything but whitespace after the array,
 // so a caller refuses to act rather than reading a failed or partial read as an
 // empty result. The rig-preface line rides stderr, so stdout is the payload. An
-// empty selection is a well-formed `[]` at exit 0 — rows nil, ok true.
-func (c *Client) List(args ...string) (rows []Bead, ok bool) {
-	return c.array(true, append([]string{"bd", "list"}, args...)...)
+// empty selection is a well-formed `[]` at exit 0 — rows empty, ok true.
+func (c *Client) List(q ListQuery) (rows []Bead, ok bool) {
+	return c.array(true, append([]string{"bd", "list"}, q.Args()...)...)
 }
 
-// DepList runs `gc bd dep list <id> <args>` and decodes the JSON array of
+// DepList runs `gc bd dep list <id> <q.Args()>` and decodes the JSON array of
 // dependency rows it prints, under List's strict contract: a caller holds on a
 // failed or unreadable probe rather than reading it as "no dependencies".
-func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
-	return c.array(true, append([]string{"bd", "dep", "list", id}, args...)...)
+func (c *Client) DepList(id string, q DepQuery) (rows []Bead, ok bool) {
+	return c.array(true, append([]string{"bd", "dep", "list", id}, q.Args()...)...)
 }
 
 // Update runs one `gc bd update`, returning its combined output. Callers pass
@@ -338,7 +338,9 @@ func (c *Client) Update(id string, args ...string) (string, error) {
 
 // ExitCode reports the exit status behind an Update error. A command that could
 // not be run at all reports 127, which is the status a shell caller would have
-// seen for the same failure.
+// seen for the same failure. Any error carrying an `ExitCode() int` method —
+// exec.ExitError, or a fake Store's refusal — reports that code, so a test
+// driving the fake asserts the same rc a stubbed `gc` would have produced.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -346,6 +348,10 @@ func ExitCode(err error) int {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return ee.ExitCode()
+	}
+	var ec interface{ ExitCode() int }
+	if errors.As(err, &ec) {
+		return ec.ExitCode()
 	}
 	return 127
 }

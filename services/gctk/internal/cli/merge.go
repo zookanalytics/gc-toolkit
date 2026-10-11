@@ -150,7 +150,7 @@ func mergePaceArgs(args []string) (deadline, cursor string) {
 
 type merger struct {
 	stdout, stderr io.Writer
-	client         *gcbd.Client
+	client         gcbd.Store
 	originHost     string
 	originRepo     string
 	originRepoQ    string
@@ -208,7 +208,7 @@ func (m *merger) resolveOrigin() (rc int, done bool) {
 }
 
 func (m *merger) run() int {
-	anchors, ok := m.client.List("--status=open", "--metadata-field", "merge_result=pull_request", "--limit=0", "--json")
+	anchors, ok := m.client.List(gcbd.ListQuery{Status: []string{"open"}, MetadataField: []string{"merge_result=pull_request"}})
 	if !ok {
 		fmt.Fprintf(m.stderr, "%s: could not enumerate gating anchors; failing loudly rather than merging on a partial view\n", mergeProg)
 		return 1
@@ -546,14 +546,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 
 	// --- unclosed rework/review children: metadata keys AND dependency edges ------
-	byPR, byOK := m.client.List("--metadata-field", "pr_number="+num, "--status="+mergeLiveStatuses, "--limit=0", "--json")
+	byPR, byOK := m.client.List(gcbd.ListQuery{MetadataField: []string{"pr_number=" + num}, Status: mergeLive})
 	if !byOK {
 		fmt.Fprintf(m.stdout, "%s: PR#%s referencing-bead read failed; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
 		return
 	}
-	children, cOK := m.client.DepList(id, "--direction=up", "-t", "parent-child", "--json")
-	blockers, bOK := m.client.DepList(id, "--direction=down", "-t", "blocks", "--json")
+	children, cOK := m.client.DepList(id, gcbd.DepQuery{Direction: "up", Type: "parent-child"})
+	blockers, bOK := m.client.DepList(id, gcbd.DepQuery{Direction: "down", Type: "blocks"})
 	if !cOK || !bOK {
 		fmt.Fprintf(m.stdout, "%s: PR#%s dependency probe unreadable; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++

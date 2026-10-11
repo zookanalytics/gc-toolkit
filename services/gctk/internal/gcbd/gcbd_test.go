@@ -155,7 +155,7 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 
 	t.Run("two rows", func(t *testing.T) {
 		writeGC(t, `echo '[{"id":"k1","metadata":{"task_kind":"rework"}},{"id":"k2","metadata":{}}]'`)
-		rows, ok := New().List("--metadata-field", "task_kind=rework")
+		rows, ok := New().List(ListQuery{MetadataField: []string{"task_kind=rework"}})
 		if !ok || len(rows) != 2 {
 			t.Fatalf("List = (%d rows, ok=%v), want (2, true)", len(rows), ok)
 		}
@@ -163,7 +163,7 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 
 	t.Run("empty selection is ok", func(t *testing.T) {
 		writeGC(t, `echo '[]'`)
-		rows, ok := New().List()
+		rows, ok := New().List(ListQuery{})
 		if !ok || len(rows) != 0 {
 			t.Fatalf("List on [] = (%d rows, ok=%v), want (0, true)", len(rows), ok)
 		}
@@ -173,7 +173,7 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 		// bd show returns an object when nothing resolves; a list that answered
 		// that way must not read as an empty result.
 		writeGC(t, `echo '{"error":"nope"}'`)
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List on an object = ok true; want ok false (fail closed)")
 		}
 	})
@@ -181,7 +181,7 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 	t.Run("gc that cannot run fails closed", func(t *testing.T) {
 		bin := t.TempDir() // no gc in it
 		t.Setenv("PATH", bin)
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List with no gc on PATH = ok true; want ok false")
 		}
 	})
@@ -191,22 +191,22 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 	// caller that read it would merge on that partial view.
 	t.Run("a non-zero exit fails closed whatever was printed", func(t *testing.T) {
 		writeGC(t, "echo '[]'\nexit 1\n")
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List on [] beside exit 1 = ok true; want ok false (bd_list fails a non-zero exit)")
 		}
 		writeGC(t, "echo '[{\"id\":\"k1\",\"metadata\":{}}]'\nexit 1\n")
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List on a row beside exit 1 = ok true; want ok false")
 		}
 	})
 
 	t.Run("a bare null or empty stdout fails closed", func(t *testing.T) {
 		writeGC(t, "echo 'null'\n")
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List on null = ok true; want ok false (null is not an array)")
 		}
 		writeGC(t, "exit 0\n")
-		if _, ok := New().List(); ok {
+		if _, ok := New().List(ListQuery{}); ok {
 			t.Error("List on empty stdout = ok true; want ok false")
 		}
 	})
@@ -218,14 +218,14 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 		for _, arr := range []string{`[]`, `[{"id":"k1","metadata":{}}]`} {
 			for _, tail := range []string{`garbage`, `{"id":"k2","metad`, `[]`} {
 				writeGC(t, "printf '%s\\n' '"+arr+tail+"'\n")
-				if _, ok := New().List(); ok {
+				if _, ok := New().List(ListQuery{}); ok {
 					t.Errorf("List on %s%s = ok true; want ok false", arr, tail)
 				}
 			}
 		}
 		// The control: whitespace after the array is no tail.
 		writeGC(t, "printf '[{\"id\":\"k1\",\"metadata\":{}}]  \\n\\n'\n")
-		if rows, ok := New().List(); !ok || len(rows) != 1 {
+		if rows, ok := New().List(ListQuery{}); !ok || len(rows) != 1 {
 			t.Errorf("List on an array and trailing whitespace = (%d rows, ok=%v), want (1, true)", len(rows), ok)
 		}
 	})
@@ -243,21 +243,21 @@ func TestDepListFailsClosedLikeList(t *testing.T) {
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	writeGC(t, "echo '[{\"id\":\"blk\",\"status\":\"open\",\"metadata\":{}}]'\n")
-	rows, ok := New().DepList("a", "--direction=down", "-t", "blocks", "--json")
+	rows, ok := New().DepList("a", DepQuery{Direction: "down", Type: "blocks"})
 	if !ok || len(rows) != 1 || rows[0].ID != "blk" {
 		t.Fatalf("DepList = (%+v, ok=%v), want one row blk", rows, ok)
 	}
 	writeGC(t, "echo '[]'\nexit 1\n")
-	if _, ok := New().DepList("a"); ok {
+	if _, ok := New().DepList("a", DepQuery{}); ok {
 		t.Error("DepList on [] beside exit 1 = ok true; want ok false")
 	}
 	writeGC(t, "echo 'not-json'\n")
-	if _, ok := New().DepList("a"); ok {
+	if _, ok := New().DepList("a", DepQuery{}); ok {
 		t.Error("DepList on garbage = ok true; want ok false")
 	}
 	for _, out := range []string{`[]garbage`, `[{"id":"blk","status":"open","metadata":{}}]garbage`} {
 		writeGC(t, "printf '%s\\n' '"+out+"'\n")
-		if _, ok := New().DepList("a"); ok {
+		if _, ok := New().DepList("a", DepQuery{}); ok {
 			t.Errorf("DepList on %s = ok true; want ok false (bytes after the array)", out)
 		}
 	}
@@ -277,7 +277,7 @@ func TestShowReadsTheFirstArrayWhateverFollowsIt(t *testing.T) {
 	if b := New().Show("b-1"); b == nil || b.ID != "b-1" {
 		t.Fatalf("Show = %+v, want bead b-1: the shell's read prints it before the garbage", b)
 	}
-	if _, ok := New().List(); ok {
+	if _, ok := New().List(ListQuery{}); ok {
 		t.Error("List on the same bytes = ok true; want ok false")
 	}
 }
