@@ -85,6 +85,14 @@ anchored states are the `merge_result` values. `merged` is the only state with
 `merged_sha`, the landing the state names; the human states stay open, routed
 to human.
 
+The write that enters `merged` also records what the landing shipped, which is
+the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
+`gc.work_commit` set to the `merged_sha` when that is a commit id, and
+`gc.work_branch` set to `merged_target`. The gate asks the rig's checkout
+whether that commit is on `origin/<merged_target>`. A squash GitHub made is not
+there until the checkout fetches it, so the transition fetches that branch
+first whenever the commit is missing from it.
+
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
 each enumerate anchors by their gating state, so moving a live anchor to `held`

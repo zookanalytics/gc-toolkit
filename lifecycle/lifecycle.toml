@@ -48,7 +48,9 @@ park_route = "human"
 # closed state, and a transition into a closed state must carry --close.
 # Entering `merged` additionally requires a non-empty --set merged_sha: its
 # meaning is "landed; merged_sha recorded", so it cannot be entered without the
-# landing that defines it.
+# landing that defines it. The same write records the work record that landing
+# gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
+# [metadata.runtime_owned]).
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.
@@ -1225,26 +1227,31 @@ keys = [
 #   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
 #   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
-# gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-tracking
-#   stamps on a claimed work bead: the worker's checkout, its head commit and its
-#   branch, written by the gascity binary on the claim/close path (gc.work_branch
-#   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
-#   and gc.work_commit — with the pack-written bare work_dir defined in
+# gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-record
+#   keys on a work bead: the worker's checkout, the commit that satisfied the
+#   bead, and the branch that commit is on. The gascity binary writes gc.work_dir
+#   and gc.work_branch at claim time (hookClaimIdentityPatch), from the claiming
+#   worker's checkout. mol-polecat-work's workspace-setup rewrites gc.work_branch
+#   with the branch the work is cut on, since the claim stamps the pool
+#   worktree's base checkout. The lifecycle writer's transition into `merged`
+#   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
+#   the landing it records. duplicate-sweep.sh reads gc.work_dir and
+#   gc.work_commit — with the pack-written bare work_dir defined in
 #   merge_identity — as proof a run produced work before disposing a duplicate.
-#   mol-polecat-work's workspace-setup also writes gc.work_branch, with the branch
-#   the work lands on, since the claim stamps the pool worktree's base checkout.
-#   The runtime's work-record close gate reads it: a `shipped` close needs
-#   gc.work_commit reachable on gc.work_branch (warn-only by default).
-#   No pack script reads gc.work_branch, and the runtime's detached-handoff
-#   orphan sweep reads the bare branch defined in merge_identity, not this key.
-#   Absent means no such product was recorded. A path, a sha, a branch.
+#   The runtime's work-record close gate reads the commit and the branch: a
+#   `shipped` close needs gc.work_commit reachable on gc.work_branch in the
+#   bead's checkout (warn-only by default). No pack script reads gc.work_branch,
+#   and the runtime's detached-handoff orphan sweep reads the bare branch defined
+#   in merge_identity, not this key. Absent means no such product was recorded.
+#   A path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). Its meaning is the runtime's,
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
-#   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `no-op`
-#   from dead-molecule-dispose.sh, mol-validate-close, work-outcome.sh on every
-#   visit close, the observation-filing recipes, and converse by hand.
+#   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
+#   from the lifecycle writer's transition into `merged`, and `no-op` from
+#   dead-molecule-dispose.sh, mol-validate-close, work-outcome.sh on every visit
+#   close, the observation-filing recipes, and converse by hand.
 #   duplicate-sweep.sh reads it to confirm a no-op duplicate is disposable,
 #   pr-stack.sh drops a no-op row from a branch's ledger, and each falls back to
 #   the legacy bare `work_outcome` alias. Absent leaves the disposition

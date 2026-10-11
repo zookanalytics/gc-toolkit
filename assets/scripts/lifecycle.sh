@@ -15,10 +15,15 @@
 # --close only into a closed state, and a closed state requires --close (status
 # and merge_result move together). --to merged also requires a non-empty
 # --set merged_sha, the landing the state names; a bead that never had a PR is
-# no merge anchor and closes with a plain `gc bd close`. A state's declared
-# routing rides in the same call unless --route is given: human states stamp
-# gc.routed_to=human, and detached states clear it unless the bead already rests
-# on the park route.
+# no merge anchor and closes with a plain `gc bd close`. The same write records
+# the work the landing shipped: gc.work_outcome=shipped, gc.work_commit (the
+# merged_sha, when it is an object id) and gc.work_branch (merged_target), each
+# unless the call writes that key itself. When the commit is not yet on
+# origin/<branch> in $GC_RIG_ROOT, the branch is fetched there first, because
+# the runtime's work-record gate asks that checkout whether it is. A state's
+# declared routing rides in the same call unless --route is given: human states
+# stamp gc.routed_to=human, and detached states clear it unless the bead already
+# rests on the park route.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to

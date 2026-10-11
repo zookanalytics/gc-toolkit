@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -117,6 +121,105 @@ func kv(arg string) (key, value string) {
 		return arg, arg
 	}
 	return arg[:i], arg[i+1:]
+}
+
+// objectID matches a full git object id, SHA-1 or SHA-256. merged_sha holds
+// one, or else the unverified:PR#<n> sentinel a record writes when the
+// merge-commit read comes back empty, and the sentinel names no commit.
+var objectID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// landingOf reads the landing a transition into `merged` records. The commit is
+// the merged_sha this call sets, when that value is an object id. The branch is
+// the merged_target this call sets, else the one the bead carries: every path
+// into pull_request stamps it, and the direct strategy passes it with the
+// landing. Either is empty when the landing does not name it.
+func landingOf(sets []string, bead *gcbd.Bead) (commit, branch string) {
+	branch = bead.Meta("merged_target")
+	for _, s := range sets {
+		switch k, v := kv(s); k {
+		case "merged_sha":
+			commit = v
+		case "merged_target":
+			branch = v
+		}
+	}
+	if !objectID.MatchString(commit) {
+		commit = ""
+	}
+	return commit, branch
+}
+
+// callerWrites reports whether this call sets or clears key itself.
+func callerWrites(sets, unsets []string, key string) bool {
+	for _, s := range sets {
+		if k, _ := kv(s); k == key {
+			return true
+		}
+	}
+	for _, u := range unsets {
+		if u == key {
+			return true
+		}
+	}
+	return false
+}
+
+// landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
+// does not answer delays the record rather than stalling it.
+const landingFetchTimeout = 60 * time.Second
+
+// fetchLanding makes the commit a `merged` close records reachable where the
+// runtime's work-record gate looks for it. The gate runs inside the close's own
+// `gc bd update` and asks the rig's checkout whether gc.work_commit is an
+// ancestor of refs/remotes/origin/<gc.work_branch>. A merge GitHub performed is
+// on origin before that checkout has fetched it, whether merge.sh's squash made
+// it or pr-facts.sh found it already done, and the gate reads such a commit as
+// unreachable. Under GC_WORK_RECORD_ENFORCE it then refuses the close. So when
+// the ref does not already hold the commit, the branch is fetched before the
+// write. The direct strategy fetches its target before it records, which leaves
+// nothing to fetch here.
+//
+// The checkout is $GC_RIG_ROOT, which the merge cadence and the refinery both
+// run with. With none named there is no checkout to fetch into. A landing this
+// cannot make visible still records, and the gate judges it as it would have.
+// That case prints one line, because the gate's own warning goes to output the
+// writer discards on a successful update.
+func fetchLanding(id string, sets []string, stderr io.Writer) {
+	root := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
+	var commit, branch string
+	for _, s := range sets {
+		switch k, v := kv(s); k {
+		case "gc.work_commit":
+			commit = v
+		case "gc.work_branch":
+			branch = v
+		}
+	}
+	if root == "" || !objectID.MatchString(commit) || branch == "" || strings.HasPrefix(branch, "-") {
+		return
+	}
+	ref := "refs/remotes/origin/" + branch
+	if gitIn(root, "merge-base", "--is-ancestor", commit, ref) == 0 {
+		return
+	}
+	rc := gitIn(root, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+branch+":"+ref)
+	if rc == 0 && gitIn(root, "merge-base", "--is-ancestor", commit, ref) == 0 {
+		return
+	}
+	fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, but %s does not hold it on origin/%s (fetch rc=%d); the work-record gate reads it as unreachable until that checkout fetches it\n",
+		prog, id, commit, branch, root, branch, rc)
+}
+
+// gitIn runs one git command in dir, bounded by landingFetchTimeout, and
+// returns its exit status. GIT_TERMINAL_PROMPT=0 makes a remote that asks for
+// credentials fail the call instead of waiting on a terminal nobody is at.
+func gitIn(dir string, args ...string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), landingFetchTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	return gcbd.ExitCode(cmd.Run())
 }
 
 // squeezeSpace collapses every run of POSIX whitespace to one space and trims
@@ -565,6 +668,29 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 				o.unsets = append(o.unsets, obj)
 			}
 		}
+	}
+
+	// The work record rides the landing. `merged` is the one state that says the
+	// work shipped, and the runtime's work-record gate reads that from three keys
+	// on the close this transition performs: gc.work_outcome, gc.work_commit and
+	// gc.work_branch. The landing this write records supplies all three. The
+	// outcome is shipped, the commit is merged_sha, and the branch is
+	// merged_target, the branch that commit landed on. Deriving them here, at the
+	// one writer every landing passes through, means no caller can close a landed
+	// bead with an empty record. A key the caller sets or clears itself keeps the
+	// caller's value.
+	if o.to == "merged" {
+		commit, branch := landingOf(o.sets, bead)
+		for _, w := range [][2]string{
+			{"gc.work_outcome", "shipped"},
+			{"gc.work_commit", commit},
+			{"gc.work_branch", branch},
+		} {
+			if w[1] != "" && !callerWrites(o.sets, o.unsets, w[0]) {
+				o.sets = append(o.sets, w[0]+"="+w[1])
+			}
+		}
+		fetchLanding(id, o.sets, stderr)
 	}
 
 	var updateArgs []string
