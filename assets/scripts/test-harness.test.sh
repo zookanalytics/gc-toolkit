@@ -104,6 +104,61 @@ eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
 if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
 eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
 
+# The gc bd update stub lands every flag of one call in one pass over the store:
+# the sets in order (a later value for a key wins), the unsets, the assignee,
+# the status, the appended note and the description. A value that parses as a
+# JSON number, boolean or null is stored typed and anything else as raw text,
+# as real bd stores them; a key or field STUB_DROP_KEYS names is left as it was
+# while the rest of the same call still lands, and the bead itself is never
+# lost, whichever fields the knob drops.
+store '[{"id":"tk-u","status":"open","assignee":"","title":"u","notes":"first","description":"","metadata":{"keep":"k","gone":"g","typed":"old"}},{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}]'
+gc bd update tk-u --set-metadata typed=1 --set-metadata "eq=a=b" --set-metadata flag=true \
+  --set-metadata typed=2.5 --set-metadata nul=null --set-metadata txt=" 007 " --unset-metadata gone \
+  --assignee lx-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
+eq "$(jq -c '.[] | select(.id == "tk-u") | .metadata' "$STUB_STORE")" \
+  '{"keep":"k","typed":2.5,"eq":"a=b","flag":true,"nul":null,"txt":" 007 "}' \
+  "update: every set lands typed as bd types it, the later value of a repeated key wins, a value keeps its own = and the unset is gone"
+eq "$(bassignee tk-u)" "lx-one" "update: the assignee rides the same call"
+eq "$(bstatus tk-u)" "in_progress" "update: …and so does the status"
+eq "$(notes tk-u)" $'first\nsecond' "update: a note is appended on its own line"
+eq "$(jq -r '.[] | select(.id == "tk-u") | .description' "$STUB_STORE")" "d1" "update: …and the description lands"
+eq "$(jq -c '.[] | select(.id == "tk-v")' "$STUB_STORE")" '{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}' \
+  "update: the other beads are untouched"
+gc bd update tk-v --append-notes "only" >/dev/null
+eq "$(notes tk-v)" "only" "update: the first note takes no leading newline"
+STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee lx-two --unset-metadata keep >/dev/null
+eq "$(bstatus tk-u)" "in_progress" "update: a dropped status leaves the bead as it was"
+eq "$(meta tk-u typed)" "2.5" "update: …and a dropped metadata key keeps its old value"
+eq "$(bassignee tk-u)" "lx-one" "update: …and a dropped assignee is not written"
+eq "$(meta tk-u other)" "o" "update: …while the keys the knob does not name still land"
+eq "$(meta tk-u keep)" "<absent>" "update: …including an unset"
+eq "$(jq 'length' "$STUB_STORE")" "2" "update: no bead is lost to a dropped field"
+gc bd update tk-missing --status=closed >/dev/null
+eq "$(jq 'length' "$STUB_STORE")" "2" "update: an id the store does not hold changes nothing"
+
+# The gc bd list stub answers its --metadata-field filters in the same pass as
+# the rest of the query: a row must match every field, a value is compared as
+# text (a stored number matches its spelling), and a field with no `=` matches
+# nothing a store would hold.
+store '[{"id":"l1","status":"open","title":"a","metadata":{"k":"v","n":1}},{"id":"l2","status":"open","title":"b","metadata":{"k":"v","n":2}},{"id":"l3","status":"closed","title":"c","metadata":{"k":"v","n":1}}]'
+ids() { jq -r 'map(.id) | join(",")'; }
+eq "$(gc bd list --metadata-field k=v --json | ids)" "l1,l2,l3" "list: one metadata field selects every row carrying it"
+eq "$(gc bd list --metadata-field k=v --metadata-field n=1 --json | ids)" "l1,l3" "list: two fields both have to match"
+eq "$(gc bd list --status=open --metadata-field n=1 --json | ids)" "l1" "list: …and the status filter applies with them"
+eq "$(gc bd list --metadata-field=k=v --metadata-field n=3 --json | ids)" "" "list: a field no row matches selects nothing"
+eq "$(gc bd list --metadata-field k --json | ids)" "" "list: a field without = selects nothing"
+
+# The gc sling stub pours in one pass: the route key is retired and the
+# execution route stamped, unless STUB_DROP_KEYS drops the stamp.
+store '[{"id":"tk-s","status":"open","assignee":"","title":"s","notes":"","metadata":{"gc.routed_to":"pool"}}]'
+gc sling pool tk-s --on mol-x >/dev/null
+eq "$(meta tk-s gc.routed_to)" "<absent>" "sling: the route is retired"
+eq "$(meta tk-s gc.execution_routed_to)" "pool" "sling: …and the execution route stamped"
+store '[{"id":"tk-s","status":"open","assignee":"","title":"s","notes":"","metadata":{"gc.routed_to":"pool"}}]'
+STUB_DROP_KEYS="tk-s:gc.execution_routed_to" gc sling pool tk-s --on mol-x >/dev/null
+eq "$(meta tk-s gc.routed_to)" "<absent>" "sling: a dropped stamp still retires the route"
+eq "$(meta tk-s gc.execution_routed_to)" "<absent>" "sling: …and leaves the stamp unwritten"
+
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an
 # unassigned bead or the actor's own closes plainly, and `bd update
