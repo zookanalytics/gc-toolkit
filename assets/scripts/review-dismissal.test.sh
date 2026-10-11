@@ -17,6 +17,8 @@
 #              retirement inline, or carries the dismissers' PR-url parse or
 #              approver list
 # Reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

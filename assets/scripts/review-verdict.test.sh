@@ -15,6 +15,8 @@
 # brings a branch current would then disagree about which PRs are approved. The
 # behavioral half lives beside each reader (merge.test.sh, pr-facts.test.sh).
 # Reads the repo only; no gc, no city, no network.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
