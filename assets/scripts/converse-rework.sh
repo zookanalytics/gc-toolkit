@@ -95,9 +95,11 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$TARGET" ] || TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$TARGET" ] || die "anchor $ANCHOR names no landing target (merged_target and target both empty)"
-# The PR URL keeps the rework on the PR: the writer stamps it as the child's
-# existing_pr, and the refinery's merge-push holds a child carrying one to the PR
-# pipeline and checks that the PR is still open before it pushes.
+# The script's contract is an open PR, and an anchor that names no PR is not
+# one. The URL also rides the child as existing_pr, which the refinery's
+# merge-push checks (open, on this branch, toward this target) before it closes
+# the child as landed, so a PR closed while the rework ran blocks the child for a
+# person rather than taking its landing.
 PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
 [ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty); the child could not keep the rework on it"
