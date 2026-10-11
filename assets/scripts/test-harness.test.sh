@@ -387,6 +387,13 @@ gc bd kv clear some.key
 eq "$(gc bd kv get some.key --json | jq -r '.found'):$(gc bd kv get some.key2 --json | jq -r '.value')" "false:other" "kv clear drops only that key"
 out=$(STUB_KV_FAIL=1 gc bd kv get some.key2 --json 2>/dev/null); rc=$?
 eq "$rc:$out" "1:" "STUB_KV_FAIL: a kv call fails with no answer"
+out=$(gc bd show tk-gone --json); rc=$?
+eq "$rc:$out" "0:[]" "show of an id the store does not hold answers [] by default"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-gone --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.error')" "1:no issues found matching the provided IDs" \
+  "STUB_SHOW_NOT_FOUND_ERROR: it answers bd's error object at exit 1"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-a --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.[0].id')" "0:tk-a" "…and a held id still answers its row"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

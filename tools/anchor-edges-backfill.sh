@@ -74,9 +74,12 @@ ANCHORS_EOF
 fi
 
 # unresolved <anchor> — 0 when bd answers that <anchor> is no bead in this
-# store: no row for it, or bd's not-found error.
+# store: no row for it, or bd's not-found error. bd exits 1 with that error, so
+# its answer is read before it is tested and the exit status decides nothing.
 unresolved() {
-  bd_json show "$1" | jq -e '
+  local row
+  row=$(bd_json show "$1")
+  printf '%s' "$row" | jq -e '
     (type == "array" and length == 0)
     or (type == "object" and ((.error // "") | tostring | test("not found|no issues? found"; "i")))' >/dev/null 2>&1
 }

@@ -80,6 +80,7 @@ harness_init() {
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
+  export STUB_SHOW_NOT_FOUND_ERROR=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
@@ -247,6 +248,11 @@ case "$verb" in
     # lets a test mutate the store between reads (mid-pass write modelling).
     if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
       "$STUB_SHOW_HOOK" "$id" || true
+    fi
+    # STUB_SHOW_NOT_FOUND_ERROR answers an id the store does not hold the way
+    # real bd does: an error object on stdout at exit 1. Unset, it answers [].
+    if [ -n "${STUB_SHOW_NOT_FOUND_ERROR:-}" ] && ! jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1; then
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1
     fi
     jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
     ;;

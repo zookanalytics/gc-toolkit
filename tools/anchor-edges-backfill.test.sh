@@ -7,6 +7,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-anchor-edges-backfill-test.XXXXXX")"; tra
 # shellcheck source=../assets/scripts/test-harness.sh
 . "$HERE/../assets/scripts/test-harness.sh"
 harness_init
+# bd answers an id it does not hold with an error object at exit 1.
+export STUB_SHOW_NOT_FOUND_ERROR=1
 SUT="$HERE/anchor-edges-backfill.sh"
 edges() { LC_ALL=C sort "$STUB_DEPS" | paste -sd' ' -; }
 marked() { grep -c '^anchor_edges\.joined=' "$STUB_KV"; }
