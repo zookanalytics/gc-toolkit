@@ -378,11 +378,20 @@ jq -e 'type == "array"' "$SESSION_BEADS" >/dev/null 2>&1 || printf '[]' > "$SESS
 LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" --slurpfile b "$SESSION_BEADS" '
   def kv($st): [ .id, .name, .session_name, .alias, .agent_name, .configured_named_identity ]
     | map(select(type == "string" and . != "")) | map({key: ., value: $st});
-  # Bead keys first, session-list keys second: from_entries lets the later
-  # entry win, which keeps the authoritative source authoritative.
-  [ (($b[0] // [])[] | kv(.status // "active")) ]
-  + [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
-  | add // {} | from_entries' 2>/dev/null) || LIVENESS_MAP=""
+  def dead: . == "archived" or . == "closed" or . == "failed-create";
+  # Sessions can share a key: the agent name of a pool slot outlives each
+  # occupant, and gascity hands the alias of a failed-create named session to
+  # the session that replaces it. The list puts the newest session first, so a
+  # plain later-wins map would give a shared key to its oldest holder, which
+  # is the dead one when a replacement followed it. A dead state therefore
+  # never overwrites a live one; otherwise the later entry wins.
+  def life_first: reduce .[] as $e ({};
+    if has($e.key) and (.[$e.key] | dead | not) and ($e.value | dead) then .
+    else .[$e.key] = $e.value end);
+  # Bead keys first, session-list keys second: on a key both carry, the
+  # right-hand map wins, which keeps the authoritative source authoritative.
+  ([ (($b[0] // [])[] | kv(.status // "active")) ] | add // [] | life_first)
+  + ([ (($s[0].sessions // [])[] | kv(.state // "active")) ] | add // [] | life_first)' 2>/dev/null) || LIVENESS_MAP=""
 MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null) || MAP_COUNT=""
 # Ordered by authority, and total: a count that is not a number means the
 # builder died behind a source that read fine, which is still a map that
@@ -426,36 +435,44 @@ state this step is built to read.
 
 Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
 exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved
-toward LIFE (a collision with any non-closed session reads as alive; the retry
-can un-orphan, never manufacture an orphan). A session id is a map key like any
-other, so the same two passes answer for an assignee, a session name, and a
-session id:
+toward LIFE (a collision with any session outside the dead states below reads
+as alive; the retry can un-orphan, never manufacture an orphan). A session id
+is a map key like any other, so the same two passes answer for an assignee, a
+session name, and a session id:
 ```bash
 # >>> liveness-lookup
 # Exact lookup first: authoritative whenever the owner is a literal map key.
 STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$OWNER" '.[$a] // "absent"')
 # Identity-normalizing fallback. Stripping the prefix can make two sessions in
 # different cities collide on one bare identity, so resolve a collision toward
-# LIFE: any matching session that is not closed/archived wins. Only when EVERY
+# LIFE: any matching session whose state is not dead wins. Only when EVERY
 # candidate owner is dead does the fallback report a dead state.
 if [ "$STATE" = "absent" ]; then
   STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$OWNER" '
     def bare: sub("^.*/"; "");
+    def dead: . == "archived" or . == "closed" or . == "failed-create";
     [ to_entries[] | select((.key | bare) == ($a | bare)) | .value ] as $matches
     | if ($matches | length) == 0 then "absent"
-      else ([ $matches[] | select(. != "closed" and . != "archived") ] | first) // $matches[0]
+      else ([ $matches[] | select(dead | not) ] | first) // $matches[0]
       end')
 fi
 # <<< liveness-lookup
 ```
-Classify: `active`/`awake` -> not orphaned — but a live owner whose bead
-shows no progress is the warrant path below, not a punt.
-`creating`/`asleep`/`drained`/`suspended`/
-`draining`/`quarantined` -> not orphaned (controller/operator still owns
-it). `archived`/`closed`/`absent` — but only after BOTH the exact lookup and the
-normalizing retry — -> orphaned pool work. Never classify on the exact
-lookup alone: a rig-qualified assignee whose session registered the bare
-alias resolves `absent` there while its owner is active.
+Classify by the dead states: `archived`, `closed`, `failed-create`, and
+`absent`. A bead whose owner resolves to one of them is orphaned pool
+work, but only after BOTH the exact lookup and the normalizing retry.
+Never classify on the exact lookup alone: a rig-qualified assignee whose
+session registered the bare alias resolves `absent` there while its owner
+is active. A `failed-create` session is a create that rolled back. gascity
+does not close its row while work is still assigned to it, so recovering
+that work is what lets the row close. Every other state is owned, and its
+bead is not orphaned. `active` and `awake` are live, and a live owner whose
+bead shows no progress is the warrant path below, not a punt. The rest,
+among them `start-pending`, `creating`, `asleep`, `suspended`, `draining`,
+and `quarantined`, mean the controller or the operator still owns the
+session. A state not named here is owned too, the direction the retry and
+the map both resolve toward. The `dead` definition in both jq programs
+above names the same set.
 
 **2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
 work bead is stale (no `updated_at` movement and no wisp progress for
