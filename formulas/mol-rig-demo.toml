@@ -223,14 +223,17 @@ OUT="$OUT_DIR/{{rig_name}}-$(basename "$SCRIPT_PATH" .md).mp4"
 **3. Capture.** `rig-demo-capture.sh` resolves the engine, lints, drives the
 capture, and fails closed if no MP4 appears:
 ```bash
+# >>> rig-demo-capture-run
 set -- --script "$SCRIPT_PATH" --output "$OUT" --mode "{{capture_mode}}" --port "{{serve_port}}"
 if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
 elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD" --cwd "${RIG_PATH:-$(pwd)}"
 else set -- "$@" --base-url "$BASE_URL"
 fi
 [ "{{narrate}}" = "false" ] && set -- "$@" --no-narrate
-"$SCRIPTS/rig-demo-capture.sh" "$@"
-CAPTURE_RC=$?
+# An uncaptured non-zero aborts the step under a strict shell, before the
+# escalation and hold below.
+CAPTURE_RC=0
+"$SCRIPTS/rig-demo-capture.sh" "$@" || CAPTURE_RC=$?
 if [ "$CAPTURE_RC" -ne 0 ]; then
   WHY="the engine or the app produced no MP4; a human must check the app target and the demo toolchain (doctor/check-demo-toolchain)"
   [ "$CAPTURE_RC" -eq 3 ] && WHY="the clip at $OUT recorded at least one step failing its proof; a human must judge from it whether the app or the script is wrong"
@@ -249,6 +252,7 @@ if [ "$CAPTURE_RC" -ne 0 ]; then
   exit 1
 fi
 gc bd update "$REQUEST_BEAD" --set-metadata demo_mp4_path="$OUT" --append-notes "rig-demo: captured {{capture_mode}} clip -> $OUT"
+# <<< rig-demo-capture-run
 ```
 
 **Exit criteria:** a non-empty MP4 at `demo_mp4_path` on the request bead.
