@@ -142,6 +142,14 @@ after the merge. Whether a `post-rewrite` hook should re-check is a separate
 decision; until then, re-run the renderer after any rebase that crosses a seed
 input.
 
+> **Note (tk-s35k5c, tk-s4int0m).** A stale render no longer reaches the base
+> branch. `merge.sh` refuses a merge that would leave a `generated/seed-audit/`
+> render stale (`render-seed-audit.sh --check-merge`), and
+> `doctor/check-seed-audit-current` reports only the artifact's presence and the
+> hook's wiring. A rebase still replays commits without the hook, so re-running
+> the renderer after one that crosses a seed input is what keeps the branch
+> landable.
+
 ## Verification
 
 - `assets/scripts/signoff.test.sh` — 107 assertions, 27 of them new. Against

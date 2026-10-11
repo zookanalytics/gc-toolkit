@@ -85,6 +85,12 @@ table this commit corrects was wrong about the green marker's re-gate,
 which is the class of defect a re-review exists to catch. Each of the four
 proposed inert classes carries reviewable material here.
 
+> **Note (tk-s4int0m).** `doctor/check-seed-audit-current` no longer fails on a
+> stale render. It reports only the artifact's presence and the hook's wiring.
+> Generated artifacts are still gated, by `merge.sh`, which refuses a merge that
+> would leave a `generated/seed-audit/` render stale
+> (`render-seed-audit.sh --check-merge`).
+
 **The rewrite already decided the question the other way.**
 `docs/state-machine.md:120-121` states the rule as uniform: a head move
 stales every verb at once, so a fixed branch re-evaluates fresh with no
