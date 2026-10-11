@@ -215,7 +215,7 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
 echo "open visits on anchor $ANCHOR's feedback:"
 "$SCRIPTS/finding.sh" open-visits --anchor "$ANCHOR"; VRC=$?
 [ "$VRC" -le 1 ] || { echo "cannot read the open visits on anchor $ANCHOR; refusing to rule its findings past them unread" >&2; exit 1; }
-[ "$VRC" -eq 1 ] && echo "  (none)"
+[ "$VRC" -eq 0 ] || echo "  (none)"
 ```
 
 **First, the questions the operator already holds.** The open visits printed
