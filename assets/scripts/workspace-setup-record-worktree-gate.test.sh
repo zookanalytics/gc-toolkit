@@ -93,8 +93,7 @@ no  "$BLOCK" 'WORKTREE_PATH' "stamp does not depend on the create-arm WORKTREE_P
 
 # --- Fake gc: `bd update` records its argv; everything else is a quiet no-op. -
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "bd update") shift 2; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}" ;;
 esac
@@ -104,8 +103,7 @@ chmod +x "$TMP/bin/gc"
 
 # Fake git: resolves the work branch the block records. FAKE_BRANCH drives it so
 # the detached ("HEAD") and unresolved ("") cases are reproducible with no repo.
-cat > "$TMP/bin/git" <<'GIT'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 [ "$1" = "rev-parse" ] && { printf '%s\n' "${FAKE_BRANCH:-}"; exit 0; }
 exit 0
 GIT

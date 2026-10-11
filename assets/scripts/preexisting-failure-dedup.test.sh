@@ -96,8 +96,7 @@ mkdir -p "$TMP/bin"
 #     is written whole to $FAKE_BODY (it is multi-line, so it cannot share the
 #     line-oriented meta file), and a --design is recorded as DESIGN_USED so
 #     the assertions can prove the body landed in the field readers read.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "runtime" ] && exit 0
 [ "$1" = "bd" ] || exit 0
 case "$2" in
