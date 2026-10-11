@@ -26,9 +26,10 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")"
-# merge.sh names its own directory through cd and pwd, which drop the doubled
-# slash that a TMPDIR ending in / leaves in mktemp's path. Assertions compare
-# that name with paths built on TMP, so TMP is resolved before any is built.
+# merge.sh sources gctk-resolve.sh, which exports its own directory, named
+# through cd and pwd, as GCTK_SCRIPTS_DIR. cd and pwd drop the doubled slash
+# that a TMPDIR ending in / leaves in mktemp's path. Assertions compare that
+# name with paths built on TMP, so TMP is resolved before any is built.
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
