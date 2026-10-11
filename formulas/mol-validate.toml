@@ -282,10 +282,9 @@ needs-you visit): each is recorded before the finding closes or stays open, and
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you leave unruled is silently dropped. An
-empty batch means only that nothing is left to rule — the reviewer found nothing,
-or an earlier pass already ruled it all. It settles nothing about decision 3:
-carry on to `rule-convergence` and judge convergence there on the batch's own
-evidence, never on the emptiness of this read.
+empty batch settles nothing about decision 3: carry on to `rule-convergence` and
+judge convergence there on the batch's own evidence, never on the emptiness of
+this read.
 
 This pass rules dispositions only. The must-fix set is answered by a separate
 fix-unit dispatch the check authority owns; this pass neither creates nor
