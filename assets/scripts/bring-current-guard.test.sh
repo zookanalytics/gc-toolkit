@@ -710,6 +710,7 @@ has "$(cat "$ASK_LOG")" "ASK ask --bead MI20 --path v.txt --collided main set x 
 eq "$(git -C "$R" rev-parse HEAD)" "$A" "the merge is aborted: HEAD is the head last reviewed"
 [ -f "$R/.git/MERGE_HEAD" ] && bad "a merge is still in progress" || ok "…and no merge is left in progress"
 eq "$(meta MI20 gc.routed_to)" "human" "the bead parks to a person"
+has "$(meta MI20 gc.takeaway)" "Needs a decision before its branch can be brought current" "…naming what it waits for"
 eq "$(bassignee MI20)" "" "…its assignee cleared"
 has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "…and the session drains"
 restart; bring

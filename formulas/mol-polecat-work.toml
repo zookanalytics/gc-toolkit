@@ -569,9 +569,13 @@ if [ -n "${CLAIMED_STEP_BEAD_ID:-}" ] && [ "$CLAIMED_STEP_BEAD_ID" != "$WORK_BEA
     --reason "bringing the branch current needs a decision only a person can make; the bring-current-question visit on the anchor asks it" \
     || { echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable." >&2; exit 1; }
 else
-  # A bead with no molecule parks to a person: the route first, then the
-  # assignee, which the claim guard accepts only once the bead is open.
+  # A bead with no molecule parks to a person, naming what it waits for: the
+  # route and the takeaway first, then the assignee, which the claim guard
+  # accepts only once the bead is open.
   gc bd update "$WORK_BEAD_ID" --status=open --set-metadata gc.routed_to=human \
+    --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the visit on its anchor asks it" \
+    --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --set-metadata gc.takeaway_by=mol-polecat-work \
+    --set-metadata gc.takeaway_settled= \
     --unset-metadata gc.session_id --unset-metadata gc.session_name \
     --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question visit on the anchor asks it). Nothing was pushed."
   gc bd update "$WORK_BEAD_ID" --assignee=""
