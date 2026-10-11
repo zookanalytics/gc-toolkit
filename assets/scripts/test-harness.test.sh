@@ -189,6 +189,46 @@ eq "$(view7 a,b)" "third" "pr view queue: …consumed, so the next read takes th
 eq "$(view7 a,b)" "fixture" "pr view queue: the fixture answers once the queue is empty"
 eq "$(find "$Q" -type f | wc -l | tr -d ' ')" "0" "pr view queue: every queued file was consumed"
 
+# A GraphQL mutation names only a node id, as the real API takes it, and the gh
+# stub writes the one PR fixture that holds the node. It starts as many jq
+# processes with thirty PR fixtures written as with one, so a suite's mutations
+# do not slow down as it adds PRs. A fixture whose text names the id without
+# holding the node is passed over and left as it was. A request's -f variables
+# reach the handler as written: quotes, an equals sign and non-ASCII text
+# arrive whole, a trailing newline is dropped, and a name given twice keeps its
+# last value.
+gql_thread() { # <num>: a PR fixture whose one thread T-<num> holds comment NC-<num>
+  printf '{"reviews":[],"threads":[{"id":"T-%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-%s","databaseId":1,"author":{"login":"op"},"body":"b","reactionGroups":[]}]}}],"issue_comments":[]}' "$1" "$1"
+}
+reactions() { jq -r '.threads[0].comments.nodes[0].reactionGroups | map(.content) | join(",")' "$GH_DIR/threads_$1.json"; }
+REACT_Q='mutation($id:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$id,content:$c}){clientMutationId}}'
+JQ_REAL="$(command -v jq)"; mkdir -p "$TMP/jqcount"
+printf '#!/bin/sh\necho x >> "%s"\nexec "%s" "$@"\n' "$TMP/jqcount/runs" "$JQ_REAL" > "$TMP/jqcount/jq"
+chmod +x "$TMP/jqcount/jq"
+jq_runs() { # <command>...: how many jq processes the command started
+  : > "$TMP/jqcount/runs"
+  PATH="$TMP/jqcount:$PATH" "$@" >/dev/null 2>&1
+  wc -l < "$TMP/jqcount/runs" | tr -d ' '
+}
+gql_thread 50 > "$GH_DIR/threads_50.json"
+one=$(jq_runs gh api graphql -f query="$REACT_Q" -f id=NC-50 -f c=EYES)
+eq "$(reactions 50)" "EYES" "gh graphql: addReaction marks the node in the fixture that holds it"
+for n in $(seq 51 79); do gql_thread "$n" > "$GH_DIR/threads_$n.json"; done
+many=$(jq_runs gh api graphql -f query="$REACT_Q" -f id=NC-79 -f c=EYES)
+eq "$(reactions 79)" "EYES" "gh graphql: …and finds it in the last of thirty fixtures"
+eq "$many" "$one" "gh graphql: a mutation starts as many jq processes with thirty PR fixtures as with one"
+eq "$(grep -l EYES "$GH_DIR"/threads_5[1-9].json "$GH_DIR"/threads_[67]?.json | wc -l | tr -d ' ')" "1" \
+  "gh graphql: …and writes no fixture but the one holding the node"
+gql_thread 81 > "$GH_DIR/threads_81.json"
+gql_thread 80 | jq -c '.threads[0].comments.nodes[0].replyTo = "NC-81"' > "$GH_DIR/threads_80.json"
+cp "$GH_DIR/threads_80.json" "$TMP/threads_80.before"
+gh api graphql -f query="$REACT_Q" -f id=NC-81 -f c=EYES >/dev/null
+eq "$(reactions 81)" "EYES" "gh graphql: a fixture that only names the id does not take the node's write"
+if cmp -s "$GH_DIR/threads_80.json" "$TMP/threads_80.before"; then ok "gh graphql: …and is left as it was"; else bad "gh graphql: the fixture naming NC-81 was rewritten"; fi
+gh api graphql -f query="$REACT_Q" -f id=NC-81 -f c=HEART -f c=$'a "quoted" = value, ✅\nline two\n' >/dev/null
+eq "$(jq -c '.threads[0].comments.nodes[0].reactionGroups | map(.content)' "$GH_DIR/threads_81.json")" '["EYES","a \"quoted\" = value, ✅\nline two"]' \
+  "gh graphql: a variable arrives whole, the last value given for its name, its trailing newline dropped"
+
 # The gc bd dep stub holds one edge per (issue, depends_on) pair, as real bd
 # does. A second type on a taken pair is refused with exit 1 and writes nothing,
 # whichever form wrote either edge. The same type again is a no-op that exits 0,

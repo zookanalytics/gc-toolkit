@@ -27,11 +27,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
-# The one definition of the standing kinds, shared with liveness-recheck.sh, the
-# proactive scan and the doctor checks. Exposes $STANDING_KINDS_JQ, which the
-# classify block splices in.
+# The one definition of the standing kinds, shared with this sweep's precheck,
+# liveness-recheck.sh, the proactive scan and the doctor checks. Exposes
+# $STANDING_KINDS_JQ, which the classify block splices in.
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "$PROG: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+# The one liveness classifier, shared with this sweep's precheck. Exposes
+# $LIVENESS_CLASSIFY_JQ, which the classify block runs.
+# shellcheck source=liveness-classify.sh
+. "$HERE/liveness-classify.sh" || { echo "$PROG: cannot source liveness-classify.sh from $HERE" >&2; exit 1; }
 # The one definition of an anchor's children (bd-lib.sh's anchor graph), which
 # the landed-fix wedge census reads. Its reads go through _bd_call, redefined
 # below to carry this sweep's --db pin and per-call bound.
@@ -261,9 +265,9 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # (id, session_name, alias, name, agent_name); a claim writes one of assignee /
 # gc.session_id / gc.session_name. An UNCLAIMED visit names no holder and always
 # covers — it is a pending escalation, not a dead sitting. On an unreadable list
-# $LIVENESS_KNOWN stays false and the classifier keeps every visit covering: an
-# unprovable death is not a death, and the subject is still named by its open
-# visit meanwhile.
+# $LIVENESS_KNOWN stays false and the sweep has the classifier keep every visit
+# covering (unreadable_liveness_covers): an unprovable death is not a death,
+# and the subject is still named by its open visit meanwhile.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
@@ -278,27 +282,11 @@ if printf '%s' "$SESS_RAW" | jq -e '(.sessions? // null) | type == "array"' >/de
 fi
 
 # --- classify -----------------------------------------------------------------
-# One jq over the ready set: every drop is a NAMED class; the survivors are
-# the unnamed waits. Structural edges (2i) fold in from ALIVE — a parent is
-# gated iff a not-closed child names it (the child holds the edge), and an
-# outgoing tracks edge to a not-closed bead is a named wait. Every `// ""` is
-# load-bearing: most beads carry no metadata key at all, and an empty
-# hold is a CLEARED hold, not a hold.
+# One jq over the ready set, the classifier in liveness-classify.sh: every drop
+# is a NAMED class, and the survivors are the unnamed waits. The sweep supplies
+# every read the classifier takes; its precheck runs the same classifier with
+# the reads beyond the bead set left empty.
 #
-# `gc.takeaway` is not read here. It is one field a sitting stamps when it
-# begins and REPLACES with its outcome when it signs off, and nothing clears
-# it, so its presence dates the last sitting rather than naming a live wait —
-# read as a hold, one conversation exempts a bead from this pass forever. The
-# waits a sitting records are edges instead, and every edge shape already has
-# an arm: a `blocks` blocker (what `takeaway --waiting-on` and `demand` write)
-# takes the bead out of the ready set upstream of here, children reach the
-# `gatedparents` arm, `tracks` targets reach the arm below it. `triage.hold`
-# still mutes on presence alone: no agent writes one any more, and the ones on
-# the board name their wait in prose with no edge to discharge.
-#
-# $demanded is the one non-edge read, and it exists for one case: gc-helm.sh
-# warns on stderr when a demand's `blocks` edge does not land, and nothing
-# repairs it, so that bead reads ready while a person owes an answer on it.
 # The pre-open gate set per pre_open_gate anchor, from the ONE resolver — the same
 # review-checks.sh --resolve pr-open.sh and merge.sh ask — so an undeclared or
 # legacy token (codex) gates pre-open here exactly as it does there, instead of
@@ -306,12 +294,9 @@ fi
 # legacy-token anchor as un-gated and flagged it). The census counts only the
 # gates that must be green BEFORE the PR opens, so an open-as-draft check (demo),
 # which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
-# gated. Built once per pass as a {anchor-id: [gates]} map, read by
-# pre_open_all_green below. If the resolver script is absent (have_resolver=0) the
-# jq falls back to the pre-phase none/off/approval drop. Either way a gate keeps
-# the case of its check_set token, deduped case-insensitively: gate-ensure
-# dispatches that token as the check_name and signoff stamps `check.<token>`, so
-# the census reads the marker under the same key every other reader does.
+# gated. Built once per pass as a {anchor-id: [gates]} map, read by the
+# classifier's pre_open_all_green. If the resolver script is absent
+# (have_resolver=0) the classifier falls back to the anchor's own check_set.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
 # rig's own review-checks.toml beside the pack) so a hermetic test can point it at
@@ -347,97 +332,9 @@ fi
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
       --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
-      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
-  def pr_key:
-    [ ((. // "") | tostring | ascii_downcase)
-      | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
-    | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
-  # standing_kinds, from standing-kinds.sh:
-  '"$STANDING_KINDS_JQ"'
-  # A workflow root, a scope latch and a step-spec sidecar carry a route and no
-  # executable body. The route names the run, it is not an offer. Both readers
-  # that serve or count pool work refuse them on gc.kind: the hook at
-  # hookCandidateClaimable, the controller demand loop at demandRowServable.
-  # No worker can ever take one. Mirrors beadmeta.WorkflowTopologyKinds, which
-  # no command reads out; a kind added there and not here falls through to the
-  # route arm, the behavior this def replaced.
-  def topology_kind:
-    (.metadata["gc.kind"] // "") as $k
-    | ["workflow", "scope", "spec"] | index($k) != null;
-  def machine_convoy:
-    (.issue_type // "") == "convoy"
-    and ((((.title // "") | startswith("sling-"))
-          or ((.title // "") | startswith("input convoy for"))
-          or (((.metadata["gc.synthetic"] // "") | tostring) == "true")));
-  # The tracking bead of an order is a wisp: issue_type task, no metadata
-  # until it closes, and no edges, so its id and its title are the only
-  # durable structural signals it carries. Both are machine-minted and
-  # immutable, which keeps the exclusion locally decidable and monotone.
-  # Requiring BOTH is what keeps a human bead titled "order: ..." visible,
-  # and a wisp of some other kind too.
-  def order_wisp:
-    ((.id // "") | contains("-wisp-"))
-    and ((.title // "") | startswith("order:"));
-  def pre_open_all_green:
-    (.metadata // {}) as $m
-    | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
-       else (($m.check_set // "")
-             | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
-             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
-       end) as $gates
-    | ($gates | length) > 0
-      and all($gates[]; ($m["check." + .] // "") == "green");
-  # A visit holder is live — or it has none, or liveness is unreadable. A claim
-  # writes one of assignee / gc.session_id / gc.session_name; $livesessions holds
-  # every name a listed (live) session carries. No holder is an UNCLAIMED visit,
-  # a pending escalation that still covers. $livenessknown false is an unreadable
-  # session list, where an unprovable death is not a death — keep covering.
-  def holder_live:
-    ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
-     | map(select(. != ""))) as $holders
-    | if ($holders | length) == 0 then true
-      elif ($livenessknown | not) then true
-      else any($holders[]; . as $h | ($livesessions | index($h)) != null)
-      end;
-  # Live-visit subjects: every subject a live visit covers by its shared identity
-  # (tracks edge, gc.continuation_group fallback — the stamp alone has landed
-  # empty on a live visit, su-ab9je). visit_identity_subjects is visit-identity.sh.
-  # A ready bead converses when it is one of them, or when its gc.root_bead_id
-  # is: a sitting about a workflow root covers the steps of that workflow.
-  ([ ($live[0] // [])[]
-     | select((.metadata.task_kind // "") == "visit")
-     | select(holder_live)
-     | visit_identity_subjects[] ]) as $convgroups
-  | ([ ($openprs // [])[] | pr_key ] | map(select(. != ""))) as $openkeys
-  | ([ ($alive[0] // [])[]
-     | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
-  | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
-  | ([ ($alive[0] // [])[] | .dependencies[]?
-       | select((.type // "") == "parent-child") | (.depends_on_id // empty) ] | unique) as $gatedparents
-  | [ ($ready[0] // [])[]
-      | . as $b
-      | (if machine_convoy or order_wisp then "machine"
-         elif ($husks | index($b.id)) != null then "husk"
-         elif topology_kind then "topology"
-         elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
-         elif (($worked | index($b.id)) != null) then "worked"
-         elif ((.metadata.task_kind // "") == "visit") and holder_live then "conversing"
-         elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
-         elif (($demanded | index($b.id)) != null) then "held-by-design"
-         elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
-         elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
-         elif (($convgroups | index($b.id)) != null) then "conversing"
-         elif (((.metadata.merge_result // "") == "pull_request")
-               and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
-              then "gated"
-         elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
-         elif (($gatedparents | index($b.id)) != null) then "gated"
-         elif ([ .dependencies[]? | select((.type // "") == "tracks")
-                 | select(($aliveset[(.depends_on_id // "")] // false)) ] | length > 0) then "gated"
-         else "unnamed" end) as $class
-      | {id, title: (.title // ""), type: (.issue_type // ""), class: $class}
-    ]')
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
+      --argjson unreadable_liveness_covers true \
+      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
 printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "$PROG: FAIL-SAFE: classification did not produce an array — nothing filed" >&2; exit 1; }
 CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") | {id, title, type})')
