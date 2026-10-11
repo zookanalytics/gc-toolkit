@@ -1,6 +1,6 @@
 ---
 name: Steer work by epic — park gate, priority flow, placement
-description: The design for the epic "Steer work by epic" (tk-rl8gz4b). It settles how an epic's priority, or its park, decides when the epic's work runs. It covers the park gate that holds a whole subtree, how armed and slung work stays parked, how the epic's priority reaches the polecat queue and already-poured workflows, where PR-finishing work ranks, which checks and boards must read a park, how intake holds findings for the placement sitting, and how a Checkpoint records the next priority. It lists the implementation units. Read it to review the design or to build one of its units.
+description: The design for the epic "Steer work by epic" (tk-rl8gz4b). It settles how an epic's priority, or its park, decides when the epic's work runs. It covers the park gate that holds a whole subtree, how armed and slung work stays parked, why a decision gate is not a park, how the epic's priority reaches the polecat queue and already-poured workflows, where PR-finishing work ranks, which checks and boards must read a park, how intake holds findings for the placement sitting, and how a Checkpoint records the next priority. It lists the implementation units. Read it to review the design or to build one of its units.
 ---
 
 # Steer work by epic
@@ -20,7 +20,25 @@ The operator steers with these moves, each one command:
 - `epic-steer.sh priority <epic> <P0|P1|P2>` re-ranks the epic's work, including
   workflows already poured.
 
-Each of these recommendations needs a yes or a no.
+The operator has ruled on what a park holds and what it leaves running.
+
+- **A park holds everything under the epic that has not started, armed work
+  included.** Deferred dispatch does not sling armed work past a park gate.
+- **Waiting on the operator's decision is not a park.** An epic blocked only by a
+  demand gate, the human gate a converse hold files, keeps dispatching its armed
+  work as each bead's own blockers close, as it does today. The two gates carry
+  different markers, `gc.park_gate` and `gc.demand_for`, and deferred dispatch
+  reads them (section 2).
+- **Every other hold on an epic holds its armed work too.** A prerequisite task is
+  the common case. The Checkpoints epic (tk-wmwcdlc) waits on the close-gate task
+  (tk-isd5sa), so its armed work waits for that task to land.
+- **Existing PR work keeps moving under every hold on its epic.** Merges of
+  approved PRs, review reworks, merge-ins, red-check fixes and validation passes
+  go on. This is an invariant of the graph, not an exception path. PR-finishing
+  work is never filed as a parent-child descendant, so no cascade reaches it
+  (section 7).
+
+Each of these recommendations still needs a yes or a no.
 
 1. **An item placed under an epic is worked by proxy.** Once an item is under
    an epic at P0 to P2, it runs at that epic's priority with no further move. Under
@@ -35,16 +53,7 @@ Each of these recommendations needs a yes or a no.
    approved PR can wait behind older new work of a P0 epic. *The alternative*,
    finishing at the epic's own priority, leaves approved PRs queued behind new
    work of the same band, which is the problem as filed.
-3. **A parked epic holds its armed work because the dispatch bypass narrows.**
-   Deferred dispatch slings an armed bead whose ancestor is blocked only when every
-   blocker on that ancestor is a demand for a person's answer about it. That is the
-   one shape the bypass was built for. *Cost:* a real dependency on an epic now
-   holds the epic's armed children too. The Checkpoints epic (tk-wmwcdlc) waits on
-   the close-gate task (tk-isd5sa), so its armed work would wait for that task to
-   land.
-   *The alternative*, exempting only park gates, keeps slinging armed children
-   past any other wait on their epic.
-4. **Nothing associates findings with an epic automatically yet.** That
+3. **Nothing associates findings with an epic automatically yet.** That
    classifier belongs to the first-class-epics epic (tk-rctkrj), which is parked.
    Until it lands, every non-emergency finding waits for the placement sitting.
    *Cost:* one sitting decision per finding. *The alternative* is to move the
@@ -147,13 +156,20 @@ passed load-context.
 - items placed under the epic later, through the same cascade (section 5).
 
 **What a park leaves running.** A park leaves in-flight work running. A poured
-workflow is out of the cascade's reach. PR-finishing work has no parent edge. An
-anchor whose PR merges still closes (fact 5). One in-flight path does get held. When
-the refinery patrol rejects a handed-off bead, its rebase and handle-failures
-steps route the work bead itself back to the pool
-(`formulas/mol-refinery-patrol.toml`). That bead is a member, so the cascade holds
-it. Unit 4 dispatches the rejection as a pour instead, which the cascade does not
-reach.
+workflow is out of the cascade's reach. PR-finishing work has no parent edge, and
+section 7 makes that an invariant. The anchor itself is a member, but nothing that
+drives it reads its parent. The refinery's find-work lists its handoffs with
+`bd list`, not `bd ready`. `merge.sh` enumerates anchors by `merge_result`, and the
+only edges it reads are the anchor's own blockers and children. None of
+`pr-facts.sh`, `gate-ensure.sh` and `pr-open.sh` reads `bd ready`, `bd blocked` or
+a parent edge. So a parked epic's open PRs still merge, and an anchor whose PR
+merges still closes (fact 5).
+
+One in-flight path does get held. When the refinery patrol rejects a handed-off
+bead, its rebase and handle-failures steps route the work bead itself back to the
+pool (`formulas/mol-refinery-patrol.toml`). That bead is a member, so the cascade
+holds it. Unit 4 dispatches the rejection as a pour instead, which the cascade does
+not reach.
 
 **The moves.** `assets/scripts/epic-steer.sh` carries them, shaped like
 `deferred-dispatch.sh`: verbs plus a reconcile.
@@ -161,7 +177,8 @@ reach.
 - `park <bead>` writes the edge and reads it back. It prints what is now held and
   what stays in flight. When the store has no gate yet, it creates one, marker
   included. It refuses a bead in flight. That bead's own edge would be a live
-  direct blocker, which refuses its close after the merge (fact 5). Any bead can be
+  direct blocker. `merge.sh` holds an anchor's merge on any open blocker of its
+  own, and bd refuses its close after the merge (fact 5). Any bead can be
   parked, so a loose item the operator wants held takes its own edge, as today.
 - `unpark <epic> <P>` removes the edge, sets the priority and runs the priority
   reconcile for the subtree. It also names every other open `blocks` edge on the
@@ -189,24 +206,41 @@ edge on a container remains a violation.
 - *Status deferred on the epic.* bd's cascade does not follow status, so the
   children stay in `bd ready`. That is why the hand-built park moved to the gate.
 - *A future `defer_until` on the epic.* bd drops the children of a deferred parent
-  from ready, but deferred dispatch's bypass ignores that too. The date also has to
-  be invented, and the field means "not before a date", not "until the operator
-  says".
+  from ready, but the date has to be invented, and the field means "not before a
+  date", not "until the operator says".
 - *One gate per epic.* This is the same mechanism with more beads. One gate per
   store lets every reader find the gates with one read.
 
 ## 2. Armed and slung work stays parked
 
-**Armed work.** The bypass narrows. Reconcile still slings an armed bead that only
-an ancestor holds when every open blocker on that ancestor is a demand bead for it,
-meaning one whose `gc.demand_for` names the ancestor. That is the coordination wait
-the bypass exists for (fact 6). The wait is about the ancestor itself: since
-tk-p8svsz, the visit behind it holds only the ancestor's own merge and close, never
-downstream work. Any other blocker on an ancestor holds the armed bead. A park gate
-shows in `list` and the pass log as `PARKED`. A real dependency on the container
-shows as `WAITING on <blocker>`. The arm stays intact, so unparking needs no
-re-arm. `check-armed-dispatch-owed` applies the same predicate, so a parked arm is
-neither owed nor stranded. That settles tk-rl8gz4b.1.
+**Kinds of blocker.** Each blocker on an epic is a park gate, a decision gate or a
+real prerequisite, told apart by what it carries.
+
+- *A park gate* carries `gc.park_gate=true` (section 1). It is the operator's "not
+  now", and it holds every descendant that has not started, armed ones included.
+- *A decision gate* carries a non-empty `gc.demand_for`. `gc-helm.sh demand` files
+  it as a human gate and stamps the key with the bead it gates. A converse hold on
+  an epic files one gated on the epic itself, because `converse-hold.sh` moves the
+  demand to the visit only for a PR anchor. It waits on the operator's answer, so
+  it is not a park, and the epic's armed work keeps dispatching.
+- *Anything else*, such as a task the epic waits on, is a real prerequisite. It
+  holds the epic's armed work, as the cascade already holds its routed work.
+
+A visit is none of these. `escalate.sh` links a visit to its subject by a `tracks`
+edge, which holds nothing, so a visit on an epic leaves the epic's work running.
+
+**Armed work.** The bypass narrows to decision gates. Reconcile still slings an
+armed bead whose own blockers have closed, but only when every open blocker on each
+of its ancestors is a decision gate and no ancestor carries a future
+`defer_until`. Any other hold on an ancestor holds the armed bead. The predicate
+walks every ancestor, because a member two levels down is held through a parent
+that has no blocker of its own. A decision gate is the coordination wait the bypass
+exists for (fact 6). A demand waits on a person's answer, and since tk-p8svsz the
+visit behind it holds only its subject's own merge and close, never downstream
+work. A park gate shows in `list` and the pass log as `PARKED`. A real
+prerequisite shows as `WAITING on <blocker>`. The arm stays intact, so unparking
+needs no re-arm. `check-armed-dispatch-owed` applies the same predicate, so a
+parked arm is neither owed nor stranded. That settles tk-rl8gz4b.1.
 
 The narrowing is an allow-list of the one shape the bypass was built for, and it
 fails closed. Exempting park gates alone would keep slinging the armed children of
@@ -277,9 +311,10 @@ pass is corrected by that pass.
   need it, and none would follow a later priority change.
 - *A polecat `work_query` that computes the epic's priority at claim time.* The
   proactive pool overrides its own query in this way
-  (`agents/proactive/agent.toml`). For polecats it would replace gascity's tiered query for the busiest pool, and it
-  would walk ancestors on every claim and every demand count. Bead priority is what
-  `bd ready`, the hook and the board already read.
+  (`agents/proactive/agent.toml`). For polecats it would replace gascity's tiered
+  query for the busiest pool, and it would walk ancestors on every claim and every
+  demand count. Bead priority is what `bd ready`, the hook and the board already
+  read.
 - *An order triggered on `bead.updated`.* gascity's event trigger cannot filter on
   the payload (`internal/orders/triggers.go:470-497`), so it would fire on every
   bead write.
@@ -363,11 +398,12 @@ relates-to edge between the two, because bd refuses a parent-child edge beside o
 on the same pair. It then writes the parent edge, routes the item to the polecat
 pool, and records who placed it and when. That is the unrelate-then-reparent
 primitive tk-8bzuc2 names, which sits under the parked first-class-epics epic, and
-unit 10 builds it here. `place <item> --standalone` routes a loose item at its own
-priority. The sitting's other outcomes, a new epic or a close, use the existing
-tools. An item the sitting does not place stays without an epic until the operator
-judges a group of such items material enough to become an epic, with a hypothesis,
-a first Feature and a Checkpoint after it.
+unit 10 builds it here. It refuses a bead carrying `anchor_bead`, because
+PR-finishing work stays outside every epic (section 7). `place <item> --standalone`
+routes a loose item at its own priority. The sitting's other outcomes, a new epic
+or a close, use the existing tools. An item the sitting does not place stays
+without an epic until the operator judges a group of such items material enough to
+become an epic, with a hypothesis, a first Feature and a Checkpoint after it.
 
 **Who associates.** The operator associates at the placement sitting, using the
 verb. A first reaction proposing or making the association is the create-time
@@ -407,6 +443,15 @@ with one (fact 5).
 None of them sets a priority. Each child queues at P2, bd's default, beside new
 work and in age order within that band. Each carries `anchor_bead` and a `blocks`
 edge to the anchor, with no parent edge.
+
+**The invariant.** PR-finishing work is never filed as a parent-child descendant.
+That keeps existing PR work moving under a park and under a decision hold with no
+exception path. No cascade reaches a bead with no parent, and the scripts that
+drive the anchor itself never read its parent (section 1). On 2026-10-11, none of
+the 51 open, in-progress or blocked beads carrying `anchor_bead` had a parent edge.
+Each creator's own suite asserts that the child it files has no parent (unit 6),
+and the placement verb refuses a bead carrying `anchor_bead` (unit 10). So no
+creator, sitting or future classifier can file one under an epic.
 
 **The rank.** The reconcile ranks each child and its live workflow (section 3):
 
@@ -451,15 +496,15 @@ authoritative statement of the model, and the units after it extend it.
 | # | Unit | Settles | Needs | Done when |
 |---|---|---|---|---|
 | 1 | **Park gate and the park moves.** `epic-steer.sh` `park`, `unpark`, `status`; `park-lib.sh`; the `gc.park_gate` marker, registered and backfilled on every store's gate; `--evidence`; `docs/epic-steering.md`; I1's park-gate exception; an authority-map row for the verbs. | 1 | — | Park, unpark and status pass fixture tests on a scratch store. Every live park gate carries the marker. Unpark names the other blockers that still hold a subtree. |
-| 2 | **Armed work stays parked.** The bypass narrows to demand-only ancestors; `PARKED` and `WAITING` states in `list` and the pass log; `check-armed-dispatch-owed` applies the same predicate; the fact 4 corrections. This unit is tk-rl8gz4b.1, re-scoped. | 2 | 1 | An armed child of a parked epic is neither slung nor reported owed. One held only by a demand gate still dispatches; the tk-so8clv case stays green. One whose epic waits on a real blocker waits too. |
+| 2 | **Armed work stays parked.** The bypass narrows to ancestors held only by decision gates; `PARKED` and `WAITING` states in `list` and the pass log; `check-armed-dispatch-owed` applies the same predicate; the fact 4 corrections. This unit is tk-rl8gz4b.1, re-scoped. | 2 | 1 | An armed child of a parked epic is neither slung nor reported owed, and neither is one two levels down. One held only by a demand gate still dispatches; the tk-so8clv case stays green. One whose epic waits on a real blocker waits too. |
 | 3 | **A sling does not start parked work.** The load-context guard covers a parked bead and lets in-flight beads through; Accept refuses a parked bead. | 2 | 1, 2 | Park, sling, unpark ends with the bead built, held root included. A bead in flight under a parked epic is built. |
 | 4 | **A park does not strand in-flight work.** The refinery patrol's rejection dispatches a pour instead of routing the work bead. | 1 | 1 | A rejected handoff under a parked epic is rebuilt. An unparked one behaves as today. |
 | 5 | **Priority flow.** `reconcile` and `orders/epic-priority.toml`; the `priority` verb; unpark runs the reconcile; the routing doc's claim-predicate row is corrected. | 3 | 1 | After a priority change, the members and their poured workflows' open steps carry the new priority within one pass. A later sling inherits it. A hand edit reverts. Loose beads are untouched. Pass time stays inside the order's timeout on the live store. |
-| 6 | **PR-finishing rank.** The reconcile ranks anchor children and their workflows. | 7 | 5 | An approved PR's merge-in child queues at P0. A P2 epic's review rework queues at P1. A parked epic's in-flight rework queues at P2. |
+| 6 | **PR-finishing rank and its invariant.** The reconcile ranks anchor children and their workflows. Each PR-finishing creator's suite asserts that the child it files has no parent. | 7 | 5 | An approved PR's merge-in child queues at P0. A P2 epic's review rework queues at P1. A parked epic's in-flight rework queues at P2. A creator changed to file its child with a parent fails its own suite. |
 | 7 | **Checks and converse context read the park.** `check-blocked-work-armed` skips parked beads; `bead-context.sh` reads a park. | 4 | 1 | A parked member draws no finding and no arm remedy. An unparked unarmed blocked member still does. |
 | 8 | **The helm board shows steering.** The board shows each epic's state and priority, parks epics in their own section, and stops calling their idle children stranded. The takeaway notion gets a new name. | 4 | 1 | The board fixture renders a parked epic under its own section and an unparked one with its priority. The Go and shell predicates agree on the shared fixture. |
 | 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; `unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. The sweep runs again. |
-| 10 | **The placement verb.** `place`, with unrelate-then-reparent, route and the placement record; `--standalone`. | 5 | — | Placing an item with a relates-to edge to its epic makes it a member and routes it. Under a parked epic the cascade holds it. |
+| 10 | **The placement verb.** `place`, with unrelate-then-reparent, route and the placement record; `--standalone`; the refusal of PR-finishing work. | 5 | — | Placing an item with a relates-to edge to its epic makes it a member and routes it. Under a parked epic the cascade holds it. Placing a bead that carries `anchor_bead` is refused. |
 | 11 | **The Checkpoint records the next priority.** epics.md and epic-stewardship.md state the section 6 rule. | 6 | 1, PR #977 (tk-isd5sa) | The docs carry it, and a checkpoint sitting's recipe applies the verb with its visit as evidence. |
 | 12 | **Retire the ancestor bypass.** Reconcile reads `bd ready` alone. | 2 | 2, tk-n18e15 | No open demand bead blocks an epic, and the bypass code and its tests are gone. |
 
