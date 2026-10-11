@@ -1,6 +1,7 @@
 Formula: mol-visit
 Description: mol-visit — "I want to talk about this": file one visit on a
-subject bead, parked on the helm board (gc.routed_to=human). The
+subject bead, parked on the helm board (gc.routed_to=human), or reuse the
+conversation visit already open on it. The
 operator-driven trigger of the one entry point — all three triggers
 (formula-driven, event-driven, operator-driven) collapse into filing a visit
 (specs/tk-h9pq5/design-doc.md, Key Components §5; docs/architecture.md "How
