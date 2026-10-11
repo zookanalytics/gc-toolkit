@@ -12,7 +12,7 @@
 # a pool on route, so a bead sent to a bare role is read by no one and nothing
 # reports the strand.
 #
-# submit-branch-gate.test.sh checks this for mol-polecat-work alone. Several
+# submit-and-exit.test.sh checks this for mol-polecat-work alone. Several
 # formulas build routing addresses from the same var, so the invariant is a
 # class, not one file: this scans every formula under formulas/, and every
 # formula that splices {{binding_prefix}} must declare it in the form the scan

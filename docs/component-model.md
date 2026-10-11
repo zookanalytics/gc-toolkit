@@ -335,6 +335,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
+| `assets/scripts/load-context-duplicate-dispatch-gate.sh` | work | Refuses a work bead that is unreadable, parked, in flight under another live owner, or finished, before load-context touches the workspace. |
+| `assets/scripts/load-context-blocked-work-gate.sh` | work | Refuses a work bead that an open `blocks` dependency still gates, and arms the deferred dispatch that re-offers it once the blocker closes. |
+| `assets/scripts/submit-and-exit.sh` | work | The terminal step's mechanics: the branch gate, the landing target, the push and the bring-current guard, the refinery handoff in three claim-guard-safe writes, the step-chain close, and the branch release. |
+| `assets/scripts/escalate-hold-drain.sh` | work | A declined step's exit: files the visit, holds the molecule, then drains, each only after the one before it landed. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |

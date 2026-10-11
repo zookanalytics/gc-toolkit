@@ -21,14 +21,15 @@ workflow-finalize is the control-dispatcher's — never close it.
 Two distinct branch questions: {{base_branch}} is what the worktree is
 poured FROM (on a rework child, the reviewed branch — by design);
 metadata.target is where the work LANDS. submit-and-exit resolves the
-landing target once and fails closed; the marked submit-* blocks are
-extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
-after any edit here.
+landing target once and fails closed. Its mechanics live in
+assets/scripts/submit-and-exit.sh, and load-context's gates in
+load-context-duplicate-dispatch-gate.sh and load-context-blocked-work-gate.sh;
+each script's sibling *.test.sh runs it.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
 separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
-submit-and-exit resolves it once, in step 4b, and the summary follows it.
+submit-and-exit resolves it once, and the summary and a retitle follow it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
 attempt bounced with the branch intact — resume it by bringing the branch

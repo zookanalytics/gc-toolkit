@@ -197,7 +197,7 @@ read "landed in the refinery" as "main moved".
 |---|---|---|
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
-| `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
+| `target` | you (submit) / caller | landing branch (resolved once, by `submit-and-exit.sh`) |
 | `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
 | `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
@@ -219,7 +219,7 @@ stands on a branch some OTHER open bead anchors, and every reader that matters
 for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
-Submit step 4b resolves it: the open bead on this branch that carries a
+`submit-and-exit.sh` resolves it: the open bead on this branch that carries a
 `merge_result`. Write to the anchor what the anchor's readers read, and to
 your claimed bead everything else.
 
