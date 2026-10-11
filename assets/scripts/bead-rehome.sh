@@ -22,7 +22,8 @@
 # Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
 # pr-facts.sh (a PR closed with a pre-recorded disposition),
 # scaffolding-sweep.sh (a finding a disposed PR leaves unanswered, closed onto
-# the bug that carries it).
+# the bug that carries it), deferred-dispatch.sh (a bead whose `until` targets
+# have all closed, closed onto the one that closed last).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
