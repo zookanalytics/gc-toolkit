@@ -232,12 +232,12 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER` / `MISFILED`):
    ```bash
-   # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
-   # so a read that did not resolve leaves it empty — the "hold" case below.
-   HOLDER=""
-   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
+   # eval the assignments the fold reads. HOLDER="" first, so a read that did
+   # not resolve leaves it empty — the "hold" case below.
+   HOLDER=""; MISFILED=""
+   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER|MISFILED)=')"
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
@@ -251,6 +251,15 @@ The loop, every visit:
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
    hold.
+
+   `$HOLDER` is always a visit in this visit's own store, because a fold never
+   crosses stores: the merge-hold keys it moves hold a PR's merge only in that
+   PR's own store. `$MISFILED` names the live visits on this topic, this one
+   included, that sit in a different store from their subject. Nothing that
+   reads the subject's store sees them, and that includes a PR merge hold they
+   carry. Never fold into one. When `$MISFILED` is not empty, say in your
+   framing's detail which visits are misfiled, because correcting a misfile is
+   the operator's call.
 
 **Steps 2–8 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
@@ -400,10 +409,38 @@ Rules:
   field of each `formulas/*.toml` in the rig checkout, and name the
   formula you chose when you frame the choice. File the work bead as a
   sibling and wire the wait exactly as step 7 says.
+- **Which route — a bare visit, a plain work bead, or a design-convoy.**
+  Decide with the questions under "Choosing a design-convoy" below. When they
+  point at a design-convoy, recommend `mol-design-convoy`: the
+  `gc.recommended_formula` stamp the operator Accepts and slings like any other
+  subject formula.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
+
+
+## Choosing a design-convoy
+
+A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
+one initiative. A design child lands its doc on the convoy's integration branch,
+implementation builds there, and the whole unit graduates to the default branch
+as one reviewed PR. Choose the route for a follow-up by asking, in order:
+
+1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
+   or decision the operator owns, with nothing to build, has nothing to
+   dispatch.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
+   unit and the design gate catches a wrong shape before it is built. No: a
+   plain work bead on the default one-child convoy, one PR to the default
+   branch.
+
+`design_gated` defaults to `true`, which holds implementation until the operator
+approves the design's PR. `docs/design-convoy.md` describes the gates and when
+all-in-one (`--var design_gated=false`) fits.
+
 
 
 ## Context discipline
@@ -558,7 +595,7 @@ OBS_META=$(jq -nc \
   --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
     "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
-    "gc.outcome": "recorded"}')
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <the generalizable point>

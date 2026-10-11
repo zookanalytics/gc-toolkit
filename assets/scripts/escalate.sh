@@ -26,13 +26,15 @@
 # question becomes a visit.
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
-# than counted as a satisfied escalation. A rig-qualified --pool also selects
-# the store the visit lands in, so route and store cannot disagree; without
-# one, a rig-less caller has no store to reconcile an already-open visit's
-# rig-qualified route against, and refuses rather than guess. On the board
-# route the subject selects the store instead: when its id prefix names one,
-# every read and write is pinned by path to that store, the city's included,
-# wherever the caller sits. An
+# than counted as a satisfied escalation. The subject selects the store, on
+# every route: when its id prefix names one, every read and write is pinned by
+# path to that store, the city's included, wherever the caller sits and
+# whatever --pool names. A visit belongs beside its subject: merge.sh reads a
+# PR's merge holds from its own rig's store only, so a hold-carrying visit filed
+# anywhere else holds nothing. A --pool names a route and never a store, and a
+# pool that does not read the subject's store is refused. Where the subject names no store, a
+# rig-less caller has nothing to reconcile a rig-qualified route against, and
+# refuses rather than guess. An
 # ephemeral --subject (a patrol wisp, or a subject proven to name no bead) is
 # redirected onto this store's standing triage subject, because the sitting
 # that works the visit writes its outcome and takeaway to the subject.
@@ -66,9 +68,9 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              durable subject.
   --subject  the bead the escalation is about; the visit tracks it (required).
              One bead id, [A-Za-z0-9._-] only.
-             On the board route the visit is filed in the store the subject's
-             id prefix names, whatever GC_RIG says; only a subject whose store
-             cannot be derived falls back to the GC_RIG store.
+             On every route the visit is filed in the store the subject's id
+             prefix names, whatever GC_RIG or --pool says; only a subject whose
+             store cannot be derived falls back to the GC_RIG store.
              A durable bead also narrows the dedup to that bead; an ephemeral
              one (a patrol wisp, or a subject proven to name no bead) cannot,
              so there the key alone is the identity, and the visit is filed on
@@ -87,8 +89,8 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
   --pool     route to a specific pool instead of the board; default `human`,
              which parks the visit on the helm board for the operator to engage
              (the converse routed-pool is retired). A pool route must name a
-             live agent identity that reads this rig's store; a rig-qualified
-             --pool also selects the store, so route and store cannot disagree.
+             live agent identity that reads the subject's store. The pool
+             never selects the store, so a pool in another rig is refused.
 
 env:
   GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
@@ -133,20 +135,9 @@ case "$SUBJECT" in
     exit 2 ;;
 esac
 
-# GC_RIG naming a bound rig selects the store `gc bd` reads and writes,
-# outranking BEADS_DIR and the working directory, and a pool offer is claimed
-# only by an agent that reads that store. A rig-less caller naming a
-# rig-qualified pool therefore adopts that rig: one flag names the route and the
-# store, and they agree.
-POOL_RIG="${POOL_ARG%%/*}"
-if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ]; then
-  export GC_RIG="$POOL_RIG"
-  warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
-fi
-
 # >>> subject-class
-# Whether --subject is a durable bead decides the dedup identity below and, on
-# the board route, whether a store can be derived from the subject at all.
+# Whether --subject is a durable bead decides the dedup identity below and
+# whether a store can be derived from the subject at all.
 # Resolved once here, so every path agrees:
 #   durable   — escalation-rig.sh (bead-store.sh) resolves exactly one rig: a
 #               real bead id whose store is known.
@@ -161,12 +152,12 @@ fi
 #   unproven  — escalation-rig exit 3, or any code but 0 and 1: no store could
 #               be asked (the store helper could not run, the rig set was
 #               unreadable, or a prefix two rigs carry). The subject may be a
-#               real bead, so it is NOT bucketed as ephemeral; the board-route
-#               block refuses it when GC_RIG is unset.
+#               real bead, so it is NOT bucketed as ephemeral; the store-pin
+#               block below refuses it when GC_RIG is unset.
 # The *-wisp-* glob overrides escalation-rig's answer because a wisp's own prefix
 # (lx-, tk-) does resolve to a rig, so resolvability alone would miscall it
-# durable. The rig a wisp resolves to is kept, so the board route files it in the
-# store its prefix names, as it does a durable subject.
+# durable. The rig a wisp resolves to is kept, so its visit is filed in the store
+# its prefix names, as a durable subject's is.
 ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
 subj_rig_why=""
 # esc_rig [--db] <subject> leaves escalation-rig.sh's answer in ESC_OUT, its exit
@@ -200,31 +191,35 @@ case "$SUBJECT" in *-wisp-*) SUBJECT_CLASS=ephemeral ;; esac
 SUBJECT_IS_EPHEMERAL=0; [ "$SUBJECT_CLASS" = ephemeral ] && SUBJECT_IS_EPHEMERAL=1
 # <<< subject-class
 
-# The default route is `human` (the retired converse pool's replacement; set in
-# the gate-visit block below): the visit parks on the helm board, which is not a
-# pool name that selects a store. The visit belongs in its subject's own store.
-# bd writes the tracks edge into the store the visit is filed in, so a visit
-# filed anywhere else keeps its link to the subject where nothing reading the
+# The visit belongs in its subject's own store, whatever its route. bd writes
+# the tracks edge into the store the visit is filed in, so a visit filed
+# anywhere else keeps its link to the subject where nothing reading the
 # subject's store can find it: severed from the subject, the silent mute this
-# script exists to end.
+# script exists to end. A visit that carries a PR's merge-hold keys (pr-facts.sh
+# stamps them) holds that merge only from the store merge.sh reads, the PR's own
+# rig store, which is the subject's.
 #
-# Neither GC_RIG nor the working directory reliably selects that store. `gc bd`
-# honors GC_RIG only when it names a bound rig, and the city's own store is not
-# one: GC_RIG set to the city's rig name draws a warning and is ignored, and the
-# call answers from the caller's working directory. A caller in a rig checkout
-# escalating about a city-store subject would file into its own rig.
+# Neither GC_RIG, the working directory nor the route reliably selects that
+# store. `gc bd` honors GC_RIG only when it names a bound rig, and the city's own
+# store is not one: GC_RIG set to the city's rig name draws a warning and is
+# ignored, and the call answers from the caller's working directory. A caller in
+# a rig checkout escalating about a city-store subject would file into its own
+# rig. A pool names who claims the visit, and the pool a caller picks need not
+# live in the subject's rig, so a store taken from the pool can file the visit
+# away from its subject.
 #
-# So on the board route the store is proven from the subject itself, through
-# escalation-rig.sh (bead-store.sh): the one prefix->store derivation the
-# destructive gates use, which refuses a prefix no rig carries, one two rigs
-# carry, an unreadable rig set, and a rig with no path, each with its own reason
-# on stderr. Every `gc bd` call below names that store by path through
-# STORE_DB, because a --db path reaches every store, the city's included, ahead
-# of GC_RIG and the working directory. GC_RIG is bound to the subject's rig for
-# pool-route.sh, which judges an already-open visit's route against the rig
-# whose store it was read from. A caller's GC_RIG naming another rig is
-# overridden with a warning rather than refused, since the pin files the visit
-# in the subject's store whatever GC_RIG says.
+# So the store is proven from the subject itself, through escalation-rig.sh
+# (bead-store.sh): the one prefix->store derivation the destructive gates use,
+# which refuses a prefix no rig carries, one two rigs carry, an unreadable rig
+# set, and a rig with no path, each with its own reason on stderr. Every `gc bd`
+# call below names that store by path through STORE_DB, because a --db path
+# reaches every store, the city's included, ahead of GC_RIG and the working
+# directory. GC_RIG is bound to the subject's rig for pool-route.sh, which judges
+# every route against the rig whose store the visit is in: a --pool from another
+# rig is refused as cross-rig, and an already-open visit routed to one is
+# repointed. A caller's GC_RIG naming another rig is overridden with a warning
+# rather than refused, since the pin files the visit in the subject's store
+# whatever GC_RIG says.
 #
 # A subject with no store to pin is handled by the class resolved above. An
 # ephemeral one (a subject proven to name no bead, or a wisp whose prefix names
@@ -235,26 +230,24 @@ SUBJECT_IS_EPHEMERAL=0; [ "$SUBJECT_CLASS" = ephemeral ] && SUBJECT_IS_EPHEMERAL
 # unpinned under the caller's GC_RIG, since there is nothing to disprove that
 # pin with, and is refused when GC_RIG is unset.
 STORE_DB=""
-if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
-  # The rig names the store for pool-route.sh and the path selects it for
-  # `gc bd`; without both, the store is unproven.
-  subj_db=""
-  if [ -n "$SUBJECT_RIG" ]; then
-    esc_rig --db "$SUBJECT"
-    [ "$ESC_RC" = 0 ] && subj_db="$ESC_OUT"
+# The rig names the store for pool-route.sh and the path selects it for `gc bd`;
+# without both, the store is unproven.
+subj_db=""
+if [ -n "$SUBJECT_RIG" ]; then
+  esc_rig --db "$SUBJECT"
+  [ "$ESC_RC" = 0 ] && subj_db="$ESC_OUT"
+fi
+if [ -n "$subj_db" ]; then
+  STORE_DB="$subj_db"
+  if [ -z "${GC_RIG:-}" ]; then
+    warn "GC_RIG unset; deriving rig '$SUBJECT_RIG' from subject '$SUBJECT' and filing in its store ($STORE_DB), not the caller's ambient store"
+  elif [ "$GC_RIG" != "$SUBJECT_RIG" ]; then
+    warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$SUBJECT_RIG'; a visit belongs in its subject's own store, so it is filed there ($STORE_DB), not in the '$GC_RIG' store"
   fi
-  if [ -n "$subj_db" ]; then
-    STORE_DB="$subj_db"
-    if [ -z "${GC_RIG:-}" ]; then
-      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$SUBJECT_RIG' from subject '$SUBJECT' and filing in its store ($STORE_DB), not the caller's ambient store"
-    elif [ "$GC_RIG" != "$SUBJECT_RIG" ]; then
-      warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$SUBJECT_RIG'; on the board route the visit belongs in the subject's own store, so it is filed there ($STORE_DB), not in the '$GC_RIG' store"
-    fi
-    export GC_RIG="$SUBJECT_RIG"
-  elif [ "$SUBJECT_CLASS" != ephemeral ] && [ -z "${GC_RIG:-}" ]; then
-    warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would be severed from its subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
-    exit 1
-  fi
+  export GC_RIG="$SUBJECT_RIG"
+elif [ "$SUBJECT_CLASS" != ephemeral ] && [ -z "${GC_RIG:-}" ]; then
+  warn "GC_RIG unset and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would be severed from its subject. Re-run with GC_RIG set to the subject's rig."
+  exit 1
 fi
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -287,7 +280,7 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # closes the visit. No matching open visit is success: retract is idempotent,
 # so a second pass, or a subject that never raised one, exits 0 having changed
 # nothing. The lookup reads the subject's own store, pinned by STORE_DB in the
-# board-route block above exactly as the filing path is; visit-close.sh
+# store-pin block above exactly as the filing path is; visit-close.sh
 # addresses the visit and the subject by id, and an id resolves to the store
 # that holds it.
 if [ "$RETRACT" = 1 ]; then
@@ -353,6 +346,23 @@ POOL_ROUTE="$SELF_DIR/pool-route.sh"
 # ok | unknown | cross-rig | no-identity | unbound-store, for a route this
 # script did not write.
 route_verdict() { "$POOL_ROUTE" --verdict "$1"; }
+# pool-route.sh judges a route against the store GC_RIG names. The subject's
+# rig is bound there whenever its store is pinned, so a pool from another rig is
+# refused as cross-rig. With no pin and GC_RIG unset, the visit lands in
+# whatever store the ambient environment picks, and nothing can prove that a
+# rig-qualified pool reads it. A pool never selects the store, so that route is
+# refused rather than guessed. Checked at each point that writes a route, as
+# pool-route.sh is.
+pool_store_known() {
+  case "$1" in
+    */*)
+      if [ -z "${GC_RIG:-}" ]; then
+        warn "--pool '$1' is scoped to rig '${1%%/*}', but subject '$SUBJECT' names no store and GC_RIG is unset, so nothing proves that pool reads the store this visit would land in. A pool never selects the store; nothing filed. Re-run with GC_RIG set to the store the visit belongs in, or without --pool to park it on the board."
+        return 1
+      fi ;;
+  esac
+  return 0
+}
 
 # The headline is the first line of the message, capped so a long paragraph
 # does not run into the visit title. When it overruns, cut back to the last
@@ -434,9 +444,10 @@ if [ -n "$OPEN" ]; then
       # the visit is the mute this script exists to end, and repointing would
       # rewrite a route that is very likely sound. The caller names its store.
       warn "visit $OPEN is open for $DEDUP_SCOPE and routes to '$OPEN_ROUTE', but GC_RIG is unset, so nothing here can tell whether that pool reads the store this row came from — a visit in a store it never lists has asked nobody."
-      warn "  repair: re-run with --pool '$OPEN_ROUTE' (or GC_RIG=${OPEN_ROUTE%%/*}) so the store and the route agree."
+      warn "  repair: re-run with GC_RIG=${OPEN_ROUTE%%/*} so the store and the route agree."
       exit 1 ;;
   esac
+  pool_store_known "$POOL_NAME" || exit 1
   POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
   warn "visit $OPEN is open for $DEDUP_SCOPE but routes to '$OPEN_ROUTE', which no live pool claims — repointing it at '$POOL'."
   gc bd update "$OPEN" ${STORE_DB:+--db "$STORE_DB"} --set-metadata "gc.routed_to=$POOL" >/dev/null 2>&1
@@ -519,6 +530,7 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
   fi
 fi
 
+pool_store_known "$POOL_NAME" || exit 1
 POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 
 # The subject has to outlive the visit. A converse sitting records what it

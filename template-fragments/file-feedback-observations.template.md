@@ -15,7 +15,7 @@ OBS_META=$(jq -nc \
   --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
   '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
     "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
-    "gc.outcome": "recorded"}')
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
   -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <the generalizable point>

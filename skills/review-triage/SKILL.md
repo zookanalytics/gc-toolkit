@@ -110,7 +110,7 @@ reviewed PR writes the index.
 OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
     "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
-    "gc.outcome": "recorded"}')
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
   -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <what a reviewer could not classify the diff against>

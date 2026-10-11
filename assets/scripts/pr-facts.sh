@@ -7,8 +7,9 @@
 # spends, since both are attempts at the one repair;
 # CLOSED-unmerged -> if the anchor carries a pre-recorded disposition
 # (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
-# bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
-# + escalate.sh visit; base moved -> retargeted +
+# bead-rehome.sh once its parked children, its machine review scaffolding
+# (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
+# otherwise abandoned + escalate.sh visit; base moved -> retargeted +
 # escalate (check markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
 # PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
@@ -174,6 +175,10 @@ RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
+# The retirement of a disposed anchor's machine review scaffolding, the same
+# sweep the cadence runs as arm 10. The close arm runs it for its one anchor
+# before that close, so the scaffolding's blocks edges do not refuse it.
+SCAFFOLDING_SWEEP="$SCRIPTS_DIR/scaffolding-sweep.sh"
 # The guarded visit close. Both visit retires below go through it, so a retired
 # visit carries gc.outcome and gc.outcome_reason, the board's outcome and headline
 # for a sitting that left no takeaway, and both stamps read back before the close.
@@ -1571,6 +1576,27 @@ CHILDREN_EOF
             echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
           fi
         fi
+        # Retire the anchor's machine review scaffolding BEFORE its close, for
+        # the reason the children above go first. A fix unit, an open must-fix
+        # finding and a validation pass each hold a `blocks` edge on the anchor,
+        # so while one is open the close below is refused and escalated, for
+        # scaffolding that arm 10 retires later in this same pass. The sweep it
+        # runs here is arm 10's, scoped to this anchor, so both retire the same
+        # set: a finding about this diff is mooted, and one that can cite code
+        # the target branch already carries is carried forward as a bug of its
+        # own. When a finding's comment line does not read this pass (exit 3),
+        # or the scaffolding does not enumerate (exit 1), the close waits for the
+        # next pass rather than landing before the finding is judged. The
+        # children's writes above change what the sweep reads, so the pass's
+        # cached listings are dropped first.
+        if [ -x "$SCAFFOLDING_SWEEP" ]; then
+          bd_cache_clear
+          "$SCAFFOLDING_SWEEP" --anchor "$id"; src=$?
+          if [ "$src" -eq 1 ] || [ "$src" -eq 3 ]; then
+            echo "$PROG: $id — PR#$num disposition recorded but its review scaffolding is not settled (scaffolding-sweep rc=$src); retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+        fi
         # Retire this script's merge-path visits on the anchor BEFORE its close,
         # not after. Each was filed to hold PR#$num's merge until a person
         # answered it (MERGE_PATH_KEYS_JQ), possibly before the disposition marker
@@ -2680,7 +2706,13 @@ $CBODY"
     # behaviour: neither the findings nor the watermark land unless every item
     # filed. finding.sh dedups on lane plus a normalized locus and message, so a
     # retry after a mid-batch failure re-adopts the findings already filed rather
-    # than twinning them.
+    # than twinning them. A batch routed to a rework child records that child on
+    # each finding (finding.fix_unit), the one fix unit a must-fix ruling may hang
+    # the finding's close-ordering edge on. The anchor's other rework children —
+    # an earlier batch's, a stale-base merge-in, a red-check rework — never carried
+    # this batch, and a finding wired to one closes as answered when it lands. A
+    # finding a later batch re-raises records that batch's child instead.
+    FFU=(); case "$DISP" in rework:?*) FFU=(--fix-unit "${DISP#rework:}") ;; esac
     if [ ! -x "$FINDING" ]; then
       echo "$PROG: WARN $id — PR#$num finding tool not found ($FINDING); NOT watermarking (the batch has no findings for the validator to rule)" >&2
       skipped=$((skipped + 1)); continue
@@ -2699,7 +2731,7 @@ $CBODY"
       fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
       frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
-      if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" 2>/dev/null) && [ -n "$fid" ]; then
+      if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" ${FFU[@]+"${FFU[@]}"} 2>/dev/null) && [ -n "$fid" ]; then
         # Record which GitHub row and review raised it. finding.comment_id lets the
         # write-back post a declined finding's owed reply into that thread;
         # finding.review_id groups the finding under its review, so the write-back
@@ -2717,15 +2749,18 @@ $CBODY"
       echo "$PROG: WARN $id — PR#$num could not file every feedback finding; NOT watermarking (retry next pass; finding.sh re-adopts the ones already filed)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # The rework child's edges onto the findings it answers are NOT hung here.
-    # Every finding is still unvalidated, and a fix unit that blocked one the
-    # validator later declines would refuse that finding's close (bd will not close
-    # a blocked issue) and stall the validator's triage. The close-ordering edge
+    # The rework child's edge onto a newly filed finding is NOT hung here. The
+    # finding is still unvalidated, and a fix unit that blocked one the validator
+    # later declines would refuse that finding's close (bd will not close a
+    # blocked issue) and stall the validator's triage. The close-ordering edge
     # onto a finding is hung as the validator rules it must-fix (finding.sh
-    # set-disposition), so the fix unit blocks only the findings it must answer; a
-    # visit-routed batch has no fix unit and a human answers it. The child's own
-    # blocks edge onto the anchor, wired at dispatch, is what holds the merge in the
-    # meantime (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
+    # set-disposition, from the finding.fix_unit recorded above), so the fix unit
+    # blocks only the findings it must answer. A re-raised finding already ruled
+    # must-fix is not ruled again, so upsert hangs this batch's child onto it as
+    # it re-adopts it. A visit-routed batch has no fix unit and a human answers
+    # it. The child's own blocks edge onto the anchor, wired at dispatch, is what
+    # holds the merge in the meantime
+    # (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
     # The batch boundary goes down WITH the disposition that names it. Derived
     # later, off the disposition, it can be lost: a pass that exits after this

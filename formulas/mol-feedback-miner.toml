@@ -258,7 +258,7 @@ $NORM
 # and the next run's pair-key dedup finds it.
 OBS_META=$(jq -nc --arg c "$CATEGORY" --arg s "$SCOPE" --arg d "$DIRECTIVE" --arg k "$KEY" \
   '{task_kind: "observation", "obs.category": $c, "obs.scope": $s, "obs.source": "miner",
-    "obs.directive": $d, "obs.provenance": $k, "gc.outcome": "recorded"}')
+    "obs.directive": $d, "obs.provenance": $k, "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 BEAD_JSON=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task -l learning -l observation -d "$BODY" --metadata "$OBS_META" --status=closed --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create observation for $KEY${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
