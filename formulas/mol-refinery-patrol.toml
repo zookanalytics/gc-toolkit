@@ -556,7 +556,9 @@ retry:
 head onto origin/$TARGET in a throwaway worktree, pushes, verifies the remote
 ref, and records and closes the bead in ONE lifecycle transition. Exit 3 means
 branch protection refused the push: the bead is now `merge_strategy=pr`, so
-take the mr path below. Any other non-zero exit has drained; stop the wisp.
+take the mr path below. Any other non-zero exit stops the wisp. A refused or
+unverified push has drained; a git or lifecycle command that failed has not,
+and the script printed which.
 ```bash
 "$SCRIPTS/direct-merge-push.sh" --work "$WORK" --target "$TARGET"; DIRECT_RC=$?
 [ "$DIRECT_RC" = 3 ] && MERGE_STRATEGY=mr

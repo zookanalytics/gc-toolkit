@@ -19,14 +19,17 @@
 # review", "Cannot update this protected ref") promotes the bead to
 # merge_strategy=pr and exits 3, and the caller takes the mr path: the prep
 # worktree is untouched and still holds the prepared head for the PR push. Any
-# other failure drains and exits 1, leaving the work with the refinery.
+# other refused push, a push origin does not verify, and an unresolvable rig
+# drain and exit 1, leaving the work with the refinery. Any other command that
+# fails stops the script under errexit with that command's status, undrained.
 #
 # The merge worktree and its scratch directory are removed on every exit.
 #
 # Called by mol-refinery-patrol's merge-push step.
 # env: GC_RIG_ROOT, GC_RIG; GC_LIFECYCLE_TOOL replaces the sibling lifecycle.sh.
-# exit: 0 merged, pushed, verified and closed · 1 failed (drained) · 2 usage
-#       · 3 promoted to merge_strategy=pr (take the mr path)
+# exit: 0 merged, pushed, verified and closed · 2 usage · 3 promoted to
+#       merge_strategy=pr (take the mr path) · otherwise failed: drained after
+#       a push or rig failure, undrained after an errexit stop
 # Errexit only, as the block this was ran: the rig-root lookup below is the one
 # every refinery block copies verbatim, and it reads GC_RIG bare.
 set -e
