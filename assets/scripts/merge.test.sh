@@ -157,9 +157,16 @@ eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
 eq "$(bstatus MR2)" "open" "…and the anchor stays open"
 
 echo "# a broken lane or finalize helper holds its own anchor, never the pass"
-# Only the check resolver is required up front. lane-state.sh and finalize-gate.sh
-# fail where they are called, which holds that one open PR, and a PR that has
-# already merged still gets its record, which needs neither helper.
+# Only the check resolver is required up front. The lane derivation and
+# finalize-gate.sh fail where they are called, which holds that one open PR, and
+# a PR that has already merged still gets its record, which needs neither. The
+# two are induced differently because they live differently: finalize-gate.sh is
+# a sibling script in both arms, so chmod -x breaks it in both; the lane
+# derivation is lane-state.sh in the shell arm but lane.Green in-process in the
+# gctk arm, which execs no script, so its failure is induced at the store, where
+# both arms read: STUB_LIST_FAIL_ON on the lane query's `anchor_bead=HM1`, the
+# one merge read that lists by anchor_bead (the anchors read is merge_result=,
+# the by-PR read is pr_number=, the children read is a dep list).
 for helper in lane-state.sh finalize-gate.sh; do
   case "$helper" in
     lane-state.sh) why="PR#65 lane state unreadable on anchor HM1; merge held" ;;
@@ -169,10 +176,14 @@ for helper in lane-state.sh finalize-gate.sh; do
   printf '%s' "$(prview 65 OPEN CLEAN)" > "$GH_DIR/pr_view_65.json"
   printf '%s' "$(prview 66 MERGED CLEAN)" > "$GH_DIR/pr_view_66.json"
   approved 65
-  chmod -x "$SD/$helper"
   : > "$STUB_GH_LOG"
-  out=$("$SUT" 2>&1); rc=$?
-  chmod +x "$SD/$helper"
+  case "$helper" in
+    lane-state.sh) out=$(STUB_LIST_FAIL_ON="anchor_bead=HM1" "$SUT" 2>&1); rc=$? ;;
+    finalize-gate.sh)
+      chmod -x "$SD/$helper"
+      out=$("$SUT" 2>&1); rc=$?
+      chmod +x "$SD/$helper" ;;
+  esac
   eq "$rc" 0 "a non-executable $helper leaves the pass at exit 0"
   has "$out" "merge: $why" "…holding the open PR at the $helper call"
   hasnt "$(cat "$STUB_GH_LOG")" "pr merge 65" "…which does not merge"
@@ -1669,12 +1680,15 @@ echo "## arm: shell fallback (GCTK_FALLBACK=merge)"
 export GCTK_FALLBACK=merge
 suite
 # With a binary named, merge.sh keeps the call, and the landing it records
-# still reaches that binary through lifecycle.sh.
+# still reaches that binary through lifecycle.sh. lane-state.sh hands its call
+# to the same binary, so it is kept on its shell too for this one run: the
+# sentinel standing in for gctk would otherwise answer the lane query with its
+# own stdout, which the shell's first_notgreen_lane reads as a lane name.
 store "[$(anchor SF1 133), $(rev SF1)]"
 printf '%s' "$(prview 133 OPEN CLEAN)" > "$GH_DIR/pr_view_133.json"
 approved 133
-out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
-hasnt "$out" "SENTINEL-GCTK merge" "GCTK_FALLBACK=merge keeps merge.sh on its shell with a binary named"
+out=$(GCTK_FALLBACK=merge,lane-state GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
+hasnt "$out" "SENTINEL-GCTK merge" "GCTK_FALLBACK naming merge keeps merge.sh on its shell with a binary named"
 has "$out" "SENTINEL-GCTK lifecycle transition SF1 --to merged" "…and the shell records the landing through lifecycle.sh, which execs that binary"
 rm -f "$GH_DIR/pr_view_133.json" "$GH_DIR/reviews_133.json"
 unset GCTK_FALLBACK

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lane"
 )
 
 // `gctk merge` is the port of assets/scripts/merge.sh: arm 2 of the merge
@@ -32,10 +33,12 @@ import (
 // (pace.go).
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
-// same writer the shell reached through lifecycle.sh. Every other seam is a
-// subprocess exactly as the script's was — gc/bd/gh/git and the sibling shell
-// helpers (escalate.sh, record-failure-cap.sh, lane-state.sh, finalize-gate.sh,
-// review-checks.sh, render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
+// same writer the shell reached through lifecycle.sh, and each lane's green is
+// derived in-process by lane.Green, the derivation lane-state.sh hands its own
+// calls to. Every other seam is a subprocess exactly as the script's was —
+// gc/bd/gh/git and the sibling shell helpers (escalate.sh,
+// record-failure-cap.sh, finalize-gate.sh, review-checks.sh,
+// render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
 // which gctk-resolve.sh exports as merge.sh's directory before it execs this
 // binary. That keeps the stub harness, the observability and the permissions
 // surfaces identical. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass
@@ -115,6 +118,11 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	if rc, done := m.resolveOrigin(); done {
 		return rc
 	}
+	// The lane derivation's GitHub-approval fallback asks `gh api
+	// repos/<owner>/<repo>/...`, the bare slug, not the host-qualified
+	// originRepoQ merge's own gh calls pass to --repo. The slug is the one this
+	// pass just resolved, so the fallback reads no origin of its own.
+	m.remote = lane.Remote{Origin: lane.FixedSlug(m.originRepo), Approver: lane.GHApprover{}}
 	// Used only to exclude our own reviews; unresolved holds the approval gate.
 	m.selfLogin = strings.TrimSpace(string(firstOut(m.ghOrigin("user", "--jq", ".login"))))
 	if m.selfLogin == "" {
@@ -157,7 +165,10 @@ type merger struct {
 	selfLogin      string
 	repoRoot       string
 	scriptsDir     string
-	anchors        []gcbd.Bead
+	// remote is the lane derivation's GitHub-approval fallback: this pass's
+	// origin slug and a gh-backed approver.
+	remote  lane.Remote
+	anchors []gcbd.Bead
 	// deadline and cursor pace the anchors the visit order does not put first.
 	deadline string
 	cursor   string
@@ -177,31 +188,18 @@ type merger struct {
 }
 
 // resolveOrigin mirrors the origin-repo resolution: github only, the slug
-// validated to exactly owner/repo. done=true means the caller returns rc.
+// validated to exactly owner/repo. The reduction is lane.OriginSlug, the same
+// three URL forms, sed chain and shape check the script's case had, so merge
+// and lane-state resolve one checkout to one slug. done=true means the caller
+// returns rc.
 func (m *merger) resolveOrigin() (rc int, done bool) {
 	u := stripSpaces(runOut("git", "remote", "get-url", "origin"))
-	var repo string
-	switch {
-	case strings.HasPrefix(u, "git@github.com:"),
-		strings.HasPrefix(u, "https://github.com/"),
-		strings.HasPrefix(u, "ssh://git@github.com/"):
-		m.originHost = "github.com"
-		repo = u
-		repo = strings.TrimPrefix(repo, "ssh://git@github.com/")
-		repo = strings.TrimPrefix(repo, "git@github.com:")
-		repo = strings.TrimPrefix(repo, "https://github.com/")
-		repo = strings.TrimSuffix(repo, ".git")
-		repo = strings.TrimRight(repo, "/")
-	}
-	// Exactly owner/repo: reject owner/repo/extra, a leading slash, a trailing
-	// slash, and a bare name.
-	if n := strings.Count(repo, "/"); n != 1 || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") {
-		repo = ""
-	}
-	if repo == "" {
+	repo, ok := lane.OriginSlug(u)
+	if !ok {
 		fmt.Fprintf(m.stderr, "%s: cannot resolve this checkout's origin repository; NOTHING is merged this pass\n", mergeProg)
 		return 0, true
 	}
+	m.originHost = "github.com"
 	m.originRepo = repo
 	m.originRepoQ = m.originHost + "/" + m.originRepo
 	return 0, false
@@ -981,10 +979,16 @@ func (m *merger) prViewSettled(num string, pinnedRaw []byte) (outcome settledOut
 // The lanes are the ones review-checks.sh resolves for the merge, which drops
 // the non-lanes none/off and the approval merge rule. ok=false is a state the
 // caller holds on: the resolver exited non-zero, or a lane was unreadable
-// (lane-state green exit 2). A resolver that dies prints nothing, and reading
-// that as no lanes would merge on approval alone. An empty lane with ok=true
-// means every declared lane is green.
-func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok bool) {
+// (lane.Unreadable, lane-state green's exit 2). A resolver that dies prints
+// nothing, and reading that as no lanes would merge on approval alone. An empty
+// notgreen with ok=true means every declared lane is green.
+//
+// Each lane's green is lane.Green in-process, over the same store client the
+// rest of the pass reads through, with the GitHub-approval fallback live (the
+// script's lane-state.sh ran with no --no-remote). The script's one line of
+// stderr on an unreadable store, `lane-state: could not read review beads on
+// <anchor>`, is kept, because scriptRC forwarded the helper's stderr.
+func (m *merger) firstNotgreenLane(anchor, checkSet string) (notgreen string, ok bool) {
 	lanes, rrc := m.scriptCapture("review-checks.sh", "--resolve", "--check-set", checkSet, "--through", "merge")
 	if rrc != 0 {
 		return "", false
@@ -993,10 +997,14 @@ func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok boo
 		if l == "" {
 			continue
 		}
-		switch m.scriptRC("lane-state.sh", "green", "--anchor", anchor, "--lane", l) {
-		case 0:
+		v, err := lane.Green(m.client, m.remote, anchor, l, false)
+		if err != nil {
+			fmt.Fprintf(m.stderr, "lane-state: %s\n", err)
+		}
+		switch v {
+		case lane.IsGreen:
 			// green; next lane
-		case 1:
+		case lane.NotGreen:
 			return l, true
 		default:
 			return "", false
@@ -1131,13 +1139,13 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // resolve the helpers in, and a bare name would fall to a PATH lookup. A named
 // directory missing a helper is not refused here, because merge.sh refuses the
 // pass only for a missing check resolver, which Merge checks next. Every other
-// helper is handled where it is called. A missing lane-state.sh or
-// finalize-gate.sh holds that anchor. A missing escalate.sh,
-// record-failure-cap.sh or render-seed-audit.sh is skipped. The pass still
-// records a PR that has already merged.
+// helper is handled where it is called. A missing finalize-gate.sh holds that
+// anchor (lane green is derived in-process and needs no helper). A missing
+// escalate.sh, record-failure-cap.sh or render-seed-audit.sh is skipped. The
+// pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1164,13 +1172,6 @@ func (m *merger) recordCap(id, num, mergeOid, base string) {
 	cmd.Stdout = m.stdout
 	cmd.Stderr = m.stderr
 	_ = cmd.Run()
-}
-
-func (m *merger) scriptRC(name string, args ...string) int {
-	cmd := exec.Command(m.scriptPath(name), args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = m.stderr
-	return gcbd.ExitCode(cmd.Run())
 }
 
 func (m *merger) scriptCapture(name string, args ...string) (string, int) {
