@@ -710,6 +710,12 @@ case "$sub" in
     esac ;;
   api)
     path=""; jqexpr=""; gqvars='{}'; gqquery=""; method=""
+    # The -f/-F variables. gqv holds each by name, a later value for a name
+    # replacing the earlier one, and gqkeys the names in the order they first
+    # came. $gqvars is the same variables as one JSON object, built by a single
+    # jq once the arguments are read, so a request costs one process for its
+    # variables however many it carries. A handler reads one through gqvar.
+    declare -A gqv=(); gqkeys=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --hostname) shift ;;
@@ -721,28 +727,45 @@ case "$sub" in
           kv="${2:-}"; shift
           k="${kv%%=*}"; v="${kv#*=}"
           if [ "$k" = "query" ]; then gqquery="$v"
-          else gqvars=$(printf '%s' "$gqvars" | jq -c --arg k "$k" --arg v "$v" '.[$k] = $v'); fi ;;
+          else [ -n "${gqv[$k]+set}" ] || gqkeys+=("$k"); gqv[$k]="$v"; fi ;;
         --*) : ;;
         *) [ -z "$path" ] && path="$1" ;;
       esac
       shift || true
     done
+    if [ "${#gqkeys[@]}" -gt 0 ]; then
+      gqargs=()
+      for k in "${gqkeys[@]}"; do gqargs+=(--arg "$k" "${gqv[$k]}"); done
+      gqvars=$(jq -cn '$ARGS.named' "${gqargs[@]}")
+    fi
+    # gqvar <var> <name>: the request variable <name> into <var>, empty when the
+    # request carries none, its trailing newlines dropped the way reading it
+    # back out of $gqvars through a command substitution drops them.
+    gqvar() {
+      local val="${gqv[$2]-}"
+      while [ "${val%$'\n'}" != "$val" ]; do val="${val%$'\n'}"; done
+      printf -v "$1" '%s' "$val"
+    }
     if [ "$path" = "graphql" ]; then
       # The write-back surface: three reads plus four mutations, over a fixture
       # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
-      num=$(printf '%s' "$gqvars" | jq -r '.num // ""')
+      gqvar num num
       f="$G/threads_$num.json"
       # A mutation carries only the global node id, exactly as the real API takes
       # it, so the fixture holding that node has to be found rather than named.
+      # A fixture holding the node carries its id as a quoted JSON string, so one
+      # grep narrows the fixtures to those before jq reads each one, and a
+      # mutation's cost does not grow with the number of PR fixtures a suite has
+      # written. grep lists them in glob order, the order the scan reads them in.
       locate() { # <node-id> <node|thread>
         local cand filt
         if [ "$2" = "thread" ]; then filt='[ .threads[]? | select(.id == $i) ] | length > 0'
         else filt='[ (.reviews[]?, (.threads[]? | .comments.nodes[]?), .issue_comments[]?) | select(.id == $i) ] | length > 0'; fi
-        for cand in "$G"/threads_*.json; do
+        while IFS= read -r cand; do
           [ -s "$cand" ] || continue
           jq -e --arg i "$1" "$filt" "$cand" >/dev/null 2>&1 && { printf '%s' "$cand"; return 0; }
-        done
+        done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
       case "$gqquery" in
@@ -760,8 +783,8 @@ case "$sub" in
           # Drops the viewer's reaction of that content from the node, so the next
           # read shows it gone. STUB_UNREACT_RC models a removal the API refuses.
           [ "${STUB_UNREACT_RC:-0}" = "0" ] || exit "${STUB_UNREACT_RC:-0}"
-          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
-          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          gqvar sid id
+          gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg id "$sid" --arg c "$c" '
@@ -774,8 +797,8 @@ case "$sub" in
           echo '{"data":{"removeReaction":{"clientMutationId":null}}}'; exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
-          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
-          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          gqvar sid id
+          gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg id "$sid" --arg c "$c" '
@@ -790,8 +813,8 @@ case "$sub" in
           echo '{"data":{"addReaction":{"clientMutationId":null}}}'; exit 0 ;;
         *addPullRequestReviewThreadReply*)
           [ "${STUB_REPLY_RC:-0}" = "0" ] || exit "${STUB_REPLY_RC:-0}"
-          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
-          body=$(printf '%s' "$gqvars" | jq -r '.b // ""')
+          gqvar tid t
+          gqvar body b
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           # databaseId 0 and our own login keep the reply out of every react and
@@ -808,7 +831,7 @@ case "$sub" in
           echo '{"data":{"addPullRequestReviewThreadReply":{"clientMutationId":null}}}'; exit 0 ;;
         *resolveReviewThread*)
           [ "${STUB_RESOLVE_RC:-0}" = "0" ] || exit "${STUB_RESOLVE_RC:-0}"
-          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
+          gqvar tid t
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg t "$tid" '.threads = ((.threads // []) | map(if .id == $t then .isResolved = true else . end))' "$f" > "$t" && mv "$t" "$f"
@@ -831,7 +854,7 @@ case "$sub" in
         *PullRequestReviewThread*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -z "${STUB_GQL_THREAD_FAIL:-}" ] || exit 1
-          tid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
+          gqvar tid id
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
@@ -889,8 +912,8 @@ case "$sub" in
         n="${path##*/pulls/}"; n="${n%%/*}"
         f="$G/threads_$n.json"
         [ -s "$f" ] || echo '{"reviews":[],"threads":[],"issue_comments":[]}' > "$f"
-        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
-        p=$(printf '%s' "$gqvars" | jq -r '.path // ""')
+        gqvar b body
+        gqvar p path
         db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
         t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
         jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
@@ -901,15 +924,15 @@ case "$sub" in
         [ -s "$r" ] || echo '[]' > "$r"
         jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
           '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
-        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
-          "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
+        gqvar fst subject_type; gqvar fcommit commit_id
+        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$fst" "$fcommit" >> "${STUB_GH_LOG:?}"
         out="{\"id\":$db}"
         if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
         exit 0 ;;
       PATCH:*/issues/comments/*)
         [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
         cid="${path##*/issues/comments/}"
-        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        gqvar b body
         hit=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue
