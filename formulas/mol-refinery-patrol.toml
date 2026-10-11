@@ -450,8 +450,11 @@ FAIL_LOG=$(cat <<'FAILLOG'
 FAILLOG
 )
 # --title-contains, never --search: bd rejects that on stderr with an empty
-# stdout, which reads as "no duplicate".
-DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
+# stdout, which reads as "no duplicate". The probe reads every status a live
+# tracker can hold, as one comma list (a repeated --status keeps only its last
+# value); closed is left out, because a red that outlives a landed fix is new.
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+DUP_JSON=$(gc bd list --type=bug --status="$LIVE_STATUSES" --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
 # bd fails open, so only a JSON array is a readable answer. Anything else is
 # unknown: file nothing and merge nothing, and the next patrol re-probes.
 if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then

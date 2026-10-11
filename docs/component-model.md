@@ -380,6 +380,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
 | `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |
+| `assets/scripts/visit-file.sh` | visit | Files the one conversation visit a subject gets on the helm board, reusing one already open and never an escalation visit, for a formula step that puts a question to the operator. |
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |

@@ -518,14 +518,14 @@ fi
 
 ## 3. Contested rules: file a visit, never a flip
 
-One live visit per contested pattern. `gc-helm.sh open` folds into a visit
-already open on the pattern bead, and otherwise files the canonical board visit
-on it:
+One live visit per contested pattern. `visit-file.sh` reuses a conversation
+visit already open on the pattern bead (never an escalation visit, which closes
+on its own terms), and otherwise files the board visit on it:
 ```bash
-HELM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-helm.sh" ] && { HELM="$c/assets/scripts/gc-helm.sh"; break; }
+VF=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/visit-file.sh" ] && { VF="$c/assets/scripts/visit-file.sh"; break; }
 done
-"${HELM:?gc-helm.sh not found in the pack}" open "$PATTERN" --reason "contested rule: <rule summary>" --body "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>"
+"${VF:?visit-file.sh not found in the pack}" --subject "$PATTERN" --title "contested rule: <rule summary>" --description "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>"
 ```
 
 ## 4. Summarize and drain
