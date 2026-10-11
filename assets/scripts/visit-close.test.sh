@@ -45,8 +45,7 @@ mkdir -p "$BIN"
 #   FAIL_DEP    an edge write is refused (the holder cannot be joined)
 # The anchor graph reads answer an anchor with no children yet, and an edge
 # write is logged as "dep add <child> <anchor> ...".
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
@@ -150,8 +149,7 @@ echo "── the work-record outcome never holds the close ──"
 #                   ones land
 WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
 mkdir -p "$WBIN"
-cat >"$WBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$WBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update)

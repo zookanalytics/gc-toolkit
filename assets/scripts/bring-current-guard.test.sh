@@ -252,8 +252,7 @@ echo "# classify: a git read that fails is judgment, never mechanical"
 # exemption is what a failed read would otherwise hand out.
 REAL_GIT=$(command -v git)
 mkdir -p "$TMP/failgit"
-cat > "$TMP/failgit/git" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/failgit/git" <<SHIM
 sub=""; i=1
 while [ "\$i" -le "\$#" ]; do
   case "\${!i}" in

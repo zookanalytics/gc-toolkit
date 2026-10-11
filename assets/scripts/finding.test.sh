@@ -476,8 +476,7 @@ store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"",
 upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "assets/scripts/r.sh:$1()" --message "$2" --fix-unit "$3"; }
 mkdir -p "$TMP/cross"
 FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
   "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
 fi
@@ -496,8 +495,7 @@ eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it 
 # child, right after the batch's write. The re-adoption reads the disposition after
 # that write, so it sees must-fix and hangs its child.
 FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 "$BIN/gc" "\$@"; rc=\$?
 if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
   "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null

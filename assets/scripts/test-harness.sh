@@ -133,9 +133,19 @@ mk_sut_dir() { # <dir> <file>...
   return 0
 }
 
+# The interpreter line every stub starts with. A `#!/usr/bin/env bash` stub costs
+# two execs per call, env's and then bash's, and the suite calls its stubs tens
+# of thousands of times, so the stubs name the bash running this harness
+# directly: the one on PATH that run-tests.sh (or the operator) already picked.
+# env stays the fallback for a bash that does not report its own path.
+_stub_shebang() {
+  if [ -n "${BASH:-}" ] && [ -x "${BASH:-}" ]; then printf '#!%s\n' "$BASH"
+  else printf '#!/usr/bin/env bash\n'; fi
+}
+
 _write_gc_stub() {
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+_stub_shebang > "$BIN/gc"
+cat >> "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"; D="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -210,13 +220,14 @@ case "$sub" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$bead:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
-    jq -c --arg id "$bead" 'map(if .id == $id then (.metadata |= del(.["gc.routed_to"])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    case ",$drops," in
-      *",gc.execution_routed_to,"*) : ;;
-      *) jq -c --arg id "$bead" --arg t "$target" 'map(if .id == $id then .metadata["gc.execution_routed_to"] = $t else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-    esac
-    mv "$tmp" "$S"
+    stamp=1
+    case ",$drops," in *",gc.execution_routed_to,"*) stamp=0 ;; esac
+    tmp="${S%/*}/.gc-stub.$$"
+    jq -c --arg id "$bead" --arg t "$target" --argjson stamp "$stamp" '
+      map(if .id == $id then
+            (.metadata |= del(.["gc.routed_to"]))
+            | (if $stamp == 1 then .metadata["gc.execution_routed_to"] = $t else . end)
+          else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
@@ -294,20 +305,23 @@ case "$verb" in
       esac
       shift || true
     done
-    out=$(jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
-      [ .[]
+    # One jq answers the whole query, the --metadata-field filters included:
+    # each `k=v` is split at its first `=` (a field with no `=` keeps the whole
+    # word as both, as the shell split it did) and a row must match every one.
+    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
+      ($ARGS.positional | map(split("=") as $p
+                               | if ($p | length) == 1 then {k: ., v: .}
+                                 else {k: $p[0], v: ($p[1:] | join("="))} end)) as $fields
+      | [ .[]
         | (.status // "open") as $bst
         | select($st == "" or (($st | split(",")) | index($bst)))
         | select($hk == "" or ((.metadata // {}) | has($hk)))
         | select($ty == "" or ((.issue_type // "task") == $ty))
         | select($ex == "" or ((.issue_type // "task") != $ex))
-        | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase))) ]' "$S")
-    for f in ${fields[@]+"${fields[@]}"}; do
-      k="${f%%=*}"; v="${f#*=}"
-      out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
-        '[ .[] | select((((.metadata // {})[$k]) // "" | tostring) == $v) ]')
-    done
-    printf '%s\n' "$out"
+        | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
+        | . as $row
+        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v)) ]' \
+      "$S" --args ${fields[@]+"${fields[@]}"}
     [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
@@ -359,53 +373,50 @@ case "$verb" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
-    for kv in ${sets[@]+"${sets[@]}"}; do
-      k="${kv%%=*}"; v="${kv#*=}"
-      case ",$drops," in *",$k,"*) continue ;; esac
-      # bd stores a value that parses as a JSON number, true, false or null as
-      # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
-      # boolean. Every other value, a quoted JSON string included, is stored as
-      # its raw text. The number grammar is JSON's, which is stricter than jq's
-      # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" '
-        ($v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
-        | (if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
-           elif $t == "true" then true
-           elif $t == "false" then false
-           elif $t == "null" then null
-           else $v end) as $stored
-        | map(if .id == $id then .metadata[$k] = $stored else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    for k in ${unsets[@]+"${unsets[@]}"}; do
-      case ",$drops," in *",$k,"*) continue ;; esac
-      jq -c --arg id "$id" --arg k "$k" \
-        'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    if [ "$asg_set" = 1 ]; then
-      case ",$drops," in *",assignee,"*) : ;; *)
-        jq -c --arg id "$id" --arg a "$asg" \
-          'map(if .id == $id then .assignee = $a else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    if [ -n "$newstatus" ]; then
-      case ",$drops," in *",status,"*) : ;; *)
-        jq -c --arg id "$id" --arg s "$newstatus" \
-          'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    if [ "$note_set" = 1 ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    if [ "$desc_set" = 1 ]; then
-      case ",$drops," in *",description,"*) : ;; *)
-        jq -c --arg id "$id" --arg d "$desc" \
-          'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    mv "$tmp" "$S"
+    # The whole update lands in ONE jq pass over the store, however many flags
+    # it carries: a jq per --set-metadata, --unset-metadata, assignee, status,
+    # notes and description, each with its own temp copy, made a five-flag
+    # update cost six processes and six rewrites of the store, and the suite
+    # writes tens of thousands of updates. The sets ride the positional args
+    # ahead of the unsets ($ns says where the split is), each `k=v` cut at its
+    # first `=` as the shell cut it. A set or unset whose key STUB_DROP_KEYS
+    # names is skipped, as are the assignee, status and description it names;
+    # notes are never dropped.
+    # bd stores a value that parses as a JSON number, true, false or null as
+    # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
+    # boolean. Every other value, a quoted JSON string included, is stored as
+    # its raw text. The number grammar is JSON's, which is stricter than jq's
+    # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+    tmp="${S%/*}/.gc-stub.$$"
+    jq -c --arg id "$id" --arg dr "$drops" --argjson ns "${#sets[@]}" \
+      --argjson asg_set "$asg_set" --arg asg "$asg" --arg st "$newstatus" \
+      --argjson note_set "$note_set" --arg note "$note" \
+      --argjson desc_set "$desc_set" --arg desc "$desc" '
+      ($dr | split(",")) as $drop
+      | def kept($k): ($drop | index($k)) == null;
+        ($ARGS.positional[:$ns]
+         | map(split("=") as $p
+               | if ($p | length) == 1 then {k: ., v: .}
+                 else {k: $p[0], v: ($p[1:] | join("="))} end)
+         | map(select(kept(.k)))
+         | map(.stored = ((.v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
+             | if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
+               elif $t == "true" then true
+               elif $t == "false" then false
+               elif $t == "null" then null
+               else .v end))) as $sets
+      | ($ARGS.positional[$ns:] | map(select(kept(.)))) as $unsets
+      | map(if .id == $id then
+              reduce $sets[] as $s (.; .metadata[$s.k] = $s.stored)
+              | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
+              | (if $asg_set == 1 and kept("assignee") then .assignee = $asg else . end)
+              | (if $st != "" and kept("status") then .status = $st else . end)
+              | (if $note_set == 1 then
+                   .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $note)
+                 else . end)
+              | (if $desc_set == 1 and kept("description") then .description = $desc else . end)
+            else . end)' \
+      "$S" --args ${sets[@]+"${sets[@]}"} ${unsets[@]+"${unsets[@]}"} > "$tmp" && mv "$tmp" "$S"
     echo "updated $id"
     ;;
   create)
@@ -438,28 +449,33 @@ case "$verb" in
       shift || true
     done
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
-    { [ -n "$cmeta" ] && printf '%s' "$cmeta" | jq empty >/dev/null 2>&1; } \
+    # One jq validates the metadata, mints the id and lands the row. An
+    # unparseable --metadata fails --argjson before the program runs, which is
+    # the refusal with nothing created; the id is minted from the store's length
+    # inside the pass and read back from the last line of its output, so the
+    # STUB_DROP_KEYS pair that names it is matched there too (the last pair
+    # naming the id wins, as the shell loop it replaces let the last one win).
+    [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
+    out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
+      ("new-" + ((length + 1) | tostring)) as $id
+      | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
+         | (last // "") | .[($id | length) + 1:] // "" | split(",")) as $drop
+      | (if ($m | type) == "object"
+           then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
+           else $m end) as $meta
+      | (if ($drop | index("status")) then "open" else $st end) as $status
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]),
+        $id' "$S" 2>/dev/null) \
       || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
       ctgt="${cdep#*:}"
       jq -e --arg id "$ctgt" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1 \
         || { echo "Error: validation failed: create: dependency target does not exist: issue $ctgt not found" >&2; exit 1; }
     done
-    n=$(jq 'length' "$S"); nid="new-$((n + 1))"
-    drops=""
-    for pair in ${STUB_DROP_KEYS:-}; do
-      case "$pair" in "$nid:"*) drops="${pair#*:}" ;; esac
-    done
-    case ",$drops," in *",status,"*) cstatus="open" ;; esac
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
-    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
-      --argjson m "$cmeta" --arg dr "$drops" '
-      ($dr | split(",")) as $drop
-      | (if ($m | type) == "object"
-           then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
-           else $m end) as $meta
-      | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
-      "$S" > "$tmp" && mv "$tmp" "$S"
+    nid="${out##*$'\n'}"
+    tmp="${S%/*}/.gc-stub.$$"
+    printf '%s\n' "${out%$'\n'*}" > "$tmp" && mv "$tmp" "$S"
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
       ctyp="${cdep%%:*}"; ctgt="${cdep#*:}"
       [ "$ctyp" != "$cdep" ] || ctyp="blocked-by"
