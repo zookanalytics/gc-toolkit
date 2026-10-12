@@ -8,7 +8,7 @@
 # ONE VISIT PER GATE. The sweep's idempotence key is the gate itself: once a
 # visit stands for a gate, the gate is stamped gc.gate_visit=<visit-id> and is
 # never re-offered. Keying on "is a visit open right now" instead would re-file
-# every two minutes after any sitting that ends with the gate still open — a
+# every five minutes after any sitting that ends with the gate still open — a
 # benign close, a cut-short hold that re-states the demand, an operator
 # `dismiss` — spawning a fresh converse session per cooldown for a question
 # already put to a person. The return trip for a cut-short hold is the liveness

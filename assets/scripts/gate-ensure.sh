@@ -36,8 +36,7 @@
 # situation key rather than holding the anchor in silence. There is no dispatch
 # ceiling: quiescence forbids the redundant round the ceiling used to bound, and
 # the runaway shapes left — a reviewer that dies after claim, a fix unit filed
-# with its edge reversed — stop the PR moving and are caught by
-# liveness-sweep.sh's stale-gate pass, not by a count on the check.
+# with its edge reversed — stop the PR moving rather than spin the dispatcher.
 # A lane entering validating — an open task_kind=validation bead on the anchor
 # (quiescence clause c), opened by pr-facts.sh on a human feedback batch or the
 # machine-review path — gets mol-validate dispatched ONTO that pass so the
@@ -231,12 +230,14 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 }
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
-# child is a blocks-dep bead whose metadata carries a non-empty
-# source_review_bead, which request-changes stamps on the one child it files as
-# it clears check.<g>, so a lane back to unreviewed with one of these still
-# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
-# could not answer; the caller holds the dispatch, the same as an unreadable
-# in-flight-review lookup.
+# child here is a blocks-dep bead whose metadata carries a source key, which
+# rework-child.sh stamps on each child it files: source_review_bead on the one a
+# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
+# one an operator ruling files. Either is changing the branch, so a review that
+# read it now would read a mid-change diff, and a lane back to unreviewed with
+# one still open is owed the rework landing, not a fresh review. Non-zero rc =
+# the ledger could not answer; the caller holds the dispatch, the same as an
+# unreadable in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -246,7 +247,8 @@ open_rework_child() { # <anchor-id>
     ($ls | split(",")) as $live
     | [ .[]
         | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
-        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | select(((.metadata.source_review_bead // "") | tostring) != ""
+                 or ((.metadata.source_ruling_bead // "") | tostring) != "")
         | .id ] | (.[0] // empty)' 2>/dev/null
 }
 
@@ -285,7 +287,7 @@ open_validation_pass() { # <anchor-id>
 # answering), and quiesce_unreadable (a probe could not answer — fail closed, hold
 # and retry next pass). The clauses, in order, first hold wins:
 #   (a) a fix unit in flight answering an open must-fix finding, ANY lane [finding.sh fix-in-flight]
-#   (b) a fix unit in flight resolving a finding on the anchor            [open_rework_child]
+#   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
 # with inflight_review at the dispatch site. Each clause is an open-bead query;
@@ -293,14 +295,15 @@ open_validation_pass() { # <anchor-id>
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
-# and names it. Clause (b) cannot stand in for it: it sees only a request-changes
-# rework child, never the fix unit pr-facts.sh files for a human batch. A must-fix
-# finding nothing answers, with no fix unit in flight and no validation pass, sits
-# on a diff no one is changing, which is not the mid-change read quiescence
-# forbids. It holds no dispatch: a lane short of green dispatches as it would
-# without the finding, still subject to the per-head bar. It still holds the
-# merge through its blocks edge, and the settle decision still reads it as owed,
-# so it is reported here once per anchor instead of being named as an actor.
+# and names it. Clause (b) cannot stand in for it: it sees only the rework child
+# a request-changes verdict or a ruling files, never the fix unit pr-facts.sh
+# files for a human batch. A must-fix finding nothing answers, with no fix unit
+# in flight and no validation pass, sits on a diff no one is changing, which is
+# not the mid-change read quiescence forbids. It holds no dispatch: a lane short
+# of green dispatches as it would without the finding, still subject to the
+# per-head bar. It still holds the merge through its blocks edge, and the settle
+# decision still reads it as owed, so it is reported here once per anchor instead
+# of being named as an actor.
 compute_quiescence() { # <anchor-id>
   quiesce_hold=""; quiesce_reason=""; quiesce_unanswered=""; quiesce_unreadable=0
   local fif rc fu fst mf vp
@@ -314,7 +317,7 @@ compute_quiescence() { # <anchor-id>
     1) quiesce_unanswered=$(printf '%s' "$fif" | tr '\n' ' ' | sed 's/ *$//') ;;
     *) quiesce_unreadable=1; return 0 ;; # 2 unreadable, or the tool is missing
   esac
-  # (b) fix unit in flight (a live blocks-dep child carrying source_review_bead).
+  # (b) fix unit in flight (a live blocks-dep child carrying a source key).
   if ! fu=$(open_rework_child "$1"); then quiesce_unreadable=1; return 0; fi
   if [ -n "$fu" ]; then quiesce_hold=1; quiesce_reason="fix unit $fu in flight"; return 0; fi
   # (c) validation pass in flight.
@@ -902,6 +905,19 @@ STRAY
       esac
     fi
     why="lane '$g' does not derive green (no non-superseded approve review backs it)"
+    # A lane the latest bring-current round reopened: the review reads that
+    # round's account, and the triage dispatch also rules on the round when no
+    # ruling is recorded yet.
+    round_lane=$(printf '%s' "$row" | jq -r --arg g "$g" '(.metadata.bring_current_record // null)
+      | if type == "string" then (fromjson? // null) else . end
+      | if type != "object" or .class != "conflicted" then ""
+        elif .triage == null then (if $g == "triage" then "rule" else "" end)
+        elif ((((.triage.reopen // []) + (.triage.add // [])) | index($g)) != null) then "read"
+        else "" end' 2>/dev/null)
+    case "$round_lane" in
+      rule) why="lane '$g' was reopened by a bring-current round that conflicted: rule on the round (signoff.sh --reopen, --round-reason, --dismiss-approval) after reading its account, bring-current-audit.sh render --anchor $id --as comment" ;;
+      read) why="lane '$g' was reopened by the ruling on a bring-current round: read the round's account first, bring-current-audit.sh render --anchor $id --as comment" ;;
+    esac
 
     # A lane short of green is what machine `progressing` names — not the outcome
     # of this particular attempt. A dispatch the operator hold defers, one held
@@ -1039,9 +1055,7 @@ STRAY
     # Quiescence above forbids the redundant round, so there is no budget left to
     # bound and no anchor carries a dispatch tally. The runaway shapes that remain
     # — a reviewer that dies after claim, a fix unit filed with its edge reversed
-    # — stop the PR moving rather than spin the dispatcher, and a PR that stops
-    # moving is caught by liveness-sweep.sh's stale-gate escalation, not a count
-    # on the check.
+    # — stop the PR moving rather than spin the dispatcher.
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
     # failed carries the deterministic title but no anchor_bead — invisible to

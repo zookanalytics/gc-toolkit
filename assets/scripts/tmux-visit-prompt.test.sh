@@ -273,8 +273,7 @@ exit 4'
 # same exit-code propagation `-E` performs. So the redirect, the shell quoting
 # of the tmpfile path and the read-back are exercised, not simulated.
 mkdir -p "$TMP/bin" "$TMP/gumbin" "$TMP/tmpfiles"
-cat > "$TMP/bin/tmux" <<'TMUXSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUXSTUB'
 printf 'tmux %s\n' "$*" >> "$TMUX_CALLS"
 case "$1" in
   display-popup)
@@ -352,8 +351,7 @@ chmod +x "$TMP/bin/mktemp"
 # and pays no real-`gc` latency. A chooser case sets FAKE_RIGS_JSON to the rig
 # array to exercise selection; suspended/running ride in that JSON, so a case
 # can offer a dead rig and prove the picker leaves it out.
-cat > "$TMP/bin/gc" <<'GCSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCSTUB'
 case "$1 ${2:-}" in
   "rig list")
     # A wedged data plane. `exec` so `timeout` kills THIS process and the
@@ -436,12 +434,14 @@ has "$(cat "$TMP/calls.log")" "argv=[$MULTI]" "MULTILINE: a multi-line message r
 eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as one topic, not one per line"
 
 # (CHOOSER) prefix+a picks the target rig: default from board context, override
-# to any rig — a suspended or not-running one is offered too, tagged. The chooser
-# only runs when `gc rig list` offers rigs; the default stub offers none, so
-# every case elsewhere in this suite is untouched. These cases populate it.
+# to any rig — a suspended one is offered too, tagged, and an idle one
+# (running=false) is offered untagged. The chooser only runs when `gc rig list`
+# offers rigs; the default stub offers none, so every case elsewhere in this
+# suite is untouched. These cases populate it.
 CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
                {"name":"gascity","prefix":"gc","suspended":true,"running":true},
-               {"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
+               {"name":"signal-loom","prefix":"sl","suspended":false,"running":true},
+               {"name":"sprintshow","prefix":"ss","suspended":false,"running":false}]'
 # Isolate the chooser cases in their own draft dir so their draft bookkeeping
 # cannot inflate the DRAFTOK/CANCEL counts of the shared $TMP/drafts further
 # down.
@@ -459,6 +459,8 @@ hasnt "$cgum" "gum input" "CHOOSER: the picker is a choose list, not a single-li
 has "$ccalls" "argv=[--rig]" "CHOOSER: the chosen rig is forwarded to the intake"
 has "$ccalls" "argv=[signal-loom]" "CHOOSER: the board-context rig is the confirmed default"
 has "$cgum" "gascity (suspended)" "CHOOSER: a suspended rig is offered, tagged so the choice is informed"
+has "$cgum" "sprintshow" "CHOOSER: an idle rig is offered"
+hasnt "$cgum" "not running" "CHOOSER: ...untagged, since idle is not paused"
 
 # Sole rig: when the city has exactly one rig, it is the context rig and the only
 # choice. The context-first ordering then filters the one-line list down to an
@@ -933,8 +935,7 @@ fi
 # selection (the chooser is covered hermetically above). livebin holds ONLY gc,
 # so the real tmux/gum/script the live half needs still resolve on the suffix.
 mkdir -p "$TMP/livebin"
-cat > "$TMP/livebin/gc" <<'LGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/livebin/gc" <<'LGC'
 [ "$1 ${2:-}" = "rig list" ] && { printf '{"rigs":[]}\n'; exit 0; }
 exit 0
 LGC

@@ -43,8 +43,7 @@ BLOCK="$(awk '/# >>> live-intake-consume/{f=1; next} /# <<< live-intake-consume/
 #   drop -> exit 0 but persists nothing (a lying success — the case a bare
 #           exit-code gate would miss, which the read-back must catch)
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
   "bd update")
     shift 2

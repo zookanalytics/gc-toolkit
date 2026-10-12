@@ -24,11 +24,12 @@
 #
 # An agent takes exactly ONE overlay_dir, so an agent that needs both its own
 # hook and the shared gh guard gets the guard registered inside its own
-# overlay's settings.json rather than a second stanza. Every claude-provider
-# agent must end up with the guard: assets/scripts/gh-origin-guard-wiring.test.sh
-# enumerates agents/ and fails when one is left uncovered. The codex agents (dog,
-# polecat-codex, converse-codex) never read .claude/settings.json and are
-# uncovered by design.
+# overlay's settings.json rather than a second stanza. Every agent must end up
+# with the guard: assets/scripts/gh-origin-guard-wiring.test.sh enumerates
+# agents/ and fails when one is left uncovered. The codex agents (dog,
+# polecat-codex, converse-codex) read no .claude/settings.json and take no
+# overlay; each registers the guard in the Codex home through its pre_start
+# (docs/gh-origin-guard.md, "Codex").
 #
 # cycle-recycle and work-context self-gate by role and are safe no-ops
 # elsewhere; the gh guard applies to every role, so it does not.

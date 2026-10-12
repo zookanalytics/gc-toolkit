@@ -26,8 +26,7 @@ trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; FIXDIR="$TMPD/fix"
 mkdir -p "$BIN" "$FIXDIR"
 
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ] || exit 2
 cat "$FIXDIR/subject.json"
 STUB

@@ -44,12 +44,15 @@
 #      against one shared state directory, which is the only way to see that.
 #
 #   5. THE SUBSET PROPERTY, which is the soundness argument itself. The precheck
-#      is only safe because its exclusions are a strict subset of the sweep's
-#      (liveness-sweep.sh), so its survivor set is a SUPERSET of the true
+#      runs the sweep's own classifier (liveness-classify.sh) with the reads it
+#      does not make left empty, so its survivor set is a SUPERSET of the true
 #      candidate set and "zero locally" implies "zero really". Checked by
-#      running BOTH — the precheck's own filter and the sweep's marked classify
-#      block — over one shared fixture, with a positive control so a passing
-#      run cannot mean "both sets were empty".
+#      running BOTH — the precheck and the sweep's marked classify block — over
+#      one shared fixture, with a positive control so a passing run cannot mean
+#      "both sets were empty". The superset is pinned TIGHT as well: every bead
+#      only the precheck keeps was dropped on a read the precheck does not
+#      make. A bead the sweep drops on a local read never enters its baseline,
+#      so a precheck that kept one would count it new on every evaluation.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no agent.
 set -uo pipefail
 
@@ -81,8 +84,7 @@ bash -n "$SCRIPT" && ok "liveness-sweep-precheck.sh: valid bash" \
 # ignores BEADS_DIR, so an unpinned read on the controller answers about the
 # wrong store — the pin is worth a test of its own.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # The holder-liveness read, served before the bd guard so it is not recorded to
 # $FIXDIR/reads (the store-pin assertion counts bd reads only). GC_SESSION_FAIL =
 # an outage; default (no FAKE_SESSIONS) is a readable, empty session set.
@@ -163,7 +165,12 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-titled-not-convoy","title":"input convoy for tk-yyyyy: why the walk never fires","issue_type":"bug","metadata":{}},
   {"id":"o-wisp-aaaaa","title":"order: liveness-sweep (testrig)","issue_type":"task","metadata":{}},
   {"id":"f-order-human","title":"order: tidy the convoy helpers","issue_type":"task","metadata":{}},
-  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}}
+  {"id":"n-wisp-bbbbb","title":"a wisp of some other kind","issue_type":"task","metadata":{}},
+  {"id":"f-spec-orphan","title":"a step-spec sidecar whose workflow root has closed","issue_type":"task","metadata":{"gc.kind":"spec"},"dependencies":[{"issue_id":"f-spec-orphan","depends_on_id":"f-root-closed","type":"tracks"}]},
+  {"id":"f-root-unrouted","title":"a workflow root whose route was cleared","issue_type":"task","metadata":{"gc.kind":"workflow"}},
+  {"id":"f-finalize-kind","title":"a gc.kind that names no topology","issue_type":"task","metadata":{"gc.kind":"workflow-finalize"}},
+  {"id":"f-step-sat","title":"a step whose workflow root a live visit covers","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-sat"}},
+  {"id":"f-step-free","title":"a step whose workflow root no visit covers","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-free"}}
 ]
 JSON
 
@@ -174,6 +181,7 @@ cat > "$FIX/live.json" <<'JSON'
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits","sweep.reported":"f-carried"}},
   {"id":"v-1","title":"visit: f-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"f-ingroup"}},
   {"id":"v-3","title":"visit: f-trackedvisit — live, but its group stamp landed EMPTY","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-3","depends_on_id":"f-trackedvisit","type":"tracks"}]},
+  {"id":"v-5","title":"visit: f-root-sat — a sitting about a workflow root","metadata":{"task_kind":"visit","gc.continuation_group":"f-root-sat"}},
   {"id":"f-member","title":"the bead the convoy carries","metadata":{}},
   {"id":"f-root-live","title":"a routed root the spec bead hangs off","metadata":{}},
   {"id":"f-child","title":"a child whose parent is open","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
@@ -193,6 +201,27 @@ cat > "$FIX/widen.json" <<'JSON'
   {"id":"f-blocked-child","title":"a BLOCKED child of f-epic-open","status":"blocked","metadata":{},"dependencies":[{"issue_id":"f-blocked-child","depends_on_id":"f-epic-open","type":"parent-child"}]}
 ]
 JSON
+
+# One plain standing record per kind in the shared list, so a kind added to
+# standing-kinds.sh is covered here with no edit to this file. f-subject is a
+# standing record too, but the subject guard reads it as well; these are not.
+# shellcheck source=standing-kinds.sh
+. "$ROOT/assets/scripts/standing-kinds.sh"
+STANDING_KINDS="$(jq -nr "$STANDING_KINDS_JQ"'standing_kinds[]')"
+[ -n "$STANDING_KINDS" ] || { echo "standing-kinds.sh lists no kinds"; exit 1; }
+for k in $STANDING_KINDS; do
+    jq --arg k "$k" '. + [{id: ("f-standing-" + $k), title: ("a standing record of kind " + $k), issue_type: "task", metadata: {task_kind: $k}}]' \
+       "$FIX/ready.json" > "$FIX/ready.tmp" && mv "$FIX/ready.tmp" "$FIX/ready.json"
+done
+
+# Every ready bead a local rule excludes. A board holding only these has
+# nothing to report, so the empty-board cases below keep exactly these.
+EXCLUDED_IDS="$(jq -nc --arg kinds "$STANDING_KINDS" '
+  ["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live",
+   "f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec","f-input-convoy",
+   "f-sling-convoy","f-synthetic-convoy","o-wisp-aaaaa","f-spec-orphan",
+   "f-root-unrouted","f-step-sat"]
+  + ($kinds | split("\n") | map(select(. != "") | "f-standing-" + .))')"
 
 export FIXDIR="$FIX"
 export PATH="$TMP/bin:$PATH"
@@ -277,6 +306,21 @@ hasnt ",$SURV," ",o-wisp-aaaaa," "an order-tracking wisp is excluded (class 0)"
 has ",$SURV," ",f-titled-not-convoy," "a non-convoy whose TITLE names a convoy survives — the issue_type guard"
 has ",$SURV," ",f-order-human," "a human bead titled 'order:' with no wisp id survives — order_wisp needs both"
 has ",$SURV," ",n-wisp-bbbbb," "a wisp that is not an order survives — order_wisp needs both"
+# A standing record is held by design, whatever its kind. The kinds come from
+# the shared list the sweep's classifier reads.
+for k in $STANDING_KINDS; do
+    hasnt ",$SURV," ",f-standing-$k," "a task_kind=$k standing record is excluded (held by design)"
+done
+# A workflow root, a scope latch and a step-spec sidecar name a run and offer
+# no work. Most carry a route and fall to class 1; these two carry none: a
+# sidecar whose root has closed, so its tracks edge names no live wait, and a
+# root whose route was cleared.
+hasnt ",$SURV," ",f-spec-orphan," "a step-spec sidecar with no route is excluded (topology)"
+hasnt ",$SURV," ",f-root-unrouted," "a workflow root with no route is excluded (topology)"
+has ",$SURV," ",f-finalize-kind," "a gc.kind outside the topology kinds survives"
+# A sitting about a workflow root covers the steps of that workflow.
+hasnt ",$SURV," ",f-step-sat," "a step whose workflow root a live visit covers is excluded (class 3)"
+has ",$SURV," ",f-step-free," "a step whose workflow root no visit covers survives"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.
@@ -299,7 +343,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 # --- 2. the empty path: no agent session at all ------------------------------
 echo "── an empty board ends the pass with no agent session ──"
 # Keep only the beads a local rule excludes. Nothing survives, so nothing is new.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq --argjson keep "$EXCLUDED_IDS" 'map(select([.id] | inside($keep)))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 run_precheck
 eq "$RC" "1" "exit 1 — no agent session is dispatched at all"
@@ -341,63 +385,18 @@ BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
 has "$OUT" "a visit is already live" "and says which condition fired"
 
-# --- 2c. a stale PR gate is a pass output the baseline cannot represent -------
-# liveness-sweep.sh has TWO outputs: the batch triage visit (which the reported
-# baseline speaks for) and a per-anchor stale-gate escalation (which it cannot).
-# The failure this pins: a pass whose gh read failed cannot intersect the
-# open-PR set, so it classifies a PR-gated anchor `unnamed` and advances the
-# baseline with its id. Once gh recovers and the PR is past its age, that id is
-# no longer NEW and a baseline-only skip buries the escalation for good. The
-# precheck cannot read PR age — that is the pass's gh call — so it runs the pass
-# whenever a PR-gated anchor's re-escalation floor is up, on the same
-# stale_escalated_at stamp the sweep gates on.
-# Pin the floor so the two stamps below sit unambiguously inside and outside it.
-export LIVENESS_SWEEP_STALE_REESCALATE_DAYS=3
-iso_ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-"$1"d +%Y-%m-%dT%H:%M:%SZ; }
-
-echo "── a PR-gated anchor already carried in the baseline still runs the pass ──"
+# --- 2c. a PR-gated anchor already reported forces no pass -------------------
+# An open PR names its anchor's wait however long the PR sits, so the pass owes
+# that anchor nothing once the baseline carries it, and a board whose survivors
+# are all carried skips with one among them.
+echo "── a PR-gated anchor carried in the baseline forces no pass ──"
 cp "$TMP/live.bak" "$FIX/live.json"
-# f-pr-open is PR-gated with no stale stamp; carry it and every other survivor in
-# the baseline so the delta is genuinely empty and only the stale-due gate can
-# force the run — this is exactly the failed-gh-then-recovered shape.
 jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "0" "a PR-gated anchor carried in the baseline still RUNS — its stale-gate is non-local"
+eq "$RC" "1" "carried survivors with a PR-gated anchor among them skip — no agent session"
 has "$OUT" "local survivors 3 -> new 0" "the delta really is empty: every survivor is carried"
-has "$OUT" "may owe a stale-gate escalation" "the RUN names the stale-gate reason, not a phantom new candidate"
-has "$OUT" "PR-gated anchors past the stale re-escalation floor: 1" "and reports the one anchor that forced it"
-
-echo "── a PR-gated anchor escalated INSIDE the floor is not due — the board skips ──"
-# The gate respects the floor: it does not degrade into "run forever while any PR
-# is open". An anchor stamped within the floor owes nothing yet.
-RECENT="$(iso_ago 1)"
-jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
-                      | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
-   "$TMP/ready.bak" > "$FIX/ready.json"
-BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "1" "a just-escalated anchor is inside its floor — nothing owed, the board skips"
 has "$OUT" "SKIP:" "the verdict is SKIP"
-
-echo "── a PR-gated anchor escalated BEFORE the floor is due again — it runs ──"
-# Mirrors the sweep's re-raise-after-floor: past the floor the anchor owes a
-# fresh escalation, so the precheck must dispatch again.
-OLD="$(iso_ago 10)"
-jq --arg t "$OLD" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
-                   | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
-   "$TMP/ready.bak" > "$FIX/ready.json"
-BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "0" "an anchor last escalated before the floor is due again — RUN"
-has "$OUT" "may owe a stale-gate escalation" "and the stale-gate gate is what says so"
-
-# An UNPARSEABLE stamp re-raises, the same fail-open bias as the sweep: a stamp
-# that cannot be read is not proof the escalation was made.
-echo "── a PR-gated anchor with an unreadable stamp is due (fail-open) ──"
-jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
-    | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = "not-a-date") else . end)' \
-   "$TMP/ready.bak" > "$FIX/ready.json"
-BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
 
 # Restore the canonical fixtures for the sections that follow.
 cp "$TMP/ready.bak" "$FIX/ready.json"
@@ -411,7 +410,7 @@ echo "── an unreadable probe NEVER produces a silent empty pass ──"
 # The board is emptied first, so the ONLY thing that could make these run is the
 # failed read itself. Without this the test would pass on leftover candidates
 # and prove nothing.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq --argjson keep "$EXCLUDED_IDS" 'map(select([.id] | inside($keep)))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 cp "$TMP/live.bak" "$FIX/live.json"
 run_precheck
@@ -470,9 +469,11 @@ echo "── an abort BEFORE the decision runs the pass ──"
 # code actually under test.
 sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$TMP/aborting.sh"
 chmod +x "$TMP/aborting.sh"
-# The copy sources its sibling visit-identity.sh by $0-relative path, so the
-# shared predicate lib has to travel with it into the temp dir.
-cp "$(dirname "$SCRIPT")/visit-identity.sh" "$TMP/visit-identity.sh"
+# The copy sources its sibling libraries by $0-relative path, so every one the
+# script sources has to travel with it into the temp dir.
+for lib in $(sed -n 's|^\. "\$HERE/\([^"]*\)".*|\1|p' "$SCRIPT"); do
+    cp "$(dirname "$SCRIPT")/$lib" "$TMP/$lib"
+done
 grep -qx 'exit 3' "$TMP/aborting.sh" && ok "abort injection landed" \
     || bad "abort injection landed" "the trap line moved — this test is checking nothing"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -573,7 +574,7 @@ rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 # full classification to re-run on every evaluation of a board that has
 # nothing to say, which is the poll the cadence exists to bound.
 echo "── a proven-quiet SKIP spends the window itself ──"
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq --argjson keep "$EXCLUDED_IDS" 'map(select([.id] | inside($keep)))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 : > "$FIX/reads"
@@ -700,10 +701,11 @@ eq "$(find "$KEYS/liveness-sweep" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | 
    "two rig roots ending in the same name keep separate windows"
 
 # --- 6. the subset property: the soundness argument, mechanically ------------
-# The precheck is safe ONLY because its exclusions are a strict subset of the
-# sweep's. Run both over one fixture and assert containment. The classifier
-# half is the sweep's own marked classify block, extracted verbatim, so this
-# cannot drift from the code that actually runs.
+# The precheck is safe ONLY because its survivors contain the sweep's
+# candidates. Run both over one fixture and assert containment, then that the
+# containment is tight on every local exclusion. The classifier half is the
+# sweep's own marked classify block, extracted verbatim, so this cannot drift
+# from the code that actually runs.
 echo "── the precheck's survivors are a SUPERSET of the classifier's candidates ──"
 extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
 extract classify "$SWEEP" > "$TMP/classify.sh"
@@ -746,26 +748,24 @@ PROG=liveness-sweep
 # set below the precheck's.
 # These are JSON payloads the extracted block reads through `--argjson`, never
 # command strings to be word-split — hence the disables.
-# An OPEN_PRS row carries the PR's last-update time beside its url, and the
-# clock the block ages it against is PASS_EPOCH. Both are given here so this
-# runs the same arithmetic the pass does; a PR touched now is not stale, so the
-# bead classifies `gated` and stays out of the candidate set either way.
 # shellcheck disable=SC2089
-OPEN_PRS="[{\"url\":\"https://github.com/zook/gc-toolkit/pull/521\",\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]"
-PASS_EPOCH="$(date -u +%s)"
+OPEN_PRS='["https://github.com/zook/gc-toolkit/pull/521"]'
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
-export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
-# The classify block matches visit coverage and standing records through two
-# shared definitions, which liveness-sweep.sh sources before it. Supply the same
-# defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ) from the real libs so the
-# extracted block resolves them and cannot drift.
+export OPEN_PRS WORKED HUSK_STEPS
+# The classify block runs the shared classifier, and the classifier matches
+# visit coverage and standing records through more shared definitions.
+# liveness-sweep.sh sources every one of these libs before the block. Supply
+# the same defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ, $LIVENESS_CLASSIFY_JQ)
+# from the real libs so the extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/standing-kinds.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/liveness-classify.sh"
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
@@ -792,6 +792,21 @@ eq "$MISSING" "" "every classifier candidate also survives the precheck (contain
 [ "$PRE_N" -gt "$CLASSIFY_N" ] \
     && ok "the precheck is the LOOSER filter ($PRE_N survivors vs $CLASSIFY_N candidates)" \
     || bad "the precheck is the LOOSER filter" "precheck $PRE_N, classifier $CLASSIFY_N — the non-local exclusions are not showing up"
+
+# And looser ONLY where it has to be. A bead the precheck keeps and the
+# classifier drops must have been dropped on a read the precheck does not make:
+# worked (a convoy drives it), gated (an open PR or a pre-open verdict; with no
+# edge in this fixture nothing else gates), or husk. Any other class is a local
+# exclusion the precheck lost. The sweep's baseline holds only its candidates,
+# so a bead in that class reads as new to the precheck on every evaluation and
+# a quiet board never skips.
+UNEXPLAINED=""
+for id in $(printf '%s' "$PRE_IDS" | tr ',' ' '); do
+    case ",$CLASSIFY_IDS," in *",$id,"*) continue ;; esac
+    class="$(printf '%s' "$CLASSIFIED" | jq -r --arg id "$id" 'first(.[] | select(.id == $id) | .class) // "missing"')"
+    case "$class" in worked|gated|husk) ;; *) UNEXPLAINED="$UNEXPLAINED $id:$class" ;; esac
+done
+eq "$UNEXPLAINED" "" "every bead only the precheck keeps was dropped on a non-local read (containment is tight)"
 
 echo "── the no-resolver census reads each lane's marker under its token's own case ──"
 # The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes

@@ -6,12 +6,12 @@
 #     stamps the marker and parks the bead, because polecats never close work
 #     beads; without a reader the bead sits open until a human rules on it, one
 #     at a time.
-#   - a never-dispatched rework twin: an open rework child for a review whose
-#     work another child of the same review already carried and landed. The twin
-#     blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
-#     anchor on work nothing will ever run, and no other arm closes it:
-#     scaffolding-sweep retires only a disposed anchor's scaffolding, and
-#     finding.sh close-answered closes only findings.
+#   - a never-dispatched rework twin: an open rework child for a review, or for
+#     an operator ruling, whose work another child of the same source already
+#     carried and landed. The twin blocks its anchor, so merge.sh and
+#     gate-ensure's quiescence hold the anchor on work nothing will ever run,
+#     and no other arm closes it: scaffolding-sweep retires only a disposed
+#     anchor's scaffolding, and finding.sh close-answered closes only findings.
 # Disposal goes through bead-rehome.sh --kind duplicate, which is the one
 # writer for a successor pointer: it stamps gc.superseded_by + _store, reads
 # them back, and closes only if they stuck. Nothing here writes a close.
@@ -56,7 +56,6 @@ bd_show() {
   printf '%s' "$raw"
 }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
-row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
 # poured <id> — the first convoy tracking <id>, empty when none. A graph.v2 pour
 # mints a convoy that tracks the bead it pours over, and that edge outlives the
@@ -210,11 +209,15 @@ $CANDS
 CANDS_EOF
 
 # --- never-dispatched rework twins --------------------------------------------
-# signoff.sh files a rework child per review, stamped with that review's id in
-# source_review_bead, and dispatches it with a mol-polecat-work pour. A second
-# child for the same review that was never dispatched is a duplicate of the one
-# that was, once that one has landed. No marker says so, so each gate below
-# re-establishes it:
+# rework-child.sh files a rework child per source and dispatches it with a
+# mol-polecat-work pour: one per review signoff.sh files for, stamped with the
+# review's id in source_review_bead, and one per ruling converse-rework.sh files
+# for, stamped with the visit's id in source_ruling_bead. A second child of the
+# same source that was never dispatched is a duplicate of the one that was, once
+# that one has landed. The gates are stated for a review; a ruling's child meets
+# each with source_ruling_bead and its visit in their place, and a child naming
+# both keys answers no single source, so it is held. No marker says a child is
+# a twin, so each gate below re-establishes it:
 #   - the population is the OPEN task_kind=rework children naming a
 #     source_review_bead whose metadata records no dispatch: unassigned, and no
 #     route, deferred dispatch, claim, worktree, commit, prepare or outcome. A
@@ -226,16 +229,18 @@ CANDS_EOF
 #     metadata does not, such as a hold that clears gc.execution_routed_to or a
 #     pour whose route stamp never read back. With the metadata, this is the
 #     second, independent proof that it was never dispatched;
-#   - its review is CLOSED. close_review is signoff.sh's last write, so no
-#     request-changes pass is left that could adopt and dispatch the twin while
-#     this arm closes it;
-#   - a sibling LANDED: another rework child naming the same review and the
+#   - its source is CLOSED. For a review, close_review is signoff.sh's last
+#     write, so no request-changes pass is left that could adopt and dispatch
+#     the twin while this arm closes it. For a ruling, the sitting closes its
+#     visit after the sign-off that files the child, and only a sign-off runs
+#     converse-rework.sh, so no filing is left that could adopt it either;
+#   - a sibling LANDED: another rework child naming the same source and the
 #     same anchor, never disposed itself (no successor pointer, no
 #     duplicate_of), recording no outcome but shipped (scaffolding-sweep's
 #     gc.outcome=moot is a retirement, not a landing), and dispatched, by its
 #     metadata or by a convoy tracking it. It either records
 #     work_outcome=shipped or is closed with its rejection_reason gone.
-#     signoff.sh stamps that field on every child, so a closed child still
+#     rework-child.sh stamps that field on every child, so a closed child still
 #     carrying it was closed without landing. Its absence proves less: the
 #     polecat's workspace-setup unsets it when it resumes the branch, and the
 #     refinery unsets it when it lands the child on the anchor's branch, when
@@ -247,7 +252,7 @@ CANDS_EOF
 #     other close of a started child carrying one of the markers above; a
 #     bare hand close of one reads as a landing. A closed child that was never
 #     dispatched is another twin, not a landing.
-# The branch, target and PR fields are the work order signoff.sh stamps on
+# The branch, target and PR fields are the work order rework-child.sh stamps on
 # every child, naming the anchor's branch and PR, so they say nothing about
 # what this child did and are not read. Closing the twin releases its blocks
 # edge onto the anchor: merge.sh and gate-ensure count only a live blocker.
@@ -267,13 +272,17 @@ else
       "prepare_mode", "merge_result", "gc.work_outcome", "work_outcome" ] as $dispatch
     | .[]
     | . as $row
-    | select(s("task_kind") == "rework" and s("source_review_bead") != "")
+    | select(s("task_kind") == "rework")
+    | select(s("source_review_bead") != "" or s("source_ruling_bead") != "")
     | select(s("duplicate_of") == "")
     | select(((.assignee // "") | tostring) == "")
     | select([ $dispatch[] as $k | $row | s($k) | select(. != "") ] | length == 0)
     | (.metadata // {}) as $m
     | [ ((.id // "") | p),
-        ($m["source_review_bead"] | p),
+        (if s("source_review_bead") != "" and s("source_ruling_bead") != "" then "both"
+         elif s("source_review_bead") != "" then "source_review_bead"
+         else "source_ruling_bead" end),
+        ((if s("source_review_bead") != "" then s("source_review_bead") else s("source_ruling_bead") end) | p),
         ($m["anchor_bead"] | p),
         (if s("hold_reason") != "" then "held" else "-" end),
         (($m["gc.superseded_by"] // $m["superseded_by"]) | p) ]
@@ -281,33 +290,41 @@ else
   [ -n "$TWINS" ] || echo "$PROG: no open rework child is undispatched"
 fi
 
-while IFS=$'\t' read -r id review anchor held_flag prior; do
+while IFS=$'\t' read -r id key src anchor held_flag prior; do
   [ -n "${id:-}" ] && [ "$id" != "-" ] || continue
+  [ "$key" != both ] || { hold "it names both source_review_bead and source_ruling_bead, so it answers no single source"; continue; }
   [ "$anchor" != "-" ] || { hold "it names no anchor_bead, so no sibling can be matched to its anchor"; continue; }
   [ "$held_flag" = "-" ] || { hold "it is parked under a hold_reason, which is somebody's judgement in progress"; continue; }
+  # What the source is, in the words every reason below uses, and what could
+  # still adopt the twin while that source is open.
+  if [ "$key" = source_review_bead ]; then
+    what="review $src"; adopter="signoff.sh may still adopt and dispatch it"
+  else
+    what="ruling visit $src"; adopter="its sitting's sign-off may still adopt and dispatch it"
+  fi
 
   if ! CONVOY=$(poured "$id"); then
     hold "what tracks it could not be read, so a pour over it cannot be ruled out"; continue
   fi
   [ -z "$CONVOY" ] || { hold "convoy $CONVOY tracks it, so a molecule was poured over it"; continue; }
 
-  if ! RVROW=$(bd_show "$review"); then
-    hold "its review $review does not resolve in this store"; continue
+  if ! SRCROW=$(bd_show "$src"); then
+    hold "its $what does not resolve in this store"; continue
   fi
-  RVSTATUS=$(row_field "$RVROW" status | tr '[:upper:]' '[:lower:]')
-  [ "$RVSTATUS" = "closed" ] || { hold "its review $review is ${RVSTATUS:-unreadable}, so signoff.sh may still adopt and dispatch it"; continue; }
+  SRCSTATUS=$(row_field "$SRCROW" status | tr '[:upper:]' '[:lower:]')
+  [ "$SRCSTATUS" = "closed" ] || { hold "its $what is ${SRCSTATUS:-unreadable}, so $adopter"; continue; }
 
   # The landed siblings, earliest-filed first, one TSV row each: the id, the
   # metadata that proves its dispatch ("-" when only a convoy could, probed
   # below), and how it landed.
-  if ! SIBROWS=$(bd_list --metadata-field source_review_bead="$review" --status="$ALL_STATUSES"); then
-    hold "the other children of review $review could not be read"; continue
+  if ! SIBROWS=$(bd_list --metadata-field "$key=$src" --status="$ALL_STATUSES"); then
+    hold "the other children of $what could not be read"; continue
   fi
-  LANDED=$(printf '%s' "$SIBROWS" | jq -r --arg self "$id" --arg r "$review" --arg a "$anchor" '
+  LANDED=$(printf '%s' "$SIBROWS" | jq -r --arg self "$id" --arg k "$key" --arg r "$src" --arg a "$anchor" '
     def s($k): ((.metadata // {})[$k] // "") | tostring;
     [ .[]
       | select((.id // "") != $self)
-      | select(s("task_kind") == "rework" and s("source_review_bead") == $r and s("anchor_bead") == $a)
+      | select(s("task_kind") == "rework" and s($k) == $r and s("anchor_bead") == $a)
       | select(s("gc.superseded_by") == "" and s("superseded_by") == "" and s("duplicate_of") == "")
       | select(s("gc.outcome") == "")
       | (if s("gc.work_outcome") != "" then s("gc.work_outcome") else s("work_outcome") end) as $wo
@@ -343,19 +360,19 @@ $LANDED
 LANDED_EOF
   if [ -z "$SUCC" ]; then
     if [ "$prior" != "-" ]; then
-      hold "it already records a successor pointer to $prior, which is not a landed child of review $review"
+      hold "it already records a successor pointer to $prior, which is not a landed child of $what"
     else
-      hold "no other child of review $review on anchor $anchor has landed"
+      hold "no other child of $what on anchor $anchor has landed"
     fi
     continue
   fi
 
   if [ "$SHOW" = "shipped" ]; then
-    SWHY="$SUCC answers the same review $review on anchor $anchor and records work_outcome=shipped"
+    SWHY="$SUCC answers the same $what on anchor $anchor and records work_outcome=shipped"
   else
-    SWHY="$SUCC answers the same review $review on anchor $anchor, was dispatched ($SEVID) and is closed"
+    SWHY="$SUCC answers the same $what on anchor $anchor, was dispatched ($SEVID) and is closed"
   fi
-  dispose "$id" "$SUCC" "$SWHY, and $id was never dispatched: no route, claim, worktree or outcome recorded, no convoy tracks it, and review $review is closed" \
+  dispose "$id" "$SUCC" "$SWHY, and $id was never dispatched: no route, claim, worktree or outcome recorded, no convoy tracks it, and $what is closed" \
     || continue
   # The twin keeps the anchor's branch, and pr-stack.sh lists every row on a
   # branch in the PR body unless it carries duplicate_of or a no-op outcome.

@@ -9,6 +9,12 @@
 #   (NOSUBJ) `seed <key>` with no subject leaves the placeholder
 #   (BADKEY) an unknown seed key exits 2 and lists the valid keys
 #   (BADCMD) an unknown subcommand exits 2
+#   (LENS)   `lens <skill> <subject>` names the skill and the subject, has the
+#            sitting load it, withholds the skill's final writes, and with no
+#            opener ends in a framing-then-wait close
+#   (LENS-OPENER) with an opener, the brief defers to it and the opener follows
+#            verbatim, never passing through the placeholder substitution
+#   (LENS-BADNAME) a skill name outside letters, digits, dots and hyphens exits 2
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +66,34 @@ eq "$RC" 2 "(BADKEY) an unknown key exits 2"
 echo "# an unknown subcommand is refused"
 run frobnicate
 eq "$RC" 2 "(BADCMD) an unknown subcommand exits 2"
+
+echo "# lens seeds the sitting with a skill as its lens on the subject"
+run lens gc-toolkit.review-arch tk-abc
+eq "$RC" 0 "(LENS) a lens with no opener exits 0"
+has "$OUT" "look at tk-abc through the gc-toolkit.review-arch" "(LENS) the brief names the subject and the skill"
+has "$OUT" "Load that skill before you prep" "(LENS) …has the sitting load the skill"
+has "$OUT" "not yours to make" "(LENS) …and withholds the skill's final writes, which belong to the bead it serves"
+has "$OUT" "available to you, say so" "(LENS) …and says what to do when the skill is not available"
+has "$OUT" "then WAIT for the operator" "(LENS) …and with no opener, the lens is the assignment: frame, then wait"
+hasnt "$OUT" "__SKILL__" "(LENS) …no skill placeholder is left behind"
+hasnt "$OUT" "__SUBJECT__" "(LENS) …no subject placeholder is left behind"
+
+echo "# with an opener, the brief defers to it and the opener follows verbatim"
+run lens gc-toolkit.review-arch tk-abc 'start with the __SUBJECT__ split & the | cost'
+eq "$RC" 0 "(LENS-OPENER) a lens with an opener exits 0"
+has "$OUT" "opener follows and says what to do first" "(LENS-OPENER) the brief hands the first move to the opener"
+hasnt "$OUT" "then WAIT for the operator" "(LENS-OPENER) …instead of the lens-only close"
+has "$OUT" "start with the __SUBJECT__ split & the | cost" "(LENS-OPENER) …and the opener is emitted verbatim, untouched by the substitution"
+case "$OUT" in
+  *"says what to do first."*"start with the"*) ok "(LENS-OPENER) …after the brief" ;;
+  *) bad "(LENS-OPENER) the opener should follow the brief" ;;
+esac
+
+echo "# a lens refuses a name that is not a skill name"
+run lens 'review|arch' tk-abc
+eq "$RC" 2 "(LENS-BADNAME) a name carrying a metacharacter exits 2"
+run lens
+eq "$RC" 2 "(LENS-BADNAME) a lens with no skill exits 2"
 
 echo
 echo "gc-helm-engage-starters: $PASS passed, $FAIL failed"
