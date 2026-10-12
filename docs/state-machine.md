@@ -684,8 +684,8 @@ review's result set.
   re-reviews the whole diff at the head the child lands. Two things can still
   back a lane through the ruling: a review already in flight when the ruling is
   filed, whose verdict is on the head it read, and an operator's GitHub
-  approval, which backs every lane until it is dismissed. converse never pushes
-  code; the molecule does.
+  approval, which until it is dismissed backs every lane but one a later
+  bring-current round reopened. converse never pushes code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full
