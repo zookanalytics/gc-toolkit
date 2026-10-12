@@ -60,4 +60,11 @@ REVIEW_VERDICT_DEF='
       [ latest_opinions($self)[] | select(.state == "APPROVED")
         | select(((.submitted_at // "") | tostring) >= $since) ]
     else [] end;
+  # The approvals given strictly after the instant $since: approvals_since, less
+  # any approval submitted at $since itself. A bring-current round draws this
+  # line at its time: bring-current-guard.sh dismisses each approval submitted
+  # at or before it and leaves a later one standing, since that one saw the
+  # merged code.
+  def approvals_after($self; $since):
+    [ approvals_since($self; $since)[] | select(((.submitted_at // "") | tostring) > $since) ];
 '

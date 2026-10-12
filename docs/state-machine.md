@@ -238,10 +238,11 @@ had dismissed (the guard, every one given before the round), not only its
 latest, because an older approval would otherwise count again. A
 bring-current's dismissal also files a visit on the anchor asking for the
 approval again, and the visit holds the merge while it is open. `pr-facts.sh`
-retracts it once an outside approval submitted no earlier than the visit
-stands, or once the anchor closes, so approving again is all it asks of the
-operator. No `check.approval` marker and no `check_set` token arms it or opts
-out, and GitHub branch protection is an extra layer, not the authority.
+retracts it once an outside approval submitted after the round stands (no
+earlier than the visit, once the anchor no longer records that round), or once
+the anchor closes, so approving again is all it asks of the operator. No
+`check.approval` marker and no `check_set` token arms it or opts out, and
+GitHub branch protection is an extra layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check

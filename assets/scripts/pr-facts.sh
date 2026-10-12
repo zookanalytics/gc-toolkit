@@ -31,8 +31,9 @@
 # FIRST; skipped under native auto-merge).
 # Ahead of the per-anchor walk, a full pass retracts the re-ask visit a
 # bring-current files when it dismisses the PR's approval, once an outside
-# approval submitted no earlier than the visit answers it or its anchor reads
-# closed or merged.
+# approval submitted after the round the visit asks about answers it (no
+# earlier than the visit, where the anchor no longer records that round), or
+# its anchor reads closed or merged.
 # No arm here re-reviews a moved head: a lane state is a state of the lane, and
 # gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
@@ -764,10 +765,13 @@ REFRESH_EOF
 # holds the merge while it is open (finalize-gate.sh). reask_pr matches that
 # visit under either key name, bring-current-judgment.<n>.<head> or
 # bring-current-dismissal.<n>.<head>. It is the PR number the key names, as a
-# string, and null for any other key.
+# string, and null for any other key. reask_head is the head the key names, and
+# null for any other key.
 REASK_KEY_JQ='
-  def reask_pr:
-    (capture("^bring-current-(judgment|dismissal)\\.(?<n>[0-9]+)\\.[0-9a-f]*$") | .n) // null;'
+  def reask_key:
+    capture("^bring-current-(judgment|dismissal)\\.(?<n>[0-9]+)\\.(?<h>[0-9a-f]*)$");
+  def reask_pr: (reask_key | .n) // null;
+  def reask_head: (reask_key | .h) // null;'
 # retract_reask_visits <anchor> <key> <visit-ids> <why> <reading> — conclude the
 # re-ask visits under <key> for the anchor once their ask is answered. They are
 # retracted moot through escalate.sh's retract verb, which leaves a visit someone
@@ -1326,17 +1330,24 @@ fi
 # changed and approve again, and it holds the merge while it is open. Approving
 # on GitHub closes nothing, so every full pass reads the open re-ask visits and
 # retracts each one whose ask is answered. It is answered once the PR carries an
-# approval submitted no earlier than the visit was filed, from an account whose
-# latest opinion it still is (review-verdict.sh's approvals_since). An approval
-# from before the visit, such as one whose dismissal failed, keeps it holding.
-# Its ask is moot once the anchor reads closed or merged, since no merge is left
-# to hold. Each key is judged against the latest filing among its open twins, so
-# a later round's visit is never answered by an approval that came before it. The
-# approval is read only for the anchor's own PR in this checkout's origin. A
-# visit someone is engaged in is theirs to conclude, and a subject or review list
-# that does not read this pass leaves the visit for the next. Like the sweeps
-# above, this runs before the no-anchors early-exit, so a visit whose anchor has
-# closed is still read.
+# approval that saw the code the round pushed, from an account whose latest
+# opinion it still is. bring-current-guard.sh dismisses each approval submitted
+# at or before the round's time, bring_current_round_at, and leaves a later one
+# standing. So while the anchor's bring_current_record names the head in the
+# visit's key, an approval submitted after that time answers the visit
+# (review-verdict.sh's approvals_after), even one given before the ruling that
+# filed it. When the record names another head or none, the round's time is
+# unknown, and only an approval submitted no earlier than the visit answers it
+# (approvals_since). An approval from before that line, such as one whose
+# dismissal failed, keeps the visit holding. Its ask is moot once the anchor
+# reads closed or merged, since no merge is left to hold. Twins under one key
+# are judged against one line, the round's time or else the latest filing among
+# them, so a later round's visit is never answered by an approval that came
+# before it. The approval is read only for the anchor's own PR in this
+# checkout's origin. A visit someone is engaged in is theirs to conclude, and a
+# subject or review list that does not read this pass leaves the visit for the
+# next. Like the sweeps above, this runs before the no-anchors early-exit, so a
+# visit whose anchor has closed is still read.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if ra_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
     while IFS="$(printf '\t')" read -r rasubj rakey ranum rasince raids; do
@@ -1364,8 +1375,16 @@ if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $rakey — the acting login is unresolved, so no approval of PR#$ranum can be told from the city's own; its re-ask visit is left for the next pass" >&2
         continue
       fi
-      if [ "$rasince" = "-" ]; then
-        echo "$PROG: $rakey — the time its re-ask visit was filed did not read, so no approval can be counted against it; left for the next pass" >&2
+      raround=$(printf '%s' "$rarow" | jq -r --arg k "$rakey" "$REASK_KEY_JQ"'
+        (.[0].metadata // {}) as $m
+        | (($m.bring_current_record // null) | if type == "string" then (fromjson? // null) else . end) as $r
+        | (($m.bring_current_round_at // "") | tostring) as $at
+        | ($k | reask_head) as $h
+        | select($h != null and $h != "" and ($r | type) == "object" and (($r.head // "") | tostring) == $h)
+        | select($at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+        | $at' 2>/dev/null)
+      if [ -z "$raround" ] && [ "$rasince" = "-" ]; then
+        echo "$PROG: $rakey — the time its re-ask visit was filed did not read, and $rasubj records no time for the round it asks about, so no approval can be counted against it; left for the next pass" >&2
         continue
       fi
       rarevs=$(gh_rows "repos/$ORIGIN_REPO/pulls/$ranum/reviews?per_page=100") || rarevs=""
@@ -1373,12 +1392,18 @@ if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $rakey — PR#$ranum reviews unreadable this pass; its re-ask visit is left for the next" >&2
         continue
       fi
-      raby=$(printf '%s' "$rarevs" | jq -r --arg self "$SELF_LOGIN" --arg since "$rasince" "$REVIEW_VERDICT_DEF"'
-        approvals_since($self; $since) | sort_by((.submitted_at // ""), (.id // 0)) | .[0] // empty
+      raby=$(printf '%s' "$rarevs" | jq -r --arg self "$SELF_LOGIN" --arg round "$raround" --arg since "$rasince" "$REVIEW_VERDICT_DEF"'
+        (if $round != "" then approvals_after($self; $round) else approvals_since($self; $since) end)
+        | sort_by((.submitted_at // ""), (.id // 0)) | .[0] // empty
         | "\(.user.login // "") at \(.submitted_at // "")"' 2>/dev/null)
       [ -n "$raby" ] || continue
-      retract_reask_visits "$rasubj" "$rakey" "$raids" "PR#$ranum approved by $raby" \
-        "PR#$ranum was approved by $raby, no earlier than this visit asked for it at $rasince, so the re-review it asked for is answered."
+      if [ -n "$raround" ]; then
+        retract_reask_visits "$rasubj" "$rakey" "$raids" "PR#$ranum approved by $raby" \
+          "PR#$ranum was approved by $raby, after the bring-current round this visit asks about was recorded at $raround, so the approval saw the merged code and the re-review it asked for is answered."
+      else
+        retract_reask_visits "$rasubj" "$rakey" "$raids" "PR#$ranum approved by $raby" \
+          "PR#$ranum was approved by $raby, no earlier than this visit asked for it at $rasince, so the re-review it asked for is answered."
+      fi
     done <<RA_EOF
 $(printf '%s' "$ra_visits" | jq -r "$REASK_KEY_JQ"'
     [ .[]? | select((.metadata.task_kind // "") == "visit")

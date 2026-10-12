@@ -18,9 +18,10 @@
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
 # Also covers retracting a bring-current's re-ask visit once an outside approval
-# submitted no earlier than it answers it, or its anchor closed, and never on an
-# approval from before it, the city's own, a visit someone is engaged in, or a
-# read that did not land;
+# submitted after the round the anchor records for it answers it, or one no
+# earlier than the visit where the anchor records no such round, or its anchor
+# closed, and never on an approval from before that line, the city's own, a
+# visit someone is engaged in, or a read that did not land;
 # Also covers --posture-only (the pre-merge arm: records posture, dispatches
 # nothing, leaves MERGED/CLOSED reconciliation to the full pass, and reports an
 # anchor it could not make current in its EXIT CODE, which is what holds
@@ -1104,6 +1105,51 @@ eq "$(bstatus RVB1)" "closed" "the next pass that reads the approval retracts th
 eq "$(bstatus RVB2)" "open" "…while the visit naming another PR is still left"
 eq "$(bstatus RVB3)" "open" "…and so is the one whose filing time does not read"
 rm -f "$GH_DIR"/reviews_24[0-7].json "$GH_DIR"/reviews_25[0-3].json "$GH_DIR/reviews_999.json"
+
+echo "# while the anchor records the visit's round, an approval given after the round answers the visit"
+# The guard records the round on the anchor (bring_current_record, and its time
+# bring_current_round_at), and a ruling made later files the re-ask visit and
+# dismisses each approval submitted at or before the round's time. An approval
+# given after the round saw the merged code and stands, so it answers the visit
+# though it came before the visit was filed. When the record names another head
+# or none, or the round's time does not read, the visit's filing time is the
+# line again. bd keeps the record as JSON text, and one read back already parsed
+# is read the same.
+rec_s() { printf ',"bring_current_record":%s,"bring_current_round_at":"%s"' "$(jq -nc --arg h "$1" '{head: $h, class: "conflicted"} | tojson')" "$2"; }
+rec_o() { printf ',"bring_current_record":{"head":"%s","class":"conflicted"},"bring_current_round_at":"%s"' "$1" "$2"; }
+R0="2026-10-11T10:00:00Z"; TB="2026-10-11T11:00:00Z"; TV="2026-10-11T12:00:00Z"
+store "[$(anchor RE1 260 "$(rec_s c1a1 "$R0")"), $(rvisit RVE1 RE1 bring-current-dismissal.260.c1a1 "$TV"),
+        $(anchor RE2 261 "$(rec_o c2a2 "$R0")"), $(rvisit RVE2 RE2 bring-current-dismissal.261.c2a2 "$TV"),
+        $(anchor RE3 262 "$(rec_s c3b3 "$R0")"), $(rvisit RVE3 RE3 bring-current-dismissal.262.c3a3 "$TV"),
+        $(anchor RE4 263 "$(rec_s c4a4 "$R0")"), $(rvisit RVE4 RE4 bring-current-dismissal.263.c4a4 "$TV"),
+        $(anchor RE5 264 "$(rec_s c5a5 2026-10-11)"), $(rvisit RVE5 RE5 bring-current-dismissal.264.c5a5 "$TV"),
+        $(anchor RE6 265 "$(rec_s c6a6 "$R0")"), $(rvisit RVE6 RE6 bring-current-dismissal.265.c6a6 2026-10-11),
+        $(anchor RE7 266), $(rvisit RVE7 RE7 bring-current-judgment.266.c7a7 "$TV")]"
+printf 'RVE1|tracks|RE1\nRVE2|tracks|RE2\nRVE3|tracks|RE3\nRVE4|tracks|RE4\nRVE5|tracks|RE5\nRVE6|tracks|RE6\nRVE7|tracks|RE7\n' > "$STUB_DEPS"
+printf '[%s,%s]' "$(review 1 human1 DISMISSED 2026-10-11T09:00:00Z)" "$(review 2 human1 APPROVED "$TB")" > "$GH_DIR/reviews_260.json"
+printf '[%s]' "$(review 3 human2 APPROVED "$TB")" > "$GH_DIR/reviews_261.json"
+printf '[%s]' "$(review 4 human1 APPROVED "$TB")" > "$GH_DIR/reviews_262.json"
+printf '[%s,%s]' "$(review 5 human1 APPROVED 2026-10-11T09:00:00Z)" "$(review 6 human2 APPROVED "$R0")" > "$GH_DIR/reviews_263.json"
+printf '[%s]' "$(review 7 human1 APPROVED 2026-10-11T12:30:00Z)" > "$GH_DIR/reviews_264.json"
+for n in 265 266; do
+  printf '[%s]' "$(review "$n" human1 APPROVED "$TB")" > "$GH_DIR/reviews_$n.json"
+done
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus RVE1)" "closed" "an approval given after the round, before the ruling filed the visit, retracts it"
+eq "$(meta RVE1 'gc.outcome')" "moot" "…moot"
+has "$(meta RVE1 'gc.outcome_reason')" "PR#260 was approved by human1 at $TB, after the bring-current round this visit asks about was recorded at $R0" "…naming the approval and the round's time"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject RE1 --key bring-current-dismissal.260.c1a1" "…through escalate.sh's retract verb"
+eq "$(bstatus RVE2)" "closed" "a record read back already parsed is read the same"
+eq "$(bstatus RVE3)" "open" "once a later round replaces the record, the visit's filing time is the line again"
+eq "$(bstatus RVE4)" "open" "an approval from before the round, whose dismissal failed, or from the round's own instant answers nothing"
+eq "$(bstatus RVE5)" "closed" "a round time that does not read leaves the filing time as the line, which an approval after the visit passes"
+has "$(meta RVE5 'gc.outcome_reason')" "no earlier than this visit asked for it at $TV" "…by the filing time"
+eq "$(bstatus RVE6)" "closed" "the round's time answers a visit whose own filing time does not read"
+has "$(meta RVE6 'gc.outcome_reason')" "after the bring-current round this visit asks about was recorded at $R0" "…by that time"
+eq "$(bstatus RVE7)" "open" "an anchor that records no round leaves the filing time as the line"
+eq "$(retracts)" "4" "…so this pass retracts four situations and no more"
+rm -f "$GH_DIR"/reviews_26[0-6].json
 
 echo "# a pre-recorded disposition retires the PR's own re-ask visits before the close, and not another PR's"
 # A PR closed with its disposition recorded has no merge left for a re-ask visit

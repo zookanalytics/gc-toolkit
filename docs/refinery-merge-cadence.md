@@ -409,11 +409,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    hold-resolved retraction, and the retraction of a bring-current's re-ask
    visit. `bring-current-guard.sh` files that visit on the anchor when it
    dismisses the approval, and it holds the merge while it is open. The full
-   pass retracts it `moot` once an outside approval submitted no earlier than
-   the visit stands (`approvals_since` in `review-verdict.sh`), so the merge
-   stops waiting on it, or once its anchor reads closed or merged. An approval
-   from before the visit keeps it holding, and a visit someone is engaged in
-   is left to them. Like the `merge-blocked-approval` retirement, it runs
+   pass retracts it `moot` once an outside approval submitted after the round
+   stands, so the merge stops waiting on it, or once its anchor reads closed or
+   merged. The round's time is the anchor's `bring_current_round_at` while its
+   `bring_current_record` names the head in the visit's key (`approvals_after`
+   in `review-verdict.sh`). Otherwise an approval answers it only when
+   submitted no earlier than the visit (`approvals_since`). An approval from
+   before that line keeps it holding, and a visit someone is engaged in is
+   left to them. Like the `merge-blocked-approval` retirement, it runs
    ahead of the no-anchors early-exit. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the

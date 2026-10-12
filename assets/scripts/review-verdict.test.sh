@@ -10,7 +10,8 @@
 #             leaves no approver behind. approvals_since names the outside
 #             approvals that answer an ask made at an instant: each account's
 #             latest opinion, an approval submitted no earlier than the ask, and
-#             none against an instant that is not GitHub's form.
+#             none against an instant that is not GitHub's form. approvals_after
+#             names those submitted strictly after an instant.
 #   (READERS) every reader of the rule sources this file and applies
 #             $REVIEW_VERDICT_DEF
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
@@ -98,6 +99,18 @@ for bad_since in "" "2026-08-21" "2026-08-21T00:00:00.5Z" "2026-08-21T00:00:00-0
      "(PRED) an ask instant that is not YYYY-MM-DDTHH:MM:SSZ ('$bad_since') answers nothing"
 done
 
+echo "# the approvals given after a round"
+after() { printf '%s' "$1" | jq -c --arg self "$SELF" --arg since "$2" "$REVIEW_VERDICT_DEF"'[ approvals_after($self; $since)[] | .id ]'; }
+ROUND="2026-08-21T00:00:00Z"
+eq "$(after "[$(rv 1 human1 APPROVED 2026-08-21T00:00:01Z),$(rv 2 human2 APPROVED 2026-08-22T00:00:00Z)]" "$ROUND")" '[1,2]' \
+   "(PRED) an outside approval submitted after the round saw it"
+eq "$(after "[$(rv 1 human1 APPROVED 2026-08-21T00:00:00Z),$(rv 2 human2 APPROVED 2026-08-20T23:59:59Z)]" "$ROUND")" '[]' \
+   "(PRED) one submitted at the round's instant or before it did not"
+eq "$(after "[$(rv 1 human1 APPROVED 2026-08-22T00:00:00Z),$(rv 2 human1 CHANGES_REQUESTED 2026-08-23T00:00:00Z),$(rv 3 $SELF APPROVED 2026-08-22T00:00:00Z),$(rv 4 human2 DISMISSED 2026-08-22T00:00:00Z)]" "$ROUND")" '[]' \
+   "(PRED) nor one since replaced with a CHANGES_REQUESTED, the city's own, or a dismissed one"
+eq "$(after "[$(rv 1 human1 APPROVED 2026-08-22T00:00:00Z)]" "2026-08-21")" '[]' \
+   "(PRED) a round instant that is not YYYY-MM-DDTHH:MM:SSZ answers nothing"
+
 echo "# every reader sources the one definition"
 READERS="assets/scripts/merge.sh
 assets/scripts/pr-facts.sh
@@ -117,7 +130,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of the rule under any of its names. Specs and generated
 # renders are history and output, not readers.
-COPY_RE='def (review_verdict|latest_opinions|standing_approvals|approvals_since)[[:space:]]*\('
+COPY_RE='def (review_verdict|latest_opinions|standing_approvals|approvals_since|approvals_after)[[:space:]]*\('
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue
