@@ -360,13 +360,15 @@ var ErrUnverified = errors.New("gcbd: created bead did not read back as written"
 // The bead is read back from the store the create wrote, through the
 // authoritative ShowDirect path, and every key must read back with the value
 // written; values compare as text (readBack). A bead short of a key is written
-// the whole payload once more and read back again: nobody can have taken a
-// bead this call has only just filed. sel names the keys the caller's own probe
-// finds the bead by. A bead still short of one of them is one no later run can
-// find, while an edge it carries can still hold its anchor, so it is closed
-// (gc.outcome=abandoned) and Create reports ErrNotFiled; with no sel, that
-// takes being short of every key. A read-back that fails, or a bead short only
-// of other keys, returns the id with ErrUnverified.
+// the whole payload once more and read back again. That write carries only the
+// values the create carried, onto a bead filed a moment before.
+//
+// sel names the keys the caller's own probe finds the bead by. A bead still
+// short of one of them is one no later run can find, while an edge it carries
+// can still hold its anchor, so it is closed (gc.outcome=abandoned) and Create
+// reports ErrNotFiled. With no sel, that takes being short of every key. A
+// read-back that fails, or a bead short only of other keys, returns the id with
+// ErrUnverified.
 func (c *Client) Create(meta map[string]any, sel []string, body string, args ...string) (string, error) {
 	if len(meta) == 0 {
 		return "", fmt.Errorf("%w: refusing to file a bead without metadata", ErrNotFiled)

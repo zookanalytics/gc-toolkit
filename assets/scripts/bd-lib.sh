@@ -155,8 +155,8 @@ bd_live_children() {
 #
 # The bead is read back from the store the create wrote, and every key must
 # read back with the value written. A bead short of a key is written the whole
-# payload once more and read back again (bd_meta_ensure). Nobody can have taken
-# a bead this call has only just filed, so that write lands on no one's work.
+# payload once more and read back again (bd_meta_ensure). That write carries
+# only the values the create carried, onto a bead filed a moment before.
 #
 # --select names, comma-joined, the payload keys the caller's own probe finds
 # the bead by, and the caller keeps that list beside the probe. A bead still
