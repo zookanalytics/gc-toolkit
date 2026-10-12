@@ -344,7 +344,8 @@ claimable.
 
 If `metadata.rejection_reason` exists, this bead was previously attempted
 and rejected by the refinery. Read the reason carefully:
-- Rebase conflict → you'll resume the existing branch and rebase
+- Conflict with the base → you'll resume the existing branch, bring it current
+  by MERGE, and write an audit entry for each conflict you resolve
 - Test failure → you'll resume the branch and fix the issue
 
 If `metadata.branch` exists, a branch already exists from the prior attempt.
@@ -621,18 +622,96 @@ if [ -n "$REJECTION" ]; then
     # force-push it. prepare_mode is stamped merge; an absent stamp resolves to
     # merge here too, so a dropped stamp never triggers a rewrite.
     echo "resuming rejected branch by MERGE (git merge --no-edit origin/{{base_branch}}); never rebase or force-push"
-    # The PR head this bring-current starts from, recorded before the merge
-    # moves HEAD. submit-and-exit's bring-current guard reads what the push
-    # added from here, so a session that re-runs the handoff after the push
-    # still sees the whole bring-current.
+    # A resume starts a bring-current round, recorded before the merge moves
+    # HEAD: the PR head the round starts from, and whether bringing the branch
+    # current is this bead's whole job. A conflict or stale-base rejection asks
+    # for nothing else, so a commit of the bead's own is then an edit beyond the
+    # merge and owes an audit entry; any other rejection carries work of its own.
+    # An earlier round's audit and question are cleared, so the entries are this
+    # round's. submit-and-exit's bring-current guard reads the round from here,
+    # so a session that re-runs the handoff after the push still sees all of it.
     RESUME_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
     RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$RESUME_BRANCH" || git rev-parse HEAD)
-    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM"
+    case "$REJECTION" in
+      "stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only ;;
+      *) RESUME_SCOPE=with-work ;;
+    esac
+    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM" \
+      --set-metadata bring_current_scope="$RESUME_SCOPE" \
+      --unset-metadata conflict_audit --unset-metadata conflict_question
+    if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.bring_current_from // empty')" != "$RESUME_FROM" ]; then
+        echo "bring_current_from=$RESUME_FROM did not read back on $WORK_BEAD_ID; NOT merging, since the guard could not read the round. Re-run this block." >&2
+        exit 1
+    fi
     git merge --no-edit origin/{{base_branch}}
-    # Conflicts (likely the rejection reason): resolve, git add, git commit.
+    # Conflicts: resolve each, record its audit entry, then commit (below).
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
 # <<< rejected-branch-resume-mode
+```
+
+**Conflicts: resolve, write the audit, then commit.** You are the only party
+that knows what collided and why you chose what you chose, so you write it
+down as you resolve. Every message a person later reads about this round is
+composed from your entries: the triage verdict on the PR, a dismissal note, a
+re-ask visit. This applies to the merge above and to any merge of the base you
+run later in this bead. For each file git could not merge, resolve it, stage
+it, and record one entry before you commit the merge. An edit beyond what the
+merge needed, such as a test repair a conflict forced, owes an entry too, and
+on a bead whose only job is the bring-current every file a commit of your own
+changes owes one:
+```bash
+# >>> bring-current-audit-entry
+BCA=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/bring-current-audit.sh" ] && { BCA="$c/assets/scripts/bring-current-audit.sh"; break; }; done
+: "${BCA:?bring-current-audit.sh not found in the pack}"
+git diff --name-only --diff-filter=U   # the files git could not merge
+# Once per file, after resolving and staging it:
+"$BCA" add --bead "$WORK_BEAD_ID" --path "<file>" --rating "<routine|judgment>" \
+  --collided "<the two intents that met: what the base changed and why, what the branch changed and why>" \
+  --resolution "<what you kept or wrote, and why>" \
+  --check "<what a reviewer should look at to confirm it>"
+git commit --no-edit
+# <<< bring-current-audit-entry
+```
+Rate an entry `routine` for an adjacent-line collision, an overlapping comment
+edit or an obvious composition, and `judgment` for an informed decision: an
+inferred intent, a side chosen on substance, or something new written. The
+rating informs triage; it gates nothing, so rate honestly rather than low.
+`bring-current-guard.sh coverage --bead "$WORK_BEAD_ID"` lists every item the
+guard will hold the hand-off to, and which already have an entry.
+
+**A conflict you cannot resolve without guessing** (two live designs, an
+intent you cannot infer) is a question for a person, not a guess. Push
+nothing: the branch stays as it was last reviewed. Ask once, with what
+collided and the one decision you need; the visit it files on the anchor
+carries your entries so far. Then abort the merge, hold, and drain:
+```bash
+# >>> bring-current-unresolvable
+BCA=""; SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/bring-current-audit.sh" ] && [ -x "$c/assets/scripts/molecule-hold.sh" ] && { BCA="$c/assets/scripts/bring-current-audit.sh"; SCRIPTS="$c/assets/scripts"; break; }; done
+: "${BCA:?bring-current-audit.sh and molecule-hold.sh not found in the pack}"
+"$BCA" ask --bead "$WORK_BEAD_ID" --path "<file>" \
+  --collided "<the two intents that met>" --question "<the one decision you need>" \
+  || { echo "the question reached no visit; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
+git merge --abort
+if [ -n "${CLAIMED_STEP_BEAD_ID:-}" ] && [ "$CLAIMED_STEP_BEAD_ID" != "$WORK_BEAD_ID" ]; then
+  "$SCRIPTS/molecule-hold.sh" --step "<the step you hold, e.g. mol-polecat-work.workspace-setup>" --bead "$CLAIMED_STEP_BEAD_ID" \
+    --reason "bringing the branch current needs a decision only a person can make; the bring-current-question visit on the anchor asks it" \
+    || { echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable." >&2; exit 1; }
+else
+  # A bead with no molecule parks to a person, naming what it waits for: the
+  # route and the takeaway first, then the assignee, which the claim guard
+  # accepts only once the bead is open.
+  gc bd update "$WORK_BEAD_ID" --status=open --set-metadata gc.routed_to=human \
+    --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the visit on its anchor asks it" \
+    --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --set-metadata gc.takeaway_by=mol-polecat-work \
+    --set-metadata gc.takeaway_settled= \
+    --unset-metadata gc.session_id --unset-metadata gc.session_name \
+    --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question visit on the anchor asks it). Nothing was pushed."
+  gc bd update "$WORK_BEAD_ID" --assignee=""
+fi
+gc runtime drain-ack
+exit 0
+# <<< bring-current-unresolvable
 ```
 Leave `prepare_mode` on the bead — the refinery re-stamps it (merge) on every
 prepare.
@@ -1391,23 +1470,34 @@ BCG=""
 for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/bring-current-guard.sh" ] && { BCG="$c/assets/scripts/bring-current-guard.sh"; break; }
 done
-: "${BCG:?bring-current-guard.sh not found in the pack; a merge-in child is not handed off without its guard}"
-if ! "$BCG" guard --bead "$WORK_BEAD_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"; then
-  echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."
-  gc runtime drain-ack
-  exit 1
-fi
+: "${BCG:?bring-current-guard.sh not found in the pack; no bead is handed off without its guard}"
+"$BCG" guard --bead "$WORK_BEAD_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"; BCG_RC=$?
+case "$BCG_RC" in
+  0) : ;;
+  3)
+    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_BEAD_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or stamp bring_current_from when that is what it asks, then re-run this block. Do not drain: finishing the audit is yours."
+    exit 3 ;;
+  *)
+    echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."
+    gc runtime drain-ack
+    exit 1 ;;
+esac
 # <<< submit-bring-current-guard
 ```
 
-The bring-current guard runs for every handoff and acts only on a merge-in
-child, the bead pr-facts.sh's conflict arm files for an approved PR whose
-branch conflicts. Bringing that branch current either took no judgment (git
-merged it, or each conflict kept both sides' insertions whole), and the
-approval stands, or it took judgment, and the guard files a visit on the anchor
-and dismisses the approval so the operator re-reviews what changed. A guard
-that cannot finish hands nothing off: the bead stays open and still blocks the
-anchor, so nothing lands under an approval the guard could not check.
+The bring-current guard runs for every handoff and acts on a branch that
+carries a review to keep current: its anchor is gating, or a PR stands on it.
+When the push brought that branch current with its base, the round is either
+clean, because git merged it on its own and it lands quietly, or conflicted.
+A conflicted round is handed off only when your audit has an entry for every
+item the guard names, and then the guard stores the audit with its diff
+evidence on the anchor and reopens triage, which rules from your entries on
+what else reopens and whether the approval still covers the merged code. On
+an anchor whose check_set declares no triage lane, the guard rules on the
+round itself: every lane the anchor declares runs again, and an approval given
+before the round is withdrawn. A guard that cannot finish hands nothing off:
+the bead stays open and still blocks the anchor, so nothing lands on a round
+nobody accounted for.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the
