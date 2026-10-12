@@ -194,11 +194,13 @@ finished sitting's OUTCOME, so a visit closed with none is a sitting the board
 cannot report and a correct dedup close reads identical to a dropped need;
 warn-only while the legacy backlog stands), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
-whose own `blocks` edges have all closed is slung by the deferred-dispatch reconcile
-order within its cadence, so one that has stayed armed and open past that window — or
-one armed at a non-open status `bd ready` never answers — is a dispatch silently not
-firing; the is_blocked flag cascades down parent-child edges, so such an arm appears in
-`bd blocked` under an ancestor and `check-blocked-work-armed` cannot see it; warn-only),
+that nothing holds is slung by the deferred-dispatch reconcile order within its
+cadence, so one that has stayed armed and open past that window — or one armed at a
+non-open status `bd ready` never answers — is a dispatch silently not firing; a hold
+is `assets/scripts/hold-lib.sh`'s, so an arm a park holds is not owed; `bd blocked`
+lists an arm its parent's hold reaches under the arm's own id, naming the parent, but
+`check-blocked-work-armed` asks blocked work only for a dispatch path, and an arm is
+one, so it cannot see such an arm; warn-only),
 and `doctor/check-feedback-routing-owed` (the complement to the merge cadence's
 feedback arm: a cheap pre-merge arm records a PR's review posture on the anchor and
 a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture` is
@@ -444,6 +446,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gh-origin-guard-codex.sh` | shared primitive | Agent `pre_start` for the codex-provider templates, polecat-codex, converse-codex and dog: registers the gh origin guard in the Codex home's hooks file, the one every Codex session reads. |
 | `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep, its precheck and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
 | `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan (visit) sources it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. |
+| `assets/scripts/hold-lib.sh` | shared primitive | The one definition of a hold: an open `blocks` blocker on a bead or on one of its parent-child ancestors, where a demand gate on an ancestor does not count. Its walk reads a generation of ancestors per listing, so a reader judges any number of beads in a few reads. Work's deferred-dispatch pass sources it to sling an armed bead only when nothing holds it, and to name the blocker that does. Patrol's doctor sweep runs `check-armed-dispatch-owed`, which sources it so a held arm is not reported owed. |
 | `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |
 | `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
 | `assets/scripts/branch-end.sh` | shared primitive | Ends a retired bead's branch on the git remote, the way delete-on-merge ends a landed one: keeps a branch a live bead still names, pins the tip (the PR's `refs/pull/<n>/head`, or an annotated `archive/<branch>@<short-sha>` tag read back on origin), then deletes it at that tip. `bead-rehome.sh` runs it after every disposition close, so it serves that writer's callers for the same reason: converse (visit), and `pr-facts.sh`, `duplicate-sweep.sh` and `scaffolding-sweep.sh` (merge). Its origin write is granted in [authority-map.md](authority-map.md). |
