@@ -2482,6 +2482,20 @@ eq "$(awk -v c="bd show $CW4 " -v w="bd update WK4 " 'index($0, w) == 1 { exit }
 eq "$(grep -c "^bd update $CW4 " "$STUB_GC_LOG")" "0" "…writing nothing to it"
 eq "$(meta WK4 pr_comment_watermark)" "34901" "…and the mark lands"
 
+echo "# …a comment rework filed whole is routed on bd_create's own read-back"
+# bd_create read the child back whole, so the arm reads it no further before
+# the route; the route's own read-back follows the route write.
+store "[$(anchor WK7 352)]"
+printf '%s' "$(prview 352 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_352.json"
+echo '[]' > "$GH_DIR/reviews_352.json"; echo '[]' > "$GH_DIR/issue_comments_352.json"
+printf '[{"id":35201,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_352.json"
+: > "$STUB_GC_LOG"
+out=$(run)
+CW7=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WK7") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+eq "$(meta "$CW7" 'gc.routed_to')|$(meta WK7 pr_comment_watermark)" "$FIX|35201" "a fresh child is routed and the mark moves"
+eq "$(awk -v c="bd show $CW7 " -v w="bd update $CW7 --set-metadata gc.routed_to" 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
+  "…after one read of it, bd_create's own"
+
 echo "# …a comment rework an earlier two-write create left without its anchor_bead is closed before a fresh one is filed"
 # Its title is this batch's and its blocks edge holds the anchor, but the batch
 # probe finds a child by anchor_bead, so it never sees this one.

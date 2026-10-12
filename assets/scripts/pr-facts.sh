@@ -2608,6 +2608,7 @@ $CBODY"
       CSELECT="anchor_bead"
       CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
         [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
+      cwhole=""
       if [ -n "$CFIX" ]; then
         echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; re-checking its route before the watermark"
       else
@@ -2629,11 +2630,15 @@ $CBODY"
         # held the merge (no id comes back). It prints the id of a child short
         # of any other key too (its rc 2), so the id says the child exists, not
         # that it can be routed. The work-order check below says that.
-        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -)
+        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
         fi
+        # rc 0 is a child bd_create read back whole a moment ago: open, held by
+        # nobody, and carrying no route, since its work order holds none. The
+        # checks below need no read of it.
+        [ "$crc" -eq 0 ] && cwhole=1
         # The comment-rework child now exists; drop the per-pass bd_list cache
         # so the title/anchor_bead dedup probe reads it on the next anchor and
         # does not twin it. The gc bd show reads below do not repopulate the
@@ -2644,42 +2649,48 @@ $CBODY"
       # pool can claim it, and the mark would retire the only signal that could
       # re-file it. A CLOSED child is already dispositioned, so refusing on one
       # could never converge. Only a definitively closed status skips the check.
-      # The one read of the child here serves its status, whether anyone has
-      # taken it, its work order and its route.
-      crow=$(bd_json show "$CFIX" </dev/null)
-      cst=$(printf '%s' "$crow" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      # The one read of a child found by the batch probe, or filed short, serves
+      # its status, whether anyone has taken it, its work order and its route.
+      crow=""; cst="open"
+      if [ -z "$cwhole" ]; then
+        crow=$(bd_json show "$CFIX" </dev/null)
+        cst=$(printf '%s' "$crow" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      fi
       if [ "$cst" != "closed" ]; then
-        # A child that does not read back shows neither its status nor who
-        # holds it, so nothing is written to it and nothing moves: a write
-        # ignores bd's claim guard, and could land on a child a polecat is
-        # working.
-        if ! printf '%s' "$crow" | jq -e --arg c "$CFIX" 'type == "array" and ((.[0].id // "") == $c)' >/dev/null 2>&1; then
-          echo "$PROG: WARN comment rework $CFIX did not read back; nothing written or routed, and NOT watermarking (retry next pass)" >&2
-          skipped=$((skipped + 1)); continue
+        rgot=""
+        if [ -z "$cwhole" ]; then
+          # A child that does not read back shows neither its status nor who
+          # holds it, so nothing is written to it and nothing moves: a write
+          # ignores bd's claim guard, and could land on a child a polecat is
+          # working.
+          if ! printf '%s' "$crow" | jq -e --arg c "$CFIX" 'type == "array" and ((.[0].id // "") == $c)' >/dev/null 2>&1; then
+            echo "$PROG: WARN comment rework $CFIX did not read back; nothing written or routed, and NOT watermarking (retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          # The route makes the child a polecat's work order, and the watermark
+          # retires the comments it answers, so neither moves until every key of
+          # that order reads back. A child nobody has taken (open, unassigned, and
+          # not poured) that is short of a key is written the whole order once and
+          # read back again (bd_meta_ensure, judging the row read above). It is
+          # this pass's order, so a child filed at an older head is brought up to
+          # this one before anyone works it. A child someone has taken was held to
+          # this check before it was routed, and its holder owns its metadata now:
+          # the resume clears its rejection_reason, and the hand-back clears its
+          # route. So it is not written. A child still short is left for the
+          # retry: the batch probe found it by its anchor_bead, or bd_create kept
+          # it only because it carried that key.
+          ctaken=$(printf '%s' "$crow" | jq -r '.[0] // {}
+            | if (((.assignee // "") | tostring) != "")
+                 or (((.status // "open") | tostring | ascii_downcase) != "open")
+                 or (((.metadata["gc.execution_routed_to"] // "") | tostring) != "")
+              then "taken" else "" end' 2>/dev/null)
+          if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure --row "$crow" "$CFIX" "$CMETA"); then
+            echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          # The work order holds no route, so the row read above still shows it.
+          rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
-        # The route makes the child a polecat's work order, and the watermark
-        # retires the comments it answers, so neither moves until every key of
-        # that order reads back. A child nobody has taken (open, unassigned, and
-        # not poured) that is short of a key is written the whole order once and
-        # read back again (bd_meta_ensure, judging the row read above). It is
-        # this pass's order, so a child filed at an older head is brought up to
-        # this one before anyone works it. A child someone has taken was held to
-        # this check before it was routed, and its holder owns its metadata now:
-        # the resume clears its rejection_reason, and the hand-back clears its
-        # route. So it is not written. A child still short is left for the
-        # retry: the batch probe found it by its anchor_bead, or bd_create kept
-        # it only because it carried that key.
-        ctaken=$(printf '%s' "$crow" | jq -r '.[0] // {}
-          | if (((.assignee // "") | tostring) != "")
-               or (((.status // "open") | tostring | ascii_downcase) != "open")
-               or (((.metadata["gc.execution_routed_to"] // "") | tostring) != "")
-            then "taken" else "" end' 2>/dev/null)
-        if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure --row "$crow" "$CFIX" "$CMETA"); then
-          echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
-          skipped=$((skipped + 1)); continue
-        fi
-        # The work order holds no route, so the row read above still shows it.
-        rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         if [ "$rgot" != "$FIX_POOL" ]; then
           gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
           rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
