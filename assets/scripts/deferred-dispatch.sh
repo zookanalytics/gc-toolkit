@@ -284,7 +284,7 @@ cmd_arm() {
         if [ -z "$hold" ]; then
             echo "$PROG: note: nothing holds $bead right now — the next reconcile pass will dispatch it"
         else
-            echo "$PROG: note: $bead is HELD by $hold — the first reconcile pass after that hold releases will dispatch it"
+            echo "$PROG: note: $bead is HELD by $hold — the first reconcile pass after nothing holds it will dispatch it"
         fi
     else
         echo "$PROG: warning: $bead — could not read what holds it, so when reconcile will dispatch it is unproven. Read its blockers and its ancestors' by hand if the timing matters." >&2
