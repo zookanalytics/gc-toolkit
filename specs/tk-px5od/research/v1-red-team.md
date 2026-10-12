@@ -1,3 +1,8 @@
+---
+name: V1 red-team of the escalation candidate set
+description: Validation report V1 for the escalation work (tk-px5od), which red-teams the refinements and new practices in the candidate set. Its main charge is that most of the practices draw on the same finite reviewer attention, and it recommends cuts and merges.
+---
+
 # V1 Red-Team — Section A & B
 
 ## Summary

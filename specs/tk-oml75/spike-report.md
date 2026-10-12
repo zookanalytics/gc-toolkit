@@ -1,3 +1,8 @@
+---
+name: Spike report on per-bead resume fidelity across a drain (tk-oml75)
+description: The Phase 0 spike for bead-universe v1, which asks whether a resumed per-bead host keeps its conversation across a drain. It measures fidelity, token cost, and wall clock, recommends A2 (binding as cheap metadata assembly) pending an operator probe, and carries that probe's script.
+---
+
 # Spike report: per-bead resume fidelity across a drain (`tk-oml75`)
 
 **Bead:** `tk-oml75` — *Spike: prove per-bead resume fidelity across a drain*

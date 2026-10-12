@@ -101,8 +101,7 @@ S
 : > "$TMP/updates"     # one line per `gc bd update` invocation (the full argv)
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -168,11 +167,6 @@ case "$1 ${2:-}" in
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.proactive_reaction reads back as. The release stamps it =1 as the
-    # completion proof two guards key on; FAKE_PROACTIVE holds it so a test models
-    # the stamp LANDING and landing empty (the silent drop a multi-pair update can
-    # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
-    proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
     # What gc.session_name / gc.session_id read back as: the executor identity a
     # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
     # test models the clear LANDING (empty) and being DROPPED (the pin still
@@ -218,8 +212,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
@@ -263,16 +257,6 @@ case "$1 ${2:-}" in
             1)     ;;
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-          esac ;;
-        # gc.proactive_reaction=1 is the release's completion proof, read back the
-        # way gc.takeaway_settled is. FAKE_PROACTIVE_DROP=1 loses every one of them
-        # (no repair recovers it); =multi loses it only out of a multi-pair release
-        # write, the shape the lone repair write recovers.
-        gc.proactive_reaction=*)
-          case "${FAKE_PROACTIVE_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
-            *)     printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
           esac ;;
         # gc.outcome lands per visit so the dismiss read-back sees the stamp.
         # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
@@ -363,7 +347,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
+       FAKE_SETTLED="$TMP/settled" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
@@ -444,8 +428,8 @@ A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
 grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
-grep -q 'gc.proactive_reaction=1' <<< "$A" \
-  && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
+grep -q 'gc.proactive_reaction' <<< "$A" \
+  && bad "(RELEASE) anchor still stamps the retired proactive_reaction" || ok "(RELEASE) anchor no longer stamps the retired proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
@@ -1074,72 +1058,6 @@ grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/
   || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
 : > "$TMP/exec"
 
-# ── takeaway --release: the completion-proof read-back ────────────────────────
-# gc.proactive_reaction=1 is the stamp two guards downstream key on to refuse a
-# SECOND release — first-reaction-dispose's retry guard and cmd_sling's
-# already-reacted skip — so a park whose stamp lands empty reads to both as a
-# partial that never completed, and the next dispose re-releases a bead a worker
-# may already hold. It rides the multi-pair release write, so the same silent
-# drop can hit it; it is read back and repaired like the route beside it, and —
-# unlike the cosmetic pour stamp — a repair that also misses is a verb failure.
-# Covered:
-#   (PROACTOK)   a stamp that reads back "1" is written once, no repair, exit 0
-#   (PROACTFIX)  a stamp dropped from the multi-pair write is re-stamped, exit 0
-#   (PROACTDEAD) a stamp that will not land is a verb failure, writes kept
-
-# (PROACTOK) the stamp lands: the release's own set is the only one written.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/perr" || PORC=$?
-eq "$PORC" "0" "(PROACTOK) a completion stamp that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "1" \
-   "(PROACTOK) …and is written once, with no repair"
-grep -q 'gc.proactive_reaction on' "$TMP/perr" \
-  && bad "(PROACTOK) a landed stamp should say nothing (stderr: $(cat "$TMP/perr"))" \
-  || ok "(PROACTOK) …and says nothing about a read-back"
-
-# (PROACTFIX) the stamp dropped from the multi-pair release write, recovered by
-# the lone repair set.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PFRC=0
-FAKE_PROACTIVE_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/perr" || PFRC=$?
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "2" \
-   "(PROACTFIX) a stamp that did not land is re-stamped"
-grep -q "gc.proactive_reaction on A-PARKED read back as ''" "$TMP/perr" \
-  && ok "(PROACTFIX) …and the miss is reported with the value that stood" \
-  || bad "(PROACTFIX) the dropped stamp was silent (stderr: $(cat "$TMP/perr"))"
-grep -q 'the proactive-reaction repair landed' "$TMP/perr" \
-  && ok "(PROACTFIX) …and the repair that fixed it says so" \
-  || bad "(PROACTFIX) the repair did not report landing (stderr: $(cat "$TMP/perr"))"
-eq "$PFRC" "0" "(PROACTFIX) …and a repaired stamp is not a verb failure"
-eq "$(cat "$TMP/proactive")" "1" "(PROACTFIX) …the bead ends carrying the completion proof"
-
-# (PROACTDEAD) the store that will not take the stamp at all. The bead is
-# released, so a zero exit would report a park whose completion proof — the thing
-# that stops the next dispose re-releasing it — never landed.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PDRC=0
-FAKE_PROACTIVE_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/pout" 2>"$TMP/perr" || PDRC=$?
-eq "$PDRC" "4" "(PROACTDEAD) a completion stamp that will not land is a verb runtime failure"
-grep -q "did not stamp as '1'" "$TMP/perr" \
-  && ok "(PROACTDEAD) …and the message names what was missing" \
-  || bad "(PROACTDEAD) the persistent miss is unexplained (stderr: $(cat "$TMP/perr"))"
-grep -q -- '--set-metadata gc.proactive_reaction=1' "$TMP/perr" \
-  && ok "(PROACTDEAD) …and carries the by-hand repair" \
-  || bad "(PROACTDEAD) no repair spelled out (stderr: $(cat "$TMP/perr"))"
-grep -q 'takeaway set on' "$TMP/pout" \
-  && bad "(PROACTDEAD) the verb reported success on a bead missing its completion proof" \
-  || ok "(PROACTDEAD) …and does not report the takeaway as set"
-PD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$PD" in
-  *"--status=open"*"--assignee="*) ok "(PROACTDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
-esac
-: > "$TMP/proactive"
-
 # ── takeaway --release: the executor-identity read-back ───────────────────────
 # The unassign takes the departing executor's identity with it, so the release
 # clears gc.session_name and gc.session_id via --unset-metadata. Both have
@@ -1441,6 +1359,132 @@ grep -q 'has no method a pool can perform' "$TMP/derr" \
 grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
   && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
   || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
+
+# ── takeaway --release --assign: release the bead TO a named agent ────────────
+# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# so work that is its own (a town-repo edit is mechanik's) is released to it as
+# its assignee, with no route. The stub reads a bead's assignee from the
+# assignees fixture, so a row there models an assignee that landed and its
+# absence models one that did not. Covered:
+#   (TOAGENT)      the assignee replaces the empty clear in the one release
+#                  write, and the route beside it stays empty
+#   (TOAGENTOK)    an assignee that reads back is written once, exit 0, and
+#                  the success line names the agent
+#   (TOAGENTREL)   --assign without --release is refused
+#   (TOAGENTBOTH)  --assign beside --route is refused before any write
+#   (TOAGENTDEAD)  an assignee that will not land is re-written once, then
+#                  fails the verb with the repair spelled out
+#   (TOAGENTBLK)   an open non-demand blocker refuses a bare --assign
+#   (TOAGENTWAIT)  …and a call that names its waits lands, edge and all
+#   (TOAGENTFOLD)  a closed anchor is refused on its disposition, quiesce kept
+AGENT="gc-toolkit.mechanik"
+cp "$TMP/assignees" "$TMP/assignees.orig"
+printf 'A-PARKED|%s\nA-BLOCKED|%s\n' "$AGENT" "$AGENT" >> "$TMP/assignees"
+: > "$TMP/updates"; : > "$TMP/routed"
+ARC=0
+sh "$SCRIPT" takeaway A-PARKED "actionable — a city.toml edit, mechanik's" \
+   --by proactive --release --assign "$AGENT" --no-wait >"$TMP/aout" 2>"$TMP/aerr" || ARC=$?
+ALINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$ALINE" in
+  *"--status=open --assignee=$AGENT --set-metadata gc.routed_to= "*) ok "(TOAGENT) the release assigns the bead to the named agent, with no route beside it" ;;
+  *) bad "(TOAGENT) the release write did not assign the agent with an empty route (got: ${ALINE:-<none>})" ;;
+esac
+case "$ALINE" in
+  *"--set-metadata gc.takeaway=actionable — a city.toml edit, mechanik's"*) ok "(TOAGENT) …in the write that carries the headline" ;;
+  *) bad "(TOAGENT) the headline split off the assign write: ${ALINE:-<none>}" ;;
+esac
+case "$ALINE" in
+  *"gc.proactive_reaction"*) bad "(TOAGENT) the assign write still stamps the retired proactive_reaction: ${ALINE:-<none>}" ;;
+  *) ok "(TOAGENT) …and stamps no retired proactive_reaction beside it" ;;
+esac
+case "$ALINE" in
+  *"--unset-metadata gc.session_name --unset-metadata gc.session_id"*) ok "(TOAGENT) …and the prior executor's session pins go with the old assignee" ;;
+  *) bad "(TOAGENT) the assign write kept the prior executor's pins: ${ALINE:-<none>}" ;;
+esac
+eq "$ARC" "0" "(TOAGENTOK) an assignee that reads back exits 0"
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(TOAGENTOK) …and is written once, with no repair"
+grep -q "released to $AGENT" "$TMP/aout" \
+  && ok "(TOAGENTOK) …and the success line names the agent" \
+  || bad "(TOAGENTOK) the success line lost the agent (stdout: $(cat "$TMP/aout"))"
+
+: > "$TMP/updates"
+RRC2=0
+sh "$SCRIPT" takeaway A-PARKED "no release" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || RRC2=$?
+eq "$RRC2" "2" "(TOAGENTREL) --assign without --release is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTREL) …and nothing was written"
+
+: > "$TMP/updates"
+BRC3=0
+sh "$SCRIPT" takeaway A-PARKED "both" --release --route "$POOL" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || BRC3=$?
+eq "$BRC3" "2" "(TOAGENTBOTH) --assign beside --route is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTBOTH) …and nothing was written"
+grep -q 'never both' "$TMP/aerr" \
+  && ok "(TOAGENTBOTH) …and the refusal says a bead takes one address" \
+  || bad "(TOAGENTBOTH) the refusal does not explain itself (stderr: $(cat "$TMP/aerr"))"
+
+# A-UNASSIGNED has no assignees row, so its assignee reads back empty however
+# often it is written: the store that will not take it.
+: > "$TMP/updates"
+DRC3=0
+sh "$SCRIPT" takeaway A-UNASSIGNED "dropped" --release --assign "$AGENT" --no-wait \
+   >"$TMP/aout" 2>"$TMP/aerr" || DRC3=$?
+eq "$(grep -c -- "--assignee=$AGENT" "$TMP/updates" || true)" "2" \
+   "(TOAGENTDEAD) an assignee that read back wrong is re-written once"
+grep -q "the assignee on A-UNASSIGNED read back as ''" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the miss is reported" \
+  || bad "(TOAGENTDEAD) the dropped assignee was silent (stderr: $(cat "$TMP/aerr"))"
+eq "$DRC3" "4" "(TOAGENTDEAD) an assignee that will not land is a verb runtime failure"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the failure says the bead reaches no agent" \
+  || bad "(TOAGENTDEAD) the persistent miss does not name its consequence (stderr: $(cat "$TMP/aerr"))"
+grep -q -- "--assignee $AGENT" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …with the by-hand repair spelled out" \
+  || bad "(TOAGENTDEAD) no repair spelled out (stderr: $(cat "$TMP/aerr"))"
+grep -q 'takeaway set on' "$TMP/aout" \
+  && bad "(TOAGENTDEAD) the verb reported success on an unassigned bead" \
+  || ok "(TOAGENTDEAD) …and success is not reported"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+KRC=0
+sh "$SCRIPT" takeaway A-BLOCKED "assigned — the fix is mechanik's" \
+   --release --assign "$AGENT" --no-wait >/dev/null 2>"$TMP/aerr" || KRC=$?
+eq "$KRC" "2" "(TOAGENTBLK) an open non-demand blocker refuses a bare --assign"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(TOAGENTBLK) …before any write"
+grep -q 'w-child' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …naming the blocker the work is on" \
+  || bad "(TOAGENTBLK) the blocker is unnamed (stderr: $(cat "$TMP/aerr"))"
+grep -q -- '--then-assign' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …and the blocked exit that names the wait" \
+  || bad "(TOAGENTBLK) no blocked-exit re-run named (stderr: $(cat "$TMP/aerr"))"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+WRC3=0
+sh "$SCRIPT" takeaway A-BLOCKED "held — mechanik edits once the child lands" \
+   --release --assign "$AGENT" --waiting-on w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
+eq "$WRC3" "0" "(TOAGENTWAIT) an --assign that names its wait lands"
+grep -qE "^bd update A-BLOCKED .*--assignee=$AGENT" "$TMP/updates" \
+  && ok "(TOAGENTWAIT) …assigned to the agent" \
+  || bad "(TOAGENTWAIT) the assignee was lost: $(cat "$TMP/updates")"
+grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
+  && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
+  || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/updates"
+FRC3=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "assign a disposed bead" --by proactive \
+   --release --assign "$AGENT" >"$TMP/aout" 2>"$TMP/aerr" || FRC3=$?
+eq "$FRC3" "4" "(TOAGENTFOLD) --assign on a closed anchor is a verb runtime failure"
+grep -q -- '--assignee' <<< "$(line_for CLOSED-A-FOLD)" \
+  && bad "(TOAGENTFOLD) a disposed bead was handed to an agent" \
+  || ok "(TOAGENTFOLD) …and the agent is never assigned"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTFOLD) …and the refusal says so" \
+  || bad "(TOAGENTFOLD) the refusal is unexplained (stderr: $(cat "$TMP/aerr"))"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(TOAGENTFOLD) …while the quiesce a fold still needs runs" \
+  || bad "(TOAGENTFOLD) the refusal took the quiesce with it"
+mv "$TMP/assignees.orig" "$TMP/assignees"
 
 # ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
@@ -2029,8 +2073,8 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
 # ── The releasing session's own step survives the release ────────────────────
-# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
-# the bead its own molecule is anchored to, and then has to close its own step
+# A releasing session may itself own a step of a molecule anchored to the bead it
+# disposes by `takeaway --release`, and then has to close its own step
 # bead. step-close.sh resolves that bead within its molecule and corroborates
 # it by the assignee; this live step carries no gc.session_id stamp, so the
 # assignee is the only handle that proves the bead is this session's, and a
@@ -2070,10 +2114,10 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
- {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-sample","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
@@ -2083,8 +2127,7 @@ JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
 : > "$LIVE_LOG"
 
-cat > "$LIVE/bin/gc" <<'GCL'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$LIVE/bin/gc" <<'GCL'
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
 # Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
@@ -2219,7 +2262,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
-  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+  bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
@@ -2306,8 +2349,7 @@ PATH="$SAVED_PATH"
 # Its own stub: the release-quiesce fixture above answers `bd list` with step
 # beads, and demand reads `bd list` for an existing open demand.
 mkdir -p "$TMP/bin2"
-cat > "$TMP/bin2/gc" <<'GC2'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin2/gc" <<'GC2'
 printf '%s\n' "$*" >> "$D_LOG"
 case "$1 ${2:-}" in
   "rig list")
@@ -2861,16 +2903,18 @@ printf '[]\n' > "$D_LIST"
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^rigs_count() {/,/^}/p;/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
-cat > "$TMP/enumbin/gc" <<'ENUMGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
 [ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
 exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
 PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
 with_timeout() { shift; "$@"; }
+. "$2"
 . "$1"
 before="$(trap)"
 enumerate_rigs
@@ -2880,7 +2924,7 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
 grep -q 'RIGS\[\[' <<< "$EOUT" \
   && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
   || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
@@ -2908,7 +2952,7 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
-grep -q "already carries a first reaction" "$TMP/rerr" \
+grep -q "already has an open first reaction" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
 grep -q "failed" "$TMP/rerr" \

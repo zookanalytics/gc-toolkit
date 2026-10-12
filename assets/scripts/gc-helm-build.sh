@@ -208,9 +208,13 @@ if [ -n "$REPO_ROOT" ]; then
     for _p in "$MOD" ${LOCAL_DEP_MODS[@]+"${LOCAL_DEP_MODS[@]}"}; do
         # A pathspec has to be inside this repo, and "behind origin/main" is this
         # repo's question; a replace-dep resolved to another checkout is dropped.
-        case "$_p/" in
-            "$REPO_ROOT/"*) HELM_PATHS+=("${_p#"$REPO_ROOT"/}") ;;
-        esac
+        # Both answers come from git, which resolves symlinks for each module
+        # the way it did for REPO_ROOT. MOD and the replace-deps are logical
+        # `pwd` paths, so a string match against REPO_ROOT misses every module
+        # of a checkout reached through a symlinked path.
+        [ "$(git -C "$_p" rev-parse --show-toplevel 2>/dev/null || true)" = "$REPO_ROOT" ] || continue
+        _prefix="$(git -C "$_p" rev-parse --show-prefix 2>/dev/null || true)"
+        HELM_PATHS+=("${_prefix:-.}")
     done
     if [ "${#HELM_PATHS[@]}" -gt 0 ]; then
         DEFAULT_REF="$(git -C "$REPO_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"

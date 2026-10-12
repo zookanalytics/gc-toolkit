@@ -77,6 +77,73 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The test floor sits directly beneath the stubs, harness/ (git) first.
+FLOOR="$(cd "$HERE/../../tools/test-floor" && pwd)"
+case ":$PATH:" in
+  *":$TMP/bin:$FLOOR/harness:$FLOOR:"*) ok "the test floor is on PATH directly beneath the stub bin" ;;
+  *) bad "the test floor is not directly beneath the stub bin: $PATH" ;;
+esac
+
+# A script under test that outlives its suite's stubs is refused, never handed
+# the real binary. A suite in miniature sources the harness over its own TMP,
+# starts a script that waits, and is killed by a TERM that script never gets, so
+# the suite's EXIT trap removes TMP, stubs and all, while the script runs on.
+# CANARY, on the PATH the suite inherits, stands in for the real gc, bd, gh and
+# git: each one there records that it was reached. The script makes each call in
+# a subshell, as a script under test makes most of its calls, so each one
+# searches PATH afresh.
+CANARY="$TMP/floor-canary"; FLOOR_OUT="$TMP/floor-out"
+mkdir -p "$CANARY" "$FLOOR_OUT"
+for t in gc bd gh git; do
+  printf '#!/usr/bin/env bash\necho "%s reached" >> "$FLOOR_OUT/canary"\n' "$t" > "$CANARY/$t"
+  chmod +x "$CANARY/$t"
+done
+cat > "$TMP/floor-suite.sh" <<'SUITE'
+TMP="$(mktemp -d "$FLOOR_OUT/suite.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+. "$HARNESS"
+harness_init
+printf '%s\n' "$TMP" > "$FLOOR_OUT/suite-tmp"
+bash -c '
+  ( gc bd show x > "$FLOOR_OUT/with-stub" )
+  : > "$FLOOR_OUT/ready"
+  while [ ! -e "$FLOOR_OUT/go" ]; do sleep 0.1; done
+  for c in "gc bd create debris" "bd create debris" "gh pr comment 47" "git push origin"; do
+    ( $c 2>> "$FLOOR_OUT/refusals"; echo "$c rc=$?" >> "$FLOOR_OUT/rcs" )
+  done
+  : > "$FLOOR_OUT/done"
+' &
+wait
+SUITE
+( export FLOOR_OUT HARNESS="$HERE/test-harness.sh"; PATH="$CANARY:$PATH"; exec bash "$TMP/floor-suite.sh" ) &
+SUITE_PID=$!
+waited=0
+until [ -e "$FLOOR_OUT/ready" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+[ -e "$FLOOR_OUT/ready" ] && ok "floor: the script under test starts beneath a live suite" || bad "floor: the script under test never started"
+eq "$(cat "$FLOOR_OUT/with-stub" 2>/dev/null)" "[]" "floor: while the suite runs, its stub answers"
+kill -TERM "$SUITE_PID"; wait "$SUITE_PID" 2>/dev/null
+if [ -d "$(cat "$FLOOR_OUT/suite-tmp")" ]; then bad "floor: the killed suite's EXIT trap left its TMP"; else ok "floor: the killed suite's EXIT trap removed its TMP, stubs and all"; fi
+: > "$FLOOR_OUT/go"
+waited=0
+until [ -e "$FLOOR_OUT/done" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+eq "$(tr '\n' ';' < "$FLOOR_OUT/rcs" 2>/dev/null)" "gc bd create debris rc=127;bd create debris rc=127;gh pr comment 47 rc=127;git push origin rc=127;" \
+  "floor: each call the orphaned script makes fails as a missing command"
+refusals="$(cat "$FLOOR_OUT/refusals" 2>/dev/null)"
+for c in "gc bd create" "bd create debris" "gh pr comment" "git push origin"; do
+  has "$refusals" "test-floor: refused '$c'" "floor: …the floor refuses '$c'"
+done
+if [ -e "$FLOOR_OUT/canary" ]; then bad "floor: a binary behind the floor was reached: $(cat "$FLOOR_OUT/canary")"; else ok "floor: …and no binary behind the floor is reached"; fi
+
+# A tree without the floor does not run: a harness whose ../../tools holds no
+# test-floor exits before any stub is used.
+NOFLOOR="$TMP/nofloor"
+mkdir -p "$NOFLOOR/assets/scripts" "$NOFLOOR/run"
+cp "$HERE/test-harness.sh" "$NOFLOOR/assets/scripts/"
+out=$(TMP="$NOFLOOR/run"; . "$NOFLOOR/assets/scripts/test-harness.sh"; harness_init 2>&1; echo "survived"); rc=$?
+eq "$rc" "2" "harness_init with no test floor refuses to run"
+has "$out" "no test floor at tools/test-floor" "…and names the missing floor"
+hasnt "$out" "survived" "…before the suite goes on"
+
 # The gc bd create stub lands a create the way real bd does: --metadata (a JSON
 # value, its types kept), --status and --notes ride the one insert, and a
 # --metadata that is not JSON is refused with nothing created. A stub that
@@ -103,6 +170,61 @@ if STUB_CREATE_FAIL=1 gc bd create "refused" --json >/dev/null 2>&1; then bad "S
 eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
 if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
 eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
+
+# The gc bd update stub lands every flag of one call in one pass over the store:
+# the sets in order (a later value for a key wins), the unsets, the assignee,
+# the status, the appended note and the description. A value that parses as a
+# JSON number, boolean or null is stored typed and anything else as raw text,
+# as real bd stores them; a key or field STUB_DROP_KEYS names is left as it was
+# while the rest of the same call still lands, and the bead itself is never
+# lost, whichever fields the knob drops.
+store '[{"id":"tk-u","status":"open","assignee":"","title":"u","notes":"first","description":"","metadata":{"keep":"k","gone":"g","typed":"old"}},{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}]'
+gc bd update tk-u --set-metadata typed=1 --set-metadata "eq=a=b" --set-metadata flag=true \
+  --set-metadata typed=2.5 --set-metadata nul=null --set-metadata txt=" 007 " --unset-metadata gone \
+  --assignee lx-one --status=in_progress --append-notes "second" --description "d1" --json >/dev/null
+eq "$(jq -c '.[] | select(.id == "tk-u") | .metadata' "$STUB_STORE")" \
+  '{"keep":"k","typed":2.5,"eq":"a=b","flag":true,"nul":null,"txt":" 007 "}' \
+  "update: every set lands typed as bd types it, the later value of a repeated key wins, a value keeps its own = and the unset is gone"
+eq "$(bassignee tk-u)" "lx-one" "update: the assignee rides the same call"
+eq "$(bstatus tk-u)" "in_progress" "update: …and so does the status"
+eq "$(notes tk-u)" $'first\nsecond' "update: a note is appended on its own line"
+eq "$(jq -r '.[] | select(.id == "tk-u") | .description' "$STUB_STORE")" "d1" "update: …and the description lands"
+eq "$(jq -c '.[] | select(.id == "tk-v")' "$STUB_STORE")" '{"id":"tk-v","status":"open","assignee":"","title":"v","notes":"","metadata":{}}' \
+  "update: the other beads are untouched"
+gc bd update tk-v --append-notes "only" >/dev/null
+eq "$(notes tk-v)" "only" "update: the first note takes no leading newline"
+STUB_DROP_KEYS="tk-u:status,typed,assignee" gc bd update tk-u --status=closed --set-metadata typed=9 --set-metadata other=o --assignee lx-two --unset-metadata keep >/dev/null
+eq "$(bstatus tk-u)" "in_progress" "update: a dropped status leaves the bead as it was"
+eq "$(meta tk-u typed)" "2.5" "update: …and a dropped metadata key keeps its old value"
+eq "$(bassignee tk-u)" "lx-one" "update: …and a dropped assignee is not written"
+eq "$(meta tk-u other)" "o" "update: …while the keys the knob does not name still land"
+eq "$(meta tk-u keep)" "<absent>" "update: …including an unset"
+eq "$(jq 'length' "$STUB_STORE")" "2" "update: no bead is lost to a dropped field"
+gc bd update tk-missing --status=closed >/dev/null
+eq "$(jq 'length' "$STUB_STORE")" "2" "update: an id the store does not hold changes nothing"
+
+# The gc bd list stub answers its --metadata-field filters in the same pass as
+# the rest of the query: a row must match every field, a value is compared as
+# text (a stored number matches its spelling), and a field with no `=` matches
+# nothing a store would hold.
+store '[{"id":"l1","status":"open","title":"a","metadata":{"k":"v","n":1}},{"id":"l2","status":"open","title":"b","metadata":{"k":"v","n":2}},{"id":"l3","status":"closed","title":"c","metadata":{"k":"v","n":1}}]'
+ids() { jq -r 'map(.id) | join(",")'; }
+eq "$(gc bd list --metadata-field k=v --json | ids)" "l1,l2,l3" "list: one metadata field selects every row carrying it"
+eq "$(gc bd list --metadata-field k=v --metadata-field n=1 --json | ids)" "l1,l3" "list: two fields both have to match"
+eq "$(gc bd list --status=open --metadata-field n=1 --json | ids)" "l1" "list: …and the status filter applies with them"
+eq "$(gc bd list --metadata-field=k=v --metadata-field n=3 --json | ids)" "" "list: a field no row matches selects nothing"
+eq "$(gc bd list --metadata-field k --json | ids)" "" "list: a field without = selects nothing"
+
+# The gc sling stub pours in one pass: the route key is retired and the
+# execution route stamped, unless STUB_DROP_KEYS drops the stamp.
+store '[{"id":"tk-s","status":"open","assignee":"","title":"s","notes":"","metadata":{"gc.routed_to":"pool"}}]'
+gc sling pool tk-s --on mol-x >/dev/null
+eq "$(meta tk-s gc.routed_to)" "<absent>" "sling: the route is retired"
+eq "$(meta tk-s gc.execution_routed_to)" "pool" "sling: …and the execution route stamped"
+store '[{"id":"tk-s","status":"open","assignee":"","title":"s","notes":"","metadata":{"gc.routed_to":"pool"}}]'
+STUB_DROP_KEYS="tk-s:gc.execution_routed_to" gc sling pool tk-s --on mol-x >/dev/null
+eq "$(meta tk-s gc.routed_to)" "<absent>" "sling: a dropped stamp still retires the route"
+eq "$(meta tk-s gc.execution_routed_to)" "<absent>" "sling: …and leaves the stamp unwritten"
 
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an
@@ -189,6 +311,46 @@ eq "$(view7 a,b)" "third" "pr view queue: …consumed, so the next read takes th
 eq "$(view7 a,b)" "fixture" "pr view queue: the fixture answers once the queue is empty"
 eq "$(find "$Q" -type f | wc -l | tr -d ' ')" "0" "pr view queue: every queued file was consumed"
 
+# A GraphQL mutation names only a node id, as the real API takes it, and the gh
+# stub writes the one PR fixture that holds the node. It starts as many jq
+# processes with thirty PR fixtures written as with one, so a suite's mutations
+# do not slow down as it adds PRs. A fixture whose text names the id without
+# holding the node is passed over and left as it was. A request's -f variables
+# reach the handler as written: quotes, an equals sign and non-ASCII text
+# arrive whole, a trailing newline is dropped, and a name given twice keeps its
+# last value.
+gql_thread() { # <num>: a PR fixture whose one thread T-<num> holds comment NC-<num>
+  printf '{"reviews":[],"threads":[{"id":"T-%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-%s","databaseId":1,"author":{"login":"op"},"body":"b","reactionGroups":[]}]}}],"issue_comments":[]}' "$1" "$1"
+}
+reactions() { jq -r '.threads[0].comments.nodes[0].reactionGroups | map(.content) | join(",")' "$GH_DIR/threads_$1.json"; }
+REACT_Q='mutation($id:ID!,$c:ReactionContent!){addReaction(input:{subjectId:$id,content:$c}){clientMutationId}}'
+JQ_REAL="$(command -v jq)"; mkdir -p "$TMP/jqcount"
+printf '#!/bin/sh\necho x >> "%s"\nexec "%s" "$@"\n' "$TMP/jqcount/runs" "$JQ_REAL" > "$TMP/jqcount/jq"
+chmod +x "$TMP/jqcount/jq"
+jq_runs() { # <command>...: how many jq processes the command started
+  : > "$TMP/jqcount/runs"
+  PATH="$TMP/jqcount:$PATH" "$@" >/dev/null 2>&1
+  wc -l < "$TMP/jqcount/runs" | tr -d ' '
+}
+gql_thread 50 > "$GH_DIR/threads_50.json"
+one=$(jq_runs gh api graphql -f query="$REACT_Q" -f id=NC-50 -f c=EYES)
+eq "$(reactions 50)" "EYES" "gh graphql: addReaction marks the node in the fixture that holds it"
+for n in $(seq 51 79); do gql_thread "$n" > "$GH_DIR/threads_$n.json"; done
+many=$(jq_runs gh api graphql -f query="$REACT_Q" -f id=NC-79 -f c=EYES)
+eq "$(reactions 79)" "EYES" "gh graphql: …and finds it in the last of thirty fixtures"
+eq "$many" "$one" "gh graphql: a mutation starts as many jq processes with thirty PR fixtures as with one"
+eq "$(grep -l EYES "$GH_DIR"/threads_5[1-9].json "$GH_DIR"/threads_[67]?.json | wc -l | tr -d ' ')" "1" \
+  "gh graphql: …and writes no fixture but the one holding the node"
+gql_thread 81 > "$GH_DIR/threads_81.json"
+gql_thread 80 | jq -c '.threads[0].comments.nodes[0].replyTo = "NC-81"' > "$GH_DIR/threads_80.json"
+cp "$GH_DIR/threads_80.json" "$TMP/threads_80.before"
+gh api graphql -f query="$REACT_Q" -f id=NC-81 -f c=EYES >/dev/null
+eq "$(reactions 81)" "EYES" "gh graphql: a fixture that only names the id does not take the node's write"
+if cmp -s "$GH_DIR/threads_80.json" "$TMP/threads_80.before"; then ok "gh graphql: …and is left as it was"; else bad "gh graphql: the fixture naming NC-81 was rewritten"; fi
+gh api graphql -f query="$REACT_Q" -f id=NC-81 -f c=HEART -f c=$'a "quoted" = value, ✅\nline two\n' >/dev/null
+eq "$(jq -c '.threads[0].comments.nodes[0].reactionGroups | map(.content)' "$GH_DIR/threads_81.json")" '["EYES","a \"quoted\" = value, ✅\nline two"]' \
+  "gh graphql: a variable arrives whole, the last value given for its name, its trailing newline dropped"
+
 # The gc bd dep stub holds one edge per (issue, depends_on) pair, as real bd
 # does. A second type on a taken pair is refused with exit 1 and writes nothing,
 # whichever form wrote either edge. The same type again is a no-op that exits 0,
@@ -261,6 +423,24 @@ eq "$(jq -r '.[0].description' "$STUB_STORE")" "second, with a space" "update --
 gc bd update tk-desc -d third >/dev/null
 eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
 eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
+
+# The gc bd update stub lands a whole write in one jq, and the gc bd list stub
+# answers a query and all of its --metadata-field filters in one, however many
+# flags the call carries. Each counted call is read back, so a call that stopped
+# before its jq cannot pass the count.
+store '[{"id":"tk-one","status":"open","assignee":"a","title":"o","notes":"n","metadata":{"old":"x","gone":"y"}},
+        {"id":"tk-two","status":"open","assignee":"","title":"t","notes":"","metadata":{"lane":"c","stage":"1"}}]'
+one=$(jq_runs gc bd update tk-one --set-metadata k1=1)
+many=$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
+  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)
+eq "$many" "$one" "update: a write with nine flags starts as many jq processes as one with a single key"
+eq "$(jq -c '.[] | select(.id == "tk-one") | [.metadata, .assignee, .status, .notes, .description]' "$STUB_STORE")" \
+  '[{"old":"x","k1":3},"bob","in_progress","n\nmore","d"]' "update: …and every flag of that write lands"
+one=$(jq_runs gc bd list --json)
+many=$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)
+eq "$many" "$one" "list: a read with three --metadata-field filters starts as many jq processes as one with none"
+eq "$(gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json | jq -r 'map(.id) | join(",")')" "tk-two" \
+  "list: …and that read answers with the one bead every filter matches"
 
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
