@@ -42,8 +42,7 @@ mkdir -p "$BIN"
 #   RECLOSE_REFUSED  a close of a bead already closed exits 1 (bd answers it
 #               as a no-op success; this knob covers a store that refuses it)
 #   NEED_FORCE  a plain close is refused; only a --force close takes
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
@@ -138,8 +137,7 @@ echo "── the work-record outcome never holds the close ──"
 #                   ones land
 WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
 mkdir -p "$WBIN"
-cat >"$WBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$WBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update)

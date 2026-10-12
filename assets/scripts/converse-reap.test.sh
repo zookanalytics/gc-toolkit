@@ -57,8 +57,7 @@ export CALLS="$TMP/calls"
 export CONVERSE_REAP_GC="$TMP/bin/gc"
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "session list")
     if [ -n "${LIST_BROKEN:-}" ]; then echo "gc: not json here"; exit 0; fi

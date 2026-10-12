@@ -200,10 +200,10 @@ for f in "$SDIR"/*.sh; do
     case "$f" in *.test.sh) continue ;; esac    # tests quote the block; they do not ship it
     check_file "$f"
 done
-# Worker prompts carry no gate-visit copy: they are doctrine and defer the
-# dispose mechanics to their formula (proactive → mol-first-reaction's
-# advance-and-drain), so the formula and script sweeps above cover every
-# shipped copy.
+# Worker prompts carry no gate-visit copy: the proactive prompt's ruling and
+# recommend exits file a human gate through first-reaction-dispose.sh, and
+# gate-visit-sweep files that gate's visit, so the formula and script sweeps
+# above cover every shipped copy.
 
 echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
@@ -212,8 +212,7 @@ echo "── the read-back actually repairs (executed, not grepped) ──"
 EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
-cat > "$EXTMP/bin/gc" <<'GVSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$EXTMP/bin/gc" <<'GVSTUB'
 # Serves the reads the block makes. LOST=1 makes the first stamp vanish —
 # the observed failure: the update returns 0 and the value reads back empty.
 # $AGENTS is the live identity set the route is proved against; an arm that

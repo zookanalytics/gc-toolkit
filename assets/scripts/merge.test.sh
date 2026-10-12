@@ -18,6 +18,12 @@
 # they stop partway (a cut-short reviews or threads stream, a list or dep probe
 # that exited non-zero after printing an array or printed unreadable bytes
 # after it).
+#
+# The sections run in the parts declared below, each wrapped in an `if part`
+# block inside the body both arms share, so a part runs its own sections in
+# both arms. tools/run-tests.sh runs each part as its own run under its own
+# timeout; run directly, the file runs every part in order.
+# run-tests-parts: gates approval record machine reread pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,6 +48,10 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/merge.sh"
+# A pass reads an UNKNOWN merge state again on bd-lib.sh's default budget and
+# wait. A caller's value would change both, so every section starts from the
+# defaults, and a section that wants another sets it on its own call.
+unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
 
 # check_set declares the lane; the anchor carries no check.<lane> marker — a
 # lane's green is DERIVED from a backing review bead, not stored on the anchor.
@@ -107,6 +117,14 @@ paced_views() { grep -o '^pr view [0-9]*' "$STUB_GH_LOG" | awk '{ print $3 }' | 
 # wiring. GCTK_BIN names that build in both arms, because the shell records
 # every landing through lifecycle.sh, and lifecycle.sh has no fallback.
 suite() {
+
+# Each arm starts from empty logs and no dependency edges, so an assertion on a
+# log reads only what its own arm wrote.
+: > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"; : > "$STUB_DEPS"
+
+# ==== part gates: the happy path, the check resolver and the helpers, the
+# one-anchor-per-PR guard, retarget, lane state and unclosed children ====
+if part gates; then
 
 echo "# happy path"
 store "[$(anchor M1 10), $(rev M1)]"
@@ -373,6 +391,12 @@ out=$("$SUT" 2>&1)
 has "$out" "unclosed rework/review bead dep-fgn" "a dep-edge blocker holds whatever repository its url names"
 : > "$STUB_DEPS"
 
+fi # part gates
+
+# ==== part approval: must-fix findings, visits, the universal approval rule
+# and its veto, and the cause a BLOCKED or UNSTABLE PR is held for ====
+if part approval; then
+
 echo "# an open must-fix finding holds the merge, and the hold names it"
 # A must-fix finding blocks its anchor by the same `blocks` edge a rework child
 # uses, so the in-flight probe already holds. Target 4's change is that the hold
@@ -602,6 +626,60 @@ printf '[{"type":"required_status_checks","parameters":{"required_status_checks"
 out=$("$SUT" 2>&1)
 has "$out" "a REQUIRED check is not green" "UNSTABLE with a red required check holds"
 rm -f "$GH_DIR/rules_main.json"
+
+echo "# UNSTABLE with a check rollup that cannot be evaluated holds; it never reads as all-green"
+# ci is required, the lane is green and the PR is approved, so the rollup read
+# alone decides each pass. An evaluation that fails names nothing red, and the
+# unreadable-rollup hold is all that keeps the PR unmerged. The first rollup is
+# cut off mid-row and the last is a lone space. Both are queued for the rollup
+# read alone, so the pinned read still parses. The second gives ci a number for
+# a conclusion, beside a state that a reader skipping the conclusion would take
+# as green. The third gives ci a red row and then a row whose state is a
+# number. Every row of a required check is read, so the red row decides nothing.
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"ci"}]}}]' > "$GH_DIR/rules_main.json"
+for n in 35 38; do
+  printf '%s' "$(prview "$n" OPEN UNSTABLE)" > "$GH_DIR/pr_view_$n.json"
+  mkdir -p "$GH_DIR/pr_view_$n.queue/statusCheckRollup"
+done
+printf '%s' '{"statusCheckRollup":[{"name":"ci","conclusion":"FAIL' > "$GH_DIR/pr_view_35.queue/statusCheckRollup/01.json"
+printf '%s' "$(prview 36 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","conclusion":0,"state":"SUCCESS"}]')" > "$GH_DIR/pr_view_36.json"
+printf '%s' "$(prview 37 OPEN UNSTABLE ',"statusCheckRollup":[{"context":"ci","state":"FAILURE"},{"context":"ci","state":0}]')" > "$GH_DIR/pr_view_37.json"
+printf ' ' > "$GH_DIR/pr_view_38.queue/statusCheckRollup/01.json"
+for fx in "U4 35 cut off mid-row" "U5 36 giving ci a numeric conclusion" "U6 37 giving ci a numeric state after a red row" "U7 38 holding only whitespace"; do
+  read -r a n what <<<"$fx"
+  store "[$(anchor "$a" "$n"), $(rev "$a")]"
+  approved "$n"
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "PR#$n is UNSTABLE and the check rollup is unreadable; merge held (anchor $a)" "a rollup $what holds as unreadable"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr merge $n" "…and PR#$n is not merged"
+  eq "$(bstatus "$a")" "open" "…and anchor $a stays open"
+done
+rm -rf "$GH_DIR/pr_view_35.queue" "$GH_DIR/pr_view_38.queue"
+
+echo "# UNSTABLE reads only a required check's rows, and a pending one is red, not unreadable"
+# The controls for the case above, with the same required ci and the row shapes
+# gh prints. One PR has ci green as a completed check run and as a status
+# context, which carries no conclusion. Beside them sits an advisory check whose
+# conclusion is a number, and the PR merges. The other has ci as a check run
+# still in progress, whose conclusion is an empty string, and it holds as red.
+store "[$(anchor U8 54), $(rev U8)]"
+printf '%s' "$(prview 54 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","status":"COMPLETED","conclusion":"SUCCESS"},{"context":"ci","state":"SUCCESS"},{"name":"lint","status":"COMPLETED","conclusion":0}]')" > "$GH_DIR/pr_view_54.json"
+approved 54
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded U8" "UNSTABLE with ci green as a check run and a status context merges past an unreadable advisory row"
+store "[$(anchor U9 55), $(rev U9)]"
+printf '%s' "$(prview 55 OPEN UNSTABLE ',"statusCheckRollup":[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]')" > "$GH_DIR/pr_view_55.json"
+approved 55
+out=$("$SUT" 2>&1)
+has "$out" "PR#55 is UNSTABLE and a REQUIRED check is not green at sha-55: ci(RED); merge held (anchor U9)" "a required check still in progress holds as red, not as unreadable"
+rm -f "$GH_DIR/rules_main.json"
+
+fi # part approval
+
+# ==== part record: identity refusals, the terminal re-read, the merged record
+# and its retry cap, the posture hold, and seed-audit freshness ====
+if part record; then
 
 echo "# identity refusals"
 store "[$(anchor I1 40)]"
@@ -1062,13 +1140,21 @@ has "$out" "head moved during the freshness probe (fetched 'sha-moved', validate
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 
+fi # part record
+
 # --- the machine axis (lifecycle/lifecycle.toml [machine_axis]) ------------------
 # Every hold above already decides what the cadence can do next and spends the
 # answer on a log line. These assert that the answer is kept, so a reader learns
-# whether an anchor is moving without re-implementing these predicates.
+# whether an anchor is moving without re-implementing these predicates. Sections
+# in more than one part read the axis, and each part runs alone, so its readers
+# are defined here, outside every part.
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 reason()  { printf '%s' "$(meta "$1" pr.machine_reason)"; }
+
+# ==== part machine: the machine axis, and the reads that fail closed when they
+# stop partway ====
+if part machine; then
 
 echo "# machine axis: a standing veto in the settled tail is settled — the operator re-reviews"
 # Checks green at the live head, a non-city CHANGES_REQUESTED standing, and every
@@ -1387,11 +1473,16 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#127 held by unclosed rework/review bead blk-es2 (open); merge held" "the control: a null-status blocker reads as open and holds"
 : > "$STUB_DEPS"
 
+fi # part machine
+
+# ==== part reread: an UNKNOWN merge state read again within one budget per
+# pass ====
+if part reread; then
+
 # GitHub computes mergeability lazily. A merge moves the base under every sibling,
 # and each sibling's first read after it answers UNKNOWN while the computation that
 # read started runs. pr_view_<n>.queue/<fields>/ scripts the reads of one field
 # set in order; the fixture is the computed answer every later read gets.
-unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
 # The pinned read's field set, from bd-lib.sh, where merge.sh takes it. The queue
 # is keyed by it, so a queued answer goes to the pinned read or a re-read of it
 # and never to a read of another field set.
@@ -1536,6 +1627,12 @@ eq "$(pinned RR8)" "settled@sha-157" "the re-read's REVIEW_REQUIRED makes it the
 has "$out" "PR#157 is BLOCKED by branch protection: waiting on an approving review (1 required, reviewDecision='REVIEW_REQUIRED')" "…named at the BLOCKED arm, past the approval gate"
 rm -f "$GH_DIR/rules_main.json"
 
+fi # part reread
+
+# ==== part pacing: the visit order, landing first, and the rotation that paces
+# the rest ====
+if part pacing; then
+
 echo "# landing first: a PR that can land, or has left the open list, is visited first and never paced"
 # PC9's PR is approved and CLEAN, so it can land this pass; PD5's PR is not in
 # the open list (it merged out of band and owes its record). PB1 and PB2's PRs
@@ -1654,6 +1751,8 @@ has "$out" "open-PR list unreadable" "a list that does not parse is reported the
 has "$out" "visited 2 landing-first and 0 of 0 other anchors" "…and leaves the pass unpaced"
 rm -f "$GH_DIR/open_prs.json"
 
+fi # part pacing
+
 }
 
 # An arm proves nothing about which implementation answered unless the hand-off
@@ -1665,9 +1764,21 @@ SENTINEL="$TMP/sentinel-gctk"
 printf '#!/usr/bin/env bash\nprintf "SENTINEL-GCTK %%s dir=%%s\\n" "$*" "${GCTK_SCRIPTS_DIR:-}"\n' > "$SENTINEL"
 chmod +x "$SENTINEL"
 
+if part gates; then
+echo "# every section sits inside a part"
+# A run executes only its own part's block, so a section outside every block
+# would run once per part in each arm. Blocks open with `if part <name>; then`
+# and close with `fi # part <name>`, both at the start of a line.
+OUTSIDE=$(awk '/^if part [A-Za-z0-9_-]+; then$/ { inside = 1; next }
+               /^fi # part [A-Za-z0-9_-]+$/ { inside = 0; next }
+               /^echo ["\047]# / && !inside { print NR ": " $0 }' "$HERE/merge.test.sh")
+eq "$OUTSIDE" "" "no section header sits outside a part"
+fi # part gates
+
 echo "## arm: shell fallback (GCTK_FALLBACK=merge)"
 export GCTK_FALLBACK=merge
 suite
+if part gates; then
 # With a binary named, merge.sh keeps the call, and the landing it records
 # still reaches that binary through lifecycle.sh.
 store "[$(anchor SF1 133), $(rev SF1)]"
@@ -1677,6 +1788,7 @@ out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
 hasnt "$out" "SENTINEL-GCTK merge" "GCTK_FALLBACK=merge keeps merge.sh on its shell with a binary named"
 has "$out" "SENTINEL-GCTK lifecycle transition SF1 --to merged" "…and the shell records the landing through lifecycle.sh, which execs that binary"
 rm -f "$GH_DIR/pr_view_133.json" "$GH_DIR/reviews_133.json"
+fi # part gates
 unset GCTK_FALLBACK
 
 echo
@@ -1684,6 +1796,10 @@ echo "## arm: gctk merge (reached through merge.sh)"
 if [ -n "$GCTK_BUILT" ]; then
     export GCTK_BIN="$GCTK_BUILT"
     suite
+else
+    bad "gctk was not built, so the gctk merge port was NOT exercised, and this suite is its acceptance bar"
+fi
+if [ -n "$GCTK_BUILT" ] && part gates; then
     out=$(GCTK_BIN="$SENTINEL" "$SUT" 2>&1)
     has "$out" "SENTINEL-GCTK merge" "merge.sh execs \$GCTK_BIN with the merge subcommand when it resolves"
     has "$out" "dir=$SD" "…exporting its own directory as GCTK_SCRIPTS_DIR"
@@ -1710,8 +1826,6 @@ if [ -n "$GCTK_BUILT" ]; then
     eq "$(cat "$STUB_GH_LOG")" "" "…before it reads a single PR"
     out=$(GCTK_SCRIPTS_DIR="$SD" "$GCTK_BUILT" merge 2>&1)
     has "$out" "merged + recorded SD1" "the control: the same direct run with the helper directory named merges"
-else
-    bad "gctk was not built, so the gctk merge port was NOT exercised, and this suite is its acceptance bar"
 fi
 
 echo

@@ -307,7 +307,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass budget, and per anchor requires both sides to resolve there and
    probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase). An anchor pr-open
+   branch shape is brought current by merge, never rebase), whose hand-off the
+   bring-current guard holds to the same audit. An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
    arm 7 owns the dispatch. Both arms probe
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
@@ -385,8 +386,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
    approved PR only, by the approval rule merge.sh lands on; the child's
-   handoff runs `bring-current-guard.sh`, which dismisses the approval and
-   files a visit when bringing the branch current took judgment. When the
+   handoff runs `bring-current-guard.sh`, which refuses it until the worker's
+   audit covers every conflict and, when the round conflicted, reopens triage
+   to rule on what it reopens and whether the approval stands, or rules closed
+   itself on an anchor that declares no triage lane
+   ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
    child, as for arm 5), `BLOCKED`
@@ -586,9 +590,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
    anchor on work nothing will run, and no other arm closes it. The pass
    proves the twin was never dispatched two ways: its metadata records no
-   route, deferred dispatch, claim, worktree, commit or outcome, and no convoy
-   tracks it, which is the edge every pour mints. It requires the review to be
-   closed, since close_review is signoff.sh's last write. It requires a sibling
+   route, deferred dispatch, claim, worktree, commit or outcome other than
+   `no-op`, and no convoy tracks it, which is the edge every pour mints. It
+   requires the review to be closed, since close_review is signoff.sh's last
+   write. It requires a sibling
    naming the same review and anchor to have landed: dispatched, not itself
    disposed or retired, and either recording `work_outcome=shipped` or closed
    with `rejection_reason` unset. signoff.sh stamps that field on every child.
@@ -597,9 +602,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    own. So a closed sibling counts only with `merge_result=merged`, or with
    neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
    hand close of a child whose polecat had begun still reads as a landing.
-   Closing the twin releases its blocks edge, and the
-   pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
-   branch's bead list. The arm runs after review-sweep so a twin that arm 2
+   The twin then records `gc.work_outcome=no-op`, the statement that it
+   pushed nothing: `bead-rehome.sh`'s duplicate evidence accepts it beside the
+   work-order `branch` rework-child.sh stamped on the twin, and it keeps the twin
+   off pr-stack.sh's bead list for the branch. A close that is held leaves the
+   twin in this pass, and the next pass finishes it. Closing the twin releases
+   its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
 12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that

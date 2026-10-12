@@ -25,8 +25,7 @@ hasnt() { if grep -qF -- "$2" <<< "$1"; then bad "$3 (found '$2')"; else ok "$3"
 # --- the stub gc -------------------------------------------------------------
 BIN="$TMP/bin"; mkdir -p "$BIN"
 STUB_DOLT_ROOT="$TMP/dolt"; mkdir -p "$STUB_DOLT_ROOT"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 sub="${1:-} ${2:-}"
 case "$sub" in

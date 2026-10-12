@@ -51,8 +51,7 @@ esac
 # ── stubs ──────────────────────────────────────────────────────────────
 BIN="$TMP/bin"; RIG="$TMP/rig"; NORIG="$TMP/norig"
 mkdir -p "$BIN" "$RIG/assets/scripts" "$NORIG/assets/scripts" "$TMP/cwd" "$TMP/home"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf 'gc %s\n' "$*" >> "${STUB_LOG:?}"
 # Like the real gc, every mail verb refuses an empty id: peek answers "message
 # not found" with exit 1 and an error object on stdout.
@@ -73,8 +72,7 @@ case "${1:-} ${2:-}" in
   *) echo "unexpected gc invocation: $*" >&2; exit 99 ;;
 esac
 STUB
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 exit 128
 STUB
 # The wrapper records the exact argv as a JSON array, then hands the same argv
@@ -191,6 +189,26 @@ run bash 'MAIL_ID=lx-wisp-m1; KEY="bad key"; ABOUT=tk-root'
 hasnt "$LOG" "gc mail archive" "a key the real parser refuses archives nothing"
 has "$LOG" "gc mail mark-unread lx-wisp-m1" "and leaves the mail unread"
 
+echo "# a refusal for a live finding sharing KEY or ABOUT names both re-runs"
+run bash "$BASE" STUB_PF_RC=3
+hasnt "$LOG" "gc mail archive" "a refused mail is NOT archived"
+has "$LOG" "gc mail mark-unread lx-wisp-m1" "and is returned to the unread inbox"
+has "$OUT" "refused mail lx-wisp-m1" "the witness is told the filing was refused"
+has "$OUT" "with that finding's KEY and ABOUT" "and that the listed finding's KEY and ABOUT file it there"
+has "$OUT" "with DISTINCT=1" "and that DISTINCT=1 files a different situation"
+hasnt "$OUT" "stays unread for the next cycle" "and is not told the next cycle files it"
+eq "$RC" 0 "the patrol step survives the refusal"
+
+echo "# DISTINCT=1 files a mail its refusal listed as a different situation"
+run bash "$BASE; DISTINCT=1"
+eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "true" "DISTINCT=1 passes --distinct"
+has "$OUT" "about=tk-root distinct" "the real patrol-finding.sh parser accepted it"
+has "$LOG" "gc mail archive lx-wisp-m1" "the mail is archived"
+run bash "$BASE"
+eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "false" "an unset DISTINCT passes no --distinct, so the refusal still applies"
+run bash "$BASE; DISTINCT="
+eq "$(printf '%s' "$ARGS" | jq 'index("--distinct") != null')" "false" "an empty DISTINCT is the same as an unset one"
+
 echo "# nothing is filed, and nothing archived, when a prerequisite is missing"
 run bash 'MAIL_ID=lx-wisp-m1; ABOUT=tk-root'
 hasnt "$LOG" "patrol-finding" "no KEY: no filing"
@@ -217,6 +235,9 @@ for PRELUDE in 'set -e' 'set -euo pipefail'; do
   run bash "$PRELUDE; $BASE" STUB_PF_RC=1
   has "$LOG" "gc mail mark-unread lx-wisp-m1" "$PRELUDE: a failed filing leaves the mail unread"
   hasnt "$LOG" "gc mail archive" "$PRELUDE: and archives nothing"
+  run bash "$PRELUDE; $BASE" STUB_PF_RC=3
+  has "$OUT" "refused mail lx-wisp-m1" "$PRELUDE: a refusal reaches its diagnostic"
+  has "$LOG" "gc mail mark-unread lx-wisp-m1" "$PRELUDE: and leaves the mail unread"
   run bash "$PRELUDE; $BASE" STUB_PEEK_FAIL=1
   has "$OUT" "the mail is unreadable" "$PRELUDE: an unreadable mail reaches the diagnostic"
   run bash "$PRELUDE; KEY=k"
@@ -234,6 +255,11 @@ if command -v zsh >/dev/null 2>&1; then
   eq "$ARGS" "$BASH_ARGS" "zsh: an empty ABOUT is the same argv as under bash"
   run zsh "$BASE" STUB_PF_RC=1
   hasnt "$LOG" "gc mail archive" "zsh: a failed filing archives nothing"
+  run bash "$BASE; DISTINCT=1"; BASH_ARGS="$ARGS"
+  run zsh "$BASE; DISTINCT=1"
+  eq "$ARGS" "$BASH_ARGS" "zsh: DISTINCT=1 is the same argv as under bash"
+  run zsh "$BASE" STUB_PF_RC=3
+  has "$OUT" "refused mail lx-wisp-m1" "zsh: a refusal reaches its diagnostic"
 else
   echo "skip - zsh not installed; the zsh runs are skipped"
 fi
