@@ -26,6 +26,20 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac; }
 
 cd "$ROOT" || exit 1
 
+# The sites are read from the tracked tree with git grep, never by walking the
+# directory. A checkout can hold trees git does not track, such as the per-bead
+# worktrees a pool worktree nests under worktrees/, and a walk would check their
+# copies of every file as if they were sites of this checkout. Each search
+# names its pattern syntax, -F here, because grep.patternType in a git config
+# changes git grep's default. Each search also passes -a, which reads every
+# file as text. .gitattributes marks generated/ -diff, and git grep reports a
+# match in a file it holds binary as one "Binary file <path> matches" line.
+# That line names no site, and skip_file cannot tell it is under generated/.
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  bad "$ROOT is not a git checkout, so there is no tracked tree to read"
+  echo; echo "takeaway settled-key pairing: $PASS passed, $FAIL failed"; exit 1
+fi
+
 # The pairing, read from the declaration rather than hardcoded: a rename there
 # has to move this suite with it, and a suite pinned to the old key would pass
 # while nothing wrote the new one.
@@ -48,7 +62,7 @@ grep -q "\"$SETTLED\"" "$LIFECYCLE" \
 # Files that STATE the rule rather than break it: the generated re-render, the
 # specs and docs describing it, and the suites that test it.
 skip_file() {
-  case "${1#./}" in
+  case "$1" in
     generated/*|specs/*|docs/*|*/README.md|README.md) return 0 ;;
     *.test.sh|*_test.go) return 0 ;;
     *) return 1 ;;
@@ -88,9 +102,8 @@ while IFS=: read -r f n _; do
   stmt=$(statement "$f" "$n")
   checked=$((checked + 1))
   has "$stmt" "$SETTLED=" "$f:$n writes $SETTLED in the same statement"
-done < <(grep -rn --include='*.sh' --include='*.toml' --include='*.md' --include='*.go' \
-             -e "--set-metadata" . 2>/dev/null \
-           | grep -v '^\./\.git/' | grep -F "$MARKER=")
+done < <(git grep -a -n -F -e "--set-metadata" -- '*.sh' '*.toml' '*.md' '*.go' \
+           | grep -F "$MARKER=")
 
 [ "$checked" -gt 0 ] && ok "headline writers found and checked ($checked)" \
   || bad "no writer of $MARKER found — the discovery pattern has gone stale"
@@ -103,9 +116,7 @@ while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
   bad "$f:$n hardcodes a settled disposition; it is $SETTLED's writer only under --no-wait"
-done < <(grep -rn -F --include='*.sh' --include='*.toml' --include='*.md' --include='*.go' \
-             -e "$SETTLED=1" . 2>/dev/null \
-           | grep -v '^\./\.git/')
+done < <(git grep -a -n -F -e "$SETTLED=1" -- '*.sh' '*.toml' '*.md' '*.go')
 ok "no site outside the verb stamps a settled disposition of its own"
 
 HELM="$HERE/gc-helm.sh"
