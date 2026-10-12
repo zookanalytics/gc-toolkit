@@ -107,8 +107,7 @@ for name, value in values.items():
     text = text.replace("{{" + name + "}}", value)
 sys.stdout.write(text)
 PY
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 # Stand-in for the gc calls a patrol pour makes. `bd mol wisp` renders the
 # wisp's root from the formula file under $STUB_FORMULAS as it stands at this
 # call, stores it as $STUB_STORE/w<n>.root and prints the new id. Every other

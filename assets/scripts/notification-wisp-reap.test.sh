@@ -60,8 +60,7 @@ export NOTIFICATION_WISP_REAP_GC="$TMP/bin/gc"
 CITY_DB="$TMP/city/.beads"
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     jq -n --arg c "${RIG_CITY_PATH:-}" '{city_path:$c, rigs:[]}' ;;
