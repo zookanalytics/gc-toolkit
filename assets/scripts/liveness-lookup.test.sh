@@ -23,9 +23,9 @@
 # THE FIX: keep the exact lookup as the authoritative first pass, then retry ONCE
 # on the identity's last `/`-separated segment. Because stripping the prefix can
 # make two sessions in different cities collide on one bare identity, the retry
-# resolves a collision toward LIFE: any matching session that is not
-# closed/archived wins. It can therefore turn `absent` into a live state but can
-# never manufacture an orphan.
+# resolves a collision toward LIFE: any matching session whose state is not dead
+# (archived, closed, failed-create) wins. It can therefore turn `absent` into a
+# live state but can never manufacture an orphan.
 #
 # This test EXECUTES the real lookup extracted verbatim from the formula (between
 # the `liveness-lookup` markers), so it cannot drift from the shipped instruction.
@@ -120,6 +120,15 @@ old_state() {
   printf '%s' "$1" | jq -r --arg a "$2" '.[$a] // "absent"'
 }
 
+# The session-list map as it was built before a shared key resolved toward
+# life: from_entries lets the later entry win. Premise assertions only.
+old_map() {
+  printf '%s' "$1" | jq '
+    def kv($st): [ .id, .name, .session_name, .alias, .agent_name, .configured_named_identity ]
+      | map(select(type == "string" and . != "")) | map({key: ., value: $st});
+    [ (.sessions[] | kv(.state // "active")) ] | add // {} | from_entries'
+}
+
 # --- Fixtures, transcribed from live `gc session list --json` output. ---------
 # A city-scoped wisp registers a BARE alias; its beads carry a rig-qualified
 # assignee. A pool polecat registers a RIG-QUALIFIED alias; a bead may carry the
@@ -148,6 +157,9 @@ eq "$(state "$MAP_POOL" "gc-toolkit.furiosa")" "active" \
 eq "$(state '{"gascity/gc-toolkit.furiosa":"closed","gc-toolkit.furiosa":"active"}' \
             "gascity/gc-toolkit.furiosa")" "closed" \
    "(C) exact match wins over a bare-form collision (dead session still orphaned)"
+eq "$(state '{"gascity/gc-toolkit.furiosa":"failed-create","gc-toolkit.furiosa":"active"}' \
+            "gascity/gc-toolkit.furiosa")" "failed-create" \
+   "(C) exact failed-create match wins over a bare-form collision (still orphaned)"
 # (D) Non-regression, the witness's core job: an identity in NO session must
 #     still resolve absent. A fallback that rescued everything would disable
 #     orphan recovery entirely.
@@ -163,11 +175,14 @@ eq "$(state '{"gc-toolkit/gc-toolkit.furiosa":"closed","gascity/gc-toolkit.furio
 eq "$(state '{"gascity/gc-toolkit.furiosa":"active","gc-toolkit/gc-toolkit.furiosa":"closed"}' \
             "gc-toolkit.furiosa")" "active" \
    "(F) collision preference is order-independent"
-# (G) Every live state in the step's classification list must beat a dead one,
-#     not just 'active' — the controller/operator states own the session too.
-for live in active awake creating asleep drained suspended draining quarantined; do
-  eq "$(state "{\"a/x\":\"closed\",\"b/x\":\"$live\"}" "x")" "$live" \
-     "(G) collision with a '$live' owner -> '$live' (not orphaned)"
+# (G) Every state outside the dead set must beat every dead one, not just
+#     'active'. The controller and operator states own the session too, and so
+#     does a state the classification does not name.
+for live in active awake start-pending creating asleep drained suspended draining quarantined some-new-state; do
+  for dead in closed archived failed-create; do
+    eq "$(state "{\"a/x\":\"$dead\",\"b/x\":\"$live\"}" "x")" "$live" \
+       "(G) collision of a '$dead' owner with a '$live' owner -> '$live' (not orphaned)"
+  done
 done
 # (H) When EVERY candidate owner is dead the fallback reports dead — the retry
 #     rescues live sessions, it does not resurrect gone ones.
@@ -175,6 +190,10 @@ eq "$(state '{"r1/x":"closed","r2/x":"archived"}' "x")" "closed" \
    "(H) all candidates closed/archived -> dead state preserved (still orphaned)"
 eq "$(state '{"r1/x":"archived"}' "x")" "archived" \
    "(H) archived-only candidate -> archived (still orphaned)"
+eq "$(state '{"r1/x":"failed-create"}' "x")" "failed-create" \
+   "(H) failed-create-only candidate -> failed-create (still orphaned)"
+eq "$(state '{"r1/x":"failed-create","r2/x":"closed"}' "x")" "failed-create" \
+   "(H) all candidates failed-create/closed -> dead state preserved (still orphaned)"
 # (I) Matching is on the WHOLE last segment, never a suffix/substring. A suffix
 #     rule would silently alias distinct agents onto each other.
 eq "$(state '{"gc-toolkit.furiosa":"active"}' "toolkit.furiosa")" "absent" \
@@ -439,6 +458,69 @@ grep -qF 'resolves `absent` against a POPULATED map is never grounds' "$TOML" \
 grep -qF 'never returns a row' "$TOML" \
   && ok "(AC) prose records that closed sessions are excluded by design" \
   || bad "(AC) prose must record that closed sessions are excluded by design"
+
+# --- Shared keys: a dead row never shadows a live one. -----------------------
+# Two listed sessions can carry one key: the agent name of a pool slot outlives
+# each occupant, and gascity hands the alias of a failed-create named session to
+# the session that replaces it. The session list puts the newest session first,
+# so the dead predecessor is listed AFTER its live successor.
+SHARED_SLOT='{"ok":true,"sessions":[
+  {"id":"lx-new","session_name":"gc-toolkit__polecat-lx-new","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"active"},
+  {"id":"lx-old","session_name":"gc-toolkit__polecat-lx-old","agent_name":"gc-toolkit/gc-toolkit.polecat-2","state":"archived"}]}'
+SHARED_ALIAS='{"ok":true,"sessions":[
+  {"id":"lx-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"},
+  {"id":"lx-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"}]}'
+SLOT="gc-toolkit/gc-toolkit.polecat-2"
+WITNESS="gc-toolkit/gc-toolkit.witness"
+
+# (AD) Premise: a later-wins map hands the shared key to the dead row, so a bead
+#      owned by that key reads orphaned while its live successor holds it.
+eq "$(old_map "$SHARED_SLOT" | jq -r --arg k "$SLOT" '.[$k]')" "archived" \
+   "(AD premise) a later-wins map gives a shared slot name to the archived predecessor"
+eq "$(old_map "$SHARED_ALIAS" | jq -r --arg k "$WITNESS" '.[$k]')" "failed-create" \
+   "(AD premise) a later-wins map gives a shared alias to the failed-create predecessor"
+# (AD) The fix: a shared key takes the live holder's state, in either order.
+eq "$(state "$(guard_map "$SHARED_SLOT")" "$SLOT")" "active" \
+   "(AD) slot name shared with an archived predecessor -> live successor's state"
+eq "$(state "$(guard_map "$SHARED_ALIAS")" "$WITNESS")" "active" \
+   "(AD) alias shared with a failed-create predecessor -> live successor's state"
+SHARED_ALIAS_DEAD_FIRST='{"ok":true,"sessions":[
+  {"id":"lx-old","alias":"gc-toolkit/gc-toolkit.witness","state":"failed-create"},
+  {"id":"lx-new","alias":"gc-toolkit/gc-toolkit.witness","state":"active"}]}'
+eq "$(state "$(guard_map "$SHARED_ALIAS_DEAD_FIRST")" "$WITNESS")" "active" \
+   "(AD) the shared key resolves live whichever row is listed first"
+# (AD) The predecessor's own keys stay dead, so its work is still recovered.
+eq "$(state "$(guard_map "$SHARED_ALIAS")" "lx-old")" "failed-create" \
+   "(AD) the failed-create session's own id still resolves dead (orphaned)"
+eq "$(state "$(guard_map "$SHARED_SLOT")" "gc-toolkit__polecat-lx-old")" "archived" \
+   "(AD) the archived session's own name still resolves dead (orphaned)"
+# (AD) A key every holder of which is dead stays dead, and two live holders
+#      keep the later entry, as the map always did.
+eq "$(guard_map '{"ok":true,"sessions":[{"id":"a","alias":"k","state":"archived"},{"id":"b","alias":"k","state":"failed-create"}]}' \
+     | jq -r '.k')" "failed-create" \
+   "(AD) every holder of a shared key dead -> dead state preserved (still orphaned)"
+eq "$(guard_map '{"ok":true,"sessions":[{"id":"a","alias":"k","state":"active"},{"id":"b","alias":"k","state":"asleep"}]}' \
+     | jq -r '.k')" "asleep" \
+   "(AD) two live holders of a shared key -> the later entry, unchanged"
+
+# (AE) One dead set. The map guard and the lookup each define `dead` in their
+#      own jq program, and the classification prose names the set the witness
+#      reads. If the three disagree, a state is dead in one place and alive in
+#      another.
+DEAD_GUARD=$(grep -m1 'def dead:' "$TMP/guard.sh" | sed 's/^ *//' || true)
+DEAD_LOOKUP=$(grep -m1 'def dead:' "$TMP/lookup.sh" | sed 's/^ *//' || true)
+[ -n "$DEAD_GUARD" ] && [ "$DEAD_GUARD" = "$DEAD_LOOKUP" ] \
+  && ok "(AE) the map guard and the lookup define one dead set" \
+  || bad "(AE) the map guard and the lookup must define the same dead set (guard '$DEAD_GUARD', lookup '$DEAD_LOOKUP')"
+DEAD_CODE=$( { printf '%s\n' "$DEAD_LOOKUP" | grep -o '"[a-z-]*"' | tr -d '"'; echo absent; } | sort | tr '\n' ' ')
+CLASSIFY=$(awk '/^Classify by the dead states:/ {f=1} f && /^$/ {exit} f' "$TOML" | tr '\n' ' ')
+DEAD_PROSE=$(printf '%s' "$CLASSIFY" | sed 's/^Classify by the dead states:\([^.]*\)\..*/\1/' \
+  | grep -o '`[a-z-]*`' | tr -d '`' | sort | tr '\n' ' ' || true)
+eq "$DEAD_PROSE" "$DEAD_CODE" \
+   "(AE) the classification names exactly the dead set the code defines, plus absent"
+grep -qF '`start-pending`' <<< "$CLASSIFY" \
+  && ok "(AE) the classification names start-pending as owned" \
+  || bad "(AE) the classification must name start-pending as owned"
 
 # --- Static wiring: no un-normalized lookup may survive elsewhere. ------------
 # The fix only holds if the marked snippet is the ONLY place an assignee is
