@@ -104,10 +104,15 @@ The distiller (`mol-feedback-distiller`, judging by the
 `learning-distill` rubric skill) dedups pending observations, clusters
 them onto pattern beads, and decides which clusters have earned a rule.
 Each surviving proposal becomes one `prompt-update` bead carrying the
-exact rule text, the evidence list, and the reasoning; a polecat builds
-it; the refinery opens the PR; **operator review of that PR is the
-gate**. The distiller records and proposes — it never edits a prompt,
-fragment, or skill, and neither does any capturing agent.
+exact rule text, the evidence list, and the reasoning. A proposal is new
+work, so the distiller files it marked `placement=pending` and routed to
+no pool, and it waits for the operator's placement sitting
+([steering.md](steering.md)). Once the sitting places it under an epic or
+routes it on its own, a polecat builds it and the refinery opens the PR;
+**operator review of that PR is the gate**. An engineering bead from
+Gate 2 below waits for placement the same way. The distiller records and
+proposes — it never edits a prompt, fragment, or skill, and neither does
+any capturing agent.
 
 ### Three gates on promotion into a paid carrier
 

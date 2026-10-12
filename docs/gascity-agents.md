@@ -1457,10 +1457,12 @@ unreadable roster is the absence of proof rather than proof of an empty city,
 so there the name comes back unchanged on exit 3 and the caller files
 unverified rather than not at all.
 
-The witness files to both scopes and resolves at both sites. Its recipes are
-the `warrant-file` and `bug-dispatch` blocks in
-`formulas/mol-witness-patrol.toml`, which
-`assets/scripts/witness-route.test.sh` executes as extracted from the formula.
+The witness addresses both scopes and resolves at both sites: it files a
+warrant to the city-scoped dog and reads the rig-scoped refinery's queue. Its
+recipes are the `warrant-file` and `refinery-stuck-escalate` blocks in
+`formulas/mol-witness-patrol.toml`, which `assets/scripts/witness-route.test.sh`
+and `assets/scripts/refinery-stuck-escalate.test.sh` execute as extracted from
+the formula.
 
 ## The gascity-keeper front-door
 
