@@ -45,7 +45,6 @@ bd_show() {
   printf '%s' "$raw"
 }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
-row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
 # --- the live review population ----------------------------------------------
 ROWS=$(bd_list --metadata-field task_kind=review --status="$LIVE_STATUSES") || {

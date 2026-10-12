@@ -124,8 +124,10 @@ if [ "$E" -lt 10 ]; then ok "8×4s of probes fit inside a 10s budget (took ${E}s
 else bad "8×4s of probes fit inside a 10s budget" "took ${E}s"; fi
 # The control: the same eight probes under a constant per-probe bound, which is
 # the shape this block replaces. Without it §5 would pass on any fast fixture.
+# The loop stops once it has passed the budget: the overrun is the finding, and
+# the five probes left would only add 20s of waiting to it.
 S=$(now)
-bash -c 'for _ in 1 2 3 4 5 6 7 8; do timeout 4 sleep 4; done' >/dev/null 2>&1
+bash -c 'for _ in 1 2 3 4 5 6 7 8; do timeout 4 sleep 4; [ $(( $(date +%s) - $1 )) -gt 10 ] && break; done' _ "$S" >/dev/null 2>&1
 C=$(( $(now) - S ))
 if [ "$C" -gt 10 ]; then ok "a constant 4s bound on the same eight overruns it (took ${C}s, control)"
 else bad "a constant 4s bound on the same eight overruns it (control)" \
