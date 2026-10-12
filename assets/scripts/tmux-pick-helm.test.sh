@@ -50,8 +50,7 @@ fixture() { # -> ROOT STATE STUBS TMUXLOG; BOARD_RC/BOARD_OUT/BOARD_ERR drive th
 
     # Stub tmux: one line per subcommand, with the arguments, so a case can
     # assert on which surface the operator was shown.
-    cat > "$STUBS/tmux" <<'STUB'
-#!/usr/bin/env bash
+    { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUBS/tmux" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_TMUX_LOG"
 STUB
     chmod +x "$STUBS/tmux"

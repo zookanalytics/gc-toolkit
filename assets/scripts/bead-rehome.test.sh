@@ -96,8 +96,7 @@ JSON
 mkbead() { printf 'status=%s\n' "${2:-open}" > "$TMP/rigs/$1/.beads/$3"; }
 field()  { sed -n "s/^$2=//p" "$TMP/rigs/$1/.beads/$3" 2>/dev/null | tail -1; }
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-rehome.sh touches.
 case "$1 $2" in
   "rig list") cat "$FAKE_RIGS_JSON" ;;
@@ -106,8 +105,7 @@ case "$1 $2" in
 esac
 GC
 
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
