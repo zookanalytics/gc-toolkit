@@ -637,7 +637,7 @@ fresh_marks() { # id staging_file -> "<open until targets csv or ->\t<marks or -
 
 # Dispose every candidate whose `until` targets have ALL closed and that carries
 # no live work, through bead-rehome so the close carries a successor pointer.
-# bead-rehome stamps that pointer before anything can refuse the close, and a
+# bead-rehome can stamp that pointer and still have the close refused, and a
 # pointer on an anchor reads as a disposed anchor to scaffolding-sweep, so a bead
 # with live work never reaches it: its marks are read from the pass-start row,
 # and again from a fresh read of the bead and its edges just before the call. A

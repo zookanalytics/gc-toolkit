@@ -868,8 +868,8 @@ has "$out" "of 0 until-gated" "an assigned bead is not an until candidate"
 # --- the live-work guard ------------------------------------------------------
 # An open, unassigned bead can still be live work: an anchor stays open and
 # unassigned while its PR is reviewed, and so does a bead slung to a pool until a
-# worker claims it. bead-rehome stamps its pointer before anything can refuse the
-# close, and bd closes such a bead without complaint, so the guard must stop it
+# worker claims it. bead-rehome can stamp its pointer and still have the close
+# refused, and bd closes such a bead without complaint, so the guard must stop it
 # before bead-rehome is called at all. Each case: the until target has closed,
 # bead-rehome is never called, the bead stays open, and the pass is clean.
 live_case() { # name metadata-json expected-mark

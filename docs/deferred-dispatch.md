@@ -241,8 +241,8 @@ mid-pass. That includes a sling the pass's own dispatch half made moments
 earlier. A bead with any mark is reported and left open, which is never a pass
 failure. A dispatch that lands after the fresh read meets a closed bead: no
 pool offers it, and `mol-polecat-work`'s load-context quiesces a pour over it.
-The guard runs before `bead-rehome` is called, because `bead-rehome` stamps its
-successor pointer before anything can refuse the close. A pointer on an anchor
+The guard runs before `bead-rehome` is called, because `bead-rehome` can stamp
+its successor pointer and still have the close refused. A pointer on an anchor
 reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that
 anchor's review scaffolding.
 
