@@ -6,10 +6,11 @@
 # .test.sh) does not reach the polecat: a patrol tops the agent tier with no
 # peer to mail, a worker has one.
 #
-# A hold+drain is not a blocker to mail, though: it de-routes the whole molecule,
-# so it must leave a tracked record first. This also pins that the decline-and-hold
-# path files an escalate.sh visit before molecule-hold.sh runs, never bare mail
-# behind a hold, the silent strand that leaves a de-routed molecule no query returns.
+# A hold+drain is not a blocker to mail, though: it takes the whole molecule out
+# of the pool's offer, so it must leave a tracked record first. This also pins
+# that the decline-and-hold path files an escalate.sh visit before
+# molecule-hold.sh runs, never bare mail behind a hold, the silent strand that
+# leaves a de-routed molecule no query returns.
 #
 # The sender half is useless without the receiver half, so this pins both: the
 # doctrine that tells the polecat to mail HELP or NOTICE, and the witness patrol
