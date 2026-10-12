@@ -794,6 +794,11 @@ has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the b
 unset "${!GIT_@}" 2>/dev/null || true
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 : > "$GIT_CONFIG_GLOBAL"
+# A commit or tag made where no repository sets an identity takes it from here.
+# Without it git falls back to the login account's name, which a Linux CI
+# runner leaves empty, so such a commit fails there and passes on a Mac.
+git config --file "$GIT_CONFIG_GLOBAL" user.name T
+git config --file "$GIT_CONFIG_GLOBAL" user.email t@e.com
 GM="$TMP/rigs/gamma"; GM_BARE="$TMP/gamma-origin.git"
 mkdir -p "$GM/.beads"
 cat > "$TMP/rigs.json" <<JSON

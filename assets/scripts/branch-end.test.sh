@@ -30,6 +30,11 @@ PASS=0; FAIL=0
 unset "${!GC_@}" "${!BEADS_@}" "${!GIT_@}" 2>/dev/null || true
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 : > "$GIT_CONFIG_GLOBAL"
+# A commit or tag made where no repository sets an identity takes it from here.
+# Without it git falls back to the login account's name, which a Linux CI
+# runner leaves empty, so such a commit fails there and passes on a Mac.
+git config --file "$GIT_CONFIG_GLOBAL" user.name T
+git config --file "$GIT_CONFIG_GLOBAL" user.email t@e.com
 REAL_GIT="$(command -v git)"
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -361,6 +366,7 @@ mk_branch polecat/tk-m
 TIP=$(origin_tip polecat/tk-m)
 pr_pin 11 "$TIP"
 MOVED=$(move_before_delete polecat/tk-m)
+git -C "$BARE" cat-file -e "$MOVED^{commit}" 2>/dev/null && ok "fixture: the commit that moves the PR-pinned branch exists" || bad "fixture: the commit that moves the PR-pinned branch exists"
 rc=0; run --rig demo --branch polecat/tk-m || rc=$?
 rm -f "$BIN/git"
 eq "$rc" 4 "a branch that moved after the check is not ended"
@@ -371,6 +377,7 @@ new_origin
 mk_branch polecat/tk-m
 TIP=$(origin_tip polecat/tk-m)
 MOVED=$(move_before_delete polecat/tk-m)
+git -C "$BARE" cat-file -e "$MOVED^{commit}" 2>/dev/null && ok "fixture: the commit that moves the unpinned branch exists" || bad "fixture: the commit that moves the unpinned branch exists"
 rc=0; run --rig demo --branch polecat/tk-m || rc=$?
 rm -f "$BIN/git"
 eq "$rc" 4 "a branch that moved after its archive tag went up is not ended"
