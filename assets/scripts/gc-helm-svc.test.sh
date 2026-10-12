@@ -114,6 +114,8 @@
 #   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
 #                 so an unreachable origin costs one attempt per TTL, not one per
 #                 tick, and the gap is still reported off the last origin ref
+#   (SYMLINK)     a checkout reached through a symlinked path still counts its
+#                 gap and reaches its fetch
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -1228,6 +1230,35 @@ run_build
 eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
 eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
     "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
+
+# --- case: a checkout reached through a symlinked path still counts its gap ----
+# The builder derives its module paths with logical `pwd`, and git answers the
+# repo root with symlinks resolved. Matched as strings, the two spellings
+# disagreed whenever the checkout was reached through a symlink: every helm path
+# dropped out, the block skipped its fetch, and behind_main read 0 for a
+# checkout that was behind. Run the build through a link to the fixture root.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+git -C "$ROOT" add -A >/dev/null 2>&1
+git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
+git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
+git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
+LINKED="$TMP/case$CASE/linked-root"
+ln -s "$ROOT" "$LINKED"
+rm -f "$STATE/origin-fetch-at"
+REAL_ROOT="$ROOT"; ROOT="$LINKED"
+run_build
+ROOT="$REAL_ROOT"
+eq "$RC" 0 "(SYMLINK) a build run through a symlinked checkout exits 0"
+BEHIND_SL="$(status_field behind_main)"
+[ "${BEHIND_SL:-0}" -ge 1 ] 2>/dev/null \
+    && ok "(SYMLINK) the checkout is still counted as behind origin/main" \
+    || bad "(SYMLINK) behind_main is '$BEHIND_SL' through a symlinked checkout, want >= 1"
+present "$STATE/origin-fetch-at" \
+    "(SYMLINK) the block reaches its fetch, so the cadence marker is written"
 
 # ==============================================================================
 # STATIC GUARDS

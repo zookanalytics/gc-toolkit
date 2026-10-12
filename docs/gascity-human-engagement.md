@@ -274,9 +274,10 @@ can have.
 message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
 hq/city-workspace store — that store runs no reaction pool, so a topic filed
 there would park on the board with nobody to engage it, and it is dropped from
-the picker rather than offered. A suspended or not-running rig is still tagged,
-not withheld, since `gc rig suspend` keeps the beads store accessible and a
-report filed there is recorded and triaged on resume. The picker is defaulted to
+the picker rather than offered. A suspended rig is still tagged, not withheld,
+since `gc rig suspend` keeps the beads store accessible and a report filed there
+is recorded and triaged on resume. A rig with no agents running is idle, not
+paused, and is offered untagged. The picker is defaulted to
 the rig of the pane the key was pressed in (its `GC_RIG`, else the
 `<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
 the operator just picks). Enter confirms that default or the operator picks
@@ -612,14 +613,18 @@ shepherd sitting simply omits the flag, and the PR stays on the merge track. The
 sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
 the visit demand always, the anchor demand only when the explicit hold was taken.
 
-A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
-conversation wait cannot ride the closing visit — a demand left on a closed visit
-is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
-— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
-the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved. The moved wait carries
-the sitting's topic, so it refreshes this sitting's own demand on the anchor and
-never a sibling sitting's.
+A cut-short sign-off (`--ruled no`) is the one other time a sitting's question
+holds the merge. The conversation wait cannot ride the closing visit — a demand
+left on a closed visit is a gate `gate-visit-sweep` names on stderr forever and
+no return trip re-offers — so `converse-signoff.sh` moves it onto the ANCHOR:
+the liveness sweep re-offers the next sitting from `gc.demand_for=<anchor>`, and
+the merge holds until the abandoned question is answered or the demand is
+resolved. The moved wait carries the sitting's topic, so it refreshes this
+sitting's own demand on the anchor and never a sibling sitting's. A ruled
+sign-off that answers `--rework` holds the merge too, through the rework child's
+`blocks` edge, until the rework lands. It also returns every review lane to
+`unreviewed`, so the branch is re-reviewed at the head the rework lands rather
+than merged on reviews of the head the ruling outdated.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
