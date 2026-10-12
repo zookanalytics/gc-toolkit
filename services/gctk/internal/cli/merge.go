@@ -1727,8 +1727,8 @@ func numberToInt64(n json.Number) int64 {
 
 // notGreenRequired names each required context that is MISSING or RED in the
 // rollup, joined by spaces. ok=false means the rollup is unreadable: it did not
-// decode, or a row of a required context carries a conclusion or state that
-// the shell's ascii_upcase errors on.
+// decode, or a row of a required context carries a set conclusion or state that
+// is not a string.
 func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 	var v struct {
 		StatusCheckRollup []map[string]any `json:"statusCheckRollup"`
@@ -1781,8 +1781,8 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 			out = append(out, c+"(MISSING)")
 			continue
 		}
-		// Every row is read, as the shell's jq reads each one, so an unreadable
-		// row after a red one still makes the rollup unreadable.
+		// Every row is read, so an unreadable row after a red one still makes the
+		// rollup unreadable.
 		red := false
 		for _, h := range hits {
 			g, ok := green(h)
