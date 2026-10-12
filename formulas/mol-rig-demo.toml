@@ -314,7 +314,7 @@ the next); close only through step-close.sh, which resolves by
 ```bash
 SC="$SCRIPTS/step-close.sh"
 for STEP in prepare-script capture deliver-and-finalize; do
-  "$SC" --step "mol-rig-demo.$STEP" --outcome pass || echo "step-close: mol-rig-demo.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-rig-demo.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-rig-demo.$STEP was not this session's to close — left for the finalizer"
 done
 gc runtime drain-ack
 ```
