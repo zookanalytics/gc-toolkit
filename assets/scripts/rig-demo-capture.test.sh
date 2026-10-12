@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # rig-demo-capture.test.sh — hermetic coverage of the rig-demo capture core.
-# The script resolves a capture engine, lints a script, drives the capture, and
-# checks the produced file. The test drives the engine through the script's own
-# $SPRINTSHOW_BIN override seam with a stub, and runs under `env -i` with a PATH
-# of only a coreutils symlink farm — no host node, npx, gc, or sprintshow — so
-# nothing touches the network or the real engine, and each case plants exactly
-# the lint result, run result, and output-file outcome it means to exercise.
+# The script resolves a capture engine, provisions its browser, lints a script,
+# drives the capture, and checks the produced file. Most cases drive the engine
+# through the script's own $SPRINTSHOW_BIN override seam with a stub. The
+# resolution cases instead put stub node, npx, npm and gc on PATH, so engine
+# resolution and browser provisioning run as written. Every case runs under
+# `env -i` with a PATH of only a coreutils symlink farm and those stubs — no host
+# node, npx, gc, or sprintshow — so nothing touches the network or the real
+# engine, and each case plants exactly the install result, lint result, run
+# result, and output-file outcome it means to exercise.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,7 +25,8 @@ trap 'rm -rf "$TMPD"' EXIT
 
 # Only the coreutils the script actually calls; env -i keeps everything else off
 # PATH, so a path that should resolve the real engine instead finds nothing —
-# which is why every happy case must set $SPRINTSHOW_BIN.
+# which is why every happy case either sets $SPRINTSHOW_BIN or puts the
+# resolution stubs on PATH.
 FARM="$TMPD/farm"; mkdir -p "$FARM"
 for c in bash sed tr head dirname mkdir wc cat; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
@@ -141,6 +145,95 @@ echo "# a --script that does not exist -> exit 1"
 out="$(run -- --script "$TMPD/nope.md" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
 ok "missing script file exits 1" "[ '$rc' = 1 ]"
 has "does not exist" "$out" "it says the script is missing"
+
+# Engine resolution, driven without $SPRINTSHOW_BIN. Stubs on PATH stand in for
+# node, npx, npm, gc and a host ffmpeg; jq is the real one, because the script
+# reads the rig list and the engine's package.json with it. npm and npx log
+# every call to $CALLLOG in order, stand in for Playwright's installer, and hand
+# lint and run to the engine stub. $INSTALL_RC fails the install the way
+# Playwright's CLI does: a message on stdout and exit 1.
+JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
+RBIN="$TMPD/resolve-bin"; mkdir -p "$RBIN"
+ln -s "$JQ" "$RBIN/jq"
+printf '#!/usr/bin/env bash\necho v24.0.0\n' >"$RBIN/node"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$RBIN/ffmpeg"
+cat >"$RBIN/gc" <<'GC'
+#!/usr/bin/env bash
+if [ "$1 $2" = "rig list" ] && [ -n "${SS_RIG:-}" ]; then printf '{"rigs":[{"name":"sprintshow","path":"%s"}]}\n' "$SS_RIG"; fi
+exit 0
+GC
+cat >"$RBIN/npm" <<'NPM'
+#!/usr/bin/env bash
+printf 'npm %s (in %s)\n' "$*" "$PWD" >>"${CALLLOG:?}"
+if [ "$*" = "run provision:browser" ] && [ "${INSTALL_RC:-0}" != 0 ]; then
+  printf 'Failed to install browsers\nError: download failed\n'; exit "$INSTALL_RC"
+fi
+exit 0
+NPM
+cat >"$RBIN/npx" <<'NPX'
+#!/usr/bin/env bash
+printf 'npx %s\n' "$*" >>"${CALLLOG:?}"
+case "$1 $2" in
+  "tsx "*) shift 2; exec "${ENGINE_STUB:?}" "$@" ;;
+  "--yes @zookanalytics/sprintshow") shift 2; exec "${ENGINE_STUB:?}" "$@" ;;
+  "--yes --package=@zookanalytics/sprintshow")
+    if [ "${INSTALL_RC:-0}" != 0 ]; then printf 'Failed to install browsers\nError: download failed\n'; exit "$INSTALL_RC"; fi
+    exit 0 ;;
+esac
+echo "npx stub: unexpected call: $*" >&2; exit 97
+NPX
+chmod +x "$RBIN"/node "$RBIN"/ffmpeg "$RBIN"/gc "$RBIN"/npm "$RBIN"/npx
+# A local engine checkout with its deps installed. Its path is the one cd
+# reports, since npm's log line records the directory it ran in as $PWD.
+ENGINE="$(cd "$TMPD" && pwd)/sprintshow"; mkdir -p "$ENGINE/node_modules"
+printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
+CALLLOG="$TMPD/calls.log"
+# resolve_run [VAR=VAL ...] -- <sut args...>; the stubs above, never $SPRINTSHOW_BIN.
+resolve_run() {
+  local envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  [ $# -gt 0 ] && shift
+  : >"$RUNLOG"; : >"$CALLLOG"; rm -f "$OUT"
+  ( cd "$TMPD" && env -i PATH="$RBIN:$FARM" RUNLOG="$RUNLOG" CALLLOG="$CALLLOG" ENGINE_STUB="$STUB" \
+      ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" 2>&1 )
+}
+# line_of <substring> — the first $CALLLOG line holding it, or 0 when none does.
+line_of() { awk -v s="$1" 'index($0, s) { print NR; found = 1; exit } END { if (!found) print 0 }' "$CALLLOG"; }
+
+echo "# local engine, browser already installed: the provisioning step runs, the installer downloads nothing, the capture proceeds"
+out="$(resolve_run SS_RIG="$ENGINE" -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "capture exits 0" "[ '$rc' = 0 ]"
+ok "output file exists and is non-empty" "[ -s '$OUT' ]"
+has "engine = local sprintshow rig ($ENGINE)" "$out" "it resolves the local engine"
+has "npm run provision:browser (in $ENGINE)" "$(cat "$CALLLOG")" "it runs the engine's own provision:browser in the engine checkout"
+P=$(line_of "provision:browser"); L=$(line_of "lint $SCRIPT")
+ok "the browser is provisioned before the engine first runs (provision line $P, lint line $L)" "[ '$P' -gt 0 ] && [ '$L' -gt '$P' ]"
+has "run $SCRIPT" "$(cat "$RUNLOG")" "the capture runs after the provisioning step"
+
+echo "# local engine, the install fails -> exit 1 with its message, no capture"
+out="$(resolve_run SS_RIG="$ENGINE" INSTALL_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "failed install exits 1" "[ '$rc' = 1 ]"
+has "could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)" "$out" "it says the browser could not be provisioned"
+has "Failed to install browsers" "$out" "the installer's own message reaches the caller"
+hasnt "lint $SCRIPT" "$(cat "$CALLLOG")" "nothing is linted after a failed install"
+ok "nothing is captured after a failed install" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+
+echo "# published engine: the browser comes from that engine's own Playwright, then the capture proceeds"
+out="$(resolve_run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "capture exits 0" "[ '$rc' = 0 ]"
+has "engine = published @zookanalytics/sprintshow" "$out" "with no local rig it resolves the published engine"
+has "npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell" "$(cat "$CALLLOG")" "it installs the browser with the published engine's playwright"
+P=$(line_of "playwright install"); L=$(line_of "lint $SCRIPT")
+ok "the browser is provisioned before the engine first runs (provision line $P, lint line $L)" "[ '$P' -gt 0 ] && [ '$L' -gt '$P' ]"
+hasnt "npm " "$(cat "$CALLLOG")" "it does not run npm in a checkout it does not have"
+has "run $SCRIPT" "$(cat "$RUNLOG")" "the capture runs after the provisioning step"
+
+echo "# published engine, the install fails -> exit 1 with its message, no capture"
+out="$(resolve_run INSTALL_RC=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "failed install exits 1" "[ '$rc' = 1 ]"
+has "could not provision the browser (the published engine's 'playwright install chromium-headless-shell' failed)" "$out" "it says the browser could not be provisioned"
+has "Failed to install browsers" "$out" "the installer's own message reaches the caller"
+ok "nothing is captured after a failed install" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
 
 echo "# engine-resolution contract: the marked block prefers the local rig, guards the package name, and falls back to npm"
 BLOCK="$(sed -n '/# >>> rig-demo-engine-resolve/,/# <<< rig-demo-engine-resolve/p' "$SUT")"
