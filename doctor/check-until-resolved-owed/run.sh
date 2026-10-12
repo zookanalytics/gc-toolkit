@@ -2,7 +2,7 @@
 # doctor/check-until-resolved-owed — a resolved-by disposition is firing or
 # surfaced. A bead carrying an `until` edge means "X resolves me": when that
 # target closes, the deferred-dispatch reconcile order (orders/deferred-dispatch.toml,
-# every 5m) disposes the bead through bead-rehome, so a wait whose named cause has
+# a 5m cooldown) disposes the bead through bead-rehome, so a wait whose named cause has
 # landed is closed with a successor pointer rather than re-entering triage. The
 # pass disposes an OPEN, UNASSIGNED bead whose own `until` targets have all
 # closed, so a healthy resolved-by edge is short-lived: it rests until its target
@@ -48,12 +48,16 @@ set -u
     exit 1
 }
 
-# A disposition owed longer than this has waited out three reconcile intervals.
-# Mirrors check-cadence-live's I10 window, max(3×interval, 15m), which is 900s
-# for the 5m deferred-dispatch order. On a loaded host the controller's per-tick
-# dispatch budget can stretch one gap between passes past it, and I10 reads that
-# same gap as a stopped order.
-OWED_WINDOW_SECONDS=900
+# The owed window is the deferred-dispatch order's cadence window, from the one
+# definition check-cadence-live (I10) also reads: max(3×interval, one trip of
+# the order dispatch rotation). It is computed below, once the probes have their
+# budget. Unsourceable, no disposition's wait can be judged, so the check warns.
+# shellcheck source=../../assets/scripts/order-cadence.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/order-cadence.sh" || {
+    echo "cannot determine whether owed resolved-by dispositions are firing"
+    printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so the window an owed disposition is judged by cannot be computed."
+    exit 1
+}
 
 UNTIL_TYPE="until"
 
@@ -106,6 +110,22 @@ iso_to_epoch() {
     [ -n "$1" ] || { printf ''; return; }
     date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || printf ''
 }
+
+# A resolved bead is disposed on the deferred-dispatch order's next pass, so a
+# disposition owed longer than that order's cadence window has waited through a
+# gap I10 would call a stopped order. The interval is the one this pack declares
+# for the order, and the floor comes from the live registry and the city's
+# dispatch budget.
+city_root="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+dd_secs=$(cadence_order_interval "${GC_PACK_DIR:-.}/orders/deferred-dispatch.toml")
+orders_json=$(run_bounded gc order list --json 2>/dev/null)
+if [ -n "$(cadence_clock_registrations "$orders_json")" ]; then
+    owed_floor=$(cadence_floor "$orders_json" "${city_root:+$city_root/city.toml}")
+else
+    owed_floor="$CADENCE_FLOOR_MIN"
+    notes+=("the order registry (\`gc order list --json\`) did not read, so the owed window uses the ${CADENCE_FLOOR_MIN}s minimum floor, not one trip of the dispatch rotation")
+fi
+OWED_WINDOW_SECONDS=$(cadence_window "${dd_secs:-0}" "$owed_floor")
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
@@ -243,7 +263,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         if [ "$marks" != "-" ]; then
             livework+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s, but it carries live work ($marks), which the deferred-dispatch reconcile pass never disposes. A person decides: if the work is still wanted, remove the resolve-by edge (gc bd dep remove $cid <target>); if the target's close made it moot, retire the work and dispose $cid by ruling")
         else
-            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes a resolved \`until\` bead within its 5m cadence, so a disposition owed this long means that order is not firing (check-cadence-live/I10) or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
+            findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes a resolved \`until\` bead on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a disposition owed this long means that order is not firing (check-cadence-live/I10) or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
         fi
     done
 done <<< "$scopes"
