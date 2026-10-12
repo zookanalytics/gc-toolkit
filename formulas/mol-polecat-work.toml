@@ -636,9 +636,7 @@ if [ -n "$REJECTION" ]; then
       "stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only ;;
       *) RESUME_SCOPE=with-work ;;
     esac
-    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM" \
-      --set-metadata bring_current_scope="$RESUME_SCOPE" \
-      --unset-metadata conflict_audit --unset-metadata conflict_question
+    gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM" --set-metadata bring_current_scope="$RESUME_SCOPE" --unset-metadata conflict_audit --unset-metadata conflict_question
     if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.bring_current_from // empty')" != "$RESUME_FROM" ]; then
         echo "bring_current_from=$RESUME_FROM did not read back on $WORK_BEAD_ID; NOT merging, since the guard could not read the round. Re-run this block." >&2
         exit 1
