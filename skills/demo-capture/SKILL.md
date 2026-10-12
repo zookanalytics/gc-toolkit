@@ -205,6 +205,6 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
   `gc supervisor install` writes that env. Sessions started after that carry
   the key.
 
-The `doctor/check-demo-toolchain` check reports which of these are resolvable,
-so a session knows before it captures whether the clip will be narrated or
-silent, and whether the browser and ffmpeg are in place.
+The `doctor/check-demo-toolchain` check reports which of the others are
+resolvable, so a session knows before it captures whether the clip will be
+narrated or silent, and whether ffmpeg is in place.
