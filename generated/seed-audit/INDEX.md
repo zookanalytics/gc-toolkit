@@ -7,7 +7,10 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 17 · formulas: 27
+An agent file is named for the agent, or for its binding-qualified name
+(`<binding>.<name>`) where agents from different packs share one name.
+
+- agents: 18 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -33,20 +36,21 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,999 | 1,499 |
 | [`codex`](agents/codex.md) | 5,999 | 1,499 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 37,241 | 9,310 |
-| [`converse-fable`](agents/converse-fable.md) | 37,241 | 9,310 |
-| [`converse-opus`](agents/converse-opus.md) | 37,241 | 9,310 |
-| [`deacon`](agents/deacon.md) | 15,930 | 3,982 |
+| [`converse-codex`](agents/converse-codex.md) | 37,675 | 9,418 |
+| [`converse-fable`](agents/converse-fable.md) | 37,675 | 9,418 |
+| [`converse-opus`](agents/converse-opus.md) | 37,675 | 9,418 |
+| [`deacon`](agents/deacon.md) | 16,313 | 4,078 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
-| [`dog`](agents/dog.md) | 2,359 | 589 |
+| [`bd.dog`](agents/bd.dog.md) | 2,359 | 589 |
+| [`gc-toolkit.dog`](agents/gc-toolkit.dog.md) | 3,295 | 823 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
-| [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 35,546 | 8,886 |
-| [`polecat`](agents/polecat.md) | 28,295 | 7,073 |
-| [`polecat-codex`](agents/polecat-codex.md) | 28,325 | 7,081 |
-| [`proactive`](agents/proactive.md) | 14,964 | 3,741 |
-| [`refinery`](agents/refinery.md) | 13,347 | 3,336 |
-| [`witness`](agents/witness.md) | 18,311 | 4,577 |
+| [`keeper`](agents/keeper.md) | 24,472 | 6,118 |
+| [`mechanik`](agents/mechanik.md) | 35,929 | 8,982 |
+| [`polecat`](agents/polecat.md) | 28,987 | 7,246 |
+| [`polecat-codex`](agents/polecat-codex.md) | 29,017 | 7,254 |
+| [`proactive`](agents/proactive.md) | 23,481 | 5,870 |
+| [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
+| [`witness`](agents/witness.md) | 19,204 | 4,801 |
 
 ## Formula recipes
 
@@ -65,13 +69,12 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,344 | 586 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,179 | 1,544 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,143 | 1,535 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
@@ -82,7 +85,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 4,050 | 1,012 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 3,554 | 888 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 4,410 | 1,102 |
-| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,106 | 526 |
+| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,095 | 523 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,244 | 311 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,653 | 913 |
 

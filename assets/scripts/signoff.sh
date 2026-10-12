@@ -4,6 +4,10 @@
 # mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>]
+# A triage approve on an anchor whose bring-current round awaits triage also
+# carries that round's ruling (--reopen, --round-reason, --dismiss-approval),
+# which bring-current-guard.sh's `decide` records and carries out before the
+# artifact is posted; the posted artifact opens with the round's account.
 # Both verdicts first record reviewed_oid on the review bead. A lane state names
 # no commit, but lane-state.sh derives green only from a local backing bead that
 # carries a reviewed_oid, so recording it here is what lets an approve close back
@@ -70,6 +74,10 @@ VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
 # so the review carries the city's mark, and the superseded-block dismissal asks
 # its definition of the city's own review (gc_city_own) rather than the login.
 PR_POST="$HERE/pr-post.sh"
+# The bring-current round's ruling: what a conflicted round reopens, and whether
+# the approval it touched is dismissed. Overridable so the hermetic test can
+# stand in for it.
+BRING_CURRENT="${GC_BRING_CURRENT_TOOL:-$HERE/bring-current-guard.sh}"
 
 usage() {
   cat >&2 <<'U'
@@ -77,6 +85,7 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>] [--add-gates <checks>]
                   [--visual <decision>]
+                  [--reopen <lanes>|none --round-reason <text> [--dismiss-approval]]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
@@ -108,12 +117,25 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  refused on any other check's; none records with approve only.
                  Stamped on the review bead as visual=<decision> and named on
                  the posted artifact's `Visual:` line.
+  --reopen       triage's ruling on a bring-current round that conflicted:
+                 the lanes the anchor declares that run again on the merged
+                 code, or none. Required on a triage approve while the anchor's
+                 bring_current_record holds a conflicted round triage has not
+                 ruled on, and refused otherwise. A check the anchor does not
+                 declare is added with --add-gates, and a lane added on this
+                 call runs on the merged code as well.
+  --round-reason why the round reopens what it does, one line; required with
+                 --reopen.
+  --dismiss-approval
+                 the round took judgment the standing human approval did not
+                 see: dismiss it, filing the re-ask visit first.
 U
 }
 
 warn() { echo "signoff: $*" >&2; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
+REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -123,6 +145,9 @@ while [ $# -gt 0 ]; do
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --reopen)       REOPEN="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --round-reason) ROUND_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --dismiss-approval) DISMISS_APPROVAL=1;   shift ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
@@ -251,6 +276,29 @@ fi
 [ -n "$ANCHOR" ] || { warn "no anchor resolves for $REVIEW_BEAD (no metadata.anchor_bead, no blocks edge); refusing — the check has nowhere to land"; exit 1; }
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
+
+# A bring-current round that conflicted and that triage has not ruled on. The
+# guard filed it on the anchor and reopened the triage lane, so a triage verdict
+# on this anchor is that ruling as well as its classification, and it is not
+# recorded without one.
+ROUND_HEAD=""
+if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
+  ROUND_HEAD=$(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].metadata.bring_current_record // null)
+    | if type == "string" then (fromjson? // null) else . end
+    | if type == "object" and .class == "conflicted" and .triage == null then (.head // "") else "" end' 2>/dev/null)
+fi
+if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
+  [ "$CHECK_NAME" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
+    || { warn "--reopen, --round-reason and --dismiss-approval carry triage's ruling on a bring-current round, which only a triage approve records; nothing written"; exit 1; }
+  [ -n "$ROUND_HEAD" ] \
+    || { warn "no bring-current round on $ANCHOR awaits triage's ruling; drop --reopen, --round-reason and --dismiss-approval. Nothing written"; exit 1; }
+fi
+if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
+  if [ -z "$REOPEN" ] || [ -z "$(printf '%s' "$ROUND_REASON" | tr -d '[:space:]')" ]; then
+    warn "the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR awaits this triage's ruling: pass --reopen <lanes>|none and --round-reason <why>, and --dismiss-approval when the approval no longer covers what would land (bring-current-audit.sh render --anchor $ANCHOR --as comment reads the round). Nothing written"
+    exit 1
+  fi
+fi
 
 # Post-open iff the ANCHOR names a PR.
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
@@ -732,6 +780,33 @@ $tok"
   WIDEN_SUMMARY=" (check_set now $newset${added:+; added $added})"
 }
 
+# Triage's ruling on the bring-current round: recorded and carried out by the
+# guard's `decide` (the lanes to run again, the dismissal), AFTER the widening so
+# a lane added on this call is reopened with the rest, and BEFORE the artifact
+# and the green stamp, so a ruling that did not land leaves the review open and
+# the round still owed. The artifact then opens with the round's account,
+# rendered from the anchor's record.
+apply_round_decision() {
+  [ -n "$ROUND_HEAD" ] || return 0
+  local round_body rc args added
+  round_body=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-round.XXXXXX") || { warn "mktemp failed"; exit 2; }
+  added=$(gate_tokens "$ADD_GATES" | paste -sd, -)
+  args=(decide --anchor "$ANCHOR" --review-bead "$REVIEW_BEAD" --reopen "$REOPEN"
+        --reason "$ROUND_REASON" --body-out "$round_body")
+  [ -z "$added" ] || args+=(--add "$added")
+  [ -z "$DISMISS_APPROVAL" ] || args+=(--dismiss-approval)
+  "$BRING_CURRENT" "${args[@]}"; rc=$?
+  case "$rc" in
+    0) : ;;
+    1) rm -f "$round_body"; warn "the bring-current ruling was refused; nothing written, re-run this call with the ruling corrected"; exit 1 ;;
+    *) rm -f "$round_body"; warn "the bring-current ruling did not fully land on $ANCHOR; review left OPEN, and the same call retries it"; exit 2 ;;
+  esac
+  if [ -s "$round_body" ]; then
+    { cat "$round_body"; printf '\n\n'; cat "$BODY_FILE"; } > "$round_body.all" && mv "$round_body.all" "$BODY_FILE"
+  fi
+  rm -f "$round_body"
+}
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker is an operator-granted gate exception that
   # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
@@ -750,6 +825,7 @@ if [ "$VERDICT" = "approve" ]; then
       ;;
   esac
   apply_triage_decision
+  apply_round_decision
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
