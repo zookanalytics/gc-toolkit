@@ -178,7 +178,9 @@ Three checks keep the halves together. The positive control closing
 is a rig-scoped cooldown, does not opt out of the single-flight gate, and
 still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
 (I10) then asserts the registration is live on every importing rig and
-has fired within `max(3×interval, 15m)`. Ship the arm without the cadence
+has fired within its cadence window: `max(3×interval, floor)`, where the floor
+is one trip of the order dispatch rotation (`assets/scripts/order-cadence.sh`).
+Ship the arm without the cadence
 and `arm` still succeeds, still writes a well-formed record, and nothing
 ever performs it — the same invisible hold, one layer down.
 `doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
