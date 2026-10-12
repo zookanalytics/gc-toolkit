@@ -2343,7 +2343,9 @@ REAP_EOF
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
-      # by the same rule merge.sh lands on (review-verdict.sh).
+      # by the same rule merge.sh lands on (review-verdict.sh), so an approval a
+      # bring-current ruling lifted (the anchor's bring_current_lifted_at) is
+      # none here either.
       # Each bring-current costs a polecat round and a fresh CI run, and it goes
       # stale again whenever main moves, while a PR nobody approved cannot land
       # however current its branch is. So its conflict waits for the approval,
@@ -2353,8 +2355,9 @@ REAP_EOF
       # retries.
       approval=""
       if [ -n "$SELF_LOGIN" ] && [ -n "$revs_raw" ]; then
-        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
-          review_verdict($self)
+        lifted=$(printf '%s' "$row" | jq -r '(.metadata.bring_current_lifted_at // "") | tostring' 2>/dev/null)
+        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg lifted "$lifted" "$REVIEW_VERDICT_DEF"'
+          review_verdict($self; $lifted)
           | if .veto != "" then "veto:" + .veto elif .approver != "" then "approved" else "none" end' 2>/dev/null)
       fi
       case "$approval" in

@@ -255,7 +255,8 @@ func (m *merger) run() int {
 //   - the anchor carries merge_hold, review comments nothing has answered, or
 //     no normalized check_set;
 //   - the approval rule (reviewVerdict), applied to each account's latest
-//     APPROVED or CHANGES_REQUESTED review, finds a veto or no approval;
+//     APPROVED or CHANGES_REQUESTED review and the anchor's lift line, finds a
+//     veto or no approval;
 //   - the merge state pr-facts.sh recorded at the PR's live head, in the
 //     posture arm that runs right before this one, is one the merge never
 //     proceeds on: anything but CLEAN, UNSTABLE, or UNKNOWN, the state GitHub
@@ -302,7 +303,7 @@ func (m *merger) landsFirst(a *gcbd.Bead, open map[string]*openPR) bool {
 		stripSpacesCommas(a.Meta("check_set")) == "" {
 		return false
 	}
-	if v := reviewVerdict(pr.reviews(), m.selfLogin); v.veto != "" || v.approver == "" {
+	if v := reviewVerdict(pr.reviews(), m.selfLogin, a.Meta("bring_current_lifted_at")); v.veto != "" || v.approver == "" {
 		return false
 	}
 	// pr_merge_state is <state>@<head>, and a state recorded at an older head
@@ -494,6 +495,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	checkset := fresh.Meta("check_set")
 	posture := fresh.Meta("pr_posture")
 	aroute := fresh.Meta("gc.routed_to")
+	lifted := fresh.Meta("bring_current_lifted_at")
 
 	// --- validate, in order -------------------------------------------------------
 	if stripSpacesCommas(checkset) == "" {
@@ -587,7 +589,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	rs, rok := reviewState(reviewsRaw, m.selfLogin)
+	rs, rok := reviewState(reviewsRaw, m.selfLogin, lifted)
 	if !rok {
 		fmt.Fprintf(m.stdout, "%s: PR#%s reviews history unreadable; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
@@ -608,8 +610,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 	if rs.approver == "" {
+		// An approval the lift line set aside is named, because GitHub still
+		// shows one whose dismissal it refused.
 		m.recordMachine(id, "settled", headOid, aroute)
-		fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review stands (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, id)
+		if rs.lifted != "" {
+			fmt.Fprintf(m.stdout, "%s: PR#%s the approval from '%s' was given at or before the bring-current round whose ruling lifted it (%s), so it no longer counts and a new approval lands the PR; merge held (anchor %s)\n", mergeProg, num, rs.lifted, lifted, id)
+		} else {
+			fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review stands (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, id)
+		}
 		m.held++
 		return
 	}
@@ -751,7 +759,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	freason := terminalReason(final, num, base, liveURL, headRef)
+	freason := terminalReason(final, num, base, liveURL, headRef, lifted)
 	if freason == "OK" {
 		fcs := final.Meta("check_set")
 		if rg, ok := m.firstNotgreenLane(id, fcs); !ok {
@@ -1597,16 +1605,22 @@ type reviewRow struct {
 	IDNum       int64
 }
 
+// reviewSummary is the approval rule's answer: the first reviewer whose latest
+// opinion vetoes, the first whose latest approves, and, when no approval is
+// left to land the PR, the first whose standing approval the lift line set
+// aside.
 type reviewSummary struct {
 	veto     string
 	approver string
+	lifted   string
 }
 
 // reviewState applies the approval rule (reviewVerdict) to a PR's REST reviews
-// history. ok=false is an unreadable history: `jq -cs` slurps the whole stream
-// or nothing, so one row that will not decode makes all of it unreadable,
-// because the veto or the only approval may be that row or follow it.
-func reviewState(raw []byte, self string) (reviewSummary, bool) {
+// history and the anchor's lift line. ok=false is an unreadable history: `jq
+// -cs` slurps the whole stream or nothing, so one row that will not decode makes
+// all of it unreadable, because the veto or the only approval may be that row or
+// follow it.
+func reviewState(raw []byte, self, lifted string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
 	var all []reviewRow
@@ -1634,7 +1648,7 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 			IDNum:       numberToInt64(obj.ID),
 		})
 	}
-	return reviewVerdict(all, self), true
+	return reviewVerdict(all, self, lifted), true
 }
 
 // reviewVerdict is the approval rule, which the approval gate and the visit
@@ -1644,9 +1658,13 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 // latest is taken, so a dismissed approval does not count and a dismissed
 // CHANGES_REQUESTED does not hide its author's older approval. An approval
 // stands across later pushes until someone dismisses it, so the commit a review
-// was given at is not read.
-func reviewVerdict(all []reviewRow, self string) reviewSummary {
+// was given at is not read. lifted is the anchor's bring_current_lifted_at: once
+// a ruling on a bring-current round lifts the approval, an approval submitted at
+// or before it no longer approves, and empty lifts nothing (approvals_after and
+// the two-argument review_verdict in review-verdict.sh).
+func reviewVerdict(all []reviewRow, self, lifted string) reviewSummary {
 	var summary reviewSummary
+	standing := ""
 	// Group the non-self APPROVED and CHANGES_REQUESTED reviews by login and keep
 	// the latest per reviewer by (submitted_at, id). A DISMISSED row is dropped
 	// before the latest is taken.
@@ -1677,11 +1695,35 @@ func reviewVerdict(all []reviewRow, self string) reviewSummary {
 		if latest.State == "CHANGES_REQUESTED" && summary.veto == "" {
 			summary.veto = l
 		}
-		if latest.State == "APPROVED" && summary.approver == "" {
+		if latest.State == "APPROVED" && standing == "" {
+			standing = l
+		}
+		if latest.State == "APPROVED" && summary.approver == "" && approvedAfter(latest, lifted) {
 			summary.approver = l
 		}
 	}
+	if lifted != "" && summary.approver == "" {
+		summary.lifted = standing
+	}
 	return summary
+}
+
+// liftInstant is the one form a lift line is read in, the instant GitHub stamps
+// on a review, in which instants order as strings.
+var liftInstant = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
+
+// approvedAfter reports whether an approval survives the lift line: every
+// approval does when there is none, only one submitted strictly after it when
+// there is, and none when the line is not an instant in GitHub's form, so a
+// line that did not read never lets an approval count.
+func approvedAfter(r reviewRow, lifted string) bool {
+	if lifted == "" {
+		return true
+	}
+	if !liftInstant.MatchString(lifted) {
+		return false
+	}
+	return r.SubmittedAt > lifted
 }
 
 // openPR is one node of the open-PR read.
@@ -1805,8 +1847,9 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 }
 
 // terminalReason re-derives the full stored authorization set immediately before
-// the merge, returning "OK" or the first field that moved.
-func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
+// the merge, returning "OK" or the first field that moved. lifted is the lift
+// line the approval was validated against.
+func terminalReason(final *gcbd.Bead, num, base, url, ref, lifted string) string {
 	st := final.StatusLower()
 	mr := final.Meta("merge_result")
 	pn := final.Meta("pr_number")
@@ -1834,6 +1877,8 @@ func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
 		return "branch changed after validation"
 	case stripSpacesCommas(fcs) == "":
 		return "check_set emptied after validation"
+	case final.Meta("bring_current_lifted_at") != lifted:
+		return "a bring-current ruling lifted the approval after validation"
 	default:
 		return "OK"
 	}

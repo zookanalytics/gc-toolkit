@@ -19,8 +19,10 @@
 # account other than the city's, given at any commit, because an approval stands
 # across later pushes until it is dismissed; dismissed reviews are dropped before
 # each reviewer's latest is taken, so a dismissed approval does not count and a
-# dismissed CHANGES_REQUESTED does not hide its author's older approval; a
-# standing CHANGES_REQUESTED from any other account vetoes); no unclosed
+# dismissed CHANGES_REQUESTED does not hide its author's older approval; once a
+# ruling on a bring-current round lifts the approval, no approval submitted at
+# or before the anchor's bring_current_lifted_at counts, dismissed on GitHub or
+# not; a standing CHANGES_REQUESTED from any other account vetoes); no unclosed
 # rework/review child or open must-fix finding (metadata keys naming this PR AND
 # dependency edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only; an UNKNOWN,
@@ -264,10 +266,11 @@ ANCHOR_HOLDS_DEF='
 '
 
 # The approval rule over a list of reviews in the REST shape, REVIEW_VERDICT_DEF:
-# review_verdict($self) yields {veto, approver}, each the first such login or
-# empty. Shared by the approval gate and the visit order, so the two never
-# disagree on approval, and with pr-facts.sh, whose conflict arm brings only an
-# approved PR current.
+# review_verdict($self; $lifted) yields {veto, approver, lifted}, each the first
+# such login or empty, where $lifted is the anchor's bring_current_lifted_at and
+# an approval submitted at or before it no longer approves. Shared by the
+# approval gate and the visit order, so the two never disagree on approval, and
+# with pr-facts.sh, whose conflict arm brings only an approved PR current.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 
@@ -345,7 +348,8 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 #     then holds every PR);
 #   - one of the three anchor-local holds stands (ANCHOR_HOLDS_DEF);
 #   - the approval rule (REVIEW_VERDICT_DEF), applied to each account's latest
-#     APPROVED or CHANGES_REQUESTED review, finds a veto or no approval;
+#     APPROVED or CHANGES_REQUESTED review and the anchor's lift line, finds a
+#     veto or no approval;
 #   - the merge state pr-facts.sh recorded at the PR's live head, in the
 #     posture arm that runs right before this one, is one the merge below never
 #     proceeds on: anything but CLEAN, UNSTABLE, or UNKNOWN, the state GitHub
@@ -386,7 +390,8 @@ if OPEN_PRS=$(printf '%s' "$open_raw" | scrub | jq -sc '
            elif ([ $pr[$n].latestOpinionatedReviews.nodes[]?
                    | { user: { login: (.author.login // "") }, state,
                        submitted_at: (.submittedAt // ""), id: (.databaseId // 0) } ]
-                 | review_verdict($self) | .veto != "" or .approver == "") then "rest"
+                 | review_verdict($self; ($m.bring_current_lifted_at // ""))
+                 | .veto != "" or .approver == "") then "rest"
            elif ($ms[1] // "") != "" and $ms[1] == ($pr[$n].headRefOid // "")
                 and (["CLEAN", "UNSTABLE", "UNKNOWN"] | index($ms[0])) == null then "rest"
            else "landing" end) + "\t" + tojson' 2>/dev/null); then
@@ -526,6 +531,7 @@ while IFS= read -r tagged; do
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
+  lifted=$(printf '%s' "$fresh" | jq -r '(.meta.bring_current_lifted_at // "") | tostring')
 
   # --- validate, in order -------------------------------------------------------
   # Empty/absent check_set is NEVER "no checks": the declared checkless opt-out is
@@ -700,9 +706,10 @@ while IFS= read -r tagged; do
     held=$((held + 1)); continue
   fi
   # The approval rule (REVIEW_VERDICT_DEF): each non-self reviewer's latest
-  # APPROVED or CHANGES_REQUESTED review, dismissed reviews dropped first.
-  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
-    review_verdict($self)' 2>/dev/null)
+  # APPROVED or CHANGES_REQUESTED review, dismissed reviews dropped first, and
+  # no approval submitted at or before the anchor's lift line.
+  rstate=$(printf '%s' "$reviews" | jq -cs --arg self "$SELF_LOGIN" --arg lifted "$lifted" "$REVIEW_VERDICT_DEF"'
+    review_verdict($self; $lifted)' 2>/dev/null)
   if [ -z "$rstate" ]; then
     echo "$PROG: PR#$num reviews history unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -738,9 +745,15 @@ while IFS= read -r tagged; do
     # Every declared check is green and no pool-routed blocker is open: the
     # cadence is done and the pull request is waiting on a person.
     # That is `settled`, and the approval clause of the owed rule is what makes
-    # the row the operator's rather than nobody's.
+    # the row the operator's rather than nobody's. An approval the lift line set
+    # aside is named, because GitHub still shows one whose dismissal it refused.
     record_machine "$id" "settled" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num no external APPROVED review stands (approval is a universal merge rule); merge held (anchor $id)"
+    set_aside=$(printf '%s' "$rstate" | jq -r '.lifted // ""')
+    if [ -n "$set_aside" ]; then
+      echo "$PROG: PR#$num the approval from '$set_aside' was given at or before the bring-current round whose ruling lifted it ($lifted), so it no longer counts and a new approval lands the PR; merge held (anchor $id)"
+    else
+      echo "$PROG: PR#$num no external APPROVED review stands (approval is a universal merge rule); merge held (anchor $id)"
+    fi
     held=$((held + 1)); continue
   fi
 
@@ -948,7 +961,7 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" "$ANCHOR_HOLDS_DEF"'
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg lifted "$lifted" "$ANCHOR_HOLDS_DEF"'
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
@@ -965,6 +978,7 @@ $sa_out" >/dev/null 2>&1 || true
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
       elif ($m.check_set | no_check_set) then "check_set emptied after validation"
+      elif ((($m.bring_current_lifted_at // "") | tostring) != $lifted) then "a bring-current ruling lifted the approval after validation"
       else "OK" end' 2>/dev/null); frc=$?
   # The lane term the marker read used to carry, now derived: no declared lane
   # may have left green between validation and the merge. A lane's backing bead

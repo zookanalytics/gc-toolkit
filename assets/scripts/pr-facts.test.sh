@@ -969,6 +969,20 @@ has "$out" "PR#232 conflicts but no external approval stands" "a dismissed appro
 has "$out" "PR#233 conflicts but no external approval stands" "…nor does the city's own approval"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted for either"
 
+echo "# …an approval a bring-current ruling lifted releases nothing, by the rule merge.sh lands on"
+# GitHub may have refused its dismissal, so it still reads APPROVED; the
+# anchor's lift line is what sets it aside. One given after the line releases
+# the merge-in.
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+printf '%s' "$(prview 239 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_239.json"
+approve 239
+out=$(run)
+has "$out" "PR#239 conflicts but no external approval stands; no merge-in filed" "an approval at or before the lift line files no merge-in"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted"
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+out=$(run)
+has "$out" "filed merge-mode rework" "an approval after the lift line releases the merge-in"
+
 echo "# …reviews that do not read, or an unresolved acting login, prove no approval: nothing is filed until a pass reads one"
 store "[$(anchor NA5 234)]"
 printf '%s' "$(prview 234 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_234.json"
