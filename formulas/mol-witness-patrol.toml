@@ -472,7 +472,8 @@ among them `start-pending`, `creating`, `asleep`, `suspended`, `draining`,
 and `quarantined`, mean the controller or the operator still owns the
 session. A state not named here is owned too, the direction the retry and
 the map both resolve toward. The `dead` definition in both jq programs
-above names the same set.
+above names the same states except `absent`, which the lookup returns when
+no session carries the owner.
 
 **2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
 work bead is stale (no `updated_at` movement and no wisp progress for
