@@ -616,16 +616,21 @@ shepherd sitting simply omits the flag, and the PR stays on the merge track. The
 sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
 the visit demand always, the anchor demand only when the explicit hold was taken.
 
-A sitting that ends with its question still open is the one other time the merge
-waits: a cut-short sign-off (`--ruled no`), or a `dismiss` that leaves the
-conversation's gate open. The conversation wait cannot ride the closing visit — a
-demand left on a closed visit is a gate `gate-visit-sweep` names on stderr forever
-and no return trip re-offers — so `converse-signoff.sh` and `gc-helm dismiss
---leave-gate` both move it onto the ANCHOR: the liveness sweep re-offers the next
-sitting from `gc.demand_for=<anchor>`, and the merge holds until the abandoned
-question is answered or the demand is resolved. The moved wait carries the
-sitting's topic, its visit's escalation_key, so it refreshes that sitting's own
-demand on the anchor and never a sibling sitting's.
+The one other time a sitting's question holds the merge is when the sitting ends
+with that question still open: a cut-short sign-off (`--ruled no`), or a
+`dismiss` that leaves the conversation's gate open. The conversation wait cannot
+ride the closing visit — a demand left on a closed visit is a gate
+`gate-visit-sweep` names on stderr forever and no return trip re-offers — so
+`converse-signoff.sh` and `gc-helm dismiss --leave-gate` both move it onto the
+ANCHOR: the liveness sweep re-offers the next sitting from
+`gc.demand_for=<anchor>`, and the merge holds until the abandoned question is
+answered or the demand is resolved. The moved wait carries the sitting's topic,
+its visit's escalation_key, so it refreshes that sitting's own demand on the
+anchor and never a sibling sitting's. A ruled
+sign-off that answers `--rework` holds the merge too, through the rework child's
+`blocks` edge, until the rework lands. It also returns every review lane to
+`unreviewed`, so the branch is re-reviewed at the head the rework lands rather
+than merged on reviews of the head the ruling outdated.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
