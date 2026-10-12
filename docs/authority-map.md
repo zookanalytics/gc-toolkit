@@ -12,8 +12,9 @@ change, not an implementation detail — amend this table in the same PR.
 ## Scope
 
 **Mandate.** Who may exercise each destructive or state-bearing power in the
-pack, over beads, over origin refs and over sessions: the sole holder of each
-power, the evidence an act requires, and what the holder may never do.
+pack, over beads, over origin refs, over the city's own config and over
+sessions: the sole holder of each power, the evidence an act requires, and what
+the holder may never do.
 
 **Boundaries.** It names holders and their limits, not how an act runs; each
 holder's own script or doc carries its mechanics. The anchor lifecycle these
