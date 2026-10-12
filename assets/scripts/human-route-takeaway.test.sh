@@ -36,7 +36,10 @@ cd "$ROOT" || exit 1
 # worktrees a pool worktree nests under worktrees/, and a walk would check their
 # copies of every file as if they were sites of this checkout. Each search
 # names its pattern syntax, -G or -F, because grep.patternType in a git config
-# changes git grep's default.
+# changes git grep's default. Each search also passes -a, which reads every
+# file as text. .gitattributes marks generated/ -diff, and git grep reports a
+# match in a file it holds binary as one "Binary file <path> matches" line.
+# That line names no site, and skip_file cannot tell it is under generated/.
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   bad "$ROOT is not a git checkout, so there is no tracked tree to read"
   echo; echo "human-route-takeaway.test.sh: $PASS passed, $FAIL failed"; exit 1
@@ -142,7 +145,7 @@ while IFS=: read -r f n _; do
   if [[ "$stmt" =~ ^[[:space:]]*(echo|printf)[[:space:]] ]]; then continue; fi
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$n writes the takeaway in the same update"
-done < <(git grep -n -G -e 'gc\.routed_to="\?human"\?' -- '*.sh' '*.toml' '*.md' \
+done < <(git grep -a -n -G -e 'gc\.routed_to="\?human"\?' -- '*.sh' '*.toml' '*.md' \
            | grep -F -- '--set-metadata')
 
 # A route that FALLS BACK to the park sentinel is a park too, whatever the
@@ -158,7 +161,7 @@ while IFS=: read -r f n _; do
   stmt=$(statement "$f" "$wn")
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$wn parks via \$$var and writes the takeaway with it"
-done < <(git grep -n -F -e "=\"$PARK\"" -- '*.sh' '*.toml' | grep -F '[ -z "$')
+done < <(git grep -a -n -F -e "=\"$PARK\"" -- '*.sh' '*.toml' | grep -F '[ -z "$')
 
 [ "$raw_checked" -gt 0 ] && ok "raw park writers found and checked ($raw_checked)" \
   || bad "no raw park writer found — the discovery patterns have gone stale"
@@ -227,7 +230,7 @@ for st in $HUMAN_STATES; do
            bad "$f:$n parks with --to $st and records no question"
          fi ;;
     esac
-  done < <(git grep -n -G -e "transition .* --to $st" -- '*.sh' '*.toml' '*.md')
+  done < <(git grep -a -n -G -e "transition .* --to $st" -- '*.sh' '*.toml' '*.md')
 done
 
 echo

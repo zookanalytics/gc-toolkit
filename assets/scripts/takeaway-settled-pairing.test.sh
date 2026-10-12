@@ -31,7 +31,10 @@ cd "$ROOT" || exit 1
 # worktrees a pool worktree nests under worktrees/, and a walk would check their
 # copies of every file as if they were sites of this checkout. Each search
 # names its pattern syntax, -F here, because grep.patternType in a git config
-# changes git grep's default.
+# changes git grep's default. Each search also passes -a, which reads every
+# file as text. .gitattributes marks generated/ -diff, and git grep reports a
+# match in a file it holds binary as one "Binary file <path> matches" line.
+# That line names no site, and skip_file cannot tell it is under generated/.
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   bad "$ROOT is not a git checkout, so there is no tracked tree to read"
   echo; echo "takeaway settled-key pairing: $PASS passed, $FAIL failed"; exit 1
@@ -99,7 +102,7 @@ while IFS=: read -r f n _; do
   stmt=$(statement "$f" "$n")
   checked=$((checked + 1))
   has "$stmt" "$SETTLED=" "$f:$n writes $SETTLED in the same statement"
-done < <(git grep -n -F -e "--set-metadata" -- '*.sh' '*.toml' '*.md' '*.go' \
+done < <(git grep -a -n -F -e "--set-metadata" -- '*.sh' '*.toml' '*.md' '*.go' \
            | grep -F "$MARKER=")
 
 [ "$checked" -gt 0 ] && ok "headline writers found and checked ($checked)" \
@@ -113,7 +116,7 @@ while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
   bad "$f:$n hardcodes a settled disposition; it is $SETTLED's writer only under --no-wait"
-done < <(git grep -n -F -e "$SETTLED=1" -- '*.sh' '*.toml' '*.md' '*.go')
+done < <(git grep -a -n -F -e "$SETTLED=1" -- '*.sh' '*.toml' '*.md' '*.go')
 ok "no site outside the verb stamps a settled disposition of its own"
 
 HELM="$HERE/gc-helm.sh"
