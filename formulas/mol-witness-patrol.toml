@@ -65,9 +65,10 @@ gc mail inbox
 Triage HELP/blocked mail from polecats: unblock what you can (point at
 docs, suggest an approach); a blocker you cannot becomes a finding bead
 (`patrol-finding.sh --scope witness-findings --key polecat-help --about <the
-polecat's bead> ...`), and the reaction decides whether it is work, a wait, or
-a question for the operator. `--about` is what keeps two blocked polecats two
-findings. Emergencies (crash, data loss, corruption, security) go straight to
+polecat's bead> --distinct ...`), and the reaction decides whether it is work,
+a wait, or a question for the operator. `--about` is what keeps two blocked
+polecats two findings, and `--distinct` files the second while the first is
+still live. Emergencies (crash, data loss, corruption, security) go straight to
 escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
@@ -121,7 +122,14 @@ the mail reports, the way every finding key does, and ABOUT is the bead it
 concerns, left empty when it names none. NOTE is optional and adds what you
 know that the sender did not. The block copies the mail into the finding
 verbatim and archives the mail only after the finding is filed. When nothing is
-filed, the mail stays unread and the next cycle files it:
+filed, the mail stays unread and the next cycle files it.
+
+A refusal is the exception, because the next cycle meets the same refusal.
+patrol-finding.sh refuses with exit 3 when a live witness finding already
+shares KEY or ABOUT, and it lists those findings. If the mail reports one of
+their situations, re-run the block with that finding's KEY and ABOUT, and the
+mail lands on it as an occurrence. If it reports a different situation, re-run
+the block with DISTINCT=1, which passes --distinct:
 ```bash
 # >>> notice-finding
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -158,10 +166,16 @@ $NOTE"
   fi
   MAIL_TITLE="${MAIL_SUBJECT#NOTICE: }"
   [ -n "$MAIL_TITLE" ] || MAIL_TITLE="$MAIL_SUBJECT"
-  if "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" --title "$MAIL_TITLE" --message "$FINDING_TEXT"; then
+  PF_RC=0
+  "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" ${DISTINCT:+--distinct} --title "$MAIL_TITLE" --message "$FINDING_TEXT" || PF_RC=$?
+  if [ "$PF_RC" -eq 0 ]; then
     gc mail archive "$MAIL_ID" >/dev/null || echo "notice-finding: filed, but mail $MAIL_ID did not archive. The next cycle files it again, and the finding counts that as a recurrence." >&2
   else
-    echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    if [ "$PF_RC" -eq 3 ]; then
+      echo "notice-finding: patrol-finding.sh refused mail $MAIL_ID because a live finding it listed shares KEY or ABOUT. Re-run this block with that finding's KEY and ABOUT if the mail reports its situation, or with DISTINCT=1 if it reports a different one. The mail stays unread until then." >&2
+    else
+      echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    fi
     gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
   fi
 fi
@@ -346,8 +360,8 @@ Two more exclusions are structural, not kind-based:
 instances get NEW ids on restart, so pattern-matching an assignee against a
 template false-negatives forever. Build the identity->state map ONCE per
 cycle, before the first bead is read, keyed on id / name / session_name /
-alias / agent_name / configured_named_identity. Stream both blobs through
-temp files, never --argjson (ARG_MAX):
+alias / agent_name / configured_named_identity. Stream the list through a
+temp file, never --argjson (ARG_MAX):
 ```bash
 # >>> liveness-map-guard
 # Builds the map and answers the ONE question the fail safe asks: did the map
@@ -356,37 +370,29 @@ temp files, never --argjson (ARG_MAX):
 # runs once per cycle with no bead in scope, so no bead's owner can reach the
 # decision.
 SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
-SESSION_BEADS=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
-trap 'rm -f "$SESSIONS_RAW" "$SESSION_BEADS" 2>/dev/null' EXIT
+trap 'rm -f "$SESSIONS_RAW" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
-gc bd list --type=session --label=gc:session --include-infra --all --json --limit=0 > "$SESSION_BEADS" 2>/dev/null || true
-# The session list is the load-bearing source. A non-object, or an object with
+# The session list is the map's only source. A non-object, or an object with
 # no .sessions array, is the READ failing, which is a different fact from a
 # city that reports no sessions.
 SESSIONS_OK=0
 if jq -e 'type == "object" and (.sessions | type) == "array"' "$SESSIONS_RAW" >/dev/null 2>&1; then
   SESSIONS_OK=1
 fi
-# Normalize both sources to a shape the builder cannot fail on, so MAP_COUNT is
-# a number on every path and the trip below is decided by SESSIONS_OK rather
-# than by how the builder happened to die. The session beads contribute keys
-# when they can and are never required: an unusable answer from them
-# contributes nothing rather than failing the cycle.
+# Normalize the list to a shape the builder cannot fail on, so MAP_COUNT is a
+# number on every path and the trip below is decided by SESSIONS_OK rather than
+# by how the builder happened to die.
 [ "$SESSIONS_OK" = "1" ] || printf '{"sessions":[]}' > "$SESSIONS_RAW"
-jq -e 'type == "array"' "$SESSION_BEADS" >/dev/null 2>&1 || printf '[]' > "$SESSION_BEADS"
-LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" --slurpfile b "$SESSION_BEADS" '
+LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" '
   def kv($st): [ .id, .name, .session_name, .alias, .agent_name, .configured_named_identity ]
     | map(select(type == "string" and . != "")) | map({key: ., value: $st});
-  # Bead keys first, session-list keys second: from_entries lets the later
-  # entry win, which keeps the authoritative source authoritative.
-  [ (($b[0] // [])[] | kv(.status // "active")) ]
-  + [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
+  [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
   | add // {} | from_entries' 2>/dev/null) || LIVENESS_MAP=""
 MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null) || MAP_COUNT=""
 # Ordered by authority, and total: a count that is not a number means the
-# builder died behind a source that read fine, which is still a map that
-# cannot be trusted. Falling through to an empty MAP_TRIP would skip the
+# builder died behind a session list that read fine, which is still a map
+# that cannot be trusted. Falling through to an empty MAP_TRIP would skip the
 # fail safe on an unusable map, so the two assignments above absorb their own
 # failure: under `set -e` an abort would leave MAP_TRIP unset, and unset reads
 # as no trip.
@@ -399,7 +405,7 @@ else
     0)           MAP_TRIP="liveness map empty" ;;
   esac
 fi
-rm -f "$SESSIONS_RAW" "$SESSION_BEADS"
+rm -f "$SESSIONS_RAW"
 trap - EXIT INT TERM HUP
 # <<< liveness-map-guard
 ```
@@ -419,10 +425,15 @@ the fail safe. Closed sessions are excluded from `gc session list` on every
 path by design, so a bead naming a session that has since closed always
 resolves absent and `--state=closed` never returns a row. That is permanent,
 not drift, and it is the orphan signal the classification below prescribes.
-The session beads answer with an empty array on a healthy city, because
-`gc bd list` drops `issue_type=session` outright, so an empty second source is
-not an empty map either. A map that omits sessions you can name is the steady
-state this step is built to read.
+A map that omits sessions you can name is the steady state this step is built
+to read.
+
+The map holds no closed session, and the classification below orphans
+`absent` and `closed` alike. Closed sessions are recorded as session beads in
+the city store, a set that grows with every session the city runs, so a map
+that held them would cost a whole-history scan on every rig each cycle.
+Closed keys would also keep the map populated when the session list comes
+back empty, and that cycle would no longer trip `liveness map empty`.
 
 Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
 exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved
@@ -612,7 +623,7 @@ fi
 When a work bead's worktree is a husk or gone and its branch is not on the owning
 origin (or a guard refused), the work may be lost: file the refusal best-effort
 (`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
---about <bead> ...`) and fall through — recovery is load-bearing, the notice
+--about <bead> --distinct ...`) and fall through — recovery is load-bearing, the notice
 advisory. A source bead with neither a work_dir nor a branch is not that case:
 it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
 to file. A visit, a review, or a graph.v2 step or root never reaches this branch
@@ -753,7 +764,7 @@ and reopens live molecule machinery into a pool.
 Exit 3 is a PARTIAL write: some fields landed and some did not, the bead is now
 half-released, and it needs a finding
 (`patrol-finding.sh --scope witness-findings --key witness-partial-release
---about <bead> ...`), not a retry.
+--about <bead> --distinct ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
@@ -830,7 +841,7 @@ if [ "$STAMP_RECOVERY" = "1" ]; then
   gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
 fi
 ```
-File a finding `--key witness-crash-loop --about <bead>` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
+File a finding `--key witness-crash-loop --about <bead> --distinct` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
 two recoveries were close together — a finding that reports only "recovered
 before" makes whoever handles it re-derive the interval. `recovered_count` outside the
 window is a bead that keeps coming back rather than one that is looping; it is
