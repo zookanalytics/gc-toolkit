@@ -56,7 +56,7 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 2e6c8d3c8f7c6ead2ae5b5a17ebe2dc2803f0250c1b00f452af0e80e9f1a4890
 assets/scripts/render-seed-audit.sh
-0824be6eef588f240033b64193f7680a0af6d9b5a135928fcf950a6586b0670d
+1438725b5f4e93491e1a4bf8b032f99bc1a80168eee5c71f1d63f4d25c50f47f
 formulas/mol-deacon-patrol.toml
 07d6f0db15dab10e9d25e5fcb6e403d5289291cd321e3ef08d6df671d4e136d3
 formulas/mol-design-convoy.toml
@@ -86,7 +86,7 @@ formulas/mol-validate.toml
 formulas/mol-visit.toml
 70aabd4af31952d91b74ce9c81cd897b39c7e3e98d3d22fb7b11b1219c17544d
 formulas/mol-witness-patrol.toml
-9c0f62a00047d2c56de4bc04583fe944a286eeb44fe5a5c3da9a4656257b008d
+c42da5f8389634133e0d673d606902ab71b36076d1675c5025d7b184f0b46198
 pack.toml
 a31b75c5f58bc0f601df73790fa828c36f80f0b407339df439558d6cdf90a10a
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
