@@ -2954,15 +2954,18 @@ eq "$(meta R7 'gc.routed_to')" "human" "…with the hold it belongs to"
 
 echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
 # The shape rides the create and is read back. A pass that landed without its
-# anchor_bead, and whose repair write is refused, fails closed: the batch is not
-# watermarked, so it retries. The rework child is already filed and routed, so
-# the retry costs nothing.
+# anchor_bead, and whose second write is refused, is one no probe can find, so
+# bd_create closes it and nothing is opened; here the close is refused too, and
+# is reported. The batch is not watermarked, so it retries. The rework child is
+# already filed and routed, so the retry costs nothing.
 store "[$(anchor Vf 74)]"
 printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
 echo '[]' > "$GH_DIR/reviews_74.json"
 printf '[{"id":8740,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_74.json"
 out=$(STUB_DROP_KEYS="new-3:anchor_bead" STUB_UPDATE_FAIL="new-3" run)
-has "$out" "did not record the batch shape" "the dropped stamp is reported, not swallowed"
+has "$out" "new-3 did not read back carrying anchor_bead" "the dropped stamp is reported, not swallowed"
+has "$out" "would not close" "…and so is a close that did not land"
+has "$out" "could not open a validation pass" "…and no pass is reported opened"
 eq "$(vpass_id Vf)" "<none>" "…and no stamped validation pass stands on the anchor"
 eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass opens, so it retries"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
@@ -2970,15 +2973,16 @@ eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already f
 echo "# a pass whose check_name write half-lands warns, holds the batch, does not watermark"
 # The validator selects findings by check_name and defaults a missing one to correctness,
 # so a pass carrying anchor_bead but no check_name would rule correctness findings and
-# leave the human batch unruled. Reading only anchor_bead back would pass it; the
-# read-back checks the lane the validator consumes and skips the watermark.
+# leave the human batch unruled. check_name is a key the human-lane probe finds a
+# pass by, so bd_create closes a fresh pass still short of it, and the batch is not
+# watermarked.
 store "[$(anchor Vk 78)]"
 printf '%s' "$(prview 78 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_78.json"
 echo '[]' > "$GH_DIR/reviews_78.json"
 printf '[{"id":8780,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_78.json"
 out=$(STUB_DROP_KEYS="new-3:check_name" run)
-has "$out" "did not record the batch shape" "the dropped lane is reported, not swallowed"
-has "$out" "check_name=<absent>" "…naming the field that did not land"
+has "$out" "new-3 did not read back carrying check_name, so no reader could find it; closed it" "the dropped lane is reported, not swallowed"
+eq "$(bstatus new-3)|$(meta new-3 gc.outcome)" "closed|abandoned" "…and the pass no validator could rule is closed, so its edge holds nothing"
 eq "$(meta Vk pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
 
 echo "# a pass whose reviewed_oid write half-lands warns, holds the batch, does not watermark"
@@ -3030,15 +3034,15 @@ echo "# a pass whose task_kind write half-lands is invisible to the validator pa
 # task_kind=validation is the key gate-ensure's open_validation_pass selects a
 # pass by; a bead carrying anchor_bead and check_name but no task_kind still
 # blocks the anchor by its edge, yet no validator-path selector can see it.
-# Reading back only anchor_bead/check_name/reviewed_oid would pass it; the gate
-# reads task_kind too and skips the watermark so the batch retries.
+# task_kind is a key the human-lane probe selects by too, so bd_create closes
+# such a pass, and the batch is not watermarked, so it retries.
 store "[$(anchor Vg 84)]"
 printf '%s' "$(prview 84 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_84.json"
 echo '[]' > "$GH_DIR/reviews_84.json"
 printf '[{"id":8840,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_84.json"
 out=$(STUB_DROP_KEYS="new-3:task_kind" run)
-has "$out" "did not record the batch shape" "the dropped task_kind is reported, not swallowed"
-has "$out" "task_kind=<absent>" "…naming the field that did not land"
+has "$out" "new-3 did not read back carrying task_kind, so no reader could find it; closed it" "the dropped task_kind is reported, not swallowed"
+eq "$(bstatus new-3)|$(meta new-3 gc.outcome)" "closed|abandoned" "…and the pass no validator-path selector could see is closed"
 eq "$(meta Vg pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
