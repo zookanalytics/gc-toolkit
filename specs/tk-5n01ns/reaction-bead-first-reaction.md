@@ -107,9 +107,9 @@ in S's notes is the record of what was chosen and why.
 
 | Disposition | S becomes | Act |
 |---|---|---|
-| **actionable** | routed to a pool | release S to the pool (`gc.routed_to`); the card is the dispatch note |
+| **actionable** | routed to a pool, or assigned to a named agent | release S to the pool (`gc.routed_to`), or with `--assign` to the named agent whose own work it is, as its assignee; the card is the dispatch note |
 | **recommend** | held on a human gate, with an action to Accept | stamp `gc.recommended_formula`, file the gate (`gc-helm.sh demand`, topic `first-reaction`), hold S on it |
-| **blocked** | held on a `blocks` edge | wire the edge to the blocker; optionally arm a deferred dispatch for when it clears |
+| **blocked** | held on a `blocks` edge | wire the edge to the blocker; optionally arm a deferred dispatch for when it clears, or with `--then-assign` assign S to a named agent in the same release |
 | **close** | driven by the validating closer | append the close brief to S's notes, sling `mol-validate-close` at S |
 | **ruling** | held on a human gate, Discuss-only | file the gate, hold S on it |
 
@@ -263,6 +263,16 @@ premise no longer held was left to the operator:
   keys demand and the pool queries drop on. Main's step cases in
   `tools/gc-proactive.test.sh` carry over, and its sweep case expects the
   reaction-bead dry-run line.
+- **A named agent as a second address.** Main gave the actionable exit
+  `--assign` and the blocked exit `--then-assign`, so work that is a named
+  agent's own, such as mechanik's town-repo edit, goes to that agent as its
+  assignee rather than to a pool. It changes where a reaction sends the subject,
+  not how the reaction is dispatched, so both flags carry over as R's
+  write-back. Main wrote the rubric and the two calls into `mol-first-reaction`;
+  they live in the proactive prompt, which replaces it.
+- **A ruling's rework twin.** Main extended the rework-twin pass to the twin of
+  an operator ruling's rework child. That twin takes the same no-op stamp before
+  its close as a review's twin.
 
 ## Metadata
 
