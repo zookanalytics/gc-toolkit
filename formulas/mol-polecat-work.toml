@@ -86,7 +86,7 @@ Two dispatch surfaces can reach one work bead — this workflow, and a direct
 pool route left on the bead itself. When both fire, two workers set up the same
 branch and one silently destroys the other's commits. Before touching the
 workspace, prove that the bead is readable, not parked, not in flight under
-another live owner, and not already finished:
+another live owner or in another live session's tree, and not already finished:
 
 ```bash
 # >>> load-context-duplicate-dispatch-hold
@@ -174,12 +174,36 @@ case "$WORK_STATUS" in
       ESCALATE_MESSAGE="Work bead $WORK_BEAD_ID is $WORK_STATUS, and convoy {{convoy_id}} reached $GC_SESSION_NAME with it. A parked bead is not built, so its molecule is held at load-context; no workspace was touched and nothing was closed. Releasing the bead does not resume the molecule: once the bead is ready to build, re-offer this molecule."
     fi ;;
 esac
+SCRIPTS=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/work-tree-holder.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?molecule-hold.sh, escalate.sh and work-tree-holder.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+# This workflow never claims its work bead, so a run in flight leaves it open
+# and unassigned, and only the run's tree shows it. work-tree-holder.sh exits
+# 0 when no live session is working this work in the bead's recorded work_dir
+# or in the worktree with its branch checked out, and 1 when one is. Any
+# other exit could not rule a holder out, so it holds too.
+if [ -z "$WHY" ]; then
+  TREE_RC=0
+  TREE_FINDING=$("$SCRIPTS/work-tree-holder.sh" --bead "$WORK_BEAD_ID" --work-dir "$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty' 2>/dev/null)" --branch "$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.branch // empty' 2>/dev/null)") || TREE_RC=$?
+  case "$TREE_RC" in
+    0)
+      [ -z "$TREE_FINDING" ] || echo "$TREE_FINDING" ;;
+    1)
+      WHY="in flight in another session's tree: $TREE_FINDING"
+      ESCALATE_MESSAGE="Duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Two runs are live: salvage the tree's uncommitted and unpushed work before anything moves it, decide which run owns the bead, then re-offer that one." ;;
+    *)
+      WHY="possibly in flight in another session's tree: ${TREE_FINDING:-work-tree-holder.sh exited $TREE_RC with no finding}"
+      ESCALATE_MESSAGE="Possible duplicate dispatch on $WORK_BEAD_ID: it is $WHY. Convoy {{convoy_id}} dispatched it to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Check the tree: if a live run is using it, salvage its uncommitted and unpushed work and let that run own the bead; if none is, re-offer this molecule." ;;
+  esac
+  if [ "$TREE_RC" != 0 ]; then
+    NOTE_LABEL="Duplicate dispatch refused"
+    HOLD_LABEL="duplicate dispatch"
+    ESCALATE_KEY=polecat-duplicate-dispatch
+  fi
+fi
 if [ -n "$WHY" ]; then
-  SCRIPTS=""
-  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
   # The note is the bead's own record of the refusal. The hold reason on this
   # step carries the same text, so a note the store refuses is reported here
   # and the hold still runs.
@@ -242,9 +266,10 @@ the refinery while its PR proceeds. A closed bead's note and hold reason read
 duplicate close reads differently from a merge.
 
 Three other situations need a human, and each files its own visit. A LIVE
-conflict, in flight under a foreign owner still present in `gc session list
---state all`, is two dispatches building at once, a routing anomaly a human
-must adjudicate. An UNREADABLE bead proves nothing, so no liveness answer can
+conflict is two dispatches building at once, a routing anomaly a human must
+adjudicate: the bead is in flight under a foreign owner still present in
+`gc session list --state all`, or another live session is working it in its
+tree. An UNREADABLE bead proves nothing, so no liveness answer can
 clear it. A PARKED bead (`blocked`, `deferred`, `hooked`, `pinned`) waits on
 whoever parked it, and releasing it does not resume a held molecule, so the
 visit is what says the molecule needs re-offering. These record the release
@@ -279,6 +304,28 @@ that list is safely gone. A bead that is closed, already handed off (open
 under a foreign assignee), or carrying a `merge_result` is finished rather than
 in flight, and holds regardless of its assignee or any session's liveness. So
 does a parked or unreadable bead.
+
+The assignee is one owner signal and the work's tree is the other. This
+workflow never claims its work bead, so a run in flight leaves the bead open
+and unassigned, and only its tree shows the run. When the bead would otherwise
+build, `work-tree-holder.sh` reads the work's trees: the worktree
+`metadata.work_dir` records, which workspace-setup adopts, and the worktree
+with the work's branch checked out. That branch is `metadata.branch`, or
+`polecat/<bead>` before workspace-setup records one. A tree under your own directory (`$GC_DIR`) is
+yours to resume. A tree that is another session's directory is held by that
+session. A tree under another session's directory (`<dir>/worktrees/<bead>`)
+is held only while that session is working this work, because a pool slot
+directory outlives the session that created a tree in it, and a per-bead tree
+outlives its run. A session's work is each of its open or in_progress claims,
+and for a claimed molecule step it is what the molecule's input convoy tracks.
+That work is this work when it is this bead, a bead on this branch (the anchor
+or a sibling rework child), or a bead that records this tree as its work_dir.
+A tree with no listed session in its directory is adoptable, which is how a
+re-dispatch recovers a crashed run. A tree no session directory accounts for,
+an unreadable session list or bead listing, a claim that cannot be traced to
+its work, and a failed `git worktree list` hold as a possible duplicate. The
+note and the visit name the tree and count its uncommitted paths, so the
+holder's work can be salvaged.
 
 **4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
 
