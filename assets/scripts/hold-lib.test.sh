@@ -138,7 +138,8 @@ eq "$(ask '[ hold_holds($g[0])[] | {by, unread} ] | tojson')" "[{\"by\":\"deep-$
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the library in prose but
 # no longer calls it still fails.
-READERS="assets/scripts/deferred-dispatch.sh"
+READERS="assets/scripts/deferred-dispatch.sh
+doctor/check-armed-dispatch-owed/run.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

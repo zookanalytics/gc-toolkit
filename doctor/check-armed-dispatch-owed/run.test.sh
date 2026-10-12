@@ -54,8 +54,11 @@ GC
 #      fully-resolvable read is silent on stderr.
 #      BD_HARDFAIL_DEP names a store whose whole dep read fails outright (rc!=0),
 #      the shape a broken db or a timeout shows.
-#   * `bd list --id <csv> --all ...`     → the named blocker beads, DROPPING ids
-#      with no row (real --id is silent about a miss). BD_FAIL_BLOCKERS fails it.
+#   * `bd list --id <csv> --all ...`     → the named beads, DROPPING ids with no
+#      row (real --id is silent about a miss): the blockers the join resolves,
+#      and the ancestors and their blockers the hold walk reads.
+#      BD_FAIL_BLOCKERS fails every such read in a store, BD_FAIL_IDS only a read
+#      naming one of its ids.
 # DEP_CALLS, when set, gets one line per `bd dep list` invocation, so a test can
 # assert the read happens once per store rather than once per bead.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
@@ -83,6 +86,9 @@ case "$sub" in
   list)
     if [ -n "$id_csv" ]; then
       [ "$name" = "${BD_FAIL_BLOCKERS:-}" ] && exit 3
+      for fid in ${BD_FAIL_IDS:-}; do
+        case ",$id_csv," in *",$fid,"*) exit 3 ;; esac
+      done
       f="$STORES/$name.blockers.json"
       if [ -f "$f" ]; then
         # Model bd's default hiding: a gate/infra/template blocker is returned
@@ -143,7 +149,8 @@ run_check() {
 clear_stores() { rm -f "$TMP/stores/"*.json; }
 
 # Armed-bead fixtures (the check reads status + the slung/merge_result/armed_at
-# metadata off this listing).
+# metadata off this listing, and the hold walk reads each bead's own edges off
+# it, as real `bd list --json` carries them).
 armed_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.armed.json"; }
 aarmed()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
 astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool"}}' "$1" "$2"; }
@@ -154,6 +161,15 @@ aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","
 # a long-closed own blocker it would read as owed-but-not-firing without the cap
 # exemption.
 acapped() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_fail_count":"%s","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-3}" "${3:-2020-01-01T00:00:00Z}"; }
+# An armed bead carrying its own edges, as the listing prints them: $2 is a
+# comma list of parents, $3 of blockers.
+aedged() {
+    jq -nc --arg id "$1" --arg p "${2:-}" --arg b "${3:-}" '
+        {id: $id, status: "open",
+         metadata: {"gc.dispatch_when_ready": "rig/pool", "gc.dispatch_when_ready_armed_at": "2020-01-01T00:00:00Z"},
+         dependencies: ( [ $p | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "parent-child"} ]
+                       + [ $b | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "blocks"} ] )}'
+}
 
 # Edge fixtures — the flat array a batch `bd dep list` returns for the store
 # (issue_id blocked-by depends_on_id). A parent-child edge is included in one
@@ -170,11 +186,21 @@ b_open()   { printf '{"id":"%s","status":"open"}' "$1"; }
 # A closed GATE blocker — bd list hides it unless --include-gates is passed, so
 # this exercises the include flags the status lookup must carry.
 b_closed_gate() { printf '{"id":"%s","status":"closed","closed_at":"%s","issue_type":"gate"}' "$1" "$2"; }
+# An ancestor the hold walk reads: $2 is a comma list of its parents, $3 of its
+# blockers.
+b_epic() {
+    jq -nc --arg id "$1" --arg p "${2:-}" --arg b "${3:-}" '
+        {id: $id, status: "open", issue_type: "epic", title: "epic \($id)",
+         dependencies: ( [ $p | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "parent-child"} ]
+                       + [ $b | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "blocks"} ] )}'
+}
+b_gate()   { printf '{"id":"%s","status":"open","issue_type":"gate","title":"Parked until the operator unparks it"}' "$1"; }
+b_demand() { printf '{"id":"%s","status":"open","issue_type":"gate","title":"Decide %s","metadata":{"gc.demand_for":"%s"}}' "$1" "$2" "$2"; }
 
 OLD="2020-01-01T00:00:00Z"
 RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# --- 1. OWED: open arm, own blocks closed long ago, held only by an ancestor --
+# --- 1. OWED: open arm, own blocks closed long ago, nothing holds it ---------
 armed_store alpha "$(aarmed a-1)"
 edges_store alpha "$(e_pc a-1 epic)" "$(e_blk a-1 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
@@ -393,6 +419,75 @@ has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 DEPN=$( [ -f "$DEPLOG" ] && wc -l < "$DEPLOG" | tr -d ' ' || echo 0 )
 eq "$DEPN" "1" "the store's dependency edges are read in ONE batch, not one call per bead"
+clear_stores
+
+# --- 14. HELD: an arm whose own blocker closed long ago, under a parked epic,
+#          is held by the park, so it is not owed ------------------------------
+armed_store alpha "$(aedged h-1 epic-1 b-0)"
+edges_store alpha "$(e_pc h-1 epic-1)" "$(e_blk h-1 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an armed child of a parked epic is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-1" "a parked epic's armed child is not reported"
+clear_stores
+
+# --- 15. HELD two levels down: the feature between has no blocker of its own --
+armed_store alpha "$(aedged h-2 feat-1 b-0)"
+edges_store alpha "$(e_pc h-2 feat-1)" "$(e_blk h-2 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic feat-1 epic-1 "")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm two levels under a parked epic is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-2" "the grandchild of a parked epic is not reported"
+clear_stores
+
+# --- 16. HELD: an epic that waits on an open task holds its armed work ---------
+armed_store alpha "$(aedged h-3 epic-1 b-0)"
+edges_store alpha "$(e_pc h-3 epic-1)" "$(e_blk h-3 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" t-1)" "$(b_open t-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm whose epic waits on an open task is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-3" "it is not reported"
+clear_stores
+
+# --- 17. OWED: a demand gate on the epic holds nothing, so reconcile owes the
+#          arm its dispatch, and one that has waited past the window is flagged
+armed_store alpha "$(aedged h-4 epic-1 b-0)"
+edges_store alpha "$(e_pc h-4 epic-1)" "$(e_blk h-4 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" dg-1)" "$(b_demand dg-1 epic-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose epic waits only on a demand gate is owed (exit 1)"
+has "$OUT" "alpha bead h-4" "it is reported as owed"
+clear_stores
+
+# --- 18. RELEASED: the park closed just now, so the owed window runs from the
+#          release, not from the arm's own blocker long ago ---------------------
+armed_store alpha "$(aedged h-5 epic-1 b-0)"
+edges_store alpha "$(e_pc h-5 epic-1)" "$(e_blk h-5 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_closed_gate park-1 "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm whose park was released just now is within cadence, not owed"
+hasnt "$OUT" "alpha bead h-5" "it is not reported"
+clear_stores
+
+# --- 19. FAIL CLOSED: an ancestor that cannot be read is NOT checked -----------
+armed_store alpha "$(aedged h-6 epic-ghost b-0)"
+edges_store alpha "$(e_pc h-6 epic-ghost)" "$(e_blk h-6 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose ancestor cannot be read warns (exit 1)"
+has "$OUT" "could not read [epic-ghost]" "the unread ancestor is named"
+hasnt "$OUT" "owed but not firing" "an unread hold is NOT reported as owed"
+clear_stores
+
+# --- 20. FAIL CLOSED: a hold walk whose read fails leaves the store's arms NOT
+#          checked -----------------------------------------------------------
+armed_store alpha "$(aedged h-7 epic-1 b-0)"
+edges_store alpha "$(e_pc h-7 epic-1)" "$(e_blk h-7 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
+OUT=$(BD_FAIL_IDS=epic-1 run_check); RC=$?
+eq "$RC" "1" "a hold walk that cannot read warns rather than passing (exit 1)"
+has "$OUT" "could not read what holds 1 armed bead(s)" "the not-checked reason is named"
+hasnt "$OUT" "owed but not firing" "a failed walk is NOT reported as owed"
 clear_stores
 
 # --- the owed window is the deferred-dispatch order's cadence window ----------
