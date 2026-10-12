@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# gh-origin-guard-wiring.test.sh — assert every claude-provider agent actually
-# receives the gh origin guard.
+# gh-origin-guard-wiring.test.sh — assert every agent actually receives the gh
+# origin guard, through the registration its provider reads.
 #
 # The guard only protects an agent whose settings register it, and nothing at
 # runtime reports an agent that was left out: an unwired agent looks exactly
 # like one whose writes were all legitimate. A new agent added to agents/ with
-# no overlay would be silently unguarded, which is the failure this test exists
-# to make loud.
+# no registration would be silently unguarded, which is the failure this test
+# exists to make loud.
 #
 # Covered:
 #   (1) every agent that is not codex-provider has a pack.toml overlay_dir
 #   (2) that overlay registers a PreToolUse/Bash hook naming the guard
-#   (3) the registered command is identical across overlays, so they cannot
-#       drift into guarding different things
-#   (4) the command resolves the script only from gc-controlled roots — never
+#   (3) every codex-provider agent runs gh-origin-guard-codex.sh as pre_start,
+#       since Codex reads no .claude overlay
+#   (4) the registered command is identical across overlays and the Codex
+#       registration, so they cannot drift into guarding different things
+#   (5) the command resolves the script only from gc-controlled roots — never
 #       from the working directory, which on a third-party checkout would let
 #       that repository supply the code judging its own writes
-#   (5) the script it names exists, is executable, and parses
+#   (6) the script it names exists, is executable, and parses
 #
 # run-tests-scope: tree
 
@@ -25,6 +27,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 GUARD_REL="assets/scripts/gh-origin-guard.sh"
+CODEX_REL="assets/scripts/gh-origin-guard-codex.sh"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
@@ -34,7 +37,7 @@ command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 1; }
 
 echo "gh-origin-guard wiring"
 
-# --- (5) the script itself -----------------------------------------------
+# --- (6) the script itself -----------------------------------------------
 if [ -x "$REPO/$GUARD_REL" ]; then ok "guard script is executable"
 else bad "guard script is executable" "$REPO/$GUARD_REL"; fi
 if sh -n "$REPO/$GUARD_REL" 2>/dev/null; then ok "guard script parses"
@@ -52,16 +55,22 @@ overlay_of() { # overlay_of <agent>
     ' "$REPO/pack.toml"
 }
 
-# --- (1)(2) coverage, agent by agent -------------------------------------
+# --- (1)(2)(3) coverage, agent by agent ----------------------------------
 GUARD_CMDS=""
 for dir in "$REPO"/agents/*/; do
     agent="$(basename "$dir")"
     [ -f "$dir/agent.toml" ] || continue
 
-    # Only a declared codex provider is exempt: .claude/settings.json is inert
-    # there. Anything else may run under claude and must be covered.
+    # A declared codex provider reads no .claude/settings.json, so its guard is
+    # the Codex home's registration, made by its pre_start before the session
+    # starts. Anything else may run under claude and must have an overlay.
     if grep -Eq '^provider *= *"codex"' "$dir/agent.toml"; then
-        ok "$agent is codex-provider (guard does not apply)"
+        if awk '/^pre_start *=/, /\]/' "$dir/agent.toml" \
+            | grep -Fq "{{.ConfigDir}}/$CODEX_REL"; then
+            ok "$agent is guarded (codex: pre_start runs $CODEX_REL)"
+        else
+            bad "$agent is guarded" "codex-provider, and its pre_start does not run {{.ConfigDir}}/$CODEX_REL"
+        fi
         continue
     fi
 
@@ -93,18 +102,41 @@ for dir in "$REPO"/agents/*/; do
 "
 done
 
-# --- (3) the registrations agree -----------------------------------------
+# --- (4) the registrations agree -----------------------------------------
+# The Codex registration is what the installer writes into a Codex home, read
+# back from a scratch one.
+CODEX_HOME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gh-origin-guard-wiring.XXXXXX")"
+trap 'rm -rf "$CODEX_HOME_DIR"' EXIT
+if CODEX_HOME="$CODEX_HOME_DIR" "$REPO/$CODEX_REL" >/dev/null 2>&1; then
+    codex_cmd="$(jq -r --arg g "gh-origin-guard.sh" '
+        [ (.hooks.PreToolUse // [])[]
+          | select((.matcher // "") == "Bash")
+          | (.hooks // [])[]
+          | select((.command // "") | contains($g))
+          | .command ] | first // ""' "$CODEX_HOME_DIR/hooks.json" 2>/dev/null)"
+    if [ -n "$codex_cmd" ]; then
+        ok "the Codex registration is a PreToolUse/Bash hook naming the guard"
+        GUARD_CMDS="$GUARD_CMDS$codex_cmd
+"
+    else
+        bad "the Codex registration is a PreToolUse/Bash hook naming the guard" \
+            "$(cat "$CODEX_HOME_DIR/hooks.json" 2>/dev/null)"
+    fi
+else
+    bad "the Codex registration is a PreToolUse/Bash hook naming the guard" "$CODEX_REL failed"
+fi
+
 DISTINCT="$(printf '%s' "$GUARD_CMDS" | grep -c . || true)"
 UNIQUE="$(printf '%s' "$GUARD_CMDS" | sort -u | grep -c . || true)"
 if [ "$DISTINCT" -gt 0 ] && [ "$UNIQUE" -eq 1 ]; then
-    ok "all overlays register the same command ($DISTINCT agents, 1 spelling)"
+    ok "every registration runs the same command ($DISTINCT registrations, 1 spelling)"
 else
-    bad "all overlays register the same command" "$DISTINCT registrations, $UNIQUE distinct spellings"
+    bad "every registration runs the same command" "$DISTINCT registrations, $UNIQUE distinct spellings"
 fi
 
 CMD="$(printf '%s' "$GUARD_CMDS" | head -1)"
 
-# --- (4) the command resolves from gc-controlled roots only --------------
+# --- (5) the command resolves from gc-controlled roots only --------------
 case "$CMD" in
     *'rev-parse'*|*'--show-toplevel'*)
         bad "resolution is not cwd-derived" "the command consults the working directory's repository" ;;

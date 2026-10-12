@@ -60,8 +60,7 @@ GC_LOG="$TMP/gclog"; HELM_LOG="$TMP/helmlog"
 # the live-bead fixture otherwise; `gc bd update` only logs. Every call logs
 # its argv (so the test can prove --include-gates is passed and the stamp is
 # written), and the gate list fails when told to.
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >> "$GC_LOG"
 case "$1 ${2:-}" in
   "bd list")

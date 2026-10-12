@@ -33,8 +33,7 @@ mkdir -p "$TMP/bin" "$TMP/show"
 # --- gc stub -------------------------------------------------------------------
 # Serves the census reads from fixture files, `bd show` from $SHOW_DIR/<id>.json,
 # the refile guard's closed listing from $PRIOR_VISITS, and records every write.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
 case "$sub" in
@@ -112,11 +111,9 @@ chmod +x "$TMP/bin/gc"
 
 # gh stub: only zook/gc-toolkit answers, with #521/#522 open (so #520 merged and
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
-# It serves $GH_PRS verbatim, which is how a test ages a PR: the sweep asks for
-# url,updatedAt and reads both, so a stub that answered only url would classify
-# every PR ageless and hide the case these tests are about.
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
+# It serves $GH_PRS verbatim, an updatedAt on every row, so a test can date the
+# open PRs and show that no age changes how their anchors classify.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
@@ -453,85 +450,33 @@ grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
     && ok "a failed anchor read keeps the step a candidate (reported)" \
     || bad "failed anchor read hides nothing" "$(cat "$BASELINE_FILE")"
 
-echo "── a PR-gated anchor is a named wait only while its PR MOVES ──"
-# The defect: an anchor parked on a PR that stopped is invisible to every pass.
-# The PR names the wait, so it is not an unnamed wait and the batch visit skips
-# it; nothing else looks. It has to become its own escalation, on the anchor.
+echo "── a PR-gated anchor is a named wait however long its PR sits ──"
+# An open PR names its anchor's wait, and the operator's review of it has no
+# deadline. With both open PRs dated a year back the pass classifies exactly as
+# it does with fresh ones: the anchors stay gated, the one visit filed is the
+# batch visit, and nothing is stamped on an anchor.
+pass_funnel() { printf '%s' "$OUT" | grep 'funnel:' || true; }
 gh_prs 0 0
-run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "a moving PR stays gated" "escalated anyway: $(cat "$ESC_CALLS")" \
-    || ok "a PR updated today stays gated — nothing escalated"
-
-gh_prs 9 0
-run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" "a PR idle past the threshold escalates exactly once"
-grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
-    && ok "…with the ANCHOR as subject and one stable key" || bad "stale subject/key" "$(cat "$ESC_CALLS")"
-grep -q 'c-pr-case' "$ESC_CALLS" \
-    && bad "the sibling PR that is still moving is untouched" "c-pr-case escalated too" \
-    || ok "the sibling PR that is still moving is untouched"
-grep -q 'bd update c-pr-open --set-metadata stale_escalated_at=' "$GC_CALLS" \
-    && ok "…and the anchor is stamped stale_escalated_at" || bad "stale_escalated_at stamp" "$(cat "$GC_CALLS")"
-grep -q 'stale_escalated_to=gc-toolkit.converse' "$GC_CALLS" \
-    && ok "…and stale_escalated_to records the route escalate.sh reported" \
-    || bad "stale_escalated_to stamp" "$(cat "$GC_CALLS")"
-grep -q '9 day' "$ESC_BODIES" && ok "the body states how long the PR has been idle" || bad "body age" "$(cat "$ESC_BODIES")"
-grep -q 'pull/521' "$ESC_BODIES" && ok "…and names the PR" || bad "body names the PR" "$(cat "$ESC_BODIES")"
-case ",$(cat "$BASELINE_FILE")," in
-    *",c-pr-open,"*) bad "a stale gate is never doubled into the batch" "it entered the baseline too" ;;
-    *) ok "a stale gate is escalated alone, never also batched as an unnamed wait" ;;
+run_sweep ABSENT
+FRESH_FUNNEL="$(pass_funnel)"
+case "$FRESH_FUNNEL" in
+    *" gated "*) ok "control: the fresh-PR pass reports a gated class" ;;
+    *) bad "control: the fresh-PR pass reports a gated class" "funnel: ${FRESH_FUNNEL:-<none>}" ;;
 esac
-
-echo "── the dedup is the anchor's own stamp, so a wiped state dir cannot lose it ──"
-# run_sweep deletes the state directory on every call, which IS the recycle the
-# /tmp marker file could not survive: here the ONLY thing that can suppress a
-# second escalation is durable bead state.
-stamp_pr_open() { jq --arg t "$1" 'map(if .id == "c-pr-open" then .metadata.stale_escalated_at = $t else . end)' \
-    "$TMP/ready.json" > "$TMP/ready-stamped.json"; }
-gh_prs 9 0
-stamp_pr_open "$(iso_ago 1)"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "a stamped anchor inside the floor is not re-raised" "re-escalated: $(cat "$ESC_CALLS")" \
-    || ok "a stamped anchor inside the floor is not re-raised, fresh state dir and all"
-grep -q "inside the 3d floor" <<< "$OUT" && ok "…and the pass says so" || bad "floor line" "$OUT"
-
-stamp_pr_open "$(iso_ago 5)"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
-   "past the floor the same anchor is raised again — bounded retry, not once-forever"
-
-stamp_pr_open "not-a-timestamp"
-FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
-eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
-   "an unreadable stamp re-raises rather than muting the anchor forever"
-
-echo "── an unverifiable age reports, and a failed escalation stamps nothing ──"
-printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
-    "$(iso_ago 0)" > "$TMP/gh-prs.json"
-run_sweep "$EXPECT_SURVIVORS"
-grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
-    && ok "a PR GitHub gave no updatedAt for is REPORTED, never held" || bad "ageless PR" "$(cat "$ESC_CALLS")"
-grep -q 'no readable last-update time' "$ESC_BODIES" \
-    && ok "…and the body says the age is unknown instead of inventing one" || bad "ageless body" "$(cat "$ESC_BODIES")"
-
-gh_prs 9 0
-GH_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
-grep -q anchor-stale "$ESC_CALLS" \
-    && bad "an unread PR set escalates no stale gate" "escalated on data it never read" \
-    || ok "an unread PR set escalates no stale gate — the bead falls to the batch instead"
-
-ESC_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
-grep -q stale_escalated "$GC_CALLS" \
-    && bad "a failed escalation stamps nothing" "stamped anyway: $(grep stale_escalated "$GC_CALLS")" \
-    || ok "a failed escalation stamps nothing — the next pass retries it"
-
-rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"; : > "$GC_CALLS"; : > "$ESC_CALLS"
-bash "$SCRIPT" --dry-run >/dev/null 2>&1
-eq "$(cat "$ESC_CALLS")" "" "--dry-run escalates no stale gate"
-grep -q stale_escalated "$GC_CALLS" && bad "--dry-run stamps no anchor" "it stamped one" \
-    || ok "--dry-run stamps no anchor"
+gh_prs 400 400
+run_sweep ABSENT
+eq "$RC" "0" "the pass completes over year-old PRs"
+eq "$(pass_funnel)" "$FRESH_FUNNEL" "every class counts as it does with fresh PRs"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "$EXPECT_SURVIVORS" \
+   "…and the unnamed set is the one fresh PRs give"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
+   "the one visit filed is the batch visit — no anchor is escalated for its PR's age"
+grep -Eq 'c-pr-(open|case)' "$ESC_BODIES" \
+    && bad "neither PR-gated anchor is listed as an unnamed wait" "$(cat "$ESC_BODIES")" \
+    || ok "neither PR-gated anchor is listed as an unnamed wait"
+grep -q 'bd update c-pr-' "$GC_CALLS" \
+    && bad "nothing is stamped on a PR-gated anchor" "$(grep 'bd update c-pr-' "$GC_CALLS")" \
+    || ok "nothing is stamped on a PR-gated anchor"
 gh_prs 0 0
 
 echo "── the standing subject is created on first run, idempotently ──"
@@ -692,6 +637,23 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
+# A ruling's rework child carries no source_review_bead, like a human batch's, but
+# it answers the ruling. An anchor sent back to pre_open_gate keeps that closed
+# child, which must not read as the landed fix of a human objection nobody answered.
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"wr-anchor","status":"open","title":"edge-less human finding beside a ruling's rework","metadata":{"merge_result":"pre_open_gate","branch":"polecat/wr-anchor"}},
+  {"id":"wr-find","status":"open","title":"edge-less human must-fix finding","metadata":{"task_kind":"finding","finding.disposition":"must-fix","finding.lane":"human","anchor_bead":"wr-anchor"}}
+]
+JSON
+printf '[]\n' > "$TMP/show/dep-wr-find.json"
+printf '%s\n' '[{"id":"wr-fix","status":"closed","metadata":{"task_kind":"rework","anchor_bead":"wr-anchor","source_ruling_bead":"wr-visit"}}]' > "$TMP/show/reworks-wr-anchor.json"
+run_sweep
+grep -q 'wr-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "a ruling's landed rework was read as a human finding's fix" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "a ruling's landed rework answers no human finding — nothing escalated"
 
 echo "── the phase-aware census asks the resolver, with a controlled index ──"
 # A real index (not the missing-file fallback the rest of this file uses):

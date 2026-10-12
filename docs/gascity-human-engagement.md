@@ -274,9 +274,10 @@ can have.
 message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
 hq/city-workspace store — that store runs no reaction pool, so a topic filed
 there would park on the board with nobody to engage it, and it is dropped from
-the picker rather than offered. A suspended or not-running rig is still tagged,
-not withheld, since `gc rig suspend` keeps the beads store accessible and a
-report filed there is recorded and triaged on resume. The picker is defaulted to
+the picker rather than offered. A suspended rig is still tagged, not withheld,
+since `gc rig suspend` keeps the beads store accessible and a report filed there
+is recorded and triaged on resume. A rig with no agents running is idle, not
+paused, and is offered untagged. The picker is defaulted to
 the rig of the pane the key was pressed in (its `GC_RIG`, else the
 `<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
 the operator just picks). Enter confirms that default or the operator picks
@@ -558,6 +559,36 @@ subject's visits. Dismissing the visit without an answer leaves the gate open
 and the question owed, with no second visit offered unless `gc.gate_visit` is
 unset.
 
+### Two visit channels: keyless conversation, keyed escalation
+
+A visit reaches a person two ways. Both channels file through the one
+`gate-visit` snippet, whose copies `assets/scripts/gate-visit.test.sh` holds to
+the same invariants. Each channel keeps one open visit per situation, and they
+differ in what names the situation.
+
+A **conversation visit** is keyless, and its subject names its situation.
+`gc-helm.sh open` files the operator's board pick, and `gate-visit-sweep` and
+`gc-visit-open.sh` file through it. It folds a second ask into whatever visit is
+already open on the subject. The one deliberate exception is `gc-helm.sh
+engage` when the operator asks for a new visit, which passes `--allow-duplicate`
+to file a fresh visit for a distinct concern. The formula copies of the snippet,
+in `mol-visit`, `mol-validate-close` and `mol-feedback-distiller`, first look
+for a conversation visit already open on the subject and reuse it. That check
+matters when a step runs twice, either because a later command in it failed and
+the block is re-run or because a second session takes a re-offered step.
+Without it the second run files a second visit, which goes on asking after the
+first one is answered. Both paths read coverage through
+`assets/scripts/visit-identity.sh`. It reads the visit's `tracks` edge and falls
+back to the `gc.continuation_group` stamp.
+
+An **escalation visit** is keyed. `assets/scripts/escalate.sh` stamps
+`escalation_key` and keeps one open visit per subject and key. It also carries a
+verdict window, which declines to re-raise a situation a person already ruled
+moot or benign. That is what a detector that re-fires every cycle needs. A
+formula copy never reuses an escalation visit. `escalate.sh --retract` closes
+one as moot when its own situation clears, and the formula's question would
+close with it, unasked.
+
 ### A conversation does not freeze its subject; a merge hold is an opt-in
 
 What the conversation demand gates is the choice that keeps a sitting from
@@ -582,14 +613,18 @@ shepherd sitting simply omits the flag, and the PR stays on the merge track. The
 sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
 the visit demand always, the anchor demand only when the explicit hold was taken.
 
-A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
-conversation wait cannot ride the closing visit — a demand left on a closed visit
-is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
-— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
-the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved. The moved wait carries
-the sitting's topic, so it refreshes this sitting's own demand on the anchor and
-never a sibling sitting's.
+A cut-short sign-off (`--ruled no`) is the one other time a sitting's question
+holds the merge. The conversation wait cannot ride the closing visit — a demand
+left on a closed visit is a gate `gate-visit-sweep` names on stderr forever and
+no return trip re-offers — so `converse-signoff.sh` moves it onto the ANCHOR:
+the liveness sweep re-offers the next sitting from `gc.demand_for=<anchor>`, and
+the merge holds until the abandoned question is answered or the demand is
+resolved. The moved wait carries the sitting's topic, so it refreshes this
+sitting's own demand on the anchor and never a sibling sitting's. A ruled
+sign-off that answers `--rework` holds the merge too, through the rework child's
+`blocks` edge, until the rework lands. It also returns every review lane to
+`unreviewed`, so the branch is re-reviewed at the head the rework lands rather
+than merged on reviews of the head the ruling outdated.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that

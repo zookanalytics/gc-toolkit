@@ -710,8 +710,7 @@ fi
 
 CTMP="$TMPD/claim"
 mkdir -p "$CTMP/bin"
-cat > "$CTMP/bin/gc" <<'GCC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$CTMP/bin/gc" <<'GCC'
 case "$1 ${2:-}" in
   "hook --claim") cat "$FAKE_CLAIM" ;;
   "bd update")    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
@@ -1208,7 +1207,13 @@ run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existi
           "tk-subj" "$STRANDED"
 eq "$COUT" "action=finish bead=tk-held group=tk-other reason=outcome-stamped" \
    "(FINISH-FOREIGN) an out-of-group strand is finished, not put back"
-eq "${CUPD:-<none>}" "<none>" "(FINISH-FOREIGN) …and the release never runs"
+# The release is three writes: the session pins unset, --status=open, and the
+# assignee cleared. The finish writes only the visit's work outcome before its
+# close (work-outcome.sh).
+eq "$(grep -cE -- '--status=open|--assignee=|--unset-metadata gc\.session_(id|name)' <<< "$CUPD" || true)" "0" \
+   "(FINISH-FOREIGN) …and the release never runs"
+eq "$(grep -v -- '--set-metadata gc.work_outcome=no-op' <<< "$CUPD" | grep -c . || true)" "0" \
+   "(FINISH-FOREIGN) …and the finish writes nothing but the work outcome"
 
 # --- the prompt and the doc carry the verdict the script now returns ---------
 # An unknown action falls through the prompt's case with VISIT set, so a prompt
@@ -1629,8 +1634,7 @@ mkdir -p "$SOBIN" "$SOPACK/assets/scripts" "$SOFOR" "$SOCITY/rigs/gc-toolkit/ass
 SOLOG="$SO/log"    # gc-helm.sh + lifecycle.sh calls, in order
 SOGC="$SO/gclog"   # gc bd gate/close calls
 
-cat >"$SOBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SOBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
@@ -1642,8 +1646,13 @@ case "${2:-}" in
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
-            *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
-                 else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
+            # SO_MERGE_RESULT puts the subject in a lifecycle state (pull_request
+            # is an open PR); SO_SUBJECT_UNREADABLE makes it a read that fails.
+            *)   if [ -n "${SO_SUBJECT_UNREADABLE:-}" ]; then echo '{"error":"no issues found"}'
+                 elif [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:({"gc.takeaway":"prior"}+(if $mr=="" then {} else {merge_result:$mr} end))}]'
+                 else jq -nc --arg id "${3:-}" --arg mr "${SO_MERGE_RESULT:-}" \
+                    '[{id:$id,metadata:(if $mr=="" then {} else {merge_result:$mr} end)}]'; fi ;;
         esac ;;
     list)
         # The demand list the discharge filters client-side: a subject/anchor demand
@@ -1879,6 +1888,138 @@ SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "
 SOARGS=(--visit v-x --outcome "o — p" --ruled yes --ruling r);    run_so; eq "$SO_RC" "2" "--ruled yes without --route is refused"
 SOARGS=(--visit v-x --outcome "o — p" --ruled no);                run_so; eq "$SO_RC" "2" "--ruled no without --still-owed is refused"
 SOARGS=(--visit v-x --ruled no --still-owed z);                   run_so; eq "$SO_RC" "2" "a missing --outcome is refused"
+SOARGS=(--visit v-x --outcome "o — p" --ruled no --still-owed z --rework); run_so; eq "$SO_RC" "2" "--rework without --ruled yes is refused"
+
+# --rework files the ruling's rework child before anything else is written. Its
+# blocks edge then holds the merge before the discharge resolves a merge hold this
+# sitting took, and a filing that does not land stops the sign-off with every
+# demand still standing. The stub logs into SOGC beside the gate calls, so the
+# order of the two is read off one log.
+cat >"$SOPACK/assets/scripts/converse-rework.sh" <<'CR'
+#!/usr/bin/env bash
+printf 'REWORK: %s\n' "$*" >>"$SOGC"
+if [ "${SO_REWORK_RC:-0}" = 0 ]; then
+    echo "converse-rework: filed rework rw-1 on anchor item-x"
+else
+    echo "converse-rework: anchor item-x is merge_result='pre_open_gate', not pull_request" >&2
+fi
+exit "${SO_REWORK_RC:-0}"
+CR
+chmod +x "$SOPACK/assets/scripts/converse-rework.sh"
+
+echo "── --rework files the ruling's rework first, then the sign-off proceeds ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so
+eq "$SO_RC" "0" "a sign-off whose rework filed exits 0"
+have "the rework is filed against the subject, sourced by this visit" \
+     'REWORK: --anchor item-x --ruling-bead v-x --ruling approved' "$SOGC"
+have "…the discharge still resolves the merge hold" 'bd gate resolve d-x --reason approved' "$SOGC"
+so_rw=$(grep -n '^REWORK: ' "$SOGC" | head -1 | cut -d: -f1)
+so_gr=$(grep -n 'bd gate resolve d-x' "$SOGC" | head -1 | cut -d: -f1)
+if [ -n "$so_rw" ] && [ -n "$so_gr" ] && [ "$so_rw" -lt "$so_gr" ]; then
+    ok "…only after the rework's blocks edge holds the merge"
+else
+    bad "…only after the rework's blocks edge holds the merge" \
+        "rework@${so_rw:-none} resolve@${so_gr:-none} — a merge hold released before the rework files leaves the stale PR free to land"
+fi
+have "…and the PR-reminder close text names the filed rework" 'filed ruling-driven rework on item-x' "$SOGC"
+
+echo "── a rework that does not file stops the sign-off before any write ──"
+run_so SO_REWORK_RC=2
+eq "$SO_RC" "1" "a refused rework exits 1, so the sitting does not sign off"
+case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x"*"not pull_request"*) ok "…naming the subject and why the rework refused" ;;
+                  *) bad "…naming the subject and why the rework refused" "got: $SO_OUT" ;; esac
+case "$SO_OUT" in *"Do NOT post the sign-off or close the visit"*) ok "…and telling the sitting not to sign off or close" ;;
+                  *) bad "…and telling the sitting not to sign off or close" "got: $SO_OUT" ;; esac
+so_rest=$(grep -v '^REWORK: ' "$SOGC")
+if [ -z "$so_rest" ]; then ok "…no demand resolved and no close text stashed, so a merge hold still holds"
+else bad "…no demand resolved and no close text stashed, so a merge hold still holds" "found: $so_rest"; fi
+if [ -s "$SOLOG" ]; then bad "…and no takeaway or release written" "found: $(cat "$SOLOG")"
+else ok "…and no takeaway or release written"; fi
+
+echo "── a rework script that resolves nowhere stops the sign-off too ──"
+# The city root carries a takeaway writer but no converse-rework.sh, so a sign-off
+# that ran on past the missing script would reach that writer.
+run_so GC_RIG_ROOT="$SOFOR"
+eq "$SO_RC" "1" "a missing converse-rework.sh exits 1"
+case "$SO_OUT" in *"REWORK NOT COMPLETE on item-x: no converse-rework.sh"*) ok "…and says the script resolved nowhere" ;;
+                  *) bad "…and says the script resolved nowhere" "got: $SO_OUT" ;; esac
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…and writes nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…and writes nothing"; fi
+
+have "the settle skill gates the sign-off on the script's exit" \
+     'if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh"' "$SK_SETTLE"
+
+# A ruled sign-off on an open PR must answer the rework question. A ruling whose
+# rework is never filed lands only in notes nothing reads while the PR keeps
+# reading ready, so a forgotten flag is refused rather than read as no rework.
+echo "── a ruled sign-off on an open PR must answer --rework or --no-rework ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "2" "a ruled sign-off on an open PR that answers neither is refused"
+case "$SO_OUT" in *"--rework"*"--no-rework"*) ok "…naming both answers" ;;
+                  *) bad "…naming both answers" "got: $SO_OUT" ;; esac
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…and writes nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…and writes nothing, so a merge hold this sitting took still holds"; fi
+run_so SO_MERGE_RESULT=pull_request SO_TAKEAWAY=0
+eq "$SO_RC" "2" "…whether or not the subject carries an earlier takeaway"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --no-rework)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "--no-rework answers it, and the sign-off proceeds"
+lacks "…filing no rework" 'REWORK: ' "$SOGC" "--no-rework ran converse-rework.sh"
+have "…while the discharge still resolves the merge hold" 'bd gate resolve d-x --reason approved' "$SOGC"
+have "…and the PR close text records that the ruling leaves the branch" \
+     'gc.pr_visit_actions=ruling: approved (released to human); ruling leaves the branch of item-x as it stands' "$SOGC"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "--rework answers it, and the sign-off proceeds"
+have "…filing the rework against the open PR, sourced by this visit" \
+     'REWORK: --anchor item-x --ruling-bead v-x --ruling approved' "$SOGC"
+lacks "…and its close text does not say the branch stands" 'leaves the branch' "$SOGC" "a --rework sign-off said the branch stands"
+
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+run_so SO_MERGE_RESULT=pre_open_gate
+eq "$SO_RC" "0" "a subject that is not an open PR needs no answer"
+lacks "…and files no rework" 'REWORK: ' "$SOGC" "a sign-off without --rework ran converse-rework.sh"
+lacks "…nor records a branch judgment it was never asked for" 'leaves the branch' "$SOGC" "a sign-off with neither flag said the branch stands"
+run_so SO_SUBJECT_UNREADABLE=1
+eq "$SO_RC" "2" "a subject that will not read is refused as an open PR would be"
+if [ -s "$SOLOG" ] || [ -s "$SOGC" ]; then bad "…writing nothing" "found: $(cat "$SOLOG" "$SOGC")"
+else ok "…writing nothing"; fi
+
+SOARGS=(--visit v-x --outcome "o — p" --ruled no --still-owed z --no-rework); run_so; eq "$SO_RC" "2" "--no-rework without --ruled yes is refused"
+SOARGS=(--visit v-x --subject item-x --outcome "o — p" --ruled yes --ruling r --route human --rework --no-rework)
+run_so; eq "$SO_RC" "2" "--rework with --no-rework is refused"
+have "the settle skill teaches the forced answer" '--no-rework' "$SK_SETTLE"
+
+# Every script the sign-off runs is found by one search order: the rig root, then
+# the working directory's checkout, then the city's gc-toolkit rig. A rig root
+# carrying none of them sends all three to the city root, each logging its root.
+echo "── one search order finds every script the sign-off runs ──"
+SOCITY2="$SO/city2"; mkdir -p "$SOCITY2/rigs/gc-toolkit/assets/scripts"
+so_helm "$SOCITY2/rigs/gc-toolkit" CITY2
+cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" <<'LC'
+#!/usr/bin/env bash
+case "${1:-}" in
+    state)      printf '%s\n' "${STUB_STATE:-held}" ;;
+    transition) printf 'lc[CITY2] %s\n' "$*" >>"$SOLOG"; exit 0 ;;
+    *) exit 2 ;;
+esac
+LC
+cat >"$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh" <<'CR'
+#!/usr/bin/env bash
+printf 'REWORK[CITY2]: %s\n' "$*" >>"$SOGC"
+echo "converse-rework: filed rework rw-1 on anchor item-x"
+CR
+chmod +x "$SOCITY2/rigs/gc-toolkit/assets/scripts/lifecycle.sh" "$SOCITY2/rigs/gc-toolkit/assets/scripts/converse-rework.sh"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human --rework)
+run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$SOCITY2" SO_MERGE_RESULT=pull_request
+eq "$SO_RC" "0" "a sign-off whose scripts sit only on the city root runs"
+have "…finding the rework script there" 'REWORK[CITY2]: --anchor item-x' "$SOGC"
+have "…the takeaway writer" 'helm[CITY2] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
+have "…and the lifecycle writer" 'lc[CITY2] transition item-x --to unanchored --route human' "$SOLOG"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
