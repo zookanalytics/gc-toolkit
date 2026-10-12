@@ -5,9 +5,10 @@
 #
 # Sourced (never executed) by the shell readers that act on a PR's approval:
 # pr-facts.sh (the conflict arm brings a branch current only for an approved
-# PR), bring-current-guard.sh (an approved PR whose bring-current took judgment
-# loses the approval) and approval-withdraw.sh (a validator ruling that a fresh
-# whole-diff review is warranted withdraws it). One definition, no copies:
+# PR), bring-current-guard.sh (an approval the ruling on a bring-current round
+# finds outgrown is dismissed) and approval-withdraw.sh (a validator ruling that
+# a fresh whole-diff review is warranted withdraws it). One definition, no
+# copies:
 # review-verdict.test.sh fails when a reader stops sourcing this file or
 # carries a rule of its own. gctk merge (services/gctk/internal/cli/merge.go,
 # reviewVerdict) states the same rule natively for the universal approval merge
