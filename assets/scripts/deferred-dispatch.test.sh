@@ -30,9 +30,10 @@
 #     ancestor (hold-lib.sh), assigned, sling failed;
 #   * the hold: an armed child of a parked epic, one two levels down and one
 #     whose epic waits on a task are held and named with the blocker's title in
-#     the pass log and in list, while one whose epic waits only on a demand gate
-#     is slung; a held arm stays intact and fires once its hold releases, and an
-#     unreadable blocker or ancestor holds it;
+#     list, and the pass log names each such hold once with the arms it keeps;
+#     an arm its own blocker holds is counted there, not named. One whose epic
+#     waits only on a demand gate is slung. A held arm stays intact and fires
+#     once its hold releases, and an unreadable blocker or ancestor holds it;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -476,7 +477,7 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "a blocked armed bead is not an error"
 eq "$(slings)" "0" "a blocked armed bead is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a blocked armed bead keeps its record"
-has "$out" "HELD b-1 by b-0" "the pass log names the blocker that holds it"
+hasnt "$out" "HELD by b-0" "an arm its own blocker holds gets no line of its own in the pass log"
 has "$out" "1 held" "summary counts it as held"
 
 store '[{"id":"b-1","status":"open","assignee":"someone/else","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
@@ -608,7 +609,7 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "holding a parked arm is a clean pass"
 eq "$(slings)" "0" "an armed child of a parked epic is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the held arm keeps its record, so unparking needs no re-arm"
-has "$out" 'HELD b-1 by park "Parked until the operator unparks it" on ancestor epic' "the pass log names the park, its title and the epic it sits on"
+has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: b-1' "the pass log names the park, its title, the epic it sits on and the arm it keeps"
 has "$out" "1 held" "summary counts it as held"
 out="$("$SUT" list 2>&1)"
 has "$out" 'b-1 -> rig/pool [HELD by park "Parked until the operator unparks it" on ancestor epic]' "list names the park that holds the arm"
@@ -628,7 +629,7 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
  {"id":"feat","status":"open","issue_type":"feature","assignee":"","metadata":{},"notes":"","_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm two levels under a parked epic is NOT slung"
-has "$out" "HELD b-1 by park" "the pass log names the park that holds it"
+has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: b-1' "the pass log names the park that holds it"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record"
 
 # A park and a prerequisite hold alike: an epic that waits on a task holds its
@@ -639,7 +640,7 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
  {"id":"t-1","status":"open","issue_type":"task","title":"Land the prerequisite","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm whose epic waits on an open task is NOT slung"
-has "$out" 'HELD b-1 by t-1 "Land the prerequisite" on ancestor epic' "the pass log names the task the epic waits on"
+has "$out" 'HELD by t-1 "Land the prerequisite" on ancestor epic: b-1' "the pass log names the task the epic waits on"
 
 # The exception covers an ancestor only: a demand gate on the bead itself is the
 # decision about that bead, and it holds.
@@ -648,7 +649,9 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
  {"id":"dg","status":"open","issue_type":"gate","title":"Decide b-1","assignee":"","metadata":{"gc.demand_for":"b-1"},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm behind a demand gate of its own is NOT slung"
-has "$out" "HELD b-1 by dg" "the pass log names the demand gate"
+has "$out" "1 held" "the summary counts it as held"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the demand gate that holds it"
 
 # An OPEN own blocker still withholds, whatever its ancestors do: the arm waits
 # on exactly that blocker.
@@ -659,7 +662,7 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm with an open OWN blocker is NOT slung under an epic nothing holds"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the still-blocked arm keeps its record"
-has "$out" "HELD b-1 by b-0" "the pass log names its own blocker"
+hasnt "$out" "HELD by" "an arm its own blocker holds gets no pass-log line, however its ancestors stand"
 has "$out" "1 held" "summary counts it as held"
 
 # Fail closed: a blocker or an ancestor that cannot be read holds the arm, never
@@ -670,13 +673,14 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an unresolvable own blocker leaves the arm un-slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record when its own blocker cannot be resolved"
-has "$out" "HELD b-1 by b-0-missing (unreadable)" "the pass log says the blocker could not be read"
 has "$out" "1 held" "an unresolved blocker counts as held, not dispatched"
+out="$("$SUT" list 2>&1)"
+has "$out" "b-1 -> rig/pool [HELD by b-0-missing (unreadable)]" "list says the blocker could not be read"
 echo "# an unresolvable ancestor fails closed (arm stays held)"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"}]}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm whose ancestor cannot be read is NOT slung"
-has "$out" "HELD b-1 by ancestor epic-missing (unreadable)" "the pass log says the ancestor could not be read"
+has "$out" "HELD by ancestor epic-missing (unreadable): b-1" "the pass log says the ancestor could not be read"
 echo "# a hold walk that cannot read fails the pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
 out="$(STUB_BD_LIST_ID_FAIL=1 "$SUT" reconcile 2>&1)"; rc=$?
@@ -722,6 +726,8 @@ store '[
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "none of four arms under a parked epic is slung"
 has "$out" "4 held" "all four are counted held"
+has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: a-1 a-2 a-3 a-4' "the pass log names the park once, with every arm it keeps"
+eq "$(printf '%s\n' "$out" | grep -c 'HELD by')" "1" "one line for one park, however many arms it keeps"
 eq "$(grep -c '^dep list\|^show' "$STUB_BD_LOG")" "0" "the walk makes no per-bead call"
 eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "four arms under one epic cost four list reads (all + ready + the epic + its blocker), not one per arm"
 unset STUB_BD_LOG

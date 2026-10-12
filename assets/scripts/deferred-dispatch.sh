@@ -383,15 +383,18 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
 
 # Unreadable is not empty: every enumeration read is checked and any failure
 # returns 1. The fourth column is what holds the bead, as hold-lib.sh prints it,
-# and is empty for a bead nothing holds. A bd-ready bead needs no walk, because
-# bd reports nothing holding it, and a non-open one never dispatches whatever
-# holds it, so the walk covers only the open beads bd holds unready. hold_graph
-# reads all of them at once, one read per generation of ancestors and one for
-# their blockers, so a pass costs the same few reads however large the armed set
-# grows. A walk that cannot read fails the whole enumeration rather than let an
-# unread hold pass for none. The snapshot is cached to all_out so the list and
-# reconcile loops read each bead's fields from it instead of a `bd show` per bead.
-armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>" per bead; caches the snapshot to all_out
+# and is empty for a bead nothing holds. The fifth names the nearest hold again
+# when every hold sits on an ancestor, so the pass can group the arms an
+# ancestor's blocker keeps, and is empty otherwise. A bd-ready bead needs no
+# walk, because bd reports nothing holding it, and a non-open one never
+# dispatches whatever holds it, so the walk covers only the open beads bd holds
+# unready. hold_graph reads all of them at once, one read per generation of
+# ancestors and one for their blockers, so a pass costs the same few reads
+# however large the armed set grows. A walk that cannot read fails the whole
+# enumeration rather than let an unread hold pass for none. The snapshot is
+# cached to all_out so the list and reconcile loops read each bead's fields from
+# it instead of a `bd show` per bead.
+armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>\t<ancestor hold>" per bead; caches the snapshot to all_out
     local out="$1" all_out="$2" all ready_ids seed graph
     # --brief on both reads: this function and its cache consumers use only id,
     # status, assignee, metadata and dependency edges, all of which --brief
@@ -422,8 +425,11 @@ armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>" per
         (input | map(.id)) as $ready
         | inputs | .[]
         | (if (.id as $i | $ready | index($i)) then "1" else "0" end) as $r
+        | ((.id // "") | tostring) as $self
+        | (if $r == "0" and (.status // "") == "open" then hold_holds($g[0]) else [] end) as $h
         | [ .id, (.status // ""), $r,
-            (if $r == "0" and (.status // "") == "open" then hold_summary($g[0]) else "" end) ]
+            (if ($h | length) > 0 then hold_summary($g[0]) else "" end),
+            (if ($h | length) > 0 and all($h[]; .on != $self) then ($h[0] | hold_label($self)) else "" end) ]
         | @tsv' > "$out" 2>/dev/null || return 1
     return 0
 }
@@ -448,8 +454,8 @@ cmd_list() {
         return 0
     fi
 
-    local n=0 id status ready hold json target reason slung state mr fails
-    while IFS=$'\t' read -r id status ready hold; do
+    local n=0 id status ready hold via json target reason slung state mr fails
+    while IFS=$'\t' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
         json="$(bead_from_cache "$all_cache" "$id")" || json=""
@@ -525,11 +531,12 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 held=0 stranded=0 assigned=0 capped=0 failed=0
+    local expected processed=0 dispatched=0 retired=0 held=0 stranded=0 assigned=0 capped=0 failed=0 heldf
     expected="$(wc -l < "$rows" | tr -d ' ')"
+    mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
-    local id status ready hold json target args_json assignee slung rc merge_result fails
-    while IFS=$'\t' read -r id status ready hold; do
+    local id status ready hold via json target args_json assignee slung rc merge_result fails
+    while IFS=$'\t' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
 
@@ -617,21 +624,21 @@ cmd_reconcile() {
 
         # Not dispatchable. `bd --ready` (the fast path) and a walk that finds
         # nothing holding an open bead (hold-lib.sh) are the two ways in. A held
-        # bead waits on a blocker that can clear, on it or on an ancestor: its
-        # line names the blocker and its title, so a parked arm says why it is
-        # parked and what releases it, and the arm stays intact for the first
-        # pass after the hold releases. Any other live status is excluded by
-        # `--ready` on the status itself, so waiting for it is waiting for
-        # something no blocker closing can deliver. Say both every pass — the arm
-        # outlives every session that could remember it, and a silent count is
-        # how it stays lost.
+        # bead waits on a blocker that can clear, on it or on an ancestor, and the
+        # arm stays intact for the first pass after the hold releases. An arm an
+        # ancestor's blocker holds is gathered for the pass log below; one its own
+        # blocker holds waits on what it was armed for, and is counted. Any other
+        # live status is excluded by `--ready` on the status itself, so waiting
+        # for it is waiting for something no blocker closing can deliver. Say so
+        # every pass — the arm outlives every session that could remember it, and
+        # a silent count is how it stays lost.
         if [ "$ready" != "1" ]; then
             if [ "$status" != "open" ]; then
                 echo "$PROG: STRANDED $id is armed at status=$status, which 'bd list --ready' never answers — return it to open or disarm; no blocker closing will dispatch it" >&2
                 stranded=$((stranded + 1)); continue
             fi
             if [ -n "$hold" ]; then
-                echo "$PROG: HELD $id by $hold"
+                [ -z "$via" ] || printf '%s\t%s\n' "$via" "$id" >> "$heldf"
                 held=$((held + 1)); continue
             fi
         fi
@@ -728,6 +735,16 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
+    # One line per hold an ancestor's blocker makes, naming its blocker, the
+    # blocker's title and the arms it keeps: the arms a park on an epic holds,
+    # which a pass that read no ancestor would have slung. A line per arm would
+    # grow with the armed set, and only the last 2 KB of a failing pass's output
+    # reach its order.failed event, so the warnings above would be pushed out.
+    # `list` names the hold on every arm.
+    awk -F'\t' -v prog="$PROG" '
+        !($1 in arms) { order[++n] = $1; arms[$1] = $2; next }
+        { arms[$1] = arms[$1] " " $2 }
+        END { for (i = 1; i <= n; i++) printf "%s: HELD by %s: %s\n", prog, order[i], arms[order[i]] }' "$heldf"
     echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
 }

@@ -163,10 +163,13 @@ not grow with the number of armed beads under a held epic.
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
 dispatches the bead. `list` shows a held arm as `HELD by <blocker>
-"<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, and
-the pass log names it the same way on every pass. So a parked arm says
-why it is parked and what releases it. A blocker or an ancestor the pass
-could not read shows as `(unreadable)`.
+"<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, so a
+parked arm says why it is parked and what releases it. A blocker or an
+ancestor the pass could not read shows as `(unreadable)`. The pass log names,
+on every pass, each hold that sits on an ancestor once, followed by the arms
+it keeps. An arm its own blocker holds is counted in the summary without a
+line, because the output of a failing pass reaches its `order.failed` event
+only as its last 2 KB, and a line per arm would push the pass's warnings out.
 
 The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
 **first**, slings **second**, promotes the marker to `slung@<ts>` on
