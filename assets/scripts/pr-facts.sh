@@ -116,11 +116,11 @@
 # the block) and re-requests its author, per-review via finding.review_id so one
 # reviewer clears independently of another. A needs-you finding is the exception
 # that holds the review open on purpose: it stays open until the operator rules
-# its visit and no fix unit on its lane is still in flight (finding.sh
-# close-answered), so the review it belongs to is never auto-dismissed meanwhile. The
-# confidence is the validator's, carried by the finding's closure, never a commit
-# oid, so a later push does not reopen it. A dismissal is not an approval: the
-# merge still gates on an explicit one.
+# its visit and no fix unit on its lane, nor a ruling's rework child, is still in
+# flight (finding.sh close-answered), so the review it belongs to is never
+# auto-dismissed meanwhile. The confidence is the validator's, carried by the
+# finding's closure, never a commit oid, so a later push does not reopen it. A
+# dismissal is not an approval: the merge still gates on an explicit one.
 # The sweep also carries each machine-lane finding ruled worth fixing (must-fix
 # or deferred) to the PR, where the merge is decided: a file-level review
 # comment when the finding's locus begins with a file the diff touches, a

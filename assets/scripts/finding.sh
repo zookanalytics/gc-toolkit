@@ -44,8 +44,9 @@
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
 #                                         holds the review until the visit closes and
-#                                         no fix unit on its lane is in flight; then
-#                                         closed (close-answered)
+#                                         no fix unit on its lane, nor a ruling's
+#                                         rework child, is in flight; then closed
+#                                         (close-answered)
 #
 # `blocks` is the type must-fix uses, and not because it is the only edge that
 # blocks a close: merge.sh reads exactly `blocks` downward, so a finding held by
@@ -730,8 +731,9 @@ cmd_set_disposition() {
       # id as the reply the raiser's thread receives, and leaves the finding OPEN.
       # An open finding keeps pr-facts.sh from auto-dismissing the human review, so
       # the review holds the merge changes-requested until the operator rules the
-      # visit; close-answered then closes the finding once no fix unit on its lane
-      # is still in flight, which is when the work the ruling calls for has landed.
+      # visit; close-answered then closes the finding once no fix unit on its lane,
+      # nor a ruling's rework child, is still in flight, which is when the work the
+      # ruling calls for has landed.
       #
       # The visit is resolved before anything is written. --visit names one already
       # open on the anchor's feedback, which this ruling defers to rather than ask
@@ -1043,12 +1045,16 @@ cmd_shed_orphaned() {
 # the edge would have carried.
 #
 # A needs-you finding is closed once its visit (finding.visit) has closed and no
-# fix unit answers it any more: nothing blocks it, and none on its lane is live.
-# The operator has then ruled, and the work their ruling calls for is on the
-# branch, or the ruling called for none. Until then the finding holds its review
-# changes-requested, and fix-in-flight holds review dispatch while a fix unit on
-# its lane is live. A visit, blocker list or census that will not read leaves it
-# open.
+# fix unit answers it any more: nothing blocks it, none on its lane is live, and
+# no ruling's rework child is live on the anchor. A ruling's child
+# (converse-rework.sh, source_ruling_bead) answers no lane, but it is the work an
+# operator's ruling calls for, and a ruling rules the whole diff, so a needs-you
+# finding on any lane waits for it. The operator has then ruled, and the work
+# their ruling calls for is on the branch, or the ruling called for none. Until
+# then the finding holds its review changes-requested. Review dispatch is held
+# meanwhile too: by fix-in-flight while a fix unit on its lane is live, and by
+# gate-ensure's open_rework_child while a ruling's child is. A visit, blocker
+# list, census or rework read that will not answer leaves it open.
 cmd_close_answered() {
   local anchor="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -1117,7 +1123,10 @@ cmd_close_answered() {
     census=$(anchor_fix_unit_census "$anchor" "$flane") || continue
     c_live="${census%% *}"
     [ "${c_live:-1}" -eq 0 ] || continue
-    cnote="resolved: its visit $nyvisit closed, and no fix unit on lane $flane is still in flight"
+    printf '%s' "$rows" | jq -e 'all(.[]; ((.metadata.task_kind // "") | tostring) != "rework"
+                                         or ((.metadata.source_ruling_bead // "") | tostring) == "")' >/dev/null 2>&1 \
+      || continue
+    cnote="resolved: its visit $nyvisit closed, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
     [ -n "$reason" ] && cnote="$cnote ($reason)"
     gc bd update "$id" --status=closed --append-notes "$cnote" >/dev/null 2>&1 \
       || warn "could not close needs-you finding $id after its visit $nyvisit closed"

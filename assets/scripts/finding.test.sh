@@ -832,8 +832,9 @@ has "$(notes "$FW1")" "past open visit(s) visW" "…and the finding's notes reco
 
 # ---------------------------------------------------------------------------
 # The release: a needs-you finding closes once its visit has closed and no fix
-# unit on its lane is in flight, and while one is, fix-in-flight names it so
-# quiescence holds reviews off a diff the ruling may still change.
+# unit on its lane, nor a ruling's rework child, is in flight. While a fix unit
+# on its lane is, fix-in-flight names it so quiescence holds reviews off a diff
+# the ruling may still change.
 # ---------------------------------------------------------------------------
 out=$("$SUT" fix-in-flight --anchor tk-ancV); rc=$?
 eq "$rc" "0" "fix-in-flight holds while the held rework answers the needs-you finding's lane"
@@ -860,6 +861,25 @@ eq "$rc/$out" "1/" "fix-in-flight reports a needs-you finding with no fix unit a
 jq -c 'map(if .id == "visN" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" close-answered --anchor tk-ancN
 eq "$(bstatus "$FN")" "closed" "close-answered closes it once its visit closes, with no fix unit to wait on"
+# A ruling's rework child (converse-rework.sh) answers no lane, but when the
+# operator's ruling on the visit calls for a change, that child is the work the
+# needs-you finding waits on: the finding, and so its review, stay open until it
+# lands.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancU","status":"open","assignee":"","title":"ancU","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visU","status":"open","assignee":"","title":"visit: tk-ancU","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancU"}}]'
+FU=$(human_finding tk-ancU "docs/u.md" "drop this section or keep it?" 62)
+"$SUT" set-disposition --finding "$FU" --anchor tk-ancU --disposition needs-you --visit visU >/dev/null
+jq -c 'map(if .id == "visU" then .status = "closed" else . end)
+       + [{"id":"rlU","status":"in_progress","assignee":"","title":"Rework PR#12: apply operator ruling","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancU","source_ruling_bead":"visU"}}]' \
+  "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+gc bd dep rlU --blocks tk-ancU >/dev/null
+"$SUT" close-answered --anchor tk-ancU
+eq "$(bstatus "$FU")" "open" "a needs-you finding stays open after its visit closes while the ruling's rework child is in flight"
+gc bd update rlU --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancU
+eq "$(bstatus "$FU")" "closed" "…and closes once that child has landed"
+has "$(notes "$FU")" "nor a ruling's rework child" "…recording that it waited on the ruling's child too"
 
 # shed-orphaned: a needs-you finding on an anchor that has closed is moot; its
 # visit is the operator's and stays.

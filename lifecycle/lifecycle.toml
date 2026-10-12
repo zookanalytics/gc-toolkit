@@ -741,7 +741,8 @@ keys = [
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
   # human review changes-requested until the visit closes and no fix unit on its
-  # lane is in flight, when finding.sh close-answered closes it.
+  # lane, nor a ruling's rework child, is in flight, when finding.sh
+  # close-answered closes it.
   "finding.disposition",
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
@@ -784,7 +785,8 @@ keys = [
   # the ruling runs: one it filed, or one already open on the anchor's feedback
   # that the ruling named. The finding stays open and the visit id is posted to
   # the raiser's thread; once the visit closes and no fix unit on the finding's
-  # lane is in flight, close-answered closes the finding.
+  # lane, nor a ruling's rework child, is in flight, close-answered closes the
+  # finding.
   "finding.visit",
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's

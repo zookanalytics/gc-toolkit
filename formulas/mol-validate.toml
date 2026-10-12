@@ -310,11 +310,12 @@ dependency edge by hand:
   receives, and leaves the finding OPEN. An open finding holds the review
   changes-requested until the operator rules the visit, so the decision is visible
   — a visit plus a PR comment — never a silent park. Once the visit has closed
-  and no fix unit on the finding's lane is in flight, gate-ensure's
-  `finding.sh close-answered` closes the finding. Reserve it for what you cannot
-  judge: a comment you can weigh is must-fix or declined, and one you can defer
-  is deferred. A question an open visit already carries is `needs-you --visit`
-  on that visit, as the first paragraph says, never a second visit.
+  and no fix unit on the finding's lane, nor a ruling's rework child, is in
+  flight, gate-ensure's `finding.sh close-answered` closes the finding. Reserve
+  it for what you cannot judge: a comment you can weigh is must-fix or declined,
+  and one you can defer is deferred. A question an open visit already carries is
+  `needs-you --visit` on that visit, as the first paragraph says, never a second
+  visit.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```

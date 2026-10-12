@@ -460,8 +460,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    declined or deferred finding, whose thread stays open for the operator to
    accept or overrule, as a needs-you finding's does until they rule. A
    needs-you finding closes once its visit has closed and no fix unit on its
-   lane is in flight, and its comment then resolves through its batch's bead
-   like any other. A review
+   lane, nor a ruling's rework child, is in flight, and its comment then
+   resolves through its batch's bead like any other. A review
    body or a Conversation comment has no thread, so a Conversation comment of
    the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves
