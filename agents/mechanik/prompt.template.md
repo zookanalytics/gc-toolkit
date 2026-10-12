@@ -183,6 +183,8 @@ branch is rejected non-fast-forward and stays with its polecat.
 
 {{ template "bead-disposition" . }}
 
+{{ template "visit-close" . }}
+
 ## Upstream engagement (gascity)
 
 For every bug or design gap in upstream `gascity`, three options, in order

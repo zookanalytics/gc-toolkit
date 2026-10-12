@@ -21,8 +21,7 @@ hasnt() { if grep -qF -- "$2" <<< "$1"; then bad "$3 (found '$2')"; else ok "$3"
 matches() { if grep -qE -- "$2" <<< "$1"; then ok "$3"; else bad "$3 (no match for /$2/ in: $1)"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 # Models the bd surface this script uses, including the two answers that shape
 # its control flow: `show` returns an OBJECT when nothing resolves, and
 # `create --json` can hand back an empty id although the bead landed.

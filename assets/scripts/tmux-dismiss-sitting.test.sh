@@ -145,8 +145,7 @@ HELMSTUB
 mkdir -p "$TMP/bin"
 # tmux: display-message -p answers the format it is asked for; any other
 # display-message is a message to the operator and is only logged.
-cat > "$TMP/bin/tmux" <<'TMUXSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUXSTUB'
 printf 'tmux %s\n' "$*" >> "$TMUX_CALLS"
 if [ "$1" = display-message ]; then
     for a in "$@"; do
@@ -164,8 +163,7 @@ exit 0
 TMUXSTUB
 chmod +x "$TMP/bin/tmux"
 # gc: answers `session list` with the fixture, or fails like a dead data plane.
-cat > "$TMP/bin/gc" <<'GCSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCSTUB'
 if [ "$1 ${2:-}" = "session list" ]; then
     [ -n "${FAKE_LIST_RC:-}" ] && exit "$FAKE_LIST_RC"
     printf '%s\n' "$FAKE_LIST"

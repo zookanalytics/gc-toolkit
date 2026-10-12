@@ -57,8 +57,7 @@ roster() { printf '%s\n' "$@" | jq -s --arg tmp "$TMP" '{agents: ., rigs: [
     {name: "beta",  path: ($tmp + "/beta"),  suspended: false},
     {name: "cold",  path: ($tmp + "/cold"),  suspended: true}]}' > "$STATUS_JSON"; }
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 printf '%s\n' "$*" >> "$CALLS"
 [ "${1:-}" = "--city" ] && shift 2
 case "${1:-} ${2:-}" in
