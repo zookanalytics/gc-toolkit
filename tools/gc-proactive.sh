@@ -15,6 +15,9 @@
 #                        (absent, suspended, or capped at zero), or when the
 #                        named bead lives in a store the pool's rig does not
 #                        own (cross-store route), exit 0/1
+#   assignable <agent> [bead]  "would an assignment be offered?" — the same
+#                        question for a named agent addressed by assignee,
+#                        exit 0/1
 # The pool's only throttle is its max_active_sessions
 # (agents/proactive/agent.toml); slung beads queue until a slot frees. That
 # bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
@@ -285,7 +288,9 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       --sling, sling a first reaction at each,
                                       at most $SLING_CAP per sweep
                                       (GC_PROACTIVE_SLING_CAP). Read-only
-                                      without --sling.
+                                      without --sling. Exit 1, nothing
+                                      slung, when a ready read or the
+                                      filter fails.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
@@ -305,6 +310,14 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       the proactive pool; any rig-qualified
                                       target answers. Exit 0 yes, 1 no; callers
                                       divert on no.
+       $PROG assignable <named-agent> [<bead>]
+                                      Would a bead ASSIGNED to that agent be
+                                      offered by its own hook? No when the
+                                      roster has no agent by that exact name,
+                                      it is suspended, it is a pool rather than
+                                      a named session, or <bead> is named and
+                                      lives in a store a rig-scoped agent's
+                                      hook does not read. Exit 0 yes, 1 no.
 
 Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
 how many run at once; routed beads queue until a slot frees. One --sling sweep
@@ -412,6 +425,117 @@ cmd_deliverable() {
             printf 'yes: could not read this city agent roster, so the pool is assumed live — an unreadable roster is not evidence that %s is gone\n' "$target"
             return 0 ;;
     esac
+}
+
+# ---------------------------------------------------------------------------
+# assignable <named-agent> [<bead>] — "if I assign work to this agent right now,
+# will its own hook ever offer it?" The first reaction's actionable and blocked
+# exits ask it before they address a bead to a named agent (--assign,
+# --then-assign). A named session's hook matches the bead's assignee
+# (docs/gascity-routing-model.md, Lane 2), so an assignment vanishes when no
+# agent is registered under that exact name, when the agent is a pool rather
+# than a named session (a pool's instances match their own identities, never
+# the pool's name), or when its hook reads no store the bead lives in. A
+# city-scoped agent's hook reads every rig's store; a rig-scoped one reads its
+# own rig's store and the city's. A suspended agent leaves the bead sitting
+# until it resumes.
+#
+# NO is a positive finding only, as for deliverable: a roster this cannot read
+# answers yes, and a config or rig list this cannot read skips its arm.
+# ---------------------------------------------------------------------------
+cmd_assignable() {
+    local target bead roster entry name dir scope suspended cfg named riglist bead_prefix rig_prefix hq_prefix
+    target="${1:-}"
+    bead="${2:-}"
+    if [ -z "$target" ]; then
+        printf 'no: name the agent to assign (assignable <named-agent> [<bead>])\n'
+        return 1
+    fi
+
+    if [ -n "$FIXTURE" ]; then
+        roster=""
+        [ -f "$FIXTURE/agents.json" ] && roster="$(cat "$FIXTURE/agents.json")"
+    elif command -v timeout >/dev/null 2>&1; then
+        roster="$(timeout "${GC_PROACTIVE_ROSTER_TIMEOUT:-15}" gc agent list --json 2>/dev/null || true)"
+    else
+        roster="$(gc agent list --json 2>/dev/null || true)"
+    fi
+    # The agent's row as name, dir, scope and suspended, joined on US; empty when
+    # the roster names no such agent, __unreadable__ when it carries no agent list.
+    entry="__unreadable__"
+    if [ -n "$roster" ]; then
+        entry="$(printf '%s' "$roster" | jq -r --arg t "$target" '
+            if ((.agents // null) | type) != "array" then error("no agent list") else
+              .agents | map(select((.qualified_name // "") == $t)) | .[0] // empty
+              | [(.name // ""), (.dir // ""), (.scope // ""), ((.suspended // false) | tostring)] | join("\u001f")
+            end' 2>/dev/null)" \
+            || entry="__unreadable__"
+    fi
+    case "$entry" in
+        __unreadable__)
+            printf 'yes: could not read this city agent roster, so %s is assumed assignable — an unreadable roster is not evidence that it is gone\n' "$target"
+            return 0 ;;
+        "")
+            printf 'no: no agent is registered as %s in this city, so a bead assigned to it is offered to nobody (a named agent is addressed by its exact qualified name, e.g. gc-toolkit.mechanik)\n' "$target"
+            return 1 ;;
+    esac
+    IFS=$'\037' read -r name dir scope suspended <<< "$entry"
+    if [ "$suspended" = "true" ]; then
+        printf 'no: %s is suspended, so a bead assigned to it sits unoffered until it resumes\n' "$target"
+        return 1
+    fi
+
+    # Named-session arm. The merged config's NamedSessions lists every named
+    # singleton by template and rig dir; an agent the list does not carry is a
+    # pool. Only a list that reads as an array is evidence.
+    if [ -n "$FIXTURE" ]; then
+        cfg=""
+        [ -f "$FIXTURE/config.json" ] && cfg="$(cat "$FIXTURE/config.json")"
+    elif command -v timeout >/dev/null 2>&1; then
+        cfg="$(timeout "${GC_PROACTIVE_ROSTER_TIMEOUT:-15}" gc config show --json 2>/dev/null || true)"
+    else
+        cfg="$(gc config show --json 2>/dev/null || true)"
+    fi
+    named=""
+    if [ -n "$cfg" ]; then
+        named="$(printf '%s' "$cfg" | jq -r --arg n "$name" --arg t "$target" --arg d "$dir" '
+            (.config.NamedSessions // null) as $ns
+            | if ($ns | type) == "array"
+              then [$ns[] | select(((.Template // "") == $n or (.Template // "") == $t) and ((.Dir // "") == $d))] | length
+              else "unknown" end' 2>/dev/null || true)"
+    fi
+    if [ "$named" = "0" ]; then
+        printf 'no: %s is a pool, not a named session; its instances each match their own identity and never the pool name, so a bead assigned to it is offered to nobody (route a pool with --route)\n' "$target"
+        return 1
+    fi
+
+    # Store arm. Only a rig-scoped agent can miss a store, and only when the
+    # caller names the bead.
+    if [ -n "$bead" ] && [ "$scope" != "city" ]; then
+        if [ -n "$FIXTURE" ]; then
+            riglist=""
+            [ -f "$FIXTURE/rigs.json" ] && riglist="$(cat "$FIXTURE/rigs.json")"
+        else
+            riglist="$(gc rig list --json 2>/dev/null || true)"
+        fi
+        if [ -n "$riglist" ]; then
+            bead_prefix="${bead%%-*}"
+            rig_prefix="$(printf '%s' "$riglist" \
+                | jq -r --arg n "$dir" '.rigs[]? | select((.name // "") == $n) | .prefix // ""' 2>/dev/null \
+                | head -n1 || true)"
+            hq_prefix="$(printf '%s' "$riglist" \
+                | jq -r '.rigs[]? | select((.hq // false) == true) | .prefix // ""' 2>/dev/null \
+                | head -n1 || true)"
+            if [ -n "$rig_prefix" ] && [ "$bead_prefix" != "$rig_prefix" ] && [ "$bead_prefix" != "$hq_prefix" ]; then
+                printf 'no: %s is scoped to rig %s, so its hook reads the %s- store and the city store, but %s lives in the %s- store and is never offered to it\n' \
+                    "$target" "$dir" "$rig_prefix" "$bead" "$bead_prefix"
+                return 1
+            fi
+        fi
+    fi
+
+    printf 'yes: %s is a registered, unsuspended named session%s\n' "$target" "${bead:+ whose hook reads the store $bead lives in}"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -560,6 +684,10 @@ scan_precision_filter() {
 scan_drop_inflight() {
     local cands roots convoys inflight kept dropped db
     cands="$(cat)"
+    # The candidates come from the precision filter, which prints nothing when
+    # it fails. Nothing is not an empty page, so refuse it rather than count it;
+    # scan_candidates reports the failure.
+    printf '%s' "$cands" | jq -se 'length == 1 and (.[0] | type) == "array"' >/dev/null 2>&1 || return 1
     if [ -n "$FIXTURE" ]; then
         roots='[]'; convoys='[]'
         if [ -f "$FIXTURE/roots.json" ]; then roots="$(cat "$FIXTURE/roots.json")"; fi
@@ -587,16 +715,31 @@ scan_drop_inflight() {
     printf '%s' "$kept"
 }
 
+# ready_read_failed <read> <rc> <output> — log a gc bd ready read that exited
+# non-zero, with the error text from the {"error": ...} object gc bd leaves on
+# stdout when there is one. A failed read is not an empty ready set. Taken as
+# one, it drops its beads from the sweep unseen, and with both reads failing a
+# --sling sweep exits 0 with nothing slung, the result a sweep with no work gives.
+ready_read_failed() {
+    local err
+    err="$(printf '%s' "$3" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)"
+    log "$PROG: scan: the $1 read failed (gc bd ready exit $2${err:+: $err}). A failed read is not an empty ready set, so the scan fails rather than report no candidates; retry once the store answers."
+}
+
+# scan_candidates — the scan's candidate page, one JSON array. cmd_scan runs it
+# in a command substitution, where set -e does not apply, so a step that fails
+# returns non-zero here explicitly. A step that failed quietly would leave an
+# empty page, which reads as nothing to react to.
 scan_candidates() {
-    local ranked
+    local ranked rank_rc=0
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)"
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
     else
         # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
         # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-        local optin movable db
+        local optin movable db optin_rc=0 movable_rc=0
         db="$(rig_beads_db)"
         # Read the FULL opt-in and movable sets (--limit 0), not a page.
         # scan_precision_filter drops work-in-flight beads (review lanes,
@@ -607,20 +750,31 @@ scan_candidates() {
         # filter-before-bound the demand mirror uses.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null || true)"
-        [ -n "$optin" ] || optin='[]'
+                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null)" || optin_rc=$?
+        [ "$optin_rc" -eq 0 ] || { ready_read_failed opt-in "$optin_rc" "$optin"; return 1; }
 
         # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
         # filter below drops the ones a fresh first reaction must not touch.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                    --sort oldest --limit 0 2>/dev/null || true)"
-        [ -n "$movable" ] || movable='[]'
+                    --sort oldest --limit 0 2>/dev/null)" || movable_rc=$?
+        [ "$movable_rc" -eq 0 ] || { ready_read_failed movable-forward "$movable_rc" "$movable"; return 1; }
 
         # Union the two sources, apply the shared precision filter, drop the
-        # beads a workflow is already driving, then rank by board weight.
-        ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
-            | scan_precision_filter | scan_drop_inflight | board_rank)"
+        # beads a workflow is already driving, then rank by board weight. A read
+        # that exited 0 must still be one JSON array, [] when nothing is ready.
+        # Anything else, an empty read included, stops the union with an error
+        # that names the read. The check rides the union's own parse because
+        # each read can run to tens of megabytes.
+        ranked="$(jq -n --slurpfile optin <(printf '%s' "$optin") --slurpfile movable <(printf '%s' "$movable") '
+                def answered($read): if length == 1 and (.[0] | type) == "array" then .[0]
+                    else error("the \($read) read failed: gc bd ready printed something other than one JSON array") end;
+                ($optin | answered("opt-in")) + ($movable | answered("movable-forward"))' \
+            | scan_precision_filter | scan_drop_inflight | board_rank)" || rank_rc=$?
+    fi
+    if [ "$rank_rc" -ne 0 ]; then
+        log "$PROG: scan: the candidates could not be filtered and ranked, so the scan fails rather than report none"
+        return 1
     fi
 
     # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
@@ -656,7 +810,7 @@ cmd_scan() {
     fi
 
     local cands
-    cands="$(scan_candidates)"
+    cands="$(scan_candidates)" || return 1
 
     if [ -z "$do_sling" ]; then
         if [ -n "$as_json" ]; then
@@ -822,7 +976,8 @@ main() {
             esac
             ;;
         deliverable) cmd_deliverable "$@" ;;
-        *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
+        assignable)  cmd_assignable "$@" ;;
+        *) die "unknown verb '$verb' (demand|scan|sling|deliverable|assignable; --help)" ;;
     esac
 }
 

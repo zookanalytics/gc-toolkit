@@ -55,8 +55,7 @@ bash -n "$WRAP"   && ok "pin-keepalive-precheck.sh: valid bash" || bad "pin-keep
 # logging `session pin`. The pin log is the read-only proof: --check must never
 # add a line to it.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 sub="${1:-}"; shift || true

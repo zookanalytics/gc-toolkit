@@ -7,12 +7,23 @@
 # dir at END). harness_init unsets every GC_* var, so each cache case exports the
 # variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
+#
+# row_meta, the metadata read the library shares with every script that sources
+# it, is pinned first; it reads no store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 . "$HERE/bd-lib.sh"
+
+# --- row_meta: one metadata value off a show row, as a string -----------------
+ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'
+eq "$(row_meta "$ROW" branch)" "polecat/tk-m" "row_meta reads a metadata value"
+eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
+eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
+eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
+eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 

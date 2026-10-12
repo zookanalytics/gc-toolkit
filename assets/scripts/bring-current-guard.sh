@@ -1,56 +1,113 @@
 #!/usr/bin/env bash
-# bring-current-guard — keeps an approval from covering code it never saw. A
-# merge-in child (the bead pr-facts.sh's conflict arm files for an approved PR
-# whose branch conflicts) brings the branch current with its base. When that
-# took no judgment, the approval still describes the code that would land, and
-# it stands: main's ruleset does not dismiss stale reviews on push. When it took
-# judgment, this files a visit on the anchor and dismisses the approval, so the
-# operator re-reviews what changed instead of landing it under the old approval.
+# bring-current-guard — holds a bring-current to the worker's audit of it, and
+# routes a conflicted one to triage, or rules it closed on an anchor that
+# declares no triage lane, so no review covers code it never saw.
 #
-# Called by submit-and-exit (formulas/mol-polecat-work.toml) right after the
-# push is verified, for every bead it hands off; any bead but a merge-in child of
-# an open PR is left alone.
+# Bringing a branch current merges its base in. Run at every hand-off
+# (submit-and-exit in formulas/mol-polecat-work.toml, right after the push),
+# this reads what the hand-off pushed onto a branch that carries a review to
+# keep current: its anchor is gating, or a PR stands on it. A branch nobody has
+# reviewed yet has nothing to keep, and is left alone. The round is one of:
 #
-# THE BOUNDARY. A bring-current is MECHANICAL when every commit it adds to the
-# branch is a merge of the base whose result is the one git produces on its own,
-# except where git stopped on a conflict. A conflict is mechanical only where
-# both sides inserted lines at one place and replaced nothing the merge base
-# had there, and the resolution keeps the two inserted blocks whole, one after
-# the other, in either order. Each block is compared as git reads it with no
-# common lines hoisted out, so two blocks that end in the same `fi` keep a `fi`
-# each, and only blank lines may differ. Paths in the generated tier
-# (linguist-generated in .gitattributes) are exempt: they are renders the pack
-# writes and nobody edits by hand, and merge.sh refuses a merge whose
-# seed-audit render is not current.
-# Everything else is JUDGMENT, and so is anything this cannot establish:
-#   - a commit of its own on the branch (a fix-up, a rename, a test repair);
-#   - a merge of anything but the base, or of more than two parents;
-#   - a change to a file the merge did not conflict on;
-#   - a conflict where both sides changed lines the merge base had, however it
-#     was resolved, or one resolved by choosing a side, interleaving the two
-#     blocks, rewriting, or dropping a line;
-#   - a conflict over a deleted, renamed, binary or mode-changed file;
-#   - a history it cannot read, or no record of where the bring-current began.
+#   CLEAN. Every commit the round adds is a merge of the base whose tree is the
+#   one git produces on its own. Nothing was resolved by hand, so the round owes
+#   no account and no triage. Its record is stored on the anchor and it lands
+#   quietly. This comparison is the tripwire that proves "clean": nothing rides
+#   in under that label.
 #
-# ORDER. On judgment over a standing approval, the visit is filed first and read
-# back: it holds the anchor's merge (finalize-gate.sh) and tells the operator
-# why, so no dismissal strands a PR without a signal. Each approving account is
-# then re-requested and its approval dismissed, the order pr-facts.sh uses when
-# it clears a human review. A dismissal that does not land is noted on the
-# visit, which still holds the merge.
+#   CONFLICTED. Anything else. Each ITEM below is something git did not produce
+#   on its own, and the worker owes one audit entry for each
+#   (bring-current-audit.sh):
+#     - a file in git's conflict set, however it was resolved;
+#     - a file a merge commit changed beyond what git's own merge produces;
+#     - a merge of anything but the base, or of more than two parents
+#       (path `commit:<short>`), or a pushed head that does not descend from
+#       where the round began (path `history`);
+#     - a commit's own change that could not be read (path `commit:<short>`);
+#     - on a bead whose only job is the bring-current
+#       (bring_current_scope=merge-only, stamped where its resume began), each
+#       file a commit of its own changes. On any other bead a commit of its own
+#       is the bead's work, which its own review path judges; it is listed as
+#       evidence and owes no entry.
+#   A round whose audit lacks an entry for an item, or whose entry is
+#   incomplete, is REFUSED (exit 3): nothing is handed off, and the worker
+#   writes the missing entries and re-runs. A round whose resume stamped
+#   bring_current_from but not bring_current_scope owes no entries: that resume
+#   step asks for no audit, and the submit step poured with it drains on any
+#   refusal, so a refusal would only re-offer the same hand-off. A covered
+#   round, or one that owes no entries, is stored on the anchor with the
+#   evidence, and routed to triage: the triage lane is
+#   superseded, so gate-ensure.sh dispatches it again, and triage is added to
+#   the lanes this anchor's rounds reopened (bring_current_reopened) with the
+#   round's time (bring_current_round_at). lane-state.sh lets no approval given
+#   before that time vouch for a reopened lane, so a standing approval neither
+#   lets the merge skip triage nor keeps triage from being dispatched. An anchor
+#   whose check_set declares no triage lane gets the CLOSED RULING below
+#   instead.
+#
+# The guard weighs no round, and the worker's rating of an entry gates
+# nothing. Triage decides what the round reopens, and records it through
+# signoff.sh, which runs `decide` here: lanes to run again, and whether the
+# human approval is dismissed.
+#
+# EVIDENCE. Each conflicted file is replayed with git's own merge (diff3, so
+# each hunk shows what the merge base had there) and its resolution compared:
+# whether both sides only added lines and the resolution keeps the two
+# additions whole, one after the other in either order (each block read as git
+# reads it, no common lines hoisted out, only blank lines ignored); whether the
+# merge base had lines in a hunk that one or both sides changed; or whether the
+# resolution is something else. Deleted, renamed, binary and mode-changed files
+# are named as such. Paths in the generated tier (linguist-generated in
+# .gitattributes) are renders the pack writes and nobody edits by hand, and
+# merge.sh refuses a merge whose seed-audit render is not current, so they owe
+# no entry and are listed as evidence only.
+#
+# DECIDE. `decide` records triage's ruling in the anchor's record, adds the
+# lanes it reopens to bring_current_reopened, supersedes each reopened lane's
+# standing review so gate-ensure.sh dispatches it again, and, when triage rules
+# the approval no longer covers what would land, dismisses it. The visit that
+# re-asks for the review is filed and read back first, so no dismissal strands
+# a PR without a signal; each approving account is then re-requested and every
+# approval it has standing is dismissed, the order pr-facts.sh uses when it
+# clears a human review. An account that approved twice before the round loses
+# both approvals, because a dismissed review drops out of the approval rule and
+# the older approval would count again. An approval submitted after
+# bring_current_round_at saw the merged code, so it stands, the same line
+# lane-state.sh draws. A dismissal that does not land is noted on the visit,
+# which still holds the merge. The visit, the dismissal note and the round
+# section of triage's posted verdict are all rendered from the stored record.
+#
+# CLOSED RULING. A conflicted round on an anchor whose check_set declares no
+# triage lane (correctness alone, say, or the none opt-out) has no review to
+# rule on it, and approval is a merge rule no check_set opts out of. So the
+# guard rules on the round itself and assumes the worst: every lane the anchor
+# declares runs again on the merged code (the lanes review-checks.sh resolves
+# for the merge, none for the none opt-out), and where a PR stands the
+# approvals given before the round are dismissed the way `decide` dismisses
+# them, re-ask visit first. The ruling is stored in the record where triage's
+# goes, marked `by: guard`, so every reader treats the round as ruled, and a
+# re-run of the same hand-off carries it out again. A person who wants triage
+# to rule instead adds the triage lane to the anchor's check_set.
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]
-#   bring-current-guard.sh classify --from <oid> --to <oid> --base <ref>
+#   bring-current-guard.sh coverage --bead <id> [--to <oid>] [--from <oid>]
+#   bring-current-guard.sh classify --from <oid> --to <oid> --base <ref> [--scope merge-only|with-work]
+#   bring-current-guard.sh decide --anchor <id> --review-bead <id> --reopen <lanes|none>
+#       [--add <lanes>] [--dismiss-approval] --reason <text> [--body-out <file>]
 # guard: <id> is the bead being handed off and --to the pushed head (default
 # HEAD). The bead's bring_current_from, stamped where its resume began, marks
-# where the bring-current started; --from, the origin head before the push,
-# stands in when that stamp is absent.
-# classify: prints `mechanical` or `judgment`, then one reason per line.
-# Both read the git repository of the working directory.
-# Exit: 0 nothing owed, or the visit that holds the merge landed · 1 a read
-# failed or the visit did not land, so nothing was dismissed and the caller
-# retries · 2 usage
+# where the round started; --from, the origin head before the push, stands in
+# when that stamp is absent. With neither a stamp nor a --from short of the
+# head, nothing records where the work began, which is refused too.
+# coverage: the guard's reading without its writes: each item and whether the
+# audit covers it. classify: prints none, clean, conflicted or unreadable, then
+# one evidence line per item. All three read the git repository of the working
+# directory.
+# Exit: 0 nothing owed, or the round recorded (and routed, or ruled closed) ·
+# 1 a read or a write failed, so nothing was handed off and the caller retries ·
+# 2 usage · 3 the audit does not cover the round, or nothing records where it
+# began: the worker completes it and re-runs
 set -u
 
 PROG="bring-current-guard"
@@ -63,21 +120,33 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+REVIEW_OUTCOME="${GC_REVIEW_OUTCOME_TOOL:-$SCRIPTS_DIR/review-outcome.sh}"
+# The one resolver of which check_set tokens are lanes: the closed ruling reopens
+# the lanes it names for the merge.
+REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
-# The approval rule merge.sh lands on: standing_approvals($self) is one review per
-# approving account other than the city's.
+# The audit's reads and every rendering of a round come from one place.
+# shellcheck source=bring-current-audit.sh
+. "$SCRIPTS_DIR/bring-current-audit.sh" || { echo "$PROG: cannot source bring-current-audit.sh beside this script" >&2; exit 2; }
+# The approval rule merge.sh lands on: standing_approvals($self) is every
+# approval not yet dismissed from an account other than the city's.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# The PR and approval naming the two approval dismissers share (pr_coords,
+# approval_phrase).
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 TAB=$(printf '\t')
-# How many reasons a visit or a dismissal message lists before it counts the rest.
-MAX_REASONS=8
+TRIAGE_LANE="triage"
 
 usage() {
   echo "usage: $PROG guard --bead <id> [--to <oid>] [--from <oid>]" >&2
-  echo "       $PROG classify --from <oid> --to <oid> --base <ref>" >&2
+  echo "       $PROG coverage --bead <id> [--to <oid>] [--from <oid>]" >&2
+  echo "       $PROG classify --from <oid> --to <oid> --base <ref> [--scope merge-only|with-work]" >&2
+  echo "       $PROG decide --anchor <id> --review-bead <id> --reopen <lanes|none> [--add <lanes>] [--dismiss-approval] --reason <text> [--body-out <file>]" >&2
   exit 2
 }
 
@@ -85,10 +154,16 @@ WORK=""
 cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; }
 trap cleanup EXIT
 
-VERDICT="mechanical"; REASONS=""
-judge() { VERDICT="judgment"; REASONS="${REASONS:+$REASONS
-}$*"; }
 short() { git rev-parse --short=12 "$1" 2>/dev/null || printf '%s' "$1"; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# The round being read. CLASS ends as none, clean, conflicted or unreadable;
+# each evidence row is "<covered 1|0>\t<kind>\t<path>\t<commit>\t<detail>".
+CLASS="none"; READ_FAIL=""; BASE_MERGES=0
+ev() { # <covered> <kind> <path> <commit> <detail>
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$WORK/evidence"
+}
+unreadable() { READ_FAIL="$*"; }
 
 EMPTY_BLOB=""
 empty_blob() {
@@ -96,17 +171,19 @@ empty_blob() {
   printf '%s' "$EMPTY_BLOB"
 }
 
-# NUL-separated paths on stdin, the ones .gitattributes at <commit> does not mark
-# linguist-generated on stdout, NUL-separated. An attribute read that fails
-# exempts nothing, so every path goes on to be judged.
-reviewed_paths() { # <commit>
+# NUL-separated paths on stdin; prints those .gitattributes at <commit> does not
+# mark linguist-generated (the reviewed tier) to stdout and the generated ones to
+# <generated-file>, both NUL-separated. An attribute read that fails exempts
+# nothing, so every path goes on to be judged.
+split_paths() { # <commit> <generated-file>
   cat > "$WORK/paths"
+  : > "$2"
   if ! git check-attr -z --stdin --source "$1" linguist-generated <"$WORK/paths" >"$WORK/attrs" 2>/dev/null; then
     cat "$WORK/paths"
     return
   fi
   while IFS= read -r -d '' p && IFS= read -r -d '' _attr && IFS= read -r -d '' val; do
-    [ "$val" = "set" ] || printf '%s\0' "$p"
+    if [ "$val" = "set" ]; then printf '%s\0' "$p" >> "$2"; else printf '%s\0' "$p"; fi
   done <"$WORK/attrs"
 }
 
@@ -126,8 +203,9 @@ MARK=40
 # merge base had there). Blank lines are left out of both. Prints `ok` when
 # every hunk replaced nothing the base had and the resolution keeps the two
 # sides' blocks whole, one after the other, around git's own merged text;
-# `base` when a hunk replaced lines the base had; `differ` when the resolution
-# is anything else; `unreadable` when no diff3 hunk could be read.
+# `base` when a hunk had lines in the merge base that one or both sides changed;
+# `differ` when the resolution is anything else; `unreadable` when no diff3 hunk
+# could be read.
 HUNK_MATCH_AWK='
 function rep(c, n,   r) { r = ""; while (n-- > 0) r = r c; return r }
 function blank(l) { return l ~ /^[ \t\r]*$/ }
@@ -181,7 +259,8 @@ END {
 # One conflicted path of merge <c>: its stages as merge-tree reported them, its
 # replayed conflict in <tree>, and the resolution the merge commit carries.
 classify_conflict() { # <c> <tree> <path> <stages: "<stage>:<mode>:<oid> ..." >
-  local c="$1" tree="$2" p="$3" st="$4" s stages="" mode="" base="" ours="" theirs="" rmode res hunks
+  local c="$1" tree="$2" p="$3" st="$4" s stages="" mode="" base="" ours="" theirs="" rmode res hunks sc
+  sc=$(short "$c")
   for s in $st; do
     stages="$stages${s%%:*}"
     case "${s%%:*}" in
@@ -193,38 +272,39 @@ classify_conflict() { # <c> <tree> <path> <stages: "<stage>:<mode>:<oid> ..." >
     if [ -z "$mode" ]; then mode="$s"; elif [ "$mode" != "$s" ]; then mode="mixed"; fi
   done
   case "$stages" in 123|23) : ;; *)
-    judge "$(short "$c"): $p conflicted over a file one side deleted or renamed, so keeping it or not was a choice"
+    ev 1 conflict "$p" "$sc" "conflicted over a file one side deleted or renamed, so keeping it or not was a choice"
     return ;;
   esac
   case "$mode" in 100644|100755) : ;; *)
-    judge "$(short "$c"): $p conflicted over its file mode or type"
+    ev 1 conflict "$p" "$sc" "conflicted over its file mode or type"
     return ;;
   esac
   rmode=$(git ls-tree "$c" -- "$p" 2>/dev/null | awk '{print $1}')
   res=$(git rev-parse -q --verify "${c}:${p}" 2>/dev/null)
   if [ -z "$res" ] || [ "$rmode" != "$mode" ]; then
-    judge "$(short "$c"): $p conflicted and the merge deleted it or changed its mode"
+    ev 1 conflict "$p" "$sc" "conflicted, and the merge deleted it or changed its mode"
     return
   fi
   [ -n "$base" ] || base=$(empty_blob)
   if is_binary "$base" || is_binary "$ours" || is_binary "$theirs" || is_binary "$res"; then
-    judge "$(short "$c"): $p is a binary file in conflict"
+    ev 1 conflict "$p" "$sc" "is a binary file in conflict"
     return
   fi
   git cat-file blob "${tree}:${p}" > "$WORK/replay" 2>/dev/null
   git cat-file blob "$res" > "$WORK/resolution" 2>/dev/null
   hunks=$(awk -v M="$MARK" "$HUNK_MATCH_AWK" "$WORK/replay" "$WORK/resolution" 2>/dev/null)
   case "$hunks" in
-    ok) : ;;
-    base) judge "$(short "$c"): $p conflicted where both sides changed lines the merge base had, so the resolution had to choose" ;;
-    differ) judge "$(short "$c"): $p conflicted, and the resolution is not the two sides' insertions kept whole (it chose a side, interleaved them, rewrote, or dropped a line)" ;;
-    *) judge "$(short "$c"): $p conflicted, and its conflict could not be read back" ;;
+    ok)     ev 1 conflict "$p" "$sc" "conflicted where both sides only added lines; the resolution keeps both additions whole" ;;
+    base)   ev 1 conflict "$p" "$sc" "conflicted where the merge base had lines that one or both sides changed, so git could not merge it on its own" ;;
+    differ) ev 1 conflict "$p" "$sc" "conflicted, and the resolution is not the two sides' additions kept whole: it took a side, interleaved them, rewrote, or dropped a line" ;;
+    *)      ev 1 conflict "$p" "$sc" "conflicted, and its conflict could not be read back" ;;
   esac
 }
 
 # One merge commit <c> = <p1> (the branch) + <p2>, replayed with git's own merge.
 classify_merge() { # <c> <p1> <p2>
-  local c="$1" p1="$2" p2="$3" out rc tree entry meta p stg diffs
+  local c="$1" p1="$2" p2="$3" out rc tree entry meta p stg diffs sc
+  sc=$(short "$c")
   out="$WORK/merge-tree.$c"
   # diff3 markers show what the merge base had in each hunk, and MARK-long
   # markers cannot collide with a line of the file. Neither changes which paths
@@ -234,7 +314,7 @@ classify_merge() { # <c> <p1> <p2>
     merge-tree --write-tree -z --no-messages "$p1" "$p2" >"$out" 2>/dev/null
   rc=$?
   if [ "$rc" -gt 1 ]; then
-    judge "$(short "$c"): its merge could not be replayed to compare against"
+    ev 1 merge "commit:$sc" "$sc" "its merge of $(short "$p2") could not be replayed to compare against"
     return
   fi
   tree=""
@@ -246,109 +326,220 @@ classify_merge() { # <c> <p1> <p2>
     printf '%s\t%s\n' "$p" "$(printf '%s' "$meta" | awk '{print $3 ":" $1 ":" $2}')" >> "$WORK/conflicts"
   done < "$out"
   if [ -z "$tree" ]; then
-    judge "$(short "$c"): its merge could not be replayed to compare against"
+    ev 1 merge "commit:$sc" "$sc" "its merge of $(short "$p2") could not be replayed to compare against"
     return
   fi
   # Every path the merge commit carries differently from git's own result.
   diffs="$WORK/diffs.$c"
   if ! git diff-tree -r -z --no-renames --name-only "$tree" "$c" >"$diffs" 2>/dev/null; then
-    judge "$(short "$c"): its tree could not be compared with the replayed merge"
+    ev 1 merge "commit:$sc" "$sc" "its tree could not be compared with git's own merge of $(short "$p2")"
     return
   fi
-  # A conflicted path is judged by its resolution whether or not it differs from
-  # the replayed markers; any other differing path is an edit the merge did not
-  # need. The generated tier is left out of both.
+  # A conflicted path is an item whether or not its resolution differs from the
+  # replayed markers; any other differing path is an edit the merge did not
+  # need. The generated tier owes no entry and is listed as evidence.
   awk -F'\t' '{print $1}' "$WORK/conflicts" | sort -u | tr '\n' '\0' > "$WORK/cpaths"
-  { cat "$diffs"; cat "$WORK/cpaths"; } | reviewed_paths "$c" | sort -zu > "$WORK/judged"
+  { cat "$diffs"; cat "$WORK/cpaths"; } | sort -zu | split_paths "$c" "$WORK/generated" > "$WORK/judged"
   while IFS= read -r -d '' p; do
     stg=$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { printf "%s ", $2 }' "$WORK/conflicts")
     if [ -n "$stg" ]; then
       classify_conflict "$c" "$tree" "$p" "$stg"
     else
-      judge "$(short "$c"): $p changed beyond what merging $(short "$p2") produces"
+      ev 1 beyond "$p" "$sc" "changed beyond what merging $(short "$p2") produces"
     fi
   done < "$WORK/judged"
+  while IFS= read -r -d '' p; do
+    ev 0 generated "$p" "$sc" "a generated render (linguist-generated), which owes no entry"
+  done < "$WORK/generated"
 }
 
-# The commits <to> adds over <from> along the branch's own line, each judged.
-classify() { # <from> <to> <base-ref>
-  local from="$1" to="$2" base="$3" c commits parents p1 p2 n subj
-  VERDICT="mechanical"; REASONS=""
-  [ -n "$WORK" ] || WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-bring-current-guard.XXXXXX") || { judge "no scratch directory to replay the merge in"; return; }
-  from=$(git rev-parse -q --verify "$from^{commit}" 2>/dev/null) || { judge "the start of the bring-current ($1) is not a commit here"; return; }
-  to=$(git rev-parse -q --verify "$to^{commit}" 2>/dev/null) || { judge "the pushed head ($2) is not a commit here"; return; }
+# A commit of its own, <c> on <parent>: on a merge-only bead each file it
+# changes is an item; elsewhere it is the bead's work, listed once.
+classify_own() { # <c> <parent> <scope>
+  local c="$1" parent="$2" scope="$3" sc subj n p
+  sc=$(short "$c")
+  subj=$(git log -1 --format=%s "$c" 2>/dev/null)
+  if ! git diff-tree -r -z --no-renames --name-only "$parent" "$c" >"$WORK/own" 2>/dev/null; then
+    if [ "$scope" = "merge-only" ]; then
+      ev 1 own "commit:$sc" "$sc" "\"$subj\" is a commit of its own, and what it changed could not be read"
+    else
+      ev 0 own "commit:$sc" "$sc" "\"$subj\" is a commit of its own, and what it changed could not be read"
+    fi
+    return
+  fi
+  split_paths "$c" "$WORK/own-generated" < "$WORK/own" > "$WORK/own-reviewed"
+  [ -s "$WORK/own-reviewed" ] || return 0
+  if [ "$scope" = "merge-only" ]; then
+    while IFS= read -r -d '' p; do
+      ev 1 own "$p" "$sc" "changed by $sc \"$subj\", a commit of its own on a bead whose only job is the bring-current"
+    done < "$WORK/own-reviewed"
+  else
+    n=$(tr -cd '\0' < "$WORK/own-reviewed" | wc -c | tr -d ' ')
+    ev 0 own "commit:$sc" "$sc" "\"$subj\" is a commit of the bead's own work ($n file(s)), judged by its own review path"
+  fi
+}
+
+# The commits <to> adds over <from> along the branch's own line, each read.
+classify() { # <from> <to> <base-ref> <scope>
+  local from="$1" to="$2" base="$3" scope="${4:-with-work}" c commits parents n subj
+  CLASS="none"; READ_FAIL=""; BASE_MERGES=0
+  [ -n "$WORK" ] || WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-bring-current-guard.XXXXXX") || { unreadable "no scratch directory to replay the merge in"; CLASS=unreadable; return; }
+  : > "$WORK/evidence"
+  from=$(git rev-parse -q --verify "$from^{commit}" 2>/dev/null) || { unreadable "the start of the round ($1) is not a commit here"; CLASS=unreadable; return; }
+  to=$(git rev-parse -q --verify "$to^{commit}" 2>/dev/null) || { unreadable "the pushed head ($2) is not a commit here"; CLASS=unreadable; return; }
   if ! git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1; then
-    judge "the base $base could not be read, so no merge in the push can be shown to be of it"
-    return
+    unreadable "the base $base could not be read, so no merge in the push can be shown to be of it"
+    CLASS=unreadable; return
   fi
-  if [ "$from" = "$to" ]; then
-    REASONS="nothing was pushed past $(short "$from")"
-    return
-  fi
+  [ "$from" != "$to" ] || return 0
   if ! git merge-base --is-ancestor "$from" "$to" 2>/dev/null; then
-    judge "the pushed head $(short "$to") does not descend from $(short "$from"): the branch history was rewritten"
-    return
+    ev 1 history "history" "$(short "$to")" "the pushed head $(short "$to") does not descend from $(short "$from"), where the round began: the branch history was rewritten"
+    CLASS=conflicted; return
   fi
   if ! commits=$(git rev-list --first-parent "$from..$to" 2>/dev/null); then
-    judge "the commits from $(short "$from") to $(short "$to") could not be listed"
-    return
+    unreadable "the commits from $(short "$from") to $(short "$to") could not be listed"
+    CLASS=unreadable; return
   fi
   for c in $commits; do
     parents=$(git rev-list --parents -n 1 "$c" 2>/dev/null)
     set -- $parents
     shift
     n=$#
-    subj=$(git log -1 --format=%s "$c" 2>/dev/null)
     if [ "$n" -eq 1 ]; then
-      if ! git diff-tree -r -z --no-renames --name-only "$1" "$c" >"$WORK/own" 2>/dev/null; then
-        judge "$(short "$c") \"$subj\" is a commit of its own, and what it changed could not be read"
-      elif [ -n "$(reviewed_paths "$c" <"$WORK/own" | tr '\0' '\n')" ]; then
-        judge "$(short "$c") \"$subj\" is a commit of its own, not part of a merge"
-      fi
+      classify_own "$c" "$1" "$scope"
       continue
     fi
+    subj=$(git log -1 --format=%s "$c" 2>/dev/null)
     if [ "$n" -ne 2 ]; then
-      judge "$(short "$c") \"$subj\" merges $n parents at once"
+      ev 1 merge "commit:$(short "$c")" "$(short "$c")" "\"$subj\" merges $n parents at once"
       continue
     fi
-    p1="$1"; p2="$2"
-    if ! git merge-base --is-ancestor "$p2" "$base" 2>/dev/null; then
-      judge "$(short "$c") \"$subj\" merges $(short "$p2"), which is not on $base"
+    if ! git merge-base --is-ancestor "$2" "$base" 2>/dev/null; then
+      ev 1 merge "commit:$(short "$c")" "$(short "$c")" "\"$subj\" merges $(short "$2"), which is not on $base"
       continue
     fi
-    classify_merge "$c" "$p1" "$p2"
+    BASE_MERGES=$((BASE_MERGES + 1))
+    classify_merge "$c" "$1" "$2"
   done
-  if [ "$VERDICT" = "mechanical" ]; then
-    REASONS="every commit past $(short "$from") is a merge of $base that git made, or whose conflicts keep both sides' insertions whole"
+  if awk -F'\t' '$1 == 1 { found = 1 } END { exit !found }' "$WORK/evidence"; then
+    CLASS=conflicted
+  elif [ "$BASE_MERGES" -gt 0 ]; then
+    CLASS=clean
   fi
 }
 
-# The first MAX_REASONS reasons as "- " lines, and a count of the rest.
-reason_lines() {
-  printf '%s\n' "$REASONS" | awk -v max="$MAX_REASONS" 'NF { n++; if (n <= max) print "- " $0 } END { if (n > max) print "- and " (n - max) " more" }'
+# The evidence rows as a JSON array.
+evidence_json() {
+  jq -Rsc 'split("\n") | map(select(length > 0) | split("\t")
+    | {covered: (.[0] == "1"), kind: .[1], path: .[2], commit: .[3], detail: (.[4:] | join("\t"))})' "$WORK/evidence"
 }
 
 # --- classify ------------------------------------------------------------------
 cmd_classify() {
-  local from="" to="" base=""
+  local from="" to="" base="" scope="with-work"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --from) from="${2:-}"; shift 2 ;;
-      --to)   to="${2:-}"; shift 2 ;;
-      --base) base="${2:-}"; shift 2 ;;
+      --from)  from="${2:-}"; shift 2 ;;
+      --to)    to="${2:-}"; shift 2 ;;
+      --base)  base="${2:-}"; shift 2 ;;
+      --scope) scope="${2:-}"; shift 2 ;;
       *) usage ;;
     esac
   done
   [ -n "$from" ] && [ -n "$to" ] && [ -n "$base" ] || usage
-  classify "$from" "$to" "$base"
-  printf '%s\n' "$VERDICT"
-  [ -z "$REASONS" ] || printf '%s\n' "$REASONS"
+  case "$scope" in merge-only|with-work) : ;; *) usage ;; esac
+  classify "$from" "$to" "$base" "$scope"
+  printf '%s\n' "$CLASS"
+  [ -z "$READ_FAIL" ] || printf '%s\n' "$READ_FAIL"
+  [ -n "$WORK" ] && [ -s "$WORK/evidence" ] && awk -F'\t' '{ printf "%s %s: %s\n", ($1 == 1 ? "audit" : "note "), $3, $5 }' "$WORK/evidence"
   return 0
 }
 
-# --- guard ---------------------------------------------------------------------
-cmd_guard() {
-  local bead="" to="" from_arg="" row title branch target num url anchor stamp from base
+# --- the hand-off's reading, shared by guard and coverage -----------------------
+# Sets ROW, BEAD, ANCHOR, AROW, BRANCH, TARGET, SCOPE, OWED, FROM, TO and the
+# round. OWED is empty when the round owes no audit entries.
+# rc: 0 a round to judge · 10 nothing to guard (printed) · 1 a read failed ·
+# 3 nothing records where the work began
+read_handoff() { # <bead> <to> <from-arg>
+  local stamp
+  BEAD="$1"; TO="$2"
+  [ -n "$TO" ] || TO=$(git rev-parse -q --verify HEAD 2>/dev/null)
+  [ -n "$TO" ] || { echo "$PROG: no pushed head to read; nothing is guarded and the caller retries" >&2; return 1; }
+  TO=$(git rev-parse -q --verify "$TO^{commit}" 2>/dev/null) || { echo "$PROG: the pushed head $2 is not a commit here; nothing is guarded and the caller retries" >&2; return 1; }
+  ROW=$(bd_json show "$BEAD")
+  printf '%s' "$ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+    || { echo "$PROG: $BEAD could not be read; nothing is guarded and the caller retries" >&2; return 1; }
+  ANCHOR=$(bca_anchor_of "$ROW") || { echo "$PROG: the beads on $BEAD's branch could not be listed, so its anchor is unknown; nothing is guarded and the caller retries" >&2; return 1; }
+  if [ "$ANCHOR" = "$BEAD" ]; then
+    AROW="$ROW"
+  else
+    AROW=$(bd_json show "$ANCHOR")
+    printf '%s' "$AROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+      || { echo "$PROG: anchor $ANCHOR could not be read; nothing is guarded and the caller retries" >&2; return 1; }
+  fi
+  BRANCH=$(bca_meta "$ROW" branch); [ -n "$BRANCH" ] || BRANCH=$(bca_meta "$AROW" branch)
+  if ! bca_reviewed "$AROW" "$ROW"; then
+    echo "$PROG: ${BRANCH:-$BEAD} carries no review to keep current (anchor $ANCHOR is not gating and no PR stands on it); nothing to guard"
+    return 10
+  fi
+  TARGET=$(bca_meta "$ROW" target); [ -n "$TARGET" ] || TARGET=$(bca_meta "$AROW" target)
+  [ -n "$TARGET" ] || { echo "$PROG: neither $BEAD nor anchor $ANCHOR names the target the branch is brought current with; nothing is guarded and the caller retries" >&2; return 1; }
+  SCOPE=$(bca_meta "$ROW" bring_current_scope)
+  stamp=$(bca_meta "$ROW" bring_current_from)
+  # A start stamped with no scope beside it is the mark of a resume step that
+  # asks for no audit (see the header).
+  OWED=1
+  [ -n "$stamp" ] && [ -z "$SCOPE" ] && OWED=""
+  [ "$SCOPE" = "merge-only" ] || SCOPE="with-work"
+  FROM="${stamp:-$3}"
+  if [ -z "$stamp" ] && { [ -z "$FROM" ] || [ "$(git rev-parse -q --verify "$FROM^{commit}" 2>/dev/null)" = "$TO" ]; }; then
+    echo "$PROG: nothing records where $BEAD's work on ${BRANCH:-its branch} began (no bring_current_from stamp, and nothing was pushed past ${FROM:-an unknown head} by this hand-off), so whether it brought the branch current cannot be read. Stamp the head the branch had before this bead's first commit or merge: gc bd update $BEAD --set-metadata bring_current_from=<oid>, then re-run" >&2
+    return 3
+  fi
+  git fetch -q origin "+refs/heads/$TARGET:refs/remotes/origin/$TARGET" >/dev/null 2>&1 || true
+  classify "$FROM" "$TO" "refs/remotes/origin/$TARGET" "$SCOPE"
+  if [ "$CLASS" = "unreadable" ]; then
+    echo "$PROG: the round $(short "$FROM")..$(short "$TO") could not be read ($READ_FAIL); nothing is guarded and the caller retries" >&2
+    return 1
+  fi
+  if [ "$CLASS" = "none" ]; then
+    echo "$PROG: $BEAD pushed no merge of $TARGET onto ${BRANCH:-its branch} past $(short "$FROM"); nothing to guard"
+    return 10
+  fi
+  return 0
+}
+
+# The covered items the audit lacks, one "<path>\t<why>" per line: no entry, or
+# an entry missing a field or a known rating.
+missing_entries() { # <audit-json>
+  evidence_json | jq -r --argjson a "$1" '
+    [ .[] | select(.covered) | .path ] | unique | .[]
+    | . as $p
+    | ([ $a[]? | select(type == "object" and .path == $p) ] | .[0]) as $e
+    | if $e == null then "\($p)\tno entry"
+      elif ([$e.collided, $e.resolution, $e.check] | map((. // "") | tostring | length > 0) | all) | not then "\($p)\tthe entry lacks collided, resolution or check"
+      elif ($e.rating != "routine" and $e.rating != "judgment") then "\($p)\tthe entry rating is \($e.rating // "absent"), not routine or judgment"
+      else empty end' 2>/dev/null
+}
+
+coverage_report() { # <audit-json>
+  evidence_json | jq -r --argjson a "$1" '
+    [ .[] | select(.covered) ] | group_by(.path) | .[] | .[0] as $i
+    | ([ $a[]? | select(type == "object" and .path == $i.path) ] | .[0]) as $e
+    | (if $e == null then "NEEDS AN ENTRY" else "covered (\($e.rating // "?"))" end) as $s
+    | "  \($s)  \($i.path): \($i.detail)"' 2>/dev/null
+}
+
+audit_of() { # <row-json>
+  local a
+  a=$(bca_meta_json "$1" conflict_audit)
+  printf '%s' "$a" | jq -e 'type == "array"' >/dev/null 2>&1 || a='[]'
+  printf '%s' "$a"
+}
+
+# --- coverage ------------------------------------------------------------------
+cmd_coverage() {
+  local bead="" to="" from_arg="" rc audit missing
   while [ $# -gt 0 ]; do
     case "$1" in
       --bead) bead="${2:-}"; shift 2 ;;
@@ -358,51 +549,222 @@ cmd_guard() {
     esac
   done
   [ -n "$bead" ] || usage
-  [ -n "$to" ] || to=$(git rev-parse -q --verify HEAD 2>/dev/null)
-  [ -n "$to" ] || { echo "$PROG: no pushed head to read; nothing is guarded and the caller retries" >&2; return 1; }
+  read_handoff "$bead" "$to" "$from_arg"; rc=$?
+  case "$rc" in 0) : ;; 10) return 0 ;; *) return "$rc" ;; esac
+  if [ "$CLASS" = "clean" ]; then
+    echo "$PROG: the round $(short "$FROM")..$(short "$TO") is clean: git merged $TARGET on its own, so it owes no entry"
+    return 0
+  fi
+  audit=$(audit_of "$ROW")
+  echo "$PROG: the round $(short "$FROM")..$(short "$TO") conflicted; each item and the audit entry it owes:"
+  coverage_report "$audit"
+  missing=$(missing_entries "$audit")
+  [ -z "$missing" ] && return 0
+  if [ -z "$OWED" ]; then
+    echo "$PROG: $BEAD's resume asked for no audit, so the round owes no entries; the guard records the items without one by its own evidence"
+    return 0
+  fi
+  return 3
+}
 
-  row=$(bd_json show "$bead" | jq -c '.[0] | select(type == "object")' 2>/dev/null)
-  [ -n "$row" ] || { echo "$PROG: $bead could not be read; nothing is guarded and the caller retries" >&2; return 1; }
-  title=$(printf '%s' "$row" | jq -r '.title // ""')
-  branch=$(printf '%s' "$row" | jq -r '(.metadata.branch // "") | tostring')
-  target=$(printf '%s' "$row" | jq -r '(.metadata.target // "") | tostring')
-  num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
-  url=$(printf '%s' "$row" | jq -r '(.metadata.pr_url // .metadata.existing_pr // "") | tostring')
-  anchor=$(printf '%s' "$row" | jq -r '(.metadata.anchor_bead // "") | tostring')
-  stamp=$(printf '%s' "$row" | jq -r '(.metadata.bring_current_from // "") | tostring')
-  # A merge-in child carries the title pr-facts.sh composes from its own PR,
-  # branch and base, the key its orphan adoption matches on.
-  case "$num" in ''|*[!0-9]*) num="" ;; esac
-  if [ -z "$num" ] || [ -z "$branch" ] || [ -z "$target" ] \
-     || [ "${title#"Merge $target into PR#$num (branch $branch):"}" = "$title" ]; then
-    echo "$PROG: $bead is not a merge-in child of an open PR; nothing to guard"
+# --- guard ---------------------------------------------------------------------
+cmd_guard() {
+  local bead="" to="" from_arg="" rc audit missing="" ev_json existing same_round triage_prev round_at prior record cs reopened got
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bead) bead="${2:-}"; shift 2 ;;
+      --to)   to="${2:-}"; shift 2 ;;
+      --from) from_arg="${2:-}"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [ -n "$bead" ] || usage
+  read_handoff "$bead" "$to" "$from_arg"; rc=$?
+  case "$rc" in 0) : ;; 10) return 0 ;; *) return "$rc" ;; esac
+
+  audit=$(audit_of "$ROW")
+  if [ "$CLASS" = "conflicted" ]; then
+    missing=$(missing_entries "$audit")
+    if [ -n "$missing" ] && [ -n "$OWED" ]; then
+      {
+        echo "$PROG: the audit on $BEAD does not cover the round $(short "$FROM")..$(short "$TO"), so it is not handed off. Each item and the entry it owes:"
+        coverage_report "$audit"
+        echo "Missing or incomplete:"
+        printf '%s\n' "$missing" | awk -F'\t' '{ printf "  %s: %s\n", $1, $2 }'
+        echo "Record each with: bring-current-audit.sh add --bead $BEAD --path <path> --collided <the two intents that met> --resolution <what was kept or written, and why> --check <what a reviewer should look at> --rating routine|judgment; then re-run the guard."
+      } >&2
+      return 3
+    fi
+    [ -z "$missing" ] || echo "$PROG: $BEAD's resume asked for no audit, so the round's items without an entry are recorded with the guard's evidence alone"
+  fi
+
+  ev_json=$(evidence_json)
+  existing=$(bca_meta_json "$AROW" bring_current_record)
+  [ -n "$existing" ] || existing='null'
+  same_round=$(printf '%s' "$existing" | jq -r --arg h "$TO" --arg b "$BEAD" \
+    'if type == "object" and .head == $h and .bead == $b then "1" else "" end' 2>/dev/null)
+  triage_prev='null'; round_at=""; prior='{"audit":[],"evidence":[]}'
+  if [ -n "$same_round" ]; then
+    triage_prev=$(printf '%s' "$existing" | jq -c '.triage // null')
+    round_at=$(bca_meta "$AROW" bring_current_round_at)
+    prior=$(printf '%s' "$existing" | jq -c '{audit: [ .audit[]? | select(.round != null) ], evidence: [ .evidence[]? | select(.round != null) ], from: .from}')
+  elif printf '%s' "$existing" | jq -e 'type == "object" and .class == "conflicted" and .triage == null' >/dev/null 2>&1; then
+    # An earlier round still awaiting a ruling: its account rides into this
+    # record, tagged with its own head, so the ruling covers everything not yet
+    # ruled on.
+    prior=$(printf '%s' "$existing" | jq -c '(.head // "") as $h
+      | {audit: [ .audit[]? | if .round == null then . + {round: $h} else . end ],
+         evidence: [ .evidence[]? | if .round == null then . + {round: $h} else . end ],
+         from: .from}')
+  fi
+  record=$(jq -nc --arg head "$TO" --arg from "$FROM" --arg target "$TARGET" \
+    --arg base "$(git rev-parse -q --verify "refs/remotes/origin/$TARGET" 2>/dev/null)" \
+    --arg bead "$BEAD" --arg class "$CLASS" --arg scope "$SCOPE" --arg at "$(now)" \
+    --argjson ev "$ev_json" --argjson audit "$audit" --argjson triage "$triage_prev" --argjson prior "$prior" '
+    ([ $ev[] | select(.covered) | .path ] | unique) as $paths
+    | {head: $head, from: ($prior.from // $from), target: $target, base_oid: $base, bead: $bead,
+       class: $class, scope: $scope, at: $at,
+       evidence: ($ev + ($prior.evidence // [])),
+       audit: ([ $audit[] | select(type == "object" and (.path as $p | $paths | index($p)) != null) ] + ($prior.audit // [])),
+       triage: $triage }' 2>/dev/null)
+  [ -n "$record" ] || { echo "$PROG: the round's record could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
+  # The record covers everything since the last round that was ruled on, so a
+  # clean round that carries an earlier round still awaiting a ruling is filed
+  # as conflicted: that ruling is still owed.
+  record=$(printf '%s' "$record" | jq -c 'if ([ .evidence[] | select(.covered) ] | length) > 0 then .class = "conflicted" else . end')
+
+  if [ "$(printf '%s' "$record" | jq -r '.class')" = "clean" ]; then
+    gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
+    got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
+    [ "$got" = "$TO" ] || { echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2; return 1; }
+    echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET was clean (git merged it on its own, up to $(short "$TO")); recorded on $ANCHOR, nothing reopens"
     return 0
   fi
 
-  # The stamp marks where this bead's bring-current began, so a head that does
-  # not descend from it is a rewritten history, which classify judges.
-  from="${stamp:-$from_arg}"
-  git fetch -q origin "+refs/heads/$target:refs/remotes/origin/$target" >/dev/null 2>&1 || true
-  base="refs/remotes/origin/$target"
-  if [ -n "$from" ]; then
-    classify "$from" "$to" "$base"
-  else
-    VERDICT="judgment"
-    REASONS="nothing records where this bring-current began, so what it changed cannot be read"
+  # A ruling the guard made itself belongs to a hand-off that is being re-run,
+  # so it is carried out again. Triage's ruling is carried out by the verdict
+  # that recorded it.
+  if [ "$(printf '%s' "$triage_prev" | jq -r '.by? // ""' 2>/dev/null)" = "guard" ]; then
+    closed_ruling "$record" "$round_at"
+    return $?
   fi
-  if [ "$VERDICT" = "mechanical" ]; then
-    echo "$PROG: PR#$num's bring-current took no judgment: $REASONS. Any approval stands."
+  if [ "$triage_prev" != "null" ]; then
+    gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
+    got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
+    [ "$got" = "$TO" ] || { echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2; return 1; }
+    echo "$PROG: the round up to $(short "$TO") is already recorded on $ANCHOR and triage has ruled on it; nothing more is owed"
     return 0
   fi
 
-  # Judgment. Whether it costs an approval depends on whether one stands.
-  local host repo self reviews approvals logins noun covers them are key msg dmsg visit rows failed="" dismissed="" rid login
-  host=$(printf '%s' "$url" | sed -n 's#^https://\([^/]*\)/[^/]*/[^/]*/pull/[0-9][0-9]*.*#\1#p')
-  repo=$(printf '%s' "$url" | sed -n 's#^https://[^/]*/\([^/]*/[^/]*\)/pull/[0-9][0-9]*.*#\1#p')
-  if [ -z "$host" ] || [ -z "$repo" ] || [ "$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')" != "$num" ]; then
-    echo "$PROG: $bead names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
+  # An empty check_set is stamped with the default, which declares triage. A
+  # set that declares no triage lane has no review to rule on the round.
+  cs=$(bca_meta "$AROW" check_set | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
+  if [ -n "$cs" ] && ! grep -qx -- "$TRIAGE_LANE" <<< "$cs"; then
+    closed_ruling "$record" "$round_at"
+    return $?
+  fi
+  reopened=$(printf '%s,%s' "$(bca_meta "$AROW" bring_current_reopened)" "$TRIAGE_LANE" \
+    | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
+  [ -n "$round_at" ] || round_at=$(now)
+  # The reopened lanes and the round's time land with the record, before the
+  # triage lane loses its backing: from the moment the backing goes, no approval
+  # older than the round vouches for the lane, so the merge cannot slip past it.
+  gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" \
+    --set-metadata "bring_current_reopened=$reopened" --set-metadata "bring_current_round_at=$round_at" >/dev/null 2>&1 || true
+  got=$(bd_json show "$ANCHOR")
+  if [ "$(bca_meta_json "$got" bring_current_record | jq -r '.head // ""' 2>/dev/null)" != "$TO" ] \
+     || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ] \
+     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ]; then
+    echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2
     return 1
   fi
+  if ! "$REVIEW_OUTCOME" supersede-lane --anchor "$ANCHOR" --lane "$TRIAGE_LANE" \
+       --reason "bring-current round up to $(short "$TO") conflicted; triage decides what it reopens" >/dev/null; then
+    echo "$PROG: the triage lane on $ANCHOR could not be reopened; nothing is handed off and the caller retries" >&2
+    return 1
+  fi
+  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")); the audit and evidence are recorded on $ANCHOR, and triage is reopened to decide what the round reopens"
+  return 0
+}
+
+# --- the closed ruling ---------------------------------------------------------
+# Rule closed on a conflicted round whose anchor declares no triage lane (see
+# CLOSED RULING above), or carry out again the closed ruling a re-run of the
+# same hand-off finds in its record. The record with the ruling, the reopened
+# lanes and the round's time are written and read back before any lane loses
+# its backing, as for the triage lane, and the dismissal runs last because it
+# reads the round's time. rc 0 recorded and carried out · 1 a read or a write
+# failed; nothing is handed off and the caller retries.
+closed_ruling() { # <record-json> <round-at, empty for a new round>
+  local record="$1" round_at="$2" ruling cs lanes lanes_json url num dismiss=false reopened got lane writes
+  cs=$(bca_meta "$AROW" check_set)
+  ruling=$(printf '%s' "$record" | jq -c 'if (.triage.by? // "") == "guard" then .triage else empty end' 2>/dev/null)
+  if [ -z "$ruling" ]; then
+    if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$cs" --through merge 2>/dev/null); then
+      echo "$PROG: the lanes $ANCHOR's check_set ('$cs') declares could not be resolved, so the round cannot be ruled on; nothing is handed off and the caller retries" >&2
+      return 1
+    fi
+    lanes_json=$(printf '%s' "$lanes" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')
+    # Where a PR stands, the same test dismiss_approvals applies.
+    url=$(bca_meta "$AROW" pr_url); [ -n "$url" ] || url=$(bca_meta "$AROW" existing_pr)
+    num=$(bca_meta "$AROW" pr_number)
+    [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
+    [ -n "$url" ] && [ -n "$num" ] && dismiss=true
+    ruling=$(jq -nc --argjson l "$lanes_json" --argjson d "$dismiss" --arg cs "$cs" --arg at "$(now)" \
+      '{by: "guard", reopen: $l, add: [], dismiss: $d,
+        reason: "no triage lane is declared on this anchor (check_set \u0027\($cs)\u0027), so no review weighs what the round changed, and it is ruled the safe way", at: $at}')
+    [ -n "$ruling" ] || { echo "$PROG: the closed ruling could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
+    record=$(printf '%s' "$record" | jq -c --argjson t "$ruling" '.triage = $t' 2>/dev/null)
+    [ -n "$record" ] || { echo "$PROG: the round's record could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
+  fi
+  lanes_json=$(printf '%s' "$ruling" | jq -c '.reopen // []')
+  reopened=$(printf '%s\n%s' "$(bca_meta "$AROW" bring_current_reopened | tr ',' '\n')" "$(printf '%s' "$lanes_json" | jq -r '.[]')" \
+    | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
+  [ -n "$round_at" ] || round_at=$(now)
+  writes=(--set-metadata "bring_current_record=$record" --set-metadata "bring_current_round_at=$round_at")
+  [ -n "$reopened" ] && writes+=(--set-metadata "bring_current_reopened=$reopened")
+  gc bd update "$ANCHOR" "${writes[@]}" >/dev/null 2>&1 || true
+  got=$(bd_json show "$ANCHOR")
+  if [ "$(bca_meta_json "$got" bring_current_record | jq -r '(.head // "") + " " + (.triage.by // "")' 2>/dev/null)" != "$TO guard" ] \
+     || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ] \
+     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ]; then
+    echo "$PROG: the round's record and its closed ruling did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2
+    return 1
+  fi
+  for lane in $(printf '%s' "$lanes_json" | jq -r '.[]'); do
+    if ! "$REVIEW_OUTCOME" supersede-lane --anchor "$ANCHOR" --lane "$lane" \
+         --reason "bring-current round up to $(short "$TO") conflicted, and the anchor declares no triage lane to rule on it, so every declared lane runs again" >/dev/null; then
+      echo "$PROG: lane $lane on $ANCHOR could not be reopened; nothing is handed off and the caller retries" >&2
+      return 1
+    fi
+  done
+  if [ "$(printf '%s' "$ruling" | jq -r '.dismiss')" = "true" ]; then
+    dismiss_approvals "$ANCHOR" "$got" "$(bca_meta_json "$got" bring_current_record)" || return 1
+  fi
+  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")), and $ANCHOR's check_set ('$cs') declares no triage lane, so the guard ruled closed: $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "no lane is declared to run again" else join(", ") + (if length == 1 then " runs" else " run" end) + " again on the merged code" end')$([ "$(printf '%s' "$ruling" | jq -r '.dismiss')" = "true" ] && echo ", and the approval given before the round is withdrawn")"
+  return 0
+}
+
+# --- dismiss -------------------------------------------------------------------
+# Dismiss the standing approvals on the anchor's PR given before the round, the
+# re-ask visit first. rc 0 nothing stood, or the visit holds the merge · 1
+# nothing was dismissed and the caller retries.
+dismiss_approvals() { # <anchor> <anchor-row> <record-json>
+  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun key msg dmsg rows visit failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN
+  # shellcheck disable=SC2034  # approval_phrase sets it; these messages render from the record and use no verb
+  local APPROVAL_VERB
+  url=$(bca_meta "$arow" pr_url); [ -n "$url" ] || url=$(bca_meta "$arow" existing_pr)
+  num=$(bca_meta "$arow" pr_number)
+  [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
+  if [ -z "$url" ] || [ -z "$num" ]; then
+    echo "$PROG: no PR stands on $anchor, so no approval stands to dismiss"
+    return 0
+  fi
+  if ! pr_coords "$url" "$num"; then
+    echo "$PROG: $anchor names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
+    return 1
+  fi
+  host="$PR_HOST"; repo="$PR_REPO"
   self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
   if [ -z "$self" ]; then
     echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
@@ -412,44 +774,34 @@ cmd_guard() {
     echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
     return 1
   fi
-  approvals=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" "$REVIEW_VERDICT_DEF"'
-    [ standing_approvals($self)[] | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
+  # An approval submitted after the round saw the merged code, so it stands.
+  since=$(bca_meta "$arow" bring_current_round_at)
+  approvals=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
+    [ standing_approvals($self)[]
+      | select($since == "" or (((.submitted_at // "") | tostring) <= $since))
+      | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
   if [ -z "$approvals" ]; then
     echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2
     return 1
   fi
   if [ "$approvals" = "[]" ]; then
-    echo "$PROG: PR#$num's bring-current took judgment, but no approval stands to dismiss; the next review sees the change"
+    later=$(printf '%s' "$reviews" | scrub | jq -s --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
+      [ standing_approvals($self)[] | select(((.submitted_at // "") | tostring) > $since) ] | length' 2>/dev/null)
+    if [ -n "$since" ] && [ "${later:-0}" != "0" ]; then
+      echo "$PROG: the round's ruling withdraws the approval on PR#$num, but every standing approval was given after the round and saw the merged code, so none is dismissed"
+    else
+      echo "$PROG: the round's ruling withdraws the approval on PR#$num, but no approval stands to dismiss"
+    fi
     return 0
   fi
-  logins=$(printf '%s' "$approvals" | jq -r '[ .[].login ] | if length > 1 then (.[:-1] | join(", ")) + " and " + .[-1] else .[0] end')
-  if [ "$(printf '%s' "$approvals" | jq 'length')" -gt 1 ]; then
-    noun="approvals"; covers="cover"; them="them"; are="are"
-  else
-    noun="approval"; covers="covers"; them="it"; are="is"
-  fi
+  approval_phrase "$approvals"
+  logins="$APPROVERS"; noun="$APPROVAL_NOUN"
 
-  if [ -z "$anchor" ]; then
-    rows=$(bd_list --status=open --metadata-field branch="$branch") || rows=""
-    anchor=$(printf '%s' "$rows" | jq -r --arg self "$bead" '
-      [ .[]? | select(.id != $self) | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
-      | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null)
-  fi
-  if [ -z "$anchor" ]; then
-    echo "$PROG: PR#$num's anchor could not be resolved, so there is no bead to file the visit on; nothing is dismissed and the caller retries" >&2
-    return 1
-  fi
-
-  key="bring-current-judgment.$num.$to"
-  msg="PR#$num $noun dismissed: bringing it current with $target took judgment
-Bringing PR#$num ($url) current with $target changed the approved code in ways git does not make on its own, so the $noun from $logins no longer $covers what would land. The city dismisses $them and asks for the review again.
-
-What the bring-current changed beyond a mechanical merge, up to pushed head $(short "$to"):
-$(reason_lines)
-
-Your call: review the change on the PR and approve again to let it land, or say what to change. This visit holds the merge while it is open."
+  key="bring-current-dismissal.$num.$(printf '%s' "$record" | jq -r '.head // ""')"
+  msg=$(bca_render_record "$record" visit "$num" "$url" "$logins")
+  [ -n "$msg" ] || { echo "$PROG: the re-ask visit could not be composed; nothing is dismissed and the caller retries" >&2; return 1; }
   if ! "$ESCALATE" --subject "$anchor" --key "$key" --message "$msg"; then
-    echo "$PROG: the visit on $anchor did not land; the approval is NOT dismissed, so it is never cleared without a signal, and the caller retries" >&2
+    echo "$PROG: the visit on $anchor did not land; the $noun is NOT dismissed, so it is never cleared without a signal, and the caller retries" >&2
     return 1
   fi
   if ! rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" --metadata-field "gc.continuation_group=$anchor"); then
@@ -460,18 +812,24 @@ Your call: review the change on the PR and approve again to let it land, or say 
     [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
           | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' 2>/dev/null)
   if [ -z "$visit" ]; then
-    echo "$PROG: escalate.sh left no open visit for this bring-current (a sitting has already answered it), so the $noun from $logins $are left standing"
+    echo "$PROG: escalate.sh left no open visit for this dismissal (a sitting has already answered it), so the $noun from $logins stays standing"
     return 0
   fi
 
-  dmsg="Bringing this branch current with $target took judgment (pushed head $(short "$to")), so this approval no longer covers the code that would land: $(printf '%s\n' "$REASONS" | awk -v max="$MAX_REASONS" 'NF { n++; if (n <= max) printf "%s%s", (n > 1 ? "; " : ""), $0 } END { if (n > max) printf "; and %d more", n - max }'). Please review the change and approve again."
-  while IFS=$'\t' read -r rid login; do
-    [ -n "$rid" ] || continue
+  dmsg=$(bca_render_record "$record" dismissal "$num" "$url" "$logins")
+  [ "${#dmsg}" -le 2000 ] || dmsg="${dmsg:0:1990}…"
+  while IFS= read -r login; do
+    [ -n "$login" ] || continue
     gh api --hostname "$host" -X POST "repos/$repo/pulls/$num/requested_reviewers" \
       -f "reviewers[]=$login" </dev/null >/dev/null 2>&1 || failed="$failed; $login was not re-requested"
+  done <<APPROVERS
+$(printf '%s' "$approvals" | jq -r '[ .[].login ] | unique | .[]')
+APPROVERS
+  while IFS=$'\t' read -r rid login; do
+    [ -n "$rid" ] || continue
     if gh api --hostname "$host" -X PUT "repos/$repo/pulls/$num/reviews/$rid/dismissals" \
          -f message="$dmsg" </dev/null >/dev/null 2>&1; then
-      dismissed="$dismissed${dismissed:+, }$login"
+      dismissed="$dismissed${dismissed:+, }$login (review $rid)"
     else
       failed="$failed; the approval from $login (review $rid) could not be dismissed"
     fi
@@ -479,17 +837,106 @@ Your call: review the change on the PR and approve again to let it land, or say 
 $(printf '%s' "$approvals" | jq -r '.[] | "\(.id)\t\(.login)"')
 APPROVALS
   if [ -n "$failed" ]; then
-    gc bd update "$visit" --append-notes "Not every write on GitHub landed: ${failed#; }. Any approval still showing there predates the judgment this bring-current took, and this visit holds the merge until it closes." >/dev/null 2>&1 \
+    gc bd update "$visit" --append-notes "Not every write on GitHub landed: ${failed#; }. Any approval still showing there predates the ruling on this bring-current, and this visit holds the merge until it closes." >/dev/null 2>&1 \
       || echo "$PROG: WARN the dismissal failures could not be noted on visit $visit" >&2
-    echo "$PROG: PR#$num's bring-current took judgment; visit $visit holds the merge; dismissed: ${dismissed:-none}; not cleared: ${failed#; }" >&2
+    echo "$PROG: visit $visit holds PR#$num's merge; dismissed: ${dismissed:-none}; not cleared: ${failed#; }" >&2
     return 0
   fi
-  echo "$PROG: PR#$num's bring-current took judgment; visit $visit holds the merge, and the $noun from $logins $are dismissed"
+  echo "$PROG: visit $visit holds PR#$num's merge, and the $noun from $logins dismissed"
+  return 0
+}
+
+# --- decide --------------------------------------------------------------------
+# Triage's ruling on a conflicted round, run by signoff.sh before it records the
+# triage verdict. rc 0 recorded and carried out · 1 refused, nothing written ·
+# 2 a write did not land; the review stays open and the same call retries.
+cmd_decide() {
+  local anchor="" review="" reopen="" add="" dismiss="" reason="" body_out="" arow record decided tokens lane bad="" lanes_json add_json triage new reopened got num url
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --anchor)           anchor="${2:-}"; shift 2 ;;
+      --review-bead)      review="${2:-}"; shift 2 ;;
+      --reopen)           reopen="${2:-}"; shift 2 ;;
+      --add)              add="${2:-}"; shift 2 ;;
+      --dismiss-approval) dismiss=1; shift ;;
+      --reason)           reason="${2:-}"; shift 2 ;;
+      --body-out)         body_out="${2:-}"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [ -n "$anchor" ] && [ -n "$review" ] && [ -n "$reopen" ] || usage
+  reason=$(bca_flat "$reason")
+  [ -n "$reason" ] || { echo "$PROG: a ruling on a bring-current round says why (--reason); nothing written" >&2; return 1; }
+  arow=$(bd_json show "$anchor")
+  printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+    || { echo "$PROG: anchor $anchor could not be read; nothing written" >&2; return 2; }
+  record=$(bca_meta_json "$arow" bring_current_record)
+  printf '%s' "$record" | jq -e 'type == "object" and .class == "conflicted"' >/dev/null 2>&1 \
+    || { echo "$PROG: anchor $anchor carries no conflicted bring-current round for triage to rule on; nothing written" >&2; return 1; }
+  decided=$(printf '%s' "$record" | jq -r '.triage.review // ""')
+  if [ -n "$decided" ] && [ "$decided" != "$review" ]; then
+    echo "$PROG: the round on $anchor up to $(printf '%s' "$record" | jq -r '.head // "" | .[0:12]') was already ruled on by $decided; nothing written" >&2
+    return 1
+  fi
+
+  # The lanes a ruling may reopen are the ones the anchor declares. A lane it
+  # does not declare has no review to run again; triage adds one with --add-gates.
+  tokens=$(bca_meta "$arow" check_set | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
+  [ "$reopen" = "none" ] && reopen=""
+  for lane in $(printf '%s' "$reopen" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d'); do
+    case "$lane" in none|off|approval) bad="${bad:+$bad, }$lane"; continue ;; esac
+    printf '%s\n' "$tokens" | grep -qx -- "$lane" || bad="${bad:+$bad, }$lane"
+  done
+  if [ -n "$bad" ]; then
+    echo "$PROG: --reopen names $bad, which $anchor's check_set ('$(bca_meta "$arow" check_set)') does not declare as a review lane; nothing written" >&2
+    return 1
+  fi
+  lanes_json=$(printf '%s' "$reopen" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')
+  add_json=$(printf '%s' "$add" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')
+  if [ -n "$decided" ]; then
+    # A retry of the same ruling carries out what was recorded.
+    lanes_json=$(printf '%s' "$record" | jq -c '.triage.reopen // []')
+    add_json=$(printf '%s' "$record" | jq -c '.triage.add // []')
+    [ "$(printf '%s' "$record" | jq -r '.triage.dismiss')" = "true" ] && dismiss=1 || dismiss=""
+    triage=$(printf '%s' "$record" | jq -c '.triage')
+  else
+    triage=$(jq -nc --arg r "$review" --argjson l "$lanes_json" --argjson a "$add_json" \
+      --argjson d "$([ -n "$dismiss" ] && echo true || echo false)" --arg why "$reason" --arg at "$(now)" \
+      '{review: $r, reopen: $l, add: $a, dismiss: $d, reason: $why, at: $at}')
+  fi
+  new=$(printf '%s' "$record" | jq -c --argjson t "$triage" '.triage = $t')
+  reopened=$(printf '%s\n%s\n%s' "$(bca_meta "$arow" bring_current_reopened | tr ',' '\n')" \
+      "$(printf '%s' "$lanes_json" | jq -r '.[]')" "$(printf '%s' "$add_json" | jq -r '.[]')" \
+    | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
+  gc bd update "$anchor" --set-metadata "bring_current_record=$new" --set-metadata "bring_current_reopened=$reopened" >/dev/null 2>&1 || true
+  got=$(bd_json show "$anchor")
+  if [ "$(bca_meta_json "$got" bring_current_record | jq -r '.triage.review // ""' 2>/dev/null)" != "$review" ] \
+     || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ]; then
+    echo "$PROG: triage's ruling did not read back on $anchor; the review stays open and the same call retries" >&2
+    return 2
+  fi
+  for lane in $(printf '%s' "$lanes_json" | jq -r '.[]'); do
+    if ! "$REVIEW_OUTCOME" supersede-lane --anchor "$anchor" --lane "$lane" \
+         --reason "bring-current round up to $(printf '%s' "$new" | jq -r '.head // "" | .[0:12]') reopened by triage $review" >/dev/null; then
+      echo "$PROG: lane $lane on $anchor could not be reopened; the review stays open and the same call retries" >&2
+      return 2
+    fi
+  done
+  if [ -n "$dismiss" ]; then
+    dismiss_approvals "$anchor" "$got" "$new" || return 2
+  fi
+  if [ -n "$body_out" ]; then
+    num=$(bca_meta "$got" pr_number); url=$(bca_meta "$got" pr_url)
+    bca_render_record "$new" comment "$num" "$url" > "$body_out" || { echo "$PROG: the round's account could not be rendered; the review stays open and the same call retries" >&2; return 2; }
+  fi
+  echo "$PROG: triage's ruling on $anchor's bring-current round recorded: reopened $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing" else join(", ") end')$([ -n "$dismiss" ] && echo ", approval dismissal requested")"
   return 0
 }
 
 case "${1:-}" in
-  classify) shift; cmd_classify "$@" ;;
   guard)    shift; cmd_guard "$@" ;;
+  coverage) shift; cmd_coverage "$@" ;;
+  classify) shift; cmd_classify "$@" ;;
+  decide)   shift; cmd_decide "$@" ;;
   *) usage ;;
 esac

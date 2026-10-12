@@ -5,16 +5,23 @@
 # instead of filing a second one, and a proactive first reaction
 # (formulas/mol-first-reaction.toml) reads it and picks the disposition: route
 # it to a pool, hold it on an edge, or file the visit.
+# A patrol that types its key by hand picks it afresh on every pass, so one
+# situation can come back under a new key or a new subject, where the
+# exact-match dedup cannot see it. A NEW bead that shares its key or its subject
+# with a live finding in its scope is therefore refused, and those findings are
+# listed for the caller to compare. --distinct files it anyway.
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
-#                     [--priority <n>] [--rig <rig>] [--no-react] [--dry-run]
+#                     [--priority <n>] [--rig <rig>] [--distinct]
+#                     [--no-react] [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml.
 # The visit is not this path's exit. A finding needing the operator's judgment
 # gets there through the reaction's `ruling` disposition, which files the visit
 # inline (the gate-visit block in formulas/mol-first-reaction.toml). A patrol
 # calls assets/scripts/escalate.sh directly only for an emergency it cannot
 # express as a bead.
-# Exit: 0 filed or already tracked · 1 could not file/verify · 2 usage
+# Exit: 0 filed or already tracked · 1 could not file/verify · 2 usage ·
+#       3 refused: a live finding in the scope shares the key or the subject
 set -uo pipefail
 
 PROG="patrol-finding"
@@ -61,10 +68,17 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
   --message   the finding, verbatim — it becomes the bead body, and it is
               what the first reaction reads
   --about     the bead this finding is ABOUT. Adds a `tracks` edge and
-              narrows the dedup to that bead, so one key over two beads is
-              two findings
+              narrows the dedup to that bead. A wisp (`*-wisp-*`) is dropped
+              with a warning: its pass burns it, so the key alone is the
+              identity
   --scope     which patrol filed it (deacon-findings, witness-findings);
               recorded as finding.scope
+  --distinct  file a new bead although a live finding in this scope shares
+              its key (about another bead) or its subject (under another
+              key). Without it that filing is refused with exit 3 and the
+              live findings are listed; when the report is one of their
+              situations, re-run with that finding's --key and --about. A
+              per-bead key, one finding per --about, passes it on every call
   --type      bead type (default: bug)
   --priority  bead priority; the proactive scan spends its slots by board
               weight, so a finding that matters should say so
@@ -77,7 +91,7 @@ U
 }
 
 KEY=""; CHECK=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
-PRIORITY=""; RIG_ARG=""; NO_REACT=""; DRY=""
+PRIORITY=""; RIG_ARG=""; DISTINCT=""; NO_REACT=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)      KEY="${2:-}";      shift 2 || { usage; exit 2; } ;;
@@ -89,6 +103,7 @@ while [ $# -gt 0 ]; do
     --type)     TYPE="${2:-}";     shift 2 || { usage; exit 2; } ;;
     --priority) PRIORITY="${2:-}"; shift 2 || { usage; exit 2; } ;;
     --rig)      RIG_ARG="${2:-}";  shift 2 || { usage; exit 2; } ;;
+    --distinct) DISTINCT=1; shift ;;
     --no-react) NO_REACT=1; shift ;;
     -n|--dry-run) DRY=1; shift ;;
     -h|--help)  usage; exit 2 ;;
@@ -113,6 +128,13 @@ fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
+esac
+# A wisp names no subject a later pass can match: its patrol burns it when the
+# pass ends and the next pass pours another, so every pass would carry a new
+# --about and file a new bead. The key alone is the identity there, as in
+# escalate.sh's subject-class block, and no tracks edge is drawn to it.
+case "$ABOUT" in
+  *-wisp-*) warn "--about $ABOUT is a wisp, which its pass burns; filing on the key alone"; ABOUT="" ;;
 esac
 
 # GC_RIG selects the store `gc bd` reads and writes, and gc-proactive.sh
@@ -223,6 +245,29 @@ find_by_key() {
   printf '%s' "$rows" | jq -r '.[0].id // empty' 2>/dev/null || return 2
 }
 
+# siblings -> the live findings in this scope that share the key about another
+# subject (or none), or the subject under another key, as a JSON array with
+# the oldest unheld bead first, or `[]` when there are none. NON-ZERO without
+# printing when the listing cannot be trusted, the same contract as
+# rows_by_key: a failed read is not "no sibling".
+siblings() {
+  local out
+  out=$(bd_json list --status="$LIVE_STATUSES" --metadata-field "finding.scope=$SCOPE_LABEL" --limit=0) \
+    || return 2
+  printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  printf '%s' "$out" \
+    | jq -c --arg k "$KEY" --arg a "$ABOUT" --arg sc "$SCOPE_LABEL" --arg st "$LIVE_STATUSES" \
+        '($st | split(",")) as $want
+         | [ .[] | select(((.metadata["finding.scope"] // "") == $sc)
+                      and ((.status // "") as $s | $want | any(. == $s)))
+                 | ((.metadata["finding.key"] // "") | tostring) as $fk
+                 | ((.metadata["finding.about"] // "") | tostring) as $fa
+                 | select($fk != "")
+                 | select(($fk == $k and $fa != $a) or ($a != "" and $fa == $a and $fk != $k)) ]
+         | sort_by([(.status == "blocked"), (.created_at // "")])' 2>/dev/null \
+    || return 2
+}
+
 # waits_on_open <blocker-id>... -> 0 while one of the blockers is still open, 1
 # once every one of them reads closed, and 1 when there are none. A blocker
 # counts as closed only when a read shows it closed. One whose read fails, or
@@ -242,8 +287,8 @@ SCOPE_LABEL="${SCOPE:-unscoped}"
 DEDUP_SCOPE="[$KEY]${ABOUT:+ on $ABOUT}"
 
 if [ -n "$DRY" ]; then
-  printf 'key=%s scope=%s rig=%s type=%s%s\n' \
-    "$KEY" "$SCOPE_LABEL" "${GC_RIG:-}" "$TYPE" "${ABOUT:+ about=$ABOUT}"
+  printf 'key=%s scope=%s rig=%s type=%s%s%s\n' \
+    "$KEY" "$SCOPE_LABEL" "${GC_RIG:-}" "$TYPE" "${ABOUT:+ about=$ABOUT}" "${DISTINCT:+ distinct}"
   printf 'title=%s\n' "$TITLE"
   printf 'would file (or update) one bead for %s\n' "$DEDUP_SCOPE"
   exit 0
@@ -318,6 +363,32 @@ $MESSAGE"
   fi
   warn "could not record the recurrence on $EXISTING; the finding is still tracked there"
   exit 1
+fi
+
+# ── A live finding already reports this situation under another name ──
+# The exact match above sees a repeat only when the caller typed the same key
+# and subject again. A patrol that types its key afresh each pass can report
+# one situation under a new key with the same subject, or under the same key
+# with another subject, and each such filing would be a twin with its own first
+# reaction. So a new bead that shares either half with a live finding in this
+# scope is refused, and those findings are listed. A caller whose situation is
+# one of them re-runs with its --key and --about, and the report becomes an
+# occurrence there. --distinct says the caller compared and it is not, or that
+# the key is per-bead by design.
+if [ -z "$DISTINCT" ]; then
+  if ! SIBLINGS=$(siblings); then
+    warn "sibling lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot let a twin of a live finding through. Re-run when the store is readable."
+    exit 1
+  fi
+  if [ "$(printf '%s' "$SIBLINGS" | jq 'length' 2>/dev/null)" != "0" ]; then
+    warn "refusing to file a new bead for $DEDUP_SCOPE: live findings in the $SCOPE_LABEL scope already share its key or its subject:"
+    printf '%s' "$SIBLINGS" | jq -r '.[]
+      | "  \(.id) [\(.status // "?")] --key \(.metadata["finding.key"] // "")"
+        + (if (.metadata["finding.about"] // "") != "" then " --about \(.metadata["finding.about"])" else "" end)
+        + " — \(.title // "")"' >&2
+    warn "If this is one of those situations, re-run with its --key and --about, and the report lands on it as an occurrence. If it is a different situation, re-run with --distinct."
+    exit 3
+  fi
 fi
 
 # ── Recurring after its bead let go is news, and gets its own bead ────
