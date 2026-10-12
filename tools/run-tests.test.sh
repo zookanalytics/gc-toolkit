@@ -31,6 +31,11 @@
 #     /tmp when it is unset, with no symlink and no trailing slash, while the
 #     same file run directly gets the TMPDIR as given; a TMPDIR that names no
 #     directory is a usage error;
+#   - every file runs with the test floor at the front of PATH: gc, bd and gh
+#     resolve to it and git does not, and a call made after a file's stub
+#     directory is removed is refused there rather than reaching the binary
+#     behind it, which the same file run directly reaches; a tree without the
+#     floor does not run;
 #   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
 #     counted by nproc, else getconf, else sysctl, and capped at the run count;
 #     TEST_JOBS and -j each override that default;
@@ -91,10 +96,12 @@ unset GIT_CONFIG_COUNT "${!GIT_CONFIG_KEY_@}" "${!GIT_CONFIG_VALUE_@}"
 unset TEST_JOBS TEST_TIMEOUT TEST_RETRY
 
 # The runner derives its root from its own location, so give it a git repo to
-# sit in. The fixtures live outside it and are passed by absolute path.
+# sit in, with the test floor it puts every file above. The fixtures live
+# outside it and are passed by absolute path.
 REPO="$TMP/repo"
 mkdir -p "$REPO/tools"
 cp "$RUNNER" "$REPO/tools/run-tests.sh"
+cp -R "$HERE/test-floor" "$REPO/tools/"
 git -C "$REPO" init -q
 RUNNER_COPY="$REPO/tools/run-tests.sh"
 
@@ -376,6 +383,62 @@ TMPDIR="$TMP/no-such-dir" run "$FIX/tmpdir.test.sh"
 eq "$RC" 2 "a TMPDIR that names no directory is a usage error"
 has "$OUT" "cannot resolve the temp directory '$TMP/no-such-dir'" "…and named"
 if [ -e "$STATE/tmpdir" ]; then bad "and no file runs" "the fixture ran"; else ok "and no file runs"; fi
+
+echo "── floor: every file runs above the test floor ──"
+# CANARY stands in for the directory holding the real gc, bd and gh: each one
+# there records that it was reached. The fixture stubs gc the way a suite does,
+# in a directory at the front of PATH, then removes that directory, as a killed
+# suite's EXIT trap or the scratch reaper does, and calls gc again. Each call
+# runs in a subshell, as a script under test makes most of its calls, so each
+# one searches PATH afresh. A shell that ran gc itself remembers the stub's path
+# and fails on the missing file without searching again.
+CANARY="$TMP/canary"
+mkdir -p "$CANARY"
+for t in gc bd gh; do
+  cat > "$CANARY/$t" <<C
+#!/usr/bin/env bash
+echo "$t reached" >> "\$RUNTESTS_FIXTURE_STATE/canary"
+C
+  chmod +x "$CANARY/$t"
+done
+cat > "$FIX/floor.test.sh" <<'F'
+#!/usr/bin/env bash
+S="$RUNTESTS_FIXTURE_STATE"
+for t in gc bd gh git; do printf '%s=%s\n' "$t" "$(command -v "$t")"; done > "$S/resolved"
+BIN="$(mktemp -d "${TMPDIR:-/tmp}/gctk-floor-fixture.XXXXXX")"
+printf '#!/usr/bin/env bash\necho stub\n' > "$BIN/gc"
+chmod +x "$BIN/gc"
+export PATH="$BIN:$PATH"
+( gc bd show x > "$S/with-stub" )
+rm -rf "$BIN"
+( gc bd create debris 2> "$S/refusal"; echo "$?" > "$S/rc" )
+F
+reset_state
+PATH="$CANARY:$PATH" run "$FIX/floor.test.sh"
+eq "$RC" 0 "a file runs with the floor on PATH"
+eq "$(grep '^gc=' "$STATE/resolved")" "gc=$REPO/tools/test-floor/gc" "gc resolves to the floor, ahead of the caller's PATH"
+eq "$(grep '^bd=' "$STATE/resolved")" "bd=$REPO/tools/test-floor/bd" "…and bd"
+eq "$(grep '^gh=' "$STATE/resolved")" "gh=$REPO/tools/test-floor/gh" "…and gh"
+hasnt "$(grep '^git=' "$STATE/resolved")" "test-floor" "git is left to the caller's PATH, since suites run the real git"
+eq "$(cat "$STATE/with-stub")" "stub" "the file's own stub answers ahead of the floor"
+eq "$(cat "$STATE/rc")" "127" "with the stub directory gone, the call fails as a missing command"
+has "$(cat "$STATE/refusal")" "test-floor: refused 'gc bd create'" "…refused by the floor, which names it"
+if [ -e "$STATE/canary" ]; then bad "…and the binary behind the floor is never reached" "$(cat "$STATE/canary")"; else ok "…and the binary behind the floor is never reached"; fi
+# Run directly the file has no floor, so the same call reaches the canary: the
+# canary is reachable, and the runner is what stands in front of it.
+reset_state
+RUNTESTS_FIXTURE_STATE="$STATE" PATH="$CANARY:$PATH" bash "$FIX/floor.test.sh"
+eq "$(cat "$STATE/canary" 2>/dev/null)" "gc reached" "the same file run directly reaches the binary behind its removed stub"
+# A tree without the floor does not run.
+NREPO="$TMP/nofloor-repo"
+mkdir -p "$NREPO/tools"
+cp "$RUNNER" "$NREPO/tools/run-tests.sh"
+git -C "$NREPO" init -q
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$NREPO/tools/run-tests.sh" -j 2 -t 30 "$FIX/floor.test.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a runner whose tree has no floor refuses to run"
+has "$OUT" "no test floor at $NREPO/tools/test-floor" "…and names the missing floor"
+if [ -e "$STATE/resolved" ]; then bad "…and no file runs" "the fixture ran"; else ok "…and no file runs"; fi
 
 echo "── jobs: the default is half the cores, at least one ──"
 # The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of
