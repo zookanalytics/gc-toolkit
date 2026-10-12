@@ -44,8 +44,7 @@ export RIG_PATH="$TMP/rig"
 # payload shape the real `bd show` emits for that reading. Every mutating call is
 # appended to $FAKE_CALLS so "nothing was written/dispatched/spawned" is asserted
 # against the actual argv, not exit status alone.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "${1:-}" in
   "rig")
     [ "${2:-}" = "list" ] && jq -n --arg p "${RIG_PATH:-/nonexistent}" \

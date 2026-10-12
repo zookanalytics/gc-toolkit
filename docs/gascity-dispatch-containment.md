@@ -137,7 +137,8 @@ LIVE=open,in_progress,hooked,blocked,deferred,pinned
 #        and clear the same five keys on it.
 CONVOYS=$(gc bd dep list <work-bead> --direction=up -t tracks --json \
   | jq -r '.[] | select((.issue_type // .type) == "convoy") | .id')
-ROOTS=$(for convoy in $CONVOYS; do
+ROOTS=$(printf '%s\n' "$CONVOYS" | while IFS= read -r convoy; do
+    [ -n "$convoy" ] || continue
     gc bd list --metadata-field "gc.input_convoy_id=$convoy" \
       --metadata-field "gc.kind=workflow" --status "$LIVE" \
       --json --limit 0 | jq -r '.[].id'
@@ -173,11 +174,13 @@ ROOTS=$(printf '%s\n' "$ROOTS" | awk 'NF' | sort -u)
 #    set because they are the routed records; the descendants because a
 #    step re-delivers itself from its deferred keys on activation.
 IDS=$( { printf '%s\n' "$ROOTS"
-  for root in $ROOTS; do
+  printf '%s\n' "$ROOTS" | while IFS= read -r root; do
+    [ -n "$root" ] || continue
     gc bd list --metadata-field "gc.root_bead_id=$root" \
       --status "$LIVE" --json --limit 0 | jq -r '.[].id'
   done; } | awk 'NF' | sort -u)
-for id in $IDS; do
+printf '%s\n' "$IDS" | while IFS= read -r id; do
+  [ -n "$id" ] || continue
   gc bd update "$id" \
     --set-metadata gc.routed_to="" \
     --set-metadata gc.deferred_routed_to="" \
@@ -209,7 +212,8 @@ done
 #    re-running (see "Reading step 3's output" below). Without it a row
 #    flagged solely by a key this line does not print (any of the three
 #    execution/deferred keys) shows up as all dashes and reads as noise.
-for id in $IDS; do
+printf '%s\n' "$IDS" | while IFS= read -r id; do
+  [ -n "$id" ] || continue
   if ! shown=$(gc bd show "$id" --json 2>/dev/null) \
      || [ -z "$(printf '%s' "$shown" | tr -d '[:space:]')" ]; then
     printf '%s\t?\t?\tUNREADABLE\n' "$id"

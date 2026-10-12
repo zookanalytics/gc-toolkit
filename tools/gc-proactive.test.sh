@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down,
-# the dispatch-path drop, the fail-closed-on-unset-GC_RIG sweep guard, and the
-# scan's drop of a bead a live workflow already drives (INFLIGHT-*).
+# Hermetic test for tools/gc-proactive.sh: the live-intake stand-down, the
+# dispatch-path drop, the fail-closed-on-unset-GC_RIG sweep guard, the scan's
+# drop of a bead a live workflow already drives (INFLIGHT-*), and the
+# deliverable and assignable answers the first reaction's exits ask before they
+# hand a bead on.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
 # MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
@@ -28,6 +30,18 @@
 #   (ARMED-SWEEP)   a scan --sling sweep reacts to raw input and never to those beads
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
+# A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
+# key is all that sets it apart from raw input:
+#   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
+#   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
+#   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
+# A failed read is not an empty ready set, and a page the filter cannot build is
+# not an empty page, so the scan fails on either rather than report no candidates:
+#   (READ-FAILCLOSED) a gc bd ready read that fails, in each shape a failed read
+#                     can take, fails the scan and names the read
+#   (READ-SWEEP)      …and a scan --sling sweep over it dispatches nothing
+#   (READ-CONTROL)    …while two reads that answer still scan
+#   (PAGE-FAILCLOSED) an unreadable or empty candidate set fails the scan and the sweep
 #
 # gc-proactive.sh is a bash script (process substitution), so it is invoked via
 # bash, not sh.
@@ -175,6 +189,48 @@ hasnt "$OUT" "tk-capped" "(ARMED-SWEEP) …nor at the capped arm"
 for k in $PATH_KEYS; do
     hasnt "$OUT" "tk-path-$k" "(ARMED-SWEEP) …nor at the bead carrying $k"
 done
+
+# --- a molecule step is not a scan candidate --------------------------------
+# Most graph.v2 steps are issue_type task, and no graph.v2 step has a
+# parent-child edge, so the type allowlist and the top-level clause both pass
+# one. tk-step-validate and tk-step-reaction are ordinary steps of two formulas,
+# each tied to its root by a tracks edge. tk-step-finalize is a control step
+# whose gc.kind is not a topology kind, tied to its root by gc.root_bead_id
+# alone. Each is unrouted and passes every other clause, so gc.step_ref is all
+# that sets it apart from tk-raw. tk-step-blank carries the key with an empty
+# value, which names no step.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+  {"id":"tk-step-validate", "issue_type":"task", "description":"converge the rules", "title":"rule convergence",
+   "metadata":{"gc.step_ref":"mol-validate.rule-convergence","gc.step_id":"rule-convergence","gc.root_bead_id":"tk-root-validate"},
+   "dependencies":[{"issue_id":"tk-step-validate","depends_on_id":"tk-root-validate","type":"tracks"}]},
+  {"id":"tk-step-reaction", "issue_type":"task", "description":"react to the subject", "title":"first reaction",
+   "metadata":{"gc.step_ref":"mol-first-reaction.first-reaction","gc.step_id":"first-reaction","gc.root_bead_id":"tk-root-reaction"},
+   "dependencies":[{"issue_id":"tk-step-reaction","depends_on_id":"tk-root-reaction","type":"tracks"}]},
+  {"id":"tk-step-finalize", "issue_type":"task", "description":"finalize the workflow", "title":"workflow finalize",
+   "metadata":{"gc.kind":"workflow-finalize","gc.step_ref":"mol-polecat-work.workflow-finalize","gc.step_id":"workflow-finalize","gc.root_bead_id":"tk-root-work"}},
+  {"id":"tk-step-blank", "issue_type":"task", "description":"a step key left empty", "title":"blank step key", "metadata":{"gc.step_ref":""}}
+]
+JSON
+
+echo "# scan_precision_filter drops a molecule step, keeps raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(STEP-KEEP) a raw input beside the step beads is still a candidate"
+has "$IDS" "tk-step-blank" "(STEP-KEEP) …and so is a bead whose gc.step_ref is empty"
+hasnt "$IDS" "tk-step-validate" "(STEP-DROP) a mol-validate step is not a scan candidate"
+hasnt "$IDS" "tk-step-reaction" "(STEP-DROP) …nor a mol-first-reaction step"
+hasnt "$IDS" "tk-step-finalize" "(STEP-DROP) …nor a workflow-finalize control step"
+
+echo "# a scan --sling sweep reacts to raw input and never to a molecule step"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(STEP-SWEEP) the sweep exits 0"
+has "$OUT" "would sling mol-first-reaction at tk-raw" "(STEP-SWEEP) the sweep slings a first reaction at the raw input"
+hasnt "$OUT" "tk-step-validate" "(STEP-SWEEP) …and none at the mol-validate step"
+hasnt "$OUT" "tk-step-reaction" "(STEP-SWEEP) …nor at the mol-first-reaction step"
+hasnt "$OUT" "tk-step-finalize" "(STEP-SWEEP) …nor at the control step"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
@@ -371,6 +427,100 @@ set +e
 OUT="$(bash "$SCRIPT" deliverable gascity/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
 set -e
 hasnt "$OUT" "cross-store" "(XSTORE-UNREADABLE) with no rig list, the store arm does not fire"
+
+# --- assignable: a named agent addressed by assignee ------------------------
+# A named session's hook matches the bead's assignee, so `assignable <agent>
+# [<bead>]` answers no when the roster has no agent by that exact name, when it
+# is suspended, when it is a pool (absent from the merged config's
+# NamedSessions), or when a rig-scoped agent's hook reads neither the bead's
+# store nor the city's. A city-scoped agent's hook reads every rig store. The
+# fixture seam feeds agents.json, config.json and rigs.json.
+cat > "$TMP/rigs.json" <<'JSON'
+{"rigs":[
+  {"name":"loomington","prefix":"lx","path":"/x/loomington","hq":true},
+  {"name":"gc-toolkit","prefix":"tk","path":"/x/gc-toolkit","hq":false},
+  {"name":"gascity","prefix":"gc","path":"/x/gascity","hq":false}]}
+JSON
+cat > "$TMP/agents.json" <<'JSON'
+{"agents":[
+  {"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city","suspended":false},
+  {"name":"deacon","qualified_name":"gc-toolkit.deacon","scope":"city","suspended":true},
+  {"name":"witness","qualified_name":"gc-toolkit/gc-toolkit.witness","dir":"gc-toolkit","scope":"rig","suspended":false},
+  {"name":"polecat","qualified_name":"gc-toolkit/gc-toolkit.polecat","dir":"gc-toolkit","scope":"rig","suspended":false}]}
+JSON
+cat > "$TMP/config.json" <<'JSON'
+{"config":{"NamedSessions":[
+  {"Template":"mechanik","Scope":"city","Dir":""},
+  {"Template":"deacon","Scope":"city","Dir":""},
+  {"Template":"witness","Scope":"rig","Dir":"gc-toolkit"}]}}
+JSON
+
+echo "# assignable answers yes for a city-scoped named agent, in any rig store"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-YES) mechanik can be handed a tk- bead"
+has "$OUT" "named session" "(ASSIGNABLE-YES) …as a registered named session"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.mechanik gc-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-YES) …and a bead in another rig's store, which its hook also reads"
+
+echo "# assignable refuses what no hook would offer"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-ABSENT) a bare name no agent is registered under is refused"
+has "$OUT" "exact qualified name" "(ASSIGNABLE-ABSENT) …naming the address form"
+
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit.deacon tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-SUSPENDED) a suspended agent is refused"
+has "$OUT" "suspended" "(ASSIGNABLE-SUSPENDED) …naming why"
+
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-POOL) a pool is refused: its instances never match the pool name"
+has "$OUT" "--route" "(ASSIGNABLE-POOL) …pointing at the route a pool takes"
+
+echo "# assignable holds a rig-scoped agent to the stores its hook reads"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness gc-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 1 "(ASSIGNABLE-XSTORE) a rig-scoped agent is refused a bead in another rig's store"
+has "$OUT" "gc- store" "(ASSIGNABLE-XSTORE) …naming the store the bead lives in"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-OWNSTORE) …and answers yes for its own rig's store"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness lx-300fe 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-CITYSTORE) …and for the city store, which its hook also reads"
+
+echo "# assignable says no only on a positive finding"
+rm -f "$TMP/config.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-NOCONFIG) with no config to read, a pool is not proven a pool"
+printf '{"config":{}}' > "$TMP/config.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.polecat tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-NOCONFIG) …nor with a config that carries no NamedSessions list"
+rm -f "$TMP/agents.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-UNREADABLE) with no roster to read, the agent is assumed assignable"
+printf '{"error":"no city"}' > "$TMP/agents.json"
+set +e
+OUT="$(bash "$SCRIPT" assignable mechanik tk-82he4j 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(ASSIGNABLE-UNREADABLE) …and a roster with no agent list is unreadable, not empty"
 
 # --- the sling guard refuses a bead a live workflow already drives ----------
 # gc sling refuses a second live workflow of the same formula on a bead but pours
@@ -571,6 +721,126 @@ for k in $PATH_KEYS; do
 done
 hasnt "$IDS" "tk-scan-driven" "(BOTH-READS) …and, in the same sweep, the bead a live workflow drives"
 has "$IDS" "tk-scan-free" "(BOTH-READS) …and keeps the bead with neither"
+
+# --- a ready read that fails fails the scan --------------------------------
+# gc bd answers a failed read with a non-zero exit and its {"error": ...} object,
+# or nothing, on stdout. Taken as an empty ready set, a failed read drops its
+# beads from the sweep unseen, and with both reads failing a --sling sweep exits
+# 0 with nothing slung. A third stub answers the two ready reads and logs every
+# call it sees.
+# FAIL_OPTIN or FAIL_MOVABLE fails one read in the shape it names; every other
+# call goes to the first stub. The opt-in read answers a bead the sweep can sling,
+# so a scan that skips the failed read and carries on is seen slinging it.
+READY="$TMP/stub-ready"
+mkdir -p "$READY"
+cat > "$READY/gc" <<SH
+#!/bin/sh
+printf '%s\n' "\$*" >> "$TMP/ready-calls.log"
+answer() {
+  case "\$1" in
+    object) printf '{\n  "error": "database is locked",\n  "schema_version": 1\n}\n'; exit 1 ;;
+    nothing) printf 'Error: failed to open database\n' >&2; exit 1 ;;
+    array-exit-1) printf '[]'; exit 1 ;;
+    nothing-exit-0) exit 0 ;;
+  esac
+}
+case "\$*" in
+  "bd ready --metadata-field gc.proactive=1 --unassigned --exclude-type=epic --json --sort oldest --limit 0")
+      answer "\${FAIL_OPTIN:-}"
+      printf '[{"id":"tk-optin-free","issue_type":"task","description":"asked for a reaction","title":"opt-in","created_at":"2026-01-03T00:00:00Z","metadata":{"gc.proactive":"1"}}]' ;;
+  "bd ready --unassigned --exclude-type=epic --json --sort oldest --limit 0")
+      answer "\${FAIL_MOVABLE:-}"
+      exec "$STUB/gc" "\$@" ;;
+  "bd dep list tk-optin-free --direction up -t tracks --json") printf '[]' ;;
+  *) exec "$STUB/gc" "\$@" ;;
+esac
+SH
+chmod +x "$READY/gc"
+ready_scan() { : > "$TMP/ready-calls.log"; env -u GC_PROACTIVE_FIXTURE PATH="$READY:$PATH" "${@:2}" bash "$SCRIPT" scan "$1" </dev/null 2>"$TMP/scan.err"; }
+
+echo "# with both ready reads answered, the scan offers a bead from each"
+set +e
+OUT="$(ready_scan --json)"; RC=$?
+set -e
+eq "$RC" 0 "(READ-CONTROL) the scan exits 0"
+IDS="$(printf '%s' "$OUT" | jq -r '.[].id' 2>/dev/null | sort | tr '\n' ' ' || true)"
+has "$IDS" "tk-optin-free" "(READ-CONTROL) …offering the opt-in bead"
+has "$IDS" "tk-scan-free" "(READ-CONTROL) …and the movable-forward bead"
+
+echo "# a ready read that fails fails the scan, in each shape a failed read can take"
+while read -r var shape name; do
+    set +e
+    OUT="$(ready_scan --json "FAIL_$var=$shape")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/scan.err")"
+    [ "$RC" -ne 0 ] && ok "(READ-FAILCLOSED) the $name read answering $shape fails the scan (exit $RC)" \
+        || bad "(READ-FAILCLOSED) the $name read answering $shape fails the scan (exited 0)"
+    eq "$OUT" "" "(READ-FAILCLOSED) …printing no candidate page"
+    has "$ERR" "the $name read failed" "(READ-FAILCLOSED) …and naming the read"
+    if [ "$shape" = object ]; then
+        has "$ERR" "the $name read failed (gc bd ready exit 1: database is locked)" "(READ-FAILCLOSED) …with gc bd's own error text"
+    fi
+done <<'CASES'
+OPTIN object opt-in
+MOVABLE object movable-forward
+OPTIN nothing opt-in
+MOVABLE nothing movable-forward
+OPTIN array-exit-1 opt-in
+MOVABLE array-exit-1 movable-forward
+OPTIN nothing-exit-0 opt-in
+MOVABLE nothing-exit-0 movable-forward
+CASES
+
+echo "# both reads failing, as they do while the store is down, fails the scan with gc bd's error"
+set +e
+OUT="$(ready_scan --json FAIL_OPTIN=object FAIL_MOVABLE=object)"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(READ-FAILCLOSED) both ready reads failing fails the scan (exit $RC)" \
+    || bad "(READ-FAILCLOSED) both ready reads failing fails the scan (exited 0)"
+has "$ERR" "gc bd ready exit 1: database is locked" "(READ-FAILCLOSED) …carrying gc bd's own error text"
+hasnt "$ERR" "syntax error" "(READ-FAILCLOSED) …and stopping before anything counts the candidates"
+
+echo "# a sweep whose ready read fails slings nothing and exits non-zero"
+set +e
+OUT="$(ready_scan --sling FAIL_MOVABLE=nothing)"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(READ-SWEEP) scan --sling exits non-zero when a ready read fails (exit $RC)" \
+    || bad "(READ-SWEEP) scan --sling exits non-zero when a ready read fails (exited 0)"
+eq "$(grep -c -e '^sling ' -e '^bd create' "$TMP/ready-calls.log" || true)" 0 "(READ-SWEEP) …dispatching nothing, not even the bead the other read offered"
+hasnt "$ERR" "first reaction(s)" "(READ-SWEEP) …and reporting no sweep total"
+has "$ERR" "the movable-forward read failed" "(READ-SWEEP) …naming the read that failed"
+
+# The fixture seam feeds scan.json through the same filter, drop and rank. A page
+# they cannot build is not an empty page: an unreadable candidate set, or an empty
+# one, fails the scan and the sweep before the live-workflow drop counts it.
+echo "# a candidate set the filter cannot build a page from fails the scan"
+printf '{\n  "error": "database is locked",\n  "schema_version": 1\n}\n' > "$TMP/scan.json"
+set +e
+OUT="$(bash "$SCRIPT" scan --json 2>"$TMP/scan.err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) an unreadable candidate set fails the scan (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) an unreadable candidate set fails the scan (exited 0)"
+eq "$OUT" "" "(PAGE-FAILCLOSED) …printing no candidate page"
+has "$ERR" "could not be filtered and ranked" "(PAGE-FAILCLOSED) …and saying so"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) a sweep over it exits non-zero (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) a sweep over it exits non-zero (exited 0)"
+hasnt "$OUT" "(fixture) would" "(PAGE-FAILCLOSED) …dispatching nothing"
+hasnt "$OUT" "first reaction(s)" "(PAGE-FAILCLOSED) …and reporting no sweep total"
+: > "$TMP/scan.json"
+set +e
+OUT="$(bash "$SCRIPT" scan --json 2>"$TMP/scan.err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/scan.err")"
+[ "$RC" -ne 0 ] && ok "(PAGE-FAILCLOSED) an empty candidate set fails the scan (exit $RC)" \
+    || bad "(PAGE-FAILCLOSED) an empty candidate set fails the scan (exited 0)"
+hasnt "$ERR" "syntax error" "(PAGE-FAILCLOSED) …refused before the live-workflow drop counts it"
+rm -f "$TMP/scan.json"
 
 echo "# the live reads: a live root names a convoy that tracks the bead"
 set +e

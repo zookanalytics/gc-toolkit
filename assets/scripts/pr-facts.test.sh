@@ -7,7 +7,9 @@
 # masked while threads are open; no guess when the read fails, and an operator
 # merge_hold left alone) while a pending required approving review files no visit
 # and any stale merge-blocked-approval visit is retired; CONFLICTING -> one rework child per head (dedup on
-# branch+head, holds and a live demand veto, unstamped orphans adopted),
+# branch+head, holds and a live demand veto, unstamped orphans adopted, a
+# supersession hold from branch-supersession.sh vetoes — asked only on an
+# approved PR, after the dedup, and only about the head GitHub reported),
 # stamped prepare_mode=merge (every branch brought current by merge, never rebase),
 # counted as dispatched only once that stamp AND the route read back, with a
 # child stranded by a lost route stamp re-routed rather than buried by the
@@ -25,11 +27,11 @@
 # pass, and the full pass's own re-derive reads the labels its sweep just wrote;
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
-# unanswered comment routing to a fix-pool child or (under a human hold) to a
-# visit, the watermark advancing only after both that child's mode and its route
-# read back, a comment above the mark re-firing while one below it stays
-# answered, and the reads that record nothing rather than clear a standing
-# `commented`.
+# unanswered comment routing to a fix-pool child whatever holds the anchor, or to
+# a visit when there is nowhere to route work, the watermark advancing only after
+# both that child's mode and its route read back, a comment above the mark
+# re-firing while one below it stays answered, and the reads that record nothing
+# rather than clear a standing `commented`.
 # Also covers the validation pass such a batch ensures: a live check_name=human
 # task_kind=validation bead anchored to the PR (the lane the validator rules,
 # never the whole check_set — a multi-lane anchor still gets one human-lane pass)
@@ -40,9 +42,9 @@
 # adopted by title when a prior stamp dropped. Opening it
 # fails closed: a pass that did not record the shape the validator consumes
 # (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
-# holds the batch unwatermarked to retry. A capped anchor
-# keeps its park (retired on signoff.sh's side, not here) and its feedback goes to
-# the person; a verdict the city posted itself and a rework hand-back are not
+# holds the batch unwatermarked to retry. A held anchor keeps its hold and its
+# feedback still becomes a routed rework child, the fix unit a must-fix ruling
+# attaches to; a verdict the city posted itself and a rework hand-back are not
 # feedback and open no pass.
 # Write-back: EYES on a routed comment; a question-mark answer naming the visit
 # while a comment's batch waits on an open one, or its finding on a needs-you
@@ -62,11 +64,15 @@
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout; run directly, the file runs every part in order.
-# run-tests-parts: reconcile posture feedback writeback checks pacing
+# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX")"
+# pr-facts.sh names pr-post.sh under its own directory, named through cd and
+# pwd. They drop the doubled slash that a TMPDIR ending in / leaves in mktemp's
+# path, so TMP is resolved before any expected path is built.
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -86,7 +92,7 @@ meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' 
 vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -135,6 +141,17 @@ gc bd update "$vid" --set-metadata "escalation_key=$key" \
   --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
 ESC
+# branch-supersession.sh's hold verb, by its exit contract: 0 holds the merge-in
+# dispatch for the operator's decision, anything else proceeds. Its own suite
+# covers the classification; here only the call and its answer matter.
+cat > "$SD/branch-supersession.sh" <<'SUPS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_SUPERSESSION_LOG:?}"
+[ -n "${STUB_SUPERSESSION_HOLD:-}" ] && { echo "branch-supersession (stub): filed decision, no rework dispatched"; exit 0; }
+exit 1
+SUPS
+chmod +x "$SD/branch-supersession.sh"
+export STUB_SUPERSESSION_LOG="$TMP/supersession.log" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 # validate-dispatch-body.sh's real output is prose the validator reads; the test
 # only needs a non-empty note so the validation-pass open takes its body path.
@@ -235,7 +252,8 @@ child() { # id branch [extra-metadata] [status] [assignee]
 
 ROOT="$(cd "$HERE/../.." && pwd)"
 
-# ==== part reconcile: merged, closed, retargeted and conflicting PRs ====
+# ==== part reconcile: merged, closed, retargeted and conflicting PRs, through
+# the approval a conflicting PR's merge-in waits for ====
 if part reconcile; then
 
 echo "# every section sits inside a part"
@@ -253,6 +271,13 @@ BLOCK="$(awk '/# >>> pr-posture-vocabulary/{f=1;next} /# <<< pr-posture-vocabula
 eval "$BLOCK"
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
 eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
+
+echo "# conversation vocabulary drift against lifecycle.toml"
+CBLOCK="$(awk '/# >>> pr-conversation-vocabulary/{f=1;next} /# <<< pr-conversation-vocabulary/{f=0} f' "$HERE/pr-facts.sh")"
+[ -n "$CBLOCK" ] && ok "conversation-vocabulary block extracted" || bad "conversation-vocabulary markers missing"
+eval "$CBLOCK"
+TOML_CONVERSATIONS=$(sed -n 's/^conversations = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
+eq "$PR_CONVERSATIONS" "$TOML_CONVERSATIONS" "conversations match lifecycle.toml [conversation]"
 
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
@@ -528,6 +553,84 @@ eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another bl
 has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "escalated under the dispose-failed key"
 has "$(cat "$STUB_ESC_LOG")" "K5" "…the escalation names the child that was already disposed"
 has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
+
+# The rest of the anchor's machine review scaffolding carries no branch, and each
+# piece holds a blocks edge on the anchor: a fix unit, the must-fix finding it
+# answers, a validation pass. Arm 10 retires them, but after this arm, so a close
+# attempted first is refused and escalated for a condition no person has to
+# clear. The close runs that sweep for its own anchor first. scafb seeds one
+# piece, with no branch so it is never a parked child; the store enforces the
+# blocks refusal, so a sweep that closed a finding before the fix unit blocking
+# it would leave the anchor's close refused.
+scafb() { # id anchor kind [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","title":"%s on %s","metadata":{"task_kind":"%s","anchor_bead":"%s"}}' \
+    "$1" "${4:-open}" "${5:-}" "$3" "$2" "$3" "$2"
+}
+echo "# a disposed anchor blocked only by its review scaffolding closes on the first pass, with no visit"
+: > "$STUB_DEPS"
+store "[$(anchor F2s 136 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-s"'), $(scafb RWS F2s rework in_progress rig/gc-toolkit.polecat), $(scafb FS F2s finding), $(scafb VPS F2s validation)]"
+printf 'RWS|blocks|FS\nRWS|blocks|F2s\nFS|blocks|F2s\nVPS|blocks|F2s\n' > "$STUB_DEPS"
+printf '%s' "$(prview 136 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_136.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_ENFORCE_BLOCKS=1 run)
+eq "$(bstatus F2s)" "closed" "the anchor closes on the first pass"
+eq "$(meta F2s 'gc.superseded_by')" "tk-s" "…through the sanctioned terminal close"
+eq "$(bstatus RWS)" "closed" "the claimed fix unit is retired before it"
+eq "$(meta FS 'gc.outcome')" "moot" "…the must-fix finding about this diff is mooted"
+eq "$(bstatus VPS)" "closed" "…and the validation pass is retired"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated, so no pr-dispose-failed visit is filed"
+sw_ln=$(printf '%s\n' "$out" | grep -n "closed finding FS" | head -1 | cut -d: -f1)
+cl_ln=$(printf '%s\n' "$out" | grep -n "F2s — PR#136 closed out-of-band; auto-disposed" | head -1 | cut -d: -f1)
+{ [ -n "$sw_ln" ] && [ -n "$cl_ln" ] && [ "$sw_ln" -lt "$cl_ln" ]; } \
+  && ok "the scaffolding is retired before the close, in the same pass" \
+  || bad "the scaffolding must be retired before the close (sweep line '$sw_ln', close line '$cl_ln')"
+
+# A human review comment on a line the PR left unchanged can cite code the target
+# branch already carries. Closing the PR does not answer it, so the sweep carries
+# that finding forward to a bead of its own rather than mooting it, and the close
+# still lands.
+hfinding() { # id anchor locus comment-id
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"finding[human]: objection %s","description":"Locus: %s\\n\\nThe objection %s.","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.source":"human:op","finding.disposition":"must-fix","finding.comment_id":"%s"}}' \
+    "$1" "$1" "$3" "$1" "$2" "$4"
+}
+unchanged_line_comment() { # num comment-id
+  printf '[{"id":%s,"path":"docs/b.md","diff_hunk":"@@ -5,3 +5,3 @@\\n context\\n unchanged line"}]' "$2" > "$GH_DIR/comments_$1.json"
+}
+echo "# a finding that outlives the disposed diff is carried forward, and the close still lands"
+: > "$STUB_DEPS"
+store "[$(anchor F2u 137 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-u"'), $(hfinding FU F2u docs/b.md:7 702)]"
+printf 'FU|blocks|F2u\n' > "$STUB_DEPS"
+unchanged_line_comment 137 702
+printf '%s' "$(prview 137 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_137.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2u)" "closed" "the anchor's close lands"
+BUGU=$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FU") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$BUGU" "<none>" "the finding's objection is carried by a bead of its own"
+eq "$(meta FU 'gc.superseded_by')" "$BUGU" "…the finding closes pointed at it"
+eq "$(meta FU 'gc.outcome')" "<absent>" "…not mooted"
+eq "$(bstatus "$BUGU")" "open" "…and the carrier stays open"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated"
+
+echo "# a finding whose comment line does not read leaves the close for the next pass"
+: > "$STUB_DEPS"
+store "[$(anchor F2v 138 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-v"'), $(hfinding FV F2v docs/b.md:7 703)]"
+printf 'FV|blocks|F2v\n' > "$STUB_DEPS"
+unchanged_line_comment 138 703
+printf '%s' "$(prview 138 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_138.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_GH_LIST_RC=1 run)
+eq "$(bstatus F2v)" "open" "the anchor is not closed past a finding nobody could judge"
+eq "$(bstatus FV)" "open" "…the finding stays open"
+has "$out" "review scaffolding is not settled" "…the pass says why"
+hasnt "$(cat "$STUB_REHOME_LOG")" "--origin F2v" "…bead-rehome is not called on the anchor"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and nothing is escalated: the next pass retries"
+out=$(run)
+eq "$(bstatus F2v)" "closed" "the next pass, with the comments readable, closes the anchor"
+hasnt "$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FV") | .id ] | .[0] // "<none>"' "$STUB_STORE")" "<none>" "…carrying the finding forward"
+# A later section that reuses one of these PR numbers reads its comments as
+# feedback, so the fixtures go with the cases that wrote them.
+rm -f "$GH_DIR/comments_137.json" "$GH_DIR/comments_138.json"
 
 # A refused close escalates under pr-dispose-failed.<num>, and that visit tracks
 # the anchor. It reports this arm's own failed close and asks for the next pass's
@@ -900,6 +1003,12 @@ approve 236
 out=$(run)
 has "$out" "re-routing stranded rework ST1" "once the PR is approved, the strand is re-routed as before"
 
+fi # part reconcile
+
+# ==== part rework: the CONFLICTING arm's holds and the feedback it routes, its
+# rework child's birth and stamps, an empty merge commit and a stale gate ====
+if part rework; then
+
 echo "# …a hold vetoes the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 14 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_14.json"
@@ -1007,24 +1116,46 @@ out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
-echo "# …and a held + CONFLICTING anchor DEFERS fresh operator comments — the cap-park carve-out is gone (F5e successor)"
-# The merge_hold skip above continues past the whole loop body, so the feedback
-# arm never runs: a fresh operator comment on a held+conflicting PR is left
-# unwatermarked and unrouted until the hold lifts. The retired cap park
-# (merge_hold=signoff_cap) had a carve-out that still routed it to the person
-# holding the anchor; every truthy merge_hold now defers it, and the five
-# migrated parks are exactly merge_hold=true.
+echo "# …but a held + CONFLICTING anchor that owes feedback routes it to a rework child, filing no merge-in"
+# A hold defers the stale-base merge-in, never the feedback. An anchor that owes
+# feedback skips the CONFLICTING arm, so neither the hold nor any other skip guard
+# there reaches it, and the feedback arm's prepare_mode=merge child brings the
+# branch current as it answers. The hold itself is left standing.
 store "[$(anchor F5e 91 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 91 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_91.json"
 echo '[]' > "$GH_DIR/reviews_91.json"
 printf '[{"id":9101,"user":{"login":"human1"},"body":"please rebase and address this"}]' > "$GH_DIR/comments_91.json"
+: > "$STUB_ESC_LOG"
 out=$(run)
-has "$out" "a hold is set (operator gate); no rework dispatched" "the held+conflicting anchor dispatches no rework"
-eq "$(meta F5e pr_comment_disposition)" "<absent>" "…the fresh operator comment gets no disposition"
-eq "$(meta F5e pr_comment_watermark)" "<absent>" "…the comment stays unwatermarked, deferred until the hold lifts"
-eq "$(vpass_id F5e)" "<none>" "…and no validation pass is opened for it"
+hasnt "$out" "a hold is set (operator gate); no rework dispatched" "the hold does not skip an anchor that owes feedback"
+DISP="$(meta F5e pr_comment_disposition)"
+has "$DISP" "rework:" "…the fresh operator comment routes to a rework child"
+F5FIX="${DISP#rework:}"
+eq "$(meta "$F5FIX" 'gc.routed_to')" "$FIX" "…routed to the fix pool"
+eq "$(meta "$F5FIX" prepare_mode)" "merge" "…brought current by merge, so it resolves the conflict as it answers"
+grep -qxF "$F5FIX|blocks|F5e" "$STUB_DEPS" && ok "…and it blocks the anchor, so the merge waits for it" || bad "the feedback child does not block the held anchor"
+eq "$(meta F5e pr_comment_watermark)" "9101" "…the comment is watermarked, not deferred until the hold lifts"
+hasnt "$(vpass_id F5e)" "<none>" "…a validation pass is opened for it"
+eq "$(cat "$STUB_ESC_LOG")" "" "…no visit is filed"
+eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))] | length' "$STUB_STORE")" "0" "…and NO stale-base merge-in child is filed under the hold"
 eq "$(meta F5e merge_hold)" "true" "…the operator's hold is left standing"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child of any kind is minted"
+
+echo "# …and a live demand on a CONFLICTING anchor that owes feedback routes it the same way"
+# The demand reaches the CONFLICTING arm twice, through anchor_decision_held and
+# as a foreign blocks-blocker of the anchor. An anchor that owes feedback meets
+# neither.
+store "[$(anchor F5f 201),$(demand F5f)]"
+gc bd dep dm-F5f --blocks F5f >/dev/null 2>&1
+printf '%s' "$(prview 201 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_201.json"
+echo '[]' > "$GH_DIR/reviews_201.json"
+printf '[{"id":20101,"user":{"login":"human1"},"body":"address this"}]' > "$GH_DIR/comments_201.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+hasnt "$out" "an open demand holds it" "the demand guard does not skip an anchor that owes feedback"
+hasnt "$out" "the anchor is held by" "…nor does the demand's gate, read as a foreign blocker"
+has "$(meta F5f pr_comment_disposition)" "rework:" "…the feedback routes to a rework child"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed"
+eq "$(bstatus dm-F5f)" "open" "…while the demand is left standing for its sitting"
 
 echo "# …and so does an armed re-dispatch: the anchor is parked, waiting to re-offer when ready (tk-79ffoh)"
 # gc.dispatch_when_ready is deferred-dispatch's arm marker. While it is set the
@@ -1365,6 +1496,57 @@ has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable str
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# CONFLICTING: a branch a landed change superseded gets the operator's decision, not a child"
+# The stub git serves STUB_FETCHED_HEAD for every rev-parse, so both fetched tips
+# read as the PR's head: the head GitHub reported is the head classified.
+store "[$(anchor SUP1 120)]"
+printf '%s' "$(prview 120 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_120.json"
+approve 120
+export STUB_FETCHED_HEAD="sha-120" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_SUPERSESSION_LOG")" "hold --anchor SUP1 --branch polecat/x120 --target main --base sha-120 --head sha-120 --pr 120" \
+  "the guard is asked about this anchor, its branch, its base and the head GitHub reported"
+has "$out" "filed decision, no rework dispatched" "a held answer is reported"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no merge-in child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …the guard answering proceed leaves the ordinary merge-in child"
+store "[$(anchor SUP2 121)]"
+printf '%s' "$(prview 121 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_121.json"
+approve 121
+export STUB_FETCHED_HEAD="sha-121" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_SUPERSESSION_LOG")" "hold --anchor SUP2" "the guard was asked"
+has "$out" "filed merge-mode rework" "and drift still files the merge-in child"
+
+echo "# …a head that moved since GitHub reported it is not classified"
+store "[$(anchor SUP3 122)]"
+printf '%s' "$(prview 122 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_122.json"
+approve 122
+export STUB_FETCHED_HEAD="sha-moved" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "a fetched head that disagrees with GitHub's is not put to the guard"
+has "$out" "filed merge-mode rework" "and the ordinary child goes, as it did before the guard"
+
+echo "# …a live child on the branch stands the arm down before the guard is asked"
+store "[$(anchor SUP4 123), $(child LIVE4 polecat/x123 ',"task_kind":"rework","anchor_bead":"SUP4"' in_progress rig/gc-toolkit.polecat-1)]"
+printf '%s' "$(prview 123 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_123.json"
+approve 123
+export STUB_FETCHED_HEAD="sha-123" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$out" "already covers branch" "the live child dedups the arm"
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "…so a re-scoping child a sitting sent is never second-guessed by the guard"
+
+echo "# …an unapproved PR is not put to the guard: its conflict waits for an approval first"
+store "[$(anchor SUP5 124)]"
+printf '%s' "$(prview 124 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_124.json"
+echo '[]' > "$GH_DIR/reviews_124.json"
+export STUB_FETCHED_HEAD="sha-124" STUB_SUPERSESSION_HOLD=1; : > "$STUB_SUPERSESSION_LOG"
+out=$(run)
+has "$out" "PR#124 conflicts but no external approval stands; no merge-in filed" "the approval gate answers first"
+eq "$(cat "$STUB_SUPERSESSION_LOG")" "" "…so no decision is put to the operator for a PR nobody approved"
+export STUB_FETCHED_HEAD="" STUB_SUPERSESSION_HOLD=""
+
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
 printf '%s' "$(prview 24 MERGED CLEAN MERGEABLE)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_24.json"
@@ -1385,10 +1567,10 @@ hasnt "$out" "filed re-review" "no re-review child is filed"
 hasnt "$out" "is stale" "…and nothing here calls a moved head stale"
 hasnt "$(cat "$STUB_GC_LOG")" "--on mol-review" "…and no review formula is poured from this arm"
 
-fi # part reconcile
+fi # part rework
 
 # ==== part posture: BLOCKED, dismissals, the posture record, the comment
-# watermark, --posture-only and a sitting's hold ====
+# watermark and the thread reads behind it ====
 if part posture; then
 
 echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
@@ -1453,6 +1635,30 @@ printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution
 : > "$STUB_ESC_LOG"
 out=$(run)
 eq "$(cat "$STUB_ESC_LOG")" "" "an operator merge_hold leaves the BLOCKED escalation unsent"
+
+echo "# BLOCKED on a thread holding only the city's finding comments escalates nothing; one a human wrote in still does"
+# The write-back posts a ruled finding as a review thread, through pr-post.sh and
+# so carrying the city's mark, and resolves it once a fixed finding closes. While
+# only the city has written in it, it asks nothing of a person. BF2's thread holds
+# the same finding comment and a human reply. BF3's one comment carries the
+# finding marker but is not the city's own post, so it is a thread like any other.
+# BF4's holds only the city's post of a deferred finding, whose answer leaves the
+# thread open for the operator to accept or overrule, so it waits on a person.
+store "[$(anchor BF1 207), $(anchor BF2 208), $(anchor BF3 210), $(anchor BF4 213)]"
+for n in 207 208 210 213; do printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
+bfc='{"id":"FC-b","databaseId":9200,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FB)\n<!-- gc-finding:FB -->\n\n<!-- gc:city -->","reactionGroups":[]}'
+printf '{"threads":[{"id":"FT-207","isResolved":false,"comments":{"nodes":[%s]}}]}' "$bfc" > "$GH_DIR/threads_207.json"
+printf '{"threads":[{"id":"FT-208","isResolved":false,"comments":{"nodes":[%s,{"id":"NC-208","databaseId":300,"author":{"login":"johnzook"},"body":"why not fix it here?","reactionGroups":[]}]}}]}' "$bfc" > "$GH_DIR/threads_208.json"
+printf '{"threads":[{"id":"FT-210","isResolved":false,"comments":{"nodes":[{"id":"NC-210","databaseId":301,"author":{"login":"johnzook"},"body":"see <!-- gc-finding:FB --> above","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_210.json"
+bfo='{"id":"FC-o","databaseId":9201,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled deferred** (FO)\n**Outcome:** Deferred: follow-up tk-fo carries this after the merge.\n<!-- gc-finding:FO -->\n<!-- gc-finding:FO:answered -->\n<!-- gc-finding:FO:open -->\n\n<!-- gc:city -->","reactionGroups":[]}'
+printf '{"threads":[{"id":"FT-213","isResolved":false,"comments":{"nodes":[%s]}}]}' "$bfo" > "$GH_DIR/threads_213.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject BF1 --key merge-blocked-threads" "a thread only the city's finding comments are in is not escalated: the write-back resolves it"
+has "$(cat "$STUB_ESC_LOG")" "--subject BF2 --key merge-blocked-threads" "…but one a human wrote in counts like any thread"
+has "$(cat "$STUB_ESC_LOG")" "--subject BF3 --key merge-blocked-threads" "…and so does one whose marker text is not the city's own post"
+has "$(cat "$STUB_ESC_LOG")" "--subject BF4 --key merge-blocked-threads" "…and so does one whose answer leaves it open for the operator"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# the merge-blocked-approval visit category is retired: every open one is swept, even with no live anchors"
@@ -1891,6 +2097,13 @@ CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG3") | select((.me
 has "$CB" "a new comment" "the work order carries the new comment"
 hasnt "$CB" "confirmed comment" "…and not the one the mark confirmed"
 
+fi # part posture
+
+# ==== part routing: a feedback batch's size, range and ledgers, the
+# comment-rework child its routing stamps and adopts, --posture-only and a
+# sitting's hold ====
+if part routing; then
+
 echo "# a feedback batch past the OS per-argument limit still renders"
 # A busy PR's inline-comment list grew past Linux's
 # per-argument cap (MAX_ARG_STRLEN, 128 KiB), so the jq that took the list as
@@ -1908,6 +2121,104 @@ hasnt "$out" "could not filter retired reviews" "…and so does the dismissal fi
 has "$out" "routed to rework:new-2" "the oversized batch routes like any other"
 eq "$(meta BIG pr_comment_watermark)" "7009" "the watermark advances to the last comment in the oversized batch"
 eq "$(meta BIG pr_comment_disposition)" "rework:new-2" "…and the disposition records on the anchor"
+
+echo "# conversation axis — quiet: no human utterance in any of the three spaces"
+store "[$(anchor CQ 70)]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/comments_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+echo '[]' > "$GH_DIR/issue_comments_70.json"
+out=$(run)
+eq "$(meta_pinned CQ pr.conversation)" "quiet@sha-70" "nothing said reads quiet, pinned to the head"
+
+echo "# conversation axis — outstanding: a human utterance sits above its space's watermark"
+store "[$(anchor CO 71)]"
+printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
+printf '[{"id":7100,"user":{"login":"human1"},"body":"please fix"}]' > "$GH_DIR/comments_71.json"
+out=$(run)
+eq "$(meta_pinned CO pr.conversation)" "outstanding@sha-71" "an utterance above the mark reads outstanding"
+
+echo "# conversation axis — a recorded outstanding with no newer signal is carried, never collapsed to quiet"
+# watermark caught up (unanswered = 0) and no disposition is set, but a position
+# was recorded outstanding at an OLDER head: the carry must re-stamp it to the
+# live head. Seeding the live head would skip the write (have_cvh = want_c), so
+# the assertion would pass whether the script carried outstanding or derived
+# nothing — the old head forces the write, so it also catches a derive-nothing.
+store "[$(anchor CI 72 ',"pr_comment_watermark":"7200","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"')]"
+printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
+printf '[{"id":7200,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_72.json"
+out=$(run)
+eq "$(meta_pinned CI pr.conversation)" "outstanding@sha-72" "a carried outstanding re-stamps to the live head, never collapsing to quiet"
+has "$out" "conversation outstanding@sha-72" "the carry is written this pass, not a vacuous no-op over the seed"
+
+echo "# conversation axis — answered: the routed fix unit has CLOSED (its branch landed), not merely a head move"
+# A rework child covered the batch and has since closed, which is the city's reply
+# landing on the branch. outstanding was recorded at an older head; the close —
+# read off the disposition's child — is what promotes it to answered.
+store "[$(anchor CA 73 ',"pr_comment_watermark":"7300","pr_comment_disposition":"rework:new-CAchild","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"'), $(child new-CAchild polecat/x73 '' closed)]"
+printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
+printf '[{"id":7300,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_73.json"
+out=$(run)
+eq "$(meta_pinned CA pr.conversation)" "answered@sha-73" "the routed fix unit closed (its branch landed) reads answered"
+
+echo "# conversation axis — a head move with the fix unit still OPEN is NOT answered (a merge-in of main is not the city's reply)"
+# The misread this guards: the head moved off the recorded outstanding, but the
+# rework child covering the batch is still open — a merge-in of the base or an
+# operator push, not the city answering — so it holds outstanding, never a false
+# answered toward the quiet end.
+store "[$(anchor CM 75 ',"pr_comment_watermark":"7500","pr_comment_disposition":"rework:new-CMchild","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"'), $(child new-CMchild polecat/x75 '' open)]"
+printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
+printf '[{"id":7500,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_75.json"
+out=$(run)
+eq "$(meta_pinned CM pr.conversation)" "outstanding@sha-75" "the head moved but the routed child is still open — stays outstanding"
+
+echo "# conversation axis — outstanding re-derives from the live disposition even with NO prior pr.conversation key"
+# The watermark advanced and the disposition recorded together (one transition),
+# but pr.conversation was never written. The live routed child is head-independent
+# evidence the batch is outstanding, so a dropped conversation write does not fall
+# the board to unknown — the hole a failed write would otherwise leave.
+store "[$(anchor CD 76 ',"pr_comment_watermark":"7600","pr_comment_disposition":"rework:new-CDchild"'), $(child new-CDchild polecat/x76 '' open)]"
+printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
+printf '[{"id":7600,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/comments_76.json"
+out=$(run)
+eq "$(meta_pinned CD pr.conversation)" "outstanding@sha-76" "a live routed disposition re-derives outstanding with no prior key"
+
+echo "# conversation axis — a caught-up anchor with NO disposition and no prior position reads unknown, never a false outstanding"
+# A rollout-era anchor: the comment watermark already covers the only utterance
+# (unanswered = 0), no pr.conversation key was ever recorded, and — unlike CD
+# above — nothing was routed, so there is no disposition to re-derive outstanding
+# from. Nothing sits above a watermark and no fix unit is in flight, so the
+# position stays unrecorded; the board renders an unrecorded position as unknown.
+store "[$(anchor CU 74 ',"pr_comment_watermark":"7400"')]"
+printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
+printf '[{"id":7400,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/comments_74.json"
+out=$(run)
+eq "$(meta CU pr.conversation)" "<absent>" "a caught-up anchor with no prior position records nothing, reading unknown on the board"
+
+echo "# conversation axis — an unmarked review under our login past the cutover is an utterance, never quiet"
+# gc_city_own reads a post under the city's login as the city's own only when it
+# carries a mark or predates the provenance cutover. An unmarked review after the
+# cutover is a model or operator review run on the city's account, so someone
+# spoke and the PR is not quiet. An empty-bodied approval is not feedback, so
+# nothing sits above a watermark and nothing was routed: the position stays
+# unrecorded, which the board renders as unknown.
+store "[$(anchor CK 77 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 77 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_77.json"
+printf '[{"id":7700,"user":{"login":"gc-city-bot"},"state":"APPROVED","body":"","commit_id":"sha-77","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_77.json"
+echo '[]' > "$GH_DIR/comments_77.json"
+echo '[]' > "$GH_DIR/issue_comments_77.json"
+out=$(run)
+has "$out" "posture approved@sha-77" "the pass read the PR, so the conversation was derived, not skipped"
+eq "$(meta CK pr.conversation)" "<absent>" "an unmarked review under our login past the cutover is an utterance: not quiet"
+
+echo "# conversation axis — the city's own marked post is not an utterance: still quiet"
+store "[$(anchor CC 78 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
+printf '%s' "$(prview 78 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_78.json"
+echo '[]' > "$GH_DIR/reviews_78.json"
+echo '[]' > "$GH_DIR/comments_78.json"
+printf '[{"id":7800,"user":{"login":"gc-city-bot"},"body":"Demo video for this PR.\\n\\n<!-- gc:city -->","created_at":"2026-10-07T03:00:00Z"}]' > "$GH_DIR/issue_comments_78.json"
+out=$(run)
+eq "$(meta_pinned CC pr.conversation)" "quiet@sha-78" "the city's own marked post leaves the PR quiet"
 
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
@@ -2174,21 +2485,25 @@ out=$(STUB_SELF_LOGIN="" run); rc=$?
 eq "$rc" 0 "the full pass exits 0"
 has "$out" "not current" "…while still reporting the count"
 
-echo "# a sitting still waiting on a person gets the comments, not the fix pool"
+echo "# a sitting still waiting on a person does not keep the comments from the fix pool"
+# A live demand gates the merge; the feedback is still answered, by a child that
+# is the fix unit a must-fix ruling on the batch's findings attaches to.
 store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"'),$(demand H1)]"
 printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_44.json"
 echo '[]' > "$GH_DIR/reviews_44.json"
 printf '[{"id":8001,"user":{"login":"human1"},"body":"this is wrong"}]' > "$GH_DIR/comments_44.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.44.0.8001" "the visit key names the exact batch"
-has "$(cat "$STUB_ESC_LOG")" "a sitting is holding it for an operator ruling" "…and why no work could be routed"
-eq "$(meta H1 pr_comment_disposition)" "visit:new-3" "the choice is recorded, and it is the visit"
-eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned — it went to a named party"
-eq "$(meta new-3 task_kind)" "visit" "the visit was really filed"
-eq "$(meta new-3 pr_number)" "44" "the visit carries the PR, which is what holds the merge"
-hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-3" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "no work was routed under the human's decision"
+eq "$(cat "$STUB_ESC_LOG")" "" "a live demand does not choose a visit"
+DISP="$(meta H1 pr_comment_disposition)"
+has "$DISP" "rework:" "the comments become a rework child"
+H1FIX="${DISP#rework:}"
+eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned"
+eq "$(meta "$H1FIX" task_kind)" "rework" "…the child carries the rework role marker"
+eq "$(meta "$H1FIX" 'gc.routed_to')" "$FIX" "…and is routed to the fix pool"
+grep -qxF "$H1FIX|blocks|H1" "$STUB_DEPS" && ok "…blocking the anchor, so the merge waits for it" || bad "the feedback child does not block the demand-held anchor"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+eq "$(bstatus dm-H1)" "open" "…while the demand is left standing for its sitting"
 
 echo "# …while a takeaway whose sitting ENDED holds nothing: the comments become work"
 store "[$(anchor H2 45 ',"gc.takeaway":"routed — nothing further needed here"'),$(demand H2 closed)]"
@@ -2201,47 +2516,51 @@ eq "$(meta H2 pr_comment_disposition)" "rework:new-3" "a closed demand is a sitt
 eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed"
 eq "$(meta H2 'gc.takeaway')" "routed — nothing further needed here" "…while the sitting's record is left alone"
 
-echo "# …and so does rebase_hold: a child told to answer comments may rewrite the branch"
+echo "# …and so does rebase_hold: the freeze defers the stale-base merge-in, never the feedback"
 store "[$(anchor H5 54 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 54 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_54.json"
 echo '[]' > "$GH_DIR/reviews_54.json"
 printf '[{"id":8400,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_54.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "rebase_hold freezes the branch" "an operator branch freeze routes to the human, not the pool"
-eq "$(meta H5 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work dispatched against the frozen branch"
+eq "$(cat "$STUB_ESC_LOG")" "" "a branch freeze does not choose a visit"
+has "$(meta H5 pr_comment_disposition)" "rework:" "…the feedback routes to a rework child"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+eq "$(meta H5 rebase_hold)" "true" "…while the freeze is left standing"
 
-echo "# …and so does an armed re-dispatch: feedback goes to a visit, never a rework on a superseded branch (tk-79ffoh)"
+echo "# …and so does an armed re-dispatch: the feedback child holds the anchor, so the re-pour waits for it"
 store "[$(anchor FA2 76 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
 printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
 echo '[]' > "$GH_DIR/reviews_76.json"
 printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_76.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "the anchor is armed to re-dispatch when ready" "an armed anchor routes feedback to the human, not the pool"
-has "$(meta FA2 pr_comment_disposition)" "visit:" "…and the visit is what is recorded, not a rework"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no rework dispatched against the superseded branch"
+eq "$(cat "$STUB_ESC_LOG")" "" "an armed anchor does not choose a visit"
+DISP="$(meta FA2 pr_comment_disposition)"
+has "$DISP" "rework:" "…the feedback routes to a rework child"
+grep -qxF "${DISP#rework:}|blocks|FA2" "$STUB_DEPS" && ok "…which blocks the anchor, keeping the armed re-dispatch out of bd ready until it lands" || bad "the feedback child does not block the armed anchor"
+eq "$(meta FA2 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "…while the arm is left standing"
 
 echo "# …a visit that did not take the stamp is NOT watermarked past"
-store "[$(anchor H4 53 ',"gc.routed_to":"human"')]"
+store "[$(anchor H4 53)]"
 printf '%s' "$(prview 53 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_53.json"
 echo '[]' > "$GH_DIR/reviews_53.json"
 printf '[{"id":8300,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_53.json"
-out=$(STUB_DROP_KEYS="new-2:pr_number" run)
+out=$(STUB_DROP_KEYS="new-2:pr_number" "$SUT" --review-pool "$REV" 2>&1)   # no --fix-pool: the visit case
 has "$out" "did not record pr_number=53; NOT watermarking" "an unheld visit fails closed"
 eq "$(meta H4 pr_comment_watermark)" "<absent>" "…the mark never moved past an unheld comment"
 eq "$(meta_pinned H4 pr_posture)" "commented@sha-53" "…and the posture still holds the merge"
 
-echo "# …so does an anchor already routed to a human, and one with no fix pool"
-store "[$(anchor H2 47 ',"gc.routed_to":"human"')]"
+echo "# …so does an anchor already routed to a human; one with no fix pool goes to a visit"
+store "[$(anchor H6 47 ',"gc.routed_to":"human"')]"
 printf '%s' "$(prview 47 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_47.json"
 echo '[]' > "$GH_DIR/reviews_47.json"
 printf '[{"id":8100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_47.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "already routed to a human" "a human-routed anchor gets a visit"
-eq "$(meta H2 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
+eq "$(cat "$STUB_ESC_LOG")" "" "a human-routed anchor does not choose a visit"
+has "$(meta H6 pr_comment_disposition)" "rework:" "…its feedback becomes a rework child"
+eq "$(meta H6 'gc.routed_to')" "human" "…and the anchor's own route is left alone"
 store "[$(anchor H3 48)]"
 printf '%s' "$(prview 48 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_48.json"
 echo '[]' > "$GH_DIR/reviews_48.json"
@@ -2249,9 +2568,67 @@ printf '[{"id":8200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 : > "$STUB_ESC_LOG"
 out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
+has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.48.0.8200" "…under a visit key naming the exact batch"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
+eq "$(meta new-2 task_kind)" "visit" "the visit was really filed"
+eq "$(meta new-2 pr_number)" "48" "the visit carries the PR, which is what holds the merge"
+hasnt "$(grep -F '|blocks|H3' "$STUB_DEPS" || true)" "new-2" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
 
-fi # part posture
+echo "# under every hold, a must-fix human finding gets a routed fix unit that blocks the anchor"
+# A hold gates the merge or a dispatch whose only work is bringing the branch
+# current; it never chooses the vehicle for feedback. Each hold below leaves the
+# batch a routed rework child blocking the anchor, conflicting or not, and a
+# must-fix ruling on the batch's finding (the real finding.sh) hangs its
+# close-ordering edge on that child. Without the child the finding would hold the
+# merge with nothing acting on it.
+# The fix-unit-to-finding edge joins two new-N ids, which every later case
+# reuses, so each row starts from the edges that stood before the matrix and the
+# matrix leaves them as it found them.
+hv=0
+hv_deps="$TMP/deps.before-hold-matrix"
+cp "$STUB_DEPS" "$hv_deps"
+for hv_state in "BLOCKED MERGEABLE" "DIRTY CONFLICTING"; do
+  for hv_hold in merge_hold rebase_hold human demand armed; do
+    cp "$hv_deps" "$STUB_DEPS"
+    hv=$((hv + 1)); A="HV$hv"; P=$((210 + hv))
+    case "$hv_hold" in
+      merge_hold)  store "[$(anchor "$A" "$P" ',"merge_hold":"true"')]" ;;
+      rebase_hold) store "[$(anchor "$A" "$P" ',"rebase_hold":"true"')]" ;;
+      human)       store "[$(anchor "$A" "$P" ',"gc.routed_to":"human"')]" ;;
+      armed)       store "[$(anchor "$A" "$P" ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]" ;;
+      demand)      store "[$(anchor "$A" "$P"),$(demand "$A")]"
+                   gc bd dep "dm-$A" --blocks "$A" >/dev/null 2>&1 ;;
+    esac
+    L="[$hv_hold, ${hv_state% *}]"
+    printf '%s' "$(prview "$P" OPEN $hv_state)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_$P.json"
+    echo '[]' > "$GH_DIR/reviews_$P.json"
+    printf '[{"id":%s,"user":{"login":"human1"},"body":"this must change before it lands"}]' "$((P * 100))" > "$GH_DIR/comments_$P.json"
+    : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+    out=$(run)
+    DISP="$(meta "$A" pr_comment_disposition)"
+    has "$DISP" "rework:" "$L the batch routes to a rework child"
+    HFIX="${DISP#rework:}"
+    eq "$(meta "$HFIX" 'gc.routed_to')" "$FIX" "$L …routed to the fix pool"
+    grep -qxF "$HFIX|blocks|$A" "$STUB_DEPS" && ok "$L …blocking the anchor" || bad "$L the rework child does not block the anchor"
+    eq "$(cat "$STUB_ESC_LOG")" "" "$L …and no visit is filed"
+    HFID=$(jq -r --arg a "$A" '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == $a) | .id ] | .[0] // "<none>"' "$STUB_STORE")
+    hasnt "$HFID" "<none>" "$L …the objection is filed as a finding"
+    grep -qxF "$HFIX|blocks|$HFID" "$STUB_DEPS" && bad "$L the child already blocks the unvalidated finding at dispatch" || ok "$L …which the child does not block before it is ruled"
+    "$SD/finding.sh" set-disposition --finding "$HFID" --anchor "$A" --disposition must-fix >/dev/null 2>&1
+    eq "$(meta "$HFID" 'finding.disposition')" "must-fix" "$L …which the validator rules must-fix"
+    grep -qxF "$HFIX|blocks|$HFID" "$STUB_DEPS" && ok "$L …and the ruling hangs it on the batch's own fix unit" || bad "$L the must-fix finding was not hung on the batch's fix unit"
+    case "$hv_hold" in
+      merge_hold)  eq "$(meta "$A" merge_hold)" "true" "$L …the hold is left standing" ;;
+      rebase_hold) eq "$(meta "$A" rebase_hold)" "true" "$L …the freeze is left standing" ;;
+      human)       eq "$(meta "$A" 'gc.routed_to')" "human" "$L …the human route is left standing" ;;
+      armed)       eq "$(meta "$A" 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "$L …the arm is left standing" ;;
+      demand)      eq "$(bstatus "dm-$A")" "open" "$L …the demand is left standing" ;;
+    esac
+  done
+done
+cp "$hv_deps" "$STUB_DEPS"
+
+fi # part routing
 
 # ==== part feedback: validation passes, review bodies, CHANGES_REQUESTED and
 # the reads that record nothing ====
@@ -2310,6 +2687,37 @@ FIDW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select(
 hasnt "$FIDW" "<none>" "the comment is filed as a finding"
 grep -qxF "new-2|blocks|$FIDW" "$STUB_DEPS" && bad "the rework child must not block the unvalidated finding" || ok "…which the rework child does not block at dispatch"
 eq "$(meta Vw pr_comment_disposition)" "rework:new-2" "…and the batch watermarks its rework disposition"
+
+echo "# each finding records its own batch's rework child, so a must-fix ruling hangs no other child on the anchor"
+# The anchor already carries a stale-base merge-in child and an earlier batch's
+# child. Both are task_kind=rework with no source_review_bead, the shape this
+# batch's child has, so a lane-level match cannot tell them apart. The real
+# finding.sh rules each finding below, as the validator would.
+store "[$(anchor Vf 89),$(printf '{"id":"mrg-89","status":"open","assignee":"","title":"Rework PR#89: base rewritten, PR conflicts","notes":"","metadata":{"task_kind":"rework","anchor_bead":"Vf","prepare_mode":"merge"}}'),$(printf '{"id":"cfu-89","status":"open","assignee":"","title":"Address review comments on PR#89 (through review 0, comment 8800)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"Vf","source_review":"8800"}}')]"
+printf '%s' "$(prview 89 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_89.json"
+echo '[]' > "$GH_DIR/reviews_89.json"
+printf '[{"id":8890,"user":{"login":"human1"},"body":"handle the empty list"}]' > "$GH_DIR/comments_89.json"
+out=$(run)
+VFD="$(meta Vf pr_comment_disposition)"
+has "$VFD" "rework:" "the batch routes to its own rework child"
+VFC="${VFD#rework:}"
+FIDF=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vf") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+eq "$(meta "$FIDF" 'finding.fix_unit')" "$VFC" "…and its finding records that child"
+"$SD/finding.sh" set-disposition --finding "$FIDF" --anchor Vf --disposition must-fix
+grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "a must-fix ruling hangs the close-ordering edge from the batch's child" || bad "the batch's child does not block its must-fix finding"
+grep -qF "mrg-89|blocks|$FIDF" "$STUB_DEPS" && bad "the merge-in child must not answer the finding" || ok "…not from the merge-in child"
+grep -qF "cfu-89|blocks|$FIDF" "$STUB_DEPS" && bad "the earlier batch's child must not answer the finding" || ok "…nor from the earlier batch's child"
+# A later batch re-raises the same comment: its own child is the latest that
+# carries the objection, and the finding, already ruled, is never ruled again.
+printf '[{"id":8890,"user":{"login":"human1"},"body":"handle the empty list"},{"id":8895,"user":{"login":"human1"},"body":"handle the empty list"}]' > "$GH_DIR/comments_89.json"
+out=$(run)
+VFD2="$(meta Vf pr_comment_disposition)"
+VFC2="${VFD2#rework:}"
+if [ -n "$VFC2" ] && [ "$VFC2" != "$VFC" ]; then ok "the later batch routes to a child of its own"; else bad "the later batch did not route to a new child (got '$VFD2')"; fi
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "Vf")] | length' "$STUB_STORE")" "1" "…and re-adopts the open finding rather than twinning it"
+eq "$(meta "$FIDF" 'finding.fix_unit')" "$VFC2" "…which records the later child"
+grep -qxF "$VFC2|blocks|$FIDF" "$STUB_DEPS" && ok "…and that child blocks the already-ruled finding, so it closes only once the later child lands" || bad "the later child does not block the re-raised must-fix finding"
+grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "…beside the first batch's child, which stays" || bad "the first batch's edge was dropped"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
@@ -2387,7 +2795,7 @@ eq "$(meta orph-72 anchor_bead)" "Vo" "…now carrying the anchor open_validatio
 
 echo "# a held anchor: the batch opens a pass but does NOT lift the operator's hold"
 # An operator's own hold is theirs to lift, so this arm never touches it; it
-# stays, and the comments go to the person holding it.
+# stays, and the comments still become work.
 store "[$(anchor Vc 73 "$HELD_STATE")]"
 printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
 echo '[]' > "$GH_DIR/reviews_73.json"
@@ -2397,7 +2805,7 @@ hasnt "$(vpass_id Vc)" "<none>" "the batch still opens a validation pass"
 eq "$(meta Vc merge_hold)" "true" "…but the operator's hold is left standing — this arm does not touch it"
 eq "$(meta Vc 'gc.routed_to')" "human" "…nor the human route"
 eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
-eq "$(meta Vc pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
+has "$(meta Vc pr_comment_disposition)" "rework:" "…and the comments still become a rework child: a hold does not choose the visit"
 
 echo "# a verdict the city posted itself is not feedback, and opens no pass"
 # Provenance, not shape: signoff.sh posts its verdicts through pr-post.sh, which
@@ -2620,7 +3028,7 @@ eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto st
 echo "# …and a CHANGES_REQUESTED veto opens a validation pass like any other feedback"
 # A veto is review the branch has never been answered against, the same as a
 # comment batch, so it opens a pass. It does not touch an operator's own hold,
-# so a held anchor keeps its hold and the veto goes to the person holding it.
+# so a held anchor keeps its hold, and the veto still becomes a rework child.
 HELDCR=',"merge_hold":"true","gc.routed_to":"human","blocked_reason":"held for the operator to review"'
 store "[$(anchor PB 56 "$HELDCR")]"
 printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_56.json"
@@ -2631,7 +3039,7 @@ hasnt "$(vpass_id PB)" "<none>" "the veto opens a validation pass"
 eq "$(meta PB signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 eq "$(meta PB merge_hold)" "true" "…the operator's hold is left standing"
 eq "$(meta PB 'gc.routed_to')" "human" "…with the human route"
-eq "$(meta PB pr_comment_disposition)" "visit:new-2" "…so the objection goes to the person holding it (the pass is opened after, as new-3)"
+has "$(meta PB pr_comment_disposition)" "rework:" "…and the objection still becomes a rework child"
 
 echo "# …a review DISMISSED before it routed is never filed"
 # A dismissal moves the review out of COMMENTED and CHANGES_REQUESTED both, so
@@ -2839,9 +3247,9 @@ eq "$rc" 1 "an unreadable enumeration exits non-zero"
 
 fi # part feedback
 
-# These helpers sit outside every part: parts writeback and checks both use
-# them, and child() here replaces the rework-child helper above for the rest of
-# the file, in every run.
+# These helpers sit outside every part: the parts after them use them, and
+# child() here replaces the rework-child helper above for the rest of the file,
+# in every run.
 # ---- PR write-back: acknowledge on pickup, reply and resolve on landing -------
 # STUB_SELF_LOGIN is gc-city-bot, so "johnzook" is the operator throughout.
 # A write-back fixture states the WHOLE PR, not just its review threads. The
@@ -2880,9 +3288,16 @@ child()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c
 # comment's URL as artifact_url (what the write-back cites in place of a commit).
 child_artifact() { printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"c","metadata":{"artifact_url":"%s"}}' "$1" "$2" "$3"; }
 gh_since() { tail -n +"$1" "$STUB_GH_LOG"; }
+# The PR's commits, which a fix's answer cites: a list of {oid, message, parents}
+# objects, with parents 2 for a merge of the base. A fixture without the list is a
+# PR none of whose commits names a fix unit.
+commits() { # num commits-json
+  jq -c --argjson cs "$2" '.commits = $cs' "$GH_DIR/threads_$1.json" > "$TMP/commits.json" \
+    && mv "$TMP/commits.json" "$GH_DIR/threads_$1.json"
+}
 # The provenance cutover the unengaged-thread sections stamp on their anchors.
-# Those sections sit in the writeback and checks parts, and each part runs alone,
-# so the stamp is defined here, outside both.
+# Sections in more than one part stamp it, and each part runs alone, so it is
+# defined here, outside every part.
 UTCUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
@@ -2924,12 +3339,18 @@ mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "REACT" "no second reaction to the Conversation comment"
 
-echo "# a landed fix replies once naming the commit, then resolves the thread"
+echo "# a landed fix replies once naming the commit it made, then resolves the thread"
+# The PR head is a merge of the base, which fixed nothing, so the answer names the
+# commit the fix unit made: the one whose message names it. The comment has no
+# finding, so the answer says it was resolved rather than fixed.
 store "[$(anchor W2 41 "$(wb_meta rework:K2)"), $(child K2 closed)]"
 printf '%s' "$(prview 41 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_41.json"
 threads 41 "$(one_thread 41)"
+commits 41 '[{"oid":"0a1b2c3d4e5f","message":"feat: the first round (W2)"},{"oid":"f1e2d3c4b5a6","message":"fix: the parser takes only declared names (K2)"},{"oid":"sha-41","message":"Merge remote-tracking branch origin/main into polecat/x41","parents":2}]'
 out=$(run)
-has "$(treply 41 T-41)" "✅ Resolved in sha-41" "the reply leads with the check mark and names the landing commit"
+has "$(treply 41 T-41)" "✅ Resolved in f1e2d3c4 (K2)." "the reply leads with the check mark and names the commit the fix unit made"
+hasnt "$(treply 41 T-41)" "sha-41" "…never the head, a merge of the base"
+hasnt "$(treply 41 T-41)" "0a1b2c3d" "…nor a commit another bead made"
 has "$(treply 41 T-41)" "K2" "…and the bead that carried the work"
 has "$(treply 41 T-41)" "<!-- gc-writeback-mark:resolved -->" "…carrying the resolved mark line a later pass reads"
 has "$(treply 41 T-41)" "<!-- gc:city -->" "…carrying the city's mark, posted through pr-post.sh"
@@ -2945,6 +3366,7 @@ out=$(run)
 hasnt "$(gh_since "$mark")" "REACT" "no second reaction"
 hasnt "$(gh_since "$mark")" "REPLY" "no second reply"
 hasnt "$(gh_since "$mark")" "RESOLVE" "no second resolve"
+hasnt "$(gh_since "$mark")" "COMMITS" "…and no read of the commits, with no answer left to cite them in"
 has "$out" "0 comments acknowledged, 0 threads replied, 0 threads resolved" "the repeat pass reports no writes"
 eq "$(jq -r '[ .threads[].comments.nodes[] ] | length' "$GH_DIR/threads_41.json")" "2" "the thread still carries exactly one reply"
 
@@ -3109,20 +3531,22 @@ hasnt "$(gh_since "$mark")" "REACT" "…and no reaction"
 # The validator may overrule a human on the merits (finding declined), but it
 # owes them the reason on their PR: it stamps the answer (finding.reply) and the
 # row it answers (finding.comment_id), and the write-back posts that answer into
-# the thread and resolves it. A closed declined human finding carrying both.
+# the thread, leading with the ruling, and leaves the thread open for the
+# operator to accept or overrule. A closed declined human finding carrying both.
 dfind() { # id anchor comment_id [reply]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"declined: not an objection","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.comment_id":"%s"%s}}' \
     "$1" "$2" "$3" "${4:+,\"finding.reply\":\"$4\"}"
 }
 
-echo "# a declined human objection is answered on its thread and the thread resolved"
+echo "# a declined human objection is answered on its thread, and the thread is left open"
 store "[$(anchor WD1 47 "$(wb_meta visit:VD1)"), $(dfind DF1 WD1 100 'The diff already asserts X in helper; no change needed.')]"
 printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
 threads 47 "$(one_thread 47)"
 out=$(run)
-has "$(treply 47 T-47)" "no change needed" "the validator's decline reason is posted into the raiser's thread"
+has "$(treply 47 T-47)" "Declined: The diff already asserts X in helper; no change needed." "the validator's decline reason is posted into the raiser's thread, leading with the ruling"
+hasnt "$(treply 47 T-47)" "✅" "…never with the check mark a fix carries"
 has "$(treply 47 T-47)" "<!-- gc-writeback -->" "…carrying the write-back marker"
-eq "$(tresolved 47 T-47)" "true" "…and the answered thread is resolved, so it no longer holds the merge"
+eq "$(tresolved 47 T-47)" "false" "…and the thread is left open for the operator to accept or overrule"
 eq "$(meta DF1 finding.reply_posted)" "1" "…and the finding is marked answered"
 echo "# …and a second pass answers the same thread nothing"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
@@ -3143,23 +3567,24 @@ eq "$(meta DF3 finding.reply_posted)" "<absent>" "…and the finding is not mark
 
 # ---- a deferred or needs-you human finding owes its raiser an answer too -------
 # The write-back answers every human ruling that owes a reply, not only declines:
-# a deferred finding posts its follow-up id and resolves the thread (the deferral
-# is settled on this PR), a needs-you finding posts its visit id and leaves the
-# thread UNRESOLVED (the operator still owes a ruling). A finding carrying the
-# disposition, its comment_id, and the owed reply.
+# a deferred finding posts its follow-up id and leaves the thread open for the
+# operator to accept or overrule, a needs-you finding posts its visit id and
+# leaves the thread UNRESOLVED (the operator still owes a ruling). A finding
+# carrying the disposition, its comment_id, and the owed reply.
 xfind() { # id anchor comment_id disposition status reply
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"%s","finding.source":"human:johnzook","finding.comment_id":"%s","finding.reply":"%s"}}' \
     "$1" "$5" "$2" "$4" "$3" "$6"
 }
 
-echo "# a deferred human objection posts its follow-up id into the thread and resolves it"
+echo "# a deferred human objection posts its follow-up id into the thread and leaves it open"
 store "[$(anchor WDF1 51 "$(wb_meta visit:VDF1)"), $(xfind DFF1 WDF1 100 deferred closed 'Deferred — tracked as follow-up tk-fup1. It will be picked up after this merges.')]"
 printf '%s' "$(prview 51 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_51.json"
 threads 51 "$(one_thread 51)"
 out=$(run)
 has "$(treply 51 T-51)" "tracked as follow-up tk-fup1" "the deferred finding's follow-up id is posted into the raiser's thread"
 has "$(treply 51 T-51)" "<!-- gc-writeback -->" "…carrying the write-back marker"
-eq "$(tresolved 51 T-51)" "true" "…and the thread is resolved: a deferral is settled on this PR"
+has "$(treply 51 T-51)" "Deferred — tracked as follow-up tk-fup1" "…leading with the ruling, which the reply already opens with"
+eq "$(tresolved 51 T-51)" "false" "…and the thread is left open for the operator to accept or overrule"
 eq "$(meta DFF1 finding.reply_posted)" "1" "…and the finding is marked answered"
 
 echo "# a needs-you objection posts its visit id into the thread but leaves it UNRESOLVED"
@@ -3170,6 +3595,216 @@ out=$(run)
 has "$(treply 52 T-52)" "opened visit tk-vis1" "the needs-you finding's visit id is posted into the raiser's thread"
 eq "$(tresolved 52 T-52)" "false" "…but the thread is NOT resolved: the operator still owes a ruling"
 eq "$(meta NUF1 finding.reply_posted)" "1" "…and the finding is marked answered so the reply is not doubled"
+
+# ---- a ruled machine finding is posted where the operator reads the PR --------
+# A machine-lane finding ruled must-fix or deferred is posted once: a file-level
+# review comment when its locus begins with a file the PR's diff touches, a
+# Conversation comment otherwise. Once it closes it is answered with how it
+# closed, and its thread is resolved. One that closed before it was posted
+# carries its outcome from the start. MF holds no human batch, so its findings
+# alone bring it into the sweep.
+mfind() { # id anchor disposition status locus [lane] [extra-metadata]
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[%s]: the parser accepts names it does not own","description":"Locus: %s\\n\\nThe parser accepts names it does not own; tighten it to the declared forms.\\n\\nRaised by machine:%s reviewing anchor %s.","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"%s","finding.disposition":"%s","finding.source":"machine:%s"%s}}' \
+    "$1" "$4" "${6:-codex}" "$5" "${6:-codex}" "$2" "$2" "${6:-codex}" "$3" "${6:-codex}" "${7:-}"
+}
+# The thread holding a finding's post, its comment bodies, and the Conversation
+# comment carrying a finding.
+fthread() { jq -c --arg m "<!-- gc-finding:$2 -->" '[ .threads[]? | select(any(.comments.nodes[]?; (.body // "") | contains($m))) ] | first // {}' "$GH_DIR/threads_$1.json"; }
+tbodies() { printf '%s' "$1" | jq -r '[ .comments.nodes[]?.body ] | join("\n")'; }
+fissue() { jq -r --arg m "<!-- gc-finding:$2 -->" '[ .issue_comments[]? | select((.body // "") | contains($m)) | .body ] | first // ""' "$GH_DIR/threads_$1.json"; }
+
+echo "# ruled machine findings are posted once each: on the file their locus names, or to the Conversation"
+# FM4's locus names assets/scripts/xy.sh, which the diff does not touch; the diff
+# does touch assets/scripts/x, a prefix of it, and a path does not end inside a
+# name, so FM4 goes to the Conversation rather than onto the wrong file. FM7's
+# names a file the PR removes, which GitHub anchors no review comment to.
+store "[$(anchor MF 200), $(mfind FM1 MF must-fix open 'assets/scripts/x.sh:parse_name'), $(child FU1 open),
+  $(mfind FM2 MF must-fix closed 'assets/scripts/x.sh: parse_name'), $(child FU2 closed),
+  $(mfind FM3 MF deferred closed 'PR #200 body / Summary' codex ',"finding.follow_up":"tk-fu3","finding.reply":"Deferred — tracked as follow-up tk-fu3: low risk. It will be picked up after this merges."'),
+  $(mfind FM4 MF must-fix open 'assets/scripts/xy.sh: parse_name'), $(child FU4 open),
+  $(mfind FM6 MF must-fix closed 'assets/scripts/x.sh'), $(child FU6 closed),
+  $(mfind FM7 MF must-fix open 'assets/scripts/gone.sh: helper'),
+  $(mfind FX1 MF unvalidated open 'assets/scripts/x.sh'), $(mfind FX2 MF declined closed 'assets/scripts/x.sh'),
+  $(mfind FX3 MF needs-you open 'assets/scripts/x.sh'), $(mfind FX4 MF must-fix open 'assets/scripts/x.sh' human)]"
+printf 'FU1|blocks|FM1\nFU2|blocks|FM2\nFU4|blocks|FM4\nFU6|blocks|FM6\n' >> "$STUB_DEPS"
+printf '%s' "$(prview 200 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_200.json"
+threads 200 '{"reviews":[],"threads":[],"issue_comments":[]}'
+# The commits the fix units made. FU1 made two, one of which names the finding
+# it fixed, and the head is a merge of the base, which names FU1 and fixed nothing.
+commits 200 '[{"oid":"fu1aaaa11111","message":"fix: tighten the parser (FU1)\n\nFinding FM1: parse_name took names it does not own."},{"oid":"fu1bbbb22222","message":"docs: note the parser change (FU1)"},{"oid":"fu2cccc33333","message":"fix: parse_name (FU2)"},{"oid":"fu4dddd44444","message":"fix: the xy parser (FU4)"},{"oid":"sha-200","message":"Merge remote-tracking branch origin/main (FU1)","parents":2}]'
+printf '[{"filename":"assets/scripts/x.sh","status":"modified"},{"filename":"assets/scripts/x","status":"added"},{"filename":"assets/scripts/gone.sh","status":"removed"}]' > "$GH_DIR/files_200.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 )); gmark=$(( $(wc -l < "$STUB_GC_LOG") + 1 ))
+out=$(run)
+since=$(gh_since "$mark"); gsince=$(tail -n +"$gmark" "$STUB_GC_LOG")
+eq "$(printf '%s\n' "$since" | grep -c '^FCOMMENT 200 assets/scripts/x.sh file sha-200$')" "3" "the three findings whose locus begins with a diff file are posted on that file, file-level, at the live head"
+eq "$(printf '%s\n' "$since" | grep -c '^PRCOMMENT 200$')" "3" "…and the three whose locus names no file left in the diff go to the Conversation"
+hasnt "$since" "FCOMMENT 200 assets/scripts/x " "…none of them onto a file whose name only begins its locus"
+hasnt "$since" "FCOMMENT 200 assets/scripts/gone.sh" "…nor onto a file the PR removes"
+has "$(fissue 200 FM7)" 'Locus: `assets/scripts/gone.sh: helper`' "…whose finding is posted to the Conversation, naming its locus"
+has "$out" "6 findings posted" "…which the pass reports"
+eq "$(printf '%s\n' "$gsince" | grep -c 'bd list --metadata-field task_kind=finding')" "1" "the findings come from one store-wide read"
+hasnt "$gsince" "anchor_bead=MF --status=open,in_progress,blocked,deferred,hooked,pinned,closed" "…and no per-anchor read: an anchor with no human batch reads nothing more"
+eq "$(meta MF pr_comment_batch)" "<absent>" "…nor is a human batch history minted for it"
+eq "$(meta FX1 finding.pr_comment)" "<absent>" "an unvalidated finding is not posted"
+eq "$(meta FX2 finding.pr_comment)" "<absent>" "…nor a declined one"
+eq "$(meta FX3 finding.pr_comment)" "<absent>" "…nor one waiting on the operator"
+eq "$(meta FX4 finding.pr_comment)" "<absent>" "…nor a human finding, which already sits on the PR where its raiser wrote it"
+T1=$(fthread 200 FM1)
+has "$(tbodies "$T1")" "**Finding from the codex review, ruled must-fix** (FM1)" "a post names its lane, its ruling and its finding"
+has "$(tbodies "$T1")" "The merge waits for this to be fixed on the branch." "…what an open must-fix holds"
+has "$(tbodies "$T1")" "The parser accepts names it does not own; tighten it" "…and the objection in the reviewer's words"
+hasnt "$(tbodies "$T1")" "Raised by machine" "…without the bead's own provenance line"
+hasnt "$(tbodies "$T1")" "<!-- gc-writeback -->" "…and with no write-back marker the reply plan would claim its thread by"
+has "$(tbodies "$T1")" "<!-- gc:city -->" "…carrying the city's mark, posted through pr-post.sh"
+eq "$(printf '%s' "$T1" | jq -r '.isResolved')" "false" "its thread stays open while the finding is"
+eq "$(meta FM1 finding.pr_comment)" "$(printf '%s' "$T1" | jq -r '.comments.nodes[0].databaseId')" "the finding records the comment it was posted as"
+T2=$(fthread 200 FM2)
+has "$(tbodies "$T2")" "**Outcome:** Fixed in fu2cccc3 (FU2)." "a finding fixed before it was posted carries its outcome: the commit its fix unit made, and the fix unit"
+hasnt "$(tbodies "$T2")" "Addressed" "…never a blanket Addressed"
+hasnt "$(tbodies "$T2")" "The merge waits" "…never that it still holds the merge"
+has "$(tbodies "$T2")" "<!-- gc-finding:FM2:answered -->" "…and is marked answered in place"
+eq "$(meta FM2 finding.pr_answered)" "<absent>" "…while its thread still owes the resolve"
+IC3=$(fissue 200 FM3)
+has "$IC3" "ruled deferred" "a deferred finding is posted as deferred"
+has "$IC3" "**Outcome:** Deferred — tracked as follow-up tk-fu3" "…with its follow-up as the outcome"
+has "$IC3" 'Locus: `PR #200 body / Summary`' "…and its locus named, since no file in the diff holds it"
+has "$IC3" "<!-- gc:city -->" "…and the city's mark, as every Conversation post carries"
+eq "$(meta FM3 finding.pr_answered)" "1" "a Conversation comment posted with its outcome owes nothing more"
+has "$(fissue 200 FM4)" "The merge waits for this to be fixed on the branch." "an open finding posted to the Conversation says what it holds"
+eq "$(printf '%s\n' "$since" | grep -c '^COMMITS 200$')" "1" "the PR's commits are read once for the two outcomes that cite them"
+
+echo "# a posted finding that closes is answered: by a reply and a resolve in its thread, by an edit in the Conversation"
+# The operator has replied in FM6's thread, so that conversation is theirs to end.
+bmut FM1 '.status = "closed"'; bmut FU1 '.status = "closed"'
+bmut FM4 '.status = "closed"'; bmut FU4 '.status = "closed"'
+jq -c '.threads = [ .threads[] | if any(.comments.nodes[]?; (.body // "") | contains("<!-- gc-finding:FM6 -->"))
+    then .comments.nodes += [{id: "NC-200-op", databaseId: 300, author: {login: "johnzook"}, body: "is this really fixed?", reactionGroups: []}]
+    else . end ]' "$GH_DIR/threads_200.json" > "$TMP/t200.json" && mv "$TMP/t200.json" "$GH_DIR/threads_200.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+since=$(gh_since "$mark")
+T6=$(fthread 200 FM6)
+eq "$(printf '%s' "$T6" | jq -r '.isResolved')" "false" "a thread a human wrote in after the post is left open"
+eq "$(printf '%s' "$T6" | jq -r '.comments.nodes | length')" "2" "…with nothing more posted into it, its answer being in place"
+eq "$(meta FM6 finding.pr_answered)" "1" "…and the finding recorded answered"
+has "$out" "has a reply after finding FM6; answered, left unresolved" "…which the pass says"
+T1=$(fthread 200 FM1)
+has "$(tbodies "$T1")" "Fixed in fu1aaaa1 (FU1)." "the reply names the commit that fixed it, of the fix unit's commits the one naming the finding"
+hasnt "$(tbodies "$T1")" "fu1bbbb2" "…not the fix unit's other commit"
+hasnt "$(tbodies "$T1")" "sha-200" "…nor the head, a merge of the base"
+has "$(tbodies "$T1")" "<!-- gc-finding:FM1:answered -->" "…marked as the finding's answer"
+eq "$(tbodies "$T1" | grep -c -F '<!-- gc:city -->')" "2" "…and the reply carries the city's mark like the post it answers"
+eq "$(printf '%s' "$T1" | jq -r '.isResolved')" "true" "…and the thread is resolved behind it"
+T2=$(fthread 200 FM2)
+eq "$(printf '%s' "$T2" | jq -r '.isResolved')" "true" "the thread posted with its outcome is resolved"
+eq "$(printf '%s' "$T2" | jq -r '.comments.nodes | length')" "1" "…with no reply, its answer already in place"
+IC4=$(fissue 200 FM4)
+has "$IC4" "**Outcome:** Fixed in fu4dddd4 (FU4)." "the Conversation comment is edited to carry the answer"
+eq "$(printf '%s\n' "$IC4" | grep -c -F '<!-- gc:city -->')" "1" "…keeping the city's mark, once"
+hasnt "$IC4" "The merge waits" "…in place of what the ruling held"
+eq "$(jq '[ .issue_comments[] | select((.body // "") | contains("gc-finding:FM4")) ] | length' "$GH_DIR/threads_200.json")" "1" "…without a second comment"
+eq "$(meta FM1 finding.pr_answered)$(meta FM2 finding.pr_answered)$(meta FM4 finding.pr_answered)" "111" "each is recorded answered"
+has "$out" "3 findings answered" "the pass reports the three answers"
+eq "$(printf '%s\n' "$since" | grep -c '^COMMITS 200$')" "1" "…reading the PR's commits once for the two answers that cite them"
+hasnt "$since" "FCOMMENT" "nothing is posted twice"
+# This pass's walk read back every comment the first pass posted. The city's mark
+# is what keeps them out of the feedback batch: unmarked, a post under our login
+# after the cutover is feedback, and the city would route its own findings back to
+# itself as rework.
+hasnt "$out" "MF — PR#200 review comments routed" "the posted findings are not read back as feedback"
+eq "$(meta MF pr_comment_disposition)" "<absent>" "…so no batch is routed for them"
+
+echo "# …after which a pass writes nothing and reads nothing from GitHub for them"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+since=$(gh_since "$mark")
+hasnt "$since" "graphql" "settled findings cost no GitHub read"
+hasnt "$since" "COMMENT " "…and nothing is posted"
+hasnt "$since" "ICEDIT" "…or edited"
+has "$out" "0 findings posted, 0 findings answered" "the repeat pass reports no writes"
+
+echo "# a post whose stamp did not land is recorded off its marker; a post whose comment is gone is left; no file list, no post"
+# FM1's stamp is dropped, as if the pass that posted it died before recording
+# it: the marker on the PR is what stops a second post. FM2's thread is deleted
+# from the PR: nothing is left to answer, and nothing re-posts it. FM5 is owed a
+# post on a file, but the file list will not read, so it is not guessed onto the
+# Conversation.
+FM1C=$(meta FM1 finding.pr_comment)
+bmut FM1 '.metadata |= del(.["finding.pr_comment"], .["finding.pr_answered"])'
+bmut FM2 '.metadata |= del(.["finding.pr_answered"])'
+jq -c '.threads = [ .threads[] | select(any(.comments.nodes[]?; (.body // "") | contains("<!-- gc-finding:FM2 -->")) | not) ]' \
+  "$GH_DIR/threads_200.json" > "$TMP/t200.json" && mv "$TMP/t200.json" "$GH_DIR/threads_200.json"
+jq -c ". + [$(mfind FM5 MF must-fix open 'assets/scripts/x.sh:other')]" "$STUB_STORE" > "$TMP/s.json" && mv "$TMP/s.json" "$STUB_STORE"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(STUB_FILES_RC=1 run)
+since=$(gh_since "$mark")
+eq "$(meta FM1 finding.pr_comment)" "$FM1C" "the post already on the PR is recorded from its marker"
+eq "$(meta FM2 finding.pr_answered)" "gone" "a post whose comment is gone from the PR is left answered as gone"
+eq "$(meta FM5 finding.pr_comment)" "<absent>" "with the file list unreadable, a post owed on a file waits"
+hasnt "$since" "COMMENT " "…and nothing is posted: not twice, not again, not to the Conversation"
+has "$out" "file list unreadable; finding FM5 not posted" "…and the pass says why"
+
+echo "# past the per-pass cap, a backlog of findings waits for the next pass"
+# A first activation finds every open PR's backlog owed at once.
+mc="[$(anchor MC 209)"
+for i in $(seq 1 11); do mc="$mc, $(mfind "CF$i" MC must-fix open "anchor MC / note $i")"; done
+store "$mc]"
+printf '%s' "$(prview 209 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_209.json"
+threads 209 '{"reviews":[],"threads":[],"issue_comments":[]}'
+out=$(run)
+has "$out" "10 findings posted" "a pass posts up to the cap"
+has "$out" "1 finding post(s) or answer(s) wait for the next pass (cap 10 per pass)" "…and says how many wait"
+out=$(run)
+has "$out" "1 findings posted" "the next pass posts the rest"
+eq "$(jq '[ .issue_comments[] | select((.body // "") | contains("<!-- gc-finding:CF")) ] | length' "$GH_DIR/threads_209.json")" "11" "…each exactly once"
+
+echo "# a post whose new comment id does not come back is recorded off its marker by the next pass"
+store "[$(anchor MQ 211), $(mfind QF1 MQ must-fix open 'anchor MQ / note')]"
+printf '%s' "$(prview 211 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_211.json"
+threads 211 '{"reviews":[],"threads":[],"issue_comments":[]}'
+out=$(STUB_PR_COMMENT_QUIET=1 run)
+has "$out" "finding QF1 posted, but its comment id did not read back" "a post whose id does not come back says so"
+eq "$(meta QF1 finding.pr_comment)" "<absent>" "…and records no id it cannot name"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(meta QF1 finding.pr_comment)" "$(jq -r '[ .issue_comments[] | select((.body // "") | contains("<!-- gc-finding:QF1 -->")) | .databaseId ] | first' "$GH_DIR/threads_211.json")" "the next pass records the comment off its marker"
+hasnt "$(gh_since "$mark")" "PRCOMMENT" "…and posts nothing again"
+
+echo "# an unmarked post under our login in a finding's thread is someone writing there"
+# After the cutover such a post is a model or operator review run on the city's
+# account, feedback like a person's, so the finding's answer leaves the thread
+# open for it the way it does for a human reply.
+store "[$(anchor MR 212 "$UTCUT"), $(mfind RF1 MR must-fix open 'assets/scripts/x.sh: parse_name'), $(child RU1 open)]"
+printf 'RU1|blocks|RF1\n' >> "$STUB_DEPS"
+printf '%s' "$(prview 212 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_212.json"
+threads 212 '{"reviews":[],"threads":[],"issue_comments":[]}'
+printf '[{"filename":"assets/scripts/x.sh","status":"modified"}]' > "$GH_DIR/files_212.json"
+out=$(run)
+has "$out" "MR — PR#212 posted finding RF1 on assets/scripts/x.sh" "the finding is posted on its file"
+jq -c '.threads = [ .threads[] | if any(.comments.nodes[]?; (.body // "") | contains("<!-- gc-finding:RF1 -->"))
+    then .comments.nodes += [{id: "NC-212-m", databaseId: 302, author: {login: "gc-city-bot"}, body: "model review: the fix misses the empty name", createdAt: "2099-01-01T00:00:00Z", reactionGroups: []}]
+    else . end ]' "$GH_DIR/threads_212.json" > "$TMP/t212.json" && mv "$TMP/t212.json" "$GH_DIR/threads_212.json"
+bmut RF1 '.status = "closed"'; bmut RU1 '.status = "closed"'
+out=$(run)
+TR=$(fthread 212 RF1)
+has "$(tbodies "$TR")" "Fixed on this PR (RU1)." "the closed finding is answered in its thread, naming no commit when none names its fix unit"
+eq "$(printf '%s' "$TR" | jq -r '.isResolved')" "false" "…and the thread is left open over the unmarked post"
+has "$out" "has a reply after finding RF1; answered, left unresolved" "…which the pass says"
+
+echo "# a deferred machine finding's thread is answered and left open for the operator"
+store "[$(anchor MD 345 "$UTCUT"), $(mfind DF7 MD deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu7","finding.reply":"Deferred — tracked as follow-up tk-fu7: low risk. It will be picked up after this merges."')]"
+printf '%s' "$(prview 345 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_345.json"
+threads 345 '{"reviews":[],"threads":[],"issue_comments":[]}'
+printf '[{"filename":"assets/scripts/x.sh","status":"modified"}]' > "$GH_DIR/files_345.json"
+out=$(run)
+TD=$(fthread 345 DF7)
+has "$(tbodies "$TD")" "**Outcome:** Deferred — tracked as follow-up tk-fu7" "the deferred finding is posted on its file with its outcome"
+has "$(tbodies "$TD")" "<!-- gc-finding:DF7:open -->" "…carrying the open line, since its thread waits for the operator"
+out=$(run)
+TD=$(fthread 345 DF7)
+eq "$(printf '%s' "$TD" | jq -r '.isResolved')" "false" "the next pass leaves the thread open"
+eq "$(meta DF7 finding.pr_answered)" "1" "…and records the finding answered"
+has "$out" "finding DF7 is deferred; thread" "…saying it left the thread open"
 
 echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
 # Declining closes the finding, so a still-standing objection re-adopts as a
@@ -3187,6 +3822,12 @@ grep -qxF "$VPR|blocks|WR" "$STUB_DEPS" && ok "…whose blocks edge re-holds the
 FRESHR=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "WR") | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 hasnt "$FRESHR" "<none>" "…and a fresh OPEN finding is filed, the closed decline not re-adopted in its place"
 eq "$(bstatus DFR)" "closed" "…while the prior declined finding stays closed"
+
+fi # part writeback
+
+# ==== part answers: which batch answers which comment, and the acting identity
+# and the reads an answer rests on ====
+if part answers; then
 
 echo "# a later batch answers its own comments and never the ones before them"
 # The watermark is cumulative and the disposition is overwritten per batch, so
@@ -3206,7 +3847,7 @@ out=$(run)
 eq "$(meta WF pr_comment_batch)" "visit:VF|0|100;rework:KF|100|200" \
   "the new disposition inherits the old mark as its floor, beside the open visit's batch it still owes"
 eq "$(thumbed 52 NC-52b)" "true" "the new comment is answered and marked resolved"
-has "$(treply 52 T-52b)" "✅ Resolved in sha-52" "its thread gets the reply"
+has "$(treply 52 T-52b)" "✅ Resolved on this PR (KF)." "its thread gets the reply"
 eq "$(tresolved 52 T-52b)" "true" "…and is resolved behind it"
 hasnt "$(treply 52 T-52)" "Resolved" "the earlier batch's thread is never answered by this one"
 eq "$(tresolved 52 T-52)" "false" "…and is never resolved by it"
@@ -3274,6 +3915,7 @@ echo "# a thread two MIXED-form batches touched names each by its own landing fo
 store "[$(anchor WX 60 "$(wb_meta rework:KC1)"), $(child KC1 open), $(child KA2 open)]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_60.json"
 threads 60 "$(one_thread 60)"
+commits 60 '[{"oid":"kc1e00aaaaaa","message":"fix: the first ask (KC1)"},{"oid":"sha-60","message":"Merge remote-tracking branch origin/main","parents":2}]'
 out=$(run)
 bmut WX '.metadata += {"pr_comment_disposition":"rework:KA2","pr_comment_watermark":"200"}'
 threads 60 "$(tfile 60 | jq -c '.threads[0].comments.nodes += [
@@ -3285,7 +3927,7 @@ eq "$(treply 60 T-60)" "" "the thread waits while the artifact unit is still ope
 bmut KA2 '.status = "closed" | .metadata += {"artifact_url":"https://github.com/zook/gc-toolkit/pull/60#issuecomment-600"}'
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-has "$(treply 60 T-60)" "✅ Resolved in sha-60 on this PR (KC1)" "the commit unit is cited by its landing commit"
+has "$(treply 60 T-60)" "✅ Resolved in kc1e00aa (KC1)." "the commit unit is cited by the commit it made"
 has "$(treply 60 T-60)" "issuecomment-600 (KA2)" "the artifact unit is cited by its delivered URL, not a commit"
 eq "$(tresolved 60 T-60)" "true" "the thread is resolved behind the one mixed-form reply"
 eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
@@ -3308,7 +3950,7 @@ hasnt "$(treply 58 T-58)" "Resolved" "the landed rework never answers over a com
 eq "$(tresolved 58 T-58)" "false" "…and never resolves the thread under it"
 bmut VL '.status = "closed"'
 out=$(run)
-has "$(treply 58 T-58)" "Resolved in sha-58 on this PR (KL)." "once the visit closes, the reply names the rework"
+has "$(treply 58 T-58)" "Resolved on this PR (KL)." "once the visit closes, the reply names the rework"
 has "$(treply 58 T-58)" "Resolved: visit VL closed." "…and the closed visit"
 eq "$(tresolved 58 T-58)" "true" "…and the thread is resolved behind it"
 eq "$(thumbed 58 NC-58),$(thumbed 58 NC-58b)" "true,true" "…with both comments marked resolved"
@@ -3406,7 +4048,7 @@ printf '%s' "$(prview 48 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_48.json"
 threads 48 "$(printf '%s' "$(one_thread 48)" | jq -c '.threads[0].viewerCanResolve = false')"
 out=$(run)
 eq "$(tresolved 48 T-48)" "false" "an unresolvable thread is not resolved"
-has "$(treply 48 T-48)" "✅ Resolved in sha-48" "…but the reply still lands, since the operator still wants it"
+has "$(treply 48 T-48)" "✅ Resolved on this PR" "…but the reply still lands, since the operator still wants it"
 has "$out" "not resolvable by this identity" "the missing right is reported"
 
 echo "# an unreadable thread read writes nothing"
@@ -3424,6 +4066,12 @@ threads 50 "$(one_thread 50)"
 out=$(STUB_REPLY_RC=1 run)
 has "$out" "could not reply on thread" "the failed reply is reported"
 eq "$(tresolved 50 T-50)" "false" "…and the thread is left unresolved"
+
+fi # part answers
+
+# ==== part reactions: the reaction cap, the PRs an answer may touch, the
+# Conversation tab, a finding's own answer and the unengaged-thread backstop ====
+if part reactions; then
 
 echo "# over the reaction cap, the batch's answers wait for the acknowledgements"
 # The pickup reaction is what tells the operator their comment was seen. A
@@ -3508,7 +4156,7 @@ eq "$(tresolved 57 T-57)" "false" "…and not resolved"
 echo "# …and the pass whose acknowledgement lands answers it"
 out=$(run)
 eq "$(thumbed 57 NC-57)" "true" "the retried acknowledgement lands, and the answer behind it marks the comment resolved"
-has "$(treply 57 T-57)" "✅ Resolved in sha-57" "the reply follows it"
+has "$(treply 57 T-57)" "✅ Resolved on this PR" "the reply follows it"
 eq "$(tresolved 57 T-57)" "true" "…and the thread is resolved behind it"
 
 echo "# a disposition written DURING the pass is acknowledged in that same pass"
@@ -3562,9 +4210,10 @@ echo "# a landed batch resolves its review body and Conversation comment with on
 store "[$(anchor WT1 310 "$(wb_tmeta rework:KT1 55 50 'rework:KT1|0|55' 'rework:KT1|0|50')"), $(child KT1 closed)]"
 printf '%s' "$(prview 310 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_310.json"
 threads 310 "$(top_fixture 310)"
+commits 310 '[{"oid":"kt1a00aaaaaa","message":"fix: the cap reads its budget (KT1)"}]'
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-has "$(pcomments 310)" "✅ Resolved in sha-310 on this PR (KT1)." "a check-mark answer names the landing commit and the bead"
+has "$(pcomments 310)" "✅ Resolved in kt1a00aa (KT1)." "a check-mark answer names the commit the fix unit made and the bead"
 has "$(pcomments 310)" "In reply to https://github.com/zook/gc-toolkit/pull/310#pullrequestreview-55, https://github.com/zook/gc-toolkit/pull/310#issuecomment-50." \
   "…and links to the review body and the Conversation comment it answers"
 has "$(pcomments 310)" "<!-- gc-writeback-mark:resolved r55 i50 -->" "…carrying the mark line that names both"
@@ -3617,13 +4266,16 @@ echo "# a landed batch waits for the comment's own finding to be validated"
 store "[$(anchor WT4 313 "$(wb_meta rework:KT4)"), $(child KT4 closed), $(hfind FT4 WT4 100 900 unvalidated open)]"
 printf '%s' "$(prview 313 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_313.json"
 threads 313 "$(one_thread 313)"
+# KT4 made two commits, and the one naming the comment (databaseId 100) fixed it.
+commits 313 '[{"oid":"kt4a00aaaaaa","message":"fix: the guard (KT4)\n\nReview comment 100 asked for it."},{"oid":"kt4b00bbbbbb","message":"test: the guard (KT4)"}]'
 out=$(run)
 eq "$(treply 313 T-313)" "" "no answer while the finding is open"
 eq "$(tresolved 313 T-313)" "false" "…and the thread is left open"
 eq "$(reacted 313 NC-313)" "true" "…the comment still acknowledged"
 bmut FT4 '.status = "closed" | .metadata += {"finding.disposition":"must-fix"}'
 out=$(run)
-has "$(treply 313 T-313)" "✅ Resolved in sha-313 on this PR (KT4)." "once the finding closes, the batch answers the comment"
+has "$(treply 313 T-313)" "✅ Fixed in kt4a00aa (KT4)." "once the must-fix finding closes, the batch answers the comment fixed, naming the commit that names it"
+hasnt "$(treply 313 T-313)" "kt4b00bb" "…and not the fix unit's other commit"
 eq "$(tresolved 313 T-313)" "true" "…and resolves the thread"
 eq "$(thumbed 313 NC-313)" "true" "…and marks the comment resolved"
 
@@ -3638,13 +4290,14 @@ hasnt "$(treply 314 T-314)" "Resolved" "the landed batch never claims the commen
 eq "$(tresolved 314 T-314)" "false" "…and the thread stays open for the ruling"
 eq "$(thumbed 314 NC-314)" "false" "…with the comment not marked resolved"
 
-echo "# a declined finding's answer leads with the check mark and marks the comment resolved"
+echo "# a declined finding's answer leads with its ruling, marks the comment answered, and leaves the thread open"
 store "[$(anchor WT6 315 "$(wb_meta rework:KT6)"), $(child KT6 open), $(hfind FT6 WT6 100 900 declined closed 'The helper already asserts it; no change needed.')]"
 printf '%s' "$(prview 315 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_315.json"
 threads 315 "$(one_thread 315)"
 out=$(run)
-has "$(treply 315 T-315)" "✅ The helper already asserts it; no change needed." "the decline is answered with the check mark"
-eq "$(tresolved 315 T-315)" "true" "…and its thread resolved"
+has "$(treply 315 T-315)" "Declined: The helper already asserts it; no change needed." "the decline is answered leading with its ruling"
+hasnt "$(treply 315 T-315)" "✅" "…not the check mark a fix carries"
+eq "$(tresolved 315 T-315)" "false" "…and its thread is left open for the operator to accept or overrule"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 eq "$(thumbed 315 NC-315),$(reacted 315 NC-315)" "true,false" "the next pass trades the comment's EYES for THUMBS_UP"
@@ -3658,15 +4311,115 @@ store "[$(anchor WT7 316 "$(wb_tmeta rework:KT7 55 0 'rework:KT7|0|55' '')"), $(
 printf '%s' "$(prview 316 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_316.json"
 threads 316 "$(top_fixture 316 | jq -c '.issue_comments = []')"
 out=$(STUB_DROP_KEYS="FT7:finding.reply_posted" run)
-has "$(pcomments 316)" "✅ Not an objection: the cap is a reaction budget. In reply to https://github.com/zook/gc-toolkit/pull/316#pullrequestreview-55." \
-  "the decline is posted with the check mark and a link to the review it answers"
+has "$(pcomments 316)" "Declined: Not an objection: the cap is a reaction budget. In reply to https://github.com/zook/gc-toolkit/pull/316#pullrequestreview-55." \
+  "the decline is posted leading with its ruling, with a link to the review it answers"
 eq "$(meta FT7 finding.reply_posted)" "<absent>" "the answered stamp was dropped, as a pass that died after posting leaves it"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-hasnt "$(gh_since "$mark")" "PRCOMMENT" "the next pass finds the posted answer by its finding line and posts no second one"
+hasnt "$(gh_since "$mark")" "PRCOMMENT" "the next pass finds the posted answer by its text and finding line, and posts no second one"
 eq "$(meta FT7 finding.reply_posted)" "1" "…and records the finding answered"
 out=$(run)
 eq "$(thumbed 316 RV-316),$(reacted 316 RV-316)" "true,false" "…and the review body trades EYES for THUMBS_UP"
+
+# ---- an owed reply is read back by its own text, never by another reply -------
+# A finding's answer is on the PR only when a reply of ours carries its own text
+# and names no other finding. An older reply of ours in the thread, such as a
+# batch answer posted before the finding was ruled, is not it: it neither stops
+# the answer from posting nor stands in for it. A finding stamped answered whose
+# answer is not on the PR is answered now.
+stamped() { jq -c '.metadata["finding.reply_posted"] = "1"'; }
+
+echo "# a decline under an older reply of ours in its thread is still posted"
+store "[$(anchor WLG 335 "$(wb_meta rework:KLG)"), $(child KLG closed), $(hfind FLG WLG 100 900 declined closed 'Declined: the measured read is the slower one.')]"
+printf '%s' "$(prview 335 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_335.json"
+threads 335 "$(printf '%s' "$(one_thread 335)" | jq -c '
+  .threads[0].comments.nodes += [
+    {"id":"NC-335m","databaseId":0,"author":{"login":"gc-city-bot"},"body":"Addressed in 52a81c40 on this PR (KLG).\n<!-- gc-writeback -->","reactionGroups":[]}]')"
+out=$(run)
+has "$(treply 335 T-335)" "Declined: the measured read is the slower one." "the decline is posted though an older reply of ours sits in its thread"
+has "$(treply 335 T-335)" "<!-- gc-writeback-finding:FLG -->" "…naming its finding"
+eq "$(meta FLG finding.reply_posted)" "1" "…and the finding is marked answered once it is"
+eq "$(tresolved 335 T-335)" "false" "…with the thread left open for the operator"
+
+echo "# a finding stamped answered whose answer never reached the PR is answered now"
+# What an older pass left: the thread resolved behind the batch's answer, and the
+# finding stamped answered with its decline posted nowhere.
+store "[$(anchor WST 336 "$(wb_meta rework:KST)"), $(child KST closed), $(hfind FST WST 100 900 declined closed 'Declined: neither case can leave a bead on the page.' | stamped)]"
+printf '%s' "$(prview 336 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_336.json"
+threads 336 "$(printf '%s' "$(one_thread 336)" | jq -c '
+  .threads[0].isResolved = true
+  | .threads[0].comments.nodes += [
+    {"id":"NC-336m","databaseId":0,"author":{"login":"gc-city-bot"},"body":"Addressed in 52a81c40 on this PR (KST).\n<!-- gc-writeback -->","reactionGroups":[]}]')"
+out=$(run)
+has "$(treply 336 T-336)" "Declined: neither case can leave a bead on the page." "the missing decline is posted"
+has "$out" "finding FST was stamped answered, but its answer was not on the PR; posted it" "…and the pass says the stamp was wrong"
+eq "$(meta FST finding.reply_posted)" "1" "…which stays stamped, now that it is true"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REPLY" "a later pass finds the answer and posts nothing more"
+
+echo "# a needs-you answer does not stand in for the ruling that replaced it"
+# The operator ruled the visit and the finding was re-ruled declined with a new
+# reply, while its stamp still records the needs-you answer under the same line.
+store "[$(anchor WRR 337 "$(wb_meta rework:KRR)"), $(child KRR closed), $(hfind FRR WRR 100 900 declined closed 'Declined: the operator ruled the cap stays.' | stamped)]"
+printf '%s' "$(prview 337 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_337.json"
+threads 337 "$(printf '%s' "$(one_thread 337)" | jq -c '
+  .threads[0].comments.nodes += [
+    {"id":"NC-337q","databaseId":0,"author":{"login":"gc-city-bot"},"body":"❓ This comment needs your decision — opened visit tk-v337.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:FRR -->","reactionGroups":[]}]')"
+out=$(run)
+has "$(treply 337 T-337)" "Declined: the operator ruled the cap stays." "the new ruling's answer is posted under the old one"
+eq "$(tresolved 337 T-337)" "false" "…and the thread stays open"
+
+echo "# a stamped answer that is missing and fails to post drops its stamp, so the review waits"
+store "[$(anchor WSD 338 "$(wb_meta rework:KSD)"), $(child KSD closed), $(hfind FSD WSD 100 900 declined closed 'Declined: not an objection.' | stamped)]"
+printf '%s' "$(prview 338 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_338.json"
+threads 338 "$(one_thread 338)"
+out=$(STUB_REPLY_RC=1 run)
+eq "$(meta FSD finding.reply_posted)" "<absent>" "the stamp is dropped while the answer is not on the PR"
+out=$(run)
+has "$(treply 338 T-338)" "Declined: not an objection." "the next pass posts the answer"
+eq "$(meta FSD finding.reply_posted)" "1" "…and stamps it"
+
+echo "# a thread holding a fixed and a declined finding is answered for both and left open"
+store "[$(anchor WPB 339 "$(wb_meta rework:KPB 101)"), $(child KPB closed), $(hfind FPA WPB 100 900 must-fix closed), $(hfind FPB WPB 101 900 declined closed 'Declined: the second ask is already handled.')]"
+printf '%s' "$(prview 339 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_339.json"
+threads 339 "$(printf '%s' "$(one_thread 339)" | jq -c '
+  .threads[0].comments.nodes += [
+    {"id":"NC-339b","databaseId":101,"author":{"login":"johnzook"},"body":"and this too","reactionGroups":[]}]')"
+commits 339 '[{"oid":"kpba00aaaaaa","message":"fix: the first ask (KPB)\n\nReview comment 100."}]'
+out=$(run)
+has "$(treply 339 T-339)" "✅ Fixed in kpba00aa (KPB)." "the fixed comment is answered as fixed"
+has "$(treply 339 T-339)" "Declined: the second ask is already handled." "…and the declined one with its ruling"
+eq "$(tresolved 339 T-339)" "false" "…and the thread is left open, since the operator still accepts or overrules the decline"
+has "$out" "thread T-339 holds a declined or deferred finding; left open for the operator" "…which the pass says"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REPLY" "a later pass answers nothing twice"
+hasnt "$(gh_since "$mark")" "RESOLVE" "…resolves nothing"
+hasnt "$out" "thread T-339 holds a declined" "…and does not report the open thread again"
+
+echo "# a comment declined as no objection is not claimed fixed by its landed batch"
+store "[$(anchor WNO 340 "$(wb_meta rework:KNO)"), $(child KNO closed), $(hfind FNO WNO 100 900 declined closed)]"
+printf '%s' "$(prview 340 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_340.json"
+threads 340 "$(one_thread 340 'nice approach')"
+out=$(run)
+eq "$(treply 340 T-340)" "" "nothing is posted: a no-objection decline owes no answer, and the batch does not claim one"
+eq "$(tresolved 340 T-340)" "false" "…and the thread is not resolved over it"
+out=$(run)
+eq "$(thumbed 340 NC-340),$(reacted 340 NC-340)" "true,false" "…while the comment is marked handled"
+
+echo "# an answer whose commits cannot be read waits for a pass that can cite them"
+store "[$(anchor WCF 344 "$(wb_meta rework:KCF)"), $(child KCF closed), $(hfind FCF WCF 100 900 must-fix closed)]"
+printf '%s' "$(prview 344 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_344.json"
+threads 344 "$(one_thread 344)"
+commits 344 '[{"oid":"kcfa00aaaaaa","message":"fix: it (KCF)"}]'
+out=$(STUB_GQL_COMMITS_FAIL=1 run)
+eq "$(treply 344 T-344)" "" "no answer is posted without its commits"
+eq "$(tresolved 344 T-344)" "false" "…and the thread is not resolved ahead of it"
+has "$out" "could not read the commits the answer on thread T-344 cites" "…which the pass says"
+out=$(run)
+has "$(treply 344 T-344)" "✅ Fixed in kcfa00aa (KCF)." "the next pass posts it"
+eq "$(tresolved 344 T-344)" "true" "…and resolves the fixed thread"
 
 echo "# a comment added to an answered, resolved thread is answered on its own"
 store "[$(anchor WT8 317 "$(wb_meta rework:KT8b 200)$(wb_batch 'rework:KT8a|0|100;rework:KT8b|100|200')"), $(child KT8a closed), $(child KT8b closed)]"
@@ -3679,7 +4432,7 @@ threads 317 "$(printf '%s' "$(one_thread 317)" | jq -c '
     {"id":"NC-317b","databaseId":200,"author":{"login":"johnzook"},"body":"one more","reactionGroups":[]}]')"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-has "$(treply 317 T-317)" "✅ Resolved in sha-317 on this PR (KT8b)." "the later comment gets the answer naming its own bead"
+has "$(treply 317 T-317)" "✅ Resolved on this PR (KT8b)." "the later comment gets the answer naming its own bead"
 eq "$(gh_since "$mark" | grep -c '^REPLY')" "1" "…in one reply"
 hasnt "$(gh_since "$mark")" "RESOLVE" "…into the thread already resolved, which is left as it is"
 eq "$(thumbed 317 NC-317b),$(reacted 317 NC-317b)" "true,false" "…and the later comment is marked resolved"
@@ -3758,7 +4511,7 @@ printf '%s' "$(prview 323 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_323.json"
 threads 323 "{\"reviews\":[],\"threads\":[$(answered_thread 323 a 90 55),$(open_thread 323 b 100)]}"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-has "$(treply 323 T-323b)" "✅ Resolved in sha-323 on this PR (KTD)." "the carried comment's thread is answered by the batch"
+has "$(treply 323 T-323b)" "✅ Resolved on this PR (KTD)." "the carried comment's thread is answered by the batch"
 eq "$(treply 323 T-323a)" "" "the thread the sitting answered gets no answer naming the batch"
 eq "$(gh_since "$mark" | grep -c '^REPLY')" "1" "…so the pass posts one reply"
 eq "$(reacted 323 NC-323a),$(thumbed 323 NC-323a)" "true,false" "…and that comment is acknowledged, never marked resolved"
@@ -3779,7 +4532,7 @@ threads 325 "$(printf '%s' "{\"reviews\":[],\"threads\":[$(answered_thread 325 a
   {"id":"RV-325a","databaseId":55,"state":"COMMENTED","body":"two renames","url":"https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-55","author":{"login":"johnzook"},"reactionGroups":[]},
   {"id":"RV-325b","databaseId":56,"state":"COMMENTED","body":"rethink the cap","url":"https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-56","author":{"login":"johnzook"},"reactionGroups":[]}]')"
 out=$(run)
-has "$(pcomments 325)" "✅ Resolved in sha-325 on this PR (KTF). In reply to https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-56." \
+has "$(pcomments 325)" "✅ Resolved on this PR (KTF). In reply to https://github.com/zook/gc-toolkit/pull/325#pullrequestreview-56." \
   "the batch answers the review it carried"
 hasnt "$(pcomments 325)" "pullrequestreview-55" "…and not the review whose every inline comment a sitting answered"
 eq "$(reacted 325 RV-325a),$(thumbed 325 RV-325a)" "true,false" "that review is acknowledged, never marked resolved"
@@ -3792,7 +4545,7 @@ store "[$(anchor WTG 326 "$(wb_meta rework:KTG)"), $(child KTG closed), $(hfind 
 printf '%s' "$(prview 326 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_326.json"
 threads 326 "{\"reviews\":[],\"threads\":[$(answered_thread 326 a 90 55)]}"
 out=$(run)
-has "$(treply 326 T-326a)" "✅ Resolved in sha-326 on this PR (KTG)." "the routed comment is answered by its batch"
+has "$(treply 326 T-326a)" "✅ Fixed on this PR (KTG)." "the routed comment is answered by its batch, as fixed since its must-fix finding closed"
 eq "$(thumbed 326 NC-326a)" "true" "…and marked resolved"
 
 echo "# an unmarked review under our OWN login from before the cutover leaves threads arm 7 never routes"
@@ -3846,6 +4599,32 @@ out=$(run)
 hasnt "$out" "unengaged review-thread finding" "a thread holding a pr-post.sh reply is engaged"
 eq "$(meta UT7 pr_unengaged_threads)" "<absent>" "…and no head watermark is written"
 
+echo "# a thread the city opened to post a ruled finding is no unengaged review finding"
+# A finding fixed before its PR opened is posted with its thread open until the
+# next pass resolves it, and nothing else need be live on the anchor then. The
+# finding's comment carries the city's mark, as every post through pr-post.sh
+# does. UF1's only comment under our login is that finding's, so the cheap
+# pre-gate settles it without reading a thread. UF2 also carries an unmarked note
+# from before the cutover in a resolved thread, which does send the pass to the
+# threads, so there the count has to pass over the finding's thread.
+store "[$(anchor UF1 205 "$UTCUT"), $(anchor UF2 206 "$UTCUT")]"
+for n in 205 206; do
+  printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_$n.json"
+  echo '[]' > "$GH_DIR/reviews_$n.json"
+done
+ufc='{"id":"FC-u","databaseId":9100,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FZ)\n<!-- gc-finding:FZ -->\n<!-- gc-finding:FZ:answered -->\n\n<!-- gc:city -->","createdAt":"2026-10-08T12:00:00Z","reactionGroups":[]}'
+printf '%s\n' '[{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->\n\n<!-- gc:city -->","pull_request_review_id":null,"created_at":"2026-10-08T12:00:00Z"}]' > "$GH_DIR/comments_205.json"
+printf '{"reviews":[],"threads":[{"id":"FT-205","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[%s]}}]}\n' "$ufc" > "$GH_DIR/threads_205.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"an old review note","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"},{"id":9100,"user":{"login":"gc-city-bot"},"body":"<!-- gc-finding:FZ -->\n\n<!-- gc:city -->","pull_request_review_id":null,"created_at":"2026-10-08T12:00:00Z"}]' > "$GH_DIR/comments_206.json"
+printf '{"reviews":[],"threads":[{"id":"T-206","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-206","databaseId":100,"author":{"login":"gc-city-bot"},"body":"an old review note","createdAt":"2026-10-06T12:00:00Z","reactionGroups":[]}]}},{"id":"FT-206","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[%s]}}]}\n' "$ufc" > "$GH_DIR/threads_206.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run_posture)
+since=$(gh_since "$mark")
+eq "$(meta_pinned UF1 pr_posture)" "review_required@sha-205" "a finding's open thread does not fold the posture into commented"
+eq "$(meta_pinned UF2 pr_posture)" "review_required@sha-206" "…nor beside an unmarked note the pass reads the threads for"
+hasnt "$since" "num=205" "a finding comment alone sends the pass to no thread read"
+has "$since" "num=206" "…while an unmarked note from before the cutover does"
+
 echo "# a live child already on the anchor owns the follow-up — no second signal, no thread read"
 store "[$(anchor UT4 63 "$UTCUT"), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
 printf '%s' "$(prview 63 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_63.json"
@@ -3875,11 +4654,10 @@ eq "$rc" 1 "…and the pre-merge posture pass holds the merge (posture uncurrent
 has "$out" "posture is not current" "…naming the anchor merge must not read this pass"
 eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture merge.sh would clear against"
 
-fi # part writeback
+fi # part reactions
 
-# ==== part checks: merge-hold order, the Conversation tab, red required checks,
-# self-heal, review re-requests, the route-comments-only pass, the status:
-# label and pacing ====
+# ==== part checks: merge-hold order, the Conversation tab and red required
+# checks ====
 if part checks; then
 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
@@ -4046,7 +4824,7 @@ echo "# …and an armed re-dispatch files no red-check rework either — the bra
 # GH_DIR fixtures outlive the per-case store reset, so PR#75's feedback batch
 # from upthread is still present; clear it so this case exercises the red-check
 # arm alone. Feedback on an armed anchor is FA2's case, where it routes to a
-# visit and opens a validation pass that this plain new- count would catch.
+# rework child and opens a validation pass that this plain new- count would catch.
 rm -f "$GH_DIR/comments_75.json" "$GH_DIR/reviews_75.json"
 store "[$(anchor FA3 75 ',"gc.dispatch_when_ready":"rig/gc-toolkit.polecat"')]"
 printf '%s' "$(prview 75 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_75.json"
@@ -4077,6 +4855,13 @@ eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unma
 eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
 rm -f "$GH_DIR/rules_main.json"
+
+fi # part checks
+
+# ==== part selfheal: the self-heal reap, parks and the attempt cap, review
+# re-requests, the route-comments-only pass, the status: label and the per-pass
+# bead cache ====
+if part selfheal; then
 
 # ---- self-heal reap: a rework child the branch has outrun, now green, is moot ----
 # The merge-lane analogue of the self-heal the reconcile lane already does. Reaps
@@ -4324,7 +5109,8 @@ rm -f "$GH_DIR/rules_main.json"
 # the review level. A human CHANGES_REQUESTED is GitHub's own block and stands
 # until cleared, so once every finding one review raised has closed — fixed and
 # landed, or declined and answered — pr-facts dismisses THAT review (clearing the
-# block) and re-requests its author, per-review via finding.review_id. The
+# block) and re-requests its author, per-review via finding.review_id, saying
+# what each finding came to. The
 # confidence is the validator's, carried by the closed findings; a dismissal is
 # not an approval. wview.reviews is served from the .reviews of threads_<n>.json.
 rfind() { # id anchor review_id disposition [status]
@@ -4344,8 +5130,10 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/140/reviews/555/dismissals" "the human review is dismissed once all its findings clear"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/140/requested_reviewers" "…and a fresh review is requested"
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=johnzook" "…from the review's own author"
-has "$(cat "$STUB_GH_LOG")" "addressed by a change" "the dismiss message names the comment resolved by a change"
-has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…and the one resolved by an accepted decline"
+has "$(cat "$STUB_GH_LOG")" "Every comment from this review has an answer on PR #140" "the dismiss message says every comment is answered, never that each was addressed"
+has "$(cat "$STUB_GH_LOG")" "HF1: fixed" "…names the comment that was fixed"
+has "$(cat "$STUB_GH_LOG")" "HF2: declined; the reason is in its thread" "…and the one declined, pointing at its reason"
+hasnt "$(cat "$STUB_GH_LOG")" "addressed" "…and calls none of them addressed"
 has "$out" "dismissed human review 555 and re-requested johnzook" "the pass reports the per-review dismissal"
 
 echo "# …but not while one of that review's findings is still open"
@@ -4402,8 +5190,8 @@ hasnt "$out" "could not re-request" "…and never reports a refused re-request"
 
 # ---- a declined finding's owed reply gates its review's dismissal ---------------
 # A declined human finding closes when the validator stamps its answer
-# (finding.reply), which is before the reply/resolve arm has delivered that answer
-# and marked it finding.reply_posted=1. So closure alone must not make the review
+# (finding.reply), which is before the write-back has delivered that answer and
+# marked it finding.reply_posted=1. So closure alone must not make the review
 # dismissable: dismissing then would clear CHANGES_REQUESTED before the decline
 # reached the reviewer. This finding carries both its review id and its owed reply.
 rfindreply() { # id anchor review_id comment_id [reply_posted]
@@ -4416,8 +5204,8 @@ store "[$(anchor HR5 144 "$(wb_meta rework:HRC5)"), $(child HRC5 closed), $(rfin
 printf '%s' "$(prview 144 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_144.json"
 threads 144 "$(jq -cn --argjson r "$(hreview 144 559 CHANGES_REQUESTED)" --argjson t "$(one_thread 144)" '{reviews: $r.reviews, threads: $t.threads}')"
 : > "$STUB_GH_LOG"
-out=$(STUB_RESOLVE_RC=1 run)
-eq "$(meta HF7 finding.reply_posted)" "<absent>" "the resolve failed, so the decline reply is not yet marked delivered"
+out=$(STUB_REPLY_RC=1 run)
+eq "$(meta HF7 finding.reply_posted)" "<absent>" "the reply did not post, so the decline is not yet marked delivered"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered decline reply holds the review's dismissal"
 hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
 
@@ -4429,7 +5217,7 @@ threads 145 "$(hreview 145 560 CHANGES_REQUESTED)"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560/dismissals" "a delivered decline reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
-has "$(cat "$STUB_GH_LOG")" "resolved by an accepted decline" "…the dismiss message names the accepted decline"
+has "$(cat "$STUB_GH_LOG")" "HF8: declined; the reason is in its thread" "…the dismiss message names the decline"
 
 # ---- a deferred finding's owed reply gates its review's dismissal the same way --
 # A deferred finding closes when the validator rules it, but it owes its raiser
@@ -4446,8 +5234,8 @@ store "[$(anchor HR7 147 "$(wb_meta rework:HRC7)"), $(child HRC7 closed), $(rfin
 printf '%s' "$(prview 147 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_147.json"
 threads 147 "$(jq -cn --argjson r "$(hreview 147 562 CHANGES_REQUESTED)" --argjson t "$(one_thread 147)" '{reviews: $r.reviews, threads: $t.threads}')"
 : > "$STUB_GH_LOG"
-out=$(STUB_RESOLVE_RC=1 run)
-eq "$(meta HF9 finding.reply_posted)" "<absent>" "the resolve failed, so the deferral reply is not yet marked delivered"
+out=$(STUB_REPLY_RC=1 run)
+eq "$(meta HF9 finding.reply_posted)" "<absent>" "the reply did not post, so the deferral is not yet marked delivered"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered deferral reply holds the review's dismissal"
 
 echo "# …and once the deferral reply is delivered (finding.reply_posted=1) the review is dismissed"
@@ -4457,7 +5245,7 @@ threads 148 "$(hreview 148 563 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
-has "$(cat "$STUB_GH_LOG")" "tracked as a follow-up for after the merge" "…the dismiss message names the deferral"
+has "$(cat "$STUB_GH_LOG")" "deferred to a follow-up, named in its thread" "…the dismiss message names the deferral"
 
 # ---- --route-comments-only: route operator feedback early in the pass ----------
 # --posture-only stamps commented/changes_requested on the pre-merge tick, and
@@ -4489,16 +5277,17 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
 eq "$(vpass_id RC1)" "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .id ][0] // "<none>"' "$STUB_STORE")" \
   "the batch opens its validation pass here too, exactly as the full arm does"
 
-echo "# …a human hold routes the same batch to a visit, early (the full arm's choice)"
+echo "# …a held anchor routes the same batch to a rework child, early (the full arm's choice)"
 store "[$(anchor RC2 67 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 67 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_67.json"
 echo '[]' > "$GH_DIR/reviews_67.json"
 printf '[{"id":6701,"user":{"login":"human1"},"body":"hmm"}]' > "$GH_DIR/comments_67.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run_route)
-eq "$(meta RC2 pr_comment_disposition | sed 's/visit:.*/visit/')" "visit" "a held anchor's feedback goes to a visit, on the early tick"
-has "$(cat "$STUB_ESC_LOG")" "merge_hold is set" "…and the visit records why no work could be routed"
-hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work routed under the hold"
+has "$(meta RC2 pr_comment_disposition)" "rework:" "a held anchor's feedback becomes a rework child, on the early tick"
+eq "$(cat "$STUB_ESC_LOG")" "" "…no visit is filed"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…the fix pool is woken"
+eq "$(meta RC2 merge_hold)" "true" "…and the hold is left standing"
 
 echo "# …route-comments-only does NOT run the write-back sweep (the full pass owns it)"
 store "[$(anchor RC3 68 "$(wb_meta rework:KX)"), $(child KX open)]"
@@ -4653,7 +5442,7 @@ unset GC_RECONCILE_BD_CACHE
 twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.metadata.branch // "") == "polecat/x19")) ] | length' "$STUB_STORE")
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
-fi # part checks
+fi # part selfheal
 
 # ==== part pacing: the paced walks, their visit order, and the posture basis ====
 if part pacing; then
@@ -4719,13 +5508,13 @@ open_prs "$(open_node 191)" "$(open_node 192)" "$(open_node 193)"
 WBCUR="$TMP/pr-facts-wb.cursor"; rm -f "$WBCUR" "$WBCUR".*
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
 eq "$(reacted 191 NC-191),$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false,false" "past the deadline the sweep still acknowledges one anchor, the lowest id"
-has "$out" "write-back visited 1 of 3 anchors with routed comments (0 with something new first) before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
+has "$out" "write-back visited 1 of 3 anchors with routed comments or owed findings (0 with something new first) before the deadline; the next pass resumes at WP2" "…and names where the next pass resumes"
 eq "$(cat "$WBCUR.writeback" 2>/dev/null)" "WP1" "the sweep records its progress on a cursor of its own"
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
 eq "$(reacted 192 NC-192),$(reacted 193 NC-193)" "true,false" "the next pass resumes the sweep after its cursor"
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
 eq "$(reacted 193 NC-193)" "true" "a deadline that has not passed lets the sweep reach every anchor"
-has "$out" "write-back visited 3 of 3 anchors with routed comments" "…and reports the whole sweep"
+has "$out" "write-back visited 3 of 3 anchors with routed comments or owed findings" "…and reports the whole sweep"
 out=$("$SUT" --fix-pool "$FIX" 2>&1)
 hasnt "$out" "write-back visited" "an unpaced pass reports no write-back pacing"
 
@@ -4736,7 +5525,7 @@ echo "# write-back: an anchor with something new to answer goes ahead of the rot
 rm -f "$WBCUR" "$WBCUR.writeback" "$WBCUR.writeback.first"
 bmut WP3 '.metadata.pr_comment_watermark = "150"'
 out=$("$SUT" --fix-pool "$FIX" --deadline 1 --cursor "$WBCUR" 2>&1)
-has "$out" "write-back visited 2 of 3 anchors with routed comments (1 with something new first)" "a moved watermark puts the anchor first, and the rest still get their visit"
+has "$out" "write-back visited 2 of 3 anchors with routed comments or owed findings (1 with something new first)" "a moved watermark puts the anchor first, and the rest still get their visit"
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
 has "$out" "(0 with something new first)" "once visited, it rotates with the rest"
 bmut KP3 '.status = "closed"'
@@ -4747,6 +5536,27 @@ has "$out" "(1 with something new first)" "a live child appearing on WP2 moves i
 bmut KP2 '.status = "closed"'
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
 has "$out" "(1 with something new first)" "…and that child closing moves it again"
+
+echo "# pacing: an anchor owed only a finding post is in the write-back rotation and its count"
+# WP5 carries no comment batch. Its one ruled finding is what brings it into the
+# sweep, so the count the sweep reports against has to hold it too. It has no
+# batch to mark, so it rotates with the rest.
+store "[$(anchor WP4 194 "$(wb_meta rework:KP4)"), $(child KP4 open), $(anchor WP5 195),
+        {\"id\":\"FP5\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"finding[codex]: a note\",\"description\":\"Locus: anchor WP5 / note\\n\\nA note.\",\"metadata\":{\"task_kind\":\"finding\",\"anchor_bead\":\"WP5\",\"finding.lane\":\"codex\",\"finding.disposition\":\"must-fix\"}}]"
+for n in 194 195; do
+  printf '%s' "$(prview "$n" OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_$n.json"
+  threads "$n" "$(one_thread "$n")"
+  printf '[]' > "$GH_DIR/issue_comments_$n.json"
+done
+open_prs "$(open_node 194)" "$(open_node 195)"
+rm -f "$WBCUR" "$WBCUR".*
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
+has "$out" "write-back visited 2 of 2 anchors with routed comments or owed findings" "the anchor owed only a finding is visited and counted"
+has "$out" "WP5 — PR#195 posted finding FP5 to the Conversation" "…and its finding is posted"
+bmut FP5 '.status = "closed"'
+out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$WBCUR" 2>&1)
+has "$out" "write-back visited 2 of 2 anchors with routed comments or owed findings (0 with something new first)" "…and its finding closing leaves it in the rotation, with no batch to mark"
+has "$out" "0 findings posted, 1 findings answered" "…where it is still visited for the answer it owes"
 
 echo "# posture basis: a PR nothing touched since its posture was derived costs no per-PR read"
 store "[$(anchor PB1 301 "$UTCUT"), $(anchor PB2 302 "$UTCUT")]"
@@ -4916,6 +5726,7 @@ store "[$(anchor DW1 331 ',"pr_posture":"approved@sha-331@2026-10-01T00:00:00Z",
         $(anchor DW4 334 ',"pr_posture":"approved@sha-334@2026-10-01T00:00:00Z","pr_merge_state":"DIRTY@sha-334"')]"
 for n in 331 332 333; do printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$n.json"; done
 printf '%s' "$(prview 334 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_334.json"
+approve 334
 open_prs "$(open_node 331 BLOCKED APPROVED)" "$(open_node 332 BLOCKED APPROVED)" "$(open_node 333 BLOCKED APPROVED)" "$(open_node 334 DIRTY APPROVED)"
 DWCUR="$TMP/pr-facts-dw.cursor"; rm -f "$DWCUR" "$DWCUR".*
 : > "$STUB_GH_LOG"
@@ -4987,6 +5798,7 @@ store "[$(anchor HD1 381),
         $(anchor HD4 384 "$(HD_APPROVED_DIRTY 384 ',"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"')")]"
 printf '%s' "$(prview 381 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_381.json"
 for n in 382 383 384; do printf '%s' "$(prview "$n" OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$n.json"; done
+approve 382
 open_prs "$(open_node 381)" "$(open_node 382 DIRTY APPROVED)" "$(open_node 383 DIRTY APPROVED)" "$(open_node 384 DIRTY APPROVED)"
 HDCUR="$TMP/pr-facts-hd.cursor"; rm -f "$HDCUR" "$HDCUR".*
 out=$("$SUT" --fix-pool "$FIX" --deadline "$(FAR)" --cursor "$HDCUR" 2>&1)
