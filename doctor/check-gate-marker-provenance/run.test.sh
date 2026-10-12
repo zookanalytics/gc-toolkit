@@ -28,8 +28,7 @@ cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"}]}
 EOF
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
@@ -44,8 +43,7 @@ GC
 # beads carrying that key, so a bead with no signoff_verdict is NOT
 # returned to ARM B — which is exactly why that arm never has to special-case it.
 # --all returns every status; otherwise --status filters, defaulting to open.
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
@@ -77,8 +75,7 @@ fi
 printf '%s' "$out"
 BD
 
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 [ "${GH_ABSENT:-0}" = "1" ] && exit 127
 path=""
 for a in "$@"; do case "$a" in repos/*) path="$a" ;; esac; done
