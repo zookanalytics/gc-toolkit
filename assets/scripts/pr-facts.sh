@@ -676,9 +676,9 @@ MERGE_PATH_KEYS_JQ='
     test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
     or . == "merge-blocked-threads"
-    # A merge-in child files the re-ask visit through bring-current-guard.sh,
-    # and it holds the merge too. reask_pr is REASK_KEY_JQ, which a program
-    # using this def puts ahead of it.
+    # bring-current-guard.sh files the re-ask visit when it dismisses an
+    # approval, and it holds the merge too. reask_pr is REASK_KEY_JQ, which a
+    # program using this def puts ahead of it.
     or reask_pr == $n;'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
   # Both stamps are re-checked here as well as queried: this id gets pr_number
@@ -758,11 +758,11 @@ $(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
     | .id' 2>/dev/null)
 REFRESH_EOF
 }
-# The visit that asks again for an approval a bring-current dismissed. A
-# merge-in child's handoff files it on the anchor through bring-current-guard.sh,
-# under a key naming PR number <n> and the head the child pushed, and it holds
-# the merge while it is open (finalize-gate.sh). reask_pr matches that visit
-# under either key name, bring-current-judgment.<n>.<head> or
+# The visit that asks again for an approval a bring-current dismissed.
+# bring-current-guard.sh files it on the anchor when it dismisses the approval,
+# under a key naming PR number <n> and the head the bring-current pushed, and it
+# holds the merge while it is open (finalize-gate.sh). reask_pr matches that
+# visit under either key name, bring-current-judgment.<n>.<head> or
 # bring-current-dismissal.<n>.<head>. It is the PR number the key names, as a
 # string, and null for any other key.
 REASK_KEY_JQ='

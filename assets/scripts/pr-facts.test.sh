@@ -1008,13 +1008,13 @@ out=$(run)
 has "$out" "re-routing stranded rework ST1" "once the PR is approved, the strand is re-routed as before"
 
 echo "# a bring-current's re-ask visit is retracted once an approval given after it answers it"
-# A merge-in child whose bring-current took judgment dismisses the PR's approval
-# and files the re-ask visit on the anchor, which holds the merge while it is
-# open. An approval submitted no earlier than the visit, from an account whose
-# latest opinion it still is, answers it. One from before the visit, such as an
-# approval whose dismissal failed, does not, and twins under one key are judged
-# against the later filing. These PRs have no view fixture, so the per-anchor
-# walk reads none of them and only the sweep acts.
+# bring-current-guard.sh files the re-ask visit on the anchor when it dismisses
+# the PR's approval, and the visit holds the merge while it is open. An approval
+# submitted no earlier than the visit, from an account whose latest opinion it
+# still is, answers it. One from before the visit, such as an approval whose
+# dismissal failed, does not, and twins under one key are judged against the
+# later filing. These PRs have no view fixture, so the per-anchor walk reads
+# none of them and only the sweep acts.
 rvisit() { # id subject key created_at [assignee]
   printf '{"id":"%s","status":"open","assignee":"%s","created_at":"%s","title":"visit","notes":"","metadata":{"escalation_key":"%s","gc.continuation_group":"%s","task_kind":"visit","gc.routed_to":"human"}}' \
     "$1" "${5:-}" "$4" "$3" "$2"
