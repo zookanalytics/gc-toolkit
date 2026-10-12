@@ -296,7 +296,9 @@ LONG=$(printf 'word%.0s ' $(seq 1 80))
 run file TestReconcile --summary "$LONG" --message "log"
 T=$(field "$OUT" .title)
 case "$T" in "Pre-existing failure: TestReconcile — word"*"…") ok "a long summary is cut at a word, after the whole key" ;; *) bad "a long summary is cut at a word, after the whole key (got '$T')" ;; esac
-[ "${#T}" -le 200 ] && ok "the title fits 200 characters" || bad "the title is ${#T} characters"
+# jq counts characters in every locale, where ${#T} counts bytes under C.
+TLEN=$(field "$OUT" '.title | length')
+[ -n "$T" ] && [ "${TLEN:-0}" -le 200 ] && ok "the title fits 200 characters" || bad "the title is ${TLEN:-0} characters, want 1 to 200"
 store
 run file TestReconcile --summary "<short description>" --message "log"
 eq "$RC/$(creates)" "2/0" "a summary still carrying its placeholder files nothing"

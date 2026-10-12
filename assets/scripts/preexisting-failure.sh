@@ -271,7 +271,9 @@ file_cmd() {
     if [ "${#summary}" -gt "$room" ] && [ "$room" -gt 0 ]; then
       summary="${summary:0:$room}"
       case "$summary" in *" "*) summary="${summary% *}" ;; esac
-      summary="$summary…"
+      # Braced: under a UTF-8 locale, macOS /bin/bash 3.2 and Homebrew bash
+      # 5.3.15 read the ellipsis's first byte into an unbraced name.
+      summary="${summary}…"
     fi
     [ "$room" -gt 0 ] && title="$title — $summary"
   fi
