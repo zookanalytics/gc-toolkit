@@ -56,8 +56,7 @@ run() { bash "$SUT" "$@" 2>&1; }
 BIN="$TMP/bin"; mkdir -p "$BIN"
 export STUB_STATUS="$TMP/status.tsv" STUB_GC_LOG="$TMP/gc.log" STUB_ROOT="$TMP" STUB_RIGS_FAIL=""
 : > "$STUB_STATUS"; : > "$STUB_GC_LOG"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
     "rig list")
