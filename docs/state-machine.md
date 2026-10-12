@@ -766,8 +766,9 @@ review's result set.
 A branch is brought current by merging its base in, never by a rebase. The
 shapes that do it are the merge-in child `pr-facts.sh` files for an approved PR
 that conflicts, the child `pre-open-rebase.sh` files for a pre-open branch that
-no longer merges, a review-feedback rework that merges the base in as it
-resumes, and an anchor the refinery's prepare re-queues on a conflict. Each resumes
+no longer merges, a rework answering review feedback or an operator ruling that
+merges the base in as it resumes, and an anchor the refinery's prepare re-queues
+on a conflict. Each resumes
 through `mol-polecat-work`'s resume block, which starts a round: it stamps
 `bring_current_from` (the PR head the round starts from) and
 `bring_current_scope` (`merge-only` when the rejection asked for nothing but the
