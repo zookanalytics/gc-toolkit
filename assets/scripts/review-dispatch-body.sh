@@ -159,6 +159,15 @@ the anchor's check_set:
 Widening is monotonic and `signoff.sh` enforces it: you cannot remove a check,
 and only a triage verdict may add one. See `skills/review-triage/SKILL.md` for
 the method. Correctness findings are the `correctness` check's, not yours.
+
+When bringing the branch current conflicted, the same verdict also rules on
+that round: read its account (`bring-current-audit.sh render --anchor <anchor>
+--as comment`), then decide which lanes run again on the merged code and
+whether the human approval still covers it, on the same call:
+
+    signoff.sh ... --reopen <lanes>|none --round-reason <why> [--dismiss-approval]
+
+`signoff.sh` refuses a triage verdict that leaves such a round unruled.
 M
     ;;
   demo)
