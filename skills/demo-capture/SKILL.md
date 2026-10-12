@@ -33,9 +33,14 @@ if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev
   # A host ffmpeg on PATH is used when present; otherwise fetch ffmpeg-static's
   # binary once (npm >= 12 blocks its automatic install script).
   command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg )
+  # The browser comes from the engine's own Playwright, whose installer skips a
+  # build that is already installed.
+  ( cd "$SS_DIR" && npm run provision:browser )
   sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
 else
-  # Any-rig path: the published package, run through npx.
+  # Any-rig path: the published package, run through npx, with the browser
+  # installed by that package's own Playwright.
+  npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell
   sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
 fi
 ```
@@ -188,13 +193,20 @@ and never breaks the video.
 The capture needs Node ≥ 22.18, a Chromium build, and ffmpeg; narration also
 needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
 
-- **Chromium** — `npx playwright install chromium-headless-shell` (add
-  `--with-deps` on a bare host). A host-provided browser is used when present.
+- **Chromium** — the capture fetches it on demand. It installs the
+  `chromium-headless-shell` build through the engine's own Playwright, so the
+  build it installs is the one the engine launches, and Playwright's installer
+  skips a build that is already installed. The capture does not install the
+  browser's system libraries. On a bare Linux host, install them once with
+  `npx playwright install-deps chromium-headless-shell`.
 - **ffmpeg** — a host `ffmpeg` on `PATH` (or `FFMPEG_BIN`) is used when present;
   otherwise the engine's bundled `ffmpeg-static` provides it.
-- **`OPENAI_API_KEY`** — read from the environment; the host places it in
-  `~/.gc/secrets.env`, merged into the session environment.
+- **`OPENAI_API_KEY`** — read from the environment. The host places it in
+  `$GC_HOME/secrets.env` (`~/.gc/secrets.env` when `GC_HOME` is unset), and
+  gascity copies it into the supervisor's service env when
+  `gc supervisor install` writes that env. Sessions started after that carry
+  the key.
 
-The `doctor/check-demo-toolchain` check reports which of these are resolvable,
-so a session knows before it captures whether the clip will be narrated or
-silent, and whether the browser and ffmpeg are in place.
+The `doctor/check-demo-toolchain` check reports which of the others are
+resolvable, so a session knows before it captures whether the clip will be
+narrated or silent, and whether ffmpeg is in place.
