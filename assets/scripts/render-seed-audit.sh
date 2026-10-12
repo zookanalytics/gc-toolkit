@@ -37,7 +37,7 @@
 # WHOSE TEXT IT IS. Rendering every agent the synthetic city configures means
 # the tree also holds prompts this pack does not author. claude.md, codex.md
 # and gemini.md come from the `builtin:` providers, and their startup protocol
-# is the core pack's shared claim-protocol fragment; dog.md comes from the bd
+# is the core pack's shared claim-protocol fragment; bd.dog.md comes from the bd
 # example pack. In the gascity repo those two sources are
 # internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md
 # and examples/bd/dolt/agents/dog/prompt.template.md. A render is a mirror of
@@ -536,26 +536,113 @@ if [ -n "$missing_templates" ]; then
     exit 2
 fi
 
-# Agents this pack owns. Only these are held to the "must not render a builtin
-# fallback" rule below: claude, codex, gemini and control-dispatcher legitimately
-# ARE the builtin worker prompt, and banning it outright would fail them.
+# Agents this pack owns, by bare name. Only these are held to the "must not
+# render a builtin fallback" rule below: claude, codex, gemini and
+# control-dispatcher legitimately ARE the builtin worker prompt, and banning it
+# outright would fail them.
 PACK_AGENTS=""
 while IFS= read -r atoml; do
     PACK_AGENTS="${PACK_AGENTS} $(basename "$(dirname "$atoml")")"
 done < <(find "$ROOT/agents" "$ROOT/packs" -mindepth 2 -maxdepth 4 -name agent.toml -print 2>/dev/null | LC_ALL=C sort)
 
+# A bare name does not say whose agent it is: the bd pack's dolt maintenance
+# dog and this pack's warrant executor are both `dog`. gc qualifies an agent as
+# <binding>.<name>, where the binding is the import that brought its pack in, so
+# the imports whose source is this pack or one of its sub-packs are what mark a
+# copy as this pack's own.
+PACK_BINDINGS="$(ROOT="$ROOT" awk '
+    /^\[/ {
+        binding = ""
+        if ($0 ~ /^\[(rigs\.)?imports\./) {
+            binding = $0
+            sub(/^\[(rigs\.)?imports\./, "", binding)
+            sub(/\]$/, "", binding)
+        }
+        next
+    }
+    binding != "" && /^source = "/ {
+        src = $0
+        sub(/^source = "/, "", src)
+        sub(/"$/, "", src)
+        if (src == ENVIRON["ROOT"] || index(src, ENVIRON["ROOT"] "/") == 1) print binding
+    }' "$TMPROOT/config.txt" | LC_ALL=C sort -u | paste -s -d ' ' -)"
+
+# The rigs in the order the composed config declares them, which is the order
+# gc searches when one agent has a copy in several rigs.
+mapfile -t RIGS < <(awk '
+    /^\[/ { in_rig = ($0 == "[[rigs]]"); next }
+    in_rig && /^name = "/ { name = $0; sub(/^name = "/, "", name); sub(/"$/, "", name); print name; in_rig = 0 }
+' "$TMPROOT/config.txt")
+
 # ------------------------------------------------------------------ inventory
 #
-# One entry per distinct agent NAME. Qualified and rig-scoped spellings
-# (audit/gc-toolkit.polecat) are deliberately collapsed: they were measured to
-# render byte-identically, because gc prime does not honour rig scope.
-mapfile -t AGENTS < <(gcq agent list --json 2>/dev/null \
-    | jq -r '.agents[].name' 2>/dev/null | LC_ALL=C sort -u)
+# One entry per agent, primed by a name that resolves to that agent alone.
+#
+# A bare name whose copies all carry one binding-qualified identity names one
+# agent, so it is primed and filed under the bare name. Its rig copies collapse
+# into that one entry, and gc renders the copy in the first rig declared.
+#
+# A bare name that agents from different packs share names neither of them. A
+# gc that refuses it fails the render under --strict, and a gc that does not
+# renders whichever agent comes first in config order. So each of those agents
+# is primed by its qualified name and filed under its binding-qualified name
+# (gc-toolkit.dog.md beside bd.dog.md). A city-scoped agent's qualified name is
+# that identity; a rig-scoped one is primed through its copy in the first rig
+# declared, the copy an unshared name would render.
+#
+# Each entry is <file stem> <name to prime> <bare name> <binding>, tab-separated.
+mapfile -t AGENT_ENTRIES < <(gcq agent list --json 2>/dev/null | jq -r --args '
+    def identity: (.qualified_name // .name) | split("/") | last;
+    def rig_rank: (.dir // "") as $d
+        | if $d == "" then -1 else (($ARGS.positional | index($d)) // 1e9) end;
+    .agents
+    | group_by(.name)[]
+    | . as $copies
+    | .[0].name as $name
+    | (map(identity) | unique) as $ids
+    | $ids[] as $id
+    | ($copies | map(select(identity == $id)) | sort_by(rig_rank) | .[0]) as $first
+    | (if ($ids | length) == 1 then [$name, $name] else [$id, ($first.qualified_name // $id)] end)
+      + [$name, (if $id == $name then "" else ($id | rtrimstr("." + $name)) end)]
+    | @tsv' "${RIGS[@]}" 2>/dev/null)
 mapfile -t FORMULAS < <(gcq formula list 2>/dev/null \
     | grep -E '^[a-z0-9][a-z0-9._-]*$' | LC_ALL=C sort -u)
 
-[ "${#AGENTS[@]}" -gt 0 ]   || die "no agents resolved from the synthetic city"
-[ "${#FORMULAS[@]}" -gt 0 ] || die "no formulas resolved from the synthetic city"
+[ "${#AGENT_ENTRIES[@]}" -gt 0 ] || die "no agents resolved from the synthetic city"
+[ "${#FORMULAS[@]}" -gt 0 ]      || die "no formulas resolved from the synthetic city"
+
+# AGENTS holds the file stems the INDEX lists. AGENT_RENDERS pairs each stem
+# with the name it is primed by and whether the copy is this pack's own.
+AGENTS=()
+AGENT_RENDERS=()
+OWNED_NAMES=" "
+for entry in "${AGENT_ENTRIES[@]}"; do
+    IFS=$'\t' read -r stem prime name binding <<< "$entry"
+    owned=""
+    if [[ " $PACK_AGENTS " == *" $name "* ]] && [ -n "$binding" ] \
+        && [[ " $PACK_BINDINGS " == *" $binding "* ]]; then
+        owned="owned"
+        OWNED_NAMES="$OWNED_NAMES$name "
+    fi
+    AGENTS+=("$stem")
+    AGENT_RENDERS+=("$stem"$'\t'"$prime"$'\t'"$owned")
+done
+
+# Every agent this pack defines has to render from its own copy. One that the
+# synthetic city composes only under another pack's binding, or not at all,
+# would leave its doctrine out of the audit while another pack's prompt, or
+# nothing, stands in its place.
+unrendered=""
+for a in $PACK_AGENTS; do
+    [[ "$OWNED_NAMES" == *" $a "* ]] || unrendered="$unrendered $a"
+done
+if [ -n "$unrendered" ]; then
+    printf 'agent(s) this pack defines that the synthetic city composes only under another\n' >&2
+    printf "pack's binding, or not at all, so the audit would not hold their own prompts\n" >&2
+    printf '(bindings that import this pack: %s):\n' "${PACK_BINDINGS:-none found}" >&2
+    for a in $unrendered; do printf '  %s\n' "$a" >&2; done
+    exit 2
+fi
 
 # ------------------------------------------------------------------ normalize
 #
@@ -606,9 +693,11 @@ FALLBACK_MARKERS=(
 # offered them. Walking the scopes is what closes that gap.
 FORMULA_SCOPES=("" "gc-toolkit" "gascity")
 
+# render_one <kind> <name> <dest> [owned]. The scratch files take the
+# destination's file name, because a rig-qualified agent name carries a slash.
 render_one() {
-    local kind="$1" name="$2" dest="$3" raw rc scope
-    raw="$TMPROOT/raw.$kind.$name"
+    local kind="$1" name="$2" dest="$3" owned="${4:-}" raw rc scope
+    raw="$TMPROOT/raw.$kind.${dest##*/}"
     if [ "$kind" = "agent" ]; then
         gcq prime "$name" --strict >"$raw" 2>"$raw.err"
         rc=$?
@@ -636,7 +725,7 @@ render_one() {
         printf 'FAILED %s %s (empty render)\n' "$kind" "$name" > "$dest.error"
         return 1
     fi
-    if [ "$kind" = "agent" ] && [[ " $PACK_AGENTS " == *" $name "* ]]; then
+    if [ "$kind" = "agent" ] && [ "$owned" = "owned" ]; then
         local marker
         for marker in "${FALLBACK_MARKERS[@]}"; do
             if grep -F -e "$marker" < "$raw" > /dev/null; then
@@ -670,8 +759,9 @@ STAGE="$TMPROOT/stage"
 mkdir -p "$STAGE/agents" "$STAGE/formulas"
 
 running=0
-for a in "${AGENTS[@]}"; do
-    render_one agent "$a" "$STAGE/agents/$a.md" &
+for entry in "${AGENT_RENDERS[@]}"; do
+    IFS=$'\t' read -r stem prime owned <<< "$entry"
+    render_one agent "$prime" "$STAGE/agents/$stem.md" "$owned" &
     running=$((running + 1))
     if [ "$running" -ge "$JOBS" ]; then wait -n 2>/dev/null || true; running=$((running - 1)); fi
 done
@@ -779,6 +869,9 @@ the script and commit its output.
 Every file under \`agents/\` is the complete standing prompt one agent receives
 at spawn. Every file under \`formulas/\` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
+
+An agent file is named for the agent, or for its binding-qualified name
+(\`<binding>.<name>\`) where agents from different packs share one name.
 
 - agents: ${#AGENTS[@]} · formulas: ${#FORMULAS[@]}
 - input manifest: \`SOURCES.txt\`
