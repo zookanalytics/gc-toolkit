@@ -53,9 +53,9 @@
 # edge is the follow-up's own — a dispatchable bead — and points at the finding it
 # carries forward. bd keeps one edge per (issue, depends_on) pair, and the
 # follow-up/anchor pair is the gate's. Both edges ride the create that files the
-# follow-up, and the discovered-from edge is how a deferral retried after a
-# failure finds the follow-up the failed attempt filed, so the retry files no
-# second one.
+# follow-up, and so does its source_finding stamp naming the finding. A deferral
+# retried after a failure finds the follow-up the failed attempt filed by that
+# stamp, so the retry files no second one.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -268,19 +268,23 @@ strip_inbound_blocks() { # <finding>
 }
 
 # The live follow-up a deferral of <finding> already filed, or empty. A follow-up
-# is born discovered-from the finding it carries forward, and only the deferred
-# arm hangs that edge type on a finding, so the finding's live discovered-from
-# dependents are its follow-ups. A closed one is not returned: a deferral must leave a
-# follow-up that can still dispatch, and a closed bead never will. One deferral
-# files one follow-up; if more are live, the first in id order is returned.
-# Non-zero rc = the edges would not read, which is not "none filed".
+# is born discovered-from the finding it carries forward and stamped
+# source_finding=<finding>, and the stamp is what marks it as the deferral's.
+# Other beads are born discovered-from a finding too: scaffolding-sweep.sh files
+# the bug that carries a disposed anchor's finding forward that way, and that bug
+# takes its own route to a first reaction, so a dependent without the stamp is
+# never taken for the follow-up. A closed one is not returned: a deferral must
+# leave a follow-up that can still dispatch, and a closed bead never will. One
+# deferral files one follow-up; if more are live, the first in id order is
+# returned. Non-zero rc = the edges would not read, which is not "none filed".
 deferred_follow_up() { # <finding>
   local rows
   rows=$(bd_json dep list "$1" --direction=up -t discovered-from) || return 2
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
-  printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" '
+  printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" --arg f "$1" '
     ($live | split(",")) as $l
-    | [ .[] | select(((.status // "open") | tostring | ascii_downcase) as $s | $l | index($s)) | .id ]
+    | [ .[] | select(((.metadata.source_finding // "") | tostring) == $f)
+            | select(((.status // "open") | tostring | ascii_downcase) as $s | $l | index($s)) | .id ]
     | sort | .[0] // empty' 2>/dev/null
 }
 
@@ -521,23 +525,27 @@ cmd_set_disposition() {
         # The follow-up carries the objection and the deferral reason, and it is
         # filed whole. Its gate rides the create: the anchor blocks it, so bd holds
         # it unready until merge-push closes the anchor. Its discovered-from edge
-        # onto the finding rides the create too. bd lands a create with every --deps
-        # edge or files nothing, so no follow-up exists ungated, and every one is
-        # the finding's discovered-from dependent, which is how a retry finds it. bd
-        # keeps one dependency per (issue, depends_on) pair, so the two edges take
-        # two pairs, and the follow-up/anchor pair carries the gate alone. A
-        # deferral with no tracked follow-up is the orphan this retires, so fail
-        # closed if it cannot be filed.
-        local ftitle fdesc
+        # onto the finding rides the create too, and so does its source_finding
+        # stamp. bd writes a create's bead, metadata and --deps edges in one
+        # transaction, so no follow-up exists ungated or unstamped, and every one is
+        # a stamped discovered-from dependent of the finding, which is how a retry
+        # finds it. bd keeps one dependency per (issue, depends_on) pair, so the two
+        # edges take two pairs, and the follow-up/anchor pair carries the gate
+        # alone. A deferral with no tracked follow-up is the orphan this retires, so
+        # fail closed if it cannot be filed.
+        local ftitle fdesc fmeta
         ftitle=$(bd_json show "$finding" | jq -r '(.[0].title // "") | tostring' 2>/dev/null)
         [ -n "$ftitle" ] || ftitle="finding[$finding]"
         ftitle="follow-up: $(printf '%s' "$ftitle" | sed -E 's/^finding\[[^]]*\]: //')"
         fdesc=$(printf 'Deferred from the review of anchor %s (finding %s), to be picked up after the PR merges.\n\n%s' \
           "$anchor" "$finding" "${reason:-No reason recorded.}")
-        followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --deps "blocked-by:$anchor,discovered-from:$finding" --json 2>/dev/null \
+        fmeta=$(jq -nc --arg f "$finding" '{source_finding: $f}' 2>/dev/null)
+        [ -n "$fmeta" ] \
+          || { warn "deferred $finding: could not build its follow-up's metadata; NOT filing one"; exit 2; }
+        followup=$(gc bd create "$ftitle" -t task -d "$fdesc" --metadata "$fmeta" --deps "blocked-by:$anchor,discovered-from:$finding" --json 2>/dev/null \
           | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-        # A create whose reply did not parse may still have landed, and the edge it
-        # was born with finds it.
+        # A create whose reply did not parse may still have landed, and the stamped
+        # edge it was born with finds it.
         [ -n "$followup" ] || followup=$(deferred_follow_up "$finding")
         [ -n "$followup" ] \
           || { warn "could not file a follow-up bead for deferred finding $finding; NOT closing (a deferral with no tracked later-work is the orphan this retires)"; exit 2; }

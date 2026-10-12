@@ -736,15 +736,18 @@ titled() { jq -r --arg t "$1" '[ .[] | select(.title == $t) ] | length' "$STUB_S
 upsert_r() { "$SUT" upsert --anchor tk-ancR --lane correctness --locus "assets/scripts/retry.sh:$1()" --message "$2"; }
 defer_r() { "$SUT" set-disposition --finding "$1" --anchor tk-ancR --disposition deferred --reason "later work"; }
 
-# The follow-up is filed whole: its gate and its discovered-from edge ride the
-# create, so no follow-up exists ungated or unfindable from its finding.
+# The follow-up is filed whole: its gate, its discovered-from edge and its
+# source_finding stamp ride the create, so no follow-up exists ungated or
+# unfindable from its finding.
 : > "$STUB_GC_LOG"
 RW=$(upsert_r whole "file the follow-up whole")
 defer_r "$RW"
 RWFU=$(meta "$RW" 'finding.follow_up')
 has "$(cat "$STUB_GC_LOG")" "--deps blocked-by:tk-ancR,discovered-from:$RW --json" "the follow-up's gate and discovered-from edge ride its create"
+eq "$(meta "$RWFU" source_finding)" "$RW" "…and so does its source_finding stamp, naming the finding"
 hasnt "$(cat "$STUB_GC_LOG")" "bd dep tk-ancR --blocks $RWFU" "…so no second write wires the gate"
 hasnt "$(cat "$STUB_GC_LOG")" "bd dep add $RWFU" "…or the provenance edge"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata source_finding" "…or the stamp"
 
 # The ruling fails after the arm: STUB_CLOSE_FAIL refuses only the finding's
 # --status=closed write, so the follow-up is filed, gated and armed when it fails.
@@ -799,14 +802,14 @@ defer_r "$RG"; rc=$?
 eq "$rc|$(followups "$RG")" "0|$RGFU" "the retry reuses the follow-up whose gate was removed"
 has "$(deps)" "tk-ancR|blocks|$RGFU" "…and wires its gate again"
 
-# The create lands and its reply is lost: the edge the follow-up was born with
-# finds it in the same call, so the deferral completes without a twin.
+# The create lands and its reply is lost: the stamped edge the follow-up was
+# born with finds it in the same call, so the deferral completes without a twin.
 RC=$(upsert_r reply "recover a lost create reply")
 export STUB_CREATE_GARBAGE=1
 defer_r "$RC"; rc=$?
 export STUB_CREATE_GARBAGE=""
 eq "$rc|$(meta "$RC" 'finding.disposition')" "0|deferred" "a follow-up create whose reply does not parse is recovered in the same call"
-eq "$(meta "$RC" 'finding.follow_up')" "$(followups "$RC")" "…by the discovered-from edge it was born with"
+eq "$(meta "$RC" 'finding.follow_up')" "$(followups "$RC")" "…by the stamped discovered-from edge it was born with"
 eq "$(titled "follow-up: recover a lost create reply")" "1" "…and no twin is filed"
 
 # A refused create files nothing, so the retry files exactly one follow-up.
@@ -835,6 +838,25 @@ else
 fi
 eq "$(meta "$RXFU2" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…armed like any follow-up"
 has "$(deps)" "tk-ancR|blocks|$RXFU2" "…and gated behind the anchor"
+
+# A bead another writer hangs discovered-from on the finding is not its
+# follow-up. scaffolding-sweep.sh files a disposed anchor's carried-forward bug
+# that way, born superseding the finding, and the bug takes its own route to a
+# first reaction. The deferral files a stamped follow-up of its own and leaves
+# the bug unarmed and ungated.
+RB=$(upsert_r carried "skip a carried-forward bug")
+RBB=$(gc bd create "carried forward" -t bug --deps "discovered-from:$RB" --metadata "{\"gc.supersedes\":\"$RB\"}" --json | jq -r '.id')
+eq "$(followups "$RB")" "$RBB" "(fixture) a carried-forward bug hangs discovered-from on the finding"
+defer_r "$RB"; rc=$?
+RBFU=$(meta "$RB" 'finding.follow_up')
+if [ "$rc" -eq 0 ] && [ -n "$RBFU" ] && [ "$RBFU" != "<absent>" ] && [ "$RBFU" != "$RBB" ]; then
+  ok "a deferral does not take a bead it did not file for its follow-up"
+else
+  bad "the deferral took $RBB, which it did not file, for its follow-up (rc=$rc, follow_up=$RBFU)"
+fi
+eq "$(meta "$RBFU" source_finding)|$(meta "$RBFU" 'gc.dispatch_when_ready')" "$RB|gc-toolkit/gc-toolkit.polecat" "…it files a stamped follow-up of its own and arms it"
+eq "$(meta "$RBB" 'gc.dispatch_when_ready')" "<absent>" "…and leaves the carried-forward bug unarmed"
+hasnt "$(deps)" "tk-ancR|blocks|$RBB" "…and ungated"
 
 # A read that cannot tell whether a follow-up was filed files nothing: the
 # finding's edges answer garbage, an array from a read that failed, or nothing.
