@@ -109,6 +109,10 @@ exec 9>"$probe_dir/held"
 # Every retained run of every registration. The read carries no --since: gc
 # applies that bound only after fetching every retained run, so it would not
 # make the read cheaper, and without it the answer covers every order's window.
+# `now` anchors every window and is taken before the read is sent. The answer
+# holds no run newer than its fetch, so an anchor taken after the reads would cut
+# every window short by however long they took.
+now=$(budget_now)
 run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
 run_bounded gc rig list --json >"$probe_dir/rigs.json" 2>/dev/null & rigs_pid=$!
 
@@ -140,7 +144,7 @@ is_suspended() { [ -n "$suspended_rigs" ] && printf '%s\n' "$suspended_rigs" | g
 # The run history every liveness arm below reads. It is read whole or not at
 # all: an entry that does not name its order and a parseable time would leave
 # that order's last run unjudgeable, and an unjudged run reads as a stopped
-# order. `now` anchors every window, taken once the read has answered.
+# order.
 EP='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
 runs_file="$probe_dir/runs.json"
 runs_ok=0
@@ -149,7 +153,6 @@ if [ "$runs_rc" -eq 0 ] && jq -e "$EP"'(.entries | type) == "array"
         and all(.entries[]; (.order | type) == "string" and ((.created_at | ep) | type) == "number")' \
         "$runs_file" >/dev/null 2>&1; then
     runs_ok=1
-    now=$(budget_now)
 else
     warnings+=("could not read the order run history (\`gc order history --limit 0 --json\`) — the liveness arm did not run, so no order's last run was checked")
 fi

@@ -57,6 +57,8 @@ case "$1 $2" in
       # order's alone. Each $HIST_DIR/<order>.json holds one order's entries, and
       # an entry's "age" is the seconds since it fired (none = just now). --since
       # drops older runs, and a city run carries no rig, as the real answer omits it.
+      # HIST_DELAY keeps the read from returning for that many seconds after its
+      # runs were taken, as a slow read does.
       only=""; case "${3:-}" in ""|-*) ;; *) only="$3" ;; esac
       since=0; prev=""
       for a in "$@"; do [ "$prev" = "--since" ] && since="${a%s}"; prev="$a"; done
@@ -70,6 +72,7 @@ case "$1 $2" in
               | {order: $o, rig: (.rig // ""), created_at: ($now - (.age // 0) | todate)}
               | if .rig == "" then del(.rig) else . end' "$f"
       done | jq -cs '{entries: .}'
+      [ -z "${HIST_DELAY:-}" ] || sleep "$HIST_DELAY"
       exit "${HIST_RC_AFTER:-0}" ;;
   *) exit 0 ;;
 esac
@@ -257,6 +260,21 @@ eq "$(ls -A "$TMP/probe-tmp")" "" "…and leaves nothing behind"
 OUT=$(TMPDIR="$TMP/no-such-dir" run_check); RC=$?
 eq "$RC" "1" "no temp dir for the reads warns, never passes"
 has "$OUT" "nothing was read" "…and says nothing was read"
+
+# --- 7f. every window ends when the read is sent ------------------------------------
+# The answer holds no run newer than its fetch, so a window anchored once the
+# reads answer is cut short by however long they took, and a run near its far
+# edge reads as stopped. tick's window comes from the check's own finding, beta's
+# run is one second inside it as of the read's start, and the read answers two
+# seconds later.
+printf '{"entries":[{"rig":"alpha"}]}' > "$TMP/hist/tick.json"
+W=$(run_check | sed -n 's/.*tick: registered on rig beta but has NOT fired there in the last \([0-9]*\)s.*/\1/p')
+[ -n "$W" ] && ok "the stale-rig finding states tick's window (${W}s)" || bad "no window in the stale-rig finding"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta","age":%s}]}' "$(( ${W:-900} - 1 ))" > "$TMP/hist/tick.json"
+OUT=$(HIST_DELAY=2 run_check); RC=$?
+eq "$RC" "0" "a run inside its window when the read was sent counts, however long the read took"
+hasnt "$OUT" "has NOT fired" "…so the read's own latency calls no order stopped"
+printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 
 # --- 8. arm 3: a gctk is deployed, and it is the one this checkout describes ----
 # Orders can fire perfectly while the cadence runs logic several commits old,
