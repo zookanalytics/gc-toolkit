@@ -760,10 +760,11 @@ REFRESH_EOF
 }
 # The visit that asks again for an approval a bring-current dismissed. A
 # merge-in child's handoff files it on the anchor through bring-current-guard.sh,
-# keyed bring-current-judgment.<n>.<head> or bring-current-dismissal.<n>.<head>
-# for PR number <n> and the head the child pushed, and it holds the merge while
-# it is open (finalize-gate.sh). reask_pr is the PR number such a key names, as
-# a string, and null for any other key.
+# keyed bring-current-judgment.<n>.<head> for PR number <n> and the head the
+# child pushed, and it holds the merge while it is open (finalize-gate.sh).
+# reask_pr is the PR number such a key names, as a string, and null for any
+# other key. It also accepts bring-current-dismissal.<n>.<head>, the name a
+# pending rename gives the guard's key. No writer files that name yet.
 REASK_KEY_JQ='
   def reask_pr:
     (capture("^bring-current-(judgment|dismissal)\\.(?<n>[0-9]+)\\.[0-9a-f]*$") | .n) // null;'
