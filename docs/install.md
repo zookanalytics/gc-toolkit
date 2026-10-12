@@ -198,7 +198,7 @@ The pack's checks, and what a failure means:
 | `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` whose `blocks` edges have all closed was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
 | `check-feedback-routing-owed` | an open anchor whose PR posture is `commented`/`changes_requested` has that feedback routed within the owed window (warn-only) | the merge cadence's feedback arm not routing, so operator feedback reads as consumed while nothing acts on it |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city/lx) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
-| `check-demo-toolchain` | the demo:capture toolchain — Node, Chromium, ffmpeg, and `OPENAI_API_KEY` — is resolvable (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip |
+| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.
