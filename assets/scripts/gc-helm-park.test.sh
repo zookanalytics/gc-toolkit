@@ -12,6 +12,10 @@
 #     the text as its title, --body as its description, and no await type, no
 #     gc.demand_for and no other metadata. The bead's edge onto it reads back.
 #   - --waiting-on gives the bead an edge onto the named bead and files no gate.
+#   - a re-run of the text form files no second gate: a gate in the text form's
+#     shape that the bead already waits on under the same title is the park. A
+#     same-title gate of another kind (a demand gate, a gate with an await type,
+#     a gate carrying metadata) is not, and the park files a gate of its own.
 #   - refused with nothing written: text over the 140-character cap, both forms
 #     at once, neither form, --body beside --waiting-on, a bead in flight
 #     (branch, merge_result, rejection_reason, or a workflow past load-context),
@@ -59,7 +63,9 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-sl/.beads"
 #                    with a .beads dir, so the verb pins every call with --db.
 #   bd show <id>     `bd show --json`: an array of one row whose dependencies are
 #                    the targets' rows {id, dependency_type, status, title,
-#                    issue_type}; an unknown id is bd's error object, exit 1.
+#                    issue_type}, plus metadata and await_type where the target
+#                    carries them, as bd prints them; an unknown id is bd's error
+#                    object, exit 1.
 #   bd list          `bd list --json`: the rows whose status --status names,
 #                    gates only with --include-gates, each edge
 #                    {issue_id, depends_on_id, type}. STUB_LIST_FAIL fails it.
@@ -108,7 +114,9 @@ case "$verb" in
       . as $all
       | [ .[] | select(.id == $id)
           | [ .deps[]? | . as $d | $all[] | select(.id == $d.on)
-              | {id, dependency_type: $d.type, status, title, issue_type} ] as $deps
+              | {id, dependency_type: $d.type, status, title, issue_type}
+                + (if (.metadata // {}) == {} then {} else {metadata} end)
+                + (if (.await_type // "") == "" then {} else {await_type} end) ] as $deps
           | {id, status, issue_type, title, description,
              metadata: (if (.metadata // {}) == {} then null else .metadata end),
              parent: ([ .deps[]? | select(.type == "parent-child") | .on ] | first // null),
@@ -258,7 +266,7 @@ reset_store() {
  {"id":"tk-cv4","status":"open","issue_type":"convoy","title":"input convoy for tk-lc","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-lc","type":"tracks"}]},
  {"id":"tk-r4","status":"open","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv4"},"deps":[]},
  {"id":"tk-s4","status":"open","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r4","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r4","type":"tracks"}]},
- {"id":"tk-dg","status":"open","issue_type":"gate","title":"Rule on the loose task's scope","description":"","metadata":{"gc.demand_for":"tk-solo"},"deps":[]},
+ {"id":"tk-dg","status":"open","issue_type":"gate","await_type":"human","title":"Rule on the loose task's scope","description":"","metadata":{"gc.demand_for":"tk-solo"},"deps":[]},
  {"id":"tk-pg","status":"open","issue_type":"gate","title":"Parked until the store answers in a second; close when it does","description":"","metadata":{},"deps":[]},
  {"id":"tk-task","status":"open","issue_type":"task","title":"Land the faster store","description":"","metadata":{},"deps":[]},
  {"id":"tk-closed","status":"closed","issue_type":"task","title":"already done","description":"","metadata":{},"deps":[]},
@@ -291,6 +299,18 @@ nothing_written() {
 row() { jq -c --arg id "$1" '.[] | select(.id == $id)' "$STUB_STORE"; }
 edges_of() { jq -r --arg id "$1" '.[] | select(.id == $id) | [ .deps[]? | select(.type == "blocks") | .on ] | join(" ")' "$STUB_STORE"; }
 gate_count() { jq '[ .[] | select(.issue_type == "gate") ] | length' "$STUB_STORE"; }
+# add_gate <id> <title> <await_type> <metadata-json>: an open gate in the store.
+# add_edge <bead> <blocker>: <bead> waits on <blocker>.
+add_gate() {
+  jq -c --arg id "$1" --arg t "$2" --arg aw "$3" --argjson m "$4" \
+    '. + [{id: $id, status: "open", issue_type: "gate", title: $t, description: "", metadata: $m, deps: []}
+          + (if $aw == "" then {} else {await_type: $aw} end)]' \
+    "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+}
+add_edge() {
+  jq -c --arg a "$1" --arg b "$2" 'map(if .id == $a then .deps += [{on: $b, type: "blocks"}] else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+}
 
 TEXT="Parked while steer-by-epic lands; released when the operator unparks it at a priority"
 BODY="The operator holds this epic so polecat capacity goes to steer-by-epic."
@@ -331,6 +351,36 @@ eq "$RC" "0" "(AGAIN) re-running the same park exits 0"
 eq "$(gate_count)" "3" "(AGAIN) no second gate is filed"
 has "$ERR" "already waits on the open gate $GATE" "(AGAIN) names the gate it already waits on"
 grep -q '^bd create' <<< "$CALLS" && bad "(AGAIN) a create was sent (calls: $CALLS)" || ok "(AGAIN) no create was sent"
+
+# --- (KIND) only a gate in the text form's shape is taken for the park ---------
+# The bead already waits on a gate titled with the text. A plain gate, with no
+# await type and no metadata, is the park. For each other kind the park files a
+# gate of its own:
+#   tk-dg   a demand gate: await_type=human and gc.demand_for
+#   tk-hg   a human gate whose demand stamp has not landed: await_type=human
+#   tk-mg   a gate another writer stamped: gc.blocker_key, no await type
+KT="$(jq -r '.title' <<< "$(row tk-dg)")"
+for k in tk-dg tk-hg tk-mg; do
+  reset_store
+  add_gate tk-hg "$KT" human '{}'
+  add_gate tk-mg "$KT" "" '{"gc.blocker_key":"loose-task-scope"}'
+  add_edge tk-solo "$k"
+  run_park tk-solo "$KT"
+  eq "$RC" "0" "(KIND) $k: parking under its title exits 0"
+  hasnt "$ERR" "already waits on the open gate" "(KIND) $k: it is not taken for the park"
+  G="$(jq -r '[ .[] | select(.issue_type == "gate" and (.id | IN("tk-dg", "tk-pg", "tk-hg", "tk-mg") | not)) | .id ] | .[0] // ""' "$STUB_STORE")"
+  [ -n "$G" ] && ok "(KIND) $k: a gate of its own is filed ($G)" || bad "(KIND) $k: no gate of its own filed"
+  eq "$(edges_of tk-solo)" "$k $G" "(KIND) $k: the bead waits on $k and on the park's own gate"
+  has "$OUT" "park $G holds tk-solo: $KT" "(KIND) $k: the success line names the park's own gate"
+done
+reset_store
+add_edge tk-solo tk-pg
+PT="$(jq -r '.title' <<< "$(row tk-pg)")"
+run_park tk-solo "$PT"
+eq "$RC" "0" "(KIND) plain: parking under its title exits 0"
+has "$ERR" "already waits on the open gate tk-pg" "(KIND) plain: a plain gate under the same title is the park"
+grep -q '^bd create' <<< "$CALLS" && bad "(KIND) plain: a create was sent (calls: $CALLS)" || ok "(KIND) plain: no create was sent"
+has "$OUT" "park tk-pg holds tk-solo: $PT" "(KIND) plain: the success line names the gate it waits on"
 
 # --- (NOBODY) without --body the gate still says how to release it -------------
 reset_store

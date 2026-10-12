@@ -1833,12 +1833,19 @@ park_edge_reads_back() {
 
 # park_open_gate_titled <bead-row-json> <text> — the open gate the bead already
 # waits on under exactly this title, or empty. A re-run finds the gate it filed.
+# Only a gate in the shape the text form files counts: no await type and no
+# metadata. A gate of another kind can carry the same title. A demand gate
+# (await_type=human, gc.demand_for) is released by the operator's decision, a
+# gate with any await type by its condition firing, and a gate with metadata
+# belongs to the writer that stamped it. Adopting one would report a park while
+# the bead waits on something that is not a park.
 park_open_gate_titled() {
     printf '%s' "$1" | jq -r --arg t "$2" '
         [ (.dependencies // [])[]? | select(type == "object")
           | select(((.dependency_type // .type // "") | tostring) == "blocks")
           | select((.status // "") != "closed" and (.issue_type // "") == "gate")
           | select((.title // "") == $t)
+          | select(((.await_type // "") | tostring) == "" and (.metadata // {}) == {})
           | ((.id // .depends_on_id // "") | tostring) ]
         | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf ''
 }
