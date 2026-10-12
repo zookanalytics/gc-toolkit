@@ -4,21 +4,23 @@
 # immediately and reads no `blocks` deps, so sequencing needs a durable hold:
 #   arm <bead> --target <agent> [--sling-arg X]... [--reason "..."]
 # records the intent as metadata; `reconcile` (orders/deferred-dispatch.toml,
-# cooldown, scope="rig") performs the sling once the bead's own `blocks` edges
-# have all closed. It reads `bd list --ready` as the fast path, and ALSO
-# dispatches an open bead that bd holds unready only through a blocked or
-# deferred ANCESTOR: the is_blocked flag cascades DOWN parent-child edges, so an
-# armed epic child whose own blockers have closed never enters `bd --ready`
-# while its container waits on a human gate — and the arm waits on the bead's
-# own blockers, not its ancestors'. Status still gates: a non-open bead is a
-# deliberate hold and is never dispatched. `list` answers "what dispatches are
-# owed?"; `disarm` withdraws one.
+# cooldown, scope="rig") performs the sling once nothing holds the bead. A hold
+# is assets/scripts/hold-lib.sh's: an open `blocks` blocker on the bead or on
+# one of its parent-child ancestors, where a demand gate on an ancestor does not
+# count, because waiting on the operator's decision is not a hold. The pass
+# reads `bd list --ready` as the fast path, and ALSO dispatches an open bead bd
+# holds unready that hold-lib finds not held: the is_blocked flag cascades DOWN
+# parent-child edges, so an armed epic child whose epic waits only on a demand
+# gate never enters `bd --ready`. A held arm stays intact and fires once its
+# hold releases. Status still gates: a non-open status is set deliberately, and
+# a bead at one is never dispatched. `list` answers "what dispatches are owed?",
+# naming the blocker that holds each held arm; `disarm` withdraws one.
 #
-# `arm` is the default move for a blocked follow-up you file or hold by hand:
-# arm it instead of leaving it unrouted for someone to route once its blocker
-# lands, and the reconcile pass routes it the moment bd reports it ready — so a
-# sitting can queue everything and drain, with nothing left to remember. The
-# bead resolves by id, so the arm lands from any seat, rig-scoped or not.
+# `arm` is the default move for a blocked follow-up you file or keep back by
+# hand: arm it instead of leaving it unrouted for someone to route once its
+# blocker lands, and the reconcile pass routes it the moment nothing holds it —
+# so a sitting can queue everything and drain, with nothing left to remember.
+# The bead resolves by id, so the arm lands from any seat, rig-scoped or not.
 # Callers: agents sequencing dependent work; first-reaction-dispose.sh
 # --then-route; the deferred-dispatch order. doctor/check-blocked-work-armed
 # flags a blocked work bead that was never armed and carries no route.
@@ -85,6 +87,11 @@ DRY_RUN=0
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 
+# The one definition of a hold. Unsourceable, no arm can be told from a held one,
+# so nothing runs.
+# shellcheck source=hold-lib.sh
+. "$SCRIPTS_DIR/hold-lib.sh" || { echo "$PROG: cannot source hold-lib.sh beside this script" >&2; exit 1; }
+
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
 trap cleanup EXIT
@@ -112,17 +119,18 @@ Usage:
 
 Verbs:
   arm        Record a pending dispatch on <bead>. The sling happens later, from
-             reconcile, once bd reports the bead ready. This is the move for a
-             blocked follow-up you file or hold by hand: arm it instead of
+             reconcile, once nothing holds the bead. This is the move for a
+             blocked follow-up you file or keep back by hand: arm it instead of
              leaving it unrouted for someone to route once its blocker lands,
              so you can queue everything and drain with nothing to remember.
              The bead must be open — reconcile dispatches from the --ready
-             listing, which excludes every other status, so an arm on a held
-             bead could never fire.
+             listing, which excludes every other status, so an arm on a bead
+             at another status could never fire.
   disarm     Remove a pending dispatch. The bead is left otherwise untouched.
-  list       Show every armed bead in this store and whether it is waiting,
-             dispatchable now, or closed with a dispatch still owed.
-  reconcile  One pass: sling every armed bead that is now ready, retire the arm
+  list       Show every armed bead in this store and whether it is held (and
+             by which blocker), dispatchable now, or closed with a dispatch
+             still owed.
+  reconcile  One pass: sling every armed bead nothing holds, retire the arm
              on every armed bead that closed or that another path already
              delivered (a merge_result stamp), and — because each sling mints an
              input convoy — stop re-slinging and escalate a bead whose dispatch
@@ -219,11 +227,11 @@ cmd_arm() {
     # `bd list --ready` answers OPEN beads only: it excludes by status before it
     # ever looks at deps, so a depless `blocked` bead is as unready as a gated
     # one. An arm recorded on any other live status can therefore never fire,
-    # and nothing re-derives status from the dep graph — the hold is cleared by
-    # whoever set it. Refusing here is the difference between a caller learning
-    # that now and an arm that reads as "waiting on a blocker" forever.
+    # and nothing re-derives status from the dep graph — the status is cleared
+    # by whoever set it. Refusing here is the difference between a caller learning
+    # that now and an arm that reads as held by a blocker forever.
     if [ "$status" != "open" ]; then
-        echo "$PROG: arm: $bead is status=$status, and reconcile dispatches from 'bd list --ready', which answers open beads only — this arm could never fire. Clear the hold, then arm it." >&2
+        echo "$PROG: arm: $bead is status=$status, and reconcile dispatches from 'bd list --ready', which answers open beads only — this arm could never fire. Return it to open, then arm it." >&2
         return 1
     fi
 
@@ -236,7 +244,7 @@ cmd_arm() {
     fi
 
     local note
-    note="$PROG: dispatch armed by $(actor) at $(now_utc) — target=$target sling_args=$args_json${reason:+ reason=$reason}. It will be slung by the deferred-dispatch reconcile pass once bd reports this bead ready; nobody is holding it in context."
+    note="$PROG: dispatch armed by $(actor) at $(now_utc) — target=$target sling_args=$args_json${reason:+ reason=$reason}. It will be slung by the deferred-dispatch reconcile pass once nothing holds this bead; no agent keeps it in context."
     bd_ update "$bead" \
         --set-metadata "$K_TARGET=$target" \
         --set-metadata "$K_ARGS=$args_json" \
@@ -248,36 +256,64 @@ cmd_arm() {
 
     echo "$PROG: armed $bead -> $target${reason:+ ($reason)}"
 
-    # The hint asks the same in-store question reconcile dispatches on: are the
-    # bead's own `blocks` edges all closed? The bead is open here (refused above
-    # otherwise), so an all-clear means the next pass slings it whether or not a
-    # blocked ancestor keeps it out of `bd --ready`. But bd resolves dependencies
-    # within a single store, so a `blocks` edge to a bead in another rig holds
-    # nothing here: own_blocks_cleared and `bd list --ready` both miss it, and the
-    # next pass slings the arm while that blocker is still open. `bd list --id`
-    # renders the raw edge even when its target has no in-store row, so name any
-    # unresolvable blocker rather than let the "no open blocker" hint stand on it.
-    # This is the one place a human is here to redirect the sequencing.
+    # The hint asks the in-store question reconcile dispatches on: does anything
+    # hold the bead (hold-lib.sh)? The bead is open here (refused above
+    # otherwise), so an all-clear means the next pass slings it, and a hold names
+    # the blocker the arm now waits on. But bd resolves dependencies within a
+    # single store, so a `blocks` edge to a bead in another rig holds nothing
+    # here: `bd list --ready` misses it, and the next pass slings the arm while
+    # that blocker is still open. `bd list --id` renders the raw edge even when
+    # its target has no in-store row, so name any unresolvable blocker rather than
+    # let the all-clear stand on it. This is the one place a human is here to
+    # redirect the sequencing.
     #
     # own_blocks_unresolved_ids reports three outcomes and the hint turns on all
     # three. A non-zero rc means the bead's edges were not read: the cross-store
-    # check is unproven, so the "no open blocker" all-clear must not stand on it,
-    # any more than it may stand on a named cross-store blocker. A non-empty
-    # stdout names an unresolvable blocker. An empty stdout with rc 0 is a proven
-    # absence, the only outcome that earns the in-store all-clear.
-    local unresolved="" unresolved_rc=0
+    # check is unproven, so the all-clear must not stand on it, any more than it
+    # may stand on a named cross-store blocker. A non-empty stdout names an
+    # unresolvable blocker. An empty stdout with rc 0 is a proven absence, the
+    # only outcome that earns the in-store answer.
+    local unresolved="" unresolved_rc=0 hold="" seedf graphf
     unresolved="$(own_blocks_unresolved_ids "$bead")" || unresolved_rc=$?
     if [ "$unresolved_rc" -ne 0 ]; then
         echo "$PROG: warning: $bead — could not enumerate its 'blocks' edges to check for a cross-store blocker, so whether reconcile will dispatch it with such a blocker still open is unproven. Check its blockers by hand if the ordering matters." >&2
     elif [ -n "$unresolved" ]; then
         echo "$PROG: warning: $bead has a 'blocks' edge to $unresolved, which has no row in this store. bd resolves dependencies within a single store, so this cross-rig or external blocker does not hold the arm: reconcile will dispatch $bead with $unresolved still open. Sequence it by hand if that ordering matters." >&2
-    elif own_blocks_cleared "$bead"; then
-        echo "$PROG: note: $bead has no open blocker right now — the next reconcile pass will dispatch it"
+    elif mktemp_tracked && seedf="$REPLY" && mktemp_tracked && graphf="$REPLY" \
+            && hold="$(hold_of "$bead" "$seedf" "$graphf")"; then
+        if [ -z "$hold" ]; then
+            echo "$PROG: note: nothing holds $bead right now — the next reconcile pass will dispatch it"
+        else
+            echo "$PROG: note: $bead is HELD by $hold — the first reconcile pass after that hold releases will dispatch it"
+        fi
+    else
+        echo "$PROG: warning: $bead — could not read what holds it, so when reconcile will dispatch it is unproven. Read its blockers and its ancestors' by hand if the timing matters." >&2
     fi
     if [ -n "$assignee" ]; then
-        echo "$PROG: note: $bead carries assignee '$assignee' — reconcile will NOT sling over a held bead; clear it or disarm" >&2
+        echo "$PROG: note: $bead carries assignee '$assignee' — reconcile will NOT sling over an assigned bead; clear it or disarm" >&2
     fi
     return 0
+}
+
+# The hold walk's reader (hold-lib.sh): the named beads at every status and of
+# every class a listing hides by default, since a blocker can be a gate and an
+# ancestor can be closed.
+dd_hold_read() {
+    bd_ list --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null
+}
+
+# What holds one bead now, as hold-lib.sh prints it, or nothing when nothing
+# does. It runs inside a command substitution, so the caller allocates the two
+# files it writes: an allocation made here would land in the substitution's copy
+# of TMPFILES, which the EXIT trap never reads. rc 1 when the bead or what holds
+# it could not be read.
+hold_of() { # id seed_file graph_file -> summary on stdout
+    local id="$1" seed="$2" graph="$3" row
+    row="$(dd_hold_read "$id")" || return 1
+    printf '%s' "$row" | scrub | jq -c --arg id "$id" '[ .[]? | select(.id == $id) ]' > "$seed" 2>/dev/null || return 1
+    jq -e 'length == 1' "$seed" >/dev/null 2>&1 || return 1
+    hold_graph dd_hold_read "$seed" "$graph" || return 1
+    jq -r --slurpfile g "$graph" "$HOLD_JQ"'.[0] | hold_summary($g[0])' "$seed" 2>/dev/null
 }
 
 # --- disarm ------------------------------------------------------------------
@@ -311,32 +347,11 @@ cmd_disarm() {
     echo "$PROG: disarmed $bead"
 }
 
-# The arm waits on the bead's OWN blockers, a narrower question than `bd list
-# --ready`. `--ready` also excludes a bead held only by a blocked or deferred
-# ANCESTOR, because the is_blocked flag cascades DOWN parent-child edges: an
-# armed child of an epic that is itself blocked (e.g. on a human demand gate)
-# never enters `bd --ready`, though its own work is ready the moment its own
-# blockers close. So reconcile asks this question directly of a bead bd holds
-# unready — is every one of its own `blocks` blockers closed? — and dispatches
-# on a yes. Fail closed: an unreadable or non-array dep list returns non-zero, so
-# the bead is left armed and retried, never slung on a guess. The parent-child
-# edge is not a blocks edge and is ignored; the status gate lives in the caller.
-own_blocks_cleared() { # id -> rc 0 if every own `blocks` edge is closed
-    local id="$1" deps open_blk
-    deps="$(bd_ dep list "$id" --json 2>/dev/null)" || return 1
-    [ -n "$deps" ] || return 1
-    printf '%s' "$deps" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    open_blk="$(printf '%s' "$deps" | scrub | jq -r \
-        '[ .[] | select(.dependency_type == "blocks") | select(.status != "closed") ] | length' 2>/dev/null)"
-    case "$open_blk" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$open_blk" -eq 0 ]
-}
-
 # A `blocks` edge whose target has no row in the bead's own store — a cross-rig
 # or external blocker. bd resolves dependencies within a single store, so `bd dep
 # list` leaves such an edge out of its array (warning on stderr), as do `bd
-# show`'s resolved `dependencies` and `bd list --ready`; own_blocks_cleared never
-# sees it. `bd list --id` still renders the raw edge. This names the difference:
+# show`'s resolved `dependencies` and `bd list --ready`, which reports the bead
+# ready. `bd list --id` still renders the raw edge. This names the difference:
 # the ids the bead's raw `blocks` edges point at that `bd dep list` does not
 # resolve. Both reads name only the bead's own id, so `gc bd` answers both from
 # the store that holds the bead whether or not --db pins one. A read naming a
@@ -366,66 +381,18 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
         | join(",")' 2>/dev/null
 }
 
-# The own-blockers-clear gate (the second-chance dispatch gate), resolved for a
-# whole candidate set in a BOUNDED number of reads rather than a `bd dep list`
-# per bead. The per-bead form summed past the reconcile order's 120s budget as
-# the armed set grew, so a full pass was killed before it dispatched and owed
-# arms silently starved — the N+1 this replaces. The blocker ids come off the
-# snapshot's OWN dependency edges (`bd list --json` already carries them in the
-# list-edge shape, so no dep-list call is needed and the single-id-vs-batch shape
-# flip of `bd dep list` never arises), and ONE listing resolves their statuses.
-# Fail closed per candidate: a blocker whose row cannot be read leaves its
-# candidate not-cleared (0), exactly as the per-bead probe's non-array return
-# did, so the arm stays armed and the next pass retries rather than slinging on a
-# guess. The status LISTING failing outright returns non-zero, degrading the
-# whole pass to "could not enumerate" the way a failed --all read does.
-resolve_own_cleared() { # all_json  cand_id...  ->  "<id>\t<0|1>" per candidate
-    local all="$1"; shift
-    [ "$#" -gt 0 ] || return 0
-    local cand_json blocker_ids blk_raw blockers
-    cand_json="$(printf '%s\n' "$@" | jq -R . | jq -sc .)" || return 1
-    # Distinct `blocks` blockers of every candidate, read off the snapshot's own
-    # edges (list-edge shape: {issue_id: self, depends_on_id: blocker, type}).
-    blocker_ids="$(printf '%s' "$all" | scrub | jq -r --argjson c "$cand_json" '
-        [ .[] | select(.id as $i | ($c | index($i)))
-          | (.dependencies // [])[] | select(.type == "blocks") | .depends_on_id ]
-        | unique | join(",")' 2>/dev/null)" || return 1
-    blockers='[]'
-    if [ -n "$blocker_ids" ]; then
-        # A `blocks` blocker can be any bead class, and gate/infra/template
-        # blockers are common (a graduation gate blocking a convoy child); bd list
-        # hides those classes unless asked, so a hidden blocker would drop and
-        # read as unresolved. --id also silently drops an id with no row, so a
-        # blocker still absent from the join below is treated as unresolved (its
-        # candidate stays not-cleared), never as closed — an unread blocker must
-        # not read as a released one.
-        blk_raw="$(bd_ list --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null)" || return 1
-        printf '%s' "$blk_raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-        blockers="$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]? | {id, status} ]' 2>/dev/null)" || return 1
-        [ -n "$blockers" ] || blockers='[]'
-    fi
-    # Join per candidate: cleared (1) iff it has no `blocks` blocker whose status
-    # is unresolved or not closed.
-    printf '%s' "$all" | scrub | jq -r --argjson c "$cand_json" --argjson bl "$blockers" '
-        ($bl | map({key: .id, value: .status}) | from_entries) as $smap
-        | .[] | select(.id as $i | ($c | index($i))) | .id as $id
-        | [ (.dependencies // [])[] | select(.type == "blocks") | .depends_on_id ] as $blks
-        | (if   ([ $blks[] | select($smap[.] == null)     ] | length) > 0 then 0
-           elif ([ $blks[] | select($smap[.] != "closed") ] | length) > 0 then 0
-           else 1 end) as $cleared
-        | "\($id)\t\($cleared)"' 2>/dev/null
-}
-
 # Unreadable is not empty: every enumeration read is checked and any failure
-# returns 1. The fourth column, own_cleared, is the second-chance dispatch gate:
-# 1 for an OPEN bead that bd holds unready but whose own `blocks` edges have all
-# closed (held only by an ancestor cascade). A bd-ready bead needs no probe and a
-# non-open one is a hold, so the probe runs only on the open-but-unready rows —
-# resolved for all of them at once by resolve_own_cleared. The snapshot is cached
-# to all_out so the list and reconcile loops read each bead's fields from it
-# instead of a `bd show` per bead.
-armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<own_cleared 0|1>" per bead; caches the snapshot to all_out
-    local out="$1" all_out="$2" all ready_ids base id status ready cand_ids=() cleared_map=""
+# returns 1. The fourth column is what holds the bead, as hold-lib.sh prints it,
+# and is empty for a bead nothing holds. A bd-ready bead needs no walk, because
+# bd reports nothing holding it, and a non-open one never dispatches whatever
+# holds it, so the walk covers only the open beads bd holds unready. hold_graph
+# reads all of them at once, one read per generation of ancestors and one for
+# their blockers, so a pass costs the same few reads however large the armed set
+# grows. A walk that cannot read fails the whole enumeration rather than let an
+# unread hold pass for none. The snapshot is cached to all_out so the list and
+# reconcile loops read each bead's fields from it instead of a `bd show` per bead.
+armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>" per bead; caches the snapshot to all_out
+    local out="$1" all_out="$2" all ready_ids seed graph
     # --brief on both reads: this function and its cache consumers use only id,
     # status, assignee, metadata and dependency edges, all of which --brief
     # keeps; it drops only the free-form text that makes a row heavy on the
@@ -443,28 +410,21 @@ armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<own_cleare
     # Both snapshots grow with the armed set, and a single --argjson value past
     # the kernel per-argument size cap fails the whole enumeration. Both reach
     # jq over stdin instead: `input` is the ready snapshot, `inputs` the --all
-    # snapshot.
-    base="$( { printf '%s' "$ready_ids"; printf '\n'; printf '%s' "$all"; } | jq -rn '
+    # snapshot. The graph reaches jq as a file for the same reason.
+    mktemp_tracked || return 1; seed="$REPLY"
+    mktemp_tracked || return 1; graph="$REPLY"
+    { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -cn '
+        (input | map(.id)) as $ready
+        | [ inputs | .[] | select((.status // "") == "open") | select(.id as $i | $ready | index($i) | not) ]' \
+        > "$seed" 2>/dev/null || return 1
+    hold_graph dd_hold_read "$seed" "$graph" || return 1
+    { printf '%s' "$ready_ids" | scrub; printf '\n'; cat "$all_out"; } | jq -rn --slurpfile g "$graph" "$HOLD_JQ"'
         (input | map(.id)) as $ready
         | inputs | .[]
-        | [ .id, (.status // ""), (if (.id as $i | $ready | index($i)) then "1" else "0" end) ]
-        | @tsv' 2>/dev/null)" || return 1
-
-    while IFS=$'\t' read -r id status ready; do
-        [ -n "$id" ] || continue
-        [ "$ready" != "1" ] && [ "$status" = "open" ] && cand_ids+=("$id")
-    done <<< "$base"
-
-    if [ "${#cand_ids[@]}" -gt 0 ]; then
-        cleared_map="$(resolve_own_cleared "$all" "${cand_ids[@]}")" || return 1
-    fi
-
-    # Join the own_cleared answers back onto the base rows in one awk pass
-    # (in-memory, no bd read): a candidate absent from the map defaults to 0.
-    awk -F'\t' '
-        NR==FNR { if ($1 != "") cl[$1] = $2; next }
-        $1 != "" { printf "%s\t%s\t%s\t%s\n", $1, $2, $3, (($1 in cl) ? cl[$1] : 0) }
-    ' <(printf '%s\n' "$cleared_map") <(printf '%s\n' "$base") > "$out" || return 1
+        | (if (.id as $i | $ready | index($i)) then "1" else "0" end) as $r
+        | [ .id, (.status // ""), $r,
+            (if $r == "0" and (.status // "") == "open" then hold_summary($g[0]) else "" end) ]
+        | @tsv' > "$out" 2>/dev/null || return 1
     return 0
 }
 
@@ -488,8 +448,8 @@ cmd_list() {
         return 0
     fi
 
-    local n=0 id status ready owncleared json target reason slung state mr fails
-    while IFS=$'\t' read -r id status ready owncleared; do
+    local n=0 id status ready hold json target reason slung state mr fails
+    while IFS=$'\t' read -r id status ready hold; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
         json="$(bead_from_cache "$all_cache" "$id")" || json=""
@@ -502,12 +462,13 @@ cmd_list() {
             fails="$(meta_of "$json" "$K_FAILS")"; case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         fi
         # Not-ready splits three ways, and conflating them is what hides a dead
-        # arm: an OPEN bead with an open own-blocker is waiting on something that
-        # can clear; an OPEN bead whose own blockers have all closed is
-        # dispatchable now and held out of `bd --ready` only by an ancestor
-        # cascade (reconcile slings it anyway); any other live status is excluded
-        # by `--ready` on the status itself, so no blocker closing will make it
-        # dispatchable.
+        # arm: an OPEN bead a blocker holds (hold-lib.sh) waits on something that
+        # can clear, and is shown with the blocker and its title, so a parked bead
+        # says why it is parked and what releases it; an OPEN bead nothing holds is
+        # dispatchable now, though bd keeps it out of `--ready` (a demand gate on
+        # an ancestor does that), and reconcile slings it anyway; any other live
+        # status is excluded by `--ready` on the status itself, so no blocker
+        # closing will make it dispatchable.
         if [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ -n "$mr" ]; then state="DELIVERED — merge_result=$mr (arm retires next pass, no sling)"
         elif [ -n "$slung" ]; then
@@ -517,9 +478,9 @@ cmd_list() {
             esac
         elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, escalated; disarm or clear $K_FAILS"
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
-        elif [ "$owncleared" = "1" ]; then state="DISPATCHABLE NOW (own blockers clear; held out of bd --ready only by a blocked/deferred ancestor)"
         elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
-        else state="waiting on a blocker"; fi
+        elif [ -n "$hold" ]; then state="HELD by $hold"
+        else state="DISPATCHABLE NOW (nothing holds it; bd keeps it out of --ready only for a wait the arm does not count, such as a demand gate on an ancestor)"; fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
     done < "$rows"
     [ "$n" -gt 0 ] || echo "$PROG: no pending dispatches in this store"
@@ -564,11 +525,11 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0
+    local expected processed=0 dispatched=0 retired=0 held=0 stranded=0 assigned=0 capped=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
-    local id status ready owncleared json target args_json assignee slung rc merge_result fails
-    while IFS=$'\t' read -r id status ready owncleared; do
+    local id status ready hold json target args_json assignee slung rc merge_result fails
+    while IFS=$'\t' read -r id status ready hold; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
 
@@ -654,22 +615,25 @@ cmd_reconcile() {
             retired=$((retired + 1)); continue
         fi
 
-        # Not dispatchable. `bd --ready` (fast path) and own_cleared (an open
-        # bead whose own blockers have all closed, held out of ready only by an
-        # ancestor cascade) are the two ways in; without either, an open bead is
-        # waiting on its own open blocker and the next pass re-asks, while any
-        # other live status is excluded by `--ready` on the status itself, so
-        # waiting for it is waiting for something no blocker closing can deliver.
-        # Say so every pass — the arm outlives every session that could remember
-        # it, and a silent `waiting` count is how it stays lost.
-        if [ "$ready" != "1" ] && [ "$owncleared" != "1" ]; then
+        # Not dispatchable. `bd --ready` (the fast path) and a walk that finds
+        # nothing holding an open bead (hold-lib.sh) are the two ways in. A held
+        # bead waits on a blocker that can clear, on it or on an ancestor: its
+        # line names the blocker and its title, so a parked arm says why it is
+        # parked and what releases it, and the arm stays intact for the first
+        # pass after the hold releases. Any other live status is excluded by
+        # `--ready` on the status itself, so waiting for it is waiting for
+        # something no blocker closing can deliver. Say both every pass — the arm
+        # outlives every session that could remember it, and a silent count is
+        # how it stays lost.
+        if [ "$ready" != "1" ]; then
             if [ "$status" != "open" ]; then
-                echo "$PROG: STRANDED $id is armed at status=$status, which 'bd list --ready' never answers — clear the hold or disarm; no blocker closing will dispatch it" >&2
-                stranded=$((stranded + 1))
-            else
-                waiting=$((waiting + 1))
+                echo "$PROG: STRANDED $id is armed at status=$status, which 'bd list --ready' never answers — return it to open or disarm; no blocker closing will dispatch it" >&2
+                stranded=$((stranded + 1)); continue
             fi
-            continue
+            if [ -n "$hold" ]; then
+                echo "$PROG: HELD $id by $hold"
+                held=$((held + 1)); continue
+            fi
         fi
         target="$(meta_of "$json" "$K_TARGET")"
         args_json="$(meta_of "$json" "$K_ARGS")"
@@ -681,10 +645,10 @@ cmd_reconcile() {
             failed=$((failed + 1)); continue
         fi
 
-        # Held: slinging would take the bead away from its assignee.
+        # Assigned: slinging would take the bead away from its assignee.
         if [ -n "$assignee" ]; then
-            echo "$PROG: HELD $id is ready but assigned to '$assignee' — not slinging; disarm or clear the assignee" >&2
-            held=$((held + 1)); continue
+            echo "$PROG: ASSIGNED $id is ready but assigned to '$assignee' — not slinging; disarm or clear the assignee" >&2
+            assigned=$((assigned + 1)); continue
         fi
 
         # The retry has a budget. Each sling attempt mints an input convoy, so a
@@ -710,11 +674,11 @@ cmd_reconcile() {
             capped=$((capped + 1)); continue
         fi
 
-        # Its own blockers are clear but bd held it unready through a blocked or
-        # deferred ancestor (the parent-child cascade) — say why a not-ready bead
-        # is being slung, so the pass log is legible.
+        # Nothing holds it, but bd keeps it unready through the parent-child
+        # cascade, as it does under an ancestor that waits only on a demand gate
+        # — say why a not-ready bead is being slung, so the pass log is legible.
         if [ "$ready" != "1" ]; then
-            echo "$PROG: $id has no open blocks edge of its own; bd holds it unready only through a blocked/deferred ancestor — dispatching"
+            echo "$PROG: nothing holds $id: no open blocker sits on it, and any on its ancestors is a demand gate. bd keeps it out of --ready all the same — dispatching"
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying
@@ -764,7 +728,7 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
-    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $failed failed (of $expected armed)"
+    echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
 }
 

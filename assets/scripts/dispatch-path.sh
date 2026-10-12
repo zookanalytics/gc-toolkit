@@ -4,7 +4,7 @@
 # dispatch. Two keys each give a bead one. gc.routed_to names a pool queue,
 # which serves the bead once bd reports it ready. gc.dispatch_when_ready is an
 # arm (deferred-dispatch.sh arm), which the deferred-dispatch order slings once
-# the bead's own blockers close. gc.execution_routed_to is not one: it is
+# nothing holds the bead (hold-lib.sh). gc.execution_routed_to is not one: it is
 # execution provenance a formula pour leaves, and no queue reads it.
 #
 # Sourced (never executed) by the readers that ask whether a bead already has a
