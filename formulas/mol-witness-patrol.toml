@@ -65,9 +65,10 @@ gc mail inbox
 Triage HELP/blocked mail from polecats: unblock what you can (point at
 docs, suggest an approach); a blocker you cannot becomes a finding bead
 (`patrol-finding.sh --scope witness-findings --key polecat-help --about <the
-polecat's bead> ...`), and the reaction decides whether it is work, a wait, or
-a question for the operator. `--about` is what keeps two blocked polecats two
-findings. Emergencies (crash, data loss, corruption, security) go straight to
+polecat's bead> --distinct ...`), and the reaction decides whether it is work,
+a wait, or a question for the operator. `--about` is what keeps two blocked
+polecats two findings, and `--distinct` files the second while the first is
+still live. Emergencies (crash, data loss, corruption, security) go straight to
 escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
@@ -121,7 +122,14 @@ the mail reports, the way every finding key does, and ABOUT is the bead it
 concerns, left empty when it names none. NOTE is optional and adds what you
 know that the sender did not. The block copies the mail into the finding
 verbatim and archives the mail only after the finding is filed. When nothing is
-filed, the mail stays unread and the next cycle files it:
+filed, the mail stays unread and the next cycle files it.
+
+A refusal is the exception, because the next cycle meets the same refusal.
+patrol-finding.sh refuses with exit 3 when a live witness finding already
+shares KEY or ABOUT, and it lists those findings. If the mail reports one of
+their situations, re-run the block with that finding's KEY and ABOUT, and the
+mail lands on it as an occurrence. If it reports a different situation, re-run
+the block with DISTINCT=1, which passes --distinct:
 ```bash
 # >>> notice-finding
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -158,10 +166,16 @@ $NOTE"
   fi
   MAIL_TITLE="${MAIL_SUBJECT#NOTICE: }"
   [ -n "$MAIL_TITLE" ] || MAIL_TITLE="$MAIL_SUBJECT"
-  if "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" --title "$MAIL_TITLE" --message "$FINDING_TEXT"; then
+  PF_RC=0
+  "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key "$KEY" --about "${ABOUT:-}" ${DISTINCT:+--distinct} --title "$MAIL_TITLE" --message "$FINDING_TEXT" || PF_RC=$?
+  if [ "$PF_RC" -eq 0 ]; then
     gc mail archive "$MAIL_ID" >/dev/null || echo "notice-finding: filed, but mail $MAIL_ID did not archive. The next cycle files it again, and the finding counts that as a recurrence." >&2
   else
-    echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    if [ "$PF_RC" -eq 3 ]; then
+      echo "notice-finding: patrol-finding.sh refused mail $MAIL_ID because a live finding it listed shares KEY or ABOUT. Re-run this block with that finding's KEY and ABOUT if the mail reports its situation, or with DISTINCT=1 if it reports a different one. The mail stays unread until then." >&2
+    else
+      echo "notice-finding: patrol-finding.sh filed nothing for mail $MAIL_ID. The mail stays unread for the next cycle." >&2
+    fi
     gc mail mark-unread "$MAIL_ID" >/dev/null 2>&1 || true
   fi
 fi
@@ -609,7 +623,7 @@ fi
 When a work bead's worktree is a husk or gone and its branch is not on the owning
 origin (or a guard refused), the work may be lost: file the refusal best-effort
 (`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
---about <bead> ...`) and fall through — recovery is load-bearing, the notice
+--about <bead> --distinct ...`) and fall through — recovery is load-bearing, the notice
 advisory. A source bead with neither a work_dir nor a branch is not that case:
 it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
 to file. A visit, a review, or a graph.v2 step or root never reaches this branch
@@ -750,7 +764,7 @@ and reopens live molecule machinery into a pool.
 Exit 3 is a PARTIAL write: some fields landed and some did not, the bead is now
 half-released, and it needs a finding
 (`patrol-finding.sh --scope witness-findings --key witness-partial-release
---about <bead> ...`), not a retry.
+--about <bead> --distinct ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
@@ -827,7 +841,7 @@ if [ "$STAMP_RECOVERY" = "1" ]; then
   gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
 fi
 ```
-File a finding `--key witness-crash-loop --about <bead>` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
+File a finding `--key witness-crash-loop --about <bead> --distinct` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
 two recoveries were close together — a finding that reports only "recovered
 before" makes whoever handles it re-derive the interval. `recovered_count` outside the
 window is a bead that keeps coming back rather than one that is looping; it is
