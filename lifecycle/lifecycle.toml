@@ -446,7 +446,8 @@ keys = [
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
-  "bring_current_from",
+  "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
+  "bring_current_record", "bring_current_reopened", "bring_current_round_at",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -587,11 +588,40 @@ keys = [
 #   Absent means the arm has not read it ready. Never cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
-#   in. bring-current-guard.sh reads it at submit as the start of what the
-#   bring-current added, so a session that re-runs the handoff after the push
-#   still reads the whole bring-current. Absent, the guard starts from the origin
-#   head it read before the push. Never cleared; the next resume overwrites it.
-#   An oid.
+#   in. bring-current-guard.sh reads it at submit as the start of the round, so
+#   a session that re-runs the handoff after the push still reads the whole
+#   round. Absent, the guard starts from the origin head it read before the push,
+#   and refuses a hand-off that pushed nothing past it. Never cleared; the next
+#   resume overwrites it. An oid.
+# bring_current_scope — whether bringing the branch current is the resumed
+#   bead's whole job: merge-only for a conflict or stale-base rejection, else
+#   with-work. Written by the resume block beside bring_current_from. On a
+#   merge-only bead the guard counts a commit of the bead's own as an edit
+#   beyond the merge, which owes an audit entry. Absent reads as with-work;
+#   absent beside a bring_current_from stamp, it marks a resume step that asks
+#   for no audit, so the round owes no entries.
+# conflict_audit — the worker's audit of the round, on the bead it holds: a
+#   JSON array of {path, collided, resolution, check, rating}, one per item the
+#   guard names, rating routine or judgment. Written by bring-current-audit.sh
+#   add; cleared by the resume block when a round starts.
+# conflict_question — the conflict a worker could not resolve without
+#   guessing: {paths, collided, question}. Written by bring-current-audit.sh
+#   ask, which files the visit that asks it; cleared when a round starts.
+# bring_current_record — the anchor's record of its latest bring-current round
+#   (bring-current-guard.sh guard): the head, the start, the target, the class
+#   (clean or conflicted), the guard's evidence per item, the worker's audit,
+#   and the round's ruling once made: triage's (bring-current-guard.sh decide,
+#   run by signoff.sh), or the guard's closed ruling, marked by=guard, on an
+#   anchor whose check_set declares no triage lane. A conflicted round no
+#   ruling covers yet is carried into the next round's record. Every message
+#   about a round renders from it. A JSON object, overwritten each round.
+# bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
+#   triage, written by the guard; the lanes triage's rulings reopened or added;
+#   and every lane a closed ruling reopened. lane-state.sh lets no GitHub
+#   approval submitted before bring_current_round_at back one of these lanes.
+#   A comma list that only grows.
+# bring_current_round_at — when the latest conflicted round was recorded (UTC,
+#   ISO 8601), written by the guard with that round's record.
 
 [metadata.gates]
 keys = [
@@ -1056,6 +1086,43 @@ keys = [
 #   Stamped beside duplicate_of by hand; no pack script writes it. Never cleared.
 #   A store ref.
 
+[metadata.epic_stewardship]
+# An epic's contract and the ruling on its hypothesis, recorded on the epic bead
+# (issue_type=epic). docs/epics.md is the contract these fields make
+# machine-readable, and docs/epic-stewardship.md is the enforcement that reads
+# them. They are the operator's: stamped when the operator confirms a contract
+# field or rules at a sitting on the epic, the dated decision docs/epics.md calls
+# for. No pack script writes them. finalize-gate.sh (clause_epic_ruling_recorded)
+# and doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
+# epic_ruling_reason.
+keys = [
+  "epic_handle", "epic_hypothesis", "epic_boundaries",
+  "epic_closure_condition", "epic_indicators",
+  "epic_ruling", "epic_ruling_reason",
+  "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
+]
+# epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
+#   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
+#   boundaries. epic_hypothesis is also the close gate's trigger: its presence
+#   brings an epic under the ruling requirement (clause_epic_ruling_recorded).
+# epic_closure_condition / epic_indicators — the rest of the contract (3-6
+#   closure checks, 1-3 leading indicators). Absent means unrecorded.
+# epic_ruling — the latest ruling on the hypothesis: `continue`, `shift`, or
+#   `close` (docs/epics.md). continue and shift keep the epic open; close is the
+#   one terminal ruling. Each later ruling overwrites the last.
+#   clause_epic_ruling_recorded holds a stewarded epic's finalize until it reads
+#   close with an outcome, and check-epic-closed-implies-ruled errors on a closed
+#   stewarded epic that lacks either. Absent means the hypothesis has not been
+#   ruled on.
+# epic_ruling_reason — why the latest ruling was made, written with it. On a close
+#   ruling it is the outcome, and the close requires it: the hypothesis held, was
+#   disproven, cannot be met as stated, stalled, or ran past its cost. On continue
+#   or shift it says what the next body of work is aimed at. Absent or whitespace
+#   alone reads as unrecorded.
+# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
+#   was recorded, who recorded it, and the visit bead of the sitting that carried
+#   it. Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
+
 [metadata.human_surface]
 keys = [
   # gc.demand_for names the bead a demand gates. It is what the merge cadence
@@ -1144,11 +1211,23 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one live bead per key, narrowed to
-# finding.about when the finding names a subject bead. finding.scope is which
-# patrol filed it; finding.digest is the message hash that tells a recurrence
-# with changed text from an identical one. finding.occurrences counts the
-# recurrences and finding.first_seen/finding.last_seen bracket them.
+# it). finding.key and finding.about together are the dedup identity. A report
+# whose key and subject both match a live bead records a recurrence on that
+# bead, unless that bead is held at blocked with nothing open left to wait on.
+# A report that names no subject matches only a bead with no finding.about. An
+# --about that names a wisp (`*-wisp-*`) is dropped, and the key alone
+# identifies the finding. A patrol burns its wisp when the pass ends, so no
+# later pass can name the same one. When no live bead takes the report, a new
+# bead is refused while a live finding with the same finding.scope carries the
+# report's key under another subject or none, or the report's subject under
+# another key. The refusal lists those findings, and a caller reporting one of
+# them re-runs with that finding's key and subject, which records a recurrence
+# there. --distinct files the new bead despite those findings, though an exact
+# match still records a recurrence. A key meant to hold one finding per subject
+# passes --distinct on every call. finding.scope is which patrol filed it;
+# finding.digest is the message hash that tells a recurrence with changed text
+# from an identical one. finding.occurrences counts the recurrences and
+# finding.first_seen/finding.last_seen bracket them.
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
 # way a fix that did not hold is visible.

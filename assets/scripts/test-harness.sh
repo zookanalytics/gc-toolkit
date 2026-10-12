@@ -78,6 +78,10 @@ harness_init() {
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
+  # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
+  # `gc bd: answering from the rig "<name>" store` notice line, the contaminant a
+  # real read can carry. Unset leaves the JSON clean.
+  export STUB_SHOW_NOTICE=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
   export STUB_SHOW_NOT_FOUND_ERROR=""
@@ -262,6 +266,7 @@ case "$verb" in
     if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
       "$STUB_SHOW_HOOK" "$id" || true
     fi
+    [ -n "${STUB_SHOW_NOTICE:-}" ] && printf 'gc bd: answering from the rig "%s" store\n' "$STUB_SHOW_NOTICE"
     # STUB_SHOW_NOT_FOUND_ERROR answers an id the store does not hold the way
     # real bd does: an error object on stdout at exit 1. Unset, it answers [].
     if [ -n "${STUB_SHOW_NOT_FOUND_ERROR:-}" ] && ! jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1; then
