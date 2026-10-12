@@ -54,10 +54,11 @@
 # must-fix set is not yet closed is correct: the lane derives green only when
 # those close, which the merge predicate and the board resolve, never this.
 #
-# Callers: the validator (formulas/mol-validate.toml), every verb; and
+# Callers: the validator (formulas/mol-validate.toml), every verb;
 # converse-rework.sh, supersede-anchor only, once an operator ruling's rework
-# child is filed. Exit 0 on success; 2 when the store would not read or a write
-# did not read back.
+# child is filed; and bring-current-guard.sh, supersede-lane only, on each lane
+# a conflicted bring-current round reopens. Exit 0 on success; 2 when the store
+# would not read or a write did not read back.
 set -uo pipefail
 
 # >>> control-char-scrub

@@ -174,8 +174,8 @@ check_set may carry, but it is a universal merge rule, not a check (below). The
 one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase>`,
 drops all three and returns the checks whose phase gates `<phase>`, so no reader
 re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
-`review-outcome.sh` and `liveness-sweep.sh` all ask it rather than tokenizing
-`check_set` themselves.
+`review-outcome.sh`, `liveness-sweep.sh` and `bring-current-guard.sh` all ask it
+rather than tokenizing `check_set` themselves.
 
 Every other name is opaque to the machinery: gate-ensure dispatches whatever
 it finds there, `signoff.sh` writes `check.<name>`, and `merge.sh` requires
@@ -239,12 +239,13 @@ dropped before each reviewer's latest review is taken, so it neither approves
 nor vetoes, and it does not hide its author's older approval. A small fix after
 an approval lands on it. An outside approval is dismissed when the code that
 would land is not the code the approver saw: by `bring-current-guard.sh` when
-bringing the branch current took judgment, and by `approval-withdraw.sh` when
-the validator rules a fresh whole-diff review warranted. Each dismisses every
-approval an account has not had dismissed, not only its latest, because an
-older approval would otherwise count again. No `check.approval` marker and no
-`check_set` token arms it or opts out, and GitHub branch protection is an extra
-layer, not the authority.
+the ruling on a conflicted [bring-current round](#bringing-a-branch-current)
+withdraws it, and by `approval-withdraw.sh` when the validator rules a fresh
+whole-diff review warranted. Each dismisses every approval an account has not
+had dismissed (the guard, every one given before the round), not only its
+latest, because an older approval would otherwise count again. No
+`check.approval` marker and no `check_set` token arms it or opts out, and GitHub
+branch protection is an extra layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
@@ -691,8 +692,8 @@ review's result set.
   re-reviews the whole diff at the head the child lands. Two things can still
   back a lane through the ruling: a review already in flight when the ruling is
   filed, whose verdict is on the head it read, and an operator's GitHub
-  approval, which backs every lane until it is dismissed. converse never pushes
-  code; the molecule does.
+  approval, which until it is dismissed backs every lane but one a later
+  bring-current round reopened. converse never pushes code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full
@@ -712,11 +713,10 @@ review's result set.
   none is in flight. An unapproved one records its posture and gets nothing: a
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
-  The child's handoff runs `bring-current-guard.sh`: a bring-current git made
-  on its own, or whose conflicts kept both sides' insertions whole, leaves the
-  approval standing, and one that took judgment files a visit on the anchor and
-  dismisses the approval, so materially changed code is re-reviewed rather than
-  landed under the approval given before it.
+  The child's handoff runs `bring-current-guard.sh`, which holds the round to
+  the worker's audit. A round that conflicted goes to triage, or, on an anchor
+  that declares no triage lane, the guard rules on it closed
+  ([Bringing a branch current](#bringing-a-branch-current)).
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
   closed child does not, so a branch still CONFLICTING with nothing in flight is
@@ -741,23 +741,33 @@ review's result set.
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 11): a duplicate
-  dispatch a polecat diagnosed and parked has no other way out, since polecats
-  never close work beads. The arm closes it through `bead-rehome.sh --kind
-  duplicate` only when the named successor resolves and is closed or shipped
-  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It also closes an unmarked rework
-  twin, an open rework child that was never dispatched (no dispatch metadata,
-  no convoy tracking it) whose source is closed (the review it answers, or the
-  visit a ruling's child answers) and whose same-source, same-anchor sibling
-  landed. That twin would otherwise hold its anchor forever. It writes nothing
-  to the successor's branch or PR, and holds on anything it cannot establish.
+- **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
+  close-with-successor writer): a bead that duplicates another or was fixed
+  upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
+  gates its own evidence — the named successor resolves and is closed or shipped
+  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
+  work-product key at all), unless the origin carries the operator's
+  pre-recorded PR-close disposition for that kind and successor — and holds on
+  anything it cannot establish. Converse and operator dispositions use the same
+  writer, and so does `duplicate-sweep.sh` (cadence arm 11). The sweep reads
+  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
+  duplicate dispatch: polecats never close work beads, so the bead has no other
+  way out. It checks the same evidence before it calls the writer. It also
+  closes an unmarked rework twin: an open rework child that was never
+  dispatched (no dispatch metadata, no convoy tracking it) whose source is
+  closed (the review it answers, or the visit a ruling's child answers) and
+  whose same-source, same-anchor sibling landed. That twin would otherwise hold
+  its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
+  close. A first reaction never closes a bead: it hands a confident no-op to the
+  validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator or an operator ruling makes, not a trigger a push pulls.
+  the validator or an operator ruling makes, or the ruling on a bring-current
+  round that conflicted (triage's, or the guard's closed ruling), not a trigger
+  a push pulls.
   gate-ensure holds dispatch rather than pouring a second review while an open
   rework child is already in flight for the lane — a `blocks`-dep bead on the
   anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
@@ -766,6 +776,97 @@ review's result set.
   `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
   marker sweep leaves that shape alone rather than clearing it, for the same
   reason.
+
+### Bringing a branch current
+
+A branch is brought current by merging its base in, never by a rebase. The
+shapes that do it are the merge-in child `pr-facts.sh` files for an approved PR
+that conflicts, the child `pre-open-rebase.sh` files for a pre-open branch that
+no longer merges, a rework answering review feedback or an operator ruling that
+merges the base in as it resumes, and an anchor the refinery's prepare re-queues
+on a conflict. Each resumes
+through `mol-polecat-work`'s resume block, which starts a round: it stamps
+`bring_current_from` (the PR head the round starts from) and
+`bring_current_scope` (`merge-only` when the rejection asked for nothing but the
+bring-current, else `with-work`), and clears the previous round's audit.
+
+**The worker writes the audit.** For each file git could not merge, the worker
+resolves it and records one entry with `bring-current-audit.sh add`: what
+collided (the two intents), what it decided and why, what a reviewer should
+check, and its own rating, `routine` (an adjacent-line collision, an
+overlapping comment edit, an obvious composition) or `judgment` (an inferred
+intent, a side chosen on substance, something new). An edit beyond what the
+merge needed owes an entry too, and on a `merge-only` bead so does each file a
+commit of the bead's own changes. A conflict the worker cannot resolve without
+guessing is a question, not a guess: `bring-current-audit.sh ask` files a visit
+on the anchor carrying the entries so far and the question, the merge is
+aborted, nothing is pushed, and the bead is held until a person answers.
+
+**The guard enforces coverage and routes; it weighs no round.** At the
+handoff, `bring-current-guard.sh` reads the round on any branch that carries a
+review to keep current (its anchor is gating, or a PR stands on it):
+
+- **Clean**: every commit the round adds is a merge of the base whose tree is
+  git's own result. Nothing was resolved by hand; the round is recorded on the
+  anchor and lands quietly.
+- **Conflicted**: anything else. Each item git did not produce on its own (a
+  conflicted file, an edit beyond the merge, a merge of something but the base,
+  a rewritten history) must have an audit entry, or the handoff is refused and
+  the worker completes the audit. A covered round is stored on the anchor as
+  `bring_current_record` with the guard's evidence beside each entry (what git's
+  replay of the conflict shows the resolution kept), and the triage lane is
+  reopened: it is added to `bring_current_reopened` with the round's time,
+  `bring_current_round_at`, and its standing review is superseded.
+
+Generated renders (linguist-generated) owe no entry. A hand-off with no
+`bring_current_from` stamp that pushed nothing past the origin head it started
+from is refused rather than read as clean, because nothing records where its
+work began. A round whose resume stamped `bring_current_from` but not
+`bring_current_scope` owes no entries: that resume step asks for no audit, and
+the submit step poured with it drains on any refusal, so a refusal would only
+re-offer the same hand-off. Its items are stored with the guard's evidence
+alone, and the round is routed to triage like any other.
+
+**Triage decides what reopens.** gate-ensure dispatches triage again, and its
+verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
+[--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
+that run again on the merged code (any the anchor declares, and any it adds with
+`--add-gates`); and whether the human approval still covers what would land.
+`bring-current-guard.sh decide` records the ruling in the anchor's record,
+supersedes each reopened lane, and on a dismissal files the re-ask visit first,
+then re-requests and dismisses each standing approval given before the round;
+one submitted after `bring_current_round_at` saw the merged code and stands. A
+lane in `bring_current_reopened` is backed by a GitHub approval only when the
+approval was submitted after `bring_current_round_at` (`lane-state.sh`), so a
+standing approval neither lets the merge skip a reopened lane nor keeps its
+review from being dispatched. A routine round can therefore keep the approval
+while its lanes re-run, and material judgment removes it.
+
+**With no triage lane, the guard rules closed.** An anchor whose `check_set`
+declares no triage lane (`correctness` alone, say, or the `none` opt-out) has no
+review to rule on the round, and approval is a merge rule no `check_set` opts
+out of. So the guard rules on the round itself and assumes the worst: every lane
+the anchor declares runs again on the merged code (the lanes `review-checks.sh`
+resolves for the merge, none for `none`), and where a PR stands, each approval
+given before the round is dismissed the way a triage dismissal is, re-ask visit
+first. The ruling is stored in the record where triage's goes, marked
+`by: guard`, so gate-ensure and `signoff.sh` read the round as ruled, and a
+re-run of the hand-off carries it out again. The lanes it reopens are added to
+`bring_current_reopened` with the round's time, so `lane-state.sh` lets no
+approval given before the round back them. A person who adds the triage lane
+to the anchor's `check_set` gives the next round to triage.
+
+**Every message is composed from the audit.** The round section that opens
+triage's posted verdict, the dismissal note and the re-ask visit render from
+the stored record with `bring-current-audit.sh`: a headline of what the round
+needed, then per entry what collided, what was decided and why, and what to
+check. An item no entry covers is listed with the guard's evidence alone. The
+question visit renders from the worker's entries so far and its question.
+
+What no guard reaches: the refinery's own prepare merge, which aborts on any
+conflict and so only ever pushes git's own result; and a merge the worker ran
+by hand, outside the resume block, and pushed before submit, which the guard
+reads only from the push's own start.
 
 ## Disposition
 
@@ -784,6 +885,30 @@ mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
 twins), and any patrol judging a closed bead.
+
+A disposition ends the bead's branch, the way a merge ends a landed one
+through the repository's delete-on-merge setting. Once the close reads back,
+`bead-rehome.sh` hands the branch the bead names in `metadata.branch` to
+`assets/scripts/branch-end.sh`, which deletes it from the git remote. The
+branch stays while a live owner names it. A live owner is a bead in the rig's
+store whose status is outside the `done` category and whose `metadata.branch`
+or `metadata.target` is the branch: another anchor, work not yet handed off, a
+convoy or a member landing on its integration branch, or a successor that
+resumed the branch. The retired bead's own review scaffolding, the beads whose
+`anchor_bead` names it, is not an owner. `scaffolding-sweep.sh` retires that
+scaffolding, and `review-sweep.sh` closes a review only once the branch is
+gone, so counting it would keep nearly every retired branch. A ledger that does
+not read keeps the branch, and the default branch, `main` and `claude/*` are
+never ended. Before the delete the tip is pinned. A pull request whose
+`refs/pull/<n>/head` on origin equals the tip already pins it, because GitHub
+keeps that ref after the branch is deleted. Otherwise an annotated
+`archive/<branch>@<short-sha>` tag is pushed at the tip and read back on
+origin. The delete's lease names the checked tip, so origin refuses it if the
+branch moved, and a moved branch is left alone. The bead's notes record what
+became of its branch: ended and what pins its tip, kept and which owner names
+it, or still on the remote and the `branch-end.sh` command that ends it. The
+close never depends on any of it: a branch that cannot be ended leaves the
+disposition standing.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is
