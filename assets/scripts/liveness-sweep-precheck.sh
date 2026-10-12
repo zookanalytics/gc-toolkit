@@ -3,19 +3,15 @@
 # liveness-sweep pass has anything to say. It is the `check`
 # of the condition order orders/liveness-sweep.toml: exit 0 = run the pass,
 # non-zero = do not.
-# ITS CONDITION IS A STRICT SUBSET of liveness-sweep.sh's classification:
-# every exclusion made here, the sweep also makes, and the three non-local /
-# non-monotone ones (worked-via-convoy, the open-PR intersection, the
-# pre-open gate verdicts) are deliberately NOT made — so the local survivor
-# set is a SUPERSET of the sweep's true candidates and "zero new locally"
-# proves "zero new really", but only for the batch triage visit. The pass has a
-# second output — the per-anchor stale-gate escalation — that no unnamed-waits
-# baseline can represent, so the check ALSO runs whenever a PR-gated anchor's
-# re-escalation floor is up (the stale-due gate below). Anything else — any
-# unreadable probe, a missing subject, its own abort — RUNS the pass: a probe
-# that cannot be read excludes nothing. It also sets the 6h cadence (a
-# condition trigger has no interval). The per-rig window is spent by whichever
-# side ends the pass's
+# IT CLASSIFIES WITH liveness-sweep.sh's OWN CLASSIFIER (liveness-classify.sh)
+# over the same bead reads, and passes empty the reads it does not make:
+# open PRs, convoy-worked beads, husk steps and pre-open gate verdicts. An
+# empty input drops nothing, so the local survivor set is a SUPERSET of the
+# sweep's true candidates and "zero new locally" proves "zero new really" for
+# the batch triage visit. Any unreadable probe, a missing subject, or its own
+# abort RUNS the pass: a probe that cannot be read excludes nothing. It also
+# sets the 6h cadence (a condition trigger has no
+# interval). The per-rig window is spent by whichever side ends the pass's
 # chance to run: liveness-sweep.sh when a pass starts, or this check when it
 # has proved the board quiet, since then no pass will. A RUN verdict never
 # spends it, because more callers evaluate a check than dispatch from it (the
@@ -28,21 +24,21 @@
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
 set -uo pipefail
 
-# The one definition of what subject a visit covers, shared with liveness-sweep.sh
-# and gc-helm.sh. Exposes $VISIT_IDENTITY_JQ, which this precheck reads the way
-# liveness-sweep.sh's convgroups arm does.
+# The classifier liveness-sweep.sh runs ($LIVENESS_CLASSIFY_JQ), and the shared
+# definitions it builds on: what subject a visit covers ($VISIT_IDENTITY_JQ,
+# which the live-visit guard reads as well) and the standing kinds
+# ($STANDING_KINDS_JQ).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+# shellcheck source=standing-kinds.sh
+. "$HERE/standing-kinds.sh" || { echo "liveness-sweep-precheck: cannot source standing-kinds.sh from $HERE" >&2; exit 2; }
+# shellcheck source=liveness-classify.sh
+. "$HERE/liveness-classify.sh" || { echo "liveness-sweep-precheck: cannot source liveness-classify.sh from $HERE" >&2; exit 2; }
 
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
-# The floor between two stale-gate escalations about one anchor, mirrored from
-# liveness-sweep.sh so the "may owe an escalation" run-gate below reads the same
-# stamp with the same arithmetic the pass does.
-STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
-case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
 
 FORCE=0
 while [ $# -gt 0 ]; do
@@ -258,25 +254,15 @@ if [ "$READS_OK" -eq 1 ]; then
     fi
 fi
 
-# The local survivor set — every exclusion here is one liveness-sweep.sh also
-# makes. Class 0 drops the per-sling machine convoys and order-tracking wisps a
-# sling mints: machinery, not work, decided from issue_type, title and
-# gc.synthetic alone. The issue_type guard is load-bearing — a bare title-prefix
-# test would hide a real bead whose own title names a convoy. Every `// ""` is
-# load-bearing (most beads carry no metadata key at all); an empty hold is a
-# CLEARED hold, not a hold. Class 2(i)(a) is a
-# REVERSE index: the child holds the parent-child edge. `gc.takeaway` is not
-# an exclusion, for the reason the sweep's classify block gives; $demanded is
-# the sweep's arm of the same name, and it has to stay in step with it or a
-# bead the sweep would report is dropped here and never reaches a pass.
-# Live sitting identities, for the holder-liveness gate the SURVIVORS jq applies
-# to visits (mirrors liveness-sweep.sh). A holder GONE from the session list is
-# dead, and so is one still listed in a terminal state (archived/closed, helm's
-# ownerLive dead states); one listed in any other state is live; an UNCLAIMED
-# visit has none and still covers.
-# Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false, so a claimed
-# visit reads not-live, its subject is not excluded, and the pass runs rather
-# than risking a skipped report.
+# Live sitting identities, for the classifier's holder-liveness gate on visits,
+# read the way liveness-sweep.sh reads them. A holder GONE from the session list
+# is dead, and so is one still listed in a terminal state (archived/closed,
+# helm's ownerLive dead states); one listed in any other state is live; an
+# UNCLAIMED visit has none and still covers.
+# Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false and the
+# classifier is told a claimed visit does not cover (unreadable_liveness_covers
+# false), so its subject is not excluded and the pass runs rather than risking
+# a skipped report.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
@@ -293,55 +279,16 @@ fi
 SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
+    # The local survivor set: the beads the classifier leaves unnamed when every
+    # read beyond the bead set is empty. have_resolver "1" with an empty gate map
+    # gates no pre-open anchor; "0" would gate one on its own check_set.
     SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
-      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" "$VISIT_IDENTITY_JQ"'
-      def machine_convoy:
-        (.issue_type // "") == "convoy"
-        and ((((.title // "") | startswith("sling-"))
-              or ((.title // "") | startswith("input convoy for"))
-              or ((.metadata["gc.synthetic"] // "") == "true")));
-      def order_wisp:
-        ((.id // "") | contains("-wisp-"))
-        and ((.title // "") | startswith("order:"));
-      # holder_live mirrors liveness-sweep.sh so this stays a SUPERSET of its
-      # census, but fails CLOSED on an unreadable session list ($livenessknown
-      # false -> not live -> subject not excluded -> the pass runs). A claim
-      # writes one of assignee / gc.session_id / gc.session_name; no holder is an
-      # unclaimed visit, a pending escalation that still covers.
-      def holder_live:
-        ([ (.assignee // ""), (.metadata["gc.session_id"] // ""), (.metadata["gc.session_name"] // "") ]
-         | map(select(. != ""))) as $holders
-        | if ($holders | length) == 0 then true
-          elif ($livenessknown | not) then false
-          else any($holders[]; . as $h | ($livesessions | index($h)) != null)
-          end;
-      ([ ($live[0] // [])[]
-         | select((.metadata.task_kind // "") == "visit")
-         | select(holder_live)
-         | visit_identity_subjects[] ]) as $convgroups
-      | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
-      | ([ ($alive[0] // [])[]
-           | .dependencies[]?
-           | select((.type // "") == "parent-child")
-           | (.depends_on_id // empty) ] | unique) as $gatedparents
-      | ([ ($alive[0] // [])[]
-           | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
-      | [ ($ready[0] // [])[]
-          # class 0: per-sling machine convoys and order-tracking wisps are
-          # machinery, not work — the exclusion classify makes first.
-          | select((machine_convoy or order_wisp) | not)
-          | select((.metadata["gc.routed_to"] // "") == "")
-          | select(((.metadata.task_kind // "") != "visit") or (holder_live | not))
-          | select((.metadata.task_kind // "") != "triage-subject")
-          | select(.id as $id | ($demanded | index($id)) | not)
-          | select((.metadata["triage.hold"] // "") == "")
-          | select(.id as $id | ($convgroups | index($id)) | not)
-          | select(.id as $id | ($gatedparents | index($id)) | not)
-          | select([ .dependencies[]?
-                     | select((.type // "") == "tracks")
-                     | select(($aliveset[(.depends_on_id // "")] // false)) ] | length == 0)
-          | .id
-        ]' 2>/dev/null)
+      --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
+      --argjson unreadable_liveness_covers false \
+      --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
+      --argjson preopen_gates '{}' --arg have_resolver 1 \
+      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'
+      [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         NEW_IDS=$(printf '%s' "$SURVIVORS" | jq -c --arg seen "$BASELINE" '
           ($seen | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(. != ""))) as $s
@@ -354,37 +301,8 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     fi
 fi
 
-# The baseline speaks only for the batch triage visit. The pass has a second
-# output the baseline cannot represent: a per-anchor stale-gate escalation. On a
-# pass whose gh read failed, liveness-sweep.sh cannot intersect the open-PR set,
-# so a PR-gated anchor falls open to `unnamed` and is advanced into the reported
-# baseline; once gh recovers and the PR is past its age, that id is no longer new
-# and a baseline-only skip would bury the escalation for good. So run the pass
-# whenever a PR-gated anchor's re-escalation floor is up, regardless of the
-# baseline — the same stale_escalated_at stamp and floor arithmetic the sweep
-# gates on. PR age is the sweep's gh read, not this local check, so every
-# floor-elapsed PR-gated anchor is included: a superset of the sweep's stale-gate
-# set, the same run-the-pass bias as every probe above.
-STALE_DUE=""; N_STALE_DUE=""
-if [ "$READS_OK" -eq 1 ]; then
-    STALE_DUE=$(jq -n --slurpfile ready "$READY" \
-        --argjson now "$NOW" --argjson floor "$((STALE_REESCALATE_DAYS * 86400))" '
-      [ ($ready[0] // [])[]
-        | select((.metadata.merge_result // "") == "pull_request")
-        | select((.metadata.pr_url // "") != "")
-        | (.metadata.stale_escalated_at // "") as $e
-        | select($e == ""
-                 or ((try ($e | fromdateiso8601) catch null) as $t
-                     | if $t == null then true else ($now - $t) >= $floor end))
-        | .id ]' 2>/dev/null)
-    if printf '%s' "$STALE_DUE" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        N_STALE_DUE=$(printf '%s' "$STALE_DUE" | jq 'length')
-    fi
-fi
-
 # The ONE place DECISION may become skip — it needs every positive fact at once.
-# N_STALE_DUE empty (its jq failed) defaults to the run side, like every probe.
-if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ] && [ "${N_STALE_DUE:-1}" = "0" ]; then
+if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ]; then
     DECISION=skip
     REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no live visit on $SUBJECT"
 elif [ "$READS_OK" -ne 1 ]; then
@@ -397,8 +315,6 @@ elif [ "$JQ_OK" -ne 1 ]; then
     REASON="the local classification did not produce a JSON array — treating that as unknown, never as empty"
 elif [ -n "$LIVE_VISIT" ]; then
     REASON="a visit is already live on $SUBJECT; $N_NEW new local candidate(s) await it"
-elif [ "$N_NEW" = "0" ] && [ "${N_STALE_DUE:-0}" != "0" ]; then
-    REASON="$N_STALE_DUE PR-gated anchor(s) past the re-escalation floor may owe a stale-gate escalation the unnamed baseline cannot represent"
 else
     REASON="$N_NEW new local candidate(s) since the last reported pass"
 fi
@@ -419,9 +335,6 @@ if [ "$JQ_OK" -eq 1 ]; then
     if [ "$N_NEW" != "0" ]; then
         say "  new: $(printf '%s' "$NEW_IDS" | jq -r 'join(", ")')"
     fi
-fi
-if [ "${N_STALE_DUE:-0}" != "0" ]; then
-    say "  PR-gated anchors past the stale re-escalation floor: $N_STALE_DUE -> $(printf '%s' "$STALE_DUE" | jq -r 'join(", ")')"
 fi
 
 if [ "$DECISION" = "skip" ]; then

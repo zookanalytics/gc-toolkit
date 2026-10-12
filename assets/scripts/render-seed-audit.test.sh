@@ -302,8 +302,7 @@ printf 'name = "fixture"\n' > "$P/pack.toml"
 printf 'name = "alpha"\n' > "$P/agents/alpha/agent.toml"
 printf '# alpha doctrine\n' > "$P/agents/alpha/prompt.template.md"
 BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-first workflow'
-cat > "$TMP/stub-gc/gc" <<STUB
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/stub-gc/gc" <<STUB
 [ "\${1:-}" = --city ] && shift 2
 case "\$1 \${2:-}" in
     "config show")  printf '[[agent]]\nname = "alpha"\n' ;;
