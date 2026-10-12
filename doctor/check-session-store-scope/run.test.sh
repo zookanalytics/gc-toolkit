@@ -14,8 +14,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 CITY="$TMP/city"
 mkdir -p "$TMP/bin" "$TMP/sessions" "$TMP/proc" "$CITY"
 
-cat > "$TMP/bin/tmux" <<'TMUX'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUX'
 while [ "${1:-}" = "-L" ]; do shift 2; done
 case "${1:-}" in
   list-sessions)

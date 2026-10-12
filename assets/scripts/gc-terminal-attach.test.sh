@@ -43,8 +43,7 @@ fi
 # `session list --json` prints the fixture; `session attach` prints its argv and
 # exits, so a test can tell "would have attached X" from "refused".
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 if [ "${1-}" = "session" ] && [ "${2-}" = "list" ]; then
   [ "${GC_STUB_LIST_FAILS:-0}" = "1" ] && exit 1
   cat "$GC_STUB_LISTING"

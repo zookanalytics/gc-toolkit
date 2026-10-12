@@ -54,8 +54,7 @@ chmod +x "$SR/assets/scripts/gc-helm.sh"
 # stamps back and close — the same model visit-close.test.sh and
 # converse-close-out.test.sh use. Every list is empty (no demand).
 STATE="$TMPD/gc-state"; export STATE
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 0
 O="${STATE:?}.o"; R="${STATE:?}.r"; ST="${STATE:?}.st"
 case "${2:-}" in

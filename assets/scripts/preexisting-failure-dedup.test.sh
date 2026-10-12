@@ -68,8 +68,7 @@ mkdir -p "$TMP/bin" "$TMP/cwd" "$TMP/nopack"
 #   gc bd create ...       -> appends the bead, --metadata merged in, and records
 #                             CREATE plus the flags the body travelled in
 #                             (STUB_CREATE_FAIL refuses and files nothing)
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_LOG:?}"

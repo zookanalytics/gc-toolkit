@@ -15,7 +15,7 @@
 # Only proof refuses: an unreadable agent set returns the route with a loud
 # UNVERIFIED warning, because a route nobody could check still beats an outage.
 # Callers: the gate-visit copies (formulas/mol-visit.toml and every consumer),
-# escalate.sh, signoff.sh's rework route.
+# escalate.sh, rework-child.sh's rework route.
 # Exit: 0 route on stdout · 1 nothing routable · 2 usage
 set -uo pipefail
 
