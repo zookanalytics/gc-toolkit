@@ -60,8 +60,7 @@ SUT="$HERE/render-seed-audit.sh"
 STUB="$TMP/stub-gc"
 mkdir -p "$STUB"
 BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-first workflow'
-cat > "$STUB/gc" <<STUB
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUB/gc" <<STUB
 [ "\${1:-}" = --city ] && shift 2
 root="\$(sed -n 's|^source = "\(/[^"]*\)"\$|\1|p' city.toml | head -1)"
 printf '%s\n' "\$root" >> "$STUB/roots.log"
