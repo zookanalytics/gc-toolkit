@@ -1,6 +1,7 @@
 ---
 bead: tk-2qa85
 title: Re-aiming tooling-spend controls at the always-on patrol roles
+description: Why the on_demand session mode cannot cut the patrol roles' share of city model calls, and the patrol-frequency change that does, with the measured baseline, the coverage given up, and the follow-up measurement. Read it before changing a patrol formula's cadence default.
 date: 2026-08-20
 status: decided
 supersedes_assumption: "apply the gc-toolkit.boot mode=on_demand precedent to the five patrol sessions"

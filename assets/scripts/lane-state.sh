@@ -18,7 +18,8 @@
 #             check_name resolves to correctness): it carries signoff_verdict=approve
 #             and is not superseded (gc.outcome is not superseded); OR the
 #             anchor's pr_number has an APPROVED GitHub review (an approval names
-#             no check, so it backs every lane).
+#             no check, so it backs every lane but one a later bring-current
+#             round reopened; see below).
 #             signoff_verdict is the only stamp that names the verdict. signoff
 #             writes gc.outcome=recorded on every close, approve and
 #             request-changes alike, so recorded records only that a verdict was
@@ -37,6 +38,13 @@
 # validator supersedes an approve bead to send a lane back to unreviewed
 # (stamping gc.outcome=superseded), so a superseded approve must stop backing the
 # lane.
+#
+# A bring-current round that conflicted reopens lanes the same way, and an
+# approval given before that round never saw what it changed. So a lane named in
+# the anchor's bring_current_reopened is backed by a GitHub approval only when the
+# approval was submitted after bring_current_round_at. Without that, a standing
+# approval would keep the reopened lane green: gate-ensure.sh would never
+# dispatch its review again, and the merge would not wait for it.
 #
 # Two conditions the full derivation names are deliberately NOT read here: an
 # open must-fix finding (anchor-wide, subsumed by the merge predicate's own
@@ -63,14 +71,22 @@ ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
 usage() { echo "usage: lane-state.sh green --anchor <id> --lane <lane> [--no-remote]" >&2; }
 
-# An APPROVED GitHub review on the anchor's PR backs every lane. Consulted only
-# when no local review bead backs the lane, and fail-closed: any step that
-# cannot be completed returns 1 (not green), never 0.
+# An APPROVED GitHub review on the anchor's PR backs every lane, except that a
+# lane a bring-current round reopened is backed only by an approval submitted
+# after the round. Consulted only when no local review bead backs the lane, and
+# fail-closed: any step that cannot be completed returns 1 (not green), never 0.
 github_approved() {
-  local anchor="$1" arow pr slug u body
+  local anchor="$1" lane="$2" arow pr slug u body since="" reopened
   arow=$(bd_json show "$anchor")
   pr=$(printf '%s' "$arow" | jq -r '(.[0].metadata.pr_number // "") | tostring' 2>/dev/null)
   [ -n "$pr" ] || return 1
+  reopened=$(printf '%s' "$arow" | jq -r '(.[0].metadata.bring_current_reopened // "") | tostring' 2>/dev/null \
+    | tr ',' '\n' | sed 's/[[:space:]]//g' | tr '[:upper:]' '[:lower:]')
+  if grep -qx -- "$lane" <<< "$reopened"; then
+    since=$(printf '%s' "$arow" | jq -r '(.[0].metadata.bring_current_round_at // "") | tostring' 2>/dev/null)
+    # A reopened lane whose round has no readable time is vouched for by nothing.
+    [ -n "$since" ] || return 1
+  fi
   command -v gh >/dev/null 2>&1 || return 1
   u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
   case "$u" in
@@ -82,7 +98,8 @@ github_approved() {
   case "$slug" in */*/*|/*|*/) return 1 ;; */*) : ;; *) return 1 ;; esac
   body=$(gh api "repos/$slug/pulls/$pr/reviews?per_page=100" --paginate 2>/dev/null) || return 1
   [ -n "$body" ] || return 1
-  [ "$(printf '%s' "$body" | scrub | jq -sr '[ .[][]? | select(((.state // "") | tostring) == "APPROVED") ] | length > 0' 2>/dev/null)" = "true" ]
+  [ "$(printf '%s' "$body" | scrub | jq -sr --arg since "$since" '[ .[][]? | select(((.state // "") | tostring) == "APPROVED")
+      | select($since == "" or (((.submitted_at // "") | tostring) > $since)) ] | length > 0' 2>/dev/null)" = "true" ]
 }
 
 cmd_green() {
@@ -128,7 +145,7 @@ cmd_green() {
   # half is met; absent that, or when it cannot be confirmed, the lane is not
   # green.
   [ -n "$no_remote" ] && return 1
-  github_approved "$anchor" && return 0
+  github_approved "$anchor" "$lane" && return 0
   return 1
 }
 

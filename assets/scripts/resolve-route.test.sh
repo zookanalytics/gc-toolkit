@@ -23,8 +23,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 if [ "${1:-}" = "agent" ] && [ "${2:-}" = "list" ]; then
   [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }

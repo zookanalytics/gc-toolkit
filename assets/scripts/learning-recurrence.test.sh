@@ -22,8 +22,7 @@ day_ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | strfti
 
 # --- stub gc --------------------------------------------------------------
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 case "${1:-}" in
   rig)

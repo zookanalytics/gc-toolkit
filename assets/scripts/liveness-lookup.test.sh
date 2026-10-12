@@ -286,8 +286,7 @@ bash -n "$TMP/guard.sh" \
 # writes clean JSON to stdout and its banner to stderr, which is what the
 # guard's 2>/dev/null relies on.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GCSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCSTUB'
 set -u
 printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 echo "gc: banner on stderr, as the real command does" >&2
