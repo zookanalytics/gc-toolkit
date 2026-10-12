@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # liveness-sweep.sh — the P3 exec pass, fully mechanical (no agent session).
 # Job: classify every open bead in this rig as worked / gated / conversing /
-# held-by-design / routed-and-claimable / topology / machine residue.
+# held-by-design / awaiting placement / routed-and-claimable / topology /
+# machine residue.
 # Anything left is an UNNAMED WAIT. Then file/refresh ONE batch triage visit
 # (delta only) on the standing per-rig unnamed-waits subject via escalate.sh.
 # Also owns the standing-subject recurrence: each task_kind=triage-subject
@@ -32,6 +33,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # $STANDING_KINDS_JQ, which the classify block splices in.
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "$PROG: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+# The one definition of a bead that waits for placement, and the dispatch path
+# it reads, shared with gc-helm.sh unplaced and the doctor checks. Expose
+# $DISPATCH_PATH_JQ and $PLACEMENT_JQ, which the classify block splices in.
+# shellcheck source=dispatch-path.sh
+. "$HERE/dispatch-path.sh" || { echo "$PROG: cannot source dispatch-path.sh from $HERE" >&2; exit 1; }
+# shellcheck source=placement.sh
+. "$HERE/placement.sh" || { echo "$PROG: cannot source placement.sh from $HERE" >&2; exit 1; }
 # The one liveness classifier, shared with this sweep's precheck. Exposes
 # $LIVENESS_CLASSIFY_JQ, which the classify block runs.
 # shellcheck source=liveness-classify.sh
@@ -323,7 +331,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
       --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers true \
-      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
+      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
 printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "$PROG: FAIL-SAFE: classification did not produce an array — nothing filed" >&2; exit 1; }
 CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") | {id, title, type})')

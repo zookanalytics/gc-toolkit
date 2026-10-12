@@ -26,13 +26,18 @@ set -uo pipefail
 
 # The classifier liveness-sweep.sh runs ($LIVENESS_CLASSIFY_JQ), and the shared
 # definitions it builds on: what subject a visit covers ($VISIT_IDENTITY_JQ,
-# which the live-visit guard reads as well) and the standing kinds
-# ($STANDING_KINDS_JQ).
+# which the live-visit guard reads as well), the standing kinds
+# ($STANDING_KINDS_JQ), and a bead that waits for placement ($PLACEMENT_JQ,
+# which reads $DISPATCH_PATH_JQ).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "liveness-sweep-precheck: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "liveness-sweep-precheck: cannot source standing-kinds.sh from $HERE" >&2; exit 2; }
+# shellcheck source=dispatch-path.sh
+. "$HERE/dispatch-path.sh" || { echo "liveness-sweep-precheck: cannot source dispatch-path.sh from $HERE" >&2; exit 2; }
+# shellcheck source=placement.sh
+. "$HERE/placement.sh" || { echo "liveness-sweep-precheck: cannot source placement.sh from $HERE" >&2; exit 2; }
 # shellcheck source=liveness-classify.sh
 . "$HERE/liveness-classify.sh" || { echo "liveness-sweep-precheck: cannot source liveness-classify.sh from $HERE" >&2; exit 2; }
 
@@ -287,7 +292,7 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
       --argjson unreadable_liveness_covers false \
       --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
       --argjson preopen_gates '{}' --arg have_resolver 1 \
-      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'
+      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
       [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         NEW_IDS=$(printf '%s' "$SURVIVORS" | jq -c --arg seen "$BASELINE" '

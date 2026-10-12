@@ -9,10 +9,12 @@
 #
 # Sourced (never executed). Usage follows the in-variable jq convention
 # (visit-identity.sh): the classifier builds on visit_identity_subjects
-# (visit-identity.sh) and standing_kinds (standing-kinds.sh), so prepend
-# those defs, then these, and call liveness_classify:
+# (visit-identity.sh), standing_kinds (standing-kinds.sh) and
+# awaiting_placement (placement.sh, which asks has_dispatch_path from
+# dispatch-path.sh), so prepend those defs, then these, and call
+# liveness_classify:
 #   jq -n --slurpfile ready R --slurpfile live L --slurpfile alive A ... \
-#     "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
+#     "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
 # It emits one {id, title, type, class} row per ready bead.
 #
 # Every input below is required, and jq refuses the program when one is
@@ -59,6 +61,13 @@
 # case: gc-helm.sh warns on stderr when a demand's `blocks` edge does not land,
 # and nothing repairs it, so that bead reads ready while a person owes an
 # answer on it.
+#
+# A bead that waits for placement (placement.sh) is a named wait too: intake
+# held it as new work for the operator's placement sitting, and
+# `gc-helm.sh unplaced` lists it there, so the sweep's triage visit would ask
+# the operator the same question a second time. The predicate reads the marker
+# and every shape that places a bead, so a marker left on a bead the sitting
+# already placed names no wait.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 LIVENESS_CLASSIFY_JQ='
   def pr_key:
@@ -144,6 +153,7 @@ LIVENESS_CLASSIFY_JQ='
            elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
            elif (($demanded | index($b.id)) != null) then "held-by-design"
            elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
+           elif awaiting_placement then "awaiting-placement"
            elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
            elif (($convgroups | index($b.id)) != null) then "conversing"
            elif (((.metadata.merge_result // "") == "pull_request")

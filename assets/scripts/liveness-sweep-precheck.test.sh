@@ -758,12 +758,17 @@ export OPEN_PRS WORKED HUSK_STEPS
 # The classify block runs the shared classifier, and the classifier matches
 # visit coverage and standing records through more shared definitions.
 # liveness-sweep.sh sources every one of these libs before the block. Supply
-# the same defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ, $LIVENESS_CLASSIFY_JQ)
+# the same defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ, $DISPATCH_PATH_JQ,
+# $PLACEMENT_JQ, $LIVENESS_CLASSIFY_JQ)
 # from the real libs so the extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/visit-identity.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/standing-kinds.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/dispatch-path.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/placement.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/liveness-classify.sh"
 # shellcheck disable=SC1090

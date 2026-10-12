@@ -39,6 +39,12 @@
 # held-by-design record to a pool the moment its blocker closed. It is exempt on
 # its task_kind, read from that shared definition.
 #
+# So is a bead that waits for placement (assets/scripts/placement.sh): intake
+# held it as new work for the operator's placement sitting (docs/steering.md),
+# and its dispatch is the route the sitting gives it when it places the bead.
+# Arming it would start work the operator has not placed. A bead the sitting
+# placed under an epic is work again, marker or not, and owes a dispatch path.
+#
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
@@ -83,6 +89,16 @@ WORK_TYPES=" bug feature task chore spike "
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a routed or armed bead cannot be told from stranded work."
+    exit 1
+}
+# What waits for placement, from the one definition shared with gc-helm.sh
+# unplaced and the liveness classifier. Exposes $PLACEMENT_JQ. An unsourceable
+# one warns: without it a bead the sitting owes its dispatch would read as
+# stranded work and draw the arm remedy.
+# shellcheck source=../../assets/scripts/placement.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/placement.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/placement.sh could not be sourced from this pack, so a bead waiting for placement cannot be told from stranded work."
     exit 1
 }
 
@@ -167,9 +183,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/standing/step/workflow-topology/demand; not a
-    # merge anchor; an allowlisted work issue_type), AND carrying no dispatch
-    # path (has_dispatch_path: no route and no arm).
-    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
+    # merge anchor; not waiting for placement; an allowlisted work issue_type),
+    # AND carrying no dispatch path (has_dispatch_path: no route and no arm).
+    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
@@ -180,6 +196,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($m["gc.kind"] // "") == "")
         | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
+        | select(($b | awaiting_placement) | not)
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)
         | [ $id,

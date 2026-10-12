@@ -1060,6 +1060,25 @@ keys = [
 #   bead, and a validating closer reads _reason as the close brief of a reaction
 #   that ran before reaction beads.
 
+[metadata.placement]
+# Intake's hold on new work (docs/steering.md). A bead may reach a pool only as a
+# member of an epic, as PR-finishing work, as a checked emergency, or by the
+# operator's own move. Other new work waits for the operator's placement sitting,
+# which places it under an epic or routes it on its own.
+keys = ["placement"]
+# placement — `pending`, the marker on a bead held for the placement sitting.
+#   Written by first-reaction-dispose.sh when intake holds its actionable route
+#   or its blocked exit's --then-route, and read back before the release; by
+#   mol-witness-patrol.toml's bug-file block, in the create of a pack-defect bug;
+#   and by mol-feedback-distiller.toml, in the create of each prompt-update and
+#   engineering bead. Read through assets/scripts/placement.sh, whose
+#   awaiting_placement is the queue gc-helm.sh unplaced lists, the named wait
+#   liveness-classify.sh gives the bead, and the exemption
+#   doctor/check-blocked-work-armed reads. A parent, a route, an arm, an assignee
+#   or a live pour places a bead whatever the marker says, so a marker left on a
+#   placed bead names no wait. Absent means intake never held the bead. No pack
+#   writer clears it. A string.
+
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
 # a successor bead or a duplicate is folded into a survivor. The pointer is how a

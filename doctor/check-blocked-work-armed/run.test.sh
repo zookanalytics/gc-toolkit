@@ -4,8 +4,8 @@
 # neither route nor arm, including one carrying only gc.execution_routed_to —
 # provenance, not a dispatch path — and one whose route or arm holds only
 # whitespace), every exemption (routed, armed, assigned,
-# merge anchor, review/step/workflow/demand metadata, every standing kind,
-# decision/epic/infra types), the per-rig labelling, the remedy string, the
+# merge anchor, waiting for placement, review/step/workflow/demand metadata,
+# every standing kind, decision/epic/infra types), the per-rig labelling, the remedy string, the
 # fail-closed probes (unreadable blocked listing, unreadable rig list), and the
 # quiet paths (empty store, all-armed store).
 set -uo pipefail
@@ -168,6 +168,24 @@ clear_stores
 
 blocked_store alpha "$(barmed a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead already armed (gc.dispatch_when_ready) is not flagged"
+clear_stores
+
+# A bead intake held for the operator's placement sitting gets its dispatch when
+# the sitting places it, so blocked-and-unrouted is not the anti-pattern for it,
+# and the arm remedy would start work the operator has not placed. A marker that
+# is not pending exempts nothing.
+blocked_store alpha "$(bmeta a-1 placement pending)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a blocked bead waiting for placement (placement=pending) is not flagged"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy"
+clear_stores
+blocked_store alpha "$(bmeta a-1 placement placed)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a placement marker that is not pending exempts nothing"
+clear_stores
+# Placed under an epic, the bead is work again, marker or not: the sitting placed
+# it, and a placed bead with no route or arm strands when its blocker closes.
+blocked_store alpha '{"id":"a-1","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"parent":"tk-epic","metadata":{"placement":"pending"}}'
+eq "$(run_check >/dev/null; echo $?)" "1" "a bead placed under an epic is flagged even with its marker left behind"
 clear_stores
 
 blocked_store alpha "$(bassigned a-1)"

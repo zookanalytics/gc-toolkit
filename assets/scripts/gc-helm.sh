@@ -5,19 +5,20 @@
 # itself is `helm-svc board` (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, react, takeaway, demand, dismiss, and the read-only
-# resolve. open, engage and react take a <subject> (a bead id, a PR number or
-# URL, or a superseded id) and resolve it to the live bead that owns the work
-# by metadata and the graph, never a title; an unresolvable or ambiguous
-# reference is refused and nothing is filed.
+# resolve and unplaced. open, engage and react take a <subject> (a bead id, a
+# PR number or URL, or a superseded id) and resolve it to the live bead that
+# owns the work by metadata and the graph, never a title; an unresolvable or
+# ambiguous reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
-# converse and the proactive worker (takeaway), converse (demand), operators
-# by hand.
+# converse and the proactive worker (takeaway), converse (demand), the
+# placement sitting (unplaced), operators by hand.
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route or a takeaway disposition that will not stamp),
+# a --route or a takeaway disposition that will not stamp / an unplaced list
+# missing a store that did not answer),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own visit instead of
@@ -51,6 +52,7 @@ Usage:
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
+  gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints the rows for a caller. Read-only, files nothing; exits 4 after the list when a store did not answer
 
 The board is `helm-svc board` (services/helm). This script carries only the
 write verbs. open, engage and react take the subject as a bead id, a PR number
@@ -253,6 +255,17 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=work-outcome.sh
 . "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
     || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one definition of a bead that waits for placement, shared with the
+# liveness classifier and check-blocked-work-armed, and the dispatch path it
+# reads, shared with the proactive scan and the doctor checks: unplaced lists
+# exactly the beads that predicate admits. Expose $PLACEMENT_JQ and
+# $DISPATCH_PATH_JQ.
+# shellcheck source=dispatch-path.sh
+. "${GC_DISPATCH_PATH_LIB:-$SCRIPT_DIR/dispatch-path.sh}" \
+    || { echo "$PROG: cannot source dispatch-path.sh from $SCRIPT_DIR" >&2; exit 3; }
+# shellcheck source=placement.sh
+. "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
+    || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -1696,6 +1709,80 @@ cmd_resolve() {
     case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
     resolve_live_subject "$resolve_ref"
     printf '%s\n' "$RESOLVED_SUBJECT"
+}
+
+# ── Verb: unplaced (read-only) ───────────────────────────────────────
+# The placement sitting's queue: every live bead in the city's stores that waits
+# for placement, by placement.sh's one definition. Intake marks such a bead
+# placement=pending when it holds new work for the operator (docs/steering.md),
+# and a parent, a route, an arm, an assignee or a live pour each places it,
+# whether or not its marker was cleared. Like resolve it files nothing. Rows come
+# in the order bd offers ready work, priority then age. A suspended rig's store
+# is skipped and named, because reading it would start its Dolt server. A store
+# that does not answer is named on stderr and the verb exits 4 after printing
+# the rest, so a partial queue never reads as the whole one.
+UNPLACED_ROW_JQ='
+  select(awaiting_placement)
+  | {id, rig: $rig, title: (.title // ""), type: (.issue_type // ""),
+     priority: (.priority // 2), status: (.status // ""), created_at: (.created_at // ""),
+     takeaway: ((.metadata // {})["gc.takeaway"] // "")}'
+cmd_unplaced() {
+    up_json=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) up_json=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) echo "$PROG: unplaced: unknown argument '$1' (usage: gc-helm unplaced [--json])" >&2; exit 2 ;;
+        esac
+    done
+    enumerate_rigs
+    up_lines=""; up_unread=""
+    up_scopes=$(printf '%s' "$RIGS" | jq -r '.[] | select((.path // "") != "")
+        | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null || true)
+    up_us=$(printf '\037')
+    while IFS="$up_us" read -r up_name up_path up_susp; do
+        [ -n "$up_path" ] || continue
+        [ -d "$up_path/.beads" ] || continue
+        if [ "$up_susp" = "true" ]; then
+            echo "$PROG: unplaced: rig ${up_name:-$up_path} is suspended, so its store was not read; any bead waiting there is not listed" >&2
+            continue
+        fi
+        up_raw=$(gc bd list --db "$up_path/.beads" --metadata-field placement=pending \
+            --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null | scrub) || up_raw=""
+        if ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "$PROG: unplaced: the store of rig ${up_name:-$up_path} ($up_path/.beads) did not answer, so its beads are missing from this list" >&2
+            up_unread="$up_unread ${up_name:-$up_path}"
+            continue
+        fi
+        up_rig_lines=$(printf '%s' "$up_raw" | jq -c --arg rig "$up_name" "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[] | '"$UNPLACED_ROW_JQ" 2>/dev/null) || {
+            echo "$PROG: unplaced: the beads of rig ${up_name:-$up_path} could not be read as rows, so they are missing from this list" >&2
+            up_unread="$up_unread ${up_name:-$up_path}"
+            continue
+        }
+        [ -n "$up_rig_lines" ] && up_lines="$up_lines$up_rig_lines
+"
+    done <<EOF
+$up_scopes
+EOF
+    up_rows=$(printf '%s' "$up_lines" | jq -cs 'sort_by(.priority, .created_at, .id)' 2>/dev/null) || up_rows='[]'
+    if [ -n "$up_json" ]; then
+        printf '%s\n' "$up_rows"
+    else
+        up_n=$(printf '%s' "$up_rows" | jq 'length' 2>/dev/null || echo 0)
+        if [ "$up_n" -eq 0 ]; then
+            echo "unplaced: no bead waits for placement"
+        else
+            echo "unplaced: $up_n bead(s) wait for placement"
+            printf '%s' "$up_rows" | jq -r '.[]
+                | "\(.id)\tP\(.priority)\t\(.type)\t\(.rig)\t\(.created_at | .[0:10])\t\(.title)"
+                  + (if .takeaway != "" then "\n\t\(.takeaway)" else "" end)'
+        fi
+    fi
+    if [ -n "$up_unread" ]; then
+        echo "$PROG: unplaced: this list is partial; unread:$up_unread" >&2
+        exit 4
+    fi
+    return 0
 }
 
 # verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
@@ -3977,11 +4064,12 @@ case "${1:-}" in
     engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
     resolve)       shift; cmd_resolve "$@" ;;
+    unplaced)      shift; cmd_unplaced "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

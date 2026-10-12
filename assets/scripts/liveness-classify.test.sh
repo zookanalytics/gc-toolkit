@@ -2,7 +2,8 @@
 # Hermetic test for assets/scripts/liveness-classify.sh, the one liveness
 # classifier. Covers:
 #   (DEF)      sourcing the file exposes $LIVENESS_CLASSIFY_JQ, and with the defs
-#              it builds on it classifies every ready bead
+#              it builds on it classifies every ready bead, a bead held for
+#              placement (placement.sh) among them
 #   (EMPTY)    each read beyond the bead set drops only what it names, so passed
 #              empty it drops nothing; the precheck's superset rests on this
 #   (LIVENESS) unreadable_liveness_covers decides whether a claimed visit covers
@@ -36,6 +37,10 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 . "$HERE/visit-identity.sh" || { echo "FAIL - cannot source visit-identity.sh" >&2; exit 1; }
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "FAIL - cannot source standing-kinds.sh" >&2; exit 1; }
+# shellcheck source=dispatch-path.sh
+. "$HERE/dispatch-path.sh" || { echo "FAIL - cannot source dispatch-path.sh" >&2; exit 1; }
+# shellcheck source=placement.sh
+. "$HERE/placement.sh" || { echo "FAIL - cannot source placement.sh" >&2; exit 1; }
 # shellcheck source=liveness-classify.sh
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
 [ -n "${LIVENESS_CLASSIFY_JQ:-}" ] && ok "(DEF) sourcing the file exposes \$LIVENESS_CLASSIFY_JQ" \
@@ -50,7 +55,9 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"n-worked","title":"a bead a convoy drives","issue_type":"bug"},
   {"id":"n-husk","title":"a step of a husk molecule","issue_type":"task"},
   {"id":"n-plain","title":"an ordinary idle bug","issue_type":"bug"},
-  {"id":"n-subj","title":"the subject of a claimed visit","issue_type":"task"}
+  {"id":"n-subj","title":"the subject of a claimed visit","issue_type":"task"},
+  {"id":"n-placement","title":"held for the placement sitting","issue_type":"bug","metadata":{"placement":"pending"}},
+  {"id":"n-placed","title":"placed under an epic, its marker left behind","issue_type":"task","dependencies":[{"issue_id":"n-placed","depends_on_id":"e-1","type":"parent-child"}],"metadata":{"placement":"pending"}}
 ]
 JSON
 cat > "$TMP/live.json" <<'JSON'
@@ -68,19 +75,21 @@ classify() {
         --argjson openprs "$1" --argjson worked "$2" --argjson husks "$3" \
         --argjson preopen_gates "$4" --arg have_resolver "$5" \
         --argjson livesessions "$6" --argjson livenessknown "$7" --argjson unreadable_liveness_covers "$8" \
-        "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$LIVENESS_CLASSIFY_JQ"'[ liveness_classify[] | "\(.id):\(.class)" ] | sort | join(" ")'
+        "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'[ liveness_classify[] | "\(.id):\(.class)" ] | sort | join(" ")'
 }
 class_of() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2://p"; }
 
 echo "# the classifier"
 ALL="$(classify '["https://github.com/o/r/pull/7"]' '["n-worked"]' '["n-husk"]' '{"n-preopen":["correctness"]}' 1 '["s-1"]' true true)"
-eq "$(printf '%s\n' "$ALL" | tr ' ' '\n' | grep -c .)" "6" "(DEF) one row per ready bead"
+eq "$(printf '%s\n' "$ALL" | tr ' ' '\n' | grep -c .)" "8" "(DEF) one row per ready bead"
 eq "$(class_of "$ALL" n-pr)" "gated" "(DEF) a bead whose PR is open is gated"
 eq "$(class_of "$ALL" n-preopen)" "gated" "(DEF) a pre-open anchor whose gates are all green is gated"
 eq "$(class_of "$ALL" n-worked)" "worked" "(DEF) a convoy-worked bead is worked"
 eq "$(class_of "$ALL" n-husk)" "husk" "(DEF) a husk step is husk"
 eq "$(class_of "$ALL" n-subj)" "conversing" "(DEF) the subject of a live-held visit is conversing"
 eq "$(class_of "$ALL" n-plain)" "unnamed" "(DEF) a bead nothing names is an unnamed wait"
+eq "$(class_of "$ALL" n-placement)" "awaiting-placement" "(DEF) a bead held for the placement sitting is a named wait"
+eq "$(class_of "$ALL" n-placed)" "unnamed" "(DEF) a bead placed under an epic waits on nothing the sitting owes, marker or not"
 
 echo "# an empty read drops nothing"
 NONE="$(classify '[]' '[]' '[]' '{}' 1 '["s-1"]' true true)"
