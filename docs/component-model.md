@@ -249,31 +249,35 @@ needs a conversation is the visit `escalate.sh` files. Filing the demand
 without wiring the edge is the common failure, and a demand that gates nothing
 is a note.
 
-**The shape law** is that a bead which will ever carry a `blocks` edge must
-have no `parent-child` children. Containers do not block; blockers do not
-parent.
+**The shape law** is that a blocker on a bead with `parent-child` children
+holds every part of it, so such a bead carries a `blocks` edge only for a wait
+that belongs to all of its parts. A wait that belongs to one part goes on that
+part.
 
 The reason is what `parent-child` means. It is decomposition: the child is part
 of the parent's work, so the parent's blocked state cascades down to it. That
 cascade is the correct reading of containment and is not a defect to route
-around. It does damage only where the edge has been used for something that is
-not decomposition, and whether routed work is that case depends on what the work
-is. Work `W` a sitting hands out on subject `S` is a dependency by default: `S`
-is waiting for it and does not contain it, so `W` is not a part of `S`. Filing
-that `W` as a child of `S` would state a containment that is not true, and the
-stranding would follow from the false statement rather than from the cascade;
-filed as the graph is, `W` sits beside `S` and `S` blocks on `W`, which reads
-correctly and keeps `W` claimable. The exception is work that genuinely
-decomposes an epic subject — a story or task that is part of the epic. That `W`
-is a member, a `parent-child` child, and it carries no `blocks` edge back to the
-subject: the completion-wait is implicit in containment, and beads refuses a
-parent→descendant `blocks` edge in any case. "The subject is an epic" is the
-indicator that tells the two apart, and the shape law decides the mechanism
-either way — a dependency sibling carries the `blocks` edge, a member child
-never does (`specs/tk-xgj2ko/membership-mechanics.md`). beads enforces the
+around. A wait of the whole is what the cascade carries: a park on an epic
+([steering.md](steering.md)), or a prerequisite that all of an epic's work
+needs, holds every part that has not started, and the blocker's close releases
+them together. The cascade does damage where a wait of one part is put on the
+whole, which holds every other part with it, and where the edge has been used
+for something that is not decomposition. Whether routed work is that case
+depends on what the work is. Work `W` a sitting hands out on subject `S` is a
+dependency by default: `S` is waiting for it and does not contain it, so `W` is
+not a part of `S`. Filing that `W` as a child of `S` would state a containment
+that is not true, and the stranding would follow from the false statement rather
+than from the cascade; filed as the graph is, `W` sits beside `S` and `S` blocks
+on `W`, which reads correctly and keeps `W` claimable. The exception is work
+that genuinely decomposes an epic subject — a story or task that is part of the
+epic. That `W` is a member, a `parent-child` child, and it carries no `blocks`
+edge back to the subject: the completion-wait is implicit in containment, and
+beads refuses a parent→descendant `blocks` edge in any case. "The subject is an
+epic" is the indicator that tells the two apart, and the shape law decides the
+mechanism either way — a dependency sibling carries the `blocks` edge, a member
+child never does (`specs/tk-xgj2ko/membership-mechanics.md`). beads enforces the
 sharpest case directly, refusing an edge that would make a parent wait on its
-own descendant. Where a container is wanted for roll-up, it is a bead that never
-blocks.
+own descendant.
 
 Two boundaries. A conclusion is prose, stored once and never cleared, and it
 does not become a wait by being written down; that seam is
@@ -375,7 +379,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand, accept, and the operator's park ([steering.md](steering.md)). |
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |

@@ -141,10 +141,16 @@ The human surface is subject / visit / takeaway on native primitives
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
+- **A park decides when work runs.** `gc-helm.sh park` gives a bead a `blocks`
+  edge onto a gate of its own, titled with why it is parked and what releases
+  it. bd's cascade keeps the routed work under the bead out of every pool's
+  offer, work already in flight finishes, and closing the gate releases the
+  park. [steering.md](steering.md) says what a park holds and what it does not.
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger; `gc-helm.sh` keeps only the write verbs —
-  open, engage, react, takeaway, demand, dismiss. Everything works without the board: it spends no
-  state, so it can never be wrong for longer than one render.
+  open, engage, react, takeaway, demand, dismiss, accept and park. Everything
+  works without the board: it spends no state, so it can never be wrong for
+  longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before
 the operator arrives, the choice framed, every surface branded so the operator
