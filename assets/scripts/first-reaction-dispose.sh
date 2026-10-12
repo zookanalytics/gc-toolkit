@@ -113,7 +113,8 @@ Usage:
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
-  blocker closes (assets/scripts/deferred-dispatch.sh).
+  blocker closes (assets/scripts/deferred-dispatch.sh). An arm that does not
+  land fails the exit before the landed proof, so a re-run resumes it.
   --assign (actionable) releases the bead to a named agent instead of a pool:
   the agent becomes its assignee, the address its own hook matches, and no
   route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
@@ -262,6 +263,10 @@ case "$DISPOSITION" in
         done
         if [ -n "$THEN_ROUTE" ]; then
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
+            # The arm is part of this exit's write-back, and with no tool to
+            # record it the exit cannot land, so it does not start.
+            [ -x "$DEFERRED" ] \
+                || die "--then-route needs $DEFERRED to arm the dispatch for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
         fi
         ;;
     recommend|ruling)
@@ -734,14 +739,18 @@ if [ -n "$HOLD_WAITS" ]; then
     done
     [ -z "$MISSING" ] \
         || die "the $DISPOSITION disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is not held — it reads as parked on prose alone, the wait this exit recorded carried by no edge. The headline and the release stand — only the hold is missing, so wire the edge above by hand, or re-run this command: no landed proof was stamped, so a re-run resumes rather than refusing."
+    # A requested arm is part of the write-back too. Held with no arm, the bead
+    # waits on its edge with nothing to route it once the wait lifts, and a
+    # closed R brings no re-offer to arm it later. So an arm that does not land
+    # fails the exit the way a missing edge does, before the landed proof. The
+    # release leaves the bead open, unassigned and unrouted, which is what the
+    # arm needs, and the arm rewrites its own record, so a re-run arms cleanly.
     if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ]; then
-        if [ -x "$DEFERRED" ]; then
-            # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-            "$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
-                && note "armed the dispatch to $THEN_ROUTE for when the wait lifts" \
-                || note "WARNING: could not arm the deferred dispatch to $THEN_ROUTE; the wait still holds, but nothing will route $BEAD when it lifts"
+        # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
+        if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
+            note "armed the dispatch to $THEN_ROUTE for when the wait lifts"
         else
-            note "WARNING: deferred-dispatch.sh not found at $DEFERRED; the wait holds but nothing will route $BEAD when it lifts"
+            die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
         fi
     fi
 fi

@@ -174,7 +174,9 @@ chmod +x "$TMP/proactive"
 cat > "$TMP/deferred" <<'DD'
 #!/usr/bin/env bash
 printf 'DEFERRED %s\n' "$*" >> "$FAKE_LOG"
-[ -n "${FAKE_DEFERRED_FAILS:-}" ] && exit 1
+# FAKE_DEFERRED_FAILS models an arm the real script refuses: it names why on
+# stderr and exits 1.
+[ -n "${FAKE_DEFERRED_FAILS:-}" ] && { echo "deferred-dispatch: arm: $2 is already dispatched (fake refusal)" >&2; exit 1; }
 # deferred-dispatch.sh arm keys on gc.routed_to and status, NOT on
 # gc.execution_routed_to — that stamp is a finished pour's provenance, not a live
 # queue. A first-reaction subject carries only the stamp and no gc.routed_to, so
@@ -356,6 +358,10 @@ hasnt "UPDATE" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …writing nothing"
 #   (BLKDEDUP) --blocker-key reuses the bead a prior reaction filed
 #   (BLKEDGE)  an edge that did not land fails the exit, so nothing records done
 #   (BLKARM)   --then-route arms the dispatch that resumes the work
+#   (BLKARMFAIL)  an arm that did not land fails the exit the same way, and a
+#                 re-run arms, then stamps the landed proof, then closes R
+#   (BLKARMTOOL)  --then-route with no deferred-dispatch.sh to arm it is
+#                 refused before anything is written
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "waits on the schema migration" \
     --takeaway "held: schema migration first" --waiting-on tk-blk1 --reaction-bead "$R"
@@ -480,6 +486,49 @@ hasnt "DEFERRED arm" "$LOG" "(BLKARM) …and nothing is armed after a release th
 hasnt "gc.reacted_by" "$LOG" "(BLKARM) …and the landed proof is not stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(BLKARM) …and the reaction bead is not closed"
 unset FAKE_HELM_FAILS FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
+
+# (BLKARMFAIL) The arm is part of the write-back the landed proof stands for. A
+# bead held with no arm waits on its edge with nothing to route it once the wait
+# lifts, and a closed R brings no re-offer to arm it later. So an arm that does
+# not land fails the exit, as a missing edge does: no landed proof, R left open.
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+FAKE_DEFERRED_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(BLKARMFAIL) an arm that did not land fails the exit"
+has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(BLKARMFAIL) …after the arm was tried"
+has "nothing would route tk-sub once the wait lifts" "$ERR" "(BLKARMFAIL) …and the failure says what it costs"
+has "already dispatched (fake refusal)" "$ERR" "(BLKARMFAIL) …carrying the cause the arm named"
+has "a re-run resumes" "$ERR" "(BLKARMFAIL) …and that a re-run resumes, since no landed proof was stamped"
+hasnt "gc.reacted_by" "$LOG" "(BLKARMFAIL) …the landed proof is NOT stamped"
+hasnt "UPDATE bd update $R" "$LOG" "(BLKARMFAIL) …and the reaction bead stays open"
+hasnt "disposed as blocked" "$OUT" "(BLKARMFAIL) …and the run does not report a disposition"
+
+# The re-offered R re-runs the same call once the cause is cleared. The failed
+# run left the headline and the hold on the subject and no landed proof, so
+# nothing refuses the re-run: the arm lands, then the landed proof, then R closes.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.takeaway":"t","gc.takeaway_by":"proactive"}}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(BLKARMFAIL) the re-run after a failed arm succeeds"
+has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" "(BLKARMFAIL) …the arm lands"
+before '^DEFERRED arm' 'gc.reacted_by' "(BLKARMFAIL) …then the landed proof"
+before 'gc.reacted_by' "UPDATE bd update $R" "(BLKARMFAIL) …then the reaction bead closes"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(BLKARMFAIL) …recording its outcome"
+unset FAKE_SHOW_JSON
+
+# (BLKARMTOOL) With no deferred-dispatch.sh to arm it, the exit cannot land, so
+# it is refused before the first write.
+GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+    run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(BLKARMTOOL) --then-route with no deferred-dispatch.sh is refused"
+has "no-such-deferred-dispatch" "$ERR" "(BLKARMTOOL) …naming the tool it looked for"
+eq "$LOG" "" "(BLKARMTOOL) …before anything is written"
+GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+    run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --reaction-bead "$R"
+eq "$RC" "0" "(BLKARMTOOL) a blocked exit that asks for no arm does not need the tool"
+unset FAKE_DEPS_JSON
 
 # (BLKROUTE) --then-route is held to the SAME roster test as --route: a target no
 # pool runs is refused before anything is written, not silently armed to fail
@@ -986,6 +1035,17 @@ run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "4" "(LEGACY) a landed proof that did not stamp fails the frozen exit"
 has "Stamp it by hand" "$ERR" "(LEGACY) …naming the repair"
 unset FAKE_PROACTIVE_STAMP_FAILS
+
+# The frozen path takes the blocked exit's failed arm the same way: the exit
+# fails before gc.proactive_reaction=1, so a re-offered frozen step reads no
+# landed proof and runs the write-back again.
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+FAKE_DEFERRED_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "4" "(LEGACY) a --then-route arm that did not land fails the frozen exit"
+has "DEFERRED arm tk-sub" "$LOG" "(LEGACY) …after the arm was tried"
+hasnt "gc.proactive_reaction=1" "$LOG" "(LEGACY) …before the legacy landed proof is stamped"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 
 # A re-offered frozen step: S already carries the landed proof, so the second run
 # is a no-op success — the act does NOT run, so a bead a downstream worker may
