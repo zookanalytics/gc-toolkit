@@ -1730,7 +1730,9 @@ func numberToInt64(n json.Number) int64 {
 }
 
 // notGreenRequired names each required context that is MISSING or RED in the
-// rollup, joined by spaces. ok=false means the rollup did not decode.
+// rollup, joined by spaces. ok=false means the rollup is unreadable: it did not
+// decode, or a row of a required context carries a conclusion or state that
+// the shell's ascii_upcase errors on.
 func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 	var v struct {
 		StatusCheckRollup []map[string]any `json:"statusCheckRollup"`
@@ -1747,15 +1749,29 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 		}
 		return ""
 	}
-	green := func(item map[string]any) bool {
-		if c, ok := item["conclusion"].(string); ok && c != "" {
-			u := strings.ToUpper(c)
-			return u == "SUCCESS" || u == "NEUTRAL" || u == "SKIPPED"
+	// upper is `((.<k> // "") | tostring | length) > 0` and then
+	// `.<k> | ascii_upcase`. set is false for an absent, null, false or empty
+	// value. ok is false for any other non-string, where ascii_upcase errors.
+	upper := func(item map[string]any, k string) (u string, set, ok bool) {
+		switch x := item[k].(type) {
+		case nil:
+			return "", false, true
+		case string:
+			return strings.ToUpper(x), x != "", true
+		case bool:
+			if !x {
+				return "", false, true
+			}
 		}
-		if s, ok := item["state"].(string); ok && s != "" {
-			return strings.ToUpper(s) == "SUCCESS"
+		return "", true, false
+	}
+	green := func(item map[string]any) (isGreen, ok bool) {
+		c, set, ok := upper(item, "conclusion")
+		if set {
+			return c == "SUCCESS" || c == "NEUTRAL" || c == "SKIPPED", ok
 		}
-		return false
+		s, set, ok := upper(item, "state")
+		return set && s == "SUCCESS", ok
 	}
 	var out []string
 	for _, c := range required {
@@ -1769,11 +1785,16 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 			out = append(out, c+"(MISSING)")
 			continue
 		}
+		// Every row is read, as the shell's jq reads each one, so an unreadable
+		// row after a red one still makes the rollup unreadable.
 		red := false
 		for _, h := range hits {
-			if !green(h) {
+			g, ok := green(h)
+			if !ok {
+				return "", false
+			}
+			if !g {
 				red = true
-				break
 			}
 		}
 		if red {
