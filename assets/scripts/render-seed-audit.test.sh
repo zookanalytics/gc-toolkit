@@ -12,10 +12,14 @@
 # number whichever wc counted it. Three are refusals: --install-hook will not
 # shadow a hand-installed hook, a render fails when an agent the pack owns
 # renders the builtin worker prompt, and a render fails when the throwaway
-# city's path survives the substitution. Every render runs against a stub `gc`
-# on PATH that answers from the files of the pack it is asked about, so a render
-# is a function of the tree rendered and no real `gc`, city or network is
-# involved; the hermeticity check reads the renderer's text.
+# city's path survives the substitution. Another is about names: an agent name
+# two packs share is rendered once per agent, under each one's qualified name.
+# Every render runs against a stub `gc` on PATH, so no real `gc`, city or
+# network is involved. The stub most cases share answers from the files of the
+# pack it is asked about, so a render is a function of the tree rendered. The
+# shared-name cases need agents from a second pack, which no file of the pack
+# under test describes, so they have a stub of their own that answers from files
+# each case writes. The hermeticity check reads the renderer's text.
 #
 # Covers, for the merge gate: a head that moves a render input without
 # re-rendering, named with its reason; a head that commits the fresh render,
@@ -34,7 +38,11 @@
 # guard, which holds the pack's own agents and not a builtin provider's; a TMPDIR
 # spelled with a trailing slash, by its physical path and through a symlink, each
 # against the tree a plain one renders; a city spelling no needle names, which
-# fails the render; and a wc that pads its count, against the host's.
+# fails the render; and a wc that pads its count, against the host's. For names:
+# a shared name, rendered per agent under its qualified name against a control
+# that refuses the bare one, with the guard holding only this pack's copy, a
+# rig-scoped copy rendered from the rig declared first, and this pack's agent
+# missing beside another pack's copy failing the render.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +62,10 @@ SUT="$HERE/render-seed-audit.sh"
 # The render runs every gc call through `env -i` from inside the synthetic city,
 # so the stub receives no environment and finds the pack it is asked about the
 # way gc does, from the city's own city.toml: the pack this repo imports is the
-# first absolute source there. Each answer is then read from that pack's files.
+# first absolute source there, and the import that names it is the binding gc
+# qualifies the pack's agents by. The render counts an agent as this pack's only
+# under that binding, so the composed config carries the import and the agent
+# list the qualified names. Each answer is then read from that pack's files.
 # Every call logs the pack it answered for, which is how a case counts the trees
 # one check rendered.
 STUB="$TMP/stub-gc"
@@ -63,11 +74,14 @@ BUILTIN_WORKER='You are a worker agent in a Gas City workspace using the graph-f
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$STUB/gc" <<STUB
 [ "\${1:-}" = --city ] && shift 2
 root="\$(sed -n 's|^source = "\(/[^"]*\)"\$|\1|p' city.toml | head -1)"
+binding="\$(grep -B1 -x -F "source = \"\$root\"" city.toml | sed -n 's|^\[imports\.\(.*\)\]\$|\1|p' | head -1)"
 printf '%s\n' "\$root" >> "$STUB/roots.log"
 agents() { local d; for d in "\$root"/agents/*/; do [ -f "\$d/agent.toml" ] && basename "\$d"; done; }
 case "\$1 \${2:-}" in
-    "config show")  agents | while IFS= read -r a; do printf '[[agent]]\nname = "%s"\n' "\$a"; done ;;
-    "agent list")   { agents; echo claude; } | sed 's/.*/{"name":"&"}/' | paste -s -d, - \
+    "config show")  printf '[imports.%s]\nsource = "%s"\n' "\$binding" "\$root"
+                    agents | while IFS= read -r a; do printf '[[agent]]\nname = "%s"\n' "\$a"; done ;;
+    "agent list")   { agents | sed "s|.*|{\"name\":\"&\",\"qualified_name\":\"\$binding.&\"}|"
+                      echo '{"name":"claude","qualified_name":"claude"}'; } | paste -s -d, - \
                         | sed 's/.*/{"agents":[&]}/' ;;
     "formula list") for f in "\$root"/formulas/*.toml; do [ -f "\$f" ] && basename "\$f" .toml; done ;;
     "formula show") cat "\$root/formulas/\$3.toml" ;;
@@ -398,8 +412,9 @@ eq "$(git -C "$H" config --get core.hooksPath)" "assets/hooks" "…and points co
 #
 # An agent this pack owns that renders the builtin worker prompt fails the render,
 # while a builtin-provider agent may render it. Which agents the pack owns comes
-# from its agent.toml files, and that list has to come out the same under BSD and
-# GNU find: an empty list holds no agent to the rule.
+# from its agent.toml files and from the imports that bind its pack, and the
+# agent list has to come out the same under BSD and GNU find: an empty list holds
+# no agent to the rule.
 echo "# a pack agent that renders the builtin worker prompt fails the render"
 P="$TMP/render-pack"
 mkdir -p "$P/agents/alpha" "$P/formulas"
@@ -476,6 +491,122 @@ padded=$(TMPDIR="$D" PATH="$TMP/padding-wc:$STUB:$PATH" bash "$SUT" --root "$P" 
 eq "$rc" 0 "--sizes with a padding wc succeeds"
 has "$padded" '| `alpha` | 17 | 4 |' "…and its row carries the bare byte count"
 eq "$padded" "$host" "…the same table as the host's wc prints"
+
+# ------------------------------------------------ a name two packs share
+#
+# Two packs that each ship an agent called dog give the city two agents under one
+# bare name. gc qualifies each by the import that bound its pack, and only the
+# qualified names say which dog is meant: a gc that refuses the bare name fails a
+# render that primes it, and one that does not renders whichever agent comes
+# first. The stub refuses the bare name the way gc does.
+#
+# No file of the pack under test describes a second pack's agents, so these
+# cases run against a stub of their own. It receives no environment through the
+# render's env -i, so it reads every answer from files: the composed config, the
+# agent list, and what each name primes to or the refusal it draws. Every prompt
+# it primes passes through the shared stub's spell-city filter.
+NAMES="$TMP/stub-names"
+mkdir -p "$NAMES/prime"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$NAMES/gc" <<STUB
+[ "\${1:-}" = --city ] && shift 2
+case "\$1 \${2:-}" in
+    "config show")  cat "$NAMES/config.txt" ;;
+    "agent list")   cat "$NAMES/agents.json" ;;
+    "formula list") printf 'mol-fixture\n' ;;
+    "formula show") printf '# mol-fixture\n' ;;
+    "prime "?*)     f="$NAMES/prime/\$(printf '%s' "\$2" | tr / :)"
+                    if [ -f "\$f" ]; then "$STUB/spell-city" < "\$f"; exit; fi
+                    [ -f "\$f.err" ] && cat "\$f.err" >&2
+                    exit 1 ;;
+    *)              exit 1 ;;
+esac
+STUB
+chmod +x "$NAMES/gc"
+render_names() { PATH="$NAMES:$PATH" bash "$SUT" --root "$P" --out "$TMP/render-out" --jobs 1 2>&1; }
+# The composed config imports this pack as "fixture" and a second pack as
+# "other", then declares the given rigs in order. The fixture source is the pack
+# root the way the render resolves it, which gc prints back as given. The other
+# pack's path extends that root's spelling, so only a match on the whole path
+# component keeps it from reading as this pack's.
+stub_config() {
+    local root r
+    root="$(cd "$P" && pwd)"
+    { printf '[imports]\n[imports.fixture]\nsource = "%s"\n' "$root"
+      printf '[imports.other]\nsource = "%s-other"\n' "$root"
+      for r in "$@"; do printf '\n[[rigs]]\nname = "%s"\n' "$r"; done
+    } > "$NAMES/config.txt"
+}
+stub_agents() { local IFS=,; printf '{"agents":[%s]}\n' "$*" > "$NAMES/agents.json"; }
+stub_prime() { local f; f="$NAMES/prime/$(printf '%s' "$1" | tr / :)"; rm -f "$f.err"; printf '%s\n' "$2" > "$f"; }
+stub_refuse() { local f; f="$NAMES/prime/$(printf '%s' "$1" | tr / :)"; rm -f "$f"; printf '%s\n' "$2" > "$f.err"; }
+
+stub_config
+echo "# a name two packs share renders each agent under its qualified name"
+mkdir -p "$P/agents/dog"
+printf 'name = "dog"\n' > "$P/agents/dog/agent.toml"
+printf '# fixture dog doctrine\n' > "$P/agents/dog/prompt.template.md"
+DOGS_REFUSED='gc prime: agent "dog" is ambiguous: matches fixture.dog, other.dog; use a qualified name'
+stub_prime alpha '# alpha doctrine'
+stub_agents '{"name":"alpha","qualified_name":"fixture.alpha"}' \
+    '{"name":"dog","qualified_name":"fixture.dog"}' '{"name":"dog","qualified_name":"other.dog"}'
+stub_refuse dog "$DOGS_REFUSED"
+stub_prime fixture.dog '# fixture dog doctrine'
+stub_prime other.dog '# other dog doctrine'
+PATH="$NAMES:$PATH" gc prime dog --strict >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "control: the bare name is refused, so a render that primes it fails"
+out=$(render_names); rc=$?
+eq "$rc" 0 "a render that primes each agent by its qualified name succeeds"
+eq "$(cat "$TMP/render-out/agents/fixture.dog.md" 2>/dev/null)" "# fixture dog doctrine" \
+    "this pack's dog is filed as fixture.dog"
+eq "$(cat "$TMP/render-out/agents/other.dog.md" 2>/dev/null)" "# other dog doctrine" \
+    "…and the other pack's as other.dog"
+eq "$(cd "$TMP/render-out/agents" && printf '%s ' *)" "alpha.md fixture.dog.md other.dog.md " \
+    "…and no file claims the bare name"
+has "$(cat "$TMP/render-out/INDEX.md" 2>/dev/null)" '- [`other.dog`](agents/other.dog.md)' \
+    "INDEX lists each agent under its qualified name"
+
+echo "# the builtin-fallback guard holds this pack's copy of a shared name, not the other's"
+stub_prime fixture.dog "$BUILTIN_WORKER"
+out=$(render_names); rc=$?
+eq "$rc" 2 "this pack's dog rendering the builtin worker prompt fails the render"
+has "$out" "FAILED agent fixture.dog (rendered a builtin fallback prompt" "…naming it by its qualified name"
+stub_prime fixture.dog '# fixture dog doctrine'
+stub_prime other.dog "$BUILTIN_WORKER"
+out=$(render_names); rc=$?
+eq "$rc" 0 "the other pack's dog may render it, though that pack's path extends this one's"
+
+echo "# an agent this pack defines that renders only from another pack's copy fails the render"
+stub_prime other.dog '# other dog doctrine'
+stub_agents '{"name":"alpha","qualified_name":"fixture.alpha"}' '{"name":"dog","qualified_name":"other.dog"}'
+stub_prime dog '# other dog doctrine'
+out=$(render_names); rc=$?
+eq "$rc" 2 "this pack's dog absent beside the other pack's fails the render"
+has "$out" "composes only under another" "…saying why"
+has "$out" "  dog" "…and naming the agent"
+
+echo "# a rig-scoped name two packs share renders the copy in the rig declared first"
+mkdir -p "$P/agents/worker"
+printf 'name = "worker"\n' > "$P/agents/worker/agent.toml"
+printf '# fixture worker doctrine\n' > "$P/agents/worker/prompt.template.md"
+stub_config r2 r1
+stub_refuse dog "$DOGS_REFUSED"
+stub_refuse worker 'gc prime: agent "worker" is ambiguous: matches r1/fixture.worker, r1/other.worker, r2/fixture.worker, r2/other.worker; use a qualified name'
+stub_agents '{"name":"alpha","qualified_name":"fixture.alpha"}' \
+    '{"name":"dog","qualified_name":"fixture.dog"}' '{"name":"dog","qualified_name":"other.dog"}' \
+    '{"name":"worker","qualified_name":"r1/fixture.worker","dir":"r1"}' \
+    '{"name":"worker","qualified_name":"r1/other.worker","dir":"r1"}' \
+    '{"name":"worker","qualified_name":"r2/fixture.worker","dir":"r2"}' \
+    '{"name":"worker","qualified_name":"r2/other.worker","dir":"r2"}'
+stub_prime r1/fixture.worker '# fixture worker in r1'
+stub_prime r2/fixture.worker '# fixture worker in r2'
+stub_prime r1/other.worker '# other worker in r1'
+stub_prime r2/other.worker '# other worker in r2'
+out=$(render_names); rc=$?
+eq "$rc" 0 "a rig-scoped shared name renders"
+eq "$(cat "$TMP/render-out/agents/fixture.worker.md" 2>/dev/null)" "# fixture worker in r2" \
+    "…this pack's agent from r2, which is declared first though r1 sorts first"
+eq "$(cat "$TMP/render-out/agents/other.worker.md" 2>/dev/null)" "# other worker in r2" \
+    "…and the other pack's agent the same way"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

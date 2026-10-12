@@ -7,6 +7,9 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
+An agent file is named for the agent, or for its binding-qualified name
+(`<binding>.<name>`) where agents from different packs share one name.
+
 ## Scope
 
 **Mandate.** What text each agent and formula in this pack renders to, as a
@@ -38,7 +41,8 @@ when one is named, and are not committed:
 - [`converse-opus`](agents/converse-opus.md)
 - [`deacon`](agents/deacon.md)
 - [`demo`](agents/demo.md)
-- [`dog`](agents/dog.md)
+- [`bd.dog`](agents/bd.dog.md)
+- [`gc-toolkit.dog`](agents/gc-toolkit.dog.md)
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
 - [`mechanik`](agents/mechanik.md)
@@ -65,7 +69,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` |

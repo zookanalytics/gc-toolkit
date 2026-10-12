@@ -77,6 +77,73 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The test floor sits directly beneath the stubs, harness/ (git) first.
+FLOOR="$(cd "$HERE/../../tools/test-floor" && pwd)"
+case ":$PATH:" in
+  *":$TMP/bin:$FLOOR/harness:$FLOOR:"*) ok "the test floor is on PATH directly beneath the stub bin" ;;
+  *) bad "the test floor is not directly beneath the stub bin: $PATH" ;;
+esac
+
+# A script under test that outlives its suite's stubs is refused, never handed
+# the real binary. A suite in miniature sources the harness over its own TMP,
+# starts a script that waits, and is killed by a TERM that script never gets, so
+# the suite's EXIT trap removes TMP, stubs and all, while the script runs on.
+# CANARY, on the PATH the suite inherits, stands in for the real gc, bd, gh and
+# git: each one there records that it was reached. The script makes each call in
+# a subshell, as a script under test makes most of its calls, so each one
+# searches PATH afresh.
+CANARY="$TMP/floor-canary"; FLOOR_OUT="$TMP/floor-out"
+mkdir -p "$CANARY" "$FLOOR_OUT"
+for t in gc bd gh git; do
+  printf '#!/usr/bin/env bash\necho "%s reached" >> "$FLOOR_OUT/canary"\n' "$t" > "$CANARY/$t"
+  chmod +x "$CANARY/$t"
+done
+cat > "$TMP/floor-suite.sh" <<'SUITE'
+TMP="$(mktemp -d "$FLOOR_OUT/suite.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+. "$HARNESS"
+harness_init
+printf '%s\n' "$TMP" > "$FLOOR_OUT/suite-tmp"
+bash -c '
+  ( gc bd show x > "$FLOOR_OUT/with-stub" )
+  : > "$FLOOR_OUT/ready"
+  while [ ! -e "$FLOOR_OUT/go" ]; do sleep 0.1; done
+  for c in "gc bd create debris" "bd create debris" "gh pr comment 47" "git push origin"; do
+    ( $c 2>> "$FLOOR_OUT/refusals"; echo "$c rc=$?" >> "$FLOOR_OUT/rcs" )
+  done
+  : > "$FLOOR_OUT/done"
+' &
+wait
+SUITE
+( export FLOOR_OUT HARNESS="$HERE/test-harness.sh"; PATH="$CANARY:$PATH"; exec bash "$TMP/floor-suite.sh" ) &
+SUITE_PID=$!
+waited=0
+until [ -e "$FLOOR_OUT/ready" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+[ -e "$FLOOR_OUT/ready" ] && ok "floor: the script under test starts beneath a live suite" || bad "floor: the script under test never started"
+eq "$(cat "$FLOOR_OUT/with-stub" 2>/dev/null)" "[]" "floor: while the suite runs, its stub answers"
+kill -TERM "$SUITE_PID"; wait "$SUITE_PID" 2>/dev/null
+if [ -d "$(cat "$FLOOR_OUT/suite-tmp")" ]; then bad "floor: the killed suite's EXIT trap left its TMP"; else ok "floor: the killed suite's EXIT trap removed its TMP, stubs and all"; fi
+: > "$FLOOR_OUT/go"
+waited=0
+until [ -e "$FLOOR_OUT/done" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+eq "$(tr '\n' ';' < "$FLOOR_OUT/rcs" 2>/dev/null)" "gc bd create debris rc=127;bd create debris rc=127;gh pr comment 47 rc=127;git push origin rc=127;" \
+  "floor: each call the orphaned script makes fails as a missing command"
+refusals="$(cat "$FLOOR_OUT/refusals" 2>/dev/null)"
+for c in "gc bd create" "bd create debris" "gh pr comment" "git push origin"; do
+  has "$refusals" "test-floor: refused '$c'" "floor: …the floor refuses '$c'"
+done
+if [ -e "$FLOOR_OUT/canary" ]; then bad "floor: a binary behind the floor was reached: $(cat "$FLOOR_OUT/canary")"; else ok "floor: …and no binary behind the floor is reached"; fi
+
+# A tree without the floor does not run: a harness whose ../../tools holds no
+# test-floor exits before any stub is used.
+NOFLOOR="$TMP/nofloor"
+mkdir -p "$NOFLOOR/assets/scripts" "$NOFLOOR/run"
+cp "$HERE/test-harness.sh" "$NOFLOOR/assets/scripts/"
+out=$(TMP="$NOFLOOR/run"; . "$NOFLOOR/assets/scripts/test-harness.sh"; harness_init 2>&1; echo "survived"); rc=$?
+eq "$rc" "2" "harness_init with no test floor refuses to run"
+has "$out" "no test floor at tools/test-floor" "…and names the missing floor"
+hasnt "$out" "survived" "…before the suite goes on"
+
 # The gc bd create stub lands a create the way real bd does: --metadata (a JSON
 # value, its types kept), --status and --notes ride the one insert, and a
 # --metadata that is not JSON is refused with nothing created. A stub that
@@ -356,6 +423,24 @@ eq "$(jq -r '.[0].description' "$STUB_STORE")" "second, with a space" "update --
 gc bd update tk-desc -d third >/dev/null
 eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
 eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
+
+# The gc bd update stub lands a whole write in one jq, and the gc bd list stub
+# answers a query and all of its --metadata-field filters in one, however many
+# flags the call carries. Each counted call is read back, so a call that stopped
+# before its jq cannot pass the count.
+store '[{"id":"tk-one","status":"open","assignee":"a","title":"o","notes":"n","metadata":{"old":"x","gone":"y"}},
+        {"id":"tk-two","status":"open","assignee":"","title":"t","notes":"","metadata":{"lane":"c","stage":"1"}}]'
+one=$(jq_runs gc bd update tk-one --set-metadata k1=1)
+many=$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
+  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)
+eq "$many" "$one" "update: a write with nine flags starts as many jq processes as one with a single key"
+eq "$(jq -c '.[] | select(.id == "tk-one") | [.metadata, .assignee, .status, .notes, .description]' "$STUB_STORE")" \
+  '[{"old":"x","k1":3},"bob","in_progress","n\nmore","d"]' "update: …and every flag of that write lands"
+one=$(jq_runs gc bd list --json)
+many=$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)
+eq "$many" "$one" "list: a read with three --metadata-field filters starts as many jq processes as one with none"
+eq "$(gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json | jq -r 'map(.id) | join(",")')" "tk-two" \
+  "list: …and that read answers with the one bead every filter matches"
 
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the

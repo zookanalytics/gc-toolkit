@@ -33,6 +33,11 @@
 # reach shapes (an exec-stamp-only poured review, and a no-stamp review a
 # tracking convoy's root drives) -> a spent workflow is one deduped visit, held
 # one pass first.
+#
+# The sections run in the parts declared below, each wrapped in an `if part`
+# block. tools/run-tests.sh runs each part as its own run under its own
+# timeout; run directly, the file runs every part in order.
+# run-tests-parts: dispatch inflight wedge machine pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -183,6 +188,20 @@ judged_rc() { # <id> <anchor> <head-oid> [oc=recorded] [lane=codex]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"%s","reviewed_oid":"%s","signoff_verdict":"request-changes","gc.outcome":"%s"}}' \
     "$1" "${5:-codex}" "$2" "$3" "${4:-recorded}"
 }
+
+# ==== part dispatch: the default stamp, settled lanes, the cap's park,
+# quiescence, the per-head bar, the validation-pass dispatch, disposed anchors,
+# the live-head read and the stray-marker sweep ====
+if part dispatch; then
+
+echo "# every section sits inside a part"
+# A run executes only its own part's block, so a section outside every block
+# would run once per part. Blocks open with `if part <name>; then` and close
+# with `fi # part <name>`, both at the start of a line.
+OUTSIDE=$(awk '/^if part [A-Za-z0-9_-]+; then$/ { inside = 1; next }
+               /^fi # part [A-Za-z0-9_-]+$/ { inside = 0; next }
+               /^echo ["\047]# / && !inside { print NR ": " $0 }' "$HERE/gate-ensure.test.sh")
+eq "$OUTSIDE" "" "no section header sits outside a part"
 
 echo "# stamping the default"
 store "[$(anchor A1 pre_open_gate "" "" polecat/a1)]"
@@ -607,6 +626,13 @@ eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
 has "$out" "still reads" "the failed clear is reported"
 has "$out" "0 stray markers cleared" "…and not counted"
 
+fi # part dispatch
+
+# ==== part inflight: in-flight dedup, the stranded-review repair, rework
+# rounds, a finding released by its landed fix, the moot close, orphan adoption
+# and the pour read-back ====
+if part inflight; then
+
 echo "# in-flight dedup"
 store "[$(anchor D1 pull_request correctness "" polecat/d1),
         {\"id\":\"rev-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"correctness\",\"anchor_bead\":\"D1\",\"gc.routed_to\":\"$POOL\"}}]"
@@ -926,6 +952,25 @@ eq "$(bstatus find-ga1)" "open" "a GitHub-approval-only green lane leaves its un
 has "$out" "0 reviews dispatched" "…and the human-approved lane still dispatches nothing"
 rm -f "$GH_DIR/reviews_7701.json"
 
+echo "# a lane a conflicted bring-current round reopened dispatches past an approval older than the round"
+# The round reopened triage (bring_current_reopened, with its time) and has no
+# ruling yet. The standing approval predates the round, so it does not settle
+# triage, while correctness, which the round did not reopen, stays settled by it.
+# The triage dispatch says it rules on the round.
+BCREC=$(jq -nc '{head: "h", class: "conflicted", triage: null}' | jq -Rc .)
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+oid bc1 > "$GH_DIR/head_polecat_bc1"
+out=$(run)
+has "$out" "1 reviews dispatched" "only the reopened lane dispatches"
+has "$out" "check 'triage'" "…the triage lane"
+has "$out" "reopened by a bring-current round that conflicted: rule on the round" "…and its dispatch says to rule on the round"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-10-02T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+out=$(run)
+has "$out" "0 reviews dispatched" "an approval given after the round settles the reopened lane again"
+rm -f "$GH_DIR/reviews_7702.json"
+
 echo "# …the moot close is lane-scoped: a green lane does not resolve another lane's finding"
 # correctness is backed (locally green) and resolves its own unvalidated finding;
 # arch has no backing (ungreen) and keeps its unvalidated finding. The batched
@@ -1033,6 +1078,11 @@ has "$out" "STRANDED review $krid" "the never-poured bead is seen as stranded"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $krid --on mol-review" "…and re-slung successfully"
 eq "$(meta "$krid" 'gc.execution_routed_to')" "$POOL" "…with the pour read back (hard-fail convergence)"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
+
+fi # part inflight
+
+# ==== part wedge: the review-wedge escalation ====
+if part wedge; then
 
 # --- review-wedge escalation -------------------------------------------------
 # A poured review reaches the check through its workflow alone. Once that
@@ -1179,6 +1229,12 @@ out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "an agent still holding the bead is finishing the round, not wedged"
 eq "$(meta rev-w9 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 hasnt "$out" "WEDGED" "…and it is never called wedged"
+
+fi # part wedge
+
+# ==== part machine: the machine axis, the quorum pilot's sling vars and the
+# per-pass read cache ====
+if part machine; then
 
 # --- the machine axis (lifecycle/lifecycle.toml [machine_axis]) ------------------
 # This loop derives each lane green (settled) or short of green once per pass.
@@ -1350,6 +1406,12 @@ if [ "$uncached" -gt 1 ] && [ "$cached" -lt "$uncached" ]; then
 else
   bad "the cache did not reduce the arm's anchor_bead reads (uncached=$uncached cached=$cached)"
 fi
+
+fi # part machine
+
+# ==== part pacing: the deadline and cursor rotation, the anchors that go
+# first, a pass killed mid-anchor, a resolver crash and the dispatch stage ====
+if part pacing; then
 
 echo "# --deadline stops the pass after one anchor; --cursor resumes after it, in id order, wrapping"
 # Each anchor carries a verdict and check_set=none: it owes nothing, so it
@@ -1554,6 +1616,8 @@ store "[$(anchor GR pull_request 'correctness,rfr' "" polecat/gr ',"draft_readie
 oid gr > "$GH_DIR/head_polecat_gr"
 out=$(GC_REVIEW_CHECKS_INDEX="$RFR_IDX" run)
 has "$out" "for check 'rfr'" "a readied PR dispatches the ready-for-review check (no longer never-dispatched)"
+
+fi # part pacing
 
 echo
 echo "passed: $PASS  failed: $FAIL"

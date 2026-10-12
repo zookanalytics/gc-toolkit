@@ -109,16 +109,20 @@ read "landed in the refinery" as "main moved".
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
 | `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
-| `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
+| `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
 
 **Rejection-aware resume.** `metadata.rejection_reason` + `metadata.branch`
 mean a previous attempt was rejected with the branch intact. Resume that
-branch and fix the stated reason. Bring it current the way `prepare_mode`
-says: `merge` means the branch is SHARED — merge the base in, never rebase,
-never force-push; anything else rebases. The formula's workspace-setup step
-carries the exact block.
+branch and fix the stated reason. Bring it current by merging the base in;
+never rebase it and never force-push it. When the merge conflicts, write one
+audit entry per conflicted file as you resolve it, saying what collided, what
+you decided and why, and what a reviewer should check. The hand-off is refused
+without them, and every message a person reads about the merge is composed
+from them. A conflict you cannot resolve without guessing is a question for a
+person: push nothing and ask. The formula's workspace-setup step carries the
+exact blocks.
 
 ## The claimed bead and the anchor
 
