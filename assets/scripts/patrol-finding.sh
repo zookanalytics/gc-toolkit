@@ -3,9 +3,9 @@
 # A patrol observes something wrong and files it here. The bead is deduped on
 # a situation key, so a finding that recurs updates the bead it already has
 # instead of filing a second one, and a proactive first reaction reads it and
-# picks the disposition: route it to a pool, hold it on an edge, hand a
-# confident no-op to a validating closer, or put it to the operator as a human
-# gate.
+# picks the disposition: route it to a pool, or hold it for the operator's
+# placement sitting when no epic holds it; hold it on an edge; hand a confident
+# no-op to a validating closer; or put it to the operator as a human gate.
 # A patrol that types its key by hand picks it afresh on every pass, so one
 # situation can come back under a new key or a new subject, where the
 # exact-match dedup cannot see it. A NEW bead that shares its key or its subject

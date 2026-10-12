@@ -18,27 +18,29 @@ as you reach it. Never exit the wisp from an intermediate step — continue,
 or jump to next-iteration to pour and burn.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
-for the dog pool when an owner is alive but wedged, files a bug bead for the
-polecat pool when mail reports a defect in the pack, and watches the refinery
-queue. It does NOT manage processes (controller), write code
-(polecats), merge (refinery/cadence), kill sessions directly (the dog pool
+for the dog pool when an owner is alive but wedged, files a bug bead that
+waits for the operator's placement when mail reports a defect in the pack, and
+watches the refinery queue. It does NOT manage processes (controller), write
+code (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). A finding becomes one deduped
 BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
-disposes it: routed to a pool, held on an edge, or escalated to the operator
-as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
-a bead — an emergency that needs a human now.
+disposes it: routed to a pool, held for the operator's placement sitting, held
+on an edge, or escalated to the operator as a visit. assets/scripts/escalate.sh
+is for what a patrol cannot express as a bead — an emergency that needs a human
+now.
 
 Every address this formula stamps or queries comes from
-assets/scripts/resolve-route.sh. The agents it files to do not share a scope:
-the dog is city-scoped and its identity carries no rig segment, while the
-polecat and refinery pools are rig-scoped and carry `<rig>/`. The qualifier that
-reaches one is invisible to the other, and either stamp reads back clean, so a
-hand-written address is right only by luck. A query by a hand-written address
-fails just as quietly: listing beads by an address no agent holds returns a
-valid empty array, which reads as an empty queue.
+assets/scripts/resolve-route.sh. The agents it addresses do not share a scope:
+the dog it files warrants to is city-scoped and its identity carries no rig
+segment, while the refinery whose queue it reads is rig-scoped and carries
+`<rig>/`. The qualifier that reaches one is invisible to the other, and a stamp
+reads back clean either way, so a hand-written address is right only by luck. A
+query by a hand-written address fails just as quietly: listing beads by an
+address no agent holds returns a valid empty array, which reads as an empty
+queue.
 
-Marked blocks (bug-dispatch, notice-finding, candidate-pipeline,
+Marked blocks (bug-file, notice-finding, candidate-pipeline,
 host-bead-skip, downstream-court-skip, topology-root-skip,
 liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
 owning-store-guard, recovery-stamp-gate, crash-loop-window,
@@ -48,7 +50,7 @@ formula = "mol-witness-patrol"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery, polecat, and dog routing addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery and dog addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds."
 default = "gc-toolkit."
 
 [vars.event_timeout]
@@ -75,42 +77,30 @@ filed — note the outcome (the closed warrant carries the evidence) and
 archive.
 
 Mail reporting a defect in the pack itself, a formula or script fault the
-sender hit and worked around, is none of those: it needs a polecat rather
-than a human. File it as a bug bead routed at the polecat pool, resolving
-the address rather than writing the qualifier by hand. The route rides the
-create rather than a second write: a bug that exists before it is routed is
-an open bead offered to nobody for as long as that second write is
-outstanding, and a second write that fails leaves it that way for good. Set
-TITLE and BODY first:
+sender hit and worked around, is none of those: it is work for a polecat, not
+a question for a human. It is also new work, so it waits for the operator's
+placement sitting like any finding, and the sitting places it under an epic or
+routes it on its own (docs/steering.md). File it as a bug bead marked
+`placement=pending` and leave it unrouted. The marker rides the create rather
+than a second write: a bug that exists before it is marked is an open, unrouted
+bead in no queue for as long as that second write is outstanding, and a second
+write that fails leaves it that way for good. Set TITLE and BODY first:
 ```bash
-# >>> bug-dispatch
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-# resolve-route.sh echoes its input UNVERIFIED on an unreadable roster (exit 3)
-# and this block stamps what it prints, so the input itself must be claimable.
-# The polecat pool is rig-scoped, so hand the resolver the rig-qualified form:
-# on a readable roster it still resolves to whatever is live, and the exit-3
-# fallback is a claimable address rather than the unclaimable bare role.
-POOL=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat") || true
-if [ -z "$POOL" ]; then
-  echo "no live polecat identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
+# >>> bug-file
+BUG_JSON=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata '{"placement":"pending"}' --json)
+BUG=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
+  echo "filed bug $BUG; it waits for placement"
 else
-  BUG_JSON=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata "$(jq -nc --arg p "$POOL" '{"gc.routed_to":$p}')" --json)
-  BUG=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
-    echo "filed + routed bug $BUG to $POOL"
-  else
-    CREATE_ERR=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
-    echo "gc bd create reported no id${CREATE_ERR:+ ($CREATE_ERR)}; look for a bug already routed at $POOL before filing this again." >&2
-  fi
+  CREATE_ERR=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+  echo "gc bd create reported no id${CREATE_ERR:+ ($CREATE_ERR)}; look for the bug in gc-helm.sh unplaced before filing this again." >&2
 fi
-# <<< bug-dispatch
+# <<< bug-file
 ```
 
 A `NOTICE:` is never chatter. It reports a fact about shared state the sender
 does not own, so it leaves a tracked record before it is archived. A pack
-defect goes through bug-dispatch above and an emergency through escalate.sh.
+defect goes through bug-file above and an emergency through escalate.sh.
 Every other notice becomes a finding through the notice-finding block below.
 Mail that asks you to act where you may not is the same, whatever its subject:
 reaping a molecule, reconciling or closing another agent's beads, re-homing a
@@ -881,9 +871,9 @@ done
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
-# clean queue. The rig-qualified form goes in, as in bug-dispatch, so an
-# unreadable roster (exit 3) echoes back, unverified, a name a rig-scoped
-# refinery can hold. A refusal prints nothing, which leaves REFINERY empty.
+# clean queue. The rig-qualified form goes in, so an unreadable roster (exit 3)
+# echoes back, unverified, a name a rig-scoped refinery can hold. A refusal
+# prints nothing, which leaves REFINERY empty.
 if REFINERY=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"); then ROUTE_RC=0; else ROUTE_RC=$?; fi
 # A bead assigned to the refinery clears on its own: a handoff within a poll
 # interval, a rebase/rework task within the fix pool's work time (observed under

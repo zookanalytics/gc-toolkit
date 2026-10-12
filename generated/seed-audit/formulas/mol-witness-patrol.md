@@ -18,27 +18,29 @@ as you reach it. Never exit the wisp from an intermediate step — continue,
 or jump to next-iteration to pour and burn.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
-for the dog pool when an owner is alive but wedged, files a bug bead for the
-polecat pool when mail reports a defect in the pack, and watches the refinery
-queue. It does NOT manage processes (controller), write code
-(polecats), merge (refinery/cadence), kill sessions directly (the dog pool
+for the dog pool when an owner is alive but wedged, files a bug bead that
+waits for the operator's placement when mail reports a defect in the pack, and
+watches the refinery queue. It does NOT manage processes (controller), write
+code (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). A finding becomes one deduped
 BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
-disposes it: routed to a pool, held on an edge, or escalated to the operator
-as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
-a bead — an emergency that needs a human now.
+disposes it: routed to a pool, held for the operator's placement sitting, held
+on an edge, or escalated to the operator as a visit. assets/scripts/escalate.sh
+is for what a patrol cannot express as a bead — an emergency that needs a human
+now.
 
 Every address this formula stamps or queries comes from
-assets/scripts/resolve-route.sh. The agents it files to do not share a scope:
-the dog is city-scoped and its identity carries no rig segment, while the
-polecat and refinery pools are rig-scoped and carry `<rig>/`. The qualifier that
-reaches one is invisible to the other, and either stamp reads back clean, so a
-hand-written address is right only by luck. A query by a hand-written address
-fails just as quietly: listing beads by an address no agent holds returns a
-valid empty array, which reads as an empty queue.
+assets/scripts/resolve-route.sh. The agents it addresses do not share a scope:
+the dog it files warrants to is city-scoped and its identity carries no rig
+segment, while the refinery whose queue it reads is rig-scoped and carries
+`<rig>/`. The qualifier that reaches one is invisible to the other, and a stamp
+reads back clean either way, so a hand-written address is right only by luck. A
+query by a hand-written address fails just as quietly: listing beads by an
+address no agent holds returns a valid empty array, which reads as an empty
+queue.
 
-Marked blocks (bug-dispatch, notice-finding, candidate-pipeline,
+Marked blocks (bug-file, notice-finding, candidate-pipeline,
 host-bead-skip, downstream-court-skip, topology-root-skip,
 liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
 owning-store-guard, recovery-stamp-gate, crash-loop-window,
@@ -46,7 +48,7 @@ patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
 their tests; keep markers, keep them backslash-free.
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery, polecat, and dog routing addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds. (default=gc-toolkit.)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol builds its refinery and dog addresses from it, and an empty prefix renders bare roles like <rig>/refinery that no agent holds. (default=gc-toolkit.)
   {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=600)
 
 Steps (4):

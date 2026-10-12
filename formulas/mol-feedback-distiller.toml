@@ -10,9 +10,10 @@ the retirement pass over adopted rules is unconditional, every run. Judging
 uses the learning-distill rubric (D6: promotion is a reasoned judgment — a
 standing directive or operator-endorsed observation promotes at N=1, a
 diff-scoped nit waits for recurrence; counts and heat are inputs, never
-arithmetic). Output: at most a few change-unit `prompt-update` beads into
-the pool worker -> refinery -> operator-review pipeline (D3). Base rate:
-ZERO or ONE proposals per run; a chatty run is a smell.
+arithmetic). Output: at most a few change-unit `prompt-update` beads. Each
+waits for the operator's placement, then rides the pool worker -> refinery ->
+operator-review pipeline (D3). Base rate: ZERO or ONE proposals per run; a
+chatty run is a smell.
 
 A proposal names a CARRIER before it names rule text: a conventions bullet,
 an operator-profile entry, a work-quality entry, a review-rubric dimension, or
@@ -463,19 +464,11 @@ a blocked step, which wedges the cadence above, never is.
 
 ## 1. File one bead per surviving proposal
 
+A proposal is new work, so it waits for the operator's placement sitting like
+any finding (docs/steering.md). The bead is filed marked `placement=pending` and
+routed to no pool. The sitting places it under an epic or routes it on its own,
+and only then does a polecat build it; the operator still reviews its PR.
 ```bash
-# The route must name a LIVE agent identity: a pool offer matches by exact
-# byte equality, and GC_RIG picks both the store this bead lands in and the
-# rig segment a rig-scoped pool carries, so an address built out of GC_RIG
-# alone renders bare for a rig-less caller and is claimed by nobody while
-# the stamp reads back clean. pool-route.sh resolves it against the live
-# agent set: it prints a proven-live route, refuses one no agent carries
-# with empty stdout so the `|| exit 1` files nothing, and returns the route
-# marked UNVERIFIED when the agent set is unreadable.
-POOL_ROUTE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/pool-route.sh" ] && { POOL_ROUTE="$c/assets/scripts/pool-route.sh"; break; }
-done
-POOL=$("${POOL_ROUTE:?pool-route.sh not found in the pack}" {{binding_prefix}}polecat) || exit 1
 BODY="## Rule
 - Carrier: <convention | profile | work-quality | review-rubric | exemplar>
 - Action: <ADD | UPDATE | SUPERSEDE | RETIRE | HARDEN>
@@ -497,21 +490,27 @@ BODY="## Rule
 ## Reasoning
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
-BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --json)
+# >>> distiller-file-for-placement
+# The metadata rides the create, so the bead is never in the store without the
+# marker that puts it in the sitting's queue. target=main and merge_strategy=mr
+# are for the polecat that builds it once it is placed: they send its branch
+# through the refinery to the operator's review.
+PROPOSAL_META='{"task_kind":"prompt-update","target":"main","merge_strategy":"mr","placement":"pending"}'
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --metadata "$PROPOSAL_META" --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
-# target=main + merge_strategy=mr ride the standard pool worker -> refinery
-# pipeline; routing (stamp, don't sling) IS the dispatch.
-gc bd update "$BEAD" --set-metadata task_kind=prompt-update --set-metadata target=main --set-metadata merge_strategy=mr --set-metadata gc.routed_to="$POOL"
-echo "filed + routed prompt-update $BEAD (pattern $PATTERN)"
+echo "filed prompt-update $BEAD for placement (pattern $PATTERN)"
+# <<< distiller-file-for-placement
 ```
 
-## 1b. Engineering-bead route (Gate 2 outcomes)
+## 1b. Engineering beads (Gate 2 outcomes)
 
 A route-to-engineering cluster gets ONE ordinary work bead describing the
-mechanical fix (lint / doctor check / gate / code change), routed to the
-same pool — no task_kind=prompt-update, no bullet-cap accounting. Dedup on
-the pattern bead's `eng_bead` first (skip while it or its PR is live).
+mechanical fix (lint / doctor check / gate / code change). It waits for
+placement the same way: `--metadata '{"placement":"pending"}'` on its create,
+and no route. It carries no task_kind=prompt-update and no bullet-cap
+accounting. Dedup on the pattern bead's `eng_bead` first (skip while it or its
+PR is live).
 Record the outcome on the pattern bead so later runs neither re-judge
 toward prose nor file a duplicate:
 ```bash
@@ -537,8 +536,7 @@ fi
 ## 3. Contested rules: file a visit, never a flip
 
 One live visit per contested pattern: the block reuses a conversation visit
-already open on the subject and files nothing. NOTE: this block reassigns POOL,
-so run it after all filing above.
+already open on the subject and files nothing.
 ```bash
 SUBJECT="$PATTERN"
 # >>> gate-visit

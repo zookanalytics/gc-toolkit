@@ -48,7 +48,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 35,781 | 8,945 |
 | [`polecat`](agents/polecat.md) | 28,839 | 7,209 |
 | [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
-| [`proactive`](agents/proactive.md) | 23,481 | 5,870 |
+| [`proactive`](agents/proactive.md) | 25,620 | 6,405 |
 | [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
 | [`witness`](agents/witness.md) | 19,204 | 4,801 |
 
@@ -62,12 +62,12 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,386 | 846 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,429 | 857 |
 | [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` | 3,240 | 810 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,429 | 857 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,539 | 884 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,564 | 1,141 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 3,194 | 798 |
@@ -87,7 +87,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 4,410 | 1,102 |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` | 2,095 | 523 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,244 | 311 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,653 | 913 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 3,725 | 931 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
