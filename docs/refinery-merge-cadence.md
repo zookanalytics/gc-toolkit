@@ -307,14 +307,26 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass budget, and per anchor requires both sides to resolve there and
    probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase). An anchor pr-open
+   branch shape is brought current by merge, never rebase), whose hand-off the
+   bring-current guard holds to the same audit. An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
    arm 7 owns the dispatch. Both arms probe
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
    whichever sees a branch first files and the other stands down. The vetoes are
    arm 7's: `merge_hold`, `rebase_hold` on the anchor or on any bead naming the
-   branch, and a live demand. A failure here is not a merge hold — an anchor it
-   could not observe is left exactly as the pass found it.
+   branch, and a live demand. So is the supersession guard. Past the vetoes and
+   the dedup, both arms ask `branch-supersession.sh` whether the conflict is drift
+   or a change that landed first and deleted or rewrote code the branch edits.
+   Whether a superseded branch still has work to do is the operator's call, so
+   the arm files a `rework-base-supersession` visit on the anchor instead of a
+   child, and dispatches nothing while that visit is open and routed to somebody.
+   An open visit whose route addresses nobody holds nothing, and on a
+   supersession `escalate.sh` repoints it rather than filing a second. The guard
+   holds only behind an open visit that asks somebody, so a conflict it cannot
+   classify or record still gets the merge-in child
+   ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
+   A failure here is not a merge hold — an anchor it could not observe is left
+   exactly as the pass found it.
 6. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
    sentinel is respected), and every declared check is *raisable*: the lane
@@ -374,8 +386,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
    approved PR only, by the approval rule merge.sh lands on; the child's
-   handoff runs `bring-current-guard.sh`, which dismisses the approval and
-   files a visit when bringing the branch current took judgment), `BLOCKED`
+   handoff runs `bring-current-guard.sh`, which refuses it until the worker's
+   audit covers every conflict and, when the round conflicted, reopens triage
+   to rule on what it reopens and whether the approval stands, or rules closed
+   itself on an anchor that declares no triage lane
+   ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
+   conflict is a landed change deleting or rewriting code the branch edits,
+   the approved PR gets the operator's supersession decision instead of the
+   child, as for arm 5), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no

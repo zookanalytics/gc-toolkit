@@ -35,8 +35,7 @@ cat > "$TMP/rigs.json" <<EOF
 EOF
 printf '{"orders":[]}' > "$TMP/orders.json"
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "agent list") rc="${AGENTS_RC:-0}"; [ "$rc" -eq 0 ] || { [ -n "${AGENTS_ERR:-}" ] && printf '%s\n' "$AGENTS_ERR" >&2; exit "$rc"; }; cat "$AGENTS_JSON" ;;
   "rig list")   rc="${RIGS_RC:-0}";   [ "$rc" -eq 0 ] || { [ -n "${RIGS_ERR:-}" ] && printf '%s\n' "$RIGS_ERR" >&2; exit "$rc"; }; cat "$RIGS_JSON" ;;
@@ -45,8 +44,7 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
