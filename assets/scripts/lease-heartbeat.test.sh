@@ -33,8 +33,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 ('$2' not in '$1')" ;; esac; 
 # --- stub gc: record each `bd heartbeat <id>`, honor a configurable exit code --
 # A refusal prints the store's own wording, so the report's reason is checkable.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'EOF'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'EOF'
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "heartbeat" ]; then
     printf '%s\n' "${3:-}" >> "$HB_LOG"
     rc="${FAKE_GC_HB_RC:-0}"

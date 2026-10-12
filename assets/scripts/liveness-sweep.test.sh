@@ -33,8 +33,7 @@ mkdir -p "$TMP/bin" "$TMP/show"
 # --- gc stub -------------------------------------------------------------------
 # Serves the census reads from fixture files, `bd show` from $SHOW_DIR/<id>.json,
 # the refile guard's closed listing from $PRIOR_VISITS, and records every write.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
 case "$sub" in
@@ -114,8 +113,7 @@ chmod +x "$TMP/bin/gc"
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
 # It serves $GH_PRS verbatim, an updatedAt on every row, so a test can date the
 # open PRs and show that no age changes how their anchors classify.
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
@@ -639,6 +637,23 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
+# A ruling's rework child carries no source_review_bead, like a human batch's, but
+# it answers the ruling. An anchor sent back to pre_open_gate keeps that closed
+# child, which must not read as the landed fix of a human objection nobody answered.
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"wr-anchor","status":"open","title":"edge-less human finding beside a ruling's rework","metadata":{"merge_result":"pre_open_gate","branch":"polecat/wr-anchor"}},
+  {"id":"wr-find","status":"open","title":"edge-less human must-fix finding","metadata":{"task_kind":"finding","finding.disposition":"must-fix","finding.lane":"human","anchor_bead":"wr-anchor"}}
+]
+JSON
+printf '[]\n' > "$TMP/show/dep-wr-find.json"
+printf '%s\n' '[{"id":"wr-fix","status":"closed","metadata":{"task_kind":"rework","anchor_bead":"wr-anchor","source_ruling_bead":"wr-visit"}}]' > "$TMP/show/reworks-wr-anchor.json"
+run_sweep
+grep -q 'wr-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "a ruling's landed rework was read as a human finding's fix" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "a ruling's landed rework answers no human finding — nothing escalated"
 
 echo "── the phase-aware census asks the resolver, with a controlled index ──"
 # A real index (not the missing-file fallback the rest of this file uses):

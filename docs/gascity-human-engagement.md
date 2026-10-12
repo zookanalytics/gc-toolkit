@@ -231,7 +231,7 @@ the alert model rather than duplicating them.
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
-bead that already exists — `mol-first-reaction` files one when its reaction
+bead that already exists — a first reaction files one when its reaction
 concludes the next move is the operator's,
 `liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
@@ -274,9 +274,10 @@ can have.
 message popup, `tmux-visit-prompt.sh` shows a chooser of every rig except the
 hq/city-workspace store — that store runs no reaction pool, so a topic filed
 there would park on the board with nobody to engage it, and it is dropped from
-the picker rather than offered. A suspended or not-running rig is still tagged,
-not withheld, since `gc rig suspend` keeps the beads store accessible and a
-report filed there is recorded and triaged on resume. The picker is defaulted to
+the picker rather than offered. A suspended rig is still tagged, not withheld,
+since `gc rig suspend` keeps the beads store accessible and a report filed there
+is recorded and triaged on resume. A rig with no agents running is idle, not
+paused, and is offered untagged. The picker is defaulted to
 the rig of the pane the key was pressed in (its `GC_RIG`, else the
 `<rig>__<agent>` session-name prefix; absent on a pane that names no rig, where
 the operator just picks). Enter confirms that default or the operator picks
@@ -295,12 +296,12 @@ the bar, not liveness: a suspended rig keeps its registered agents and still
 files (triaged on resume). An unreadable roster refuses nothing, so a degraded
 data plane never blocks an intake.
 
-**Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject. That formula triages the subject and
-takes one of its five dispositions. On the two that put the subject to the
-operator, a ruling or a recommend, its `advance-and-drain` step files a human
-gate on the subject, and `gate-visit-sweep` files the visit that resolves it on
-its next pass (see "How a sitting ends" below). A
+**Two paths, and the choice is not a preference.** The preferred path files a
+first reaction at the new subject. The reaction triages the subject and takes
+one of its five dispositions. On the two that put the subject to the operator, a
+ruling or a recommend, it files a human gate on the subject, and
+`gate-visit-sweep` files the visit that resolves it on its next pass (see "How a
+sitting ends" below). A
 ruling is Discuss-only: the reaction judges the capture a genuine fork, an
 irreversible or destructive action, or a policy call, and the operator arrives at
 a framed conversation with a first-reaction card already written. A recommend
@@ -388,11 +389,11 @@ holds — but engage files that one visit itself, so the async worker must not f
 a second. The subject is created marked `gc.reaction_owned=1`, in the same
 `gc bd create` write so the proactive scan never observes it unmarked. Three
 gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
-race-free gate, so a sweep never slings a first reaction at it),
-`sling_first_reaction_guard` refuses it as a no-op, and `mol-first-reaction`'s
-`advance-and-drain` consumes it fail-closed and files no visit if a direct pour
-reaches one — stamping `gc.proactive_reaction=1` first, so the engage counts as
-the reaction and no later scan re-reacts. The invariant is preserved, not
+race-free gate, so a sweep never files a first reaction for it),
+`reaction_absent_guard` refuses to file one as a no-op, and a reaction that
+reaches a marked subject anyway closes its own reaction bead without acting
+(`agents/proactive/prompt.template.md`). The engage counts as the reaction, and
+the marker stays, so no later scan reacts. The invariant is preserved, not
 relaxed: the subject gets exactly one operator-filed visit. If a later gate
 refuses the live spawn — a bad model, a suspended rig — the subject's one visit
 is still filed and parked on the board, so the topic is never lost; the operator
@@ -612,14 +613,18 @@ shepherd sitting simply omits the flag, and the PR stays on the merge track. The
 sign-off (`converse-signoff.sh`) discharges whichever demands the sitting filed:
 the visit demand always, the anchor demand only when the explicit hold was taken.
 
-A cut-short sign-off (`--ruled no`) is the one other time the merge waits. The
-conversation wait cannot ride the closing visit — a demand left on a closed visit
-is a gate `gate-visit-sweep` names on stderr forever and no return trip re-offers
-— so `converse-signoff.sh` moves it onto the ANCHOR: the liveness sweep re-offers
-the next sitting from `gc.demand_for=<anchor>`, and the merge holds until the
-abandoned question is answered or the demand is resolved. The moved wait carries
-the sitting's topic, so it refreshes this sitting's own demand on the anchor and
-never a sibling sitting's.
+A cut-short sign-off (`--ruled no`) is the one other time a sitting's question
+holds the merge. The conversation wait cannot ride the closing visit — a demand
+left on a closed visit is a gate `gate-visit-sweep` names on stderr forever and
+no return trip re-offers — so `converse-signoff.sh` moves it onto the ANCHOR:
+the liveness sweep re-offers the next sitting from `gc.demand_for=<anchor>`, and
+the merge holds until the abandoned question is answered or the demand is
+resolved. The moved wait carries the sitting's topic, so it refreshes this
+sitting's own demand on the anchor and never a sibling sitting's. A ruled
+sign-off that answers `--rework` holds the merge too, through the rework child's
+`blocks` edge, until the rework lands. It also returns every review lane to
+`unreviewed`, so the branch is re-reviewed at the head the rework lands rather
+than merged on reviews of the head the ruling outdated.
 
 A pre-PR (unanchored) item is the one case the conversation demand still gates
 directly, because its `held` lifecycle state is a hold marker that
@@ -692,8 +697,8 @@ that stamp. It asserts nothing about the sentence and blanks nothing —
   de-route cannot end it: an open step, even unrouted, keeps workflow-finalize
   blocked, so the molecule never reaps and its held steps keep drawing
   re-dispatches. A stood-down molecule should die, not park. The one molecule
-  spared is the releasing session's own — a mol-first-reaction terminal step
-  disposing the anchor it runs on — which closes its chain the normal way and
+  spared is the releasing session's own — a sitting disposing the anchor it runs
+  on — which closes its chain the normal way and
   only sheds its husk pins. An edge would assert a wait that does not exist.
 
   An anchor CLOSED before the stand-down reaches it — a fold that landed after

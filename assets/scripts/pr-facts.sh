@@ -23,7 +23,9 @@
 # nothing in flight re-dispatches, not only on the PR's first head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
 # operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
-# since rebasing is one horn of what a demand asks;
+# since rebasing is one horn of what a demand asks; a branch whose conflict is a
+# landed change deleting or rewriting the code it edits gets the operator's
+# supersession decision instead of a child (branch-supersession.sh);
 # dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
 # gc_city_own, never a review that is feedback; signoff_dismissed read back
 # FIRST; skipped under native auto-merge).
@@ -45,17 +47,21 @@
 # posture at that head, keeps it without the per-PR reads; any other anchor is
 # read as before.
 # Unanswered review feedback routes to something — a fix-pool rework child
-# carrying the review bodies and inline comments verbatim, or a visit when a
-# human already holds the anchor — with the watermarks advancing only once that
-# routing reads back. Feedback is decided by provenance, not by author: every
-# review, inline comment and conversation comment that is not the city's own post
-# (pr-post.sh's gc_city_own: marked by pr-post.sh, or under the city's login
-# before the anchor's provenance cutover, pr_provenance_since) is feedback,
-# whoever posted it, so a model review run under the city's own account routes
-# like a person's. This runs even while the anchor still conflicts: the rework
-# child is prepare_mode=merge, so it brings the branch current as it answers, and
-# the CONFLICTING arm above stands down when feedback is owed rather than filing a
-# redundant merge-in child. It routes under posture `commented` and equally under a
+# carrying the review bodies and inline comments verbatim, or a visit when the
+# city has nowhere to route work (no head branch or no fix pool) — with the
+# watermarks advancing only once that routing reads back. A hold on the anchor
+# does not choose the visit: the child is the fix unit a must-fix finding of the
+# batch attaches to, so it is filed whatever holds the anchor. Feedback is
+# decided by provenance, not by author: every review, inline comment and
+# conversation comment that is not the city's own post (pr-post.sh's
+# gc_city_own: marked by pr-post.sh, or under the city's login before the
+# anchor's provenance cutover, pr_provenance_since) is feedback, whoever posted
+# it, so a model review run under the city's own account routes like a person's.
+# This runs even while the anchor still conflicts: the rework child is
+# prepare_mode=merge, so it brings the branch current as it answers, and the
+# CONFLICTING arm above stands down when feedback is owed rather than file a
+# redundant merge-in child or defer the feedback behind a hold. It routes under
+# posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
 # comments under it out of the batch. An unmarked review posted under our own
@@ -69,7 +75,9 @@
 # in-flight review stands it down as well as a rework. It reads the same required
 # set merge.sh holds on (required_contexts_for) but routes on a terminal failure
 # only: a pending or missing required check has not failed, so it is left for a
-# later pass.
+# later pass. It parks the anchor to a person instead of dispatching when no
+# failing required check is a code failure, when the attempt cap is reached, or
+# when a fixer already sent to this head closed and the head has not moved.
 # Such a batch also ensures a live check_name=human validation pass on the
 # anchor: it is review the branch has never been answered against, so it enters
 # the graph as a task_kind=validation bead from which gate-ensure's quiescence
@@ -101,7 +109,10 @@
 # that cannot finish them posts no answer, so no comment is answered before it
 # is acknowledged. A thread a human answered after the city's reply is left
 # open, and so is one holding a comment above the mark: no batch covers that
-# comment, so nothing has answered it yet.
+# comment, so nothing has answered it yet. A thread left open this way keeps its
+# batch's record until it is resolved. One the city's identity cannot resolve
+# stays owed: every pass tries the resolve again, and the situation is filed as
+# one finding for the repository.
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
 # particular human review raised has closed — a must-fix fixed and landed, a
@@ -151,6 +162,23 @@ PROG="pr-facts"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# True when the fix unit a feedback batch was routed to has CLOSED: a rework
+# child closes when its branch lands, a visit when a person resolves it. That
+# close is the city's exchange with the operator moving off `outstanding` — the
+# reply is there to look at. A bare head move is NOT it: a merge-in of the base
+# branch or an operator's own push leaves the routed child open, and reading the
+# head alone would call such a move an answer. Mirrors the write-back sweep's
+# own landed test, which reads the same close off the same disposition.
+conversation_fix_landed() {
+  case "$1" in
+    rework:?* | visit:?*) : ;;
+    *) return 1 ;;
+  esac
+  local _st
+  _st=$(gc bd show "${1#*:}" --json 2>/dev/null | scrub \
+    | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+  [ "$_st" = "closed" ]
+}
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The single writer of the workflow-owned `status:` PR label. The full pass is its
 # authoritative reconcile: it runs for every open anchor and already mutates the
@@ -161,6 +189,10 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+# One durable bead per situation key, each recurrence tallied on it. The
+# write-back reports a review thread it cannot resolve through it
+# (wb_unresolvable).
+PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
 # The one resolver of the check index: the two merge-readiness all-green reads
 # below ask it for every declared lane (`--through merge` spans all phases),
 # which drops the non-lanes none/off and the approval merge rule in one place.
@@ -383,11 +415,43 @@ anchor_decision_held() { # <anchor-id>
 }
 # <<< anchor-decision-guard
 
+# Whether a conflict is a landed change superseding this branch rather than drift,
+# in which case bringing it current is the operator's decision and no merge-in
+# child goes. branch-supersession.sh owns the classification and the decision
+# visit; this only puts both tips where git can read them. Its own ref namespace,
+# overwritten per anchor, so nothing here moves a branch or a remote-tracking ref.
+# A tip that will not fetch, or a head that moved since GitHub reported it,
+# answers "proceed": the guard only ever withholds a dispatch it has put to a
+# person. 0 = hold.
+SUPERSESSION="$SCRIPTS_DIR/branch-supersession.sh"
+SUPERSESSION_REF="refs/gc-toolkit/pr-facts"
+supersession_holds() { # <anchor> <branch> <target> <head-oid> <pr-number>
+  local base_oid head_tip
+  [ -x "$SUPERSESSION" ] || return 1
+  git fetch --quiet --no-tags origin "+refs/heads/$3:$SUPERSESSION_REF/base" \
+    "+refs/heads/$2:$SUPERSESSION_REF/head" >/dev/null 2>&1 || return 1
+  base_oid=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/base^{commit}" 2>/dev/null)
+  head_tip=$(git rev-parse --verify --quiet "$SUPERSESSION_REF/head^{commit}" 2>/dev/null)
+  [ -n "$base_oid" ] && [ -n "$head_tip" ] && [ "$head_tip" = "$4" ] || return 1
+  "$SUPERSESSION" hold --anchor "$1" --branch "$2" --target "$3" \
+    --base "$base_oid" --head "$head_tip" --pr "$5"
+}
+
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
 # Listed in the precedence the derivation applies, strongest human signal first.
 PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
+# >>> pr-conversation-vocabulary
+# Mirrors lifecycle/lifecycle.toml [conversation]; pr-facts.test.sh fails on drift.
+# The values this script records against the watermarks. asking is the demand
+# edge and carries no key; covered waits on a comment-to-bead link nothing
+# writes yet — neither is recorded here. conv is set only from these literals,
+# so the derivation needs no runtime membership guard; this list exists for the
+# drift check, which eval's the block and compares it to lifecycle.toml.
+# shellcheck disable=SC2034  # read by pr-facts.test.sh's drift check, not here
+PR_CONVERSATIONS="quiet outstanding answered"
+# <<< pr-conversation-vocabulary
 # >>> pr-writeback-contract
 # The trail the operator reads in the PR. EYES marks a comment the city picked
 # up, and THUMBS_UP replaces it once the comment is answered, so a handled
@@ -585,6 +649,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # brings only an approved PR current.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
+# Which inline comments a dismissal retires, REVIEW_DISMISSAL_DEF; the comment
+# space counts only the live ones.
+# shellcheck source=review-dismissal.sh
+. "$_bd_lib_dir/review-dismissal.sh" || { echo "cannot source review-dismissal.sh beside this script" >&2; exit 1; }
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -605,12 +673,13 @@ reconcile_status_label() { # <anchor> <pr-number>
 # moved base (pr-retargeted), feedback nothing routed (pr-comments), review
 # threads nobody engaged (pr-unengaged-threads), threads branch protection
 # requires resolved (merge-blocked-threads), and red checks parked to a person
-# (pr-fix-noncode, pr-fix-capped). A PR closed with a pre-recorded disposition
-# has no merge left to hold, so the disposition arm retires these visits. An arm
-# that files a new merge-holding visit adds its key here.
+# (pr-fix-noncode, pr-fix-capped, pr-fix-unmoved). A PR closed with a
+# pre-recorded disposition has no merge left to hold, so the disposition arm
+# retires these visits. An arm that files a new merge-holding visit adds its key
+# here.
 MERGE_PATH_KEYS_JQ='
   def merge_path_key($n):
-    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped)\\." + $n + "$")
+    test("^pr-(abandoned|retargeted|fix-noncode|fix-capped|fix-unmoved)\\." + $n + "$")
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
     or . == "merge-blocked-threads";'
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
@@ -968,32 +1037,14 @@ drop_ids() { # <rows-json> <ids-json>
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
 # a dismissed review on /pulls/N/comments, so a dismissal that takes the body
 # out of the batch leaves the comments under it routing. A dismissal is the only
-# thing that retires them. The review space's filter is narrower than that and
-# cannot stand in for this one: it also drops an APPROVED review, whose inline
-# comments are live feedback, and a PR green everywhere else would merge over
-# them. A comment naming no review, or naming one the review list does not
-# carry, is standalone and stays.
-# Each kept comment is stamped with its review's submission instant as
-# gc_review_submitted_at, the instant gc_city_own dates an inline comment by: a
-# comment drafted in a pending review is published when the review is submitted,
-# so a review drafted before the provenance cutover and submitted after it reads
-# as feedback whole, never its body as feedback and its comments as the city's.
+# thing that retires them, and live_comments in review-dismissal.sh is that rule,
+# the one a dismisser reads to know what its dismissal would retire. The review
+# space's filter is narrower and cannot stand in for it: it also drops an
+# APPROVED review, whose inline comments are live feedback, and a PR green
+# everywhere else would merge over them.
 live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
   { printf '%s\n' "$1"; printf '%s\n' "$2"; } | \
-  jq -nc '
-    (input) as $revs | (input) as $cmts |
-    ([ $revs[]
-       | select(((.state // "") | tostring) == "DISMISSED")
-       | ((.id // 0) | tostring) ]) as $retired
-  | ([ $revs[]
-       | select(((.submitted_at // "") | tostring) != "")
-       | { key: ((.id // 0) | tostring), value: ((.submitted_at) | tostring) } ]
-     | from_entries) as $submitted
-  | [ $cmts[]
-      | (((.pull_request_review_id // "") | tostring)) as $parent
-      | select(($retired | index($parent)) == null)
-      | if ($submitted[$parent] // "") != ""
-        then . + { gc_review_submitted_at: $submitted[$parent] } else . end ]' 2>/dev/null
+  jq -nc "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'(input) as $revs | input | live_comments($revs)' 2>/dev/null
 }
 # A batch names the reviews it answers, the way a signoff-sourced child names
 # its review bead. An empty-bodied CHANGES_REQUESTED is named here even though
@@ -1417,10 +1468,11 @@ while IFS= read -r tagged; do
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
   # parked and this PR's branch is superseded by the pending re-dispatch, so the
-  # dispatch arms below stand down on it as they do for a merge_hold or a live
-  # demand: a rework minted against a branch about to re-pour is non-hand-offable,
-  # so a polecat can only refuse it and the pool re-offers the refusal until a
-  # human clears it.
+  # stale-base and red-check arms below stand down on it as they do for a
+  # merge_hold or a live demand: a rework minted against a branch about to re-pour
+  # is non-hand-offable, so a polecat can only refuse it and the pool re-offers
+  # the refusal until a human clears it. Review feedback is the exception, and
+  # the feedback arm says why.
   armed=$(printf '%s' "$row" | jq -r '.metadata["gc.dispatch_when_ready"] // ""')
 
   # --- the posture basis, as this pass's batched read shows it -----------------
@@ -1771,14 +1823,31 @@ MP_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  posture=""; conv=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; revs_open=""; cmts_raw=""; cmts_live=""; cmts_open=""; icmts_raw=""
-  cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
-  rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
-  iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
-  obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
-  orbatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_batch // "") | tostring')
-  oibatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_batch // "") | tostring')
+  # One read of every anchor-metadata key this block needs, not a jq fork per
+  # key — the pass runs for every open anchor every 60s. Joined on the unit
+  # separator (never valid inside these values) and split on the same, so an
+  # empty field keeps its slot instead of collapsing the way a tab or
+  # default-IFS split would.
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m < <(
+    printf '%s' "$row" | jq -r '[
+        (.metadata.pr_comment_watermark // ""),
+        (.metadata.pr_review_watermark // ""),
+        (.metadata.pr_issue_comment_watermark // ""),
+        (.metadata["pr.conversation"] // ""),
+        (.metadata.pr_comment_disposition // ""),
+        (.metadata.pr_comment_batch // ""),
+        (.metadata.pr_review_batch // ""),
+        (.metadata.pr_issue_comment_batch // ""),
+        (.metadata.pr_posture // ""),
+        (.metadata.pr_merge_state // "")
+      ] | map(tostring) | join("\u001f")')
+  # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
+  # key minus its instant), have_cv just the value. The derivation reads the
+  # value; the record below compares the value@head to skip a no-op write.
+  have_cvh=""; case "$have_c" in *@*@*) have_cvh="${have_c%@*}" ;; esac
+  have_cv="${have_cvh%@*}"
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
   case "$iwm" in ''|*[!0-9]*) iwm=0 ;; esac
@@ -1896,6 +1965,29 @@ MP_EOF
       [ "$max_c" -ge "$cwm" ] || max_c="$cwm"
       [ "$max_r" -ge "$rwm" ] || max_r="$rwm"
       [ "$max_i" -ge "$iwm" ] || max_i="$iwm"
+      # quiet is a statement about the COMPLETE raw lists, not the feedback
+      # maxima above — those keep only COMMENTED/CHANGES_REQUESTED bodies (max_r)
+      # and drop a dismissed review's inline comments and what its thread answered
+      # (max_c reads cmts_open), so a dismissed objection or an "approve, but
+      # rename X" would read as no feedback. quiet means no human utterance in ANY
+      # of the three spaces (state-model.md), so count every entry across the raw
+      # lists that is not the city's own post, by the same gc_city_own the
+      # feedback readers apply, with each inline comment dated by its review's
+      # submission the way live_comments dates it. The maxima drive only the
+      # watermark compare below. A count that does not read leaves any_human
+      # empty, and the derivation then records nothing rather than quiet.
+      any_human=$({ printf '%s\n' "$revs_raw"; printf '%s\n' "$cmts_raw"; printf '%s\n' "$icmts_raw"; } \
+        | jq -n --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+            (input) as $revs | (input) as $cmts | (input) as $icmts
+          | ([ $revs[] | select(((.submitted_at // "") | tostring) != "")
+               | { key: ((.id // 0) | tostring), value: (.submitted_at | tostring) } ]
+             | from_entries) as $submitted
+          | [ $revs[],
+              ($cmts[] | ($submitted[((.pull_request_review_id // "") | tostring)] // "") as $at
+                       | if $at != "" then . + { gc_review_submitted_at: $at } else . end),
+              $icmts[]
+            | select(gc_city_own($self; $since) | not) ] | length' 2>/dev/null)
+      case "$any_human" in ''|*[!0-9]*) any_human="" ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ] || [ "$max_i" -gt "$iwm" ]; then unanswered=1; fi
       # An unmarked review posted under OUR OWN login before the cutover leaves
       # unresolved finding threads arm 7 never counts — it reads them as the city's
@@ -1927,16 +2019,54 @@ MP_EOF
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
+      # --- conversation position: where the exchange with the operator stands --
+      # Read off the watermarks and the durable routing disposition, not a prior
+      # recorded position. quiet is nothing said. outstanding is an utterance
+      # above its space's watermark, or a batch routed to a fix unit that has not
+      # closed yet — the city still working it, held outstanding rather than
+      # collapsed to quiet. answered is that fix unit CLOSED
+      # (conversation_fix_landed): a rework child lands, or a visit is resolved,
+      # so the reply is there to look at. A bare head move is NOT answered — a
+      # merge-in of the base or an operator push leaves the child open.
+      # The disposition lands in the SAME transition as the watermark it routes
+      # past, so outstanding re-derives from it even when the pr.conversation
+      # write was dropped: a routed-but-unanswered comment never decays to
+      # unknown. A caught-up anchor with NO disposition and no carried position
+      # has nothing to assert and stays unknown — conv left empty records nothing,
+      # and the board renders an unrecorded position as unknown. Unanswered
+      # feedback is tested before quiet, so feedback above a watermark never reads
+      # quiet whatever the utterance count says, and an unread count says nothing.
+      if [ "$unanswered" = 1 ]; then
+        conv="outstanding"
+      elif [ -z "$any_human" ]; then
+        conv=""
+      elif [ "$any_human" = 0 ]; then
+        conv="quiet"
+      elif [ "$have_cv" = "answered" ]; then
+        conv="answered"
+      elif [ -n "$adisp" ]; then
+        if conversation_fix_landed "$adisp"; then conv="answered"; else conv="outstanding"; fi
+      elif [ "$have_cv" = "outstanding" ]; then
+        conv="outstanding"
+      else
+        conv=""
+      fi
     fi
   fi
   case " $PR_POSTURES " in
     *" $posture "*) : ;;
     *) [ -z "$posture" ] || { echo "$PROG: $id — refusing to record undeclared posture '$posture'" >&2; posture=""; } ;;
   esac
-  have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
+  # Posture and conversation are both head-pinned and re-pinned together on every
+  # push, so ONE transition records both: merge.sh reads the posture, the board
+  # reads the conversation, and a pass that moved neither writes neither
+  # (lifecycle skips a no-op, and the shell skips the call below when nothing
+  # changed). `pinned` tracks the POSTURE alone — a conversation-only write that
+  # fails still leaves a current posture for merge.sh, which is what
+  # --posture-only reports in its exit code.
+  PC_SETS=(); wrote_p=""; wrote_c=""
   if [ -n "$posture" ]; then
     want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
-    have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
     # pr_posture is a dated key: its review_required value starts an owed clock,
     # so the recorded value carries the instant as a third component and
     # lifecycle.sh preserves it while the posture and the head both hold. Only a
@@ -1946,11 +2076,27 @@ MP_EOF
     case "$have_p" in *@*@*) have_pv="${have_p%@*}" ;; esac
     if [ "$have_pv" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
       pinned=1
-    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           --set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
-      pinned=1
-      postured=$((postured + 1))
-      echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+    else
+      PC_SETS+=(--set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m"); wrote_p="$want_p"
+    fi
+  fi
+  # The conversation rides the same transition on every full or routing pass, and
+  # it MUST: --route-comments-only advances the watermark in its routing arm later
+  # this pass, so a record deferred past that arm would see unanswered=0 with no
+  # prior position and write nothing — outstanding would never land for a comment
+  # routed pre-merge. Record it here, before the route arm consumes unanswered,
+  # never gated on ROUTE_ONLY. --posture-only is the one pass that stops below
+  # without recording (it answers only for merge.sh, which ignores the key). conv
+  # is set only from the literals the vocabulary declares, so no membership guard
+  # is needed — pr-facts.test.sh checks the vocabulary against lifecycle.toml; conv
+  # non-empty implies a resolved head (the derivation above only ran under one).
+  if [ "$POSTURE_ONLY" != 1 ] && [ -n "$conv" ] && [ "$have_cvh" != "$conv@$head_oid" ]; then
+    PC_SETS+=(--set-dated "pr.conversation=$conv@$head_oid"); wrote_c="$conv@$head_oid"
+  fi
+  if [ ${#PC_SETS[@]} -gt 0 ]; then
+    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
+      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); }
+      echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}"
       # The posture value is where a review on the PR lands: an approval, a
       # comment, a change request, or a dismissal. A pass that changes it
       # re-derives the status: label now rather than leaving it for the full
@@ -1958,10 +2104,11 @@ MP_EOF
       # reports UNKNOWN while it computes a PR's mergeability, so most posture
       # writes are a merge state moving into or out of UNKNOWN, often for dozens
       # of open PRs in one arm. Keying on them would buy a derivation per PR in
-      # that arm, and the full pass reconciles those.
-      [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
+      # that arm, and the full pass reconciles those. A conversation-only write
+      # moves no label input.
+      [ -z "$wrote_p" ] || [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
     else
-      echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
+      echo "$PROG: $id posture/conversation record failed for PR#$num; retry next pass" >&2
     fi
   fi
   # merge.sh validates the posture recorded here and never asks GitHub, so an
@@ -2117,20 +2264,18 @@ REAP_EOF
     fi
   fi
 
-  # --- CONFLICTING: bring the branch current, or route its feedback -------------
-  # A conflicting anchor holds the merge. The operator-gate skip guards below — a
-  # hold, a live demand, an armed re-dispatch, a foreign blocker — defer the whole
-  # anchor, feedback included, because each parks the review by design and lifts
-  # on its own; the next pass routes the feedback then. A missing head branch or
-  # fix pool is not such a gate: it blocks only the merge-in dispatch, so an
-  # anchor owing feedback still falls through to the feedback arm, whose visit
-  # fallback dispositions the unresolved-branch and no-fix-pool cases. Past those
-  # guards the anchor is dispatchable, and what it owes decides how: with
-  # unanswered feedback it falls through to the feedback arm below (whose
-  # prepare_mode=merge child brings the branch current as it answers); otherwise
-  # this arm files the one merge-in child, once the PR is approved. The gate that
-  # splits the two, and the approval gate after it, sit just above the dedup.
-  if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+  # --- CONFLICTING: bring the branch current ----------------------------------
+  # A conflicting anchor holds the merge. One that also owes unanswered feedback
+  # belongs to the feedback arm below, whose prepare_mode=merge child brings the
+  # branch current as it answers, whatever holds the anchor. This arm stands
+  # aside for it: a merge-in child here would twin that child on the branch, and
+  # a skip guard here would leave the feedback unanswered behind a hold. With no
+  # feedback owed, this arm files the one merge-in child, after the skip guards
+  # below: a hold, a live demand, an armed re-dispatch or a foreign blocker
+  # defers the merge-in, and a missing head branch or fix pool leaves nowhere to
+  # dispatch it. Past them, the child is filed once the PR is approved, by the
+  # approval gate just above the dedup.
+  if { [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; } && [ "$unanswered" != 1 ]; then
     if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
@@ -2161,14 +2306,10 @@ REAP_EOF
     fi
     fix_branch="${head_ref:-$branch}"
     # fix_branch and FIX_POOL are needed only to DISPATCH the merge-in child, so
-    # this guard fires under the same condition as that dispatch (below). An anchor
-    # that owes unanswered feedback — or a --route-comments-only pass — does not
-    # dispatch one here; it falls through to the feedback arm, whose visit fallback
-    # dispositions exactly these cases (an unresolved head branch, no configured
-    # fix pool). Skipping the whole anchor would strand that feedback with no
-    # visit, no finding beads, and no validation pass.
+    # this guard fires under the same condition as that dispatch (below): a
+    # --route-comments-only pass dispatches none, so it is not skipped here.
     if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
-      if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+      if [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -2201,15 +2342,11 @@ REAP_EOF
       echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Past the skip guards, the anchor is dispatchable. When it also owes
-    # unanswered feedback, or on an early routing pass (--route-comments-only),
-    # this arm files no merge-in child: the feedback arm below dispatches a
-    # prepare_mode=merge child that brings this same branch current (a MERGE of
-    # origin/$base on resume) as it answers, so a merge-in child here would only
-    # twin it on the branch. Fall through to route the feedback. Only a full-pass
-    # conflict with no feedback owed dispatches this arm's own merge-in child,
-    # and only on an approved PR.
-    if [ "$unanswered" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
+    # Past the skip guards, the anchor is dispatchable. An early routing pass
+    # (--route-comments-only) files no merge-in child: routing feedback is its
+    # whole mandate, and this anchor owes none. Only the full pass dispatches this
+    # arm's merge-in child, and only on an approved PR.
+    if [ "$ROUTE_ONLY" != 1 ]; then
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
@@ -2336,6 +2473,15 @@ REAP_EOF
         echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
         skipped=$((skipped + 1)); continue
       fi
+      # A conflict is not always drift. When a change already on the base deleted
+      # or rewrote the code this branch edits, bringing it current decides whether
+      # the branch still has work to do, and a child sent to merge it would stop
+      # and ask. This is read after the dedup above, so a live child (one a sitting
+      # sent to re-scope the branch, say) stands the arm down first, and before the
+      # strand re-route below, so a superseded branch's strand is not routed either.
+      if supersession_holds "$id" "$fix_branch" "$base" "$head_oid" "$num"; then
+        skipped=$((skipped + 1)); continue
+      fi
       reuse=""
       if [ -n "$stranded" ]; then
         reuse="$stranded"
@@ -2397,25 +2543,25 @@ REAP_EOF
   # them.
   if [ "$unanswered" = 1 ]; then
     fix_branch="${head_ref:-$branch}"
-    routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
-    # Read once: the routing choice below turns on whether a person or a sitting
-    # is holding this anchor, and each answer costs a ledger read. The demand may
-    # sit on the anchor or on the live rework child reconciling its branch;
-    # anchor_decision_held reads both.
-    holding=""; anchor_decision_held "$id" && holding=1
 
-    # A human already holding this anchor gets the comments; filing work under a
-    # live human decision fights it, and a child told to answer comments may have
-    # to bring the branch current, which rebase_hold forbids. Absent any of that,
-    # and with a pool to route to, the comments become work.
+    # The batch becomes a rework child whenever there is a branch to work on and
+    # a pool to route it to, whatever holds the anchor. The child is the batch's
+    # fix unit: a must-fix ruling on a finding filed below hangs its
+    # close-ordering edge on the anchor's human-lane rework child (finding.sh
+    # set-disposition). A batch sent to a visit has no child of its own, so a
+    # finding ruled must-fix either holds the merge with nothing acting on it or
+    # attaches to an earlier batch's landed child and closes as answered by work
+    # that never saw it. merge_hold, rebase_hold, a route to a human, a live
+    # demand and an armed re-dispatch therefore choose nothing here. Each still
+    # gates what it gates elsewhere, the merge or the stale-base and red-check
+    # dispatches. The child brings the branch current by merge as it answers, as
+    # every rework child does. On an armed anchor its blocks edge keeps the
+    # anchor out of bd ready, so deferred-dispatch holds the re-pour until the
+    # feedback is answered rather than re-pour the branch under the child. Only
+    # when the city has nowhere to route work does the batch go to a person.
     why=""
     [ -n "$fix_branch" ] || why="the PR head branch is unresolved"
     [ -n "$FIX_POOL" ]   || why="no fix pool is configured"
-    is_held "$rhold"        && why="rebase_hold freezes the branch"
-    is_held "$hold"         && why="merge_hold is set"
-    [ "$routed" = "human" ] && why="the anchor is already routed to a human"
-    [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
-    [ -n "$armed" ]         && why="the anchor is armed to re-dispatch when ready"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
@@ -3014,17 +3160,20 @@ GATES
   # context in state failure/error) and leaves pending/missing to the next pass,
   # which sees the failure once it lands.
   #
-  # Two safety rails sit on the dispatch. The attempt cap stops it churning
-  # fixers at a genuinely stuck PR: once RC_FIX_ATTEMPT_CAP distinct red heads
-  # have each drawn a fixer without the PR reaching green, the anchor is parked
-  # to a human instead of dispatching another. The non-code exclusion keeps a
-  # code-fixer off a failure no code change can clear — a timeout, a
-  # cancellation, a startup failure, an action-required gate, or a deploy/preview
-  # platform (matched by name) — which is likewise parked. Both parks write the
-  # stand-down this arm already honors, gc.routed_to=human, through lifecycle.sh
-  # in one update with the takeaway the board shows as what the person owes, so
-  # the next pass stands the anchor down on its own and the fixer is never
-  # re-offered.
+  # Safety rails on the dispatch park the anchor to a human instead of sending a
+  # fixer. The attempt cap stops it churning fixers at a genuinely stuck PR: once
+  # RC_FIX_ATTEMPT_CAP distinct red heads have each drawn a fixer without the PR
+  # reaching green, the anchor is parked instead of dispatching another. The
+  # same-head park stops it repeating an attempt: a red-check child that closed
+  # at the head the PR is still red at means a fixer was already sent there, so
+  # the anchor is parked rather than sent a second. The non-code exclusion keeps
+  # a code-fixer off a failure no code change can clear — a timeout, a
+  # cancellation, a startup failure, an action-required gate, or a
+  # deploy/preview platform (matched by name) — which is likewise parked. Each
+  # park writes the stand-down this arm already honors, gc.routed_to=human,
+  # through lifecycle.sh in one update with the takeaway the board shows as what
+  # the person owes, so the next pass stands the anchor down on its own and the
+  # fixer is never re-offered.
   RC_FIX_ATTEMPT_CAP=3
   RC_DEPLOY_CHECK_RE="vercel|netlify|deploy"
   case "$merge_state" in
@@ -3039,9 +3188,10 @@ GATES
         && rc_why="the anchor is already routed to a human"
       anchor_decision_held "$id" && rc_why="a sitting holds it for an operator ruling"
       [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
-      # A held or human-steered anchor is theirs; file nothing under it, exactly
-      # as the conflict and feedback arms stand down on the same gates. The
-      # decision may be filed on the anchor or on the live rework child
+      # A held or human-steered anchor is theirs; file nothing under it, as the
+      # stale-base arm files no merge-in under a hold. Review feedback is the one
+      # batch filed whatever holds the anchor, for the reason the feedback arm
+      # gives. The decision may be filed on the anchor or on the live rework child
       # reconciling its branch; anchor_decision_held reads both.
       if [ -z "$rc_why" ]; then
         required_contexts_for "$base"
@@ -3113,12 +3263,25 @@ GATES
             fi
             rc_names=$(printf '%s' "$rc_code_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
             rc_urls=$(printf '%s' "$rc_code_json" | jq -r '[ .[] | .url | select(. != "") ] | join(" ")' 2>/dev/null)
+            # Every red-check child names the head it was sent to fix twice: in the
+            # title it is minted with ("$RC_TITLE required check red at head <oid>")
+            # and in its rejection_reason ("... at head <oid>"). Two writers unset
+            # rejection_reason: resuming a rework (mol-polecat-work's
+            # rejected-branch-resume block) and the refinery's landed-on-branch close
+            # (mol-refinery-patrol's one-anchor-per-pr-terminal). A child that has
+            # been worked keeps its head only in the title, so rc_heads reads both.
+            # The same-head park and the attempt cap below read a child's head
+            # through it.
+            RC_TITLE="Fix failing required check(s) on PR#$num:"
+            RC_HEADS_DEF='
+              def rc_heads($t):
+                ( ((.title // "") | tostring | select(startswith($t))),
+                  ((.metadata.rejection_reason // "") | tostring | select(test("Required check"))) )
+                | scan("head ([0-9a-fA-F]{7,40})"; "i") | .[0] | ascii_downcase;'
             # Dedup like the conflict arm, but keyed on anchor_bead so it also
             # stands down for an in-flight REVIEW child (a re-review that will move
             # the head), not only a rework: any LIVE child of this anchor means
-            # work already covers it, and any child (closed included) whose
-            # rejection_reason names THIS head means this head was already routed —
-            # re-dispatching it would loop on a head nothing moved.
+            # work already covers it.
             rc_kids=$(bd_list --metadata-field anchor_bead="$id" --status="$ALL_STATUSES") || {
               echo "$PROG: $id — PR#$num has a red required check but the child probe failed; nothing dispatched (retry next pass)" >&2
               skipped=$((skipped + 1)); continue
@@ -3135,39 +3298,65 @@ GATES
                 | select(((.metadata.merge_result // "") | tostring) == "")
                 | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
                 | .id ] | .[0] // empty' 2>/dev/null)
-            rc_dup=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg s "$rc_stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+            rc_dup=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg s "$rc_stranded" --arg live "$LIVE_STATUSES" '
               ($live | split(",")) as $ls
               | [ .[] | select(.id != $id) | select(.id != $s)
                   | ((.status // "open") | ascii_downcase) as $st
-                  | ((.metadata.rejection_reason // "") | tostring) as $rr
-                  | select((($ls | index($st)) != null)
-                           or (($h != "") and ($rr | contains("head " + $h))))
+                  | select(($ls | index($st)) != null)
                   | .id ] | .[0] // empty' 2>/dev/null)
             if [ -n "$rc_dup" ]; then
               echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
               skipped=$((skipped + 1)); continue
             fi
-            # Attempt cap. Each red-check child names the head it was sent to fix
-            # twice: in the title it is minted with ("$RC_TITLE required check red
-            # at head <oid>") and in its rejection_reason ("... at head <oid>").
-            # Two writers unset rejection_reason: resuming a rework
-            # (mol-polecat-work's rejected-branch-resume block) and the refinery's
-            # landed-on-branch close (mol-refinery-patrol's
-            # one-anchor-per-pr-terminal). A child that has been worked keeps its
-            # head only in the title, so both are read. The distinct hex heads
-            # across this anchor's children (any status), less this head, are the
-            # PRIOR attempts. At the cap, stop churning fixers at a stuck PR and
-            # park it to a human. A stranded child (rescued below) is this head's
-            # attempt whose route failed to land, not a new one, so it is never
-            # capped. Nothing lowers the count, so once an anchor reaches the cap
-            # every later red head parks it again, including the first pass after
-            # a person clears the route.
-            RC_TITLE="Fix failing required check(s) on PR#$num:"
-            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" '
-              [ .[] | select(.id != $id)
-                | ( ((.title // "") | tostring | select(startswith($t))),
-                    ((.metadata.rejection_reason // "") | tostring | select(test("Required check"))) )
-                | scan("head ([0-9a-fA-F]{7,40})"; "i") | .[0] | ascii_downcase ]
+            # A CLOSED red-check child sent to THIS head means this head was already
+            # routed to a fixer, and it is still red. Another fixer would repeat that
+            # attempt at a head nothing moved, and the attempt cap below counts only
+            # prior heads, so it would never stop the repeats. The anchor parks to a
+            # human instead. A child this script unmade at birth
+            # (gc.outcome=abandoned) was never routed, so no fixer was sent. A closed
+            # child of another arm is not read here: the red check is not what it
+            # was sent to fix.
+            rc_tried=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" "$RC_HEADS_DEF"'
+              ($h | ascii_downcase) as $hl
+              | [ .[] | select(.id != $id)
+                  | select(((.status // "open") | ascii_downcase) == "closed")
+                  | select(((.metadata["gc.outcome"] // "") | tostring) != "abandoned")
+                  | select(($hl != "") and any(rc_heads($t); . == $hl))
+                  | .id ] | .[0] // empty' 2>/dev/null)
+            if [ -n "$rc_tried" ]; then
+              # The head this pass read can predate the child's close, and the
+              # refinery closes a worked child only once its push has landed on the
+              # branch. So the head is read again, after the close, and the anchor
+              # parks only when it still names this head.
+              rc_head_now=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json headRefOid 2>/dev/null \
+                | scrub | jq -r '.headRefOid // ""' 2>/dev/null)
+              if [ "$rc_head_now" != "$head_oid" ]; then
+                echo "$PROG: $id — PR#$num head re-read as '${rc_head_now:-nothing}' rather than $head_oid after red-check child $rc_tried closed; nothing parked or dispatched (the next pass reads the head again)" >&2
+                skipped=$((skipped + 1)); continue
+              fi
+              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                   --route human \
+                   --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
+                escalate "$id" "pr-fix-unmoved.$num" \
+                  "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing gc.routed_to at this head parks it again. Once a push moves the head, clearing gc.routed_to lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
+                flagged=$((flagged + 1))
+                echo "$PROG: $id — PR#$num required check(s) failing ($rc_names) at head $head_oid, which red-check child $rc_tried was already sent to fix; parked to human (no new fixer dispatched)"
+              else
+                echo "$PROG: WARN $id — PR#$num is red at a head red-check child $rc_tried was already sent to fix, but parking the anchor to human did not land (retry next pass)" >&2
+                skipped=$((skipped + 1))
+              fi
+              continue
+            fi
+            # Attempt cap. The distinct heads this anchor's red-check children (any
+            # status) were sent to fix, less this head, are the PRIOR attempts. At
+            # the cap, stop churning fixers at a stuck PR and park it to a human. A
+            # stranded child (rescued below) is this head's attempt whose route
+            # failed to land, not a new one, so it is never capped. Nothing lowers
+            # the count, so once an anchor reaches the cap every later red head
+            # parks it again, including the first pass after a person clears the
+            # route.
+            rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" "$RC_HEADS_DEF"'
+              [ .[] | select(.id != $id) | rc_heads($t) ]
               | unique | map(select(. != ($h | ascii_downcase))) | length' 2>/dev/null)
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then
@@ -3426,6 +3615,26 @@ wb_swaps() {
     fi
     swapped=$((swapped + 1))
   done
+}
+# A review thread the write-back answered for a routed batch or a ruled machine
+# finding, and that this identity cannot resolve (viewerCanResolve false), stays
+# owed. Nothing records it done, so every later pass tries the resolve again and
+# logs the thread. GitHub withholds that right from the identity rather than
+# from one PR, so each pass files the situation once, as one finding for the
+# repository. A person learns of it without reading the log, and the finding
+# names no anchor, so it holds no merge the way an escalate.sh visit on the
+# anchor would.
+wb_unres_filed=0
+wb_unresolvable() { # <thread-id>
+  echo "$PROG: $wid — PR#$wnum thread $1 is not resolvable by this identity; left unresolved (retry next pass)" >&2
+  [ "$wb_unres_filed" = 0 ] || return 0
+  wb_unres_filed=1
+  [ -x "$PATROL_FINDING" ] || return 0
+  "$PATROL_FINDING" --key "pr-thread-unresolvable.$(printf '%s' "$ORIGIN_REPO" | tr -c 'A-Za-z0-9._-' '.')" \
+    --title "The PR write-back cannot resolve review threads on $ORIGIN_REPO" \
+    --message "GitHub reports viewerCanResolve false for $SELF_LOGIN on review threads of $ORIGIN_REPO that the PR write-back has answered, so the write-back cannot resolve them. It leaves each one open, tries the resolve again on every pass, and logs the PR and thread to the refinery-reconcile pass log. Restore the identity's right to resolve review threads and the next pass resolves them, or resolve them by hand." \
+    --scope refinery-findings --type bug --priority 2 >/dev/null 2>&1 \
+    || echo "$PROG: the finding for review threads this identity cannot resolve did not record; the next pass files it" >&2
 }
 # The early arms answer for the merge arm (--posture-only) or route feedback
 # early (--route-comments-only) and write nothing to GitHub; the full pass that
@@ -3949,7 +4158,7 @@ WB_LONG_THREADS
         | [ $cs | to_entries[] | .key as $k | .value
             | select(foreign) | select((.databaseId // 0) > 0 and .databaseId <= $cwm)
             | { id, s: "c", d: .databaseId, k: $k, rgs: (.reactionGroups // []),
-                mres: $mres, tres: $tres, canres: $canres, after: $after } + cstate("c"; .databaseId; ($offc[.databaseId | tostring] == true)) ] as $fc0
+                mres: $mres, tres: $tres } + cstate("c"; .databaseId; ($offc[.databaseId | tostring] == true)) ] as $fc0
         | any($fc0[]; .back == true) as $back
         | [ $fc0[] | . + { tback: $back } ] as $fc
         | { id: $t.id, fc: $fc, held: [ $fc[] | select(.ri != null) ], back: $back, mres: $mres, after: $after,
@@ -3972,8 +4181,15 @@ WB_LONG_THREADS
       def answered: if .by == "finding" then .posted
         elif .s == "c" then (.mres != null and .k < .mres)
         else tmarked("resolved"; .tok) end;
+      # Done with: answered, THUMBS_UP on, EYES off, and for an inline comment
+      # the thread resolved. A thread left open, live or not resolvable by this
+      # identity, keeps the record of its batch, so every later pass still
+      # answers for it. A thread holding a declined or deferred finding is for
+      # the operator to resolve, so its comments are done while it stays open. A
+      # comment its own finding answers is done once that answer is recorded
+      # posted, since the arm that posts the owed reply owns its thread.
       def final: .st == "resolved" and answered and rg(.rgs; $handled) and (rg(.rgs; $reaction) | not)
-        and (.by == "finding" or .s != "c" or .tres or .after > 0 or (.canres | not) or .tback == true);
+        and (.by == "finding" or .s != "c" or .tres or .tback == true);
     ( [ $items[] | select((rg(.rgs; $reaction) or rg(.rgs; $handled)) | not) | "R\t" + .id ]
     + (if $marking != 1 then [] else
         [ $T[] | . as $x
@@ -4071,12 +4287,15 @@ $WB_MARKER
       fi
     fi
     # A human who answered our reply is still using the thread; resolving it
-    # would close a live conversation, which is theirs to end, not ours. A
-    # declined or deferred finding in the thread waits for the operator.
+    # would close a live conversation, which is theirs to end, not ours. Their
+    # reply routes as feedback of its own, and its answer resolves the thread.
+    # A live thread, like one this identity cannot resolve, keeps its batch's
+    # record until it is resolved. A declined or deferred finding in the thread
+    # waits for the operator.
     case "$a3" in
       resolved) continue ;;
       live) echo "$PROG: $wid — PR#$wnum thread $a1 has a reply after ours; left unresolved"; continue ;;
-      norights) echo "$PROG: $wid — PR#$wnum thread $a1 is not resolvable by this identity; left unresolved" >&2; continue ;;
+      norights) wb_unresolvable "$a1"; continue ;;
       pushback) echo "$PROG: $wid — PR#$wnum thread $a1 holds a declined or deferred finding; left open for the operator"; continue ;;
     esac
     if gh_graphql 'mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' \
@@ -4366,13 +4585,15 @@ WB_REVIEW_CLEARS
   # thread, or, since a Conversation comment has no thread, by an edit that puts
   # the answer in place. A fixed finding's answered thread is resolved unless a
   # post that is not the city's own has come after it, which leaves that
-  # conversation to whoever wrote it. A declined or deferred finding's thread is
-  # left open for the operator to accept or overrule, and its answer carries the
-  # open line the BLOCKED arm counts. The markers are read back before any
-  # write, so a post whose stamp did not land is recorded rather than repeated,
-  # and a thread opened this pass is resolved by the next one, which can read it
-  # back. A posted finding whose comment is gone from the PR has nothing left to
-  # answer. Only a pass that read the threads cleanly acts.
+  # conversation to whoever wrote it. One this identity cannot resolve leaves the
+  # finding owed its answer, so every later pass tries the resolve again. A
+  # declined or deferred finding's thread is left open for the operator to
+  # accept or overrule, and its answer carries the open line the BLOCKED arm
+  # counts. The markers are read back before any write, so a post whose stamp
+  # did not land is recorded rather than repeated, and a thread opened this pass
+  # is resolved by the next one, which can read it back. A posted finding whose
+  # comment is gone from the PR has nothing left to answer. Only a pass that read
+  # the threads cleanly acts.
   if [ -n "$wfown" ] && [ "$wplan_ok" = 1 ] && [ -n "$whead" ]; then
     wffiles=""; wffiles_rc=""
     while IFS= read -r wfrow; do
@@ -4520,8 +4741,11 @@ $WB_FINDING_MARKER$wfid:answered -->$wfopen"; then
               echo "$PROG: $wid — PR#$wnum thread $wftid has a reply after finding $wfid; answered, left unresolved"
             elif [ -n "$wfopen" ]; then
               echo "$PROG: $wid — PR#$wnum finding $wfid is $(printf '%s' "$wfj" | jq -r '.disp'); thread $wftid left open for the operator"
-            elif [ "$(printf '%s' "$wfat" | jq -r '.resolved')" != "true" ] \
-                 && [ "$(printf '%s' "$wfat" | jq -r '.canres')" = "true" ]; then
+            elif [ "$(printf '%s' "$wfat" | jq -r '.resolved')" != "true" ]; then
+              if [ "$(printf '%s' "$wfat" | jq -r '.canres')" != "true" ]; then
+                wb_unresolvable "$wftid"
+                continue
+              fi
               if gh_graphql 'mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' \
                    -f t="$wftid" >/dev/null; then
                 resolved=$((resolved + 1)); wfwrote=1
@@ -4553,8 +4777,9 @@ WB_FINDINGS
   # The plan is this pass's own read of GitHub, so a plan that could not be built
   # retires nothing. Its K line names, per ledger, the records to keep: the
   # newest, and every one covering a comment whose final state that read did not
-  # show (answered, THUMBS_UP on, EYES off, its thread done). A record whose
-  # last write lands this pass is retired by the next pass's read.
+  # show (answered, THUMBS_UP on, EYES off, an inline comment's thread resolved
+  # or holding a declined or deferred finding). A record whose last write lands
+  # this pass is retired by the next pass's read.
   wkeep=$(printf '%s\n' "$wplan" | awk -F'\t' '$1 == "K" { print $2 "\t" $3 "\t" $4; exit }')
   if [ "$wbatch_ok" = 1 ] && [ "$wplan_ok" = 1 ] && [ -n "$wkeep" ]; then
     IFS="$(printf '\t')" read -r wkc wkr wki <<WB_KEEP

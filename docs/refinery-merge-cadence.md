@@ -307,14 +307,26 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass budget, and per anchor requires both sides to resolve there and
    probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase). An anchor pr-open
+   branch shape is brought current by merge, never rebase), whose hand-off the
+   bring-current guard holds to the same audit. An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
    arm 7 owns the dispatch. Both arms probe
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
    whichever sees a branch first files and the other stands down. The vetoes are
    arm 7's: `merge_hold`, `rebase_hold` on the anchor or on any bead naming the
-   branch, and a live demand. A failure here is not a merge hold — an anchor it
-   could not observe is left exactly as the pass found it.
+   branch, and a live demand. So is the supersession guard. Past the vetoes and
+   the dedup, both arms ask `branch-supersession.sh` whether the conflict is drift
+   or a change that landed first and deleted or rewrote code the branch edits.
+   Whether a superseded branch still has work to do is the operator's call, so
+   the arm files a `rework-base-supersession` visit on the anchor instead of a
+   child, and dispatches nothing while that visit is open and routed to somebody.
+   An open visit whose route addresses nobody holds nothing, and on a
+   supersession `escalate.sh` repoints it rather than filing a second. The guard
+   holds only behind an open visit that asks somebody, so a conflict it cannot
+   classify or record still gets the merge-in child
+   ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
+   A failure here is not a merge hold — an anchor it could not observe is left
+   exactly as the pass found it.
 6. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
    sentinel is respected), and every declared check is *raisable*: the lane
@@ -374,8 +386,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
    approved PR only, by the approval rule merge.sh lands on; the child's
-   handoff runs `bring-current-guard.sh`, which dismisses the approval and
-   files a visit when bringing the branch current took judgment), `BLOCKED`
+   handoff runs `bring-current-guard.sh`, which refuses it until the worker's
+   audit covers every conflict and, when the round conflicted, reopens triage
+   to rule on what it reopens and whether the approval stands, or rules closed
+   itself on an anchor that declares no triage lane
+   ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
+   conflict is a landed change deleting or rewriting code the branch edits,
+   the approved PR gets the operator's supersession decision instead of the
+   child, as for arm 5), `BLOCKED`
    (→ a visit under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
    from the branch's own rules. A missing required approving review files no
@@ -452,15 +470,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    body whose every inline comment is one. Such feedback sits inside the
    batch's range, but the batch's bead never saw it, so unless a finding names
    it, it is acknowledged and never marked. A record is dropped once
-   every comment it covers carries its final mark. The reactions are written
+   every comment it covers carries its final mark and every inline comment the
+   batch answered sits in a resolved thread, or in one a declined or deferred
+   finding holds open for the operator. The reactions are written
    first and bounded per pass; when the cap or a failed write leaves one owing,
    that pass posts no answer, so no comment is answered before it is
    acknowledged. A thread with a post after the city's own reply that is not
    itself the city's own is left open, and so is one holding a comment above
    the mark: no batch covers that
    comment, so nothing has answered it, and resolving would put the thread past
-   every later pass. Idempotence is read back off GitHub, so a repeat pass
-   writes nothing and a failed write is retried by the next one.
+   every later pass. A thread left open this way keeps its batch's record, so
+   every later pass still answers for it: the post that left it open routes as
+   feedback of its own, and the answer to that post resolves the thread. A
+   thread the city answered for a batch or for a ruled machine finding (below)
+   and cannot resolve under its identity (GitHub reports `viewerCanResolve`
+   false) stays owed. Each pass tries the resolve again and logs the thread,
+   and files the situation through `patrol-finding.sh` as one finding for the
+   repository, keyed `pr-thread-unresolvable.<owner>.<repo>`. The finding names
+   no anchor, so it holds no merge. Idempotence is read back off GitHub, so a
+   repeat pass writes nothing and a failed write is retried by the next one.
    The per-anchor walk runs under the arm's share of the pass budget,
    first the anchors that need action, then the rest in a rotation. Needing
    action is a PR that left the open list (a merge or a close to record), an
@@ -487,7 +515,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    comment is answered with how it closed: the fix units and the commits they
    made, the deferral's follow-up, or the decline. A fixed finding's
    thread is then resolved unless a post that is not the city's own has come
-   after it. A declined or deferred finding's thread stays open for the
+   after it. A thread the identity cannot resolve leaves the finding owed its
+   answer, as above. A declined or deferred finding's thread stays open for the
    operator to accept or overrule. A Conversation comment is edited to carry the
    answer. A finding that closed
    before it was posted, as a pre-open round's findings have, is posted with its
@@ -572,9 +601,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
    anchor on work nothing will run, and no other arm closes it. The pass
    proves the twin was never dispatched two ways: its metadata records no
-   route, deferred dispatch, claim, worktree, commit or outcome, and no convoy
-   tracks it, which is the edge every pour mints. It requires the review to be
-   closed, since close_review is signoff.sh's last write. It requires a sibling
+   route, deferred dispatch, claim, worktree, commit or outcome other than
+   `no-op`, and no convoy tracks it, which is the edge every pour mints. It
+   requires the review to be closed, since close_review is signoff.sh's last
+   write. It requires a sibling
    naming the same review and anchor to have landed: dispatched, not itself
    disposed or retired, and either recording `work_outcome=shipped` or closed
    with `rejection_reason` unset. signoff.sh stamps that field on every child.
@@ -583,9 +613,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    own. So a closed sibling counts only with `merge_result=merged`, or with
    neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
    hand close of a child whose polecat had begun still reads as a landing.
-   Closing the twin releases its blocks edge, and the
-   pass then stamps `duplicate_of` on it, so pr-stack.sh keeps it off the
-   branch's bead list. The arm runs after review-sweep so a twin that arm 2
+   The twin then records `gc.work_outcome=no-op`, the statement that it
+   pushed nothing: `bead-rehome.sh`'s duplicate evidence accepts it beside the
+   work-order `branch` rework-child.sh stamped on the twin, and it keeps the twin
+   off pr-stack.sh's bead list for the branch. A close that is held leaves the
+   twin in this pass, and the next pass finishes it. Closing the twin releases
+   its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
 12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
