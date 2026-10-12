@@ -657,11 +657,13 @@ keys = [
 #   review-outcome.sh, signoff.sh, pr-facts.sh, pre-open-rebase.sh and
 #   visit-close.sh. A review, rework, finding or validation child carries it
 #   from the create that files it (tools/lint-learned.d/create-then-stamp.sh
-#   holds that), so no child exists without it; pr-facts.sh stamps it onto the
-#   visit escalate.sh files for unengaged review threads. pr-facts.sh's
-#   red-check arm still adopts an open child of its own title whose anchor_bead
-#   is empty. On a review bead signoff.sh falls back to the up `blocks` edge and
-#   refuses the verdict if none resolves. Never cleared. A bead id.
+#   holds that); pr-facts.sh stamps it onto the visit escalate.sh files for
+#   unengaged review threads. Empty on an open child of a producer's own title,
+#   it marks one an earlier two-write create left behind: gate-ensure.sh,
+#   signoff.sh and pr-facts.sh close such a child before they file its
+#   replacement (bd_unmake_orphans in bd-lib.sh), and pr-facts.sh's red-check
+#   arm adopts one. On a review bead signoff.sh falls back to the up `blocks`
+#   edge and refuses the verdict if none resolves. Never cleared. A bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.
