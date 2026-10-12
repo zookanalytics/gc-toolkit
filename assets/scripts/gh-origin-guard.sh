@@ -1,7 +1,10 @@
 #!/bin/sh
-# gh-origin-guard.sh — Claude PreToolUse hook: refuse an agent-typed `gh` write
-# aimed at a repository this rig does not own, and a post on one it does own
-# whose body does not carry the city's provenance mark.
+# gh-origin-guard.sh — PreToolUse hook for Claude and Codex: refuse an
+# agent-typed `gh` write aimed at a repository this rig does not own, and a post
+# on one it does own whose body does not carry the city's provenance mark.
+# Codex sends a shell call in the payload shape Claude does (tool_name Bash,
+# tool_input.command, cwd) and reads the same deny object back, so one script
+# serves both; gh-origin-guard-codex.sh registers it for Codex.
 #
 # One bot account backs every agent's gh token, so any agent can write to any
 # repository that token reaches. Filing an issue, a PR, or a comment on someone
@@ -688,6 +691,61 @@ END {
 
 [ -n "${SCAN:-}" ] || exit 0
 
+# --- codex: the directory a call runs in ---------------------------------
+
+# Codex runs a shell call in the directory its `workdir` argument names, and its
+# payload carries neither that argument nor the directory it resolves to: `cwd`
+# is the session's. Codex records a call the model makes in the session
+# transcript before it runs this hook, so the directory is read from the call's
+# own line there, allowing the transcript writer a moment to catch up. A call
+# made from inside Codex's code-mode tool has no line of its own, so its
+# directory stays unknown. A payload carrying `turn_id` is Codex's; Claude's
+# carries none.
+#
+# Prints the directory, or nothing when it cannot be shown: no transcript, a
+# call not found in it, arguments that do not parse, or a directory that does
+# not exist. A call with no `workdir` runs in the session's directory, and a
+# relative one resolves against it, the way Codex joins the two.
+codex_call_dir() { # codex_call_dir <transcript> <call id> <session dir>
+    { [ -n "${1:-}" ] && [ -n "${2:-}" ] && [ -r "$1" ]; } || return 0
+    _tries=0
+    while :; do
+        _wd=$(tail -n 2000 -- "$1" 2>/dev/null | grep -F -- "\"$2\"" \
+            | jq -R -r --arg id "$2" '
+                fromjson?
+                | select(.type == "response_item"
+                         and .payload.type == "function_call"
+                         and .payload.call_id == $id)
+                | .payload.arguments
+                | (if type == "string" then (fromjson? // null) else . end)
+                | if type == "object" then "@" + ((.workdir // "") | tostring)
+                  else "?" end' 2>/dev/null | tail -n 1)
+        [ -n "$_wd" ] && break
+        _tries=$((_tries + 1))
+        [ "$_tries" -lt 10 ] || return 0
+        sleep 0.1
+    done
+    case "$_wd" in
+        '?') return 0 ;;
+        '@') _dir=$3 ;;
+        @/*) _dir=${_wd#@} ;;
+        *)   _dir="$3/${_wd#@}" ;;
+    esac
+    [ -d "$_dir" ] || return 0
+    printf '%s' "$_dir"
+}
+
+# An unknown directory is empty, never the session's: a write that resolves
+# against it finds no repository and is refused.
+CALL_DIR_UNKNOWN=""
+if printf '%s' "$PAYLOAD" | jq -e 'has("turn_id")' >/dev/null 2>&1; then
+    CWD=$(codex_call_dir \
+        "$(printf '%s' "$PAYLOAD" | jq -r '.transcript_path // ""' 2>/dev/null)" \
+        "$(printf '%s' "$PAYLOAD" | jq -r '.tool_use_id // ""' 2>/dev/null)" \
+        "$CWD")
+    [ -n "$CWD" ] || CALL_DIR_UNKNOWN=1
+fi
+
 # --- verdict -------------------------------------------------------------
 
 # --- provenance ----------------------------------------------------------
@@ -777,7 +835,7 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
         else
             case "$_cd" in
                 /*) _base=$_cd ;;
-                *)  _base="$CWD/$_cd" ;;
+                *)  if [ -n "$CWD" ]; then _base="$CWD/$_cd"; else _base=""; fi ;;
             esac
             [ -d "$_base" ] || _base=""
         fi
@@ -913,6 +971,20 @@ to land on a repository we own is treated as landing on someone else's.
 Run it from a checkout whose \`origin\` remote is the rig's repository, or hand
 the operator the exact command to send. Bead $PREPARE_PATH_BEAD carries the
 prepare-a-command path."
+fi
+
+if [ -z "${TARGET:-}" ] && [ -n "$CALL_DIR_UNKNOWN" ]; then
+    deny "gh-origin-guard: refused \`gh $NOUN $VERB\`.
+
+This Codex call names no repository of its own, so gh would resolve one from
+the directory the call runs in. That directory could not be read: the session
+transcript holds no line for this call, as for a call made from inside Codex's
+code-mode tool, or the \`workdir\` it names does not exist. The repositories
+this session may write to are: $OWNED.
+
+Name the repository explicitly, with \`--repo\` or in the \`gh api\` endpoint, if
+the write belongs to one of those. Bead $PREPARE_PATH_BEAD carries the path for
+a write that belongs somewhere else."
 fi
 
 if [ -z "${TARGET:-}" ] && [ "$NOUN" = "api" ]; then

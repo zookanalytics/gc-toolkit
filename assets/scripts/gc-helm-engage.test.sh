@@ -60,6 +60,26 @@
 #             explicit visit id and a freshly filed visit get no such hint
 #   (MOOT-GATE) a bound pre-existing visit whose blocks-gate has since closed is
 #             flagged possibly-moot from a read-only check of its blocks-deps
+#   (SKILL)   --skill files a NEW visit whose body is the lens brief, the name
+#             checked against the sitting's own roster (rig + model) and a bare
+#             name resolved to its full one; the title and summary name it
+#   (SKILL-TEMPLATE/REASON) an opener follows the lens brief and rides the title
+#   (SKILL-CODEX) the codex roster is read for a codex sitting, and the brief
+#             rides its kick
+#   (SKILL-UNKNOWN/AMBIG/BADNAME) a name the roster lacks, a bare name two packs
+#             carry, and a malformed or empty name are refused before anything
+#             is filed or spawned (exit 2)
+#   (SKILL-VISITID) --skill on an explicit visit id is refused (exit 2): its
+#             brief is already written, so the message points at the subject
+#   (SKILL-UNREAD) an unreadable roster seeds the typed name unverified
+#   (SKILL-NEWSUBJ) --new-subject with --skill: the title is the opener
+#   (IA-SKILL*) on a TTY a new visit is asked for a skill after the model (Enter
+#             = none, ? lists, a number picks, an unknown name is asked again);
+#             an existing visit is not asked
+#   (SUSPENDED, CTRL-*) a suspended subject rig refuses before anything spawns
+#             (exit 4), and so does an HQ running=false that gc status does not
+#             contradict. An idle rig, a missed ping gc status contradicts, and
+#             a rig list with no controller reading all engage
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,8 +104,7 @@ mkdir -p "$TMP/bin"
 # argv; `bd update --assignee` records the assignee to $ASSIGNEE so the read-back
 # `bd show tk-vis` reflects it, the way the real store would. $VIS_STATUS drives
 # the busy guard. Every session/mutating call is appended to $CALLS.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 SNAME="gc-toolkit__converse-1"
 SID="gc-77"
 # A mkdir lock, so two concurrent engages see one atomic check-and-write: the
@@ -94,16 +113,36 @@ stub_lock()   { _t=0; until mkdir "$1" 2>/dev/null; do sleep 0.02; _t=$((_t + 1)
 stub_unlock() { rmdir "$1" 2>/dev/null || true; }
 case "$1 ${2:-}" in
   "rig list")
-    # suspended/running are injected per-case via $RIG_SUSPENDED/$RIG_RUNNING.
-    # Unset means the field is ABSENT (an older gc that does not report it), which
-    # the liveness guard reads as unknown and does not refuse on — the default for
-    # every case that does not set them. The rig's checkout path is $RIG_PATH, a
-    # fixture that carries converse templates so the converse-template guard passes;
-    # a case points it at a template-less dir to exercise the refusal.
-    jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" \
-      '{rigs:[ ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk"}
+    # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
+    # controller, injected via $HQ_RUNNING. The rig's suspended/running are
+    # injected via $RIG_SUSPENDED/$RIG_RUNNING. Unset means the field is ABSENT (an
+    # older gc that does not report it), which the liveness guard reads as unknown
+    # and does not refuse on — the default for every case that does not set them.
+    # $NO_HQ_ROW drops the HQ row altogether, which reads as unknown the same way.
+    # The rig's checkout path is $RIG_PATH, a fixture that carries converse
+    # templates so the converse-template guard passes; a case points it at a
+    # template-less dir to exercise the refusal.
+    jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
+          --arg nohq "${NO_HQ_ROW-}" \
+      '{rigs:[ (if $nohq != "" then empty
+                else {name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+                     + (if $hq   != "" then {running:   ($hq   == "true")} else {} end) end),
+               ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
                + (if $run  != "" then {running:   ($run  == "true")} else {} end)) ]}' ;;
+  "status --json")
+    # The supervisor-aware controller reading the liveness guard asks before an
+    # HQ running=false counts. $STATUS_CONTROLLER sets .controller.running
+    # ("true"/"false"); "unknown" is the supervisor that is up but cannot say;
+    # "broken" prints something that is not JSON. Unset prints nothing, a
+    # gc status that gave no reading.
+    printf 'status --json\n' >> "$CALLS"
+    case "${STATUS_CONTROLLER-}" in
+      true)    printf '{"controller":{"running":true,"pid":7,"mode":"supervisor"}}\n' ;;
+      false)   printf '{"controller":{"running":false,"mode":"supervisor"}}\n'; exit 1 ;;
+      unknown) printf '{"controller":{"running":false,"pid":7,"mode":"supervisor","status":"unknown"}}\n' ;;
+      broken)  printf 'gc status: not json\n' ;;
+    esac ;;
   "session list")
     # Sessions the reclaim probe (sitting_is_gone) reads. Default: the current
     # $VIS_OWNER counts as live, so the pending/busy refusals hold unchanged. A
@@ -271,6 +310,21 @@ case "$1 ${2:-}" in
       printf '%s' "$SID" > "$SPAWNED"
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
+  "skill list")
+    # The sitting's skill roster engage --skill resolves against; the --agent it
+    # was asked about is recorded. Default: review-arch and review-pm, each
+    # listed twice the way the live listing repeats a skill the city and the rig
+    # both import, beside a core skill. $SKILL_AMBIG adds a second pack's
+    # review-arch so the bare name is ambiguous; $SKILL_ROSTER_BROKEN fails the
+    # listing, the fail-open path.
+    printf 'skill list %s\n' "$*" >> "$CALLS"
+    if [ -n "${SKILL_ROSTER_BROKEN:-}" ]; then echo "skill list: data plane down" >&2; exit 1; fi
+    jq -n --arg amb "${SKILL_AMBIG:-}" \
+      '{schema_version:"1", ok:true, agent:"a", entries:(
+          [ "core.gc-work", "gc-toolkit.review-arch", "gc-toolkit.review-arch",
+            "gc-toolkit.review-pm", "gc-toolkit.review-pm" ]
+          + (if $amb != "" then ["contributing.review-arch"] else [] end)
+          | map({name:., source:(split(".")[0]), path:("/skills/" + . + "/SKILL.md")}))}' ;;
   "session attach")
     printf 'session attach %s\n' "$*" >> "$CALLS" ;;
   "session suspend")
@@ -1017,28 +1071,97 @@ has "$OUT" "is suspended" "(SUSPENDED) …saying the rig is suspended"
 has "$OUT" "gc rig resume gc-toolkit" "(SUSPENDED) …and naming the resume as the fix"
 unset RIG_SUSPENDED
 
-echo "# a subject rig with no agents running is refused before anything spawns"
-export RIG_RUNNING=false
+echo "# a city whose controller is down is refused before anything spawns"
+# The reconciler, the controller's loop, is what launches the sitting; the HQ
+# row's running is gc's probe of that controller, and gc status confirms it.
+export HQ_RUNNING=false STATUS_CONTROLLER=false
 run_engage tk-vis --no-attach
-eq "$RC" 4 "(NOTRUNNING) engaging on a not-running rig exits 4"
-hasnt "$CALLED" "session new" "(NOTRUNNING) …and spawns nothing"
-has "$OUT" "no agents running" "(NOTRUNNING) …saying so"
-unset RIG_RUNNING
+eq "$RC" 4 "(CTRL-DOWN) engaging while the city controller is down exits 4"
+hasnt "$CALLED" "session new" "(CTRL-DOWN) …and spawns nothing"
+has "$CALLED" "status --json" "(CTRL-DOWN) …having asked gc status about the HQ reading"
+has "$OUT" "city controller did not answer" "(CTRL-DOWN) …saying the controller did not answer"
+has "$OUT" "both report it not running" "(CTRL-DOWN) …and that both readings agree"
+has "$OUT" "gc status" "(CTRL-DOWN) …and pointing at the city's status"
+hasnt "$OUT" "gc rig status" "(CTRL-DOWN) …not at the subject rig's"
+unset HQ_RUNNING STATUS_CONTROLLER
 
-echo "# an explicitly live rig (suspended=false, running=true) spawns as normal"
-# The guard refuses only on suspended=true or running=false, so a rig gc reports
-# as live must engage exactly as one that reports neither flag.
-export RIG_SUSPENDED=false RIG_RUNNING=true
+echo "# an HQ running=false that gc status cannot confirm or clear still refuses"
+# The ping missed and the second reading has nothing to say: a gc status that
+# prints nothing, prints something that is not JSON, or reports a supervisor
+# that is up but cannot tell. The HQ reading stands.
+export HQ_RUNNING=false
+for _st in "" broken unknown; do
+    STATUS_CONTROLLER="$_st" run_engage tk-vis --no-attach
+    eq "$RC" 4 "(CTRL-NOREAD:${_st:-empty}) an unconfirmed HQ running=false exits 4"
+    hasnt "$CALLED" "session new" "(CTRL-NOREAD:${_st:-empty}) …and spawns nothing"
+    has "$OUT" "'gc status' could not tell" "(CTRL-NOREAD:${_st:-empty}) …saying gc status could not tell"
+done
+unset HQ_RUNNING
+
+echo "# an HQ running=false that gc status contradicts engages"
+# A loaded controller can miss the socket ping that sets the HQ row; the
+# supervisor-aware reading in gc status answering running clears it.
+export HQ_RUNNING=false STATUS_CONTROLLER=true
 run_engage tk-vis --no-attach
-eq "$RC" 0 "(LIVE) engaging on an explicitly live rig exits 0"
+eq "$RC" 0 "(CTRL-PING-MISSED) engaging when gc status reports the controller running exits 0"
+has "$CALLED" "status --json" "(CTRL-PING-MISSED) …after asking gc status"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(CTRL-PING-MISSED) …and spawns the sitting"
+unset HQ_RUNNING STATUS_CONTROLLER
+
+echo "# a rig list with no HQ row reads as unknown and does not refuse"
+# An older gc, or one that stops listing the HQ, gives no controller reading.
+# Unknown never refuses, and gc status is not asked for a reading nothing
+# contradicts.
+export NO_HQ_ROW=1 STATUS_CONTROLLER=false
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(NO-HQ) engaging with no HQ row in the rig list exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(NO-HQ) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(NO-HQ) …without asking gc status"
+unset NO_HQ_ROW STATUS_CONTROLLER
+
+echo "# a suspended rig is refused on its suspension even while the controller is down"
+# The suspension is checked first, so the refusal names the fix that is the
+# subject rig's own, and gc status is never asked.
+export HQ_RUNNING=false RIG_SUSPENDED=true STATUS_CONTROLLER=false
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-DOWN) a suspended rig with the controller down exits 4"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-DOWN) …on the suspension"
+hasnt "$OUT" "city controller" "(SUSPENDED-CTRL-DOWN) …not on the controller"
+hasnt "$CALLED" "status --json" "(SUSPENDED-CTRL-DOWN) …and gc status is not asked"
+unset HQ_RUNNING RIG_SUSPENDED STATUS_CONTROLLER
+
+echo "# an idle subject rig (running=false) engages while the controller is up"
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches the sitting there like anywhere else.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=false
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(IDLE) engaging on an idle rig exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(IDLE) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(IDLE) …and an HQ running=true asks gc status nothing"
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
+
+echo "# a suspended rig is refused even while the controller is up"
+export HQ_RUNNING=true RIG_SUSPENDED=true
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-UP) a suspended rig still exits 4 with the controller up"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-UP) …on the suspension"
+unset HQ_RUNNING RIG_SUSPENDED
+
+echo "# an explicitly live city (controller running, rig not suspended) spawns as normal"
+# The guard refuses only on suspended=true or an HQ running=false, so a city gc
+# reports as live must engage exactly as one that reports neither flag.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=true
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(LIVE) engaging on an explicitly live city exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(LIVE) …and spawns the sitting"
-unset RIG_SUSPENDED RIG_RUNNING
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
 
 echo "# an open visit bound to a GONE sitting is reclaimed, then re-engaged"
-# A sitting whose rig was suspended/down at bind time never registers, leaving
-# the visit open+assigned to a session absent from `gc session list`. engage must
-# not point the operator at that dead session: it reclaims the visit (clears the
-# binding, re-parks on the board) and spawns a fresh sitting.
+# A sitting bound while its rig was suspended or the controller was down never
+# registers, leaving the visit open+assigned to a session absent from
+# `gc session list`. engage must not point the operator at that dead session: it
+# reclaims the visit (clears the binding, re-parks on the board) and spawns a
+# fresh sitting.
 export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-dead" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
 export LIVE_SITTINGS=""
@@ -1133,6 +1256,9 @@ has "$OUT" "Subject has open visit" "(IA-VISIT-EXISTING) …after listing the op
 has "$OUT" "[d] discuss broadly" "(IA-VISIT-EXISTING) …in one prompt that also offers the new-visit seed letters"
 hasnt "$CALLED" "bd create" "(IA-VISIT-EXISTING) …files nothing"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(IA-VISIT-EXISTING) …and engages it"
+# An existing visit's brief was written when it was filed, so there is no new
+# body for a skill to seed: the skill prompt is not asked.
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-EXISTING) …and asks no skill, since its brief is already written"
 unset HAVE_VISIT
 
 echo "# a subject engage grounds the operator with a one-line summary before the visit prompt"
@@ -1183,21 +1309,24 @@ unset HAVE_VISIT
 echo "# a seed letter at the one prompt files a NEW visit carrying that seed, even with a visit present"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter model (Opus)
-run_engage_tty 'd\n\n' tk-subj --no-attach
+# [d] new visit seeded discuss-broadly (one prompt, no separate starter) · Enter
+# model (Opus) · Enter skill (none)
+run_engage_tty 'd\n\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-TEMPLATE) new visit + template exits 0"
 has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
 hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
 has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
 has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
 has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
+has "$OUT" "Skill — Enter = none" "(IA-SKILL-NONE) a new visit is asked for a skill"
+hasnt "$CALLED" "Load that skill" "(IA-SKILL-NONE) …and Enter seeds none, leaving the seed as the whole brief"
 unset HAVE_VISIT
 
 echo "# free text at the one prompt opens a NEW visit carrying it verbatim as the opener"
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
-# free text (not a number or seed letter) · Enter model
-run_engage_tty 'lets revisit the scope\n\n' tk-subj --no-attach
+# free text (not a number or seed letter) · Enter model · Enter skill (none)
+run_engage_tty 'lets revisit the scope\n\n\n' tk-subj --no-attach
 eq "$RC" 0 "(IA-NEW-FREETEXT) new visit + free text exits 0"
 has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new visit is filed"
 has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"
@@ -1251,8 +1380,9 @@ unset VIS_CGROUP VIS_TRACKS
 echo "# a subject given by title search resolves and engages"
 export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SEARCH_HIT=1
 printf 'open' > "$VIS_STATUS"
-# search text · [1] pick the match · starter Enter (none) · model Enter (Opus)
-run_engage_tty 'findme\n1\n\n\n' --no-attach
+# search text · [1] pick the match · starter Enter (none) · model Enter (Opus) ·
+# skill Enter (none)
+run_engage_tty 'findme\n1\n\n\n\n' --no-attach
 eq "$RC" 0 "(IA-SUBJECT-SEARCH) a title-searched subject resolves and engages, exit 0"
 has "$CALLED" "session new converse-opus" "(IA-SUBJECT-SEARCH) …spawning for the resolved subject's visit"
 unset SEARCH_HIT
@@ -1347,7 +1477,7 @@ unset SUBJ_CREATE_FAIL
 
 echo "# --new-subject whose post-create gate aborts still files the subject's one visit"
 # The subject is created MARKED before the gates that can still refuse the live
-# engage (here an unknown --model, like the suspended/not-running rig and unknown
+# engage (here an unknown --model, like the suspended, controller-down and unknown
 # --template gates). An abort there must not leave the operator-origin subject with
 # no visit: the async worker will not supply one (gc-proactive drops a marked bead,
 # a reaction that reaches one stands down, and even unmarked a first reaction
@@ -1368,16 +1498,160 @@ hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
 
 echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"
 # One converse-capable rig in the stub, so the rig step auto-selects (reads no
-# input); the answers then feed the title prompt and the model prompt (Enter=Opus).
+# input); the answers then feed the title prompt, the model prompt (Enter=Opus),
+# and the skill prompt a new visit gets (Enter=none).
 export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
 printf 'open' > "$VIS_STATUS"
-run_engage_tty 'draft the Q3 plan\n\n' --new-subject --no-attach
+run_engage_tty 'draft the Q3 plan\n\n\n' --new-subject --no-attach
 eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
 has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
 SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--metadata' | head -n1)"
 has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
 has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
 has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
+
+# ── --skill: a sitting seeded with a skill as its lens ────────────────
+echo
+echo "# --skill files a NEW visit whose body is the lens brief, even with one parked"
+# The lens brief is the new visit's body, the claim-time brief every sitting
+# reads, so the skill reaches the sitting on any model with no per-skill
+# template. The name is checked against the roster of the sitting that will
+# spawn: its rig, and its model's converse agent.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL) --skill on a subject exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-opus" "(SKILL) the name is checked against the sitting's own roster (its rig and model)"
+has "$CALLED" "bd create" "(SKILL) …a NEW visit is filed, past the parked one"
+hasnt "$OUT" "already open" "(SKILL) …deliberately, past the one-visit dedup"
+has "$CALLED" "visit: tk-subj — review-arch lens" "(SKILL) …titled by the skill, so the board row says whose view it brings"
+has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL) …its body is the lens brief, the bare name resolved to the full one"
+has "$CALLED" "Load that skill" "(SKILL) …which has the sitting load the skill"
+has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, frame through the lens and wait"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(SKILL) …then a sitting spawns for the new visit"
+hasnt "$CALLED" "session nudge" "(SKILL) …and the opus sitting reads the lens from the body, unkicked"
+has "$OUT" "✓ converse-opus with review-arch on new visit" "(SKILL) the summary names the skill the sitting was seeded with"
+
+echo "# a full skill name resolves to exactly that skill"
+run_engage tk-subj --skill gc-toolkit.review-pm --no-input --no-attach
+eq "$RC" 0 "(SKILL-FULL) a full --skill name exits 0"
+has "$CALLED" "through the gc-toolkit.review-pm" "(SKILL-FULL) …and seeds exactly that skill"
+
+echo "# with an opener, the lens brief leads and the opener follows it"
+run_engage tk-subj --skill review-arch --template discuss-broadly --no-input --no-attach
+eq "$RC" 0 "(SKILL-TEMPLATE) --skill with --template exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"talk through tk-subj broadly"*)
+    ok "(SKILL-TEMPLATE) the body is the lens brief, then the seed as the opener that says what to do first" ;;
+  *) bad "(SKILL-TEMPLATE) the body should be the lens brief followed by the seed (got: $CALLED)" ;;
+esac
+has "$CALLED" "visit: tk-subj — review-arch lens: discuss broadly" "(SKILL-TEMPLATE) …and the title carries the skill, then the seed label"
+run_engage tk-subj --skill review-arch --reason "is the split justified" --no-input --no-attach
+eq "$RC" 0 "(SKILL-REASON) --skill with --reason exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"is the split justified"*)
+    ok "(SKILL-REASON) the reason follows the brief as the opener" ;;
+  *) bad "(SKILL-REASON) the body should be the lens brief followed by the reason (got: $CALLED)" ;;
+esac
+has "$CALLED" "visit: tk-subj — review-arch lens: is the split justified" "(SKILL-REASON) …and rides the title after the skill"
+
+echo "# a codex sitting is checked against codex's roster, and the brief rides its kick"
+run_engage tk-subj --skill review-arch --model codex --no-input --no-attach
+eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex" "(SKILL-CODEX) the roster read is the codex sitting's"
+has "$(printf '%s\n' "$CALLED" | grep '^session nudge')" "through the gc-toolkit.review-arch" "(SKILL-CODEX) …and the codex kick carries the lens brief"
+unset HAVE_VISIT
+
+echo "# a name the roster does not carry is refused before anything is filed"
+export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER=""
+run_engage tk-subj --skill nope --no-input --no-attach
+eq "$RC" 2 "(SKILL-UNKNOWN) an unknown --skill exits 2"
+has "$OUT" "unknown --skill 'nope'" "(SKILL-UNKNOWN) …naming the fault"
+has "$OUT" "core.gc-work gc-toolkit.review-arch gc-toolkit.review-pm" "(SKILL-UNKNOWN) …and listing what the sitting carries, deduped"
+hasnt "$CALLED" "bd create" "(SKILL-UNKNOWN) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-UNKNOWN) …nothing spawned"
+
+echo "# a bare name two packs both carry is ambiguous until named in full"
+export SKILL_AMBIG=1
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-AMBIG) an ambiguous bare --skill exits 2"
+has "$OUT" "contributing.review-arch gc-toolkit.review-arch" "(SKILL-AMBIG) …naming both candidates"
+hasnt "$CALLED" "bd create" "(SKILL-AMBIG) …nothing filed"
+run_engage tk-subj --skill gc-toolkit.review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-AMBIG) …and the full name settles it"
+has "$CALLED" "through the gc-toolkit.review-arch" "(SKILL-AMBIG) …seeding the named one"
+unset SKILL_AMBIG
+
+echo "# a malformed or empty --skill is refused before the roster is read"
+run_engage tk-subj --skill 'review|arch' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) a --skill carrying a metacharacter exits 2"
+hasnt "$CALLED" "skill list" "(SKILL-BADNAME) …refused before the roster is read"
+hasnt "$CALLED" "bd create" "(SKILL-BADNAME) …nothing filed"
+run_engage tk-subj --skill '' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) an empty --skill exits 2"
+run_engage tk-subj --skill=review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-BADNAME) the --skill=<name> spelling is accepted"
+
+echo "# --skill on an explicit visit id is refused — its brief is already written"
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-VISITID) --skill with an explicit visit id exits 2"
+has "$OUT" "engage tk-subj --skill review-arch" "(SKILL-VISITID) …pointing at the visit's subject"
+hasnt "$CALLED" "bd create" "(SKILL-VISITID) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-VISITID) …nothing spawned"
+
+echo "# a roster that will not read seeds the typed name unverified"
+# The same fail-open reading engage takes for a model it cannot confirm: the
+# operator's choice goes through, says it went unverified, and the brief tells
+# the sitting to say so if it cannot load the skill.
+export BEAD_KIND=task HAVE_VISIT="" VIS_OWNER="" SKILL_ROSTER_BROKEN=1
+run_engage tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-UNREAD) an unreadable roster does not block the engage"
+has "$OUT" "seeded unverified" "(SKILL-UNREAD) …it says the name went unverified"
+has "$CALLED" "through the review-arch" "(SKILL-UNREAD) …and the brief carries the name as typed"
+unset SKILL_ROSTER_BROKEN
+
+echo "# --new-subject with --skill: the subject title is the opener after the brief"
+export BEAD_KIND=task VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage "weigh the renderer split" --new-subject --rig gc-toolkit --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-NEWSUBJ) --new-subject with --skill exits 0"
+VISIT_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--metadata' | head -n1)"
+has "$VISIT_CREATE" "visit: tk-newsubj — review-arch lens: weigh the renderer split" "(SKILL-NEWSUBJ) the visit is titled by the skill, then the subject"
+has "$CALLED" "look at tk-newsubj through the gc-toolkit.review-arch" "(SKILL-NEWSUBJ) …and briefed with the lens on the new subject"
+
+echo "# on a TTY a new visit is asked for a skill after the model; a name seeds it"
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+# [d] new visit seeded discuss-broadly · Enter model (Opus) · skill review-arch
+run_engage_tty 'd\n\nreview-arch\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL) a skill typed at the prompt exits 0"
+case "$OUT" in
+  *"Model —"*"Skill — Enter = none"*) ok "(IA-SKILL) the skill prompt follows the model prompt" ;;
+  *) bad "(IA-SKILL) the skill prompt should follow the model prompt" ;;
+esac
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL) …the typed bare name seeds the resolved skill"
+has "$CALLED" "talk through tk-subj broadly" "(IA-SKILL) …with the picked seed following as the opener"
+has "$CALLED" "visit: tk-subj — review-arch lens: discuss broadly" "(IA-SKILL) …and both in the title"
+
+echo "# ? lists the sitting's skills, a number picks one, and an unknown name is asked again"
+# [d] seed · Enter model · "nope" (unknown, re-asked) · ? (list) · [2]
+run_engage_tty 'd\n\nnope\n?\n2\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL-LIST) list-then-pick exits 0"
+has "$OUT" 'no skill "nope" on this sitting' "(IA-SKILL-LIST) an unknown name is asked again, not refused"
+has "$OUT" "[2] gc-toolkit.review-arch" "(IA-SKILL-LIST) ? lists the roster, numbered"
+has "$OUT" "[3] gc-toolkit.review-pm" "(IA-SKILL-LIST) …deduped, each skill once"
+hasnt "$OUT" "[4]" "(IA-SKILL-LIST) …with no repeated entries"
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL-LIST) …and the number picks from that list"
+
+echo "# --skill on a TTY skips the visit/starter prompt: it already chose a new visit"
+run_engage_tty '\n' tk-subj --skill review-arch --no-attach
+eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
+hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no visit/starter prompt"
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
+has "$CALLED" "visit: tk-subj — review-arch lens" "(IA-SKILL-FLAG) …filing the new visit with the lens"
+unset HAVE_VISIT
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"

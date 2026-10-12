@@ -101,8 +101,7 @@ S
 : > "$TMP/updates"     # one line per `gc bd update` invocation (the full argv)
 
 # --- gc stub ------------------------------------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -186,13 +185,17 @@ case "$1 ${2:-}" in
     # is the write below that exits 0 and yet does not land — the reason lost on
     # its own, which is the drop the read-back must refuse the close on.
     outcome_reason="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reason" 2>/dev/null || true)"
+    # gc.work_outcome reads back from FAKE_OUTCOME_DIR/<id>.work, the work record
+    # dismiss stamps before a visit's close. Absent reads as no key at all.
+    work_outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.work" 2>/dev/null || true)"
     # A visit id (v-*) answers with its fixture row from FAKE_STEPS_JSON, so a
     # verb handed a VISIT (the board lists parked visits as rows of their own)
     # sees task_kind=visit and the subject it tracks, the way the store would.
     # gc.outcome still reads back from FAKE_OUTCOME_DIR, as for any bead.
     case "$id" in v-*)
-      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" --arg or "$outcome_reason" \
-            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc | .metadata["gc.outcome_reason"] = $or ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
+      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" --arg or "$outcome_reason" --arg wo "$work_outcome" \
+            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc | .metadata["gc.outcome_reason"] = $or
+               | if $wo == "" then . else .metadata["gc.work_outcome"] = $wo end ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
          && [ "$vrow" != "[]" ]; then
         printf '%s\n' "$vrow"; exit 0
       fi ;;
@@ -213,6 +216,7 @@ case "$1 ${2:-}" in
     else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
+    printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
     # Model bd's close-authority guard: a visit HELD by another session is
     # refused unless --force. A stub that closed it either way would leave the
     # escalation path untested behind a green suite.
@@ -230,11 +234,16 @@ case "$1 ${2:-}" in
     else printf '{"children":[]}\n'; fi ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
+    # FAKE_EVENTS logs updates and closes to one file, in the order they ran.
+    printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
     # A store that rejects the write. NOPIN stands for every reason the route
     # pins fail to land; the quiesce must not go on to unassign a bead it has
     # just failed to de-route. NOSTAMP is the same refusal on a VISIT, where
     # what fails to land is the outcome the board reads a finished sitting for.
     case "$3" in *NOPIN*|*NOSTAMP*) exit 1 ;; esac
+    # FAKE_WORK_OUTCOME_REFUSE=1 rejects any update naming gc.work_outcome: the
+    # store or gate that refuses the key, which must cost that write alone.
+    case " $* " in *" gc.work_outcome="*) [ -n "${FAKE_WORK_OUTCOME_REFUSE:-}" ] && exit 1 ;; esac
     # gc.takeaway_settled lands here so a read-back sees what was written.
     # FAKE_SETTLED_DROP=1 loses every one of them (no repair recovers it);
     # =multi loses it only out of a multi-pair stamp, which is the shape a lone
@@ -268,6 +277,9 @@ case "$1 ${2:-}" in
             1) ;;
             *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome_reason=}" > "$FAKE_OUTCOME_DIR/$3.reason" ;;
           esac ;;
+        # gc.work_outcome lands per visit so its read-back sees the work record.
+        gc.work_outcome=*)
+          [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.work_outcome=}" > "$FAKE_OUTCOME_DIR/$3.work" ;;
         # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
         # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
         # read-back reads absent. FAKE_EXEC_DROP=1 loses every clear (the store
@@ -338,7 +350,8 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_SETTLED="$TMP/settled" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
+       FAKE_EVENTS="$TMP/events"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 : > "$TMP/convoy-calls"
 
@@ -1347,6 +1360,132 @@ grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
   && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
   || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
 
+# ── takeaway --release --assign: release the bead TO a named agent ────────────
+# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# so work that is its own (a town-repo edit is mechanik's) is released to it as
+# its assignee, with no route. The stub reads a bead's assignee from the
+# assignees fixture, so a row there models an assignee that landed and its
+# absence models one that did not. Covered:
+#   (TOAGENT)      the assignee replaces the empty clear in the one release
+#                  write, and the route beside it stays empty
+#   (TOAGENTOK)    an assignee that reads back is written once, exit 0, and
+#                  the success line names the agent
+#   (TOAGENTREL)   --assign without --release is refused
+#   (TOAGENTBOTH)  --assign beside --route is refused before any write
+#   (TOAGENTDEAD)  an assignee that will not land is re-written once, then
+#                  fails the verb with the repair spelled out
+#   (TOAGENTBLK)   an open non-demand blocker refuses a bare --assign
+#   (TOAGENTWAIT)  …and a call that names its waits lands, edge and all
+#   (TOAGENTFOLD)  a closed anchor is refused on its disposition, quiesce kept
+AGENT="gc-toolkit.mechanik"
+cp "$TMP/assignees" "$TMP/assignees.orig"
+printf 'A-PARKED|%s\nA-BLOCKED|%s\n' "$AGENT" "$AGENT" >> "$TMP/assignees"
+: > "$TMP/updates"; : > "$TMP/routed"
+ARC=0
+sh "$SCRIPT" takeaway A-PARKED "actionable — a city.toml edit, mechanik's" \
+   --by proactive --release --assign "$AGENT" --no-wait >"$TMP/aout" 2>"$TMP/aerr" || ARC=$?
+ALINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$ALINE" in
+  *"--status=open --assignee=$AGENT --set-metadata gc.routed_to= "*) ok "(TOAGENT) the release assigns the bead to the named agent, with no route beside it" ;;
+  *) bad "(TOAGENT) the release write did not assign the agent with an empty route (got: ${ALINE:-<none>})" ;;
+esac
+case "$ALINE" in
+  *"--set-metadata gc.takeaway=actionable — a city.toml edit, mechanik's"*) ok "(TOAGENT) …in the write that carries the headline" ;;
+  *) bad "(TOAGENT) the headline split off the assign write: ${ALINE:-<none>}" ;;
+esac
+case "$ALINE" in
+  *"gc.proactive_reaction"*) bad "(TOAGENT) the assign write still stamps the retired proactive_reaction: ${ALINE:-<none>}" ;;
+  *) ok "(TOAGENT) …and stamps no retired proactive_reaction beside it" ;;
+esac
+case "$ALINE" in
+  *"--unset-metadata gc.session_name --unset-metadata gc.session_id"*) ok "(TOAGENT) …and the prior executor's session pins go with the old assignee" ;;
+  *) bad "(TOAGENT) the assign write kept the prior executor's pins: ${ALINE:-<none>}" ;;
+esac
+eq "$ARC" "0" "(TOAGENTOK) an assignee that reads back exits 0"
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(TOAGENTOK) …and is written once, with no repair"
+grep -q "released to $AGENT" "$TMP/aout" \
+  && ok "(TOAGENTOK) …and the success line names the agent" \
+  || bad "(TOAGENTOK) the success line lost the agent (stdout: $(cat "$TMP/aout"))"
+
+: > "$TMP/updates"
+RRC2=0
+sh "$SCRIPT" takeaway A-PARKED "no release" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || RRC2=$?
+eq "$RRC2" "2" "(TOAGENTREL) --assign without --release is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTREL) …and nothing was written"
+
+: > "$TMP/updates"
+BRC3=0
+sh "$SCRIPT" takeaway A-PARKED "both" --release --route "$POOL" --assign "$AGENT" >/dev/null 2>"$TMP/aerr" || BRC3=$?
+eq "$BRC3" "2" "(TOAGENTBOTH) --assign beside --route is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(TOAGENTBOTH) …and nothing was written"
+grep -q 'never both' "$TMP/aerr" \
+  && ok "(TOAGENTBOTH) …and the refusal says a bead takes one address" \
+  || bad "(TOAGENTBOTH) the refusal does not explain itself (stderr: $(cat "$TMP/aerr"))"
+
+# A-UNASSIGNED has no assignees row, so its assignee reads back empty however
+# often it is written: the store that will not take it.
+: > "$TMP/updates"
+DRC3=0
+sh "$SCRIPT" takeaway A-UNASSIGNED "dropped" --release --assign "$AGENT" --no-wait \
+   >"$TMP/aout" 2>"$TMP/aerr" || DRC3=$?
+eq "$(grep -c -- "--assignee=$AGENT" "$TMP/updates" || true)" "2" \
+   "(TOAGENTDEAD) an assignee that read back wrong is re-written once"
+grep -q "the assignee on A-UNASSIGNED read back as ''" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the miss is reported" \
+  || bad "(TOAGENTDEAD) the dropped assignee was silent (stderr: $(cat "$TMP/aerr"))"
+eq "$DRC3" "4" "(TOAGENTDEAD) an assignee that will not land is a verb runtime failure"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …and the failure says the bead reaches no agent" \
+  || bad "(TOAGENTDEAD) the persistent miss does not name its consequence (stderr: $(cat "$TMP/aerr"))"
+grep -q -- "--assignee $AGENT" "$TMP/aerr" \
+  && ok "(TOAGENTDEAD) …with the by-hand repair spelled out" \
+  || bad "(TOAGENTDEAD) no repair spelled out (stderr: $(cat "$TMP/aerr"))"
+grep -q 'takeaway set on' "$TMP/aout" \
+  && bad "(TOAGENTDEAD) the verb reported success on an unassigned bead" \
+  || ok "(TOAGENTDEAD) …and success is not reported"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+KRC=0
+sh "$SCRIPT" takeaway A-BLOCKED "assigned — the fix is mechanik's" \
+   --release --assign "$AGENT" --no-wait >/dev/null 2>"$TMP/aerr" || KRC=$?
+eq "$KRC" "2" "(TOAGENTBLK) an open non-demand blocker refuses a bare --assign"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(TOAGENTBLK) …before any write"
+grep -q 'w-child' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …naming the blocker the work is on" \
+  || bad "(TOAGENTBLK) the blocker is unnamed (stderr: $(cat "$TMP/aerr"))"
+grep -q -- '--then-assign' "$TMP/aerr" \
+  && ok "(TOAGENTBLK) …and the blocked exit that names the wait" \
+  || bad "(TOAGENTBLK) no blocked-exit re-run named (stderr: $(cat "$TMP/aerr"))"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+WRC3=0
+sh "$SCRIPT" takeaway A-BLOCKED "held — mechanik edits once the child lands" \
+   --release --assign "$AGENT" --waiting-on w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
+eq "$WRC3" "0" "(TOAGENTWAIT) an --assign that names its wait lands"
+grep -qE "^bd update A-BLOCKED .*--assignee=$AGENT" "$TMP/updates" \
+  && ok "(TOAGENTWAIT) …assigned to the agent" \
+  || bad "(TOAGENTWAIT) the assignee was lost: $(cat "$TMP/updates")"
+grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
+  && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
+  || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/updates"
+FRC3=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "assign a disposed bead" --by proactive \
+   --release --assign "$AGENT" >"$TMP/aout" 2>"$TMP/aerr" || FRC3=$?
+eq "$FRC3" "4" "(TOAGENTFOLD) --assign on a closed anchor is a verb runtime failure"
+grep -q -- '--assignee' <<< "$(line_for CLOSED-A-FOLD)" \
+  && bad "(TOAGENTFOLD) a disposed bead was handed to an agent" \
+  || ok "(TOAGENTFOLD) …and the agent is never assigned"
+grep -q 'NOT assigned' "$TMP/aerr" \
+  && ok "(TOAGENTFOLD) …and the refusal says so" \
+  || bad "(TOAGENTFOLD) the refusal is unexplained (stderr: $(cat "$TMP/aerr"))"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(TOAGENTFOLD) …while the quiesce a fold still needs runs" \
+  || bad "(TOAGENTFOLD) the refusal took the quiesce with it"
+mv "$TMP/assignees.orig" "$TMP/assignees"
+
 # ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
 # whitespace collapse, before every side effect.
@@ -1440,7 +1579,7 @@ printf '%s\n' "$*" >> "$REC_PVC_LOG"
 REC
 chmod +x "$TMP/rec-pvc"
 
-: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/pvc.log"
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/pvc.log"; : > "$TMP/events"
 DOUT="$(GC_VISIT_COMMENT_TOOL="$TMP/rec-pvc" REC_PVC_LOG="$TMP/pvc.log" sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
 DERR="$(cat "$TMP/derr")"
 
@@ -1475,6 +1614,27 @@ if grep -q 'gc.outcome=dismissed' <<< "$VU"; then
 else
     bad "(DISMISS-OUTCOME) the visit closes with no outcome, invisible to every reader of finished sittings (got: ${VU:-<no update on v-HELD>})"
 fi
+
+# (DISMISS-WORK-OUTCOME) the visit is also stamped gc.work_outcome=no-op, the
+# value the work-record gate in `gc bd close` wants for a bead that ships no
+# commit, which a visit never does. The gate reads the bead at the close, so the
+# stamp must land BEFORE it: FAKE_EVENTS holds updates and closes in the order
+# they ran, and the work stamp must precede the first close of v-HELD. It is a
+# write of its own, never riding the gated outcome stamp.
+if grep -q 'gc.work_outcome=no-op' <<< "$VU"; then
+    ok "(DISMISS-WORK-OUTCOME) the closed visit is stamped gc.work_outcome=no-op"
+else
+    bad "(DISMISS-WORK-OUTCOME) the visit closes with no work outcome, failing the close's work-record gate (got: ${VU:-<no update on v-HELD>})"
+fi
+WO_AT=$(grep -n '^bd update v-HELD .*gc.work_outcome=no-op' "$TMP/events" | head -1 | cut -d: -f1 || true)
+CL_AT=$(grep -n '^bd close v-HELD' "$TMP/events" | head -1 | cut -d: -f1 || true)
+if [ -n "$WO_AT" ] && [ -n "$CL_AT" ] && [ "$WO_AT" -lt "$CL_AT" ]; then
+    ok "(DISMISS-WORK-OUTCOME) …before the close the gate checks"
+else
+    bad "(DISMISS-WORK-OUTCOME) the work stamp does not precede the close (stamp at line ${WO_AT:-none}, first close at line ${CL_AT:-none}): $(cat "$TMP/events")"
+fi
+eq "$(grep 'gc.work_outcome=' <<< "$VU" | grep -c 'gc.outcome=' || true)" "0" \
+   "(DISMISS-WORK-OUTCOME) …in a write of its own, apart from the gated outcome stamp"
 
 # (DISMISS-NOSUBJECT) dismiss ends the sitting and writes NOTHING to the
 # subject: the DONE band the closed anchor lands in carries no per-row state,
@@ -1692,6 +1852,39 @@ if grep -q 'was NOT dismissed' <<< "$RDOUT"; then
 else
     bad "(DISMISS-REASON-DROPPED) the refusal is not stated as one (got: $RDOUT)"
 fi
+
+# (DISMISS-WORK-REFUSED) the work stamp never holds the close. A store that
+# refuses gc.work_outcome fails that write alone: the outcome still lands, the
+# visit still closes, and the dismiss succeeds. The outcome files are shared
+# across dismiss cases, so v-HELD's are cleared first.
+: > "$TMP/updates"; : > "$TMP/closes"
+rm -f "$TMP/outcomes/v-HELD" "$TMP/outcomes/v-HELD.reason" "$TMP/outcomes/v-HELD.work"
+WRRC=0
+WROUT="$(FAKE_WORK_OUTCOME_REFUSE=1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || WRRC=$?
+eq "$WRRC" "0" "(DISMISS-WORK-REFUSED) a refused work stamp does not fail the dismiss"
+if grep -q 'closed visit v-HELD' <<< "$WROUT"; then
+    ok "(DISMISS-WORK-REFUSED) …and the visit still closes"
+else
+    bad "(DISMISS-WORK-REFUSED) the refused work stamp held the close (got: $WROUT)"
+fi
+eq "$(cat "$TMP/outcomes/v-HELD" 2>/dev/null)" "dismissed" \
+   "(DISMISS-WORK-REFUSED) …with its outcome recorded"
+
+# (DISMISS-WORK-KEPT) a work outcome the visit already records is another
+# writer's word: dismiss closes the visit without writing over it.
+: > "$TMP/updates"; : > "$TMP/closes"
+rm -f "$TMP/outcomes/v-HELD" "$TMP/outcomes/v-HELD.reason"
+printf 'abandoned' > "$TMP/outcomes/v-HELD.work"
+WKOUT="$(sh "$SCRIPT" dismiss A-PARKED 2>&1)" || true
+if grep -q 'closed visit v-HELD' <<< "$WKOUT"; then
+    ok "(DISMISS-WORK-KEPT) the visit closes"
+else
+    bad "(DISMISS-WORK-KEPT) the visit did not close (got: $WKOUT)"
+fi
+eq "$(grep -c '^bd update v-HELD .*gc.work_outcome=' "$TMP/updates" || true)" "0" \
+   "(DISMISS-WORK-KEPT) …and nothing is written over the recorded work outcome"
+eq "$(cat "$TMP/outcomes/v-HELD.work")" "abandoned" "(DISMISS-WORK-KEPT) …which still reads as it was"
+rm -f "$TMP/outcomes/v-HELD.work"
 
 # (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
 # visit. Reading the two the same way stamps the marker over a sitting the verb
@@ -1934,8 +2127,7 @@ JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
 : > "$LIVE_LOG"
 
-cat > "$LIVE/bin/gc" <<'GCL'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$LIVE/bin/gc" <<'GCL'
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
 # answers the state the earlier write left behind.
 # Fail CLOSED: an unchecked `jq > … && mv` drops the write silently when the
@@ -2157,8 +2349,7 @@ PATH="$SAVED_PATH"
 # Its own stub: the release-quiesce fixture above answers `bd list` with step
 # beads, and demand reads `bd list` for an existing open demand.
 mkdir -p "$TMP/bin2"
-cat > "$TMP/bin2/gc" <<'GC2'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin2/gc" <<'GC2'
 printf '%s\n' "$*" >> "$D_LOG"
 case "$1 ${2:-}" in
   "rig list")
@@ -2712,16 +2903,18 @@ printf '[]\n' > "$D_LIST"
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^rigs_count() {/,/^}/p;/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
-cat > "$TMP/enumbin/gc" <<'ENUMGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
 [ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
 exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
 PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
 with_timeout() { shift; "$@"; }
+. "$2"
 . "$1"
 before="$(trap)"
 enumerate_rigs
@@ -2731,7 +2924,7 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
 grep -q 'RIGS\[\[' <<< "$EOUT" \
   && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
   || bad "(ENUM) the helper did not enumerate (out: $EOUT)"

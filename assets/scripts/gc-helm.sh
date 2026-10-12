@@ -44,9 +44,9 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
-  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, and model; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, model, and, for a new visit, skill; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a visit with the Architect). --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
@@ -70,14 +70,24 @@ once the reconciler has started it;
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
 visits and offers engage-existing or a new visit, prompts a new visit's starter
-(a numbered seed, Enter for none, or free text sent verbatim), and prompts the
-model as a numbered choice over the configured variants. Any command-line value
+(a numbered seed, Enter for none, or free text sent verbatim), prompts the
+model as a numbered choice over the configured variants, and for a new visit
+asks for a skill (Enter for none, ? to list them). Any command-line value
 pre-fills and skips its prompt (--subject/positional, --reason/--template,
---model); --no-input reverts to the flag-driven one-shot behavior. Starter seeds
-live in assets/scripts/gc-helm-engage-starters.sh. A --reason or --template with
-a SUBJECT files a new visit carrying that opener and engages it even when one is
-parked, passing --allow-duplicate through to open and --body the opener as the
-claim-time brief. With no starter, an existing parked visit is engaged and a
+--model, --skill); --no-input reverts to the flag-driven one-shot behavior.
+Starter seeds and the lens brief live in assets/scripts/gc-helm-engage-starters.sh.
+--skill <name> takes any skill on the sitting's roster (gc skill list --agent
+<rig>/gc-toolkit.converse-<model>), a bare name resolving to its one full
+match (review-arch to gc-toolkit.review-arch). The new visit's brief tells the
+sitting to load that skill, read the subject through it, and leave the
+skill's final writes, such as a review verdict, to the bead it was written
+for; a --reason or --template opener follows the brief. It is refused on an
+explicit visit id, whose brief is already written, and on a name the roster
+does not carry; a roster that will not read seeds the name unverified. A
+--reason, --template or --skill with a SUBJECT files a new visit carrying that
+opener and engages it even when one is parked, passing --allow-duplicate
+through to open and --body the opener as the claim-time brief. With no
+starter, an existing parked visit is engaged and a
 fresh one is filed only when the subject has none. A --reason with an explicit
 visit id is refused, because a new visit needs a subject and the reason would
 otherwise be dropped. The summary and prompts print on stdout; a single [debug]
@@ -100,7 +110,13 @@ CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
-blocker and a pool has nothing to perform here; --waiting-on (repeatable)
+blocker and a pool has nothing to perform here; --assign <named-agent> releases
+it TO a named agent instead, in the same write, as its assignee and with no
+route, because a named agent's hook matches its assignee and never reads
+gc.routed_to. --assign is refused beside --route and on a closed anchor, and
+without --waiting-on also on a bead blocked by anything but its own demand;
+with --waiting-on the named waits gate the hand-off, since the agent's hook
+offers the bead only once bd reports it ready; --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
 whether it landed. --no-wait is the other answer to the same question: this
 sitting settled the subject and nothing is waiting on it. It stamps
@@ -161,6 +177,14 @@ meta_now() {
         | jq -r --arg k "$2" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
 }
 
+# assignee_now <bead> — the bead's top-level assignee as the store reads it now,
+# empty when unassigned or unreadable. Same pinned store as meta_now.
+assignee_now() {
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
+}
+
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
 # a demand bead's TITLE is the same board headline a takeaway stamp carries, so
@@ -217,6 +241,18 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { echo "$PROG: cannot source converse-capability.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-visit-open.sh so engage's guard and the intake's note cannot diverge.
+# Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { echo "$PROG: cannot source city-liveness.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer so dismiss cannot diverge from them. Exposes
+# work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
+    || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -272,7 +308,8 @@ sitting_is_gone() {
 }
 
 # ── Rig enumeration ──────────────────────────────────────────────────
-# Sets RIGS (JSON array of {name,path,prefix,suspended,running}); exits 3 with a per-cause
+# Sets RIGS (JSON array of {name,path,prefix,hq,suspended}, plus running on the
+# HQ row; city-liveness.sh's RIG_PROJECTION_JQ); exits 3 with a per-cause
 # sentence otherwise. Each failure names its own operator move because for a
 # non-CLI caller (the web board's open button) the code plus the sentence is
 # the whole signal.
@@ -337,10 +374,11 @@ enumerate_rigs() {
            exit 3 ;;
     esac
 
-    # Carry suspended/running through: engage's liveness guard reads them from
-    # this same enumeration. A `gc rig list` that omits either leaves it null,
-    # which the guard treats as unknown and never refuses on.
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, suspended, running}]' 2>/dev/null || printf '[]')
+    # The projection carries the flags engage's liveness guard reads from this
+    # same enumeration (city-liveness.sh says which, and why a rig row's running
+    # is not one). A `gc rig list` that omits a flag leaves it null, which the
+    # guard treats as unknown and never refuses on.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null || printf '[]')
     if [ "$(rigs_count)" -eq 0 ]; then
         # gc answered correctly: this city really has no rigs. Not a malfunction.
         echo "$PROG: no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." >&2
@@ -358,23 +396,6 @@ rig_path_for_bead() {
 rig_name_for_bead() {
     enumerate_rigs
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
-}
-
-# rig_suspended_for_bead <bead-id> / rig_running_for_bead <bead-id> — the
-# liveness flags `gc rig list` reports for the rig owning the bead: "true" or
-# "false", or EMPTY when the field is absent (an older gc that does not report
-# it). engage's guard refuses only on an explicit suspended=true or
-# running=false, so an empty read is unknown and never refuses — the flag is a
-# safety net over today's behaviour, not a new precondition on every engage.
-rig_suspended_for_bead() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
-        '.[] | select(.prefix==$p) | if (.suspended == null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1
-}
-rig_running_for_bead() {
-    enumerate_rigs
-    printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
-        '.[] | select(.prefix==$p) | if (.running == null) then "" else (.running|tostring) end' 2>/dev/null | head -n1
 }
 
 # rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
@@ -861,6 +882,14 @@ quiesce_release_molecule_steps() (
 # nobody and sits forever; on a closed anchor the route is refused outright. It
 # also names a bead that is itself the work, so a bead blocked by anything but
 # its own demand is refused.
+# --assign names a NAMED agent to release TO, written as the assignee with no
+# route: a named session's hook matches its assignee and skips the routed tier,
+# so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
+# bead is addressed one way or the other, never both. --assign is refused on a
+# closed anchor like --route. Without --waiting-on it also takes the --route
+# blocker guard. With --waiting-on the guard is skipped: the caller has named
+# the waits, and the hook offers the bead only once bd reports it ready, so
+# every open blocker gates the hand-off, named or not.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -889,10 +918,11 @@ quiesce_release_molecule_steps() (
 # says there is none — UNLESS the bead already carries an open blocker whose edge
 # holds it. Neither flag on a bead with no blocker is the silent prose-only park
 # refused below, the unedged hold the I1 backlog exists to drain. A --release
-# --route DISPATCHES to a pool instead (moving, not held), a closed anchor takes
-# only the quiesce, and a bare headline (no --release) parks nothing — all exempt.
+# --route DISPATCHES to a pool instead (moving, not held), as --assign does to a
+# named agent, a closed anchor takes only the quiesce, and a bare headline (no
+# --release) parks nothing — all exempt.
 cmd_takeaway() {
-    bead=""; text=""; by="host"; release=""; route=""; npos=0
+    bead=""; text=""; by="host"; release=""; route=""; assign=""; npos=0
     waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -905,6 +935,8 @@ cmd_takeaway() {
             --release) release=1; shift ;;
             --route=*) route="${1#--route=}"; shift ;;
             --route)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --route requires a <rig>/<agent> target" >&2; exit 2; }; route="$1"; shift ;;
+            --assign=*) assign="${1#--assign=}"; shift ;;
+            --assign)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --assign requires a named-agent identity" >&2; exit 2; }; assign="$1"; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: takeaway: unknown flag '$1'" >&2; exit 2 ;;
             *)
@@ -941,6 +973,13 @@ cmd_takeaway() {
             */*) : ;;
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
+    fi
+    # --assign rides --release for the same reason, and it excludes --route: an
+    # assignee drops the bead out of a pool's unassigned claim filter, and a
+    # named agent's hook never reads the route.
+    if [ -n "$assign" ]; then
+        [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
+        [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
     fi
 
     path=$(rig_path_for_bead "$bead")
@@ -990,10 +1029,11 @@ cmd_takeaway() {
     # A park for a person states its disposition, UNLESS the bead is already held
     # by an open blocker — then the wait is an existing edge and a bare --release
     # parks it beside that edge, not a prose-only hold. --release reopens a
-    # standing anchor and either DISPATCHES it (a --route to a pool, moving) or
-    # PARKS it for a person (no route: open, unassigned, at rest). A held park
-    # names its wait: --waiting-on writes it as a `blocks` edge, --no-wait says
-    # nothing waits and stamps gc.takeaway_settled. Neither, on a bead carrying NO
+    # standing anchor and either DISPATCHES it (a --route to a pool or an
+    # --assign to a named agent, moving) or PARKS it for a person (neither:
+    # open, unassigned, at rest). A held park names its wait: --waiting-on
+    # writes it as a `blocks` edge, --no-wait says nothing waits and stamps
+    # gc.takeaway_settled. Neither, on a bead carrying NO
     # open blocker, is the silent prose-only park — a headline holding it with no
     # edge and no settled mark, the shape doctor/check-wait-is-an-edge reports and
     # the I1 backlog drains, refilled by parks faster than closes drain it. Any
@@ -1006,7 +1046,7 @@ cmd_takeaway() {
     # fails open on the same probe where this one fails closed; a closed anchor
     # took no park (release_park cleared above); a bare headline (no --release)
     # parks nothing; a converse sitting stamps one beside a demand that holds it.
-    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
+    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$assign" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
             | jq -er 'if type == "array" then
@@ -1044,8 +1084,14 @@ cmd_takeaway() {
     # as it is to every other reader of this graph. A closed anchor is not this
     # refusal's case: its route is refused below on the disposition itself,
     # after the headline and the quiesce a folded anchor still needs have
-    # landed.
-    if [ -n "$route" ] && [ -n "$release_park" ]; then
+    # landed. An --assign takes the same guard, since a named agent offered a
+    # bead whose work sits on a blocker has nothing to perform either, unless
+    # the call names its waits with --waiting-on: the agent's hook offers the
+    # bead only once bd reports it ready, so the named waits gate the hand-off.
+    dest=""; dest_flag=""
+    if [ -n "$route" ]; then dest="$route"; dest_flag="--route"
+    elif [ -n "$assign" ] && [ -z "$waiting_ids" ]; then dest="$assign"; dest_flag="--assign"; fi
+    if [ -n "$dest" ] && [ -n "$release_park" ]; then
         probe_read=1
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
@@ -1057,10 +1103,14 @@ cmd_takeaway() {
                  else error("not an edge array") end' 2>/dev/null) || probe_read=""
         if [ -z "$probe_read" ]; then
             blocked_by=""
-            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so --route '$route' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$route' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+        fi
+        if [ -n "$blocked_by" ] && [ "$dest_flag" = "--route" ]; then
+            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            exit 2
         fi
         if [ -n "$blocked_by" ]; then
-            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
             exit 2
         fi
     fi
@@ -1129,9 +1179,10 @@ cmd_takeaway() {
     # gc.execution_routed_to. A release drops it best-effort, so a finished pour's
     # provenance does not linger on a bead the pour no longer drives.
     #
-    # The park unassigns the bead, so the identity the last executor stamped goes
-    # with the assignee: gc.session_name and gc.session_id name the session that
-    # held it, and an unassigned bead has no executor for them to name. A
+    # The park unassigns the bead, or assigns it to the --assign agent, so the
+    # identity the last executor stamped goes with the old assignee:
+    # gc.session_name and gc.session_id name the session that held it, and the
+    # bead no longer has that executor for them to name. A
     # gc.session_name left behind is residue the moment the bead next carries a
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
@@ -1141,7 +1192,7 @@ cmd_takeaway() {
     # the route beside them is: a silent multi-pair drop would otherwise report a
     # successful release while the very residue
     # doctor/executor-identity-residue exists to catch survives on the bead.
-    [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
+    [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
@@ -1167,6 +1218,24 @@ cmd_takeaway() {
                 echo "$PROG: takeaway: the route repair landed on $bead" >&2
             else
                 route_missed=1
+            fi
+        fi
+    fi
+    # An --assign is read back on the same terms. The assignee is the one field a
+    # named agent's hook matches, so one that did not land leaves the bead open,
+    # unassigned and unrouted, offered to nobody.
+    assign_missed=""
+    if [ -n "$assign" ] && [ -n "$release_park" ]; then
+        assign_got=$(assignee_now "$bead")
+        if [ "$assign_got" != "$assign" ]; then
+            echo "$PROG: takeaway: the assignee on $bead read back as '$assign_got', expected '$assign' — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --assignee="$assign" >/dev/null 2>&1 || true
+            assign_got=$(assignee_now "$bead")
+            if [ "$assign_got" = "$assign" ]; then
+                echo "$PROG: takeaway: the assignee repair landed on $bead" >&2
+            else
+                assign_missed=1
             fi
         fi
     fi
@@ -1281,6 +1350,10 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
         exit 4
     fi
+    if [ -n "$assign_missed" ]; then
+        echo "$PROG: takeaway: $bead is released but NOT assigned to '$assign' (it reads '$assign_got') — it is open and unrouted, so no agent's hook offers it. The headline, the release and the edges are written; assign it by hand: gc bd update $bead${db:+ --db $db} --assignee $assign" >&2
+        exit 4
+    fi
     # Reported at its read-back above; the exit waits until here so the edges
     # and the quiesce still run, the way the route miss does.
     if [ -n "$settled_missed" ]; then
@@ -1316,9 +1389,13 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
         exit 4
     fi
+    if [ -n "$assign" ] && [ -z "$release_park" ]; then
+        echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        exit 4
+    fi
     rel_note=""
     if [ -n "$release" ]; then
-        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}]"
+        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}${assign:+ to $assign}]"
         else rel_note=" [quiesced; anchor left closed]"; fi
     fi
     echo "takeaway set on $bead (by $by)$rel_note: $text"
@@ -2166,6 +2243,10 @@ cmd_dismiss() {
             echo "$PROG: dismiss: the outcome stamps on visit $_v did not read back (gc.outcome='${outcome_got:-<empty>}', gc.outcome_reason='${reason_got:-<empty>}'); it was NOT closed, because a closed visit with no recorded outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
             continue
         fi
+        # The work-record gate the close runs wants gc.work_outcome.
+        # work-outcome.sh stamps it in a write of its own, so it never decides
+        # whether the visit closes.
+        work_outcome_noop "$_v" gc bd
         _closed_this=0
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1)); _closed_this=1
@@ -2562,7 +2643,7 @@ cmd_accept() {
 }
 
 # ── engage: decision helpers (UI-reusable) ──────────────────────────
-# The four engage decisions — subject, visit, starter, model — resolved from
+# The five engage decisions — subject, visit, starter, model, skill — resolved from
 # durable state, factored out of the prompt loop so a later helm UI can drive
 # the same logic. The prompt_* wrappers add the one terminal read; the
 # list/find/seed helpers touch no terminal. Prompts print to the foreground
@@ -2624,6 +2705,63 @@ engage_find_visits() {
 engage_starter_list() { sh "$STARTERS_TOOL" list 2>/dev/null || true; }
 # engage_starter_seed <key> <subject> — the seed body with the subject filled in.
 engage_starter_seed() { sh "$STARTERS_TOOL" seed "$1" "$2" 2>/dev/null || true; }
+# engage_lens_brief <skill> <subject> [opener] — the brief that seeds a sitting
+# with the skill as its lens on the subject, the opener following it verbatim.
+engage_lens_brief() { sh "$STARTERS_TOOL" lens "$1" "$2" "${3:-}" 2>/dev/null || true; }
+
+# engage_skill_roster <rig> <model> — the skills a converse-<model> sitting in
+# the rig carries, read from `gc skill list --agent` for the same
+# <rig>/gc-toolkit.converse-<model> address converse-capability.sh reads. That
+# is the agent's effective view, so a skill only the rig imports counts and a
+# skill another rig imports does not. Sets ENGAGE_SKILL_ROSTER (full names, one
+# per line, deduped, since the listing repeats a skill the city and the rig both
+# import) and ENGAGE_SKILL_ROSTER_OK (1 on a readable answer, 0 when gc did not
+# answer or answered malformed). Memoized per rig and model: the skill prompt
+# lists the roster, then resolves a typed name against it.
+engage_skill_roster() {
+    [ "${_esr_key:-}" = "$1/$2" ] && return 0
+    _esr_key="$1/$2"; ENGAGE_SKILL_ROSTER=""; ENGAGE_SKILL_ROSTER_OK=0
+    _esr_json=$(with_timeout "${GC_ROSTER_TIMEOUT:-15}" gc skill list --agent "$1/gc-toolkit.converse-$2" --json 2>/dev/null | scrub || true)
+    [ -n "$_esr_json" ] || return 0
+    if _esr_names=$(printf '%s' "$_esr_json" | jq -r '
+            if type == "object" and (.entries | type == "array")
+            then [ .entries[] | objects | (.name // "") | strings | select(. != "") ] | unique | .[]
+            else error("not a skill roster") end' 2>/dev/null); then
+        ENGAGE_SKILL_ROSTER="$_esr_names"; ENGAGE_SKILL_ROSTER_OK=1
+    fi
+}
+
+# engage_resolve_skill <rig> <model> <name> — resolve a typed skill name against
+# that roster. A full name matches itself, and a bare name matches the one full
+# name ending in ".<name>", so review-arch reaches gc-toolkit.review-arch. Sets
+# ENGAGE_SKILL_STATE to ok (ENGAGE_SKILL_NAME is the full name), ambiguous or
+# unknown (ENGAGE_SKILL_MATCHES lists the candidates, or the whole roster), or
+# unread when the roster did not read. unread fails OPEN, as engage_valid_model
+# does for the same failure: ENGAGE_SKILL_NAME keeps the typed name, and the
+# brief tells the sitting to say so if it cannot load it. The caller has already
+# held the name to letters, digits, dots and hyphens, so awk -v reads it as-is.
+engage_resolve_skill() {
+    ENGAGE_SKILL_NAME=""; ENGAGE_SKILL_MATCHES=""
+    engage_skill_roster "$1" "$2"
+    if [ "$ENGAGE_SKILL_ROSTER_OK" != 1 ]; then
+        ENGAGE_SKILL_STATE=unread; ENGAGE_SKILL_NAME="$3"; return 0
+    fi
+    _ers_hits=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk -v q="$3" '$0 == q')
+    if [ -z "$_ers_hits" ]; then
+        _ers_hits=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" \
+            | awk -v q=".$3" 'length($0) > length(q) && substr($0, length($0) - length(q) + 1) == q')
+    fi
+    _ers_n=$(printf '%s' "$_ers_hits" | grep -c . || true)
+    if [ "$_ers_n" -eq 1 ]; then
+        ENGAGE_SKILL_STATE=ok; ENGAGE_SKILL_NAME="$_ers_hits"
+    elif [ "$_ers_n" -gt 1 ]; then
+        ENGAGE_SKILL_STATE=ambiguous
+        ENGAGE_SKILL_MATCHES=$(printf '%s\n' "$_ers_hits" | tr '\n' ' ' | sed 's/ *$//')
+    else
+        ENGAGE_SKILL_STATE=unknown
+        ENGAGE_SKILL_MATCHES=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | tr '\n' ' ' | sed 's/ *$//')
+    fi
+}
 
 # engage_search_subjects <query> — open non-visit beads whose title contains the
 # query, one "<id>\t<title>" row each. The subject prompt's title search, split
@@ -2777,6 +2915,49 @@ engage_prompt_model() {
     return 0
 }
 
+# engage_prompt_skill <rig> <model> — the optional skill a NEW visit seeds its
+# sitting with as a lens on the subject. Enter is none. A name resolves as
+# engage_resolve_skill does, ? lists the roster numbered, and a number picks from
+# that list. A name that does not resolve is asked again rather than refused.
+# Sets ENGAGE_SKILL (the full name, or empty for none).
+engage_prompt_skill() {
+    ENGAGE_SKILL=""
+    while :; do
+        printf '  Skill — Enter = none · a skill name, e.g. review-arch · ? lists them › '
+        IFS= read -r _epk_in || return 1
+        _epk_in=$(printf '%s' "$_epk_in" | sed 's/^ *//; s/ *$//')
+        case "$_epk_in" in
+            "") return 0 ;;
+            "?")
+                engage_skill_roster "$1" "$2"
+                if [ -n "$ENGAGE_SKILL_ROSTER" ]; then
+                    printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk '{ printf "    [%d] %s\n", NR, $0 }'
+                elif [ "$ENGAGE_SKILL_ROSTER_OK" = 1 ]; then
+                    printf '    (this sitting carries no skills)\n'
+                else
+                    printf '    (no skill list could be read for this sitting; a typed name is seeded unverified)\n'
+                fi
+                continue ;;
+            *[!0-9]*) ;;
+            *)
+                engage_skill_roster "$1" "$2"
+                _epk_pick=$(printf '%s\n' "$ENGAGE_SKILL_ROSTER" | awk -v n="$_epk_in" 'NR == n')
+                if [ -n "$_epk_pick" ]; then ENGAGE_SKILL="$_epk_pick"; return 0; fi
+                printf '  (no skill numbered %s; ? lists them)\n' "$_epk_in"
+                continue ;;
+        esac
+        case "$_epk_in" in
+            *[!A-Za-z0-9._-]*) printf '  (a skill name is letters, digits, dots and hyphens; ? lists them)\n'; continue ;;
+        esac
+        engage_resolve_skill "$1" "$2" "$_epk_in"
+        case "$ENGAGE_SKILL_STATE" in
+            ok|unread) ENGAGE_SKILL="$ENGAGE_SKILL_NAME"; return 0 ;;
+            ambiguous) printf '  "%s" matches %s; type one in full\n' "$_epk_in" "$ENGAGE_SKILL_MATCHES" ;;
+            *) printf '  no skill "%s" on this sitting; ? lists them\n' "$_epk_in" ;;
+        esac
+    done
+}
+
 # engage_prompt_rig — numbered selection over the rigs that carry a converse
 # template (only those can host a sitting). A single such rig is auto-selected;
 # none is an error. Sets ENGAGE_RIG.
@@ -2885,17 +3066,18 @@ engage_create_subject() {
         exit 4
     fi
     # Arm the abort backstop the instant the marked subject exists. Every gate
-    # from here to the visit-filing in cmd_engage can still abort (a suspended or
-    # not-running rig, an unknown --template or --model, a store read that will
-    # not confirm the bead), and until the visit is filed an abort would leave this
-    # operator-origin subject owing a visit that nothing supplies: its own
-    # stand-down marker hides it from the async worker (gc-proactive drops a marked
-    # bead, and a reaction that reaches one stands down), and even unmarked a first
-    # reaction does not force a visit for gc.origin=operator (actionable/blocked/
-    # close file none). So engage_new_subject_cleanup files that one visit itself on
-    # exit; cmd_engage disarms it once the visit is filed. enumerate_rigs (called at
-    # the top of this function) already set and cleared its own trap and memoizes on
-    # every later call, so it never clobbers this one.
+    # from here to the visit-filing in cmd_engage can still abort (a suspended
+    # rig, a downed controller, an unknown --template or --model, a store read
+    # that will not confirm the bead), and until the visit is filed an abort
+    # would leave this operator-origin subject owing a visit that nothing
+    # supplies: its own stand-down marker hides it from the async worker
+    # (gc-proactive drops a marked bead, and a reaction that reaches one stands
+    # down), and even unmarked a first reaction does not force a visit for
+    # gc.origin=operator (actionable/blocked/close file none). So
+    # engage_new_subject_cleanup files that one visit itself on exit; cmd_engage
+    # disarms it once the visit is filed. enumerate_rigs (called at the top of
+    # this function) already set and cleared its own trap and memoizes on every
+    # later call, so it never clobbers this one.
     _ens_cleanup_bead="$bead"
     trap 'engage_new_subject_cleanup' EXIT
     trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
@@ -2947,13 +3129,18 @@ engage_new_subject_cleanup() {
 # union open/dismiss match), and a subject with none gets one filed (parked to
 # the board) so a picked subject still engages.
 #
-# --model selects the tier (opus default, else fable or codex). --no-attach
-# spawns and assigns without attaching — the board picker uses it, then the
-# operator attaches from the session picker, the way a pool sitting was reached
-# before. Attached (the default), the operator lands in the sitting directly.
+# --model selects the tier (opus default, else fable or codex). --skill seeds
+# the sitting with a skill as its lens on the subject, any skill the sitting
+# carries. The lens brief is the new visit's body, the claim-time brief a
+# sitting on any model reads, so the skill rides the visit across a reclaim or
+# a re-engage with no per-skill template. --no-attach spawns and assigns
+# without attaching — the board picker uses it, then the operator attaches from
+# the session picker, the way a pool sitting was reached before. Attached (the
+# default), the operator lands in the sitting directly.
 cmd_engage() {
     bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
     engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
+    engage_skill=""; engage_skill_set=0
     # Interactive decisions carried into the visit-resolution and output below.
     engage_body=""; engage_file_new=0; engage_chosen_visit=""; visit_new=0
     # --new-subject files a FRESH subject bead, then engages it (rig-aware, since
@@ -2971,6 +3158,9 @@ cmd_engage() {
             --template=*) engage_template="${1#--template=}"; shift ;;
             --template)  shift; [ $# -gt 0 ] || { echo "$PROG: engage: --template requires a value" >&2; exit 2; }
                          engage_template="$1"; shift ;;
+            --skill=*)   engage_skill="${1#--skill=}"; engage_skill_set=1; shift ;;
+            --skill)     shift; [ $# -gt 0 ] || { echo "$PROG: engage: --skill requires a value" >&2; exit 2; }
+                         engage_skill="$1"; engage_skill_set=1; shift ;;
             --subject=*) [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="${1#--subject=}"; engage_subject_flag=1; shift ;;
             --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
                          [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
@@ -2991,6 +3181,16 @@ cmd_engage() {
         echo "$PROG: engage: --reason and --template both set the opening message — pass only one." >&2
         exit 2
     fi
+    # A skill name is letters, digits, dots and hyphens. An empty or malformed
+    # --skill is refused here, before anything is read or filed, and the charset
+    # is what lets the name reach the brief's substitution and awk unescaped.
+    if [ "$engage_skill_set" = 1 ]; then
+        case "$engage_skill" in
+            ""|*[!A-Za-z0-9._-]*)
+                echo "$PROG: engage: --skill '$engage_skill' is not a skill name (letters, digits, dots and hyphens, e.g. review-arch)." >&2
+                exit 2 ;;
+        esac
+    fi
 
     # Interactive is the DEFAULT on a TTY; --no-input reverts to the flag-driven,
     # one-shot behavior for scripts/CI. GC_HELM_ASSUME_TTY is a test seam that
@@ -3000,9 +3200,10 @@ cmd_engage() {
         engage_interactive=1
     fi
     # A pre-filled --reason/--template already commits to a new visit with that
-    # opener, so the interactive visit/starter prompts are skipped for it.
+    # opener, and --skill to a new visit carrying its lens brief, so the
+    # interactive visit/starter prompts are skipped for any of them.
     starter_prefilled=0
-    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ]; then starter_prefilled=1; fi
+    if [ "$engage_reason_set" = 1 ] || [ -n "$engage_template" ] || [ -n "$engage_skill" ]; then starter_prefilled=1; fi
 
     # --rig names the rig a NEW subject is created in; an existing subject's rig
     # comes from its id prefix, so --rig is meaningless there. Refuse rather than
@@ -3067,23 +3268,25 @@ cmd_engage() {
     [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     [ -n "$rig" ] && export GC_RIG="$rig"
 
-    # A spawned converse sitting is sustained by the RECONCILER — a converse slot
-    # sets nudge="" and idle_timeout=0, so no pool backstop cycles it. A suspended
-    # rig has its agents skipped by the reconciler, and a rig with no agents
-    # running has no live runtime tending it, so on either the sitting never comes
-    # up: engage would report success while the visit sits bound to a session that
-    # never registers, recoverable only by hand. Refuse before
-    # spawning and name the fix. Both flags come from the `gc rig list`
-    # enumerate_rigs already read; a gc that reports neither leaves them empty,
-    # which reads as unknown and does not refuse.
-    rig_suspended=$(rig_suspended_for_bead "$bead")
-    rig_running=$(rig_running_for_bead "$bead")
-    if [ "$rig_suspended" = "true" ]; then
+    # A spawned converse sitting is launched and sustained by the RECONCILER, the
+    # city controller's loop — a converse slot sets nudge="" and idle_timeout=0,
+    # so no pool backstop cycles it. The reconciler skips a suspended rig's
+    # agents and does not run while the controller is down, so on either the
+    # sitting never comes up: engage would report success while the visit sits
+    # bound to a session that never registers, recoverable only by hand. Refuse
+    # before spawning and name the fix. A rig with no agents running is idle, not
+    # down, and the reconciler launches the sitting there like anywhere else.
+    # Both flags come from the `gc rig list` enumerate_rigs already read, and
+    # city_controller_state asks gc status before an HQ running=false counts
+    # (city-liveness.sh). A gc that reports neither flag leaves them empty, which
+    # reads as unknown and does not refuse.
+    if [ "$(rig_suspended "$rig")" = "true" ]; then
         echo "$PROG: engage: rig '${rig:-?}' is suspended, so the reconciler skips its agents and a spawned converse sitting would never come up — the visit would strand bound to it. Resume the rig, then re-engage: gc rig resume ${rig:-<rig>}" >&2
         exit 4
     fi
-    if [ "$rig_running" = "false" ]; then
-        echo "$PROG: engage: rig '${rig:-?}' has no agents running, so nothing would sustain a spawned converse sitting — the visit would strand bound to a session that never registers. Start the rig first ('gc rig status ${rig:-<rig>}' to see why it is down), then re-engage." >&2
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        echo "$PROG: engage: the city controller did not answer ($CONTROLLER_SEEN), so nothing would launch a spawned converse sitting — the visit would strand bound to a session that never registers. Check 'gc status' and 'gc supervisor status', then re-engage once the controller answers." >&2
         exit 4
     fi
 
@@ -3102,6 +3305,15 @@ cmd_engage() {
     visit_subject=""
     if [ "$bead_kind" = "visit" ]; then
         visit_subject=$(printf '%s' "$bead_row" | jq -r "$VISIT_IDENTITY_JQ"'visit_subject' 2>/dev/null || true)
+    fi
+
+    # --skill writes a NEW visit's brief, and a visit's body is written once, at
+    # filing. An explicit visit id names a visit whose brief already exists, so
+    # the skill has nowhere to go; refuse before any prompt, and point at the
+    # subject form that files a visit carrying the lens.
+    if [ -n "$engage_skill" ] && [ "$bead_kind" = "visit" ]; then
+        echo "$PROG: engage: --skill seeds a NEW visit's brief, which needs a subject — but '$bead' is an explicit visit id, and its brief is already written. Engage its subject with --skill instead: $PROG engage ${visit_subject:-<subject>} --skill $engage_skill. Nothing spawned." >&2
+        exit 2
     fi
 
     # Ground the operator in the bead they picked, before the visit or model
@@ -3185,6 +3397,36 @@ cmd_engage() {
     fi
     template="converse-$engage_model"
 
+    # Skill: offered interactively only when a NEW visit is being filed, since an
+    # existing visit's brief is already written. It comes after the model because
+    # the roster is that sitting's own: <rig>/gc-toolkit.converse-<model>.
+    if [ -z "$engage_skill" ] && [ "$engage_interactive" = 1 ] && [ "$bead_kind" != "visit" ] \
+        && { [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; }; then
+        engage_prompt_skill "$rig" "$engage_model" || { echo "$PROG: engage: no input — nothing engaged" >&2; exit 2; }
+        engage_skill="$ENGAGE_SKILL"
+    fi
+    # The lens brief becomes the new visit's body, ahead of any opener (a seed's
+    # body, a typed opener, or --reason), and the skill leads the visit's title
+    # tail so the board row says whose view the sitting brings. An unreadable
+    # roster seeds the typed name unverified, as an unconfirmable --model spawns.
+    if [ -n "$engage_skill" ]; then
+        engage_resolve_skill "$rig" "$engage_model" "$engage_skill"
+        case "$ENGAGE_SKILL_STATE" in
+            ok) engage_skill="$ENGAGE_SKILL_NAME" ;;
+            unread)
+                echo "$PROG: engage: could not read the skill list for $rig/gc-toolkit.$template, so '$engage_skill' is seeded unverified; the sitting says so in its framing if it cannot load it." >&2 ;;
+            ambiguous)
+                echo "$PROG: engage: --skill '$engage_skill' matches more than one skill ($ENGAGE_SKILL_MATCHES); name one in full. Nothing spawned." >&2
+                exit 2 ;;
+            *)
+                echo "$PROG: engage: unknown --skill '$engage_skill': a $template sitting in rig '$rig' carries ${ENGAGE_SKILL_MATCHES:-no skills}. Nothing spawned." >&2
+                exit 2 ;;
+        esac
+        engage_body=$(engage_lens_brief "$engage_skill" "$bead" "${engage_body:-$engage_reason}")
+        [ -n "$engage_body" ] || { echo "$PROG: engage: $STARTERS_TOOL did not produce the lens brief for '$engage_skill'. Nothing spawned." >&2; exit 3; }
+        engage_reason="${engage_skill##*.} lens${engage_reason:+: $engage_reason}"
+    fi
+
     # Resolve the sitting's visit. A visit picked off the board is itself the
     # visit; a subject resolves to the open visits tracking it (engage_find_visits
     # at file scope), and a subject with none gets one filed (open parks it to the
@@ -3223,10 +3465,11 @@ cmd_engage() {
         # block does not misreport a freshly filed visit as a pre-existing one.
         filed_fresh=0
         candidates=$(engage_find_visits "$bead")
-        # A --reason, a --template, or an interactive "new visit"
-        # (engage_file_new) files a fresh visit and engages it — even when the
-        # subject already has one; cmd_open's --allow-duplicate marks that
-        # deliberate, and --body carries the starter as the claim-time brief.
+        # A --reason, a --template, a --skill (whose title tail is a reason), or
+        # an interactive "new visit" (engage_file_new) files a fresh visit and
+        # engages it — even when the subject already has one; cmd_open's
+        # --allow-duplicate marks that deliberate, and --body carries the
+        # starter or lens brief as the claim-time brief.
         # With none of those, an existing visit is engaged and only a subject
         # with none has a visit filed.
         if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
@@ -3606,7 +3849,8 @@ cmd_engage() {
     # On the visit-id path $bead IS the visit, so name the subject it tracks
     # rather than repeat the visit id back as its own "for".
     _eng_for="$bead"; [ "$bead_kind" = "visit" ] && [ -n "$visit_subject" ] && _eng_for="$visit_subject"
-    printf '✓ %s on %s visit %s for %s\n' "$template" "$_eng_which" "$VISIT" "$_eng_for"
+    _eng_with=""; [ -n "$engage_skill" ] && _eng_with=" with ${engage_skill##*.}"
+    printf '✓ %s%s on %s visit %s for %s\n' "$template" "$_eng_with" "$_eng_which" "$VISIT" "$_eng_for"
     printf '  attach: gc session attach %s\n' "$sid"
     # `engage <subject>` with no --reason binds a visit that already existed, which
     # may be narrower or already-purposed than the fresh discussion the operator

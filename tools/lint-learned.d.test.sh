@@ -11,7 +11,8 @@
 # directory would be run as one.
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
-# bd-helper-in-scope, bd-notes-replace, pr-post-bypass, id-read-unguarded.
+# bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
+# id-read-unguarded, doc-filing.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -772,6 +773,231 @@ runm "$TMP/continued.md"
 eq "$RC" 1 "a continued bare call in a marker-fenced snippet is scanned as one call"
 has "$OUT" "continued.md:2:" "and reported where it opened"
 
+# ── doc-filing ──────────────────────────────────────────────────────────
+#
+# The detector reads paths relative to the repository root, so every run
+# starts in a fixture root.
+DET_DF="$HERE/lint-learned.d/doc-filing.sh"
+[ -x "$DET_DF" ] || { echo "no detector at $DET_DF"; exit 1; }
+DF="$TMP/doc-filing"
+mkdir -p "$DF"
+rundf() { OUT="$(cd "$DF" && "$DET_DF" "$@" 2>&1)"; RC=$?; }
+# page <path> — write a fixture page from stdin under the fixture root.
+page() { mkdir -p "$DF/$(dirname "$1")" && cat > "$DF/$1"; }
+
+echo "── doc-filing: what is a finding ──"
+
+page docs/new.md <<'MD'
+---
+name: New
+description: A central page that never states its charter.
+---
+
+# New
+MD
+page docs/topic/nested.md <<'MD'
+# Nested
+MD
+page docs/fenced.md <<'MD'
+# Fenced
+
+```markdown
+## Scope
+```
+MD
+page docs/long-fence.md <<'MD'
+# A fence opened by four backticks
+
+````markdown
+```
+## Scope
+```
+````
+MD
+page docs/deeper.md <<'MD'
+# Deeper
+
+### Scope
+MD
+page docs/longer.md <<'MD'
+## Scope and history
+MD
+page docs/empty.md < /dev/null
+page specs/tk-a/notes.md <<'MD'
+# Notes with no frontmatter
+MD
+page specs/tk-a/name-only.md <<'MD'
+---
+name: Name only
+---
+MD
+page specs/tk-a/blank.md <<'MD'
+---
+description: ""
+---
+MD
+page specs/tk-a/null.md <<'MD'
+---
+description: ~
+---
+MD
+page specs/tk-a/empty-fold.md <<'MD'
+---
+description: >
+name: A folded value with no lines under it
+---
+MD
+page specs/tk-a/unclosed.md <<'MD'
+---
+description: The block never closes, so it is not frontmatter.
+MD
+page specs/tk-a/late.md <<'MD'
+# A title first
+
+---
+description: Frontmatter opens the page or it is not frontmatter.
+---
+MD
+page specs/tk-a/nested-key.md <<'MD'
+---
+meta:
+  description: Only a top-level key counts.
+---
+MD
+page specs/tk-a/deep/er/notes.md <<'MD'
+# Deep
+MD
+DF_NO_SCOPE=(docs/new.md docs/topic/nested.md docs/fenced.md docs/long-fence.md docs/deeper.md
+    docs/longer.md)
+DF_NO_DESC=(specs/tk-a/notes.md specs/tk-a/name-only.md specs/tk-a/blank.md specs/tk-a/null.md
+    specs/tk-a/empty-fold.md specs/tk-a/unclosed.md specs/tk-a/late.md specs/tk-a/nested-key.md
+    specs/tk-a/deep/er/notes.md)
+# docs/empty.md is named only as ./docs/empty.md, and docs/new.md both ways.
+rundf "${DF_NO_SCOPE[@]}" "${DF_NO_DESC[@]}" ./docs/empty.md ./docs/new.md
+eq "$RC" 1 "a page missing its tier's part exits 1"
+for p in "${DF_NO_SCOPE[@]}" docs/empty.md; do
+    has "$OUT" "$p:1: no \"## Scope\" section" "$p is reported for a missing Scope"
+done
+for p in "${DF_NO_DESC[@]}"; do
+    has "$OUT" "$p:1: no frontmatter description" "$p is reported for a missing description"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 16 "each page is reported once, whatever spelling named it, and nothing else is"
+has "$OUT" "specs/<bead-id>/" "a missing Scope names the other home a page can have"
+has "$OUT" "\"Inside docs/\"" "and points at the placement rule"
+has "$OUT" "(learned rule: doc-filing)" "the finding names the rule"
+
+echo "── doc-filing: what is not ──"
+
+page docs/good.md <<'MD'
+---
+name: Good
+description: A central page with its charter.
+---
+
+# Good
+
+## Scope
+
+**Mandate.** What the page owns.
+MD
+page docs/bare.md <<'MD'
+# Bare
+
+A description is encouraged on a docs/ page, not required.
+
+## Scope
+MD
+page docs/closing-hashes.md <<'MD'
+## Scope ##
+MD
+page docs/after-fence.md <<'MD'
+~~~sh
+echo "a fence that closes"
+~~~
+
+## Scope
+MD
+page docs/rule-first.md <<'MD'
+---
+A page that opens with a rule it never closes has no frontmatter.
+
+## Scope
+MD
+page docs/inline-code.md <<'MD'
+`code` at the start of a line opens no fence.
+
+## Scope
+MD
+page specs/tk-b/plain.md <<'MD'
+---
+name: Plain
+description: Why the page exists.
+---
+MD
+page specs/tk-b/folded.md <<'MD'
+---
+description: >-
+  A folded value on the lines below its key.
+---
+MD
+page specs/tk-b/next-line.md <<'MD'
+---
+description:
+  A plain value that starts on the next line.
+---
+MD
+page specs/tk-b/quoted.md <<'MD'
+---
+description: 'Quoted: a colon inside.'
+---
+MD
+page specs/tk-b/no-scope.md <<'MD'
+---
+description: A spec page needs no Scope section.
+---
+MD
+printf -- '---\r\ndescription: Written with CRLF line ends.\r\n---\r\n\r\n## Scope\r\n' > "$DF/specs/tk-b/crlf.md"
+cp "$DF/specs/tk-b/crlf.md" "$DF/docs/crlf.md"
+page docs/notes.txt <<'MD'
+not markdown
+MD
+page README.md <<'MD'
+# Outside both tiers
+MD
+page services/helm/docs/guide.md <<'MD'
+# A docs directory below the root is not the central tier
+MD
+page generated/out.md <<'MD'
+# Generated
+MD
+DF_GOOD=(docs/good.md docs/bare.md docs/closing-hashes.md docs/after-fence.md docs/rule-first.md
+    docs/inline-code.md docs/crlf.md
+    specs/tk-b/plain.md specs/tk-b/folded.md specs/tk-b/next-line.md specs/tk-b/quoted.md
+    specs/tk-b/no-scope.md specs/tk-b/crlf.md)
+rundf "${DF_GOOD[@]}" docs/notes.txt README.md services/helm/docs/guide.md generated/out.md docs/absent.md
+eq "$RC" 0 "pages carrying their tier's part, and paths outside the tiers, are clean"
+eq "$OUT" "" "a clean run prints nothing"
+
+echo "── doc-filing: a check that cannot read says so ──"
+
+chmod 000 "$DF/docs/good.md"
+if [ -r "$DF/docs/good.md" ]; then
+    ok "an unreadable page (not exercised: this user can read anything)"
+else
+    rundf docs/good.md docs/new.md
+    eq "$RC" 2 "an unreadable page is an error, never a pass"
+    has "$OUT" "docs/good.md: cannot read it" "and the page is named"
+    has "$OUT" "docs/new.md:1: no \"## Scope\"" "the readable pages are still checked"
+fi
+chmod 644 "$DF/docs/good.md"
+
+mkdir -p "$TMP/doc-filing-bin"
+printf '#!/bin/sh\nexit 3\n' > "$TMP/doc-filing-bin/awk"
+chmod +x "$TMP/doc-filing-bin/awk"
+OUT="$(cd "$DF" && PATH="$TMP/doc-filing-bin:$PATH" "$DET_DF" docs/new.md 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that fails is an error, never a pass"
+has "$OUT" "the page scan failed" "and says so"
+
 echo "── zsh-colon-modifier: what is a finding ──"
 
 # The detector is path-scoped to agent-run surfaces, so fixtures are planted at
@@ -1439,6 +1665,415 @@ chmod +x "$TMP/shim-awk/awk"
 OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_NR" "$TMP/replace.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
+echo "── formula-unquoted-for: what is a finding ──"
+
+# This detector is PATH-SCOPED to the agent-executed surfaces, so fixtures are
+# planted at paths that match that scope. The loop is spelled literally rather
+# than through a placeholder because this test file is not one of those paths —
+# the runner scanning the whole tree never scans it for this rule.
+DET_FUF="$HERE/lint-learned.d/formula-unquoted-for.sh"
+[ -x "$DET_FUF" ] || { echo "no detector at $DET_FUF"; exit 1; }
+runf() { OUT="$("$DET_FUF" "$@" 2>&1)"; RC=$?; }
+
+# Every in-scope surface is scanned: formula TOMLs, agent prompt templates
+# (top-level and under packs/), startup fragments, skills, and the named docs
+# runbook.
+mkdir -p "$TMP/formulas" "$TMP/agents/refinery" "$TMP/packs/k/agents/keeper" \
+         "$TMP/template-fragments" "$TMP/skills/s" "$TMP/docs"
+for p in formulas/f.toml agents/refinery/prompt.template.md \
+         packs/k/agents/keeper/prompt.template.md \
+         template-fragments/frag.template.md \
+         skills/s/SKILL.md \
+         docs/gascity-dispatch-containment.md; do
+    cat > "$TMP/$p" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+done
+runf "$TMP/formulas/f.toml" "$TMP/agents/refinery/prompt.template.md" \
+     "$TMP/packs/k/agents/keeper/prompt.template.md" \
+     "$TMP/template-fragments/frag.template.md" \
+     "$TMP/skills/s/SKILL.md" \
+     "$TMP/docs/gascity-dispatch-containment.md"
+eq "$RC" 1 "an unquoted loop in any in-scope surface is a finding"
+has "$OUT" "formulas/f.toml:2:" "the formula TOML is scanned"
+has "$OUT" "agents/refinery/prompt.template.md:2:" "a top-level agent prompt is scanned"
+has "$OUT" "packs/k/agents/keeper/prompt.template.md:2:" "a pack agent prompt is scanned"
+has "$OUT" "template-fragments/frag.template.md:2:" "a startup fragment is scanned"
+has "$OUT" "skills/s/SKILL.md:2:" "a skill is scanned"
+has "$OUT" "docs/gascity-dispatch-containment.md:2:" "the named docs runbook is scanned"
+has "$OUT" "formula-unquoted-for" "the finding names the rule"
+
+# Every parameter-expansion shape zsh leaves unsplit is a finding: the braced
+# and defaulted forms, a positional parameter, a variable listed beside a
+# command substitution, and a loop nested on the same line as another.
+cat > "$TMP/formulas/params.toml" <<'FIX'
+```bash
+for x in ${LIST:-}; do echo "$x"; done
+for x in $1; do echo "$x"; done
+for x in $(cmd) $LIST; do echo "$x"; done
+for r in $(cmd); do for x in $INNER; do echo "$x"; done; done
+for r in a b; do for x in $INNER; do echo "$x"; done; done
+x=1; for y in $LIST; do echo "$y"; done
+```
+FIX
+runf "$TMP/formulas/params.toml"
+eq "$RC" 1 "unsplit parameter expansions are findings"
+for n in 2 3 4 5 6 7; do
+    has "$OUT" "params.toml:$n:" "params.toml line $n is reported"
+done
+
+# A block fenced as sh or shell is shell, and so is an untagged block.
+cat > "$TMP/formulas/tags.toml" <<'FIX'
+```sh
+for x in $LIST; do echo "$x"; done
+```
+```shell
+for x in $LIST; do echo "$x"; done
+```
+```
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/formulas/tags.toml"
+eq "$RC" 1 "sh, shell and untagged blocks are shell"
+for n in 2 5 8; do
+    has "$OUT" "tags.toml:$n:" "tags.toml line $n is reported"
+done
+
+echo "── formula-unquoted-for: what is not ──"
+
+# A quoted list, zsh's explicit \${=VAR} split, and a literal list are all fine;
+# a loop outside a shell fence is prose, not executed.
+cat > "$TMP/formulas/clean.toml" <<'FIX'
+```bash
+for x in "$LIST"; do echo "$x"; done
+for x in ${=LIST}; do echo "$x"; done
+for x in a b c; do echo "$x"; done
+```
+```text
+for x in $LIST; do echo "$x"; done
+```
+not fenced at all: for x in $LIST; do echo "$x"; done
+FIX
+runf "$TMP/formulas/clean.toml"
+eq "$RC" 0 "quoted, \${=VAR}, literal, and unfenced loops are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# zsh splits the output of an unquoted command substitution as sh does, so a
+# list built from one iterates per word in both shells: $(cmd), backticks, and
+# arithmetic, including a parameter inside the substitution and a substitution
+# that continues onto the next line. A process substitution is one file name
+# in both shells, and a parameter inside it is an argument, as in $(cmd). A
+# one-line nested loop over a quoted list is not a finding either.
+cat > "$TMP/formulas/cmdsub.toml" <<'FIX'
+```bash
+for extra in $(printf '%s\n' "$IDS" | sed '1d'); do burn "$extra"; done
+for v in $(printf '%s' "$J" | jq -r '.vars[]?.name // empty'); do echo "$v"; done
+for x in `cat $LISTFILE`; do echo "$x"; done
+for i in $((N + 1)) $(seq 1 $N); do echo "$i"; done
+for x in $(outer $(inner) $ARG); do echo "$x"; done
+for id in $(gc bd list --json |
+  jq -r '.[].id'); do echo "$id"; done
+for r in $(cmd); do for x in "$Q"; do echo "$x"; done; done
+for f in <(printf '%s\n' $IDS) >(cat); do echo "$f"; done
+```
+FIX
+runf "$TMP/formulas/cmdsub.toml"
+eq "$RC" 0 "command substitution lists are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+echo "── formula-unquoted-for: quoted spans and substitutions are data ──"
+
+# A list ends at its first top-level `;`, or at a `#` that starts a word. A `;`,
+# `#`, quote or `do` inside a quoted span, a backslash escape, or a substitution
+# is data, so an unsplit expansion after one is still a finding. `do` inside a
+# list is an ordinary word, and a loop nested inside another's list is judged.
+cat > "$TMP/formulas/spans.toml" <<'FIX'
+```bash
+for x in $(printf 'a;b') $LIST; do printf '[%s]' "$x"; done
+for x in `printf a; printf b` $LIST; do printf '[%s]' "$x"; done
+for x in 'a;b' $LIST; do printf '[%s]' "$x"; done
+for x in "a;b" $LIST; do printf '[%s]' "$x"; done
+for x in "a\";b" $LIST; do printf '[%s]' "$x"; done
+for x in $'it\'s;' $LIST; do printf '[%s]' "$x"; done
+for x in a\;b $LIST; do printf '[%s]' "$x"; done
+for x in "it's" $LIST 'b'; do printf '[%s]' "$x"; done
+for x in a#b $LIST; do printf '[%s]' "$x"; done
+for x in "a #b" $LIST; do printf '[%s]' "$x"; done
+for x in a do $LIST; do printf '[%s]' "$x"; done
+for x in $(for y in $LIST; do printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+for x in ${#LIST} $LIST; do printf '[%s]' "$x"; done
+for x in `printf '%s' a\`printf b\`` $LIST; do printf '[%s]' "$x"; done
+for f in <(printf 'a;b') $LIST; do cat "$f"; done
+```
+FIX
+runf "$TMP/formulas/spans.toml"
+eq "$RC" 1 "an expansion after a terminator inside a span is a finding"
+for n in 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    has "$OUT" "spans.toml:$n:" "spans.toml line $n is reported"
+done
+
+# The same spans hide what a raw scan would wrongly report. A `$` that is
+# escaped, or that sits inside a quoted span or a substitution, is not an
+# unquoted expansion, even where an apostrophe, a nested `(` or an escaped `)`
+# would end that span early in a naive scan. Nor is a bare `$` before a span,
+# an unquoted `$x` in the loop body, or a `$LIST` in a comment. A count ($#, a
+# ${#VAR} length, arithmetic) is one number in both shells.
+cat > "$TMP/formulas/spans-clean.toml" <<'FIX'
+```bash
+for x in $(printf 'a;b') "$LIST"; do printf '[%s]' "$x"; done
+for x in "a;b" 'c;$d' "$(printf '%s;' "$LIST")"; do printf '[%s]' "$x"; done
+for x in "`printf '%s' "$LIST"`"; do printf '[%s]' "$x"; done
+for x in $(printf '%s ' $((N - 1)) $END); do printf '[%s]' "$x"; done
+for x in $(printf '%s ' a\) $X); do printf '[%s]' "$x"; done
+for x in "$LIST's" 'b'; do printf '[%s]' "$x"; done
+for x in \$LIST; do printf '[%s]' "$x"; done
+for x in $'it\'s' "$LIST"; do printf '[%s]' "$x"; done
+for x in $`printf a` "$LIST"; do printf '[%s]' "$x"; done
+for x in a b; do printf '[%s]' $x; done
+for n in ${#LIST} $# $((1 + 1)); do printf '[%s]' "$n"; done
+for x in a b # $LIST
+do printf '[%s]' "$x"; done
+```
+FIX
+runf "$TMP/formulas/spans-clean.toml"
+eq "$RC" 0 "data in a span, the loop body, a comment, and a count are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# A newline ends a list only at the top level. Inside a quoted span or a
+# substitution it is data, and after a backslash it continues the line, so the
+# list runs on into the next line, and an unsplit expansion there is still a
+# finding. Each finding is reported once, at the line its for-statement starts
+# on, and that includes a loop that starts a later line inside a substitution,
+# with or without a backslash continuation before it.
+cat > "$TMP/formulas/spans-multiline.toml" <<'FIX'
+```bash
+for x in $(printf 'a\n'
+  ) $LIST; do printf '[%s]' "$x"; done
+for x in $(printf '%s\n' a |
+  sed 's/a/b/' |
+  cat) $LIST; do printf '[%s]' "$x"; done
+for x in "a
+b" $LIST; do printf '[%s]' "$x"; done
+for x in 'a
+b' $LIST; do printf '[%s]' "$x"; done
+for x in $(printf a
+for y in $LIST; do printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+for x in $LIST $(for y in $LIST; do
+  printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+for x in a \
+  $LIST; do printf '[%s]' "$x"; done
+for x in a \
+  $(printf b
+for y in $LIST; do printf '<%s>' "$y"; done); do printf '[%s]' "$x"; done
+```
+FIX
+runf "$TMP/formulas/spans-multiline.toml"
+eq "$RC" 1 "an expansion after a line break inside a span or after a backslash is a finding"
+for n in 2 4 7 9 12 13 15 19; do
+    has "$OUT" "spans-multiline.toml:$n:" "spans-multiline.toml line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 8 "and each is reported once, at the line its for-statement starts on"
+
+# A line break exposes nothing on its own. An expansion inside the span that
+# holds the break is still data, and a top-level newline still ends a list,
+# nested or not, so an unquoted $y or $x in the loop body after it is not a
+# finding. A line that opens with `#` holds no loop, whether it is a comment
+# inside a substitution or data inside a quote.
+cat > "$TMP/formulas/spans-multiline-clean.toml" <<'FIX'
+```bash
+for x in $(printf '%s\n' $LIST
+  ); do printf '[%s]' "$x"; done
+for x in "a
+$LIST"; do printf '[%s]' "$x"; done
+for x in a b
+do printf '[%s]' $x; done
+for x in $(printf a
+for y in b c
+do printf '<%s>' $y; done); do printf '[%s]' "$x"; done
+for x in $(printf a
+# was: a; for y in $LIST; do :
+); do printf '[%s]' "$x"; done
+for x in "a
+# b; for y in $LIST; do :
+c"; do printf '[%s]' "$x"; done
+```
+FIX
+runf "$TMP/formulas/spans-multiline-clean.toml"
+eq "$RC" 0 "data in a multi-line span, a body after a top-level newline, and a #-led line are not findings"
+eq "$OUT" "" "and nothing is printed"
+
+# The shells are the ground truth. Each loop in the four fixtures above, one
+# line or several, runs under zsh and under bash with a two-word LIST: every
+# finding iterates differently in the two shells, and every clean loop alike.
+# Skipped where zsh is not installed.
+if command -v zsh >/dev/null 2>&1; then
+    for fx in spans spans-clean spans-multiline spans-multiline-clean; do
+        case "$fx" in *-clean) want=alike ;; *) want=differently ;; esac
+        n=0; loop=""
+        while IFS= read -r line; do
+            n=$((n + 1))
+            case "$line" in '```'*) continue ;; esac
+            [ -n "$loop" ] || at=$n
+            loop="${loop:+$loop
+}$line"
+            case "$line" in *'; done') ;; *) continue ;; esac
+            z="$(zsh -f -c "LIST='c d'; $loop" 2>&1)"
+            b="$(BASH_ENV='' bash -c "LIST='c d'; $loop" 2>&1)"
+            loop=""
+            got=alike; [ "$z" = "$b" ] || got=differently
+            eq "$got" "$want" "$fx.toml:$at iterates $want under zsh and bash"
+        done < "$TMP/formulas/$fx.toml"
+    done
+fi
+
+# A list runs on only while the list itself is open. A list that ends with its
+# line does not pull in the next line, and neither does a quote that opens
+# after the list has ended, like the apostrophe in a trailing comment, so a
+# commented-out loop on the next line stays a comment. The end of a block or
+# of the file ends a list too: a list cut off there is judged as it stands,
+# and the next block's loop is reported at its own line.
+cat > "$TMP/formulas/list-ends.toml" <<'FIX'
+```bash
+for x in a b
+# echo; for y in $LIST; do printf '[%s]' "$y"; done
+do printf '[%s]' "$x"; done
+for x in a b; do printf '[%s]' "$x"; done # don't
+# echo; for y in $LIST; do printf '[%s]' "$y"; done
+for y in $LIST; do printf '[%s]' "$y"; done
+for x in $LIST $(printf a
+```
+```bash
+for y in $LIST; do printf '[%s]' "$y"; done
+```
+```bash
+for x in $LIST \
+FIX
+runf "$TMP/formulas/list-ends.toml"
+eq "$RC" 1 "a list cut off by the end of its block or file is still judged"
+for n in 7 8 11 14; do
+    has "$OUT" "list-ends.toml:$n:" "list-ends.toml line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is, the commented-out loops included"
+
+# Scope excludes rendered and frozen trees even when they carry the defect: the
+# fix belongs in the source they render from or froze. lint-learned.d/ is
+# excluded too, because the text there states the rule.
+mkdir -p "$TMP/specs/b/formulas" "$TMP/generated/seed-audit/agents/a" \
+         "$TMP/base-snapshots/x/formulas" "$TMP/lint-learned.d/skills/s"
+for p in specs/b/formulas/f.toml \
+         generated/seed-audit/agents/a/prompt.template.md \
+         base-snapshots/x/formulas/f.toml \
+         lint-learned.d/skills/s/SKILL.md; do
+    cat > "$TMP/$p" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+done
+runf "$TMP/specs/b/formulas/f.toml" \
+     "$TMP/generated/seed-audit/agents/a/prompt.template.md" \
+     "$TMP/base-snapshots/x/formulas/f.toml" \
+     "$TMP/lint-learned.d/skills/s/SKILL.md"
+eq "$RC" 0 "specs/, generated/, base-snapshots/ and lint-learned.d/ are excluded"
+
+# Docs are named one at a time, not matched by a docs/* glob — an ordinary doc
+# whose fenced example happens to hold an unquoted loop is illustrative, not a
+# runbook, and must not be flagged.
+cat > "$TMP/docs/other-doc.md" <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/docs/other-doc.md"
+eq "$RC" 0 "a doc not on the runbook list is not scanned"
+
+echo "── formula-unquoted-for: a fence closes the block it opened ──"
+
+# A fence closes whichever block is open, so the bare fence that closes a json
+# block opens nothing: each shell block after it is scanned, and the prose
+# between them is not.
+cat > "$TMP/formulas/after-json.toml" <<'FIX'
+```json
+{"a": 1}
+```
+```bash
+for x in $LIST; do echo "$x"; done
+```
+for x in $LIST; do echo "$x"; done
+```bash
+for y in $LIST; do echo "$y"; done
+```
+FIX
+runf "$TMP/formulas/after-json.toml"
+eq "$RC" 1 "the shell blocks after a non-shell block are scanned"
+for n in 5 9; do
+    has "$OUT" "after-json.toml:$n:" "after-json.toml line $n is reported"
+done
+hasnt "$OUT" "after-json.toml:7:" "the prose between them is not"
+
+# A canary loop goes in before the closing fence of every block in every
+# in-scope file of this checkout, and another just after it. The scan must
+# report the canary inside each shell block and no other: a fence misread
+# that skips a shell block hides its canary, and one that runs past the end
+# of a block reports the canary after it. The test pairs the fences with a
+# tracker of its own, so a fence-state error in the detector cannot also
+# decide where the canaries go.
+FUF_ROOT="$(cd "$HERE/.." && pwd)"
+FCAN="$TMP/fuf-canary"
+mkdir -p "$FCAN"
+: > "$FCAN/.want"
+planted=()
+while IFS= read -r p; do
+    case "$p" in
+        specs/* | */specs/* | generated/* | */generated/* \
+        | base-snapshots/* | */base-snapshots/*) continue ;;
+        formulas/*.toml | */formulas/*.toml \
+        | template-fragments/*.template.md | */template-fragments/*.template.md \
+        | agents/*/prompt.template.md | */agents/*/prompt.template.md \
+        | skills/*/SKILL.md | */skills/*/SKILL.md \
+        | docs/gascity-dispatch-containment.md) ;;
+        *) continue ;;
+    esac
+    mkdir -p "$(dirname "$FCAN/$p")"
+    awk -v want="$FCAN/.want" -v m="$FCAN/$p" '
+        function shell_fence(l,   lang) {
+            lang = l
+            sub(/^[[:space:]]*```[[:space:]]*/, "", lang)
+            sub(/[[:space:]].*$/, "", lang)
+            return (lang == "" || lang == "bash" || lang == "sh" || lang == "shell")
+        }
+        /^[[:space:]]*```/ {
+            if (open) {
+                print "for c in $CANARY; do :; done"; n++
+                if (shell) print m ":" n >> want
+                print; n++
+                print "for c in $CANARY; do :; done"; n++
+                open = 0
+                next
+            }
+            open = 1; shell = shell_fence($0)
+        }
+        { print; n++ }
+    ' "$FUF_ROOT/$p" > "$FCAN/$p"
+    planted+=("$FCAN/$p")
+done < <(git -C "$FUF_ROOT" ls-files)
+sort "$FCAN/.want" > "$FCAN/.want.sorted"
+"$DET_FUF" ${planted[@]+"${planted[@]}"} | cut -d: -f1,2 | sort > "$FCAN/.got"
+FENCES="$(grep -c . "$FCAN/.want.sorted")"
+if [ "$FENCES" -gt 0 ]; then
+    ok "the checkout has shell blocks to plant ($FENCES in ${#planted[@]} files)"
+else
+    bad "the checkout has shell blocks to plant" "no in-scope shell block found under $FUF_ROOT"
+fi
+if cmp -s "$FCAN/.want.sorted" "$FCAN/.got"; then
+    ok "the canary inside every shell block is reported, and no other canary is"
+else
+    bad "the canary inside every shell block is reported, and no other canary is" "$(diff "$FCAN/.want.sorted" "$FCAN/.got" | head -20)"
+fi
 
 echo "── pr-post-bypass: what is a finding ──"
 

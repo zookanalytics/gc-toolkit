@@ -69,8 +69,7 @@ cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/file-warrant.sh
 chmod +x "$RIGROOT/assets/scripts/resolve-route.sh" "$RIGROOT/assets/scripts/file-warrant.sh"
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 case "${1:-} ${2:-}" in
@@ -88,8 +87,7 @@ case "${1:-} ${2:-}" in
   *) echo "unexpected gc invocation: $*" >&2; exit 99 ;;
 esac
 STUB
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 exit 1
 STUB
 chmod +x "$BIN/gc" "$BIN/git"
