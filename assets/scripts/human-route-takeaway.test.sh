@@ -31,6 +31,17 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2')" ;; esac; }
 
 cd "$ROOT" || exit 1
 
+# The sites are read from the tracked tree with git grep, never by walking the
+# directory. A checkout can hold trees git does not track, such as the per-bead
+# worktrees a pool worktree nests under worktrees/, and a walk would check their
+# copies of every file as if they were sites of this checkout. Each search
+# names its pattern syntax, -G or -F, because grep.patternType in a git config
+# changes git grep's default.
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  bad "$ROOT is not a git checkout, so there is no tracked tree to read"
+  echo; echo "human-route-takeaway.test.sh: $PASS passed, $FAIL failed"; exit 1
+fi
+
 # The park sentinel, read from the declared machine rather than hardcoded.
 PARK=$(sed -n 's/^park_route = "\(.*\)"/\1/p' lifecycle/lifecycle.toml)
 eq "${PARK:-<empty>}" "human" "the park route is read from lifecycle.toml"
@@ -39,7 +50,7 @@ eq "${PARK:-<empty>}" "human" "the park route is read from lifecycle.toml"
 # specs and docs describing the defect, this suite's siblings, and prose that
 # quotes the marker while explaining it.
 skip_file() {
-  case "${1#./}" in
+  case "$1" in
     generated/*|specs/*|docs/*|*/README.md|README.md) return 0 ;;
     *.test.sh|*_test.go|*.test.tsx|*.fixture.json) return 0 ;;
     template-fragments/*|services/helm/*) return 0 ;;
@@ -131,8 +142,8 @@ while IFS=: read -r f n _; do
   if [[ "$stmt" =~ ^[[:space:]]*(echo|printf)[[:space:]] ]]; then continue; fi
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$n writes the takeaway in the same update"
-done < <(grep -rn 'gc\.routed_to="\?human"\?' --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null \
-           | grep -v '^\./\.git/' | grep -F -- '--set-metadata')
+done < <(git grep -n -G -e 'gc\.routed_to="\?human"\?' -- '*.sh' '*.toml' '*.md' \
+           | grep -F -- '--set-metadata')
 
 # A route that FALLS BACK to the park sentinel is a park too, whatever the
 # variable is called: the fallback is what runs when nobody was named.
@@ -147,7 +158,7 @@ while IFS=: read -r f n _; do
   stmt=$(statement "$f" "$wn")
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$wn parks via \$$var and writes the takeaway with it"
-done < <(grep -rn "=\"$PARK\"" --include='*.sh' --include='*.toml' . 2>/dev/null | grep -v '^\./\.git/' | grep -F '[ -z "$')
+done < <(git grep -n -F -e "=\"$PARK\"" -- '*.sh' '*.toml' | grep -F '[ -z "$')
 
 [ "$raw_checked" -gt 0 ] && ok "raw park writers found and checked ($raw_checked)" \
   || bad "no raw park writer found — the discovery patterns have gone stale"
@@ -216,7 +227,7 @@ for st in $HUMAN_STATES; do
            bad "$f:$n parks with --to $st and records no question"
          fi ;;
     esac
-  done < <(grep -rn -- "transition .* --to $st" --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null | grep -v '^\./\.git/')
+  done < <(git grep -n -G -e "transition .* --to $st" -- '*.sh' '*.toml' '*.md')
 done
 
 echo
