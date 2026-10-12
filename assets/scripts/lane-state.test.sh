@@ -98,6 +98,23 @@ printf '[{"state":"COMMENTED","id":2}]' > "$GH_DIR/reviews_42.json"
 if green --anchor tk-anc --lane correctness; then bad "a non-approving GitHub review derived green"; else ok "a GitHub review that is not APPROVED is not green"; fi
 
 # ---------------------------------------------------------------------------
+# A lane a conflicted bring-current round reopened is backed only by an approval
+# submitted after the round; a lane the round did not reopen keeps the fallback.
+# ---------------------------------------------------------------------------
+REOPENED='{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness,triage","pr_number":"42","bring_current_reopened":"triage,correctness","bring_current_round_at":"2026-10-01T00:00:00Z"}}'
+store "[$REOPENED]"
+printf '[{"state":"APPROVED","id":11,"submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_42.json"
+if green --anchor tk-anc --lane triage; then bad "an approval older than the round backed a lane the round reopened"; else ok "an approval older than the round does not back a reopened lane"; fi
+if green --anchor tk-anc --lane arch; then ok "…while a lane the round did not reopen keeps the fallback"; else bad "the round withdrew the fallback from a lane it did not reopen"; fi
+printf '[{"state":"APPROVED","id":11,"submitted_at":"2026-09-30T00:00:00Z"},{"state":"APPROVED","id":12,"submitted_at":"2026-10-02T00:00:00Z"}]' > "$GH_DIR/reviews_42.json"
+if green --anchor tk-anc --lane triage; then ok "an approval given after the round backs the reopened lane"; else bad "an approval after the round did not back the reopened lane"; fi
+store "[$(printf '%s' "$REOPENED" | jq -c 'del(.metadata.bring_current_round_at)')]"
+if green --anchor tk-anc --lane triage; then bad "a reopened lane with no round time was backed by an approval"; else ok "a reopened lane whose round has no time is backed by no approval"; fi
+store "[$REOPENED,$(review closed approve recorded triage)]"
+if green --anchor tk-anc --lane triage; then ok "a fresh local approve backs the reopened lane, approval or not"; else bad "a local approve backing did not green the reopened lane"; fi
+rm -f "$GH_DIR/reviews_42.json"
+
+# ---------------------------------------------------------------------------
 # An unreadable store is not green (exit 2, never green-by-default).
 # ---------------------------------------------------------------------------
 STUB_LIST_FAIL=1 green --anchor tk-anc --lane correctness --no-remote; rc=$?
