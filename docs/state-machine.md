@@ -228,9 +228,15 @@ an account other than the city's, with a standing CHANGES_REQUESTED from any
 other account a veto. An approval stands across later pushes until it is
 dismissed, so it counts whatever commit it was given at. A dismissed review is
 dropped before each reviewer's latest review is taken, so it neither approves
-nor vetoes, and it does not hide its author's older approval. No
-`check.approval` marker and no `check_set` token arms it or opts out, and
-GitHub branch protection is an extra layer, not the authority.
+nor vetoes, and it does not hide its author's older approval. A small fix after
+an approval lands on it. An outside approval is dismissed when the code that
+would land is not the code the approver saw: by `bring-current-guard.sh` when
+bringing the branch current took judgment, and by `approval-withdraw.sh` when
+the validator rules a fresh whole-diff review warranted. Each dismisses every
+approval an account has not had dismissed, not only its latest, because an
+older approval would otherwise count again. No `check.approval` marker and no
+`check_set` token arms it or opts out, and GitHub branch protection is an extra
+layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
 What the *reviewer* did short of a verdict is posture, not a check:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of check
@@ -293,7 +299,9 @@ The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. A `CHANGES_REQUESTED`
+the operator can judge — files a visit and stays open. Only a fix's thread is
+resolved behind its answer: the thread of a declined or deferred finding stays
+open for the operator to accept or overrule. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
@@ -461,17 +469,24 @@ list does not carry, stands on its own and is counted.
 
 **Outstanding feedback routes to something.** It becomes a fix-pool rework
 child carrying the review bodies and inline comments verbatim in its
-description, or, when a human already holds the anchor (`merge_hold`,
-`rebase_hold`, `gc.routed_to=human`, or a live demand bead stamped
-`gc.demand_for=<anchor>`) or there is nowhere to route work, one `escalate.sh`
-visit per batch. A `gc.takeaway` is not one of those conditions: it records a
-sitting rather than naming a live wait, so on its own it forces no visit. Either
-way the filed bead holds the merge until it closes — the rework child through a
-`blocks` edge, the visit through the `pr_number` stamp that `merge.sh`'s
-in-flight-holder probe reads. A visit takes no `blocks` edge: `escalate.sh`
-files it *depending on* its subject, so an edge back would be a cycle.
-`pr_comment_disposition` records which was chosen. Silence is not one of the
-options.
+description, or, when there is nowhere to route work (no fix pool, or the PR
+head branch is unresolved), one `escalate.sh` visit per batch. A hold on the
+anchor does not choose the visit. `merge_hold`, `rebase_hold`,
+`gc.routed_to=human`, a live demand bead stamped `gc.demand_for=<anchor>` and
+an armed re-dispatch all leave the batch a rework child, routed like any other,
+and each keeps gating what it gates elsewhere, among them the merge, the
+stale-base merge-in and the red-check rework. The child is the batch's fix
+unit: a must-fix ruling on one of the batch's findings hangs its close-ordering
+edge on it, so a held batch with no child would leave those findings holding
+the merge with nothing acting on them. The child brings the branch current by
+merge as it answers, as every rework child does, and a conflicting branch is no
+exception: an anchor that owes feedback skips the stale-base arm and its skip
+guards entirely. Either way the filed bead holds the merge until it closes —
+the rework child through a `blocks` edge, the visit through the `pr_number`
+stamp that `merge.sh`'s in-flight-holder probe reads. A visit takes no
+`blocks` edge: `escalate.sh` files it *depending on* its subject, so an edge
+back would be a cycle. `pr_comment_disposition` records which was chosen.
+Silence is not one of the options.
 
 ## The status label (GitHub projection)
 
@@ -644,15 +659,32 @@ review's result set.
   the polecat pool. Back to `routed`; the next claimant starts from the
   recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
-  and slings exactly one rework child and clears the check marker, returning the
-  lane to `unreviewed`, so gate-ensure re-arms the dispatch when the child
-  lands. Convergence is judged by the validator, not counted in rounds
-  (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
-  child every round and nothing in the cadence bounds them. One writer, one
-  verdict: no second component writes a verdict. `pr-facts.sh` and
-  `gate-ensure.sh` also clear a marker, each under a condition
+  and slings exactly one rework child through `rework-child.sh` and clears the
+  check marker, returning the lane to `unreviewed`, so gate-ensure re-arms the
+  dispatch when the child lands. Convergence is judged by the validator, not
+  counted in rounds (`specs/tk-ztapg/review-cycle-architecture.md`), so
+  request-changes files a child every round and nothing in the cadence bounds
+  them. One writer, one verdict: no second component writes a verdict.
+  `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
+- **Ruling** (operator, via converse): a ruled sign-off on an open-PR subject
+  must answer whether the ruling changes what the branch must contain
+  (`converse-signoff.sh --rework` or `--no-rework`), and one that answers
+  neither is refused. On `--rework`, `converse-rework.sh` files the same fix
+  unit through `rework-child.sh`, sourced by `source_ruling_bead=<visit>` in
+  place of a verdict's `source_review_bead`: `task_kind=rework`, the anchor's
+  branch resumed, a `blocks` edge holding the merge. A ruling on a published PR
+  so becomes demand the refinery lands rather than prose nobody reads. A ruling
+  has no lane of its own and rules the whole diff, as a human feedback batch
+  does, so once the child is dispatched `converse-rework.sh` returns every lane
+  the anchor declares to `unreviewed` (`review-outcome.sh supersede-anchor`).
+  Quiescence holds each lane's dispatch while the child is open, and gate-ensure
+  re-reviews the whole diff at the head the child lands. Two things can still
+  back a lane through the ruling: a review already in flight when the ruling is
+  filed, whose verdict is on the head it read, and an operator's GitHub
+  approval, which backs every lane until it is dismissed. converse never pushes
+  code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full
@@ -686,7 +718,15 @@ review's result set.
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child
   filed under one answers the question by performing it. Closing the demand is
-  what releases the dispatch.
+  what releases the dispatch. A conflict that is not drift gets no child
+  either. When a change that landed first deleted or rewrote code the branch
+  edits, `branch-supersession.sh` files a `rework-base-supersession` visit on the
+  anchor, because whether the branch still has work to do is the operator's
+  call. That visit holds the dispatch while it is open and its route addresses
+  somebody; one routed nowhere holds nothing until `escalate.sh` repoints it.
+  Closing it `benign` (the overlap was incidental) lets the next pass send the
+  merge-in child.
+  `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
 - **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes
@@ -700,19 +740,20 @@ review's result set.
   AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
   or by carrying no work-product key at all. It also closes an unmarked rework
   twin, an open rework child that was never dispatched (no dispatch metadata,
-  no convoy tracking it) whose review is closed and whose same-review,
-  same-anchor sibling landed. That twin would otherwise hold its anchor
-  forever. It writes nothing to the successor's branch or PR, and holds on
-  anything it cannot establish.
+  no convoy tracking it) whose source is closed (the review it answers, or the
+  visit a ruling's child answers) and whose same-source, same-anchor sibling
+  landed. That twin would otherwise hold its anchor forever. It writes nothing
+  to the successor's branch or PR, and holds on anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator makes, not a trigger a push pulls. gate-ensure holds dispatch
-  rather than pouring a second review while an open rework child is already in
-  flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
-  `source_review_bead` (the review bead the rework answers) — and reads a
+  the validator or an operator ruling makes, not a trigger a push pulls.
+  gate-ensure holds dispatch rather than pouring a second review while an open
+  rework child is already in flight for the lane — a `blocks`-dep bead on the
+  anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
+  review or the ruling the rework answers) — and reads a
   legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
   `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
   marker sweep leaves that shape alone rather than clearing it, for the same
@@ -769,16 +810,30 @@ pool; a child a worker still holds (`in_progress`) or one an operator froze
 resolves. A close with no recorded disposition still transitions to `abandoned`
 and files the rework-or-close visit.
 
-That consummation reaches only the branch-carrying children. The rest of the
-machine review scaffolding carries no branch — the validation pass and the
-finding beads — and each still holds a `blocks` edge on the anchor, directly or
-on a rework that does, so an open one leaves a disposed anchor stuck with
-nothing in the close path reaching it. The cadence's `scaffolding-sweep.sh`
-(arm 10) does reach them: it closes every `task_kind=validation|finding|rework`
-bead whose `anchor_bead` names a disposed, non-merged anchor (`gc.superseded_by`
-or `gc.pr_close_disposition_kind` present) as `gc.outcome=moot`, findings before
-the reworks they block, so the anchor is left with no machine scaffolding
-holding its close. It never touches `task_kind=review` (`review-sweep.sh`'s) or
+That drop reaches only the parked, branch-carrying children. The rest of the
+machine review scaffolding is a fix unit, the finding beads and the validation
+pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
+must-fix finding it answers, so an open one refuses the anchor's close the same
+way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 10 over every
+disposed anchor, and the consummation runs it for its own anchor just before the
+close, so the close is not refused and escalated over scaffolding that arm 10
+would retire later in the same pass. It closes every
+`task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
+non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
+present) as `gc.outcome=moot`, reworks before the findings they block, so no
+close is refused by a blocker still open in the same pass. A bead an operator
+froze (`rebase_hold`) is left standing, like a frozen child.
+
+A finding is mooted only when it objects to the disposed diff: a machine-lane
+finding, a human finding whose locus names no file, or a human comment on a
+line the PR added or removed. A human comment on a line the PR left unchanged
+can cite code the target branch already carries, and the disposal does not
+answer it, so that finding is carried forward instead. A bug bead takes its
+objection, with no `anchor_bead`, so it reaches a first reaction like any
+discovered work, and the finding closes through `bead-rehome.sh` pointed at it.
+When a finding's comment line does not read, the consummation leaves the close
+to the next pass rather than closing the anchor before the finding is judged.
+The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or
 `task_kind=visit`: a disposed PR does not moot the human conversation about why
 it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
 open. Clearing the machine side is what lets that close land once the human side

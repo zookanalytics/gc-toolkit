@@ -83,7 +83,7 @@ harness_init() {
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   export STUB_PR_EDIT_RC=0 STUB_TIMELINE_RC=""
-  export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
+  export STUB_GQL_READ_FAIL="" STUB_GQL_COMMITS_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   export STUB_DELETE_SOURCE_HANG="" STUB_REOPEN_SOURCE_HANG="" STUB_REOPEN_SOURCE_STALL=""
   # Session roster for `gc session list`. Unset = no stdout (the historical
@@ -126,14 +126,26 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, is sourced by sibling path the same way.
+  # review-verdict.sh, the approval rule, and review-dismissal.sh, what a
+  # dismissal retires, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
+  [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   return 0
 }
 
+# The interpreter line every stub starts with. A `#!/usr/bin/env bash` stub costs
+# two execs per call, env's and then bash's, and the suite calls its stubs tens
+# of thousands of times, so the stubs name the bash running this harness
+# directly: the one on PATH that run-tests.sh (or the operator) already picked.
+# env stays the fallback for a bash that does not report its own path.
+_stub_shebang() {
+  if [ -n "${BASH:-}" ] && [ -x "${BASH:-}" ]; then printf '#!%s\n' "$BASH"
+  else printf '#!/usr/bin/env bash\n'; fi
+}
+
 _write_gc_stub() {
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+_stub_shebang > "$BIN/gc"
+cat >> "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"; D="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -208,13 +220,14 @@ case "$sub" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$bead:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
-    jq -c --arg id "$bead" 'map(if .id == $id then (.metadata |= del(.["gc.routed_to"])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    case ",$drops," in
-      *",gc.execution_routed_to,"*) : ;;
-      *) jq -c --arg id "$bead" --arg t "$target" 'map(if .id == $id then .metadata["gc.execution_routed_to"] = $t else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-    esac
-    mv "$tmp" "$S"
+    stamp=1
+    case ",$drops," in *",gc.execution_routed_to,"*) stamp=0 ;; esac
+    tmp="${S%/*}/.gc-stub.$$"
+    jq -c --arg id "$bead" --arg t "$target" --argjson stamp "$stamp" '
+      map(if .id == $id then
+            (.metadata |= del(.["gc.routed_to"]))
+            | (if $stamp == 1 then .metadata["gc.execution_routed_to"] = $t else . end)
+          else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
@@ -269,20 +282,23 @@ case "$verb" in
       esac
       shift || true
     done
-    out=$(jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
-      [ .[]
+    # One jq answers the whole query, the --metadata-field filters included:
+    # each `k=v` is split at its first `=` (a field with no `=` keeps the whole
+    # word as both, as the shell split it did) and a row must match every one.
+    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
+      ($ARGS.positional | map(split("=") as $p
+                               | if ($p | length) == 1 then {k: ., v: .}
+                                 else {k: $p[0], v: ($p[1:] | join("="))} end)) as $fields
+      | [ .[]
         | (.status // "open") as $bst
         | select($st == "" or (($st | split(",")) | index($bst)))
         | select($hk == "" or ((.metadata // {}) | has($hk)))
         | select($ty == "" or ((.issue_type // "task") == $ty))
         | select($ex == "" or ((.issue_type // "task") != $ex))
-        | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase))) ]' "$S")
-    for f in ${fields[@]+"${fields[@]}"}; do
-      k="${f%%=*}"; v="${f#*=}"
-      out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
-        '[ .[] | select((((.metadata // {})[$k]) // "" | tostring) == $v) ]')
-    done
-    printf '%s\n' "$out"
+        | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
+        | . as $row
+        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v)) ]' \
+      "$S" --args ${fields[@]+"${fields[@]}"}
     [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
@@ -334,53 +350,50 @@ case "$verb" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
-    for kv in ${sets[@]+"${sets[@]}"}; do
-      k="${kv%%=*}"; v="${kv#*=}"
-      case ",$drops," in *",$k,"*) continue ;; esac
-      # bd stores a value that parses as a JSON number, true, false or null as
-      # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
-      # boolean. Every other value, a quoted JSON string included, is stored as
-      # its raw text. The number grammar is JSON's, which is stricter than jq's
-      # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" '
-        ($v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
-        | (if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
-           elif $t == "true" then true
-           elif $t == "false" then false
-           elif $t == "null" then null
-           else $v end) as $stored
-        | map(if .id == $id then .metadata[$k] = $stored else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    for k in ${unsets[@]+"${unsets[@]}"}; do
-      case ",$drops," in *",$k,"*) continue ;; esac
-      jq -c --arg id "$id" --arg k "$k" \
-        'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    done
-    if [ "$asg_set" = 1 ]; then
-      case ",$drops," in *",assignee,"*) : ;; *)
-        jq -c --arg id "$id" --arg a "$asg" \
-          'map(if .id == $id then .assignee = $a else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    if [ -n "$newstatus" ]; then
-      case ",$drops," in *",status,"*) : ;; *)
-        jq -c --arg id "$id" --arg s "$newstatus" \
-          'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    if [ "$note_set" = 1 ]; then
-      jq -c --arg id "$id" --arg n "$note" \
-        'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
-        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
-    fi
-    if [ "$desc_set" = 1 ]; then
-      case ",$drops," in *",description,"*) : ;; *)
-        jq -c --arg id "$id" --arg d "$desc" \
-          'map(if .id == $id then .description = $d else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-      esac
-    fi
-    mv "$tmp" "$S"
+    # The whole update lands in ONE jq pass over the store, however many flags
+    # it carries: a jq per --set-metadata, --unset-metadata, assignee, status,
+    # notes and description, each with its own temp copy, made a five-flag
+    # update cost six processes and six rewrites of the store, and the suite
+    # writes tens of thousands of updates. The sets ride the positional args
+    # ahead of the unsets ($ns says where the split is), each `k=v` cut at its
+    # first `=` as the shell cut it. A set or unset whose key STUB_DROP_KEYS
+    # names is skipped, as are the assignee, status and description it names;
+    # notes are never dropped.
+    # bd stores a value that parses as a JSON number, true, false or null as
+    # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
+    # boolean. Every other value, a quoted JSON string included, is stored as
+    # its raw text. The number grammar is JSON's, which is stricter than jq's
+    # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+    tmp="${S%/*}/.gc-stub.$$"
+    jq -c --arg id "$id" --arg dr "$drops" --argjson ns "${#sets[@]}" \
+      --argjson asg_set "$asg_set" --arg asg "$asg" --arg st "$newstatus" \
+      --argjson note_set "$note_set" --arg note "$note" \
+      --argjson desc_set "$desc_set" --arg desc "$desc" '
+      ($dr | split(",")) as $drop
+      | def kept($k): ($drop | index($k)) == null;
+        ($ARGS.positional[:$ns]
+         | map(split("=") as $p
+               | if ($p | length) == 1 then {k: ., v: .}
+                 else {k: $p[0], v: ($p[1:] | join("="))} end)
+         | map(select(kept(.k)))
+         | map(.stored = ((.v | gsub("^[ \t\r\n]+|[ \t\r\n]+$"; "")) as $t
+             | if ($t | test("^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$")) then ($t | tonumber)
+               elif $t == "true" then true
+               elif $t == "false" then false
+               elif $t == "null" then null
+               else .v end))) as $sets
+      | ($ARGS.positional[$ns:] | map(select(kept(.)))) as $unsets
+      | map(if .id == $id then
+              reduce $sets[] as $s (.; .metadata[$s.k] = $s.stored)
+              | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
+              | (if $asg_set == 1 and kept("assignee") then .assignee = $asg else . end)
+              | (if $st != "" and kept("status") then .status = $st else . end)
+              | (if $note_set == 1 then
+                   .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $note)
+                 else . end)
+              | (if $desc_set == 1 and kept("description") then .description = $desc else . end)
+            else . end)' \
+      "$S" --args ${sets[@]+"${sets[@]}"} ${unsets[@]+"${unsets[@]}"} > "$tmp" && mv "$tmp" "$S"
     echo "updated $id"
     ;;
   create)
@@ -407,23 +420,28 @@ case "$verb" in
       shift || true
     done
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
-    { [ -n "$cmeta" ] && printf '%s' "$cmeta" | jq empty >/dev/null 2>&1; } \
-      || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
-    n=$(jq 'length' "$S"); nid="new-$((n + 1))"
-    drops=""
-    for pair in ${STUB_DROP_KEYS:-}; do
-      case "$pair" in "$nid:"*) drops="${pair#*:}" ;; esac
-    done
-    case ",$drops," in *",status,"*) cstatus="open" ;; esac
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
-    jq -c --arg id "$nid" --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
-      --argjson m "$cmeta" --arg dr "$drops" '
-      ($dr | split(",")) as $drop
+    # One jq validates the metadata, mints the id and lands the row. An
+    # unparseable --metadata fails --argjson before the program runs, which is
+    # the refusal with nothing created; the id is minted from the store's length
+    # inside the pass and read back from the last line of its output, so the
+    # STUB_DROP_KEYS pair that names it is matched there too (the last pair
+    # naming the id wins, as the shell loop it replaces let the last one win).
+    [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
+    out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
+      ("new-" + ((length + 1) | tostring)) as $id
+      | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
+         | (last // "") | .[($id | length) + 1:] // "" | split(",")) as $drop
       | (if ($m | type) == "object"
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
-      | . + [{id: $id, status: $st, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]' \
-      "$S" > "$tmp" && mv "$tmp" "$S"
+      | (if ($drop | index("status")) then "open" else $st end) as $status
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]),
+        $id' "$S" 2>/dev/null) \
+      || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
+    nid="${out##*$'\n'}"
+    tmp="${S%/*}/.gc-stub.$$"
+    printf '%s\n' "${out%$'\n'*}" > "$tmp" && mv "$tmp" "$S"
     if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else printf '{"id":"%s"}\n' "$nid"; fi
     ;;
   close)
@@ -705,6 +723,12 @@ case "$sub" in
     esac ;;
   api)
     path=""; jqexpr=""; gqvars='{}'; gqquery=""; method=""
+    # The -f/-F variables. gqv holds each by name, a later value for a name
+    # replacing the earlier one, and gqkeys the names in the order they first
+    # came. $gqvars is the same variables as one JSON object, built by a single
+    # jq once the arguments are read, so a request costs one process for its
+    # variables however many it carries. A handler reads one through gqvar.
+    declare -A gqv=(); gqkeys=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --hostname) shift ;;
@@ -716,28 +740,45 @@ case "$sub" in
           kv="${2:-}"; shift
           k="${kv%%=*}"; v="${kv#*=}"
           if [ "$k" = "query" ]; then gqquery="$v"
-          else gqvars=$(printf '%s' "$gqvars" | jq -c --arg k "$k" --arg v "$v" '.[$k] = $v'); fi ;;
+          else [ -n "${gqv[$k]+set}" ] || gqkeys+=("$k"); gqv[$k]="$v"; fi ;;
         --*) : ;;
         *) [ -z "$path" ] && path="$1" ;;
       esac
       shift || true
     done
+    if [ "${#gqkeys[@]}" -gt 0 ]; then
+      gqargs=()
+      for k in "${gqkeys[@]}"; do gqargs+=(--arg "$k" "${gqv[$k]}"); done
+      gqvars=$(jq -cn '$ARGS.named' "${gqargs[@]}")
+    fi
+    # gqvar <var> <name>: the request variable <name> into <var>, empty when the
+    # request carries none, its trailing newlines dropped the way reading it
+    # back out of $gqvars through a command substitution drops them.
+    gqvar() {
+      local val="${gqv[$2]-}"
+      while [ "${val%$'\n'}" != "$val" ]; do val="${val%$'\n'}"; done
+      printf -v "$1" '%s' "$val"
+    }
     if [ "$path" = "graphql" ]; then
       # The write-back surface: three reads plus four mutations, over a fixture
       # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
-      num=$(printf '%s' "$gqvars" | jq -r '.num // ""')
+      gqvar num num
       f="$G/threads_$num.json"
       # A mutation carries only the global node id, exactly as the real API takes
       # it, so the fixture holding that node has to be found rather than named.
+      # A fixture holding the node carries its id as a quoted JSON string, so one
+      # grep narrows the fixtures to those before jq reads each one, and a
+      # mutation's cost does not grow with the number of PR fixtures a suite has
+      # written. grep lists them in glob order, the order the scan reads them in.
       locate() { # <node-id> <node|thread>
         local cand filt
         if [ "$2" = "thread" ]; then filt='[ .threads[]? | select(.id == $i) ] | length > 0'
         else filt='[ (.reviews[]?, (.threads[]? | .comments.nodes[]?), .issue_comments[]?) | select(.id == $i) ] | length > 0'; fi
-        for cand in "$G"/threads_*.json; do
+        while IFS= read -r cand; do
           [ -s "$cand" ] || continue
           jq -e --arg i "$1" "$filt" "$cand" >/dev/null 2>&1 && { printf '%s' "$cand"; return 0; }
-        done
+        done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
       case "$gqquery" in
@@ -755,8 +796,8 @@ case "$sub" in
           # Drops the viewer's reaction of that content from the node, so the next
           # read shows it gone. STUB_UNREACT_RC models a removal the API refuses.
           [ "${STUB_UNREACT_RC:-0}" = "0" ] || exit "${STUB_UNREACT_RC:-0}"
-          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
-          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          gqvar sid id
+          gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg id "$sid" --arg c "$c" '
@@ -769,8 +810,8 @@ case "$sub" in
           echo '{"data":{"removeReaction":{"clientMutationId":null}}}'; exit 0 ;;
         *addReaction*)
           [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
-          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
-          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          gqvar sid id
+          gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg id "$sid" --arg c "$c" '
@@ -785,8 +826,8 @@ case "$sub" in
           echo '{"data":{"addReaction":{"clientMutationId":null}}}'; exit 0 ;;
         *addPullRequestReviewThreadReply*)
           [ "${STUB_REPLY_RC:-0}" = "0" ] || exit "${STUB_REPLY_RC:-0}"
-          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
-          body=$(printf '%s' "$gqvars" | jq -r '.b // ""')
+          gqvar tid t
+          gqvar body b
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           # databaseId 0 and our own login keep the reply out of every react and
@@ -803,7 +844,7 @@ case "$sub" in
           echo '{"data":{"addPullRequestReviewThreadReply":{"clientMutationId":null}}}'; exit 0 ;;
         *resolveReviewThread*)
           [ "${STUB_RESOLVE_RC:-0}" = "0" ] || exit "${STUB_RESOLVE_RC:-0}"
-          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
+          gqvar tid t
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg t "$tid" '.threads = ((.threads // []) | map(if .id == $t then .isResolved = true else . end))' "$f" > "$t" && mv "$t" "$f"
@@ -826,13 +867,29 @@ case "$sub" in
         *PullRequestReviewThread*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -z "${STUB_GQL_THREAD_FAIL:-}" ] || exit 1
-          tid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
+          gqvar tid id
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
           jq -c --arg t "$tid" '{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
               nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+          exit 0 ;;
+        *commits\(first:100,after:*)
+          # The PR's commits, which a fix's answer cites. Served from the PR
+          # fixture's .commits, a list of {oid, message, parents} where parents is
+          # the parent count (2 for a merge, 1 when absent). A fixture with no list
+          # is a PR none of whose commits names a fix unit. Each read is logged, so
+          # a test can tell the read is made only for an answer that is posted.
+          # STUB_GQL_COMMITS_FAIL models a commit read the API refuses.
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -z "${STUB_GQL_COMMITS_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          printf 'COMMITS %s\n' "$num" >> "${STUB_GH_LOG:?}"
+          jq -c '{data: {repository: {pullRequest: {
+              commits: {pageInfo: {hasNextPage: false, endCursor: null},
+                nodes: [ (.commits // [])[]
+                         | {commit: {oid, message, parents: {totalCount: (.parents // 1)}}} ]}}}}}' "$f"
           exit 0 ;;
         *comments\(first:100,after:*)
           # The Conversation-tab (issue comments) read. WB_THREAD_COMMENTS_QUERY
@@ -868,8 +925,8 @@ case "$sub" in
         n="${path##*/pulls/}"; n="${n%%/*}"
         f="$G/threads_$n.json"
         [ -s "$f" ] || echo '{"reviews":[],"threads":[],"issue_comments":[]}' > "$f"
-        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
-        p=$(printf '%s' "$gqvars" | jq -r '.path // ""')
+        gqvar b body
+        gqvar p path
         db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
         t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
         jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
@@ -880,15 +937,15 @@ case "$sub" in
         [ -s "$r" ] || echo '[]' > "$r"
         jq -c --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" \
           '. + [{ id: $db, user: {login: $self}, body: $b, path: $p, pull_request_review_id: null }]' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
-        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$(printf '%s' "$gqvars" | jq -r '.subject_type // ""')" \
-          "$(printf '%s' "$gqvars" | jq -r '.commit_id // ""')" >> "${STUB_GH_LOG:?}"
+        gqvar fst subject_type; gqvar fcommit commit_id
+        printf 'FCOMMENT %s %s %s %s\n' "$n" "$p" "$fst" "$fcommit" >> "${STUB_GH_LOG:?}"
         out="{\"id\":$db}"
         if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
         exit 0 ;;
       PATCH:*/issues/comments/*)
         [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
         cid="${path##*/issues/comments/}"
-        b=$(printf '%s' "$gqvars" | jq -r '.body // ""')
+        gqvar b body
         hit=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue

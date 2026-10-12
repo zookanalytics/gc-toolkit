@@ -51,8 +51,7 @@ esac
 # ── stubs ──────────────────────────────────────────────────────────────
 BIN="$TMP/bin"; RIG="$TMP/rig"; NORIG="$TMP/norig"
 mkdir -p "$BIN" "$RIG/assets/scripts" "$NORIG/assets/scripts" "$TMP/cwd" "$TMP/home"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf 'gc %s\n' "$*" >> "${STUB_LOG:?}"
 # Like the real gc, every mail verb refuses an empty id: peek answers "message
 # not found" with exit 1 and an error object on stdout.
@@ -73,8 +72,7 @@ case "${1:-} ${2:-}" in
   *) echo "unexpected gc invocation: $*" >&2; exit 99 ;;
 esac
 STUB
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 exit 128
 STUB
 # The wrapper records the exact argv as a JSON array, then hands the same argv
