@@ -2238,7 +2238,8 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 # L-after and L-pinned wait behind L-live through `blocks` edges: L-next carries
 # a claim a gone session left, L-after sits unclaimed as the pour left it, and
 # L-pinned is this session's own. L-unheld's only blocker is not an open member
-# of the molecule, so nothing holds it back from bd ready.
+# of the molecule, and its `tracks` edge to the root blocks nothing, so nothing
+# holds it back from bd ready.
 #
 # A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
 # molecule (root-FOLD, F-work, F-held) still carrying the pool route the pour
@@ -2261,7 +2262,7 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"L-pinned","status":"open","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.follow-up","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
   "dependencies":[{"issue_id":"L-pinned","depends_on_id":"L-live","type":"blocks"}]},
  {"id":"L-unheld","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.side","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"},
-  "dependencies":[{"issue_id":"L-unheld","depends_on_id":"X-closed","type":"blocks"}]},
+  "dependencies":[{"issue_id":"L-unheld","depends_on_id":"root-LIVE","type":"tracks"},{"issue_id":"L-unheld","depends_on_id":"X-closed","type":"blocks"}]},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
