@@ -31,7 +31,9 @@ NO_DESC="no frontmatter description. A spec page opens with a --- block whose de
 # Scope heading counts only outside a code fence and outside frontmatter. A
 # description counts only as a top-level key, with a value, inside a ---
 # block that opens on line 1 and closes. A block that never closes is not
-# frontmatter, so its lines count as the page's body.
+# frontmatter, so its lines count as the page's body. A load that fails leaves
+# an empty program, which awk runs as a clean scan of every page, so it ends
+# the run instead.
 SCAN=$(cat <<'AWK'
 function fence_run(s,    c, n) {
     sub(/^ ? ? ?/, "", s)
@@ -94,7 +96,7 @@ END {
     }
 }
 AWK
-)
+) || { echo "doc-filing: could not load the page scan, so no page was checked"; exit 2; }
 
 # awk reads an operand shaped like `name=value` as an assignment, so every
 # page goes to it with a ./ prefix.

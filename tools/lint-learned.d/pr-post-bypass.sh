@@ -30,7 +30,8 @@
 # Exempt: pr-post.sh itself, the one place the raw calls belong, and this
 # directory. No exception list otherwise: every post has a pr-post.sh verb.
 #
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -202,6 +203,13 @@ strip_quoted() {
 
 found=0
 
+# cannot_scan <file> <tool> — a tool that failed on a file left it unscanned,
+# and reporting nothing would pass it as clean, so the run ends in an error.
+cannot_scan() {
+    echo "pr-post-bypass: $2 failed on $1 — detector cannot scan it" >&2
+    exit 2
+}
+
 # judge <file> <lineno> <kind> <text> — report each finding the line makes.
 judge() {
     local f="$1" no="$2" kind="$3" text="$4" trimmed code
@@ -244,11 +252,15 @@ for f in "$@"; do
         specs/* | */specs/* | generated/* | */generated/*) continue ;;
     esac
     case "$f" in *.sh | *.toml | *.md) ;; *) continue ;; esac
-    # One cheap read gates the line scan.
-    grep -Eq "$GATE" "$f" 2>/dev/null || continue
+    # One cheap read gates the line scan. Exit 1 is a file with no gh call and
+    # no mutation name; anything past it is a file grep could not read, which a
+    # skip would pass unscanned.
+    grep -Eq "$GATE" "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    [ "$rc" -eq 0 ] || cannot_scan "$f" grep
     case "$f" in
-        *.sh) lines="$(sh_lines "$f")" ;;
-        *)    lines="$(fenced_lines "$f")" ;;
+        *.sh) lines="$(sh_lines "$f")" || cannot_scan "$f" awk ;;
+        *)    lines="$(fenced_lines "$f")" || cannot_scan "$f" awk ;;
     esac
     [ -n "$lines" ] || continue
     while IFS=$'\t' read -r no kind text; do

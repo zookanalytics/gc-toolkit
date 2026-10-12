@@ -68,6 +68,12 @@ while IFS= read -r f; do
             fi ;;
     esac
 
+    # Exit 1 is a file whose shape sits outside the lines that run.
+    hits="$(printf '%s\n' "$lines" | grep -E -- "$ALT")"; rc=$?
+    if [ "$rc" -gt 1 ]; then
+        echo "id-read-unguarded: grep failed on the lines of $f — detector cannot scan it" >&2
+        exit 2
+    fi
     while IFS= read -r hit; do
         [ -n "$hit" ] || continue
         no="${hit%%:*}"; body="${hit#*:}"
@@ -76,7 +82,7 @@ while IFS= read -r f; do
         case "$trimmed" in '#'*) continue ;; esac
         echo "$f:$no: $MSG"
         found=1
-    done < <(printf '%s\n' "$lines" | grep -E -- "$ALT")
+    done <<< "$hits"
 done <<< "$candidates"
 
 [ "$found" -eq 0 ]

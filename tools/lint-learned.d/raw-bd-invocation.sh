@@ -29,7 +29,8 @@
 # or unloadable, which is the minimal condition-exec env. The reason travels
 # with the line, so a later call site in the same file inherits nothing.
 #
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -80,7 +81,14 @@ for f in "$@"; do
         *) continue ;;
     esac
     # One cheap read decides whether the file is worth a line scan at all.
-    grep -Eq '(^|[^[:alnum:]_./-])bd[[:space:]]' "$f" 2>/dev/null || continue
+    # Exit 1 is a file that never mentions bd; anything past it is a file grep
+    # could not read, which a skip would pass unscanned.
+    grep -Eq '(^|[^[:alnum:]_./-])bd[[:space:]]' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    if [ "$rc" -ne 0 ]; then
+        echo "raw-bd-invocation: grep failed on $f — detector cannot scan it" >&2
+        exit 2
+    fi
 
     masked=()
     while IFS= read -r m || [ -n "$m" ]; do masked+=("$m"); done < <(sed -E "$MASK_GC_BD" "$f" 2>/dev/null)

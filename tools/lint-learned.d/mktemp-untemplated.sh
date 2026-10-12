@@ -17,7 +17,8 @@
 # an executable wrapper (`command`, `env`, `exec`, `nohup`, `time`, `timeout`)
 # runs what follows, so the wrapped call is seen through. No exception list: a
 # template is always available, and a path built from a variable counts.
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -51,8 +52,16 @@ FOLD_AWK='
 '
 
 is_comment() { # whole-line comments only; `cmd  # note` is code
-    case "$(printf '%s' "$1" | tr -d '[:space:]')" in '#'*) return 0 ;; esac
+    local trimmed="${1#"${1%%[![:space:]]*}"}"
+    case "$trimmed" in '#'*) return 0 ;; esac
     return 1
+}
+
+# cannot_scan <file> <tool> — a tool that failed on a file left it unscanned,
+# and reporting nothing would pass it as clean, so the run ends in an error.
+cannot_scan() {
+    echo "mktemp-untemplated: $2 failed on $1 — detector cannot scan it" >&2
+    exit 2
 }
 
 # A call is templated when a producer-named operand survives the option words,
@@ -160,9 +169,10 @@ resolve_command() {
 }
 
 scan_line() { # <file> <lineno> <body> <context-message>
-    local f="$1" no="$2" body="$3" ctx="$4" seg args
+    local f="$1" no="$2" body="$3" ctx="$4" seg segs args
     is_comment "$body" && return
     case "$body" in *mktemp*) ;; *) return ;; esac
+    segs="$(split_commands "$body")" || cannot_scan "$f" sed
     while IFS= read -r seg || [ -n "$seg" ]; do
         # A segment begins at a command position. Peel any assignment-word
         # prefix (`VAR=val …`, as in `TMPDIR=/x mktemp`) and executable wrapper
@@ -181,7 +191,7 @@ scan_line() { # <file> <lineno> <body> <context-message>
             found=1
             return
         fi
-    done < <(split_commands "$body")
+    done <<< "$segs"
 }
 
 # Lines of a *.sh file that hold a real command, paired with their line number.
@@ -239,22 +249,25 @@ for f in "$@"; do
     # matching logic spells `mktemp` in case patterns a text scanner cannot tell
     # from a call. base-snapshots holds fixtures that are read, not run.
     case "$f" in */lint-learned.d/mktemp-untemplated.sh | */base-snapshots/*) continue ;; esac
-    grep -q 'mktemp' "$f" 2>/dev/null || continue
+    # Exit 1 is a file that never mentions mktemp. Anything past it is a file
+    # grep could not read, and so is a scan below that fails: either way the
+    # file is unscanned, and reporting nothing would pass it as clean.
+    grep -q 'mktemp' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    [ "$rc" -eq 0 ] || cannot_scan "$f" grep
     case "$f" in
         *.sh)
+            lines="$(sh_command_lines "$f")" || cannot_scan "$f" awk
             while IFS= read -r hit; do
                 scan_line "$f" "${hit%%:*}" "${hit#*:}" \
                     'bare `mktemp` — the temp path lands in the shared /tmp/tmp.* family and cannot be traced to this script'
-            done < <(sh_command_lines "$f")
+            done <<< "$lines"
             ;;
         *.toml)
             # ``` fences and `# >>>` markers both delimit shell that is run
             # verbatim — by the agent following the recipe, or by the test
             # that extracts it.
-            while IFS= read -r line; do
-                scan_line "$f" "${line%%: *}" "${line#*: }" \
-                    'bare `mktemp` in a recipe — the temp path lands in the shared /tmp/tmp.* family and cannot be traced to this formula'
-            done < <(awk "$FOLD_AWK"'
+            lines="$(awk "$FOLD_AWK"'
                 /^[[:space:]]*```/            { inf = !inf; pend = ""; next }
                 /#[[:space:]]*>>>[[:space:]]/ { inm = 1; pend = "" }
                 /#[[:space:]]*<<<[[:space:]]/ { inm = 0; pend = "" }
@@ -263,13 +276,15 @@ for f in "$@"; do
                     if (line_continues($0)) { sub(/\\$/, "", $0); pend = $0; next }
                     print pno": "$0
                 }
-                END { if (pend != "" && pend ~ /mktemp/) print pno": "pend }' "$f" 2>/dev/null)
-            ;;
-        *.md)
+                END { if (pend != "" && pend ~ /mktemp/) print pno": "pend }' "$f" 2>/dev/null)" \
+                || cannot_scan "$f" awk
             while IFS= read -r line; do
                 scan_line "$f" "${line%%: *}" "${line#*: }" \
-                    'bare `mktemp` in an extracted snippet — the temp path cannot be traced to its producer'
-            done < <(awk "$FOLD_AWK"'
+                    'bare `mktemp` in a recipe — the temp path lands in the shared /tmp/tmp.* family and cannot be traced to this formula'
+            done <<< "$lines"
+            ;;
+        *.md)
+            lines="$(awk "$FOLD_AWK"'
                 /#[[:space:]]*>>>[[:space:]]/ { inm = 1; pend = "" }
                 /#[[:space:]]*<<<[[:space:]]/ { inm = 0; pend = "" }
                 inm {
@@ -277,7 +292,12 @@ for f in "$@"; do
                     if (line_continues($0)) { sub(/\\$/, "", $0); pend = $0; next }
                     print pno": "$0
                 }
-                END { if (pend != "" && pend ~ /mktemp/) print pno": "pend }' "$f" 2>/dev/null)
+                END { if (pend != "" && pend ~ /mktemp/) print pno": "pend }' "$f" 2>/dev/null)" \
+                || cannot_scan "$f" awk
+            while IFS= read -r line; do
+                scan_line "$f" "${line%%: *}" "${line#*: }" \
+                    'bare `mktemp` in an extracted snippet — the temp path cannot be traced to its producer'
+            done <<< "$lines"
             ;;
     esac
 done

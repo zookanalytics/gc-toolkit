@@ -35,7 +35,9 @@ set -uo pipefail
 
 # The scanner walks each fenced line a character at a time on a stack of
 # quoting frames that persists across lines, so a string or substitution that
-# spans lines keeps its context. Heredoc'd so its own quotes survive.
+# spans lines keeps its context. Heredoc'd so its own quotes survive. A load
+# that fails leaves an empty program, which awk runs as a clean scan of every
+# file, so it ends the run instead.
 SCAN_AWK=$(cat <<'AWKEOF'
 # Frames, FR[1..sp], with a nesting depth in DP[] where one is needed:
 #   T top level   S '…'   A $'…'   Q "…"   C $(…)   B `…`
@@ -152,7 +154,7 @@ BEGIN { reset_state() }
     if (!hb && hn > 0 && !CONT && FR[sp] != "S" && FR[sp] != "Q" && FR[sp] != "A") { hi = 1; body_begin() }
 }
 AWKEOF
-)
+) || { echo "zsh-colon-modifier: could not load its scan program — detector cannot scan" >&2; exit 2; }
 
 found=0
 for f in "$@"; do

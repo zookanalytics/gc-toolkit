@@ -137,8 +137,15 @@ for f in "$@"; do
         *.toml | *.md) mode='fenced' ;;
         *) continue ;;
     esac
-    # One cheap read decides whether the file is worth a scan at all.
-    grep -Eq -- '--notes([^[:alnum:]_-]|$)' "$f" 2>/dev/null || continue
+    # One cheap read decides whether the file is worth a scan at all. Exit 1
+    # is a file without the flag; anything past it is a file grep could not
+    # read, which a skip would pass unscanned.
+    grep -Eq -- '--notes([^[:alnum:]_-]|$)' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    if [ "$rc" -ne 0 ]; then
+        echo "bd-notes-replace: grep failed on $f — detector cannot scan it" >&2
+        exit 2
+    fi
     # A nested substitution is judged when it closes, ahead of the command
     # around it, so the line numbers are sorted back into file order.
     hits="$(awk -v mode="$mode" "$SCAN_AWK" "$f" | sort -n -u)" || {

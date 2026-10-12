@@ -42,7 +42,8 @@
 # Matching is pure bash: this runs inside a gate on every bead, so it must
 # not spawn a process per line.
 #
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -79,8 +80,15 @@ for f in "$@"; do
     esac
     # One cheap read decides whether the file is worth a line scan at all.
     # A file with no `tr -d` can still call a scrub helper it never defines,
-    # so the names are part of the same read.
-    grep -Eq 'tr[[:space:]]+-d|scrub|strip_ct' "$f" 2>/dev/null || continue
+    # so the names are part of the same read. Exit 1 is a file with none of
+    # them; anything past it is a file grep could not read, which a skip would
+    # pass unscanned.
+    grep -Eq 'tr[[:space:]]+-d|scrub|strip_ct' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    if [ "$rc" -ne 0 ]; then
+        echo "inline-ctrl-scrub: grep failed on $f — detector cannot scan it" >&2
+        exit 2
+    fi
 
     fence="" lineno=0 defines_scrub=0
     calls=()
