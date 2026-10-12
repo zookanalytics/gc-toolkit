@@ -27,8 +27,10 @@
 # paths the fast-forward rewrites, pins them under
 # refs/gc-toolkit/reconcile-set-aside/ and advances when each working copy is
 # committed, upstream or on a pushed branch, keeping a dirty path the
-# fast-forward does not touch, and escalates untouched when a working copy or a
-# staged edit is local-only or an untracked file sits on an added path.
+# fast-forward does not touch, removes an untracked file on an added path that
+# already holds the incoming content, and escalates untouched when a working
+# copy or a staged edit is local-only or an untracked file on an added path
+# holds other content.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -593,6 +595,24 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/pi" rev-parse HEAD)" "$PI_HEAD" "an untracked file on a path the fast-forward adds blocks the set-aside"
 eq "$(cat "$TMP/pi/new.txt")" "mine" "the untracked file in the way is left untouched"
 eq "$(esc_count pi)" "1" "an untracked file in the way escalates"
+
+# sigma: the untracked file in the way already holds the bytes origin adds
+# there, and no tracked path is dirty. The fast-forward writes those bytes back,
+# so the file goes and the checkout advances, with nothing to pin.
+behind_rig sigma
+echo added > "$TMP/sigma.src/new.txt"; git -C "$TMP/sigma.src" add new.txt; git -C "$TMP/sigma.src" commit -qm b3
+git -C "$TMP/sigma.src" push -q "$TMP/sigma.git" main
+git -C "$TMP/sigma" fetch -q origin                              # still on b1, now behind b2 and b3
+echo added > "$TMP/sigma/new.txt"
+SIGMA_REMOTE="$(git -C "$TMP/sigma.git" rev-parse main)"
+rigs_json sigma
+: > "$TMP/escalations"
+SIGMA_OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/sigma" rev-parse HEAD)" "$SIGMA_REMOTE" "an untracked copy of the content the fast-forward adds goes, and the checkout advances"
+eq "$(git -C "$TMP/sigma" status --porcelain)" "" "the added path is tracked after the fast-forward"
+eq "$(esc_count sigma)" "0" "an untracked copy of the content the fast-forward adds is not escalated"
+eq "$(set_aside_refs sigma)" "" "with no tracked path set aside, nothing is pinned"
+grep -q '1 auto-healed' <<< "$SIGMA_OUT" && ok "the summary counts the removal as an auto-heal" || bad "the summary counts the removal as an auto-heal (got '$SIGMA_OUT')"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

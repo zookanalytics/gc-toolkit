@@ -8,9 +8,10 @@
 #
 # --ff-only advances only on a clean fast-forward, keeps a dirty file the
 # incoming commits do not touch, and refuses, mutating nothing, on a divergence
-# or on a local change to a path the incoming commits rewrite. A refusal gets
-# one of two heals before it escalates, and each heal acts only on what it can
-# prove loses nothing.
+# or on a local change to a path the incoming commits rewrite. A refusal on a
+# checkout that is only behind gets the set-aside heal, and one on a diverged
+# checkout gets the reset heal. Each acts only on what it can prove loses
+# nothing, and what neither heals escalates.
 #
 # The rig root must also stay ON the default branch: it is a deploy mirror, and a
 # HEAD parked elsewhere (detached, or a feature/integration branch an agent
@@ -33,12 +34,15 @@
 #   - its working copy is absent, equals HEAD, equals the remote, or matches a
 #     blob in a remote-tracking ref's history. Any other working copy may be
 #     machine-local config or real work, so the pass escalates instead;
-#   - it has no unmerged entry, and no untracked file sits on a path the
-#     fast-forward adds.
+#   - it has no unmerged entry.
+# An unignored untracked file on a path the fast-forward adds blocks it too.
+# One that already holds the bytes the remote adds there is removed before the
+# retry, because the fast-forward writes the same content back; any other
+# escalates.
 # A staged change needs no proof of its own: a directory-imported pack runs from
-# the working tree, so the index holds nothing the runtime executes. Before
-# anything moves, `git stash create` pins the staged and working-tree state of
-# every dirty tracked path in one commit, under
+# the working tree, so the index holds nothing the runtime executes. Before a
+# tracked path moves, `git stash create` pins the staged and working-tree state
+# of every dirty tracked path in one commit, under
 # refs/gc-toolkit/reconcile-set-aside/<UTC time> rather than on the stash stack
 # that other sessions share. Only then are the blocking paths restored to HEAD
 # and the fast-forward retried. A dirty path the fast-forward does not rewrite,
@@ -67,8 +71,8 @@
 # It then resets --hard to the remote, which keeps every other untracked file,
 # and closes the divergence bead.
 #
-# Set RECONCILE_NO_AUTOHEAL=1 to disable both heals and escalate every refusal
-# instead.
+# Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
+# escalate every refusal instead.
 #
 # A refusal neither heal resolves takes the exception path: one idempotent bead
 # per blocked rig records why, and escalate.sh raises it so someone actually
@@ -178,15 +182,15 @@ in_list() {
 }
 
 # The behind-checkout heal (see the header). On success the checkout has
-# fast-forwarded and set_aside_ref names the pin. On failure blocking_report
-# says what blocked it. If set_aside_ref is empty, nothing was touched. If it is
-# set, the blocking paths were pinned and restored to HEAD, and the
-# fast-forward still refused.
+# fast-forwarded, and set_aside_ref names the pin when tracked paths were set
+# aside. On failure blocking_report says what blocked it and names whatever the
+# heal had already pinned, restored or removed; set_aside_ref is set once a pin
+# exists.
 set_aside_ref=""; blocking_report=""
 set_aside_and_advance() {
     local path="$1" remote="$2" name="$3"
-    local dirty incoming added p blob listed="" msg pin ref unsafe=0
-    local -a dirty_paths=() blocking=()
+    local dirty incoming added p blob listed="" gone="" stuck="" moved="" msg pin ref unsafe=0
+    local -a dirty_paths=() blocking=() in_way=()
     set_aside_ref=""; blocking_report=""
     # Tracked paths whose working tree or index differs from HEAD. git quotes a
     # name holding a control character, a double quote or a backslash, and a
@@ -209,7 +213,9 @@ set_aside_and_advance() {
         done <<< "$incoming"
     fi
     # An untracked file on a path the fast-forward adds blocks it too. git
-    # overwrites an ignored one, so only an unignored file counts.
+    # overwrites an ignored one, so only an unignored file counts. A regular
+    # file holding the remote's blob for its path can go, since the
+    # fast-forward writes those bytes back.
     added=$(git -C "$path" -c core.quotepath=false diff --name-only --no-renames --diff-filter=A HEAD "$remote" 2>/dev/null) \
         || { blocking_report="could not list the paths the fast-forward adds"; return 1; }
     while IFS= read -r p; do
@@ -217,10 +223,16 @@ set_aside_and_advance() {
         [ -e "$path/$p" ] || [ -L "$path/$p" ] || continue
         in_list "$p" ${dirty_paths[@]+"${dirty_paths[@]}"} && continue
         git --literal-pathspecs -C "$path" check-ignore -q -- "$p" 2>/dev/null && continue
-        blocking_report+="untracked file in the way: $p"$'\n'
-        unsafe=1
+        if [ -f "$path/$p" ] && [ ! -L "$path/$p" ] \
+           && blob=$(git -C "$path" hash-object -- "$p" 2>/dev/null) \
+           && [ "$blob" = "$(git -C "$path" rev-parse -q --verify "$remote:$p" 2>/dev/null)" ]; then
+            in_way+=("$p")
+        else
+            blocking_report+="untracked file in the way: $p (it holds other content than $remote adds there)"$'\n'
+            unsafe=1
+        fi
     done <<< "$added"
-    if [ "${#blocking[@]}" -eq 0 ] && [ "$unsafe" -eq 0 ]; then
+    if [ "${#blocking[@]}" -eq 0 ] && [ "${#in_way[@]}" -eq 0 ] && [ "$unsafe" -eq 0 ]; then
         blocking_report="no local change sits on a path the fast-forward rewrites"
         return 1
     fi
@@ -243,22 +255,37 @@ set_aside_and_advance() {
         fi
     done
     [ "$unsafe" -eq 0 ] || return 1
-    msg="reconcile-rig-checkouts set aside $listed so rigs/$name could fast-forward to $remote. This commit's tree holds each dirty path's working copy and its second parent the staged copy."
-    ref="refs/gc-toolkit/reconcile-set-aside/$(date -u +%Y%m%dT%H%M%SZ)"
-    pin=$(GIT_AUTHOR_NAME=reconcile-rig-checkouts GIT_AUTHOR_EMAIL=reconcile-rig-checkouts@localhost \
-        GIT_COMMITTER_NAME=reconcile-rig-checkouts GIT_COMMITTER_EMAIL=reconcile-rig-checkouts@localhost \
-        git -C "$path" stash create "$msg" 2>/dev/null) && [ -n "$pin" ] \
-        || { blocking_report="could not pin the local changes on $listed"; return 1; }
-    # An empty old value makes the ref create-only, so no earlier pin is replaced.
-    git -C "$path" update-ref -m "$msg" "$ref" "$pin" "" 2>/dev/null \
-        || { blocking_report="could not record the pin of $listed at $ref"; return 1; }
-    set_aside_ref="$ref"
-    if ! git --literal-pathspecs -C "$path" restore --source=HEAD --staged --worktree -- "${blocking[@]}" 2>/dev/null; then
-        blocking_report="could not restore $listed to HEAD after pinning them"
+    if [ "${#blocking[@]}" -gt 0 ]; then
+        msg="reconcile-rig-checkouts set aside $listed so rigs/$name could fast-forward to $remote. This commit's tree holds each dirty path's working copy and its second parent the staged copy."
+        ref="refs/gc-toolkit/reconcile-set-aside/$(date -u +%Y%m%dT%H%M%SZ)"
+        pin=$(GIT_AUTHOR_NAME=reconcile-rig-checkouts GIT_AUTHOR_EMAIL=reconcile-rig-checkouts@localhost \
+            GIT_COMMITTER_NAME=reconcile-rig-checkouts GIT_COMMITTER_EMAIL=reconcile-rig-checkouts@localhost \
+            git -C "$path" stash create "$msg" 2>/dev/null) && [ -n "$pin" ] \
+            || { blocking_report="could not pin the local changes on $listed"; return 1; }
+        # An empty old value makes the ref create-only, so no earlier pin is replaced.
+        git -C "$path" update-ref -m "$msg" "$ref" "$pin" "" 2>/dev/null \
+            || { blocking_report="could not record the pin of $listed at $ref"; return 1; }
+        set_aside_ref="$ref"
+        if ! git --literal-pathspecs -C "$path" restore --source=HEAD --staged --worktree -- "${blocking[@]}" 2>/dev/null; then
+            blocking_report="could not restore $listed to HEAD after pinning them"
+            return 1
+        fi
+        moved="restoring $listed to HEAD"
+    fi
+    for p in ${in_way[@]+"${in_way[@]}"}; do
+        if ! rm -f -- "$path/$p"; then
+            stuck="$p"
+            break
+        fi
+        gone="${gone:+$gone, }$p"
+    done
+    [ -z "$gone" ] || moved="${moved:+$moved and }removing the untracked $gone, which held $remote's content"
+    if [ -n "$stuck" ]; then
+        blocking_report="could not remove the untracked $stuck${moved:+ after $moved}"
         return 1
     fi
     if ! git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
-        blocking_report="the fast-forward still refused after $listed were restored to HEAD"
+        blocking_report="the fast-forward still refused after $moved"
         return 1
     fi
 }
@@ -303,7 +330,7 @@ while IFS=$'\t' read -r name path; do
     if [ -n "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && set_aside_and_advance "$path" "$remote" "$name"; then
         healed=$((healed + 1))
-        resolve_subject "$name" "rigs/$name auto-healed: set aside the local changes blocking its fast-forward at $set_aside_ref, then fast-forwarded to $remote"
+        resolve_subject "$name" "rigs/$name auto-healed: set aside the local changes blocking its fast-forward${set_aside_ref:+ (pinned at $set_aside_ref)}, then fast-forwarded to $remote"
         continue
     fi
 
