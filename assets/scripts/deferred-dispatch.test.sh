@@ -1234,6 +1234,15 @@ TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
+# The until pass stages the dependents of each bead it is about to dispose, and
+# its caller runs that read in a command substitution.
+store '[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(TMPDIR="$SCRATCH" STUB_DEP_UP_FAIL=g-1 "$SUT" reconcile 2>&1)"
+has "$out" "could not re-read g-1" "the scratch run reaches the until pass's fresh read and its fail-closed path"
+TMPDIR="$SCRATCH" "$SUT" reconcile >/dev/null 2>&1
+eq "$(rehomes)" "1" "and its disposal path"
 LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 

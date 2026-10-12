@@ -616,13 +616,14 @@ until_candidates() { # out_file -> "<id>\t<target_ids_csv>\t<marks or ->" per ca
 # closed, or ->\t<marks, or ->". rc1 when either read fails or does not parse,
 # so the bead is left for the next pass. A dispatch that lands after this read
 # meets a closed bead: no pool offers it, and mol-polecat-work's load-context
-# quiesces a pour over it.
-fresh_marks() { # id -> "<open until targets csv or ->\t<marks or ->"; rc1 if unreadable
-    local id="$1" row up upf
+# quiesces a pour over it. It runs inside a command substitution, so the caller
+# allocates the file the dependents are staged in: an allocation made here would
+# land in the substitution's copy of TMPFILES, which the EXIT trap never reads.
+fresh_marks() { # id staging_file -> "<open until targets csv or ->\t<marks or ->"; rc1 if unreadable
+    local id="$1" upf="$2" row up
     row="$(show_bead "$id" </dev/null)" || return 1
     [ -n "$row" ] || return 1
     up="$(bd_ dep list "$id" --direction=up --json </dev/null 2>/dev/null)" || return 1
-    mktemp_tracked || return 1; upf="$REPLY"
     printf '%s' "$up" | scrub > "$upf"
     jq -e 'type == "array"' "$upf" >/dev/null 2>&1 || return 1
     printf '%s' "$row" | jq -r --slurpfile up "$upf" --arg ut "$UNTIL_TYPE" "$LIVE_WORK_JQ"'
@@ -695,7 +696,7 @@ reconcile_until() {
             waiting=$((waiting + 1)); continue
         fi
         if [ "${marks:--}" = "-" ]; then
-            if ! fresh="$(fresh_marks "$id")" || [ -z "$fresh" ]; then
+            if ! mktemp_tracked || ! fresh="$(fresh_marks "$id" "$REPLY")" || [ -z "$fresh" ]; then
                 echo "$PROG: WARN could not re-read $id and its edges before disposing it — leaving it for the next pass" >&2
                 ufailed=$((ufailed + 1)); continue
             fi
