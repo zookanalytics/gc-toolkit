@@ -660,15 +660,32 @@ review's result set.
   the polecat pool. Back to `routed`; the next claimant starts from the
   recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
-  and slings exactly one rework child and clears the check marker, returning the
-  lane to `unreviewed`, so gate-ensure re-arms the dispatch when the child
-  lands. Convergence is judged by the validator, not counted in rounds
-  (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
-  child every round and nothing in the cadence bounds them. One writer, one
-  verdict: no second component writes a verdict. `pr-facts.sh` and
-  `gate-ensure.sh` also clear a marker, each under a condition
+  and slings exactly one rework child through `rework-child.sh` and clears the
+  check marker, returning the lane to `unreviewed`, so gate-ensure re-arms the
+  dispatch when the child lands. Convergence is judged by the validator, not
+  counted in rounds (`specs/tk-ztapg/review-cycle-architecture.md`), so
+  request-changes files a child every round and nothing in the cadence bounds
+  them. One writer, one verdict: no second component writes a verdict.
+  `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
   and cannot assert it.
+- **Ruling** (operator, via converse): a ruled sign-off on an open-PR subject
+  must answer whether the ruling changes what the branch must contain
+  (`converse-signoff.sh --rework` or `--no-rework`), and one that answers
+  neither is refused. On `--rework`, `converse-rework.sh` files the same fix
+  unit through `rework-child.sh`, sourced by `source_ruling_bead=<visit>` in
+  place of a verdict's `source_review_bead`: `task_kind=rework`, the anchor's
+  branch resumed, a `blocks` edge holding the merge. A ruling on a published PR
+  so becomes demand the refinery lands rather than prose nobody reads. A ruling
+  has no lane of its own and rules the whole diff, as a human feedback batch
+  does, so once the child is dispatched `converse-rework.sh` returns every lane
+  the anchor declares to `unreviewed` (`review-outcome.sh supersede-anchor`).
+  Quiescence holds each lane's dispatch while the child is open, and gate-ensure
+  re-reviews the whole diff at the head the child lands. Two things can still
+  back a lane through the ruling: a review already in flight when the ruling is
+  filed, whose verdict is on the head it read, and an operator's GitHub
+  approval, which backs every lane until it is dismissed. converse never pushes
+  code; the molecule does.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full
@@ -724,19 +741,20 @@ review's result set.
   AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
   or by carrying no work-product key at all. It also closes an unmarked rework
   twin, an open rework child that was never dispatched (no dispatch metadata,
-  no convoy tracking it) whose review is closed and whose same-review,
-  same-anchor sibling landed. That twin would otherwise hold its anchor
-  forever. It writes nothing to the successor's branch or PR, and holds on
-  anything it cannot establish.
+  no convoy tracking it) whose source is closed (the review it answers, or the
+  visit a ruling's child answers) and whose same-source, same-anchor sibling
+  landed. That twin would otherwise hold its anchor forever. It writes nothing
+  to the successor's branch or PR, and holds on anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator makes, not a trigger a push pulls. gate-ensure holds dispatch
-  rather than pouring a second review while an open rework child is already in
-  flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
-  `source_review_bead` (the review bead the rework answers) — and reads a
+  the validator or an operator ruling makes, not a trigger a push pulls.
+  gate-ensure holds dispatch rather than pouring a second review while an open
+  rework child is already in flight for the lane — a `blocks`-dep bead on the
+  anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
+  review or the ruling the rework answers) — and reads a
   legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
   `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
   marker sweep leaves that shape alone rather than clearing it, for the same

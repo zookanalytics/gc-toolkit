@@ -29,6 +29,11 @@ scrub() { tr -d '\000-\037'; }
 # bd_json <gc-bd-args...> — one `gc bd` read as JSON, control chars scrubbed.
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 
+# row_meta <show-json> <key> — one metadata value off a `gc bd show --json` row,
+# as a string. A key that is absent and a row that will not parse both read as
+# empty.
+row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
+
 # bd_list memoization — opt-in, off by default.
 #
 # When GC_RECONCILE_BD_CACHE names a directory, bd_list serves a repeated query

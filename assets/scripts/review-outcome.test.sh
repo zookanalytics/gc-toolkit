@@ -208,6 +208,24 @@ eq "$N2" "2" "supersede-anchor retires a backing on every declared lane"
 if green tk-2anc correctness; then bad "correctness stayed green after anchor-wide supersede"; else ok "correctness returned to unreviewed"; fi
 if green tk-2anc arch;  then bad "arch stayed green after anchor-wide supersede";  else ok "arch returned to unreviewed"; fi
 
+# --by names the caller in each superseded review's note; without it the note
+# names the validator's human batch, as before.
+store "[$TWO_ANCHOR]"
+BC=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
+BA=$("$SUT" back-lane --anchor tk-2anc --lane arch  --oid deadbeef)
+NB=$("$SUT" supersede-anchor --anchor tk-2anc --by "operator ruling (converse visit v-1)" --reason "rework fx-1 changes the branch"); rc=$?
+eq "$rc" 0 "supersede-anchor --by succeeds"
+eq "$NB" "2" "…retiring every declared lane's backing"
+has "$(notes "$BC")" "operator ruling (converse visit v-1): superseded (anchor-wide) — rework fx-1 changes the branch" "…each note naming the caller and its reason"
+has "$(notes "$BA")" "operator ruling (converse visit v-1): superseded (anchor-wide)" "…on every lane"
+hasnt "$(notes "$BC")" "validator: superseded" "…and none crediting the validator with the supersede"
+store "[$TWO_ANCHOR]"
+BV=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
+"$SUT" supersede-anchor --anchor tk-2anc --reason "operator overturned a diff assumption" >/dev/null
+has "$(notes "$BV")" "validator: superseded (anchor-wide human batch) — operator overturned a diff assumption" "without --by the note names the validator's human batch"
+"$SUT" supersede-anchor --anchor tk-2anc --by "" >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "an empty --by is a usage error"
+
 # A checkless anchor (check_set=none) has no lane to move: no-op success, not error.
 NONE_ANCHOR='{"id":"tk-nanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"none"}}'
 store "[$NONE_ANCHOR]"
