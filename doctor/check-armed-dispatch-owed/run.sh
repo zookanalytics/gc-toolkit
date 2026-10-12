@@ -16,11 +16,14 @@
 #     an open `blocks` blocker on the bead or on a parent-child ancestor, a
 #     demand gate on an ancestor aside. So an arm a park holds, by an edge of its
 #     own or its epic's, is not owed: a park leaves the arm intact and its status
-#     open, and the arm fires when the park releases. check-blocked-work-armed
-#     asks blocked work for a dispatch path and nothing more, and an arm is one,
-#     so an arm that never fires is this check's to see. `bd blocked` lists a bead
-#     its parent's hold reaches under the bead's own id, naming the parent as its
-#     blocker, and that check skips it for the arm alone.
+#     open, and the arm fires when the park releases. A bead in flight (a branch,
+#     a merge_result or a rejection_reason) is held by its own blockers alone, so
+#     its arm is owed under a parked epic, where reconcile slings it.
+#     check-blocked-work-armed asks blocked work for a dispatch path and nothing
+#     more, and an arm is one, so an arm that never fires is this check's to see.
+#     `bd blocked` lists a bead its parent's hold reaches under the bead's own
+#     id, naming the parent as its blocker, and that check skips it for the arm
+#     alone.
 #   * STRANDED — the bead is armed at a non-open status, which `bd list --ready`
 #     never answers, so no blocker closing will ever dispatch it (a bead armed
 #     while open, then set to another status). reconcile prints this to its own
@@ -335,10 +338,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # whose own blockers have cleared. An arm held by a blocker the walk read is
     # not owed. One whose only holds could not be read is NOT checked: an unread
     # hold is no released one, and no owed dispatch either. The owed-since is
-    # the latest close among the blockers on the arm and its ancestors, so an
-    # arm a park held is judged from the park's release.
+    # the latest close among the blockers that could hold the arm, on it and,
+    # unless it is in flight, on its ancestors, so an arm a park held is judged
+    # from the park's release.
     hold_db="$rig_path/.beads"
     free_json=$(printf '%s\n' "${free_ids[@]}" | jq -R . | jq -sc .)
+    # The rows join on the unit separator, not a tab: `read` folds a run of tabs
+    # into one, so an empty release time would hand the unread ids its field.
     hold_rows=""
     if printf '%s' "$raw" | scrub | jq -c --argjson c "$free_json" '[ .[]? | select(.id as $i | $c | index($i)) ]' > "$hold_dir/seed.json" 2>/dev/null \
        && hold_graph hold_read "$hold_dir/seed.json" "$hold_dir/graph.json"; then
@@ -348,14 +354,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
                 (if any($h[]; .unread | not) then "held" elif ($h | length) > 0 then "unread" else "free" end),
                 (hold_released_at($g[0]) // ""),
                 ([ $h[] | select(.unread) | .by ] | join(" ")) ]
-            | @tsv' "$hold_dir/seed.json" 2>/dev/null)
+            | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")' "$hold_dir/seed.json" 2>/dev/null)
     fi
     if [ -z "$hold_rows" ]; then
         warnings+=("$label: could not read what holds ${#free_ids[@]} armed bead(s) whose own blockers have closed in $rig_path/.beads — they were NOT checked")
         continue
     fi
 
-    while IFS=$'\t' read -r cid hold released unread_ids; do
+    while IFS=$'\037' read -r cid hold released unread_ids; do
         [ -n "$cid" ] || continue
         case "$hold" in
             held) continue ;;                         # a park or a prerequisite holds it: not owed

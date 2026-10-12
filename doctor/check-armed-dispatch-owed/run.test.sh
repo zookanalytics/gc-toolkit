@@ -8,7 +8,12 @@
 # configured sling-failure cap, which reconcile has already escalated), the
 # fail-closed probes (a batch dep read that fails outright, a candidate the batch
 # dep read drops as unresolvable, unreadable blocker listing, unreadable armed
-# listing, unreadable rig list, an unresolvable blocker), the
+# listing, unreadable rig list, an unresolvable blocker), the hold
+# (hold-lib.sh: an arm a park holds, on its epic or two levels up, or whose epic
+# waits on a task, is not owed; a demand gate on the epic holds nothing; a park
+# released just now dates the window; an arm in flight is held by its own
+# blockers alone; an unreadable ancestor or a failed walk leaves the arm NOT
+# checked, naming what could not be read), the
 # suspended-rig skip, and the quiet path (no armed beads). The check reads
 # dependencies in bulk: one `bd dep list` for the whole candidate set (edge
 # records) then one `bd list --id` for the blockers' statuses — so a store costs
@@ -488,6 +493,26 @@ OUT=$(BD_FAIL_IDS=epic-1 run_check); RC=$?
 eq "$RC" "1" "a hold walk that cannot read warns rather than passing (exit 1)"
 has "$OUT" "could not read what holds 1 armed bead(s)" "the not-checked reason is named"
 hasnt "$OUT" "owed but not firing" "a failed walk is NOT reported as owed"
+clear_stores
+
+# --- 21. OWED: a bead in flight is held by its own blockers alone, so a park on
+#          its epic leaves its arm owed, and one owed past the window is flagged
+armed_store alpha "$(aedged h-8 epic-1 b-0 | jq -c '.metadata += {branch: "polecat/h-8", rejection_reason: "a test failed"}')"
+edges_store alpha "$(e_pc h-8 epic-1)" "$(e_blk h-8 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" park-1)" "$(b_gate park-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm in flight under a parked epic is owed (exit 1)"
+has "$OUT" "alpha bead h-8" "it is reported as owed"
+clear_stores
+
+# --- 22. FAIL CLOSED: an arm with no blocker of its own, whose ancestor cannot
+#          be read, is NOT checked, and the warning names that ancestor --------
+armed_store alpha "$(aedged h-9 epic-ghost "")"
+edges_store alpha "$(e_pc h-9 epic-ghost)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm with no blocker of its own whose ancestor cannot be read warns (exit 1)"
+has "$OUT" "could not read [epic-ghost]" "the unread ancestor is named though no blocker of the arm has closed"
+hasnt "$OUT" "owed but not firing" "an unread hold is NOT reported as owed"
 clear_stores
 
 # --- the owed window is the deferred-dispatch order's cadence window ----------

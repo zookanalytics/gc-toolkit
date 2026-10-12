@@ -32,8 +32,10 @@
 #     whose epic waits on a task are held and named with the blocker's title in
 #     list, and the pass log names each such hold once with the arms it keeps;
 #     an arm its own blocker holds is counted there, not named. One whose epic
-#     waits only on a demand gate is slung. A held arm stays intact and fires
-#     once its hold releases, and an unreadable blocker or ancestor holds it;
+#     waits only on a demand gate is slung, and so is one in flight under a
+#     parked epic, which only an open blocker of its own holds. A held arm stays
+#     intact and fires once its hold releases, and an unreadable blocker or
+#     ancestor holds it;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -652,6 +654,43 @@ eq "$(slings)" "0" "an arm behind a demand gate of its own is NOT slung"
 has "$out" "1 held" "the summary counts it as held"
 out="$("$SUT" list 2>&1)"
 has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the demand gate that holds it"
+
+# A hold holds work that has not started. A bead in flight carries a branch, a
+# merge_result or a rejection_reason, and only a blocker of its own holds it, so
+# a re-dispatch of work already begun, such as a rejected handoff's rebuild,
+# fires under a parked epic. The walk reads none of its ancestors.
+FLIGHT='"branch":"polecat/b-1","rejection_reason":"a test failed"'
+echo "# reconcile dispatches an arm in flight under a parked epic"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"','"$FLIGHT"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""},'"$PARKED"']'
+out="$("$SUT" list 2>&1)"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (in flight, rejection_reason set: a hold on an ancestor leaves it running" "list shows an arm in flight under a parked epic as dispatchable, and why"
+export STUB_BD_LOG="$TMP/bd-flight.log"; : > "$STUB_BD_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "dispatching an arm in flight under a parked epic is a clean pass"
+eq "$(slings)" "1" "an arm in flight is slung though its epic is parked"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
+has "$out" "nothing holds b-1: it is in flight (rejection_reason set), so a hold on an ancestor leaves it running" "the pass log says why it slung a bead under a parked epic"
+hasnt "$out" "HELD by" "the park is not named as holding it"
+eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker)"
+unset STUB_BD_LOG
+
+echo "# reconcile holds an arm in flight whose own blocker is open"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"','"$FLIGHT"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","title":"Land b-0","assignee":"","metadata":{},"notes":""},'"$PARKED"']'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an arm in flight with an open blocker of its own is NOT slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "it keeps its record"
+has "$out" "1 held" "it is counted held"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by b-0 "Land b-0"]' "list names its own blocker, not the park"
+
+echo "# a bead not yet started under a parent in flight stays held by the park above"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"feat","dependency_type":"parent-child"}]},
+ {"id":"feat","status":"open","issue_type":"feature","assignee":"","metadata":{"branch":"polecat/feat"},"notes":"","_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an arm under a parent in flight is NOT slung while the epic above is parked"
+has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: b-1' "the pass log names the park"
 
 # An OPEN own blocker still withholds, whatever its ancestors do: the arm waits
 # on exactly that blocker.

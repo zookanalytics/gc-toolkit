@@ -7,6 +7,8 @@
 #   (LABEL)   how a reader prints a hold: the blocker and its title, the
 #             ancestor whose edge it sits on, an unreadable blocker or ancestor,
 #             and how many more hold the bead; one blocker reached twice is one
+#   (FLIGHT)  which keys put a bead in flight, and how a reader names the one
+#             that does
 #   (SHAPE)   a bead read by `bd show` gives the same edges as one read by a list
 #   (FAIL)    a read that fails or does not parse fails the walk, and a chain
 #             deeper than the cap holds the bead as unread
@@ -99,6 +101,20 @@ printf '%s' '[{"id":"nl-0","title":"line one\u0009tabbed\nline two","status":"op
 STORE="$TMP/nl-store.json" walk nl-1 "$nl"
 eq "$(ask 'hold_summary($g[0])')" 'nl-0 "line one tabbed line two"' "(LABEL) a control character in a title prints as a space"
 
+echo "# what puts a bead in flight"
+walk fl-1
+eq "$(ask 'hold_flight_why')" "rejection_reason set" "(FLIGHT) a rejection_reason is named ahead of the branch it comes with"
+walk fl-2
+eq "$(ask 'hold_flight_why')" "branch polecat/fl-2" "(FLIGHT) a branch alone is named with its value"
+walk fl-3
+eq "$(ask 'hold_flight_why')" "merge_result=pull_request" "(FLIGHT) a merge_result is named with its value"
+walk fl-blank
+eq "$(ask 'hold_in_flight | tostring')" "false" "(FLIGHT) blank keys do not put a bead in flight"
+walk a-1
+eq "$(ask 'hold_in_flight | tostring')" "false" "(FLIGHT) a bead with none of the keys is not in flight"
+eq "$(printf '%s' '{"id":"x","metadata":"not an object"}' | jq -r "$HOLD_JQ"'hold_in_flight | tostring')" "false" \
+   "(FLIGHT) metadata that is not an object puts nothing in flight"
+
 echo "# both shapes bd prints edges in"
 shown='{"id":"a-1","status":"open","dependencies":[{"id":"epic-a","dependency_type":"parent-child","status":"open"}]}'
 walk a-1 "$shown"
@@ -154,7 +170,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of one of the predicate's names. Specs and generated
 # renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
+DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_flight_why|hold_in_flight|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

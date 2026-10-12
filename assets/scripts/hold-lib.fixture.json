@@ -1,5 +1,5 @@
 {
-  "description": "Cases for the hold predicate (assets/scripts/hold-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges. Each case names a bead and the holds the predicate finds on it, nearest first: by is the blocker, on is the bead whose edge it sits on, and unread marks one that could not be read. released_at is the latest close among the blockers that no longer hold it, or null. reads, where given, is how many reads the walk makes for that bead alone. Any copy of the predicate runs these cases.",
+  "description": "Cases for the hold predicate (assets/scripts/hold-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges, and a bead whose metadata carries a branch, a merge_result or a rejection_reason is in flight. Each case names a bead and the holds the predicate finds on it, nearest first: by is the blocker, on is the bead whose edge it sits on, and unread marks one that could not be read. released_at is the latest close among the blockers that no longer hold it, or null. reads, where given, is how many reads the walk makes for that bead alone. Any copy of the predicate runs these cases.",
   "beads": [
     {"id": "park-1", "title": "Parked: the operator unparks the epic", "status": "open", "issue_type": "gate"},
     {"id": "epic-a", "title": "A parked epic", "status": "open", "issue_type": "epic",
@@ -94,7 +94,36 @@
     {"id": "cy-2", "title": "One half of a parent cycle", "status": "open", "issue_type": "epic",
      "dependencies": [{"issue_id": "cy-2", "depends_on_id": "cy-1", "type": "parent-child"}]},
     {"id": "cy-1", "title": "The other half", "status": "open", "issue_type": "task",
-     "dependencies": [{"issue_id": "cy-1", "depends_on_id": "cy-2", "type": "parent-child"}]}
+     "dependencies": [{"issue_id": "cy-1", "depends_on_id": "cy-2", "type": "parent-child"}]},
+
+    {"id": "fl-1", "title": "A rejected handoff under the parked epic", "status": "open", "issue_type": "task",
+     "metadata": {"branch": "polecat/fl-1", "rejection_reason": "a test failed"},
+     "dependencies": [{"issue_id": "fl-1", "depends_on_id": "epic-a", "type": "parent-child"}]},
+    {"id": "fl-2", "title": "A built bead two levels under the parked epic, carrying only its branch", "status": "open", "issue_type": "task",
+     "metadata": {"branch": "polecat/fl-2"},
+     "dependencies": [{"issue_id": "fl-2", "depends_on_id": "feat-a", "type": "parent-child"}]},
+    {"id": "fl-3", "title": "A bead under the parked epic whose PR is open", "status": "open", "issue_type": "task",
+     "metadata": {"merge_result": "pull_request"},
+     "dependencies": [{"issue_id": "fl-3", "depends_on_id": "epic-a", "type": "parent-child"}]},
+    {"id": "fl-4", "title": "A bead in flight under the parked epic, with an open blocker of its own", "status": "open", "issue_type": "task",
+     "metadata": {"branch": "polecat/fl-4"},
+     "dependencies": [{"issue_id": "fl-4", "depends_on_id": "epic-a", "type": "parent-child"},
+                      {"issue_id": "fl-4", "depends_on_id": "e-0", "type": "blocks"}]},
+    {"id": "fl-5", "title": "A bead in flight whose parent has no row", "status": "open", "issue_type": "task",
+     "metadata": {"rejection_reason": "the branch conflicts with main"},
+     "dependencies": [{"issue_id": "fl-5", "depends_on_id": "ghost-epic", "type": "parent-child"}]},
+    {"id": "fl-6", "title": "A bead in flight under the epic whose park was released", "status": "open", "issue_type": "task",
+     "metadata": {"branch": "polecat/fl-6"},
+     "dependencies": [{"issue_id": "fl-6", "depends_on_id": "epic-p", "type": "parent-child"},
+                      {"issue_id": "fl-6", "depends_on_id": "p-own", "type": "blocks"}]},
+    {"id": "fl-feat", "title": "A feature in flight under the parked epic", "status": "open", "issue_type": "feature",
+     "metadata": {"branch": "polecat/fl-feat"},
+     "dependencies": [{"issue_id": "fl-feat", "depends_on_id": "epic-a", "type": "parent-child"}]},
+    {"id": "fl-sub", "title": "A task not yet started under the feature in flight", "status": "open", "issue_type": "task",
+     "dependencies": [{"issue_id": "fl-sub", "depends_on_id": "fl-feat", "type": "parent-child"}]},
+    {"id": "fl-blank", "title": "A bead under the parked epic whose branch and rejection_reason are blank", "status": "open", "issue_type": "task",
+     "metadata": {"branch": "", "rejection_reason": ""},
+     "dependencies": [{"issue_id": "fl-blank", "depends_on_id": "epic-a", "type": "parent-child"}]}
   ],
   "cases": [
     {"name": "an armed child of a parked epic is held by the park", "bead": "a-1",
@@ -130,6 +159,22 @@
     {"name": "a gate with a blank demand_for is not a demand gate", "bead": "q-1",
      "holds": [{"by": "gate-q", "on": "epic-q", "unread": false}], "released_at": null},
     {"name": "a parent cycle ends the walk", "bead": "cy-1",
-     "holds": [], "released_at": null}
+     "holds": [], "released_at": null},
+    {"name": "a park on an ancestor leaves a rejected handoff in flight running", "bead": "fl-1",
+     "holds": [], "released_at": null, "reads": 0},
+    {"name": "a branch alone puts a bead in flight, however far under the park", "bead": "fl-2",
+     "holds": [], "released_at": null, "reads": 0},
+    {"name": "a merge_result puts a bead in flight", "bead": "fl-3",
+     "holds": [], "released_at": null, "reads": 0},
+    {"name": "a blocker of its own still holds a bead in flight", "bead": "fl-4",
+     "holds": [{"by": "e-0", "on": "fl-4", "unread": false}], "released_at": null, "reads": 1},
+    {"name": "the walk reads no ancestor of a bead in flight, so one with no row holds nothing", "bead": "fl-5",
+     "holds": [], "released_at": null, "reads": 0},
+    {"name": "a bead in flight dates its release from its own blockers alone", "bead": "fl-6",
+     "holds": [], "released_at": "2026-10-01T00:00:00Z"},
+    {"name": "a park above a parent in flight still holds the parent's work that has not started", "bead": "fl-sub",
+     "holds": [{"by": "park-1", "on": "epic-a", "unread": false}], "released_at": null, "reads": 3},
+    {"name": "a blank branch or rejection_reason does not put a bead in flight", "bead": "fl-blank",
+     "holds": [{"by": "park-1", "on": "epic-a", "unread": false}], "released_at": null, "reads": 2}
   ]
 }

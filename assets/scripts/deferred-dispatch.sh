@@ -7,14 +7,17 @@
 # cooldown, scope="rig") performs the sling once nothing holds the bead. A hold
 # is assets/scripts/hold-lib.sh's: an open `blocks` blocker on the bead or on
 # one of its parent-child ancestors, where a demand gate on an ancestor does not
-# count, because waiting on the operator's decision is not a hold. The pass
+# count, because waiting on the operator's decision is not a hold, and where a
+# bead in flight (a branch, a merge_result or a rejection_reason) is held only
+# by its own blockers, because a hold holds work that has not started. The pass
 # reads `bd list --ready` as the fast path, and ALSO dispatches an open bead bd
 # holds unready that hold-lib finds not held: the is_blocked flag cascades DOWN
 # parent-child edges, so an armed epic child whose epic waits only on a demand
-# gate never enters `bd --ready`. A held arm stays intact and fires once its
-# hold releases. Status still gates: a non-open status is set deliberately, and
-# a bead at one is never dispatched. `list` answers "what dispatches are owed?",
-# naming the blocker that holds each held arm; `disarm` withdraws one.
+# gate, or a re-dispatch of work in flight under a parked epic, never enters
+# `bd --ready`. A held arm stays intact and fires once its hold releases. Status
+# still gates: a non-open status is set deliberately, and a bead at one is never
+# dispatched. `list` answers "what dispatches are owed?", naming the blocker
+# that holds each held arm; `disarm` withdraws one.
 #
 # `arm` is the default move for a blocked follow-up you file or keep back by
 # hand: arm it instead of leaving it unrouted for someone to route once its
@@ -179,6 +182,11 @@ bead_from_cache() { # all_json_file id -> single bead object on stdout, or nothi
 
 meta_of() { # bead-json key -> value or empty
     printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
+}
+
+# Why a bead is in flight, as hold-lib.sh names it, or empty when it is not.
+flight_of() { # bead-json -> reason or empty
+    printf '%s' "$1" | jq -r "$HOLD_JQ"'hold_flight_why' 2>/dev/null
 }
 
 # --- arm ---------------------------------------------------------------------
@@ -454,7 +462,7 @@ cmd_list() {
         return 0
     fi
 
-    local n=0 id status ready hold via json target reason slung state mr fails
+    local n=0 id status ready hold via json target reason slung state mr fails flight
     while IFS=$'\t' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
@@ -472,9 +480,10 @@ cmd_list() {
         # can clear, and is shown with the blocker and its title, so a parked bead
         # says why it is parked and what releases it; an OPEN bead nothing holds is
         # dispatchable now, though bd keeps it out of `--ready` (a demand gate on
-        # an ancestor does that), and reconcile slings it anyway; any other live
-        # status is excluded by `--ready` on the status itself, so no blocker
-        # closing will make it dispatchable.
+        # an ancestor does that, as does a hold on an ancestor of a bead in
+        # flight), and reconcile slings it anyway; any other live status is
+        # excluded by `--ready` on the status itself, so no blocker closing will
+        # make it dispatchable.
         if [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ -n "$mr" ]; then state="DELIVERED — merge_result=$mr (arm retires next pass, no sling)"
         elif [ -n "$slung" ]; then
@@ -486,7 +495,11 @@ cmd_list() {
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
         elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
         elif [ -n "$hold" ]; then state="HELD by $hold"
-        else state="DISPATCHABLE NOW (nothing holds it; bd keeps it out of --ready only for a wait the arm does not count, such as a demand gate on an ancestor)"; fi
+        else
+            flight="$(flight_of "$json")"
+            if [ -n "$flight" ]; then state="DISPATCHABLE NOW (in flight, $flight: a hold on an ancestor leaves it running, and no blocker of its own is open)"
+            else state="DISPATCHABLE NOW (nothing holds it; bd keeps it out of --ready only for a wait the arm does not count, such as a demand gate on an ancestor)"; fi
+        fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
     done < "$rows"
     [ "$n" -gt 0 ] || echo "$PROG: no pending dispatches in this store"
@@ -535,7 +548,7 @@ cmd_reconcile() {
     expected="$(wc -l < "$rows" | tr -d ' ')"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
-    local id status ready hold via json target args_json assignee slung rc merge_result fails
+    local id status ready hold via json target args_json assignee slung rc merge_result fails flight
     while IFS=$'\t' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -682,10 +695,16 @@ cmd_reconcile() {
         fi
 
         # Nothing holds it, but bd keeps it unready through the parent-child
-        # cascade, as it does under an ancestor that waits only on a demand gate
-        # — say why a not-ready bead is being slung, so the pass log is legible.
+        # cascade, as it does under an ancestor that waits only on a demand gate,
+        # and over a bead in flight under any held ancestor — say why a not-ready
+        # bead is being slung, so the pass log is legible.
         if [ "$ready" != "1" ]; then
-            echo "$PROG: nothing holds $id: no open blocker sits on it, and any on its ancestors is a demand gate. bd keeps it out of --ready all the same — dispatching"
+            flight="$(flight_of "$json")"
+            if [ -n "$flight" ]; then
+                echo "$PROG: nothing holds $id: it is in flight ($flight), so a hold on an ancestor leaves it running, and no blocker of its own is open. bd keeps it out of --ready all the same — dispatching"
+            else
+                echo "$PROG: nothing holds $id: no open blocker sits on it, and any on its ancestors is a demand gate. bd keeps it out of --ready all the same — dispatching"
+            fi
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying

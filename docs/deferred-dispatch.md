@@ -112,7 +112,8 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a demand gate (see below) — stamping its own
+  waits on a demand gate, or through any held ancestor of a bead in flight
+  (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -151,10 +152,19 @@ definition follows it: a closed or pinned blocker holds nothing, and a closed
 or pinned ancestor ends the walk. It fails closed, so a blocker or an
 ancestor the pass cannot read holds the bead.
 
+A hold holds work that has not started. A bead whose work has started is in
+flight: it carries a `branch`, a `merge_result` or a `rejection_reason`. Only
+a blocker of its own holds a bead in flight, and the walk reads none of its
+ancestors, so a park on its epic leaves it running. An armed re-dispatch of
+work already begun therefore fires under a parked epic once its own blockers
+close, while the epic's members that have not started stay held, including
+the ones under a parent in flight.
+
 `bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
 parent-child edges, so an armed child of an epic that waits only on a demand
-gate never enters `--ready`. The pass therefore asks hold-lib about every
-open armed bead bd keeps unready, and slings the ones nothing holds. The
+gate never enters `--ready`, and neither does a bead in flight under a parked
+epic. The pass therefore asks hold-lib about every open armed bead bd keeps
+unready, and slings the ones nothing holds. The
 status gate still holds (a non-`open` bead is never dispatched), and an
 assignee still keeps the pass off the bead. The pass reads each generation
 of ancestors in one listing and their blockers in one more, so its cost does

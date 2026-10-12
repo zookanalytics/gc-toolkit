@@ -15,6 +15,11 @@
 # that is closed or pinned holds nothing, and an ancestor that is closed or
 # pinned neither holds the bead nor passes on a hold from further up.
 #
+# A hold holds work that has not started. A bead whose work has started is in
+# flight: it carries a branch, a merge_result or a rejection_reason. A hold on
+# an ancestor leaves it running, so only a blocker on the bead itself holds it,
+# and an armed re-dispatch of work already begun fires under a parked epic.
+#
 # The predicate fails closed. An ancestor or a blocker the walk cannot read
 # holds the bead, marked unread so a reader can say so.
 #
@@ -63,20 +68,21 @@ HOLD_JQ='
   # A demand gate: filed for a pending operator decision, naming the bead it gates.
   def hold_is_demand_gate:
     (.metadata // {}) | if type == "object" then ((.["gc.demand_for"] // "") | tostring | test("[^[:space:]]")) else false end;
-
-  # Over a graph (an object keyed by bead id, null for an id that was asked for
-  # and not found): the ids the walk reads next, comma-joined. The ancestors come
-  # first, generation by generation, and the blockers once no ancestor is left.
-  def hold_unread_parents:
-    . as $g | [ .[] | select(. != null) | select(hold_done | not) | hold_parent_ids[]
-                | select(. as $i | $g | has($i) | not) ] | unique | join(",");
-  def hold_unread_blockers:
-    . as $g | [ .[] | select(. != null) | hold_blocker_ids[]
-                | select(. as $i | $g | has($i) | not) ] | unique | join(",");
+  # Why the bead is in flight, as a reader prints it, or "" when it is not.
+  def hold_flight_why:
+    (.metadata // {}) | if type == "object" then
+      (if ((.merge_result // "") | tostring) != "" then "merge_result=\(.merge_result | tostring)"
+       elif ((.rejection_reason // "") | tostring) != "" then "rejection_reason set"
+       elif ((.branch // "") | tostring) != "" then "branch \(.branch | tostring)"
+       else "" end) | gsub("[[:cntrl:]]"; " ")
+    else "" end;
+  def hold_in_flight: hold_flight_why != "";
 
   # The beads whose blockers can hold this one, nearest first: the bead itself,
-  # then each ancestor over $g, as {id, bead, ancestor}, where bead is null for
-  # an ancestor the walk could not read. A done ancestor ends its line of the walk.
+  # then each ancestor over $g (an object keyed by bead id, null for an id that
+  # was asked for and not found), as {id, bead, ancestor}, where bead is null
+  # for an ancestor the walk could not read. A done ancestor ends its line of
+  # the walk, and a bead in flight has no ancestor to walk.
   def hold_chain($g):
     def up($ids; $seen):
       if ($ids | length) == 0 then empty
@@ -88,7 +94,18 @@ HOLD_JQ='
       end;
     ((.id // "") | tostring) as $self
     | {id: $self, bead: ., ancestor: false},
-      (hold_parent_ids as $p | up($p; $p + [$self]));
+      (if hold_in_flight then empty else (hold_parent_ids as $p | up($p; $p + [$self])) end);
+
+  # The ids the walk reads next, comma-joined: first the ancestors the seed
+  # beads walk to that $g does not hold yet, generation by generation, so an
+  # ancestor nothing walks to is never read; then, once no ancestor is left,
+  # every blocker on the beads $g holds.
+  def hold_unread_ancestors($g):
+    [ .[]? | objects | hold_chain($g) | select(.ancestor and .bead == null) | .id
+      | select(. as $i | $g | has($i) | not) ] | unique | join(",");
+  def hold_unread_blockers:
+    . as $g | [ .[] | select(. != null) | hold_blocker_ids[]
+                | select(. as $i | $g | has($i) | not) ] | unique | join(",");
 
   # What holds this bead over $g, nearest first, one entry per blocker:
   # {by, title, on, unread}. by is the blocker, on is the bead whose edge it
@@ -124,8 +141,9 @@ HOLD_JQ='
            + (if ($h | length) > 1 then " (+\(($h | length) - 1) more)" else "" end) end;
 
   # When the last hold on this bead released: the latest close among the
-  # blockers on it and on its ancestors. A demand gate on an ancestor never held
-  # it, so its close does not count. Null when none has closed.
+  # blockers on it and, unless it is in flight, on its ancestors. A demand gate
+  # on an ancestor never held it, so its close does not count. Null when none
+  # has closed.
   def hold_released_at($g):
     [ hold_chain($g) as $c
       | select($c.bead != null)
@@ -147,18 +165,19 @@ HOLD_JQ='
 # non-zero when the read fails. An id it does not return is recorded as null,
 # which the predicate reads as unread.
 #
-# The ancestors are read first, one read per generation, and then every blocker
-# on the seed beads and their ancestors in one more read. So the reads grow with
-# the depth of the tree, never with the number of beads. Returns non-zero when a
-# read fails or does not parse, and the caller then treats every seed bead as
-# unread rather than as free.
+# The ancestors the seed beads walk to are read first, one read per generation,
+# and then every blocker on the seed beads and those ancestors in one more read.
+# So the reads grow with the depth of the tree, never with the number of beads,
+# and a bead in flight costs no ancestor read. Returns non-zero when a read
+# fails or does not parse, and the caller then treats every seed bead as unread
+# rather than as free.
 hold_graph() {
     local reader="$1" seed="$2" out="$3" want level=0
     jq -c '[ .[]? | objects | select(((.id // "") | tostring) != "") | {key: (.id | tostring), value: .} ] | from_entries' \
         "$seed" > "$out" 2>/dev/null || return 1
     [ -s "$out" ] || return 1
     while :; do
-        want="$(jq -r "$HOLD_JQ"'hold_unread_parents' "$out" 2>/dev/null)" || return 1
+        want="$(jq -r --slurpfile g "$out" "$HOLD_JQ"'hold_unread_ancestors($g[0])' "$seed" 2>/dev/null)" || return 1
         [ -n "$want" ] || break
         [ "$level" -lt "$HOLD_MAX_DEPTH" ] || break
         level=$((level + 1))
