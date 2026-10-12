@@ -498,8 +498,8 @@ while IFS=$'\t' read -r name path; do
         report="${blocking_report%"$nl"}"
         [ -n "$report" ] || report="not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off"
         pinned=""
-        [ -z "$set_aside_ref" ] || pinned=$(printf 'The blocking paths were pinned at %s and restored to HEAD.\nRecover a path with git checkout %s -- <path> (working copy)\nor git checkout %s^2 -- <path> (staged copy).\n\n' \
-            "$set_aside_ref" "$set_aside_ref" "$set_aside_ref")
+        [ -z "$set_aside_ref" ] || pinned=$(printf 'The blocking paths were pinned at %s and restored to HEAD.\nRecover a path with git checkout %s -- <path> (working copy)\nor git checkout %s^2 -- <path> (staged copy).' \
+            "$set_aside_ref" "$set_aside_ref" "$set_aside_ref")"$nl$nl"
         body=$(printf 'rigs/%s could not fast-forward to %s — local changes in the live checkout\nsit on paths the incoming commits rewrite, and not all of them could be set\naside without losing content.\nPath: %s\n\n## Blocking the fast-forward\n%s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): stray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>;\nmachine-local config -> carry it across the incoming change by hand;\nreal work -> save it elsewhere first.\n\n## git status --porcelain\n%s\n' \
             "$name" "$remote" "$path" "$report" "$pinned" "$path" \
             "$(git -C "$path" status --porcelain 2>/dev/null)")
