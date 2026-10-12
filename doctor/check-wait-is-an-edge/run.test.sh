@@ -23,8 +23,7 @@ EOF
 # the read, and the three hidden bead categories stay hidden unless their
 # --include-* flag is passed. A stub that served every row would pass this
 # suite just as happily with the scan narrowed back.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -119,8 +118,7 @@ esac
 GC
 # Nothing in the check may reach for raw `bd`. This one fails every call, so a
 # read that skipped `gc` would fail the store closed and be seen.
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 echo "raw bd: circuit breaker open" >&2
 exit 7
 BD

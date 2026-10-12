@@ -476,8 +476,7 @@ store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"",
 upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "assets/scripts/r.sh:$1()" --message "$2" --fix-unit "$3"; }
 mkdir -p "$TMP/cross"
 FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
   "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
 fi
@@ -496,8 +495,7 @@ eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it 
 # child, right after the batch's write. The re-adoption reads the disposition after
 # that write, so it sees must-fix and hangs its child.
 FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 "$BIN/gc" "\$@"; rc=\$?
 if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
   "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null
@@ -607,6 +605,25 @@ STUB_DEP_GARBAGE=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable blocker read exits 2"
 STUB_LIST_FAIL=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable finding read exits 2"
+
+# A ruling's rework child carries no source_review_bead, like a human batch's, but
+# it answers the ruling its source_ruling_bead names, not a finding. Matched into
+# the human lane, its landing would close a human objection nobody addressed.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fuRr","status":"open","assignee":"","title":"Rework PR#9: apply operator ruling","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_ruling_bead":"vis-R"}}]'
+gc bd dep fuRr --blocks tk-ancR >/dev/null
+HR=$("$SUT" upsert --anchor tk-ancR --lane human --locus "PR review" --message "keep the old flag")
+gc bd update "$HR" --set-metadata finding.disposition=must-fix >/dev/null
+out=$("$SUT" fix-in-flight --anchor tk-ancR); rc=$?
+eq "$rc" "1" "a ruling's rework child does not answer an edge-less human finding"
+eq "$out" "$HR" "…so the human finding is reported unanswered"
+HR2=$("$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "b.sh:f()" --message "guard the empty case")
+"$SUT" set-disposition --finding "$HR2" --anchor tk-ancR --disposition must-fix
+hasnt "$(deps)" "fuRr|blocks|$HR2" "a human must-fix ruling never hangs the ruling's child onto the finding"
+gc bd update fuRr --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancR
+eq "$(bstatus "$HR2")" "open" "…so the ruling's rework landing leaves the human finding open"
 
 # ---------------------------------------------------------------------------
 # shed-orphaned: an unvalidated finding whose anchor has left the open set is

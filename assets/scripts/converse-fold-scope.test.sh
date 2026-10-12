@@ -73,8 +73,7 @@ mkdir -p "$BIN" "$FIXDIR"
 # `rig list` to enumerate stores, a `bd show`, and the per-store `bd list --db`
 # the cross-store scan unions. Anything else exits 2, so a block that grows an
 # unmodeled read fails here rather than silently reading the live store.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 # The premise-gate probe drives the shipped converse-claim.sh, which opens with
 # `gc hook --claim`; HOOK_BEAD / HOOK_GROUP dial the existing_assignment result
 # it must return so the claimer reaches its hold arm. The fold probe never calls

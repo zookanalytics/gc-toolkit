@@ -58,8 +58,7 @@ harness_init
 # A `bd` stub beside the `gc` one: the forced assignee clear falls through to
 # bare bd, and a test box need not have the real binary. It logs to the same
 # place so ORDER assertions see one stream of writes.
-cat > "$TMP/bin/bd" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'STUB'
 set -u
 printf 'bd %s\n' "$*" >> "${STUB_GC_LOG:?}"
 exit 1

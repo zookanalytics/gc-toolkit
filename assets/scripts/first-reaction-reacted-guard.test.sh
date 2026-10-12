@@ -43,8 +43,7 @@ grep -q 'gc.proactive_reaction' "$TMP/guard.sh" && ok "advance-and-drain-reacted
 # GC_PACK_DIR, the first place the guard looks.
 mkdir -p "$TMP/shim" "$TMP/pack/assets/scripts" "$TMP/cwd"
 export CALLS="$TMP/calls"
-cat > "$TMP/shim/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/shim/gc" <<SHIM
 case "\$1 \${2:-}" in
   "convoy status")     printf '{"children":[{"id":"tk-sub"}]}\n' ;;
   "runtime drain-ack") printf 'DRAIN-ACK\n' >> "\$CALLS" ;;
