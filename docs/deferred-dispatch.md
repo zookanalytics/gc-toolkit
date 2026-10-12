@@ -253,10 +253,10 @@ pass rather than reading "none owed". The same-store limit below holds for an
 `until` target as much as for a `blocks` blocker — one in another rig is not seen
 here.
 
-Three checks cover this half too. Two are shared with the dispatch half,
-because this is the same order on the same cadence: the positive control and
-`check-cadence-live` (I10). `doctor/check-until-resolved-owed` is the
-resolved-by mirror of `check-armed-dispatch-owed`: it flags an open, unassigned
+The positive control in `deferred-dispatch.test.sh` and `check-cadence-live`
+(I10) cover this half too, because this is the same order on the same cadence.
+`doctor/check-until-resolved-owed` is the resolved-by mirror of
+`check-armed-dispatch-owed`: it flags an open, unassigned
 bead whose `until` targets have all closed and that no open `blocks` blocker
 still holds, yet that has stayed undisposed past the reconcile window — the
 disposition silently not firing, surfaced before the bead drifts back into a
