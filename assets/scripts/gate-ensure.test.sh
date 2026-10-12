@@ -756,6 +756,24 @@ oid r1c > "$GH_DIR/head_polecat_r1c"
 out=$(run)
 has "$out" "1 reviews dispatched" "a closed rework child no longer withholds the review"
 
+# A ruling's rework child carries source_ruling_bead, not source_review_bead, and
+# changes the branch all the same: a review dispatched while it is open reads a
+# mid-change diff, and its verdict could send a second worker onto the branch.
+echo "# an OPEN ruling-sourced rework child holds the fresh dispatch too — the branch is mid-change"
+ruling_kid() { # <id> <visit> <status>
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"task_kind":"rework","source_ruling_bead":"%s"}}' "$1" "$3" "$2"
+}
+store "[$(anchor RR1 pull_request correctness "" polecat/rr1),
+        $(judged_review rev-rr1 RR1 "$(oid rr1)"),
+        $(ruling_kid fix-rr1 vis-rr1 open)]"
+printf 'fix-rr1|blocks|RR1\n' >> "$STUB_DEPS"
+oid rr1 > "$GH_DIR/head_polecat_rr1"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "0 reviews dispatched" "the open ruling-sourced rework child withholds the fresh dispatch"
+has "$out" "quiesced (fix unit fix-rr1 in flight)" "…and the anchor names it as the fix unit holding it"
+hasnt "$(cat "$STUB_GC_LOG")" "bd create" "…and no review bead is created"
+
 echo "# a landed fix unit's must-fix finding is closed before quiescence reads it, and the wedged anchor re-gates"
 # The pre_open_gate deadlock: the fix unit closed having pushed its fix onto the
 # branch, but the must-fix finding it answered was left open, holding the publish
@@ -907,6 +925,25 @@ out=$(run)
 eq "$(bstatus find-ga1)" "open" "a GitHub-approval-only green lane leaves its unvalidated finding open (no re-approval proxy)"
 has "$out" "0 reviews dispatched" "…and the human-approved lane still dispatches nothing"
 rm -f "$GH_DIR/reviews_7701.json"
+
+echo "# a lane a conflicted bring-current round reopened dispatches past an approval older than the round"
+# The round reopened triage (bring_current_reopened, with its time) and has no
+# ruling yet. The standing approval predates the round, so it does not settle
+# triage, while correctness, which the round did not reopen, stays settled by it.
+# The triage dispatch says it rules on the round.
+BCREC=$(jq -nc '{head: "h", class: "conflicted", triage: null}' | jq -Rc .)
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-09-30T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+oid bc1 > "$GH_DIR/head_polecat_bc1"
+out=$(run)
+has "$out" "1 reviews dispatched" "only the reopened lane dispatches"
+has "$out" "check 'triage'" "…the triage lane"
+has "$out" "reopened by a bring-current round that conflicted: rule on the round" "…and its dispatch says to rule on the round"
+printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-10-02T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
+store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
+out=$(run)
+has "$out" "0 reviews dispatched" "an approval given after the round settles the reopened lane again"
+rm -f "$GH_DIR/reviews_7702.json"
 
 echo "# …the moot close is lane-scoped: a green lane does not resolve another lane's finding"
 # correctness is backed (locally green) and resolves its own unvalidated finding;
