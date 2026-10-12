@@ -232,12 +232,12 @@ The loop, every visit:
    On a fresh claim (`action=work`), before prepping, resolve what this
    sitting is about and who holds it with `converse-fold.sh` (it takes
    `$VISIT` and `$SUBJECT`, recovers an empty `$SUBJECT` from the `tracks`
-   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER`):
+   edge, and prints `SUBJECT` / `TOPIC` / `HOLDER` / `MISFILED`):
    ```bash
-   # eval the two assignments the fold reads (both bead ids). HOLDER="" first,
-   # so a read that did not resolve leaves it empty — the "hold" case below.
-   HOLDER=""
-   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER)=')"
+   # eval the assignments the fold reads. HOLDER="" first, so a read that did
+   # not resolve leaves it empty — the "hold" case below.
+   HOLDER=""; MISFILED=""
+   eval "$("$CONV/converse-fold.sh" "$VISIT" "${SUBJECT:-}" | grep -E '^(SUBJECT|HOLDER|MISFILED)=')"
    ```
    **Fold only when `$HOLDER` is another visit's id** — then close your visit
    through the shared guarded close, which appends the reading to the subject,
@@ -251,6 +251,15 @@ The loop, every visit:
    Then go to step 8. When `$HOLDER` is `$VISIT` you are the holder: prep and
    continue. When it is EMPTY the listing did not read, which proves nothing —
    hold.
+
+   `$HOLDER` is always a visit in this visit's own store, because a fold never
+   crosses stores: the merge-hold keys it moves hold a PR's merge only in that
+   PR's own store. `$MISFILED` names the live visits on this topic, this one
+   included, that sit in a different store from their subject. Nothing that
+   reads the subject's store sees them, and that includes a PR merge hold they
+   carry. Never fold into one. When `$MISFILED` is not empty, say in your
+   framing's detail which visits are misfiled, because correcting a misfile is
+   the operator's call.
 
 **Steps 2–8 — the working procedure lives in skills that load when you
 reach the step.** Step 1 is the entry point and stays inline; steps 2
@@ -341,15 +350,16 @@ Rules:
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
-  yours, and a recommend-close visit is the common trigger: `mol-first-reaction`
-  files one and stamps `recommend close: <why>` as the subject's takeaway when
-  it finds nothing to do, leaving the close to the operator. The operator must
+  yours, and the common trigger is a visit on a subject the validating closer
+  would not close on its own: a first reaction that finds nothing to do hands
+  the subject to `mol-validate-close`, which closes it on its own confident
+  check and otherwise leaves it open and files the visit. The operator must
   have agreed, in this sitting, that the subject should close; what the ruling
   licenses then follows the subject's state. A **no-work** subject you dispose
   directly: its `merge_result` empty or absent, or `merged`, unassigned,
   holding no branch or PR still in flight to a pool, and not a review, step, or
-  workflow bead. This is the no-work shape `duplicate-sweep.sh` already
-  disposes, proved there by `gc.work_outcome=no-op` or no work-product key (the
+  workflow bead. This is the no-work shape `bead-rehome.sh` disposes, proved by
+  `gc.work_outcome=no-op` or no work-product key (the
   `Close-with-successor` row of `docs/authority-map.md`); record
   `gc.work_outcome=no-op` on the subject, then close it through the one writer:
   `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind
@@ -513,11 +523,14 @@ visit, say) keeps that format. Operator-initiated form: the
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces

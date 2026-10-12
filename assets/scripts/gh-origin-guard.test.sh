@@ -66,6 +66,19 @@
 #        reaction, dismissal, re-request or delete posts no body and passes; a
 #        post inside a here-document body is not held to the mark, while the
 #        origin rule still reads the body and the commands after it
+#   (27) a Codex payload is measured in the directory its call runs in, read
+#        from the call's `workdir` in the session transcript: absolute,
+#        relative, absent, or a cd composed onto it; a body file resolves there
+#        too. A call with no line of its own (code mode), no transcript, or a
+#        workdir that does not exist leaves the directory unknown, so a write
+#        resolving against it is refused while one naming its repository and
+#        a read still pass. A Claude payload is never looked up.
+#   (28) a call that names no repository is measured against the one gh picks
+#        from the working directory's remotes, not against `origin`: the
+#        remote marked by gh-resolved, else the first of upstream, github,
+#        origin and the rest; a remote that names no repository is skipped, a
+#        URL this guard cannot read for sure is not, and a choice that depends
+#        on which forges gh is logged in to is refused
 
 set -u
 
@@ -583,6 +596,244 @@ denied  "a quote in a body does not hide a post"  "$RIG" "$(lines "cat > notes.m
 allowed "…and a marked post after it passes"      "$RIG" "$(lines "cat > notes.md <<'R'" "don't" 'R' "gh pr comment 5 --body 'x <!-- gc:city -->'")"
 denied  "a here-string opens no body"             "$RIG" "$(lines "cat <<< 'x'" 'gh pr comment 5 --body plain')"
 denied  "<<EOF inside a quoted body is no opener" "$RIG" "$(lines 'gh pr comment 5 --body "see <<EOF here <!-- gc:city -->"' 'gh pr comment 6 --body plain')"
+
+# --- (27) Codex: the directory the call runs in --------------------------
+# Codex puts a call's working directory in its `workdir` argument and leaves it
+# out of the payload, whose cwd is the session's. The guard reads the call from
+# the session transcript, so a Codex session cannot reach a third-party clone
+# through workdir while the guard measures the session's own checkout.
+echo "  -- codex: the call's own directory"
+TX="$SANDBOX/codex-rollout.jsonl"
+: > "$TX"
+tx_call() { # tx_call <call id> [<workdir>] — append the call's transcript line
+    jq -cn --arg id "$1" --arg wd "${2-}" --argjson has "$([ "$#" -ge 2 ] && echo true || echo false)" '
+        {type: "response_item",
+         payload: {type: "function_call", name: "exec_command", call_id: $id,
+                   arguments: ({cmd: "x"} + (if $has then {workdir: $wd} else {} end) | tojson)}}' >> "$TX"
+}
+run_codex() { # run_codex <session cwd> <command> <call id> <transcript or ''>
+    local out
+    out="$(jq -n --arg c "$2" --arg w "$1" --arg id "$3" --arg t "$4" '
+              {session_id: "s", turn_id: "t", cwd: $w,
+               transcript_path: (if $t == "" then null else $t end),
+               hook_event_name: "PreToolUse", model: "m",
+               permission_mode: "bypassPermissions", tool_name: "Bash",
+               tool_input: {command: $c}, tool_use_id: $id}' \
+           | "$HOOK" 2>/dev/null)"
+    LAST_RC=$?
+    printf '%s' "$out"
+}
+codex_denied() { # codex_denied <label> <session cwd> <command> <call id> [<transcript>]
+    local out; out="$(run_codex "$2" "$3" "$4" "${5-$TX}")"
+    if [ "$LAST_RC" -ne 0 ]; then
+        bad "$1" "exit $LAST_RC (must always exit 0)"; return
+    fi
+    if ! printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
+        bad "$1" "expected a JSON deny, got: ${out:-<empty>}"; return
+    fi
+    ok "$1"
+}
+codex_allowed() { # codex_allowed <label> <session cwd> <command> <call id> [<transcript>]
+    local out; out="$(run_codex "$2" "$3" "$4" "${5-$TX}")"
+    if [ "$LAST_RC" -ne 0 ]; then
+        bad "$1" "exit $LAST_RC (must always exit 0)"; return
+    fi
+    if [ -n "$out" ]; then
+        bad "$1" "expected silence, got: $out"; return
+    fi
+    ok "$1"
+}
+
+tx_call call_third "$SANDBOX/third"
+tx_call call_rig   "$SANDBOX/rig"
+tx_call call_none
+tx_call call_rel   "../third"
+tx_call call_gone  "$SANDBOX/no-such-dir"
+tx_call call_empty ""
+tx_call call_city  "$SANDBOX/city"
+codex_denied  "workdir in a third-party clone"       "$RIG"            "gh issue create --title x --body y" call_third
+codex_allowed "workdir in the rig checkout"          "$SANDBOX/plain"  "gh issue create --title x --body y" call_rig
+codex_allowed "no workdir: the session's directory"  "$RIG"            "gh issue create --title x --body y" call_none
+codex_denied  "no workdir, session in a clone"       "$SANDBOX/third"  "gh issue create --title x --body y" call_none
+codex_allowed "an empty workdir is the session's"    "$RIG"            "gh issue create --title x --body y" call_empty
+codex_denied  "a relative workdir joins the session" "$RIG"            "gh issue create --title x --body y" call_rel
+codex_allowed "a cd composes onto the workdir"       "$RIG"            "cd rigs/gc-toolkit && gh issue create --title x" call_city
+codex_denied  "a workdir that does not exist"        "$RIG"            "gh issue create --title x --body y" call_gone
+REASON="$(run_codex "$RIG" "gh issue create --title x --body y" call_third "$TX" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+case "$REASON" in
+    *"aimed at github.com/get-convex/agent"*) ok "names the clone the workdir reaches" ;;
+    *) bad "names the clone the workdir reaches" "${REASON:-<empty>}" ;;
+esac
+
+# A post's body file resolves in the call's directory, not the session's.
+printf 'reply <!-- gc:city -->\n' > "$SANDBOX/rig/reply.md"
+codex_allowed "a body file resolves in the workdir" "$SANDBOX/plain" \
+    "gh pr comment 5 --repo zookanalytics/gc-toolkit --body-file reply.md" call_rig
+
+# A call made from inside Codex's code-mode tool has no transcript line of its
+# own, and a session can run with no transcript at all. The directory is then
+# unknown: a write resolving against it is refused, never measured in the
+# session's checkout, while a write naming its repository and a read pass.
+codex_denied  "code-mode call: implicit target"      "$RIG" "gh issue create --title x --body y" call_nested
+codex_allowed "code-mode call: --repo of our own"    "$RIG" "gh issue create --repo zookanalytics/gc-toolkit --title x" call_nested
+codex_denied  "code-mode call: --repo third party"   "$RIG" "gh issue create --repo get-convex/agent --title x" call_nested
+codex_denied  "code-mode call: a relative cd"        "$RIG" "cd rig && gh issue create --title x" call_nested
+codex_allowed "code-mode call: a read"               "$RIG" "gh issue view 5" call_nested
+codex_denied  "no transcript: implicit target"       "$RIG" "gh issue create --title x --body y" call_rig ""
+REASON="$(run_codex "$RIG" "gh issue create --title x --body y" call_nested "$TX" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null)"
+case "$REASON" in
+    *"code-mode"*"--repo"*) ok "explains the unknown directory" ;;
+    *) bad "explains the unknown directory" "${REASON:-<empty>}" ;;
+esac
+
+# The writer may be mid-line when the hook reads; a torn last line is skipped.
+printf '{"type":"response_item","payload":{"type":"function_call","call_id":"call_torn' >> "$TX"
+codex_allowed "a torn last line does not hide a call" "$SANDBOX/plain" "gh issue create --title x --body y" call_rig
+
+# Claude's payload carries no turn_id and is never looked up, whatever its
+# transcript holds.
+out="$(jq -n --arg c "gh issue create --title x" --arg w "$RIG" --arg t "$TX" \
+          '{tool_name:"Bash", tool_input:{command:$c}, cwd:$w, transcript_path:$t, tool_use_id:"call_third"}' \
+       | "$HOOK" 2>/dev/null)"
+[ -z "$out" ] && ok "a Claude payload keeps its cwd" || bad "a Claude payload keeps its cwd" "$out"
+
+# --- (28) the working directory's repository is gh's choice ---------------
+# gh does not read `origin` first. With no --repo and no GH_REPO it takes the
+# remote `gh repo set-default` marked (remote.<name>.gh-resolved), else the
+# first remote in the order upstream, github, origin, then the rest as git
+# lists them. A clone whose origin is ours and whose upstream is someone else's
+# therefore writes upstream, and a guard reading origin cleared that write.
+echo "  -- the working directory's repository is gh's choice"
+OURS_URL="git@github.com:zookanalytics/gc-toolkit.git"
+THEIRS_URL="https://github.com/get-convex/agent.git"
+FORK="$SANDBOX/fork"
+mkrepo "$FORK" "$OURS_URL"
+git -C "$FORK" remote add upstream "$THEIRS_URL"
+denied  "origin ours, upstream theirs, no default: pr create" "$FORK" "gh pr create --title 'x' --body 'y'"
+denied  "…issue create"                                       "$FORK" "gh issue create --title 'x' --body 'y'"
+denied  "…a marked pr comment"                                "$FORK" "gh pr comment 5 --body 'x <!-- gc:city -->'"
+denied  "…an api placeholder fill"                            "$FORK" "gh api -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+denied  "…reached by a cd"                                    "$RIG" "cd $FORK && gh issue create --title 'x'"
+allowed "…an explicit --repo at our own origin"               "$FORK" "gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+WREFUSAL="$(run "$FORK" "gh issue create --title 'x'")"
+printf '%s' "$WREFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("github.com/get-convex/agent") and test("gh repo set-default")' >/dev/null 2>&1 \
+    && ok "the refusal names upstream and how gh picked it" || bad "the refusal names upstream and how gh picked it" "$WREFUSAL"
+XREFUSAL="$(run "$FORK" "gh issue create --repo get-convex/agent --title 'x'")"
+printf '%s' "$XREFUSAL" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("get-convex/agent") and (test("set-default") | not)' >/dev/null 2>&1 \
+    && ok "an explicit target carries no note on gh's pick" || bad "an explicit target carries no note on gh's pick" "$XREFUSAL"
+# gh repo set-default marks the remote gh writes to.
+git -C "$FORK" config remote.origin.gh-resolved base
+allowed "origin marked base: pr create"                       "$FORK" "gh pr create --title 'x' --body 'y'"
+allowed "origin marked base: api placeholder fill"            "$FORK" "gh api -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+git -C "$FORK" config remote.origin.gh-resolved Base
+denied  "a mark gh cannot read stops the call"                "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config remote.origin.gh-resolved get-convex/agent
+denied  "origin marked with someone else's OWNER/REPO"        "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config --unset remote.origin.gh-resolved
+git -C "$FORK" config remote.upstream.gh-resolved zookanalytics/gc-toolkit
+allowed "upstream marked with our OWNER/REPO"                 "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config remote.upstream.gh-resolved github.com/zookanalytics/gc-toolkit
+allowed "…as HOST/OWNER/REPO"                                 "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config remote.upstream.gh-resolved https://github.com/zookanalytics/gc-toolkit.git
+allowed "…as a URL"                                           "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config remote.upstream.gh-resolved base
+denied  "upstream marked base"                                "$FORK" "gh issue create --title 'x'"
+git -C "$FORK" config remote.origin.gh-resolved base
+denied  "two marks: the first in gh's order wins"             "$FORK" "gh issue create --title 'x'"
+# The order of the unmarked: upstream, github, origin, then the rest by name.
+mkrepo "$SANDBOX/ghremote" "$OURS_URL"
+git -C "$SANDBOX/ghremote" remote add github "$THEIRS_URL"
+denied  "a remote named github comes before origin"           "$SANDBOX/ghremote" "gh issue create --title 'x'"
+mkrepo "$SANDBOX/caps" "$OURS_URL"
+git -C "$SANDBOX/caps" remote add Upstream "$THEIRS_URL"
+denied  "a remote named Upstream ranks as upstream"           "$SANDBOX/caps" "gh issue create --title 'x'"
+mkrepo "$SANDBOX/forkrem" "$OURS_URL"
+git -C "$SANDBOX/forkrem" remote add fork "$THEIRS_URL"
+allowed "origin comes before any other name"                  "$SANDBOX/forkrem" "gh issue create --title 'x'"
+mkdir -p "$SANDBOX/rest1" "$SANDBOX/rest2"
+git -C "$SANDBOX/rest1" init -q; git -C "$SANDBOX/rest1" remote add alpha "$OURS_URL"; git -C "$SANDBOX/rest1" remote add beta "$THEIRS_URL"
+git -C "$SANDBOX/rest2" init -q; git -C "$SANDBOX/rest2" remote add alpha "$THEIRS_URL"; git -C "$SANDBOX/rest2" remote add beta "$OURS_URL"
+allowed "the rest by name: ours first"                        "$SANDBOX/rest1" "gh issue create --title 'x'"
+denied  "the rest by name: theirs first"                      "$SANDBOX/rest2" "gh issue create --title 'x'"
+# gh's sort keeps that order among equal ranks for twelve remotes or fewer and
+# can reorder a longer list, so a longer list is not resolved.
+mkdir -p "$SANDBOX/many"; git -C "$SANDBOX/many" init -q
+git -C "$SANDBOX/many" remote add a00 "$OURS_URL"
+for n in 01 02 03 04 05 06 07 08 09 10 11; do git -C "$SANDBOX/many" remote add "a$n" "$THEIRS_URL"; done
+allowed "twelve remotes keep the listed order"                "$SANDBOX/many" "gh issue create --title 'x'"
+git -C "$SANDBOX/many" remote add a12 "$THEIRS_URL"
+denied  "thirteen remotes are not resolved"                   "$SANDBOX/many" "gh issue create --title 'x'"
+# gh skips a remote it reads no repository from, and reads the push URL when
+# the fetch URL names none.
+mkrepo "$SANDBOX/localup" "$OURS_URL"
+git -C "$SANDBOX/localup" remote add upstream "/srv/mirror/agent.git"
+allowed "an upstream at a local path is skipped"              "$SANDBOX/localup" "gh issue create --title 'x'"
+git -C "$SANDBOX/localup" remote set-url --push upstream "$THEIRS_URL"
+denied  "…unless its push URL names a repository"             "$SANDBOX/localup" "gh issue create --title 'x'"
+mkrepo "$SANDBOX/deepup" "$OURS_URL"
+git -C "$SANDBOX/deepup" remote add upstream "https://github.com/get-convex/agent/tree"
+allowed "an upstream path that is not OWNER/REPO is skipped"  "$SANDBOX/deepup" "gh issue create --title 'x'"
+mkrepo "$SANDBOX/slashup" "$OURS_URL"
+git -C "$SANDBOX/slashup" remote add upstream "https://github.com/get-convex/agent/"
+denied  "a trailing slash still names OWNER/REPO"             "$SANDBOX/slashup" "gh issue create --title 'x'"
+# A URL this reading cannot be sure of is not skipped: gh decodes %61 to `a`
+# and writes to get-convex/agent.
+mkrepo "$SANDBOX/escup" "$OURS_URL"
+git -C "$SANDBOX/escup" remote add upstream "https://github.com/get-convex/%61gent.git"
+denied  "an upstream URL with an escape is not skipped"       "$SANDBOX/escup" "gh issue create --title 'x'"
+# gh reads a URL that opens with // as naming a host.
+mkrepo "$SANDBOX/dslashup" "$OURS_URL"
+git -C "$SANDBOX/dslashup" remote add upstream "//github.com/get-convex/agent.git"
+denied  "an upstream //host/path is not skipped"              "$SANDBOX/dslashup" "gh issue create --title 'x'"
+# gh skips a URL whose port is not a number, so a remote naming our repository
+# behind one does not clear a write that gh sends to the next remote.
+mkrepo "$SANDBOX/portours" "$THEIRS_URL"
+git -C "$SANDBOX/portours" remote add upstream "https://github.com:abc/zookanalytics/gc-toolkit.git"
+denied  "our repository behind a bad port is not read as ours" "$SANDBOX/portours" "gh issue create --title 'x'"
+# gh drops www. from a remote's host, so www.github.com is github.com.
+mkrepo "$SANDBOX/wwwup" "$OURS_URL"
+git -C "$SANDBOX/wwwup" remote add upstream "https://www.github.com/get-convex/agent.git"
+printf '%s' "$(run "$SANDBOX/wwwup" "gh issue create --title 'x'")" | jq -e '.hookSpecificOutput.permissionDecisionReason | test("aimed at github.com/get-convex/agent")' >/dev/null 2>&1 \
+    && ok "an upstream on www.github.com is github.com" || bad "an upstream on www.github.com is github.com" "not refused as github.com/get-convex/agent"
+# gh drops only a lowercase www., before it lowercases the host, so it reads a
+# remote on WWW.github.com as on the forge www.github.com. Logged in to
+# github.com alone, gh passes over that remote and writes to the next one.
+mkrepo "$SANDBOX/wwwcaps" "$THEIRS_URL"
+git -C "$SANDBOX/wwwcaps" remote add upstream "https://WWW.github.com/zookanalytics/gc-toolkit.git"
+denied  "our repository on WWW.github.com is not read as ours" "$SANDBOX/wwwcaps" "gh issue create --title 'x'"
+# gh reads the remote name in a gh-resolved key as the text between its first
+# two dots, so a mark on my.fork marks the remote named my.
+mkrepo "$SANDBOX/dotted" "$OURS_URL"
+git -C "$SANDBOX/dotted" remote add my "$THEIRS_URL"
+git -C "$SANDBOX/dotted" remote add my.fork "$OURS_URL"
+git -C "$SANDBOX/dotted" config remote.my.fork.gh-resolved base
+denied  "a mark on my.fork marks the remote my"               "$SANDBOX/dotted" "gh issue create --title 'x'"
+# gh narrows the remotes by forge, using the hosts it is logged in to, or
+# GH_HOST alone. The guard does not read that configuration, so a remote on
+# another forge that would change the choice leaves it unresolved.
+mkrepo "$SANDBOX/labup" "$OURS_URL"
+git -C "$SANDBOX/labup" remote add upstream "https://gitlab.example.com/get-convex/agent.git"
+denied  "an upstream on another forge leaves it open"         "$SANDBOX/labup" "gh issue create --title 'x'"
+mkrepo "$SANDBOX/labfork" "$OURS_URL"
+git -C "$SANDBOX/labfork" remote add fork "https://gitlab.example.com/get-convex/agent.git"
+allowed "a remote on another forge that ranks after origin"   "$SANDBOX/labfork" "gh issue create --title 'x'"
+# The same holds when the remote on the other forge is the one we own: gh, not
+# logged in there, would skip it and write to origin.
+mkrepo "$SANDBOX/labours" "$THEIRS_URL"
+git -C "$SANDBOX/labours" remote add upstream "https://gitlab.example.com/zookanalytics/gc-toolkit.git"
+GC_RIG_ROOT="$SANDBOX/other"; export GC_RIG_ROOT
+denied  "our remote on another forge does not clear the write" "$SANDBOX/labours" "gh issue create --title 'x'"
+GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
+denied  "GH_HOST elsewhere leaves no remote to choose"        "$RIG" "GH_HOST=gitlab.example.com gh issue create --title 'x'"
+denied  "an exported GH_HOST elsewhere, the same"             "$RIG" "export GH_HOST=gitlab.example.com; gh issue create --title 'x'"
+# gh api --hostname sends the request to another forge, but the remotes are
+# narrowed by GH_HOST alone, so the placeholders still fill from our checkout.
+mkrepo "$SANDBOX/ghe" "https://ghe.example.com/zookanalytics/gc-toolkit.git"
+GC_RIG_ROOT="$SANDBOX/ghe"; export GC_RIG_ROOT
+allowed "api --hostname fills from the default forge's remote" "$RIG" "gh api --hostname ghe.example.com -X POST 'repos/{owner}/{repo}/issues' -f title=x"
+GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"

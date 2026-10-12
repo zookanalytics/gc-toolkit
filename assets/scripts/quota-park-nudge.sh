@@ -40,6 +40,7 @@ BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 # one (providers never print any); single/smart quotes and backticks count
 # only as an OPENING delimiter (the apostrophe in "You've" is that character).
 # Alternation, not a bracket class (multibyte in [...] is a byte set under C).
+# shellcheck disable=SC1112  # the curly quotes are characters the regex matches
 CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)*[[:space:]]*('\''|‘|’|`)|^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
 
 # Retry pacing: first detection nudges immediately; later attempts back off
