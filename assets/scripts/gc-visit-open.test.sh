@@ -91,23 +91,36 @@ mkdir -p "$TMP/bin" "$TMP/rigs/gc-toolkit/.beads" "$TMP/rigs/gascity/.beads"
 # Two rigs, so "which ledger" is a real question the test can check. Every
 # mutating call is appended to $FAKE_CALLS so "nothing was created" is asserted
 # against the actual argv, not against exit status alone.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
-    # suspended/running are injected per rig ONLY when the driving var is set, so
-    # the default cases see neither field (null → unknown → the guard allows) and
-    # a liveness case sets exactly the flag it is exercising. Mirrors the real
-    # projection, which carries the two flags through {name,path,prefix,...}.
-    jq -n --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
+    # The HQ row leads, as gc lists it; its running flag is gc's probe of the city
+    # controller, injected via $HQ_RUNNING. Each rig's suspended/running are
+    # injected ONLY when the driving var is set, so the default cases see no flag
+    # (null → unknown → no note) and a liveness case sets exactly the flag it is
+    # exercising.
+    jq -n --arg c "$FAKE_RIGS/city" --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
+          --arg hrun "${HQ_RUNNING-}" \
           --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
           --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
-      '{rigs:[({name:"gc-toolkit", path:$t, prefix:"tk"}
+      '{rigs:[({name:"loomington", path:$c, prefix:"lx", hq:true}
+               + (if $hrun  != "" then {running:   ($hrun =="true")} else {} end)),
+              ({name:"gc-toolkit", path:$t, prefix:"tk", hq:false}
                + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
                + (if $trun  != "" then {running:   ($trun =="true")} else {} end)),
-              ({name:"gascity",    path:$g, prefix:"gc"}
+              ({name:"gascity",    path:$g, prefix:"gc", hq:false}
                + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
                + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
+  "status --json")
+    # The supervisor-aware controller reading the wait-note asks before an HQ
+    # running=false counts. $STATUS_CONTROLLER sets .controller.running
+    # ("true"/"false"); unset prints nothing, a gc status that gave no reading.
+    # Each call is logged to $FAKE_STATUS_CALLS, apart from the mutating calls.
+    printf 'status --json\n' >> "$FAKE_STATUS_CALLS"
+    case "${STATUS_CONTROLLER-}" in
+      true)  printf '{"controller":{"running":true,"pid":7,"mode":"supervisor"}}\n' ;;
+      false) printf '{"controller":{"running":false,"mode":"supervisor"}}\n'; exit 1 ;;
+    esac ;;
   "agent list")
     # A reaction roster: proactive + converse for each rig named in
     # $FAKE_REACTION_RIGS (default: both stub rigs served). A rig ABSENT from
@@ -206,20 +219,22 @@ export FAKE_CALLS="$TMP/calls"
 export FAKE_TITLE="$TMP/title"
 export FAKE_BODY="$TMP/body"
 export FAKE_RIGS="$TMP/rigs"
+export FAKE_STATUS_CALLS="$TMP/status-calls"
 export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
 export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 export TMPDIR="$TMP"
 
-# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
+# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
 # RUN_SH names the shell that runs the script; the default is sh, as shipped.
 run() {
-    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"
+    : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"; : > "$FAKE_STATUS_CALLS"
     export FAKE_DELIVERABLE="$1"; shift
     set +e
     OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
+    STATUS_CALLS="$(cat "$FAKE_STATUS_CALLS")"
 }
 
 # --- (DIRECT) --no-react files the visit now, via gc-helm.sh open ------------
@@ -332,10 +347,11 @@ has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAU
 
 # --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
 # Suspend means paused processing, not a dead store: gc rig suspend leaves the
-# beads database accessible, so a report filed into a suspended (or not-yet-
-# running) rig is recorded now and triaged on resume. The intake mints the
-# subject and notes that it will wait — it never refuses, which would deny a rig
-# paused on purpose and filed into to process later.
+# beads database accessible, so a report filed into a suspended rig, or filed
+# while the city controller is down, is recorded now and triaged once the rig
+# resumes or the controller is back. The intake mints the subject and notes that
+# it will wait — it never refuses, which would deny a rig paused on purpose and
+# filed into to process later.
 export GASCITY_SUSPENDED=true
 run no "a report for a suspended rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) a suspended target rig files normally"
@@ -344,21 +360,59 @@ has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
 has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
 unset GASCITY_SUSPENDED
 
-export GASCITY_RUNNING=false
-run no "a report for a downed rig" --rig gascity
-eq "$RC" "0" "(LIVENESS) a not-running target rig files normally"
-has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the not-running rig"
-has "$ERR" "no agents running" "(LIVENESS) and the note names the downed runtime"
-unset GASCITY_RUNNING
+export HQ_RUNNING=false STATUS_CONTROLLER=false
+run no "a report while the controller is down" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed while the controller is down files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the target rig"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the note names the controller"
+has "$ERR" "both report it not running" "(LIVENESS) and the two readings that agree"
+has "$ERR" "gc status" "(LIVENESS) and points at the city's status"
+
+# The same downed controller reached through an existing bead, or a PR
+# reference, waits the same way, so every filing path carries the note.
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead filed while the controller is down files normally"
+has "$CALLS" "helm open gc-abc12" "(LIVENESS) the visit is filed on the existing bead"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the existing-bead path notes the controller too"
+FAKE_RESOLVE=gc-owner run no 615
+eq "$RC" "0" "(LIVENESS) a PR reference filed while the controller is down files normally"
+has "$ERR" "city controller did not answer" "(LIVENESS) and the PR-reference path notes the controller too"
+unset STATUS_CONTROLLER
+
+# A missed ping that gc status contradicts is no wait at all.
+STATUS_CONTROLLER=true run no "a report when the ping missed" --rig gascity
+eq "$RC" "0" "(LIVENESS) a report filed when gc status contradicts the HQ row files normally"
+has "$STATUS_CALLS" "status --json" "(LIVENESS) after asking gc status"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
+unset HQ_RUNNING
+
+# A suspended rig reached through an existing bead waits the same way as a topic.
+export GASCITY_SUSPENDED=true
+run no gc-abc12
+eq "$RC" "0" "(LIVENESS) an existing bead in a suspended rig files normally"
+has "$ERR" "rig 'gascity' is suspended" "(LIVENESS) and the existing-bead path notes the suspension too"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
+unset GASCITY_SUSPENDED
+
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches its triage like anywhere else, so
+# the report gets no wait-note. An HQ running=true asks gc status nothing.
+export HQ_RUNNING=true GASCITY_RUNNING=false
+run no "a report for an idle rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an idle target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the idle rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for an idle rig"
+eq "$STATUS_CALLS" "" "(LIVENESS) and gc status is not asked while the HQ row reads running"
+unset HQ_RUNNING GASCITY_RUNNING
 
 # Explicit-live files with no note — the control that proves the note fires on
 # the paused case, not every case.
-export GASCITY_SUSPENDED=false GASCITY_RUNNING=true
+export HQ_RUNNING=true GASCITY_SUSPENDED=false GASCITY_RUNNING=true
 run no "a report for a live rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
 hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for a live rig"
-unset GASCITY_SUSPENDED GASCITY_RUNNING
+unset HQ_RUNNING GASCITY_SUSPENDED GASCITY_RUNNING
 
 # A gc that reports neither flag leaves them null: unknown, no note. This is the
 # default-stub path every other case runs on, asserted here explicitly so the
@@ -705,8 +759,7 @@ eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 # There is no timeout arm — unlike gc-helm.sh this script does not bound the
 # call, so there is no kill to report.
 mkdir -p "$TMP/rigbin"
-cat > "$TMP/rigbin/gc" <<'RIGSTUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rigbin/gc" <<'RIGSTUB'
 if [ "$1 ${2:-}" = "rig list" ]; then
   case "${RIGMODE:-}" in
     exitfail) echo "dial tcp 127.0.0.1:3307: connect: connection refused" >&2; exit 7 ;;
@@ -777,16 +830,18 @@ grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
-cat > "$TMP/enumbin/gc" <<'ENUMGC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/enumbin/gc" <<'ENUMGC'
 [ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
 exit 0
 ENUMGC
 chmod +x "$TMP/enumbin/gc"
+# The probe sources city-liveness.sh ($2) first, for the projection the helper
+# runs, as the script does.
 cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
 set -eu
 PROG=probe; RIGS=""
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
+. "$2"
 . "$1"
 before="$(trap)"
 enumerate_rigs
@@ -796,7 +851,7 @@ printf 'RIGS[%s]\n' "$RIGS"
   || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
-EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" "$HERE/city-liveness.sh" 2>&1 || true)"
 has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, so the temp-file path really ran"
 has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
 eq  "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \

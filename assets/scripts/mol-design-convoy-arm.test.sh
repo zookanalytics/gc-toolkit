@@ -141,8 +141,7 @@ done
 # that reported success and recorded nothing.
 #   SLING_RC, UPDATE_RC                    exit of `gc sling` / `gc bd update`
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 printf '%s\n' "$*" >> "$GC_LOG"
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "dep" ] && [ "${3:-}" = "add" ]; then
   case "${6:-}" in

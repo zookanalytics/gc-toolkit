@@ -25,8 +25,7 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -239,8 +238,7 @@ case "${1:-}" in
 esac
 STUB
 
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 printf '%s\n' "$*" >> "${STUB_GH_ALL:?}"
@@ -271,8 +269,7 @@ esac
 exit 0
 STUB
 
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 # resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
 # then reads the check index at the reviewed commit with
 # `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
