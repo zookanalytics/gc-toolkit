@@ -1,3 +1,8 @@
+---
+name: V7 hidden metrics the pack is not measuring
+description: Validation report V7 for the escalation work (tk-px5od), which argues that the pack's metrics treat the reviewer as a constant-quality oracle. It catalogs reviewer-state and frame-state metrics the pack does not collect and recommends which to adopt.
+---
+
 # V7 Hidden Metrics — What the Pack Is Not Measuring
 
 ## Summary

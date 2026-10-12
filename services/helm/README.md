@@ -260,7 +260,10 @@ queries stop returning an anchor the moment it is answered, so the second pass
 is the only thing that gives a closed one a row. It bands `DONE`, which sorts
 below every live band, and stays there until the window ages it out. The band
 carries no per-row state: nothing retires a row early, so a row leaves only once
-it has been closed longer than the window. The collapse to a stateless band:
+it has been closed longer than the window. A visit or demand is the exception.
+Once it closes, a wrapper whose subject is on the board takes no row of its own,
+because the subject's row stands for the attention it carried
+(`board.foldWrappers`). The collapse to a stateless band:
 `specs/tk-7cb4l2/collapse.md`; the layout-stability rule and the tradeoff the
 window accepts: `specs/tk-ghlg1e/layout-stability.md`.
 
@@ -496,7 +499,7 @@ field would be lying on a normal day.
 | field | values | read from |
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
-| `pr_conversation` | `unknown` (see below) | — |
+| `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
@@ -562,12 +565,34 @@ wedge, a demand, a takeaway or a human route already owns the row and names it, 
 the signal defers to each; it is a merge anchor either way, so it reads in the
 `review` band beside the wedged pre-open rows.
 
-**`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
-`outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
-the city does not record. Deriving them without those marks means guessing, and
-every failed guess resolves to silence, which is the one answer that tells the
-operator to stop looking. The field is on the wire so the contract does not
-change shape once the marks exist.
+**`pr_conversation` reads the recorded position.** `asking` is the demand edge,
+rendered wherever it is there. `quiet`, `outstanding` and `answered` are read
+off `pr.conversation`, which `pr-facts.sh` records each pass against the
+acknowledgement watermarks and the routing disposition: `quiet` when no human
+has spoken, and on a pre-open gate, where no PR yet exists to speak on;
+`outstanding` while a human utterance sits above its space's watermark, or a
+batch routed to a fix unit that has not closed yet; `answered` once that fix
+unit closes — a rework child when its branch lands, a visit when a person
+resolves it — so the city's reply is there to look at. A head move alone is not
+`answered`: a merge-in of the base or an operator push leaves the fix unit open.
+A batch the city is working reads the coarser `outstanding` rather than `quiet`,
+because `covered` — `outstanding` with a bead on the utterance — waits on a
+comment-to-bead link nothing records yet. Because the disposition lands in the
+same transition as the watermark it routes past, `outstanding` re-derives from
+it even when a conversation write was dropped; an anchor with no disposition and
+no recorded position stays `unknown` until a new utterance. The recorded value
+is current only at the head `pr.machine` was last resolved at; pinned to any
+other head it reads `unknown`, which is a rendered value and never a fallback to
+the quiet end.
+
+**Every live PR row shows its conversation.** The row is where the operator sees
+which pull requests carry their comments. The dashboard puts a `💬 <value>` chip
+beside the PR link, colored for `outstanding`, `answered` and `asking`, with the
+value's meaning on hover. The terminal board ends the row's needs with
+`conversation <value>`, including a member row inside a fold, and skips it on an
+`asking` row, whose needs already names the question. Neither prints one on a
+closed row, since nobody acts on a finished pull request's conversation. Each
+surface's legend says what the values mean.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false
@@ -1388,9 +1413,10 @@ GC_CITY_PATH=$GC_CITY_PATH ./helm-svc board --json --limit=0 | jq length
 
 helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
 Homebrew installs icu4c keg-only, off cgo's default search path, so a bare
-`go build` or `go test` there needs it named first:
+`go build`, `go test` or `go vet` there needs it named first:
 `export CGO_CPPFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib"`.
-`gc-helm-build.sh` adds both flags itself.
+`gc-helm-build.sh` and `tools/lint.sh` add both flags themselves, through
+`assets/scripts/icu4c-cgo.sh`.
 
 Discovery env:
 

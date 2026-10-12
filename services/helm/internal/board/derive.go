@@ -1011,11 +1011,18 @@ const (
 	// [Anchor.WaitingUnknown] already applies to an unreadable edge set.
 	AxisUnknown = "unknown"
 
-	// ConversationUnknown is what every row reads today. The other values all
-	// resolve to acknowledgement watermarks that do not exist yet, and a guess
-	// resolves to silence, which is the one answer that tells the operator to
-	// stop looking.
-	ConversationUnknown = AxisUnknown
+	// The conversation axis. quiet, outstanding and answered are read off the
+	// position pr-facts.sh records against the acknowledgement watermarks;
+	// asking is the demand edge, with no key of its own; covered waits on a
+	// comment-to-bead link nothing records yet and is not among them.
+	// ConversationUnknown is a rendered value, never a fallback to the quiet
+	// end: an unread axis and a clear one are not interchangeable, and only the
+	// gather can tell them apart.
+	ConversationQuiet       = "quiet"
+	ConversationOutstanding = "outstanding"
+	ConversationAnswered    = "answered"
+	ConversationAsking      = "asking"
+	ConversationUnknown     = AxisUnknown
 
 	ApprovalRequired = "required"
 	ApprovalMet      = "met"
@@ -1029,6 +1036,7 @@ const (
 	// mdPRMachineReason names why a `blocked` machine verdict cannot merge. It is
 	// plain, not dated, and read only while pr.machine is MachineBlocked.
 	mdPRMachineReason = "pr.machine_reason"
+	mdPRConversation  = "pr.conversation"
 	mdPRPosture       = "pr_posture"
 	mdPRNumber        = "pr_number"
 	mdPRURL           = "pr_url"
@@ -1291,8 +1299,9 @@ type PRCoverage struct {
 	// recorded. A missing key is a fact about the city, not an all-clear.
 	MachineUnknown int
 	// ConversationUnknown is the rows whose exchange with the operator cannot
-	// be read. In this phase that is every row: the values depend on
-	// acknowledgement watermarks nothing records yet.
+	// be read: the cadence has not recorded a position, or the one it recorded
+	// is pinned to a head that is no longer live. A missing key is a fact about
+	// the city, not an all-clear.
 	ConversationUnknown int
 	// ApprovalUnanswered is the SETTLED rows whose approval clause could not be
 	// read. Those are the rows where the question "is GitHub holding this for a
@@ -1329,7 +1338,14 @@ func Coverage(tiles []Tile) PRCoverage {
 		if t.PRMachine == AxisUnknown {
 			c.MachineUnknown++
 		}
-		if t.PRConversation == AxisUnknown {
+		// The conversation pins to the pr.machine head for its currency check, so
+		// a row whose machine is itself unknown ALSO reads an unknown conversation
+		// — the check cannot run without a resolved machine head. Counting it here
+		// too would report the same gap on both axes and blame the conversation
+		// for one that is the machine reference's; MachineUnknown already carries
+		// it. Count the conversation only where the machine is known, so it names
+		// a real, standalone conversation gap.
+		if t.PRMachine != AxisUnknown && t.PRConversation == AxisUnknown {
 			c.ConversationUnknown++
 		}
 		if t.PRMachine == MachineSettled && t.PRApproval == AxisUnknown {
@@ -1348,18 +1364,55 @@ func prNumber(a Anchor) int {
 	return n
 }
 
-// prConversation is where the exchange with the operator stands. Every merge
-// anchor reads `unknown` in this phase: `outstanding`, `covered` and `answered`
-// all resolve to acknowledgement watermarks nothing records yet, and building
-// them before those land means guessing. Every failed guess resolves to
-// "nothing has been said", which is the one answer that tells the operator to
-// stop looking. The field ships now so the wire contract does not change shape
-// when the watermarks do land.
-func prConversation(a Anchor) string {
+func knownConversation(v string) bool {
+	return v == ConversationQuiet || v == ConversationOutstanding || v == ConversationAnswered
+}
+
+// prConversation is where the exchange with the operator stands.
+//
+// asking IS the demand edge, with no key of its own, and it renders wherever
+// the edge is there — ahead of the recorded position, because a formed question
+// waiting on an answer is the more specific state. Below that, the position is
+// read off pr.conversation, which pr-facts.sh records against the acknowledgement
+// watermarks and the routing disposition: quiet when no human has spoken (and on
+// a pre-open gate, which has no PR to speak on), outstanding while a human
+// utterance sits unanswered or a routed fix unit has yet to close, answered once
+// that fix unit closes — a rework child landing, a visit resolved — so the reply
+// is there to look at, not on a bare head move. covered is not among them — it
+// waits on a comment-to-bead link nothing records yet, and an utterance the city
+// is working reads the coarser outstanding rather than collapsing into quiet.
+//
+// The recorded value is current only at the head the cadence last resolved,
+// which the board learns from pr.machine rather than by asking GitHub — the same
+// currency check [prApproval] makes. A value pinned to any other head was read
+// before the branch moved on and reads unknown, which is a rendered value and
+// never a fallback to quiet.
+func prConversation(a Anchor, ask *Blocker) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return ConversationUnknown
+	if ask != nil {
+		return ConversationAsking
+	}
+	// A pre-open gate has no PR yet — nothing can have been said on a pull request
+	// that does not exist — so its conversation is quiet, not unknown. pr-facts.sh
+	// records the conversation only for an open, non-draft PR, so a pre-open
+	// anchor never writes one; counting its absence as unknown would hang the
+	// empty-queue all-clear on a row that cannot carry the axis. The signal is the
+	// merge_result, not a missing pr_number: an open pull_request anchor whose
+	// number has not been read back yet is a real PR with a real (if briefly
+	// unrecorded) conversation, and reads unknown until the cadence records it.
+	if a.Metadata[mdMergeResult] == mergeResultPreOpenGate {
+		return ConversationQuiet
+	}
+	value, head, _, ok := splitDated(a.Metadata[mdPRConversation])
+	if !ok || !knownConversation(value) {
+		return ConversationUnknown
+	}
+	if _, machineHead, _, machineOK := splitDated(a.Metadata[mdPRMachine]); !machineOK || head != machineHead {
+		return ConversationUnknown
+	}
+	return value
 }
 
 // prFrontier identifies the pull request and says how long the turn has been
@@ -1888,7 +1941,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRURL:          a.Metadata[mdPRURL],
 		PRBranch:       prBranch(a),
 		PRMachine:      machine,
-		PRConversation: prConversation(a),
+		PRConversation: prConversation(a, ask),
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
 	}
@@ -2351,6 +2404,16 @@ const clusterThreshold = 3
 // because dropping it would erase the only trace of the attention; its needs is
 // rewritten from its own title so the kept row states the ask instead of the
 // empty "routed to you — no question recorded".
+//
+// A CLOSED wrapper never moves its ask. Its conversation has ended, so folding
+// the ask would mark the subject owed on the strength of an ask nobody is making
+// any more. Its row is dropped whenever its subject has a row, live or DONE, and
+// whether or not that subject is itself a wrapper: the subject's row either
+// survives the fold or is dropped in favour of a row that does, so the attention
+// stays on the board. Closed wrappers that name each other in a loop keep their
+// rows, since no row outside the loop stands for them. With no subject row the
+// closed wrapper stays in the DONE band like any closed anchor, because it is the
+// only trace of the attention it carried.
 func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
@@ -2371,6 +2434,27 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		}
 		return false
 	}
+	// closedLoop reports whether walking from a closed wrapper to its subject, and
+	// on through every subject that is a closed wrapper too, comes back to where it
+	// started. Any other walk ends at a row the fold keeps, or at an open wrapper
+	// the fold keeps or folds onto a row it keeps. A loop is the one shape in which
+	// dropping every closed wrapper beside its subject would leave no row at all.
+	closedLoop := func(start string) bool {
+		seen := map[string]bool{}
+		for cur := start; !seen[cur]; {
+			seen[cur] = true
+			subj, _, _, _ := wrapperTarget(anchorByID[cur])
+			if subj == start {
+				return true
+			}
+			j, has := idx[subj]
+			if !has || !isWrapper(subj) || tiles[j].ClosedAt.IsZero() {
+				return false
+			}
+			cur = subj
+		}
+		return false
+	}
 	asks := make(map[string][]foldedAsk) // subject id -> the asks folded onto it
 	drop := make(map[string]bool)
 	for i := range tiles {
@@ -2382,13 +2466,16 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		if !ok {
 			continue
 		}
-		// A CLOSED wrapper is a finished conversation, not a live ask. Leaving it
-		// in the DONE band is right; folding it onto a subject would mark that
-		// subject owed on the strength of a visit that already ended.
+		j, has := idx[subj]
+		// A CLOSED wrapper is a finished conversation, not a live ask: nothing of
+		// it folds onto the subject, whose row already stands for it.
 		if !tiles[i].ClosedAt.IsZero() {
+			if has && !closedLoop(a.ID) {
+				drop[a.ID] = true
+			}
 			continue
 		}
-		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
+		if has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
 			asks[subj] = append(asks[subj], foldedAsk{ask: ask, kind: kind, owedSince: owedSince(tiles[i])})
 			drop[a.ID] = true
 		} else if ask != "" {
