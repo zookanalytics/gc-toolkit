@@ -7,7 +7,10 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-- agents: 17 · formulas: 26
+An agent file is named for the agent, or for its binding-qualified name
+(`<binding>.<name>`) where agents from different packs share one name.
+
+- agents: 18 · formulas: 26
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -38,7 +41,8 @@ covers that dimension.
 | [`converse-opus`](agents/converse-opus.md) | 37,527 | 9,381 |
 | [`deacon`](agents/deacon.md) | 16,313 | 4,078 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
-| [`dog`](agents/dog.md) | 2,359 | 589 |
+| [`bd.dog`](agents/bd.dog.md) | 2,359 | 589 |
+| [`gc-toolkit.dog`](agents/gc-toolkit.dog.md) | 3,295 | 823 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,472 | 6,118 |
 | [`mechanik`](agents/mechanik.md) | 35,781 | 8,945 |
@@ -46,7 +50,7 @@ covers that dimension.
 | [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
 | [`proactive`](agents/proactive.md) | 23,387 | 5,846 |
 | [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
-| [`witness`](agents/witness.md) | 18,694 | 4,673 |
+| [`witness`](agents/witness.md) | 19,204 | 4,801 |
 
 ## Formula recipes
 

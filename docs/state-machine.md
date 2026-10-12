@@ -878,6 +878,30 @@ mechanik/converse close paths
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
 twins), and any patrol judging a closed bead.
 
+A disposition ends the bead's branch, the way a merge ends a landed one
+through the repository's delete-on-merge setting. Once the close reads back,
+`bead-rehome.sh` hands the branch the bead names in `metadata.branch` to
+`assets/scripts/branch-end.sh`, which deletes it from the git remote. The
+branch stays while a live owner names it. A live owner is a bead in the rig's
+store whose status is outside the `done` category and whose `metadata.branch`
+or `metadata.target` is the branch: another anchor, work not yet handed off, a
+convoy or a member landing on its integration branch, or a successor that
+resumed the branch. The retired bead's own review scaffolding, the beads whose
+`anchor_bead` names it, is not an owner. `scaffolding-sweep.sh` retires that
+scaffolding, and `review-sweep.sh` closes a review only once the branch is
+gone, so counting it would keep nearly every retired branch. A ledger that does
+not read keeps the branch, and the default branch, `main` and `claude/*` are
+never ended. Before the delete the tip is pinned. A pull request whose
+`refs/pull/<n>/head` on origin equals the tip already pins it, because GitHub
+keeps that ref after the branch is deleted. Otherwise an annotated
+`archive/<branch>@<short-sha>` tag is pushed at the tip and read back on
+origin. The delete's lease names the checked tip, so origin refuses it if the
+branch moved, and a moved branch is left alone. The bead's notes record what
+became of its branch: ended and what pins its tip, kept and which owner names
+it, or still on the remote and the `branch-end.sh` command that ends it. The
+close never depends on any of it: a branch that cannot be ended leaves the
+disposition standing.
+
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is
 routed through this same disposition close as superseded, in one
