@@ -127,7 +127,7 @@ done
 # the hint. step-close.sh closes only; it does not write gc.output_json.
 LANE_BEAD="<the bead_id from your gc hook --claim --json>"
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_one_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-one --bead "$LANE_BEAD" --outcome pass
+"$SC" --step mol-review-quorum-signoff.review-lane-one --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -192,7 +192,7 @@ done
 # the hint. step-close.sh closes only; it does not write gc.output_json.
 LANE_BEAD="<the bead_id from your gc hook --claim --json>"
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_two_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-two --bead "$LANE_BEAD" --outcome pass
+"$SC" --step mol-review-quorum-signoff.review-lane-two --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -307,7 +307,7 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
 done
 : "${SC:?step-close.sh not found in the pack}"
 for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
-  "$SC" --step "mol-review-quorum-signoff.$STEP" --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
 done
 # >>> quorum-review-workspace-remove
 [ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"

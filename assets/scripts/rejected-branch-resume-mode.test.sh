@@ -11,15 +11,22 @@
 #     the bead carries no prepare_mode at all;
 #   - a conflicting merge is left mid-merge, for the worker to resolve into a
 #     merge commit;
-#   - before the merge moves HEAD, it stamps bring_current_from with the PR
-#     head, which is origin's copy of the branch, or HEAD when origin has none;
+#   - before the merge moves HEAD, it records the round on the bead.
+#     bring_current_from is the PR head, which is origin's copy of the branch,
+#     or HEAD when origin has none. bring_current_scope is merge-only for a
+#     "stale base at head" or "Conflicts with" rejection, and with-work for any
+#     other. The last round's conflict_audit and conflict_question are cleared;
+#   - it merges only once bring_current_from reads back from the bead, and when
+#     it does not, the block exits 1 having merged nothing;
 #   - it unsets rejection_reason;
 #   - with no rejection_reason it does nothing.
 #
 # It EXECUTES the block extracted verbatim from the formula against a real git
-# repository with a real bare origin. A gc stub serves the bead, a wrapper runs
-# the real git, and both record each call in one log, so a case can read which
-# commands ran and in what order. The block's base is rendered as an
+# repository with a real bare origin. A gc stub keeps the bead in a JSON store
+# that its reads serve and its writes change, and a wrapper runs the real git.
+# Both record each call in one log, so a case can read which commands ran, and
+# the wrapper copies the store when a merge starts, so a case can read what the
+# bead carried before the merge moved HEAD. The block's base is rendered as an
 # integration branch, which is not main, so a block that merged a fixed main
 # would merge nothing here. No live city, Dolt, network, or PRs.
 set -uo pipefail
@@ -71,17 +78,40 @@ eq "$VARS" "" "every formula var in the block is rendered"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block is valid bash" "bash -n failed"
 
 # --- Stubs. ---------------------------------------------------------------------
+# The gc stub keeps the beads in $STORE. `bd show <id>` serves that bead, and
+# `bd update <id>` applies each --set-metadata and --unset-metadata to it, so a
+# read-back sees what the block wrote. With DROP_WRITES set, an update exits 0
+# and changes nothing, which is how a write that never landed looks to the
+# block. The git wrapper copies the store to $AT_MERGE when a merge starts.
 BIN="$TMP/bin"; mkdir -p "$BIN"
-export REAL_GIT CALLS="$TMP/calls.log"
+export REAL_GIT CALLS="$TMP/calls.log" STORE="$TMP/store.json" AT_MERGE="$TMP/store-at-merge.json"
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 printf 'git %s\n' "$*" >> "$CALLS"
+if [ "${1:-}" = "merge" ]; then cp "$STORE" "$AT_MERGE"; fi
 exec "$REAL_GIT" "$@"
 SH
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 printf 'gc %s\n' "$*" >> "$CALLS"
-if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then printf '%s' "${BEAD_JSON:-}"; fi
+[ "${1:-}" = "bd" ] || exit 0
+verb="${2:-}"; id="${3:-}"
+case "$verb" in
+  show) jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE" ;;
+  update)
+    [ -z "${DROP_WRITES:-}" ] || exit 0
+    shift 3
+    while [ $# -ge 2 ]; do
+      case "$1" in
+        --set-metadata)   k="${2%%=*}"; v="${2#*=}"; f='.metadata[$k] = $v' ;;
+        --unset-metadata) k="$2"; v=""; f='.metadata |= del(.[$k])' ;;
+        *) shift; continue ;;
+      esac
+      jq -c --arg id "$id" --arg k "$k" --arg v "$v" "map(if .id == \$id then $f else . end)" "$STORE" > "$STORE.new" \
+        && mv "$STORE.new" "$STORE"
+      shift 2
+    done ;;
+esac
 exit 0
 SH
 chmod +x "$BIN/git" "$BIN/gc"
@@ -123,24 +153,30 @@ clone() {
   cp -R "$O" "$CO"
   "$REAL_GIT" clone -q "$CO" "$C" && g "$C" checkout -q -B "$1" "origin/$1"
 }
-# run_block <bead-json> — the block run in $C as a polecat runs it, on a fresh
-# call log. Sets RC.
+# run_block <bead-json> — the block run in $C as a polecat runs it, against a
+# store holding that bead, on a fresh call log. Sets RC.
 run_block() {
-  : > "$CALLS"
-  ( cd "$C" && PATH="$BIN:$PATH" BEAD_JSON="$1" WORK_BEAD_ID=tk-w bash "$TMP/block.sh" ) > "$TMP/out" 2>&1
+  : > "$CALLS"; rm -f "$AT_MERGE"
+  printf '%s' "$1" > "$STORE"
+  ( cd "$C" && PATH="$BIN:$PATH" WORK_BEAD_ID=tk-w bash "$TMP/block.sh" ) > "$TMP/out" 2>&1
   RC=$?
 }
 bead() { # <branch> [<metadata json>]
   jq -nc --arg b "$1" --argjson m "${2:-null}" '[{id: "tk-w", metadata: ({branch: $b} + ($m // {}))}]'
 }
+# meta <key> — the bead's metadata value in the store, or <absent>. at_merge
+# <key> reads it from the copy the git wrapper took when the merge started.
+meta() { jq -r --arg k "$1" '.[0].metadata // {} | if has($k) then .[$k] else "<absent>" end' "${2:-$STORE}"; }
+at_merge() { if [ -f "$AT_MERGE" ]; then meta "$1" "$AT_MERGE"; else echo "<no merge ran>"; fi; }
 parents() { g "$C" rev-list --parents -n 1 HEAD | cut -d' ' -f2-; }
 called() { grep -qxF -- "$1" "$CALLS"; }
-line_of() { grep -nxF -- "$1" "$CALLS" | head -1 | cut -d: -f1; }
 rewrites() { grep -cE '^git (rebase|push|reset|commit|cherry-pick|am)( |$)' "$CALLS"; }
 
 echo "# a rejected branch is brought current by merging the base in"
 clone polecat/w1
-run_block "$(bead polecat/w1 '{"rejection_reason":"stale base: the PR conflicts with its base","prepare_mode":"merge"}')"
+STALE="stale base at head $W1: PR#1 conflicts with '$BASE'."
+run_block "$(bead polecat/w1 "$(jq -nc --arg r "$STALE" '{rejection_reason: $r, prepare_mode: "merge",
+  conflict_audit: "entries from an earlier round", conflict_question: "a question from an earlier round"}')")"
 eq "$RC" "0" "(1) the resume exits 0"
 eq "$(parents)" "$W1 $BASE_TIP" "(1) HEAD is a merge commit of the PR head and origin/$BASE, in that order"
 called "git merge --no-edit origin/$BASE" \
@@ -148,16 +184,12 @@ called "git merge --no-edit origin/$BASE" \
   || bad "(1) the base is merged in by git merge --no-edit origin/$BASE" "$(grep '^git ' "$CALLS" | tr '\n' ';')"
 eq "$(rewrites)" "0" "(1) nothing rebases, resets, commits, cherry-picks or pushes"
 eq "$(g "$CO" rev-parse refs/heads/polecat/w1)" "$W1" "(1) origin's branch is untouched: the resume pushes nothing"
-STAMP="gc bd update tk-w --set-metadata bring_current_from=$W1"
-MERGE="git merge --no-edit origin/$BASE"
-called "$STAMP" && ok "(1) bring_current_from is stamped with the PR head" \
-  || bad "(1) bring_current_from is stamped with the PR head" "$(grep '^gc ' "$CALLS" | tr '\n' ';')"
-[ -n "$(line_of "$STAMP")" ] && [ -n "$(line_of "$MERGE")" ] && [ "$(line_of "$STAMP")" -lt "$(line_of "$MERGE")" ] \
-  && ok "(1) the stamp is written before the merge runs" \
-  || bad "(1) the stamp is written before the merge runs" "stamp line '$(line_of "$STAMP")', merge line '$(line_of "$MERGE")'"
-called "gc bd update tk-w --unset-metadata rejection_reason" \
-  && ok "(1) rejection_reason is unset" \
-  || bad "(1) rejection_reason is unset" "$(grep '^gc ' "$CALLS" | tr '\n' ';')"
+eq "$(at_merge bring_current_from)" "$W1" "(1) before the merge runs, bring_current_from is the PR head"
+eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the stale-base rejection's scope is merge-only"
+eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" \
+  "(1) before the merge runs, the last round's audit and question are cleared"
+eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 merge-only" "(1) the round stays on the bead for the hand-off to read"
+eq "$(meta rejection_reason)" "<absent>" "(1) rejection_reason is unset"
 
 echo "# the push that follows is a plain fast-forward"
 g "$C" push -q origin HEAD:polecat/w1 >/dev/null 2>&1 \
@@ -176,7 +208,8 @@ done
 
 echo "# a conflicting merge is left mid-merge for the worker"
 clone polecat/w2
-run_block "$(bead polecat/w2 '{"rejection_reason":"stale base: the PR conflicts with its base","prepare_mode":"merge"}')"
+CONFLICTS="Conflicts with $BASE at $BASE_TIP; resume in prepare_mode=merge"
+run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, prepare_mode: "merge"}')")"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(4) the clone is mid-merge, merging origin/$BASE"
 eq "$(g "$C" diff --name-only --diff-filter=U)" "shared.txt" "(4) the conflict is left for the worker to resolve"
 eq "$(g "$C" rev-parse HEAD)" "$W2" "(4) HEAD is still the PR head"
@@ -190,9 +223,7 @@ clone polecat/w1
 commit_in "$C" local.txt "local" "a commit origin has not seen"
 AHEAD="$(g "$C" rev-parse HEAD)"
 run_block "$(bead polecat/w1 '{"rejection_reason":"tests failed"}')"
-called "gc bd update tk-w --set-metadata bring_current_from=$W1" \
-  && ok "(5) bring_current_from is the PR head origin holds, not the local commit past it" \
-  || bad "(5) bring_current_from is the PR head origin holds, not the local commit past it" "$(grep '^gc bd update' "$CALLS" | tr '\n' ';')"
+eq "$(at_merge bring_current_from)" "$W1" "(5) bring_current_from is the PR head origin holds, not the local commit past it"
 eq "$(parents)" "$AHEAD $BASE_TIP" "(5) the base is merged into the local head"
 
 echo "# a branch origin does not have is stamped with HEAD from before the merge"
@@ -201,9 +232,7 @@ g "$C" checkout -q -b polecat/w3
 commit_in "$C" local.txt "local" "a commit origin never saw"
 LOCAL="$(g "$C" rev-parse HEAD)"
 run_block "$(bead polecat/w3 '{"rejection_reason":"tests failed"}')"
-called "gc bd update tk-w --set-metadata bring_current_from=$LOCAL" \
-  && ok "(6) bring_current_from is the head the resume started from, not its merge commit" \
-  || bad "(6) bring_current_from is the head the resume started from, not its merge commit" "$(grep '^gc bd update' "$CALLS" | tr '\n' ';')"
+eq "$(at_merge bring_current_from)" "$LOCAL" "(6) bring_current_from is the head the resume started from, not its merge commit"
 eq "$(parents)" "$LOCAL $BASE_TIP" "(6) the base is merged in"
 
 echo "# without a rejection the block does nothing"
@@ -216,6 +245,24 @@ for m in '' '{"rejection_reason":""}'; do
   eq "$(grep -c '^git ' "$CALLS")" "0" "(7) $label: git is not run"
   eq "$(grep -c '^gc bd update' "$CALLS")" "0" "(7) $label: nothing is written to the bead"
 done
+
+echo "# the scope is merge-only for a stale-base or conflict rejection, and with-work for any other"
+scope_case() { # <label> <rejection_reason> <scope>
+  clone polecat/w1
+  run_block "$(bead polecat/w1 "$(jq -nc --arg r "$2" '{rejection_reason: $r}')")"
+  eq "$(at_merge bring_current_scope)" "$3" "(8) $1 is stamped $3 before the merge runs"
+}
+scope_case "a stale-base rejection" "$STALE" merge-only
+scope_case "a conflict rejection" "$CONFLICTS" merge-only
+scope_case "a failed-tests rejection" "tests failed" with-work
+
+echo "# a stamp that does not read back stops the block before it merges"
+clone polecat/w1
+DROP_WRITES=1 run_block "$(bead polecat/w1 '{"rejection_reason":"tests failed"}')"
+eq "$RC" "1" "(9) the block exits 1"
+eq "$(grep -c '^git merge' "$CALLS")" "0" "(9) git merge is not run"
+eq "$(g "$C" rev-parse HEAD)" "$W1" "(9) HEAD stays at the PR head"
+eq "$(grep -c -- '--unset-metadata rejection_reason' "$CALLS")" "0" "(9) rejection_reason is not cleared, so a re-run resumes the same rejection"
 
 echo
 echo "rejected-branch-resume-mode: $PASS passed, $FAIL failed"

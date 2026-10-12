@@ -59,11 +59,16 @@
 # told a later bead answered it; and the answers held back whenever a pass
 # cannot finish the batch's pickup reactions, whether the cap or a failed write
 # left them owing, or a comment in the thread sits above the mark with no batch
-# covering it yet.
+# covering it yet. A thread left open, by a human writing after our answer or by
+# an identity that cannot resolve it, keeps its batch's record until it is
+# resolved. One the identity cannot resolve, answered for a batch or a ruled
+# machine finding, stays owed: each pass tries the resolve again and files the
+# situation as one finding for the repository.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
-# timeout; run directly, the file runs every part in order.
+# timeout. Run directly, the file runs each part in order, each in a process of
+# its own (test-harness.sh), so no part reads the fixtures an earlier part left.
 # run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal pacing
 set -uo pipefail
 
@@ -158,6 +163,19 @@ printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispa
 printf '#!/usr/bin/env bash\necho "VALIDATE-METHOD${2:+ note: $2}"\n' > "$SD/validate-dispatch-body.sh"
 chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
+# patrol-finding.sh, one durable bead per situation key: the write-back files a
+# review thread it cannot resolve through it. Each call is logged one argument
+# per line, so a test can read the key back exactly.
+cat > "$SD/patrol-finding.sh" <<'PF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" "--" >> "${STUB_PF_LOG:?}"
+PF
+chmod +x "$SD/patrol-finding.sh"
+export STUB_PF_LOG="$TMP/pf.log"; : > "$STUB_PF_LOG"
+# The key the write-back files an unresolvable review thread under, for the
+# stubbed origin (zook/gc-toolkit), and how many calls named it.
+PF_UNRES_KEY="pr-thread-unresolvable.zook.gc-toolkit"
+pf_unres_calls() { grep -cxF "$PF_UNRES_KEY" "$STUB_PF_LOG"; }
 # bead-rehome.sh, the sanctioned terminal close pr-facts consummates a
 # pre-recorded disposition through. The contract that matters here: on success
 # it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
@@ -3441,6 +3459,37 @@ has "$out" "has a reply after ours; left unresolved" "the live conversation is r
 eq "$(tresolved 44 T-44)" "false" "…and the thread stays open"
 hasnt "$(gh_since "$mark")" "REPLY" "no second reply is posted into it"
 
+echo "# a live thread keeps its batch's record until the person's reply is answered and the thread resolved"
+# The batch that answered the thread is not the newest, so only the thread
+# being open keeps its record. The person's reply routes as a batch of its own,
+# and once that batch's bead lands, the thread is answered and resolved.
+store "[$(anchor W5L 214 "$(wb_meta rework:K5Lb 200)$(wb_batch 'rework:K5L|0|100;rework:K5Lb|100|200')"), $(child K5L closed), $(child K5Lb open), $(child K5Lc closed)]"
+printf '%s' "$(prview 214 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_214.json"
+threads 214 "$(jq -cn '{reviews: [], threads: [
+  {id: "T-214", isResolved: false, viewerCanResolve: true, comments: {nodes: [
+    {id: "NC-214", databaseId: 100, author: {login: "johnzook"}, body: "please fix",
+     reactionGroups: [{content: "THUMBS_UP", viewerHasReacted: true}]},
+    {id: "NC-214-ours", databaseId: 0, author: {login: "gc-city-bot"}, reactionGroups: [],
+     body: "✅ Resolved in sha-214 on this PR (K5L).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->"},
+    {id: "NC-214-late", databaseId: 300, author: {login: "johnzook"}, body: "not quite", reactionGroups: []}]}},
+  {id: "T-214b", isResolved: false, viewerCanResolve: true, comments: {nodes: [
+    {id: "NC-214b", databaseId: 200, author: {login: "johnzook"}, body: "and this", reactionGroups: []}]}}]}')"
+: > "$STUB_PF_LOG"
+out=$(run)
+has "$out" "W5L — PR#214 thread T-214 has a reply after ours; left unresolved" "the live thread is left open"
+eq "$(meta W5L pr_comment_batch)" "rework:K5L|0|100;rework:K5Lb|100|200" \
+  "…and the batch that answered it keeps its record while it is open, though a later batch followed it"
+eq "$(pf_unres_calls)" "0" "…and nothing is filed: the open thread is a person's, not a missing right"
+bmut W5L '.metadata += {"pr_comment_disposition":"rework:K5Lc","pr_comment_watermark":"300"}'
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+has "$(treply 214 T-214)" "Resolved on this PR (K5Lc)." "once the person's reply is routed and its bead lands, the thread is answered naming that bead"
+eq "$(tresolved 214 T-214)" "true" "…and resolved behind the answer"
+eq "$(gh_since "$mark" | grep -c '^REPLY T-214$')" "1" "…in one reply"
+out=$(run)
+eq "$(meta W5L pr_comment_batch)" "rework:K5Lb|100|200;rework:K5Lc|200|300" \
+  "the record whose thread is now resolved retires, and the open batch's stays"
+
 # A thread longer than one GraphQL page. The stub cuts its reads at 100 the way
 # the API does, so everything past that is visible only to a caller that pages.
 long_thread() { # <num> <trailing comment objects, jq array>
@@ -3791,6 +3840,27 @@ has "$(tbodies "$TR")" "Fixed on this PR (RU1)." "the closed finding is answered
 eq "$(printf '%s' "$TR" | jq -r '.isResolved')" "false" "…and the thread is left open over the unmarked post"
 has "$out" "has a reply after finding RF1; answered, left unresolved" "…which the pass says"
 
+echo "# a finding's thread the identity cannot resolve keeps the finding owed its answer"
+# NF1 closed after it was posted with its outcome in place, so all its thread
+# still owes is the resolve.
+store "[$(anchor MN 217), $(mfind NF1 MN must-fix closed 'assets/scripts/x.sh: parse_name' codex ',"finding.pr_comment":"700"')]"
+printf '%s' "$(prview 217 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_217.json"
+threads 217 "$(jq -cn '{reviews: [], issue_comments: [], threads: [{id: "FT-217", isResolved: false, viewerCanResolve: false,
+  comments: {nodes: [{id: "FC-217", databaseId: 700, author: {login: "gc-city-bot"}, reactionGroups: [],
+    body: "**Finding from the codex review, ruled must-fix** (NF1)\n**Outcome:** Addressed in sha-217 on this PR.\n\n<!-- gc-finding:NF1 -->\n<!-- gc-finding:NF1:answered -->\n<!-- gc:city -->"}]}}]}')"
+: > "$STUB_PF_LOG"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 217 FT-217)" "false" "the thread is left open"
+hasnt "$(gh_since "$mark")" "REPLY" "…with nothing posted into it, its answer being in place"
+eq "$(meta NF1 finding.pr_answered)" "<absent>" "…and the finding stays owed its answer"
+has "$out" "MN — PR#217 thread FT-217 is not resolvable by this identity" "…which the pass reports"
+eq "$(pf_unres_calls)" "1" "…and files as a finding"
+jq -c '.threads[0].viewerCanResolve = true' "$GH_DIR/threads_217.json" > "$TMP/t217.json" && mv "$TMP/t217.json" "$GH_DIR/threads_217.json"
+out=$(run)
+eq "$(tresolved 217 FT-217)" "true" "once the identity can resolve it, the next pass does"
+eq "$(meta NF1 finding.pr_answered)" "1" "…and records the finding answered"
+
 echo "# a deferred machine finding's thread is answered and left open for the operator"
 store "[$(anchor MD 345 "$UTCUT"), $(mfind DF7 MD deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu7","finding.reply":"Deferred — tracked as follow-up tk-fu7: low risk. It will be picked up after this merges."')]"
 printf '%s' "$(prview 345 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_345.json"
@@ -4042,14 +4112,34 @@ threads 74 '{"reviews":[{"id":"RV-74","databaseId":55,"state":"CHANGES_REQUESTED
 out=$(run)
 eq "$(reacted 74 RV-74)" "true" "a veto's review body earns the same acknowledgement a COMMENTED one does"
 
-echo "# a thread the identity cannot resolve is left alone"
-store "[$(anchor W9 48 "$(wb_meta rework:K9)"), $(child K9 closed)]"
-printf '%s' "$(prview 48 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_48.json"
-threads 48 "$(printf '%s' "$(one_thread 48)" | jq -c '.threads[0].viewerCanResolve = false')"
+echo "# a thread the identity cannot resolve stays owed: answered, retried every pass, and filed"
+# Its batch is not the newest, so only the thread being open keeps its record.
+# The right is the identity's rather than one PR's, so the finding is keyed on
+# the repository and names no anchor.
+store "[$(anchor W9 215 "$(wb_meta rework:K9b 200)$(wb_batch 'rework:K9|0|100;rework:K9b|100|200')"), $(child K9 closed), $(child K9b open)]"
+printf '%s' "$(prview 215 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_215.json"
+threads 215 "$(printf '%s' "$(one_thread 215)" | jq -c '.threads[0].viewerCanResolve = false
+  | .threads += [{id: "T-215b", isResolved: false, viewerCanResolve: true, comments: {nodes: [
+      {id: "NC-215b", databaseId: 200, author: {login: "johnzook"}, body: "and this", reactionGroups: []}]}}]')"
+: > "$STUB_PF_LOG"
 out=$(run)
-eq "$(tresolved 48 T-48)" "false" "an unresolvable thread is not resolved"
-has "$(treply 48 T-48)" "✅ Resolved on this PR" "…but the reply still lands, since the operator still wants it"
-has "$out" "not resolvable by this identity" "the missing right is reported"
+eq "$(tresolved 215 T-215)" "false" "an unresolvable thread is not resolved"
+has "$(treply 215 T-215)" "✅ Resolved on this PR" "…but the reply still lands, since the operator still wants it"
+has "$out" "W9 — PR#215 thread T-215 is not resolvable by this identity" "the missing right is reported, naming the thread"
+eq "$(pf_unres_calls)" "1" "…and filed as a finding"
+grep -qxF -- "--about" "$STUB_PF_LOG" && bad "the finding is tied to an anchor" || ok "…tied to no anchor, so it holds no merge"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REPLY" "a later pass does not answer the thread twice"
+has "$out" "thread T-215 is not resolvable by this identity" "…it tries the resolve again"
+eq "$(pf_unres_calls)" "2" "…and files the situation once for the pass"
+eq "$(meta W9 pr_comment_batch)" "rework:K9|0|100;rework:K9b|100|200" \
+  "…and the answered batch keeps its record while the thread is open, though a later batch followed it"
+jq -c '.threads = [ .threads[] | if .id == "T-215" then .isResolved = true else . end ]' \
+  "$GH_DIR/threads_215.json" > "$TMP/t215.json" && mv "$TMP/t215.json" "$GH_DIR/threads_215.json"
+out=$(run)
+eq "$(meta W9 pr_comment_batch)" "rework:K9b|100|200" "once a person resolves the thread, its record retires"
+eq "$(pf_unres_calls)" "2" "…and nothing more is filed"
 
 echo "# an unreadable thread read writes nothing"
 store "[$(anchor WA 49 "$(wb_meta rework:KA)"), $(child KA closed)]"
