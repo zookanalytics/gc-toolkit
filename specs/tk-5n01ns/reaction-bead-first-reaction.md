@@ -132,11 +132,13 @@ close of R persists. In this model that window is a self-healing no-op, not a
 deadlock.
 
 The last write of each disposition stamps `gc.reacted_by=<R-id>` on S — after
-the edge or the arm, so it stays completion-marker-last. On re-claim (the worker
-died in the window, R's lease lapsed, R is re-offered), the worker reads S: if
-`gc.reacted_by` names this R, the write-back already landed, so it closes R and
-touches S no further. S is never re-dispatched, and never yanked from a
-downstream worker that has since claimed a routed S.
+the edge or the arm, so it stays completion-marker-last. An edge that does not
+land, or a `--then-route` arm that cannot be recorded, fails the disposition
+before that stamp and leaves R open, so a re-run of the call resumes it. On
+re-claim (the worker died in the window, R's lease lapsed, R is re-offered),
+the worker reads S: if `gc.reacted_by` names this R, the write-back already
+landed, so it closes R and touches S no further. S is never re-dispatched, and
+never yanked from a downstream worker that has since claimed a routed S.
 
 `gc.reacted_by` is not the old machinery reborn. Correctness does not rest on
 it: the write-backs are idempotent (routing S to the same pool is a no-op, an

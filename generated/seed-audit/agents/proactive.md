@@ -210,9 +210,11 @@ fi
    ```
 
    The script exits non-zero when the route never stamped, the human gate never
-   filed, the wait never became a `blocks` edge, or the closer never slung. It
-   leaves `R` open then, and a subject in that state is neither routed nor held,
-   so fix what its message names and re-run the same call before you drain.
+   filed, the wait never became a `blocks` edge, the `--then-route` dispatch
+   never armed, or the closer never slung. It leaves `R` open then. A subject in
+   that state is not routed, not held, or held with nothing to route it once the
+   wait lifts, so fix what its message names and re-run the same call before you
+   drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash
