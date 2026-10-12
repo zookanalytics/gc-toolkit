@@ -42,7 +42,8 @@ These points are decided.
 
 - **A park holds everything under the bead that has not started, armed work
   included.** Deferred dispatch does not sling armed work past it, and a hand
-  sling does not build it.
+  sling does not build it. `park --waiting-on` refuses a demand gate, the one
+  blocker deferred dispatch lets armed work past (next point).
 - **Waiting on the operator's decision is not a hold.** The operator ruled this
   on 2026-10-11 at 00:26Z. A demand gate (`gc.demand_for`) on an ancestor is
   therefore deferred dispatch's one exception: it does not hold an armed bead.
@@ -210,6 +211,14 @@ as `--waiting-on` does on `takeaway`, and reads it back. Naming another park's
 gate parks one more bead for the same reason. Naming a task parks the bead until
 the task closes. A park takes one form or the other, never both.
 
+Naming a demand gate is refused. Deferred dispatch does not count a demand gate
+on an ancestor as a hold (section 2), so a park behind one would not hold the
+armed work under the bead. The verb tells a demand gate by `gc.demand_for`, as
+the held predicate does, and its refusal names the text form instead. That
+form's gate carries no `gc.demand_for`, so it holds armed work too, and its text
+can name the decision the park waits for. Unit 12 drops the refusal when it
+retires the exception.
+
 **Unparking closes the gate.** Closing a gate releases everything that waits on
 it, as closing any blocker does (`gc bd close <gate>`). To release one bead from a
 gate that holds several, remove that bead's edge
@@ -301,7 +310,16 @@ operator ruled on 2026-10-11 that a hold waiting only on their decision does not
 hold armed work. So a demand gate on an ancestor does not hold an armed bead. A
 demand gate on the bead itself still does, because the decision is about that
 bead. This is deferred dispatch's one rule about a blocker's kind, and it names
-no kind of epic.
+no kind of epic. The rule reads what a blocker is, not why its edge was written,
+so `park --waiting-on` refuses a demand gate (section 1), and no park rests on
+the exception.
+
+*Rejected:* narrowing the exception to the bead a demand gate's `gc.demand_for`
+names, so that a park behind another bead's demand gate would hold. A park
+behind the bead's own demand gate would still read as its decision wait, so
+`park` would need the refusal anyway. And a bead that `demand --also-blocks`
+makes wait on the same decision would hold the armed work under it, against
+that ruling.
 
 The exception retires with tk-n18e15. That change stops converse holds filing a
 blocking demand, so no demand gate blocks an epic, and deferred dispatch can read
@@ -731,7 +749,7 @@ authoritative statement of the model, and the units after it extend it.
 
 | # | Unit | Section | Needs | Done when |
 |---|---|---|---|---|
-| 1 | **The park move.** `gc-helm.sh park` in both forms: a gate titled with the text, with `--body` as its description, or with `--waiting-on` an edge onto an existing bead and no gate; it refuses a bead in flight; `docs/steering.md`; I1's shape law restated for any bead with children, and tk-u4z8me rewritten to it; an authority-map row for the moves; each store's 2026-10-10 park gate retitled to state its hold and what releases it. | 1 | — | `park` passes fixture tests on a scratch store. It files a gate titled with the text and described by `--body`, gives the bead an edge onto it and reads the edge back. With `--waiting-on`, it gives the bead an edge onto that bead and files no gate. It refuses text over the headline cap, both forms at once, and a bead in flight. No live park gate says never to close it. |
+| 1 | **The park move.** `gc-helm.sh park` in both forms: a gate titled with the text, with `--body` as its description, or with `--waiting-on` an edge onto an existing bead and no gate; it refuses a bead in flight, and a demand gate as the bead to wait on; `docs/steering.md`; I1's shape law restated for any bead with children, and tk-u4z8me rewritten to it; an authority-map row for the moves; each store's 2026-10-10 park gate retitled to state its hold and what releases it. | 1 | — | `park` passes fixture tests on a scratch store. It files a gate titled with the text and described by `--body`, gives the bead an edge onto it and reads the edge back. With `--waiting-on`, it gives the bead an edge onto that bead and files no gate. It refuses text over the headline cap, both forms at once, a bead in flight, and a demand gate named by `--waiting-on`, and that refusal names the text form. No live park gate says never to close it. |
 | 2 | **Armed work stays held.** `hold-lib.sh` with the held predicate; deferred dispatch slings an armed bead only when no ancestor has a blocker other than a demand gate; `HELD by <blocker>` in `list` and the pass log; `check-armed-dispatch-owed` applies the same predicate; the fact 4 corrections. This unit is tk-rl8gz4b.1, re-scoped. | 2 | — | An armed child of a parked epic is neither slung nor reported owed, and neither is one two levels down. One whose epic waits on a task waits too. One held only by a demand gate on its epic still dispatches, and the tk-so8clv case stays green. |
 | 3 | **A sling does not start held work.** The load-context guard covers a held bead, including a workflow poured before the hold, and lets a bead in flight through; Accept refuses a held bead. | 2 | 2 | Park, sling, unpark ends with the bead built, held root included. A workflow poured before the park is held at load-context and built after the unpark. A bead in flight under a parked epic is built. |
 | 4 | **A hold does not strand in-flight work.** The refinery patrol's rejection dispatches a pour instead of routing the work bead. | 1 | — | A rejected handoff under a parked epic is rebuilt. One under no hold behaves as today. |
@@ -742,7 +760,7 @@ authoritative statement of the model, and the units after it extend it.
 | 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; the feedback distiller's filing, and the promotion path in `docs/feedback-learning.md` that describes it; `gc-helm.sh unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. A distiller run leaves each bead it files with `placement=pending`, unrouted. The sweep runs again. |
 | 10 | **The placement verb.** `gc-helm.sh place --under`, with unrelate-then-reparent, `--shift`, and a route that carries the item's priority; `--standalone`; the refusal of PR-finishing work. | 5 | 5 | Placing an item with a relates-to edge to its epic makes it a member and routes it. With the order off, an item filed at P3 and placed under a P0 epic is routed at P0, in the same write as its route, and one placed with `--shift +1` is routed at P1 with its shift recorded in that write. Under a parked epic the cascade holds it. Placing a bead that carries `anchor_bead` is refused. |
 | 11 | **The Checkpoint records the next priority.** epics.md and epic-stewardship.md state the section 6 rule. | 6 | 1, 5, PR #977 (tk-isd5sa) | The docs carry it, and a checkpoint sitting's recipe applies the moves before the sitting ends. |
-| 12 | **Retire the demand-gate exception.** Deferred dispatch and the held predicate read `bd ready` alone. | 2 | 2, tk-n18e15 | No open demand gate blocks a bead with children, and the exception's code and tests are gone. |
+| 12 | **Retire the demand-gate exception.** Deferred dispatch and the held predicate read `bd ready` alone, and `park --waiting-on` takes a demand gate. | 1, 2 | 1, 2, tk-n18e15 | No open demand gate blocks a bead with children, and the exception's code and tests are gone. In a fixture, a park behind a demand gate holds an armed member. |
 | 13 | **The existing writers settle.** Deferred dispatch's `sling_bead` and `gc-helm.sh accept` settle before they sling, and `gc-helm.sh takeaway --route` puts the priority in its route's update. | 3 | 5 | With the order off, a member filed at P2 under a P0 epic is first claimable at P0 through each writer. An arm that fires pours at P0, a takeaway route lands at P0 in the same write as the route, and an Accept pours at P0. A settle that fails leaves the bead neither slung nor routed. |
 
 A successor bead under the epic (tk-rl8gz4b.3) waits on this spec, and its
