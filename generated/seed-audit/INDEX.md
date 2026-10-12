@@ -50,7 +50,7 @@ covers that dimension.
 | [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
 | [`proactive`](agents/proactive.md) | 15,347 | 3,836 |
 | [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
-| [`witness`](agents/witness.md) | 18,694 | 4,673 |
+| [`witness`](agents/witness.md) | 19,204 | 4,801 |
 
 ## Formula recipes
 
