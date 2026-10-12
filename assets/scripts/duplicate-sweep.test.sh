@@ -270,7 +270,7 @@ chmod +x "$SD/bead-rehome.sh"
 
 # --- never-dispatched rework twins -------------------------------------------
 # rw <id> <status> <review> <anchor> [extra-metadata-json] — a rework child
-# carrying the work order signoff.sh stamps on every child.
+# carrying the work order rework-child.sh stamps on every child.
 rw() {
   local x="${5:-}"; [ -n "$x" ] || x='{}'
   jq -cn --arg id "$1" --arg st "$2" --arg r "$3" --arg a "$4" --argjson x "$x" \
@@ -579,6 +579,48 @@ out=$(STUB_UPDATE_FAIL="O1" run)
 eq "$(bstatus O1)" "closed" "the disposal itself stands"
 has "$out" "1 duplicate(s) disposed" "…and is counted"
 has "$out" "duplicate_of=L1 did not stick" "…while the missing marker is reported"
+
+echo "# a ruling's never-dispatched twin is disposed like a review's"
+# converse-rework.sh files through the same writer, keyed on the visit the ruling
+# was reached in (source_ruling_bead). A run that died before dispatch beside a
+# retry that filed, dispatched and landed leaves the same twin holding the anchor.
+ruling() { jq -c '.metadata.source_ruling_bead = .metadata.source_review_bead | .metadata |= del(.source_review_bead)'; }
+visit() {
+  jq -cn --arg id "$1" --arg st "${2:-closed}" \
+    '{id:$id, status:$st, assignee:"", title:("Visit " + $id), notes:"", metadata:{task_kind:"visit"}}'
+}
+ruling_scene() { # <visit-status> [landed-child-json]
+  scene "[$(anchor A1),$(visit V1 "$1"),$(orphan O1 V1 A1 | ruling),${2:-$(landed L1 V1 A1 | ruling)},$(convoy CV1)]"
+  edge O1 blocks A1; edge L1 blocks A1; edge CV1 tracks L1
+}
+ruling_scene closed
+out=$(run); rc=$?
+eq "$rc" 0 "a pass with a ruling's twin exits 0"
+eq "$(bstatus O1)" "closed" "a ruling's twin whose sibling landed is closed"
+eq "$(meta O1 gc.superseded_by)" "L1" "…pointed at the sibling that landed"
+eq "$(live_blockers A1)" "" "…releasing the anchor's merge"
+eq "$(meta O1 duplicate_of)" "L1" "…and marked duplicate_of"
+a=$(rehome_args)
+has "$a" "answers the same ruling visit V1 on anchor A1" "the reason names the shared ruling and anchor"
+has "$a" "and ruling visit V1 is closed" "…and that its sitting is over"
+ruling_scene open
+out=$(run)
+eq "$(bstatus O1)" "open" "a twin whose ruling's visit is still open is not disposed"
+has "$out" "its ruling visit V1 is open, so its sitting's sign-off may still adopt and dispatch it" "…saying why"
+ruling_scene closed
+store "$(jq -c 'map(select(.id != "V1"))' "$STUB_STORE")"
+out=$(run)
+eq "$(bstatus O1)" "open" "a visit that does not resolve holds the twin"
+has "$out" "its ruling visit V1 does not resolve" "…saying so"
+ruling_scene closed "$(landed L1 V1 A1)"
+out=$(run)
+eq "$(bstatus O1)" "open" "a landed child keyed on a review with the same id is not the ruling's sibling"
+has "$out" "no other child of ruling visit V1 on anchor A1 has landed" "…so the twin is held"
+ruling_scene closed
+store "$(jq -c '(.[] | select(.id == "O1") | .metadata.source_review_bead) |= "R9"' "$STUB_STORE")"
+out=$(run)
+eq "$(bstatus O1)" "open" "a child naming both source keys is not disposed"
+has "$out" "names both source_review_bead and source_ruling_bead" "…saying why"
 
 echo "# both passes run in one invocation"
 scene "[$(dup D1 T1 open '{"work_outcome":"no-op"}'),$(twin T1 closed),$(anchor A1),$(review R1),$(orphan O1 R1 A1),$(landed L1 R1 A1)]"
