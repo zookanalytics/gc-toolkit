@@ -1747,9 +1747,13 @@ cmd_unplaced() {
             echo "$PROG: unplaced: rig ${up_name:-$up_path} is suspended, so its store was not read; any bead waiting there is not listed" >&2
             continue
         fi
+        # bd's own exit status, not scrub's: a read that prints an array and then
+        # fails has not answered for its store.
+        up_rc=0
         up_raw=$(gc bd list --db "$up_path/.beads" --metadata-field placement=pending \
-            --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null | scrub) || up_raw=""
-        if ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null) || up_rc=$?
+        up_raw=$(printf '%s' "$up_raw" | scrub)
+        if [ "$up_rc" -ne 0 ] || ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
             echo "$PROG: unplaced: the store of rig ${up_name:-$up_path} ($up_path/.beads) did not answer, so its beads are missing from this list" >&2
             up_unread="$up_unread ${up_name:-$up_path}"
             continue

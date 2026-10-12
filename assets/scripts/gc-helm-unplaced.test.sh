@@ -16,8 +16,9 @@
 #   (READ)     the verb reads the marker with the live statuses and writes
 #              nothing
 #   (COLD)     a suspended rig's store is not read, and the skip is named
-#   (PARTIAL)  a store that does not answer is named and fails the run with 4
-#              after the rows that were read
+#   (PARTIAL)  a store that does not answer, or whose read fails after printing
+#              rows, is named and fails the run with 4 after the rows that were
+#              read
 #   (ARGS)     an unknown argument is refused
 # Driven over a stubbed `gc` on PATH: no live city, Dolt or network.
 set -u
@@ -81,7 +82,8 @@ case "${1:-} ${2:-}" in
     for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
     rig=$(basename "$(dirname "$db")")
     case " ${FAKE_DOWN:-} " in *" $rig "*) exit 1 ;; esac
-    if [ -n "${FAKE_EMPTY:-}" ]; then printf '[]\n'; else cat "$FAKE_TMP/$rig.json"; fi ;;
+    if [ -n "${FAKE_EMPTY:-}" ]; then printf '[]\n'; else cat "$FAKE_TMP/$rig.json"; fi
+    case " ${FAKE_FAIL_AFTER:-} " in *" $rig "*) exit 1 ;; esac ;;
   *) : ;;
 esac
 GC
@@ -135,6 +137,10 @@ eq "$RC" "4" "(PARTIAL) a store that does not answer fails the run"
 has "$ERR" "signal-loom" "(PARTIAL) …naming the rig"
 has "$ERR" "this list is partial" "(PARTIAL) …and saying the list is partial"
 eq "$(printf '%s' "$OUT" | jq -r '[.[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10" "(PARTIAL) …after printing the rows it could read"
+FAKE_FAIL_AFTER=beta run --json
+eq "$RC" "4" "(PARTIAL) a read that prints its rows and then fails has not answered"
+has "$ERR" "signal-loom" "(PARTIAL) …so its rig is named"
+hasnot "$OUT" "sl-b1" "(PARTIAL) …and the rows it printed are not listed as the store's answer"
 
 echo "# arguments"
 run --nope

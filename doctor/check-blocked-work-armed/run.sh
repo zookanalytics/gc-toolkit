@@ -44,6 +44,9 @@
 # and its dispatch is the route the sitting gives it when it places the bead.
 # Arming it would start work the operator has not placed. A bead the sitting
 # placed under an epic is work again, marker or not, and owes a dispatch path.
+# `bd blocked` prints no parent, so a marked candidate is judged on the row the
+# marker's own `bd list` prints, which carries one. When that listing cannot be
+# read, the candidate is reported as unverifiable and never flagged.
 #
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
@@ -183,8 +186,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/standing/step/workflow-topology/demand; not a
-    # merge anchor; not waiting for placement; an allowlisted work issue_type),
-    # AND carrying no dispatch path (has_dispatch_path: no route and no arm).
+    # merge anchor; an allowlisted work issue_type), AND carrying no dispatch
+    # path (has_dispatch_path: no route and no arm). A candidate that reads as
+    # waiting for placement on this listing is marked in the fourth column:
+    # `bd blocked` prints no parent, so whether the sitting placed it is settled
+    # below, on a listing that prints one.
     cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
@@ -196,12 +202,12 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($m["gc.kind"] // "") == "")
         | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
-        | select(($b | awaiting_placement) | not)
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),
+            (if ($b | awaiting_placement) then "1" else "0" end),
             (($b.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:70]) ]
         | @tsv' 2>/dev/null) || {
         warnings+=("$label: could not evaluate blocked beads in $rig_path/.beads — this store was NOT checked")
@@ -234,12 +240,38 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         liveness_ok=0           # no alive listing: cannot confirm any coverage
     fi
 
-    while IFS=$'\t' read -r id btype has_exec title; do
+    # A marked candidate waits for the placement sitting unless the sitting
+    # placed it. The parent that would say so is missing from `bd blocked`, so
+    # the marked beads are read again from `bd list`, which prints it, and
+    # awaiting_placement judges that row. Read only when a candidate is marked,
+    # and left unconfirmed ($placement_ok=0) when the listing fails, so a marked
+    # candidate is warned rather than flagged: arming a bead that still waits for
+    # the sitting would start work the operator has not placed.
+    waiting=" "; placement_ok=1
+    if printf '%s\n' "$cand" | awk -F'\t' '$4 == "1" { found = 1 } END { exit !found }'; then
+        marked=$(run_bounded gc bd list --db "$rig_path/.beads" --metadata-field placement=pending \
+            --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null)
+        if printf '%s' "$marked" | jq -e 'type == "array"' >/dev/null 2>&1 \
+            && waiting_ids=$(printf '%s' "$marked" | scrub | jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[]? | select(awaiting_placement) | .id' 2>/dev/null); then
+            while IFS= read -r w; do [ -n "$w" ] && waiting="$waiting$w "; done <<< "$waiting_ids"
+        else
+            placement_ok=0
+        fi
+    fi
+
+    while IFS=$'\t' read -r id btype has_exec held title; do
         [ -n "$id" ] || continue
         case "$worked" in *" $id "*) continue ;; esac   # a live molecule drives it
         if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
             warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but molecule liveness could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live molecule drives it; if not, arm it ($title)")
             continue
+        fi
+        if [ "$held" = "1" ]; then
+            case "$waiting" in *" $id "*) continue ;; esac   # waits for the placement sitting
+            if [ "$placement_ok" != "1" ]; then
+                warnings+=("$label bead $id [$btype]: blocked and marked placement=pending, but whether the placement sitting placed it could not be read in $rig_path/.beads — NOT flagged, because arming a bead that still waits for the sitting would start work the operator has not placed. Check by hand whether it has a parent; if it does, arm it ($title)")
+                continue
+            fi
         fi
         findings+=("$label bead $id [$btype]: blocked with no gc.routed_to and no gc.dispatch_when_ready — when its blocker closes it becomes ready and no pool is offered it. Arm it so it auto-resumes: deferred-dispatch.sh arm $id --target <rig>/<agent> --reason \"waits for <blocker>\" ($title)")
     done <<< "$cand"
