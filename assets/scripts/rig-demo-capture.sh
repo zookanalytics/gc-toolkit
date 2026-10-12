@@ -16,10 +16,10 @@
 # Playwright headlessly): the only path available to a pool session, which
 # carries no browser MCP.
 #
-# It FAILS CLOSED. A missing engine, a script the linter rejects, a capture that
-# errors, or an output file that never appears all exit non-zero, because a
-# capture that quietly produces nothing is the silent non-delivery the rig-demo
-# mol exists to prevent.
+# It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
+# script the linter rejects, a capture that errors, or an output file that never
+# appears all exit non-zero, because a capture that quietly produces nothing is
+# the silent non-delivery the rig-demo mol exists to prevent.
 #
 # Usage:
 #   rig-demo-capture.sh --script <demo.md> --output <file.mp4> \
@@ -116,6 +116,12 @@ mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'"
 # provisioning its deps and ffmpeg on first use; fall back to the published npm
 # package. $SPRINTSHOW_BIN overrides both. assets/scripts/rig-demo-capture.test.sh
 # extracts this block and checks the resolution order; keep the markers.
+#
+# The browser is installed through the engine's own Playwright on every
+# capture, local or published. The engine launches the chromium-headless-shell
+# revision its Playwright pins, so only that Playwright's installer knows which
+# build to fetch and where to keep it. The installer skips a build that is
+# already installed, so a capture on a provisioned host downloads nothing.
 scrub() { tr -d '\000-\037'; }
 if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
   sprintshow() { "$SPRINTSHOW_BIN" "$@"; }
@@ -129,9 +135,11 @@ else
   if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
     [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install ) || { echo "$PROG: 'npm install' failed in the sprintshow rig checkout" >&2; exit 1; }
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg ) || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
+    ( cd "$SS_DIR" && npm run provision:browser ) || { echo "$PROG: could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)" >&2; exit 1; }
     sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
     echo "$PROG: engine = local sprintshow rig ($SS_DIR)" >&2
   else
+    npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell || { echo "$PROG: could not provision the browser (the published engine's 'playwright install chromium-headless-shell' failed)" >&2; exit 1; }
     sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
     echo "$PROG: engine = published @zookanalytics/sprintshow (no local rig checkout)" >&2
   fi

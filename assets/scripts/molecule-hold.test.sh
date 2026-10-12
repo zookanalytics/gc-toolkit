@@ -142,8 +142,7 @@ mkdir -p "$TMP/bin"
 # assertions read.
 # FAKE_CTRL=1 injects a raw control character into every title, reproducing the
 # bd payloads that make an unfiltered `| jq` exit "invalid".
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 S="${FAKE_STORE:?}"
 printf '%s\n' "$*" >> "${GC_LOG:?}"

@@ -1,6 +1,6 @@
 ---
 name: gh origin guard
-description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own, and posts on one we own that carry no city mark — which verbs it covers, how it resolves the target, what it deliberately does not cover. Read it before changing the guard or adding an agent.
+description: The PreToolUse hook that refuses agent-typed gh writes aimed outside a repository we own, and posts on one we own that carry no city mark — which verbs it covers, how it resolves the target, how Claude and Codex agents each reach it, what it deliberately does not cover. Read it before changing the guard or adding an agent.
 ---
 
 # gh origin guard
@@ -11,9 +11,23 @@ comment on someone else's repository spends a stranger's attention. That
 decision belongs to the operator, and the guard is where the boundary is
 enforced rather than requested.
 
-The implementation is a Claude Code `PreToolUse` hook at
-`assets/scripts/gh-origin-guard.sh`, registered for every claude-provider agent
-by the overlays in `pack.toml`.
+The implementation is one `PreToolUse` hook, `assets/scripts/gh-origin-guard.sh`,
+that both providers run. Claude agents reach it through the overlays in
+`pack.toml`, and Codex agents through the Codex home's hooks file
+([Codex](#codex)).
+
+## Scope
+
+**Mandate.** The boundary the guard holds on the `gh` commands an agent types:
+which writes it refuses, how it resolves a write's target and the repositories
+a session owns, the mark it requires on a post, and how it is wired to every
+claude-provider agent.
+
+**Boundaries.** What an agent does with a write the guard refuses is
+[outbound-sends.md](outbound-sends.md). Posts made from inside the pack's
+scripts are held to the mark by `tools/lint-learned.d/pr-post-bypass.sh`, not
+by this hook, and how the city tells its own posts from feedback is
+[state-machine.md](state-machine.md#operator-feedback).
 
 ## What it refuses
 
@@ -34,7 +48,8 @@ keeps working.
 
 A refusal names the repository it stopped, names the repositories the session
 may write to, and points at the prepare-a-command path so the agent learns the
-route instead of only meeting a wall.
+route instead of only meeting a wall. When `gh` picked that repository from the
+working directory's remotes, the refusal also says how it picks.
 
 On a repository the session does own, a post is held to one more rule, below.
 
@@ -115,12 +130,46 @@ The guard resolves the target the way `gh` itself does, in the same order:
    global one.
 3. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
    same command line, or ambient in the environment.
-4. The `origin` remote of the working directory.
+4. The repository `gh` picks from the working directory's remotes, described
+   below. For a Codex call, the working directory is the one its `workdir`
+   argument names ([Codex](#codex)).
 
 The working-directory step is the one that matters most. `gh` with no `--repo`
 writes to whatever repository the working directory belongs to, so an agent
 standing in a clone of someone else's project sends there with no flag to
 inspect. A guard that read only the explicit flag would wave that through.
+
+`gh` does not read the `origin` remote first. It ranks the remotes upstream,
+github, origin, then the rest by name. It takes the first of them that
+`gh repo set-default` marked, which is a remote whose
+`remote.<name>.gh-resolved` git config is set. A value of `base` means that
+remote's repository, and an OWNER/REPO value means that repository on the
+remote's host. With no remote marked, and no terminal to ask in, `gh` takes the
+first remote in that order. A clone whose `origin` is ours and whose `upstream`
+is someone else's therefore writes to the upstream repository unless `origin`
+is marked, and the guard measures that repository, not `origin`.
+
+`gh` skips a remote whose URL names no repository, such as a local path, and
+reads a remote's push URL when its fetch URL names none. Before choosing, it
+narrows the remotes by forge. With `GH_HOST` set, it keeps the remotes on that
+forge alone. Logged in to exactly one forge, it keeps the remotes on that forge
+when there are any. Otherwise it keeps the remotes on every forge it is logged
+in to and on `github.com`. The guard does not read `gh`'s login configuration, so
+it makes the choice twice: among every remote, and among the remotes on the
+forge the call uses, which is `GH_HOST` or else `github.com`. The two agree in
+any checkout whose remotes all live on that forge. When they disagree, the
+repository `gh` writes to depends on configuration the guard does not read, and
+the write is refused. When they agree, `gh` makes the same choice, except when
+`gh` is logged in to exactly one forge and it is not the forge the call uses.
+`gh` then keeps only the remotes on its one forge, so the guard can clear a
+write that `gh` sends to one of them. An SSH host alias counts as a forge of its
+own, because the guard reads a remote's host as written.
+
+The guard reads a remote URL the way `gh` does, but it does not follow every
+form Go's URL parser accepts. A URL carrying a percent escape, a query, or a
+port that is not a number is never skipped, so if it would come first the
+write is refused. A checkout with more than twelve remotes is refused as well,
+because with more than twelve, `gh`'s sort can reorder remotes of equal rank.
 
 An owner/name given without a host is completed with the host `gh` would use:
 `GH_HOST` set inline on the command, exported earlier on the same line, or
@@ -164,7 +213,9 @@ the method and `-iftitle=x` adds a field, just as `-i -X POST` and
 
 `{owner}` and `{repo}` placeholders, and gh's older `:owner` and `:repo`
 spellings, are filled from the repository `GH_REPO` names, or else from the
-working directory's `origin`. gh fills them before it reads the host or the
+repository gh picks from the working directory's remotes. A `--hostname` does
+not change that pick, because only `GH_HOST` narrows the remotes. gh fills the
+placeholders before it reads the host or the
 path, and the guard does the same. Only the owner and the name come from that
 repository. The host stays the one the endpoint names, and a concrete owner or
 name beside a placeholder stays in the target. So
@@ -184,8 +235,10 @@ directory.
 
 City-scope agents such as the deacon and mechanik carry no rig root and
 legitimately work across rigs, so for them the owned set is the origin of every
-rig under `$GC_CITY_PATH/rigs`. The working directory is the last resort, used
-only when neither a rig root nor a city resolves.
+rig under `$GC_CITY_PATH/rigs`. The working directory's `origin` is the last
+resort, used only when neither a rig root nor a city resolves. The owned set is
+always read from `origin`, while the target is the repository `gh` picks, so a
+fork clone whose `upstream` is someone else's does not own that upstream.
 
 Resolving to the working directory earlier would make the guard vacuous exactly
 where it is needed, since a checkout of someone else's repository would then
@@ -199,12 +252,60 @@ the write lands somewhere we own, and "outside" is the safe reading.
 
 The subject of that rule is a write aimed at a repository. A `gh api` write to a
 `repos/OWNER/REPO` endpoint with no concrete owner and name, including one whose
-placeholders have no `GH_REPO` or `origin` to fill them, is such a write and is
-refused; an endpoint that names no repository at all is not, and is left alone
-rather than refused.
+placeholders have no `GH_REPO` or working-directory repository to fill them, is
+such a write and is refused; an endpoint that names no repository at all is
+not, and is left alone rather than refused.
 
 The cost of that choice is small. Every `gh` write in this repo lives inside a
 script, and those scripts run in a rig checkout where the origin resolves.
+
+## Codex
+
+Codex hands a shell call to a `PreToolUse` hook in the shape Claude does: the
+tool is `Bash`, the command is `tool_input.command`, and the payload carries a
+`cwd`. It reads the same deny object back and refuses the call with its reason.
+The guard therefore runs unchanged under both providers. Two things differ: where
+Codex reads its hooks, and where a Codex call runs.
+
+**Where Codex reads hooks.** Codex reads a project's hooks from `.codex/hooks.json`
+at the project root, and for a linked git worktree the project root is the
+repository's main checkout, not the worktree. polecat-codex and converse-codex
+run in worktrees, so a hooks file staged into their working directory is never
+read. Every Codex session also reads the hooks file in the Codex home
+(`$CODEX_HOME`, else `~/.codex`), whatever directory it runs in, so the guard is
+registered there.
+
+`assets/scripts/gh-origin-guard-codex.sh` makes that registration. It copies the
+`PreToolUse` group for `Bash` out of `overlays/gh-origin-guard/.claude/settings.json`
+verbatim, so Codex runs the command every Claude overlay runs. Every
+codex-provider agent runs it as `pre_start`, so a Codex session starts only once
+the guard is registered, and a registration that cannot be made fails the start.
+It keeps everything else in the file, replaces a guard registration in an older
+form, and leaves a current one untouched. A file that is not a hooks document is
+refused rather than overwritten.
+
+Codex runs a hook from the Codex home only once the hook is trusted. A new or
+changed hook raises Codex's "Hooks need review" prompt when a session starts, and
+gc's startup handling answers it with "Trust all and continue", which records the
+trust in the Codex home's `config.toml`. Codex keys that trust to the hook's place
+in the file and its content, which is why the script leaves a current
+registration where it stands.
+
+**Where a Codex call runs.** A Codex shell call names its working directory in a
+`workdir` argument, and the hook payload carries neither that argument nor the
+directory: its `cwd` is the session's. Codex records each call the model makes in
+the session transcript before it runs the hook. The guard finds the call there by
+the payload's `transcript_path` and `tool_use_id`, reads its `workdir`, and
+measures the call in that directory. A relative `workdir` resolves against the
+session's directory, and a call with none runs in the session's directory. A
+payload carrying `turn_id` is Codex's; Claude's carries none and is never looked
+up.
+
+A call made from inside Codex's code-mode tool has no transcript line of its own,
+so its directory is unknown. The same holds for a session with no transcript and
+for a `workdir` that does not exist. A write that would resolve against an unknown
+directory is refused. A write that names its repository with `--repo`, a URL,
+`GH_REPO`, or a `gh api` endpoint path is measured as usual, and reads pass.
 
 ## What it does not cover
 
@@ -218,24 +319,30 @@ The hook inspects the command an agent types into Bash. These are outside it:
   repository in the query body, and an endpoint such as `gists` or `user` names
   no repository to measure. The origin rule leaves both alone; a graphql
   mutation that posts is still held to the mark.
-- **Codex agents.** `dog` and `polecat-codex` never read
-  `.claude/settings.json`, so no `.claude` hook reaches them.
+- **A Codex session gc did not start.** The Codex home's registration is read by
+  every Codex session, but it finds the guard through `$GC_RIG_ROOT` and
+  `$GC_CITY_PATH`, and a session started by hand sets neither, so it runs no
+  guard.
 - **A missing `jq`.** The hook parses its payload with `jq` and stays silent
   without it.
 - **A determined bypass.** `bash -c`, a wrapper script, or a here-doc all reach
-  `gh` without matching. This guards reach by accident, and it is not a sandbox.
+  `gh` without matching, and so does text Codex writes into a shell it already
+  started, which Codex sends to no hook. This guards reach by accident, and it is
+  not a sandbox.
 
 ## Wiring
 
-An agent takes exactly one `overlay_dir`. Agents that already ship a hook get
-the guard registered inside their own overlay's `settings.json`, and the rest
-take `overlays/gh-origin-guard`:
+A Claude agent takes exactly one `overlay_dir`. Agents that already ship a hook
+get the guard registered inside their own overlay's `settings.json`, and the rest
+take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and runs
+`gh-origin-guard-codex.sh` as `pre_start` instead ([Codex](#codex)):
 
-| Overlay | Agents |
+| Registration | Agents |
 |---|---|
 | `overlays/work-context` | polecat |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
 | `overlays/gh-origin-guard` | converse-opus, converse-fable, mechanik, proactive, demo |
+| the Codex home, by `pre_start` | polecat-codex, converse-codex, dog |
 
 Every registration runs the same command, which resolves the script from
 `$GC_RIG_ROOT` and then from `$GC_CITY_PATH/rigs/gc-toolkit`. Both are set by
@@ -247,10 +354,18 @@ writes are allowed.
 ## Tests
 
 `assets/scripts/gh-origin-guard.test.sh` runs the shipped script against local
-repositories with fabricated remotes. It asserts both directions, because a
-guard that refuses everything and a guard that refuses nothing are equally
-broken and equally quiet.
+repositories with fabricated remotes, and Codex payloads against fabricated
+session transcripts. It asserts both directions, because a guard that refuses
+everything and a guard that refuses nothing are equally broken and equally
+quiet.
+
+`assets/scripts/gh-origin-guard-codex.test.sh` runs the shipped registration
+script against scratch Codex homes: what it writes, what it keeps, what it
+leaves alone, and what it refuses to overwrite.
 
 `assets/scripts/gh-origin-guard-wiring.test.sh` enumerates `agents/` and fails
-when a claude-provider agent is left uncovered. An unwired agent is invisible at
-runtime, since it looks exactly like one whose writes were all legitimate.
+when an agent is left uncovered: a Claude agent without an overlay registering
+the guard, or a Codex agent whose `pre_start` does not register it. It also
+fails when the Codex registration's command differs from the overlays'. An
+unwired agent is invisible at runtime, since it looks exactly like one whose
+writes were all legitimate.

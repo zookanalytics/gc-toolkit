@@ -10,14 +10,24 @@
 # gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
 # the close, because a closed visit with no gc.outcome is a sitting the board
 # cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# A visit also gets gc.work_outcome=no-op, for the work-record gate the close
+# runs, from work-outcome.sh: a write of its own that never gates the close and
+# never replaces a work outcome the visit already records.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# outcome when the visit lacks one.
+# outcome and that work outcome when the visit lacks them.
+# Once the origin reads back closed, on either path, the branch it names in
+# metadata.branch is ended on the git remote through branch-end.sh, the way a
+# merge ends a landed branch. That remote write never gates the disposition:
+# when the branch cannot be ended the close stands, and a warning names the
+# branch and the command that ends it. The bead's notes record the outcome.
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
 # Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
-# pr-facts.sh (a PR closed with a pre-recorded disposition).
+# pr-facts.sh (a PR closed with a pre-recorded disposition),
+# scaffolding-sweep.sh (a finding a disposed PR leaves unanswered, closed onto
+# the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -35,6 +45,13 @@ BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 # tracking the origin holds its close, the same subject-scoped precondition
 # merge.sh applies to a merge (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
+# Ends the retired branch on the git remote once the close reads back.
+# Overridable for a test.
+BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
+# The one gc.work_outcome stamp a visit gets before it closes, shared with every
+# other visit closer. Exposes work_outcome_noop.
+# shellcheck source=work-outcome.sh
+. "$HERE/work-outcome.sh" || { echo "bead-rehome: cannot source work-outcome.sh from $HERE" >&2; exit 1; }
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; EXCEPT_KEY=""
@@ -189,6 +206,12 @@ wait_edge_count() {
     printf '%s' "$n"
 }
 
+# The branch a bead names in metadata.branch; empty when it names none or the
+# answer does not parse.
+origin_branch() {
+    printf '%s' "$1" | jq -r '(.[0].metadata.branch // "") | tostring' 2>/dev/null || true
+}
+
 # A recorded disposition to a DIFFERENT successor is somebody else's decision.
 if [ -n "$PRIOR_SUCC" ] && [ "$PRIOR_SUCC" != "$SUCCESSOR" ]; then
     die "origin $ORIGIN already records a successor pointer to $PRIOR_SUCC (${PRIOR_STORE:-store unrecorded}); refusing to overwrite another disposition — reconcile the two by hand" 6
@@ -212,9 +235,11 @@ REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 # the same way. The --kind IS the disposition, so it is the outcome word, and
 # $REASON is its headline. An outcome the visit already records is the sitting's
 # own word and is left untouched (a visit closed through visit-close.sh, then
-# re-homed, already carries the word it signed off with).
+# re-homed, already carries the word it signed off with). gc.work_outcome is not
+# part of that word: step 1a stamps it whether or not the outcome is stamped.
 ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
 PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
+PRIOR_WORK_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // empty' 2>/dev/null || true)
 STAMP_OUTCOME=""
 if [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_OUTCOME" ]; then STAMP_OUTCOME=1; fi
 
@@ -226,15 +251,23 @@ if [ -n "$DRY_RUN" ]; then
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
     [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
+    [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_WORK_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
     else
         EDGE_PLAN="none ($ORIGIN carries no wait edge to $SUCCESSOR)"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  close:     %s\n  actor:     %s\n' \
+    PLAN_BRANCH=$(origin_branch "$ORIGIN_JSON")
+    if [ -n "$PLAN_BRANCH" ]; then
+        PLAN_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$PLAN_BRANCH" --bead "$ORIGIN" --dry-run)
+        BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close reads back, unless a live owner names it (${PLAN_CMD% } previews it)"
+    else
+        BRANCH_PLAN="none ($ORIGIN names no metadata.branch)"
+    fi
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  close:     %s\n  branch:    %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
         "$SUCCESSOR" "$SUCCESSOR_STORE" "$STAMP_PLAN" \
-        "$EDGE_PLAN" "$CLOSE_PLAN" "${ACTOR:-<bd default>}"
+        "$EDGE_PLAN" "$CLOSE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
@@ -277,6 +310,14 @@ if [ -n "$STAMP_OUTCOME" ]; then
     if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
         die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}' gc.outcome_reason='${GOT_OUTCOME_REASON:-}'); NOT closing it — a closed visit needs the outcome word the board groups by AND the reason headline it shows, and once it closes no re-run reaches it. The bead is still visible; re-run once the store accepts the write" 4
     fi
+fi
+
+# 1a. A visit's work outcome, for the work-record gate the close runs. It goes
+# through work-outcome.sh as a write of its own, after the gated stamps above,
+# so it never decides whether the visit closes. It runs on the repair path too,
+# where it reaches a closed visit that records its outcome but lacks this key.
+if [ "$ORIGIN_KIND" = "visit" ]; then
+    work_outcome_noop "$ORIGIN" bd_at "$ORIGIN_PATH"
 fi
 
 # 1b. Drop ONLY the wait edge to THIS successor: it would refuse the close,
@@ -347,5 +388,45 @@ bd_at "$SUCCESSOR_PATH" update "$SUCCESSOR" \
 
 [ "$ORIGIN_STATUS" = "closed" ] \
     || printf 'bead-rehome: %s closed in %s — %s\n' "$ORIGIN" "$ORIGIN_STORE" "$REASON"
+
+# 4. End the branch the retired bead names on the git remote, the way a merge
+# ends a landed one. Only once the bead reads back closed: until then it still
+# owns its branch. branch-end.sh holds the remote write and its guards. It keeps
+# a branch a live owner names, pins the tip, and deletes only the tip it
+# checked. The disposition is complete before this runs, so a branch it cannot
+# end costs a warning, never the close.
+RETIRED_BRANCH=$(origin_branch "$CHECK_JSON")
+if [ -n "$RETIRED_BRANCH" ]; then
+    # Quoted for a paste: a branch name may carry shell metacharacters.
+    END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
+    END_CMD="${END_CMD% }"
+    FINAL_STATUS=$(bead_json "$ORIGIN_PATH" "$ORIGIN" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+    if [ "$FINAL_STATUS" != "closed" ]; then
+        echo "bead-rehome: WARN $ORIGIN did not read back closed (status '${FINAL_STATUS:-unreadable}'), so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
+    else
+        END_RC=0
+        END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?
+        END_NOTE=""
+        case "$END_RC" in
+            0|3) [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT"
+                 case "$END_OUT" in *"is not on origin"*) ;; *) END_NOTE="$END_OUT" ;; esac ;;
+            *)   [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT" >&2
+                 echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
+                 END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
+        esac
+        # The bead records what became of its branch. pr-facts.sh and
+        # duplicate-sweep.sh run this script for its exit status and drop its
+        # output, so the note is what a later reader finds. A re-run that reaches
+        # the same outcome adds nothing.
+        if [ -n "$END_NOTE" ]; then
+            case "$(printf '%s' "$CHECK_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
+                *"$END_NOTE"*) ;;
+                *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
+                       || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
+            esac
+        fi
+    fi
+fi
+
 printf 'bead-rehome: attribution is in the store events table, not the issues row:\n  gc dolt sql -q "SELECT issue_id, event_type, actor, created_at FROM %s.events WHERE issue_id = '"'"'%s'"'"' ORDER BY created_at"\n' \
     "${ORIGIN%%-*}" "$ORIGIN"
