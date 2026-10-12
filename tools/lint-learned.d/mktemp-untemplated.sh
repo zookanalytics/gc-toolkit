@@ -136,6 +136,8 @@ resolve_command() {
         case "$1" in
             [A-Za-z_]*=*) shift; continue ;;
         esac
+        # A membership test: the wrapper list is the subject, and $1 is the pattern.
+        # shellcheck disable=SC2194
         case " command env exec nohup time timeout " in
             *" $1 "*) ;;
             *) break ;;
