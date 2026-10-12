@@ -9,8 +9,17 @@ per-role conventions fragments (docs/feedback-learning.md).
 One detector per hardened rule. Each executable here is the executable form
 of a single learned convention that graduated out of prose — run by
 `tools/lint-learned.sh` over every tracked file, exit 0 clean / 1 findings
-(`<file>:<line>: <message>` lines). See
+(`<file>:<line>: <message>` lines) / 2 when it cannot scan a file. See
 `specs/2026-08-learning-system/implementation-design.md` §8.
+
+A file the detector cannot read, or one a tool call fails on, is a file it
+cannot scan, so the detector says so and exits 2. The runner tells a broken
+detector from a clean one only by its exit status, and a failure that prints
+nothing and exits 0 would pass the unscanned file as clean.
+`tools/lint-learned.d.test.sh` holds every executable here to this by failing,
+in turn, each tool call a detector makes on its contract fixtures. Those
+fixtures must hold a violation of every detector's rule, so a new detector adds
+one.
 
 ## The admission test
 
