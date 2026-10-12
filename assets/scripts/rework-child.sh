@@ -5,7 +5,9 @@
 # --ruling-bead) each demand rework through it, and the flag names the source key
 # the child carries: source_review_bead or source_ruling_bead. The caller decides
 # the work order: the branch the child resumes, where it lands, the PR it keeps,
-# its title and its rejection_reason.
+# its title and its rejection_reason. The priority is not the caller's: a rework
+# is PR-finishing work, filed at the rank pr-finishing-priority.sh gives the
+# posture of the PR it keeps, so it is claimed ahead of new work.
 #
 # The store has no transactions, so filing is a sequence in which each step is
 # proved before the next one relies on it, and a retry finishes what an earlier
@@ -47,6 +49,9 @@ set -uo pipefail
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_lib_dir/bd-lib.sh}" || { echo "rework-child: cannot source bd-lib.sh beside this script" >&2; exit 2; }
+# The priority the rework child is filed at, pr_finishing_priority.
+# shellcheck source=pr-finishing-priority.sh
+. "$_lib_dir/pr-finishing-priority.sh" || { echo "rework-child: cannot source pr-finishing-priority.sh beside this script" >&2; exit 2; }
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 
 warn()  { echo "rework-child: $*" >&2; }
@@ -167,6 +172,11 @@ META=(
 [ -n "$REASON" ]    && META+=(--set-metadata "rejection_reason=$REASON")
 [ -n "$PR_URL" ]    && META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL")
 [ -n "$PR_NUMBER" ] && META+=(--set-metadata "pr_number=$PR_NUMBER")
+# The priority the sling below copies into the rework's workflow. Pre-open work
+# keeps no PR, so it has no posture.
+FIX_POSTURE=""
+[ -z "$PR_URL$PR_NUMBER" ] || FIX_POSTURE=$(row_meta "$(bd_json show "$ANCHOR")" pr_posture)
+META+=(--priority "$(pr_finishing_priority "$FIX_POSTURE")")
 gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 
 # The child must BLOCK the anchor. Recorded the other way round it waits on an

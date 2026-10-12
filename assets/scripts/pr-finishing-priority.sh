@@ -12,8 +12,9 @@
 # Sourced (never executed) by the creators, each of which passes the result as
 # --priority in the write that makes its child claimable: pr-facts.sh and
 # pre-open-rebase.sh in the route stamp of a fix-pool child, gate-ensure.sh
-# ahead of the sling of a review or a validation pass, and signoff.sh ahead of
-# the sling of its rework child. One definition, no copies:
+# ahead of the sling of a review or a validation pass, and rework-child.sh ahead
+# of the sling of the rework child a review verdict or an operator ruling files.
+# One definition, no copies:
 # pr-finishing-priority.test.sh fails when a creator stops sourcing this file.
 
 # pr_finishing_priority <posture> — prints the priority for a child of an anchor

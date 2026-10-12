@@ -676,7 +676,8 @@ adopts or rescues gets it as well as a fresh one:
 - gate-ensure (arm 6) writes it to a review, or to a validation pass that
   `pr-facts.sh` or `signoff.sh` opened, before it slings `mol-review` or
   `mol-validate` onto the bead.
-- `signoff.sh` writes it to the rework child a request-changes verdict files
+- `rework-child.sh` writes it to the rework child that a request-changes
+  verdict (`signoff.sh`) or an operator ruling (`converse-rework.sh`) files,
   before it slings `mol-polecat-work` onto the child.
 
 The refinery patrol's find-work takes handoffs in priority order too, so the

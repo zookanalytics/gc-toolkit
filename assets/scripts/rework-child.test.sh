@@ -4,7 +4,8 @@
 # filing sequence end to end, each under its own provenance: signoff.test.sh for
 # a review verdict and converse-rework.test.sh for an operator ruling. This suite
 # pins the writer's own contract: exactly one provenance, the required work-order
-# flags, the refusals that come before any write, the stdout result line its
+# flags, the priority the child is filed and poured at with no parent edge, the
+# refusals that come before any write, the stdout result line its
 # callers parse, a provenance key that matches only its own children on its own
 # anchor, one read of an edge that already stands, and every metadata key it
 # writes registered in lifecycle.toml.
@@ -31,6 +32,8 @@ STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 if [ "${1:-}" = "sling" ]; then
   # A graph.v2 pour retires gc.routed_to and stamps gc.execution_routed_to=<pool>.
+  # It also copies the bead's priority into its workflow once, which
+  # poured_priority records (bd's default 2 when none was written).
   shift; pool=""; bead=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -42,7 +45,7 @@ if [ "${1:-}" = "sling" ]; then
   done
   tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-rc.XXXXXX")
   jq -c --arg id "$bead" --arg p "$pool" \
-    'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+    'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"]) | .poured_priority = (.priority // 2)) else . end)' \
     "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   exit 0
 fi
@@ -64,6 +67,9 @@ case "${1:-}" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
           jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --priority) shift
+          jq -c --arg id "$id" --arg p "$1" \
+            'map(if .id == $id then .priority = ($p | ltrimstr("P") | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -202,6 +208,42 @@ eq "$RES" "c1 $ROUTE adopted" "stdout is '<child> <route> adopted'"
 eq "$(meta c1 existing_pr)" "https://github.com/o/r/pull/42" "--pr-url keeps the rework on that PR"
 eq "$(meta c1 pr_number)" "42" "--pr-number names it"
 eq "$(created)" "0" "nothing new is created"
+
+echo "# --- the priority: PR-finishing work, filed and poured above new work ---"
+# The work-order update carries the priority pr-finishing-priority.sh gives the
+# posture the anchor records, read only when the rework keeps a PR, and the sling
+# pours the workflow at it. bd files at P2 when given none, where new work waits.
+prio()   { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+poured() { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+anchor_posture() { # <pr_posture>: the posture the anchor records, as recorded
+  local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-rc.XXXXXX")
+  jq -c --arg p "$1" 'map(if .id == "anc-1" then .metadata.pr_posture = $p else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+}
+ON_PR=(--pr-url https://github.com/o/r/pull/42 --pr-number 42)
+APPROVED="approved@$(printf 'a%.0s' $(seq 1 40))@2026-10-11T00:00:00Z"
+reset
+RES=$("$SUT" "${WORK[@]}" --review-bead rv-1 "${ON_PR[@]}" 2>/dev/null)
+eq "$RES" "fix-1 $ROUTE filed" "a review's rework on a PR is filed"
+eq "$(prio fix-1)" "1" "…at P1 while the PR is not approved, above new work"
+eq "$(poured fix-1)" "1" "…and the sling pours its workflow at that priority"
+eq "$(grep '^bd create ' "$STUB_GC_LOG" | grep -c -- '--parent')" "0" "…and the child is created under no parent"
+reset; anchor_posture "$APPROVED"
+"$SUT" "${WORK[@]}" --review-bead rv-1 "${ON_PR[@]}" >/dev/null 2>&1
+eq "$(prio fix-1)" "0" "a review's rework on an approved PR is filed at P0"
+eq "$(poured fix-1)" "0" "…and its workflow is poured at P0"
+reset; anchor_posture "$APPROVED"
+"$SUT" "${WORK[@]}" --ruling-bead vis-1 "${ON_PR[@]}" >/dev/null 2>&1
+eq "$(prio fix-1)" "0" "a ruling's rework on an approved PR is filed at P0 too"
+eq "$(poured fix-1)" "0" "…and its workflow is poured at P0"
+reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1"}}'
+anchor_posture "$APPROVED"
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 "${ON_PR[@]}" 2>/dev/null)
+eq "$RES" "c1 $ROUTE adopted" "an undispatched child is adopted"
+eq "$(prio c1)" "0" "…and re-stamped at the priority with its work order"
+eq "$(poured c1)" "0" "…before the sling pours it"
+reset; anchor_posture "$APPROVED"
+"$SUT" "${WORK[@]}" --review-bead rv-1 >/dev/null 2>&1
+eq "$(prio fix-1)" "1" "pre-open work keeps no PR, so a posture an earlier PR left on the anchor counts for nothing: P1"
 
 echo "# --- a provenance key matches only its own children ---"
 reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"source_ruling_bead":"rv-1"}}'

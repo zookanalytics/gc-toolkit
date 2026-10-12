@@ -9,8 +9,9 @@
 #   (CREATORS) every creator sources this file, calls pr_finishing_priority and
 #              writes the priority it gets
 # The behavioral half lives beside each creator (pr-facts.test.sh,
-# pre-open-rebase.test.sh, signoff.test.sh, gate-ensure.test.sh), which assert
-# the priority each child is filed and poured at.
+# pre-open-rebase.test.sh, rework-child.test.sh, gate-ensure.test.sh), which
+# assert the priority each child is filed and poured at. signoff.test.sh asserts
+# it for a review's rework, which signoff.sh files through rework-child.sh.
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -51,7 +52,7 @@ esac
 echo "# every creator sources the one definition"
 CREATORS="assets/scripts/pr-facts.sh
 assets/scripts/pre-open-rebase.sh
-assets/scripts/signoff.sh
+assets/scripts/rework-child.sh
 assets/scripts/gate-ensure.sh"
 for c in $CREATORS; do
     f="$ROOT/$c"

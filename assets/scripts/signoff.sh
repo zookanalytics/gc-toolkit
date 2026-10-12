@@ -167,9 +167,6 @@ fi
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
-# The priority the rework child is filed at, pr_finishing_priority.
-# shellcheck source=pr-finishing-priority.sh
-. "$_bd_lib_dir/pr-finishing-priority.sh" || { echo "cannot source pr-finishing-priority.sh beside this script" >&2; exit 1; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
