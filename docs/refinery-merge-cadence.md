@@ -789,9 +789,16 @@ The live `rigs/*` checkouts are what the runtime executes, and `merge.sh`
 lands PRs via GitHub — so a merged PR is **not live** until
 `orders/reconcile-rig-checkouts.toml` (every 15m, city-scoped) fast-forwards
 each rig checkout: `git fetch origin && git merge --ff-only origin/<default>`.
-`--ff-only` mutates nothing on divergence or a conflicting dirty file; on a
-refusal the script files one idempotent visit per blocked rig (via
-`escalate.sh`, carrying `git status` + `git log <remote>..HEAD`) and
-auto-closes it once the rig fast-forwards cleanly. The 15-minute window is
+`--ff-only` mutates nothing on divergence or on a local change to a path the
+incoming commits rewrite. A refusal gets one heal first, and each heal acts only
+when nothing is lost. A checkout that is only behind sets aside the local
+changes on those paths and fast-forwards, when each working copy is absent,
+committed, upstream or on a pushed branch. It pins the staged and working-tree
+state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
+a dirty path the fast-forward does not rewrite, such as local bd config, as it
+is. A diverged checkout resets to the remote when its content is provably
+upstream. Anything else files one idempotent visit per blocked rig (via
+`escalate.sh`, carrying what blocked it and `git status`), which auto-closes
+once the rig fast-forwards cleanly. The 15-minute window is
 also the exposure behind component-model I9, watched by
 `doctor/check-pour-text-current`.

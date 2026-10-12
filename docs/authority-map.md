@@ -12,9 +12,9 @@ change, not an implementation detail — amend this table in the same PR.
 ## Scope
 
 **Mandate.** Who may exercise each destructive or state-bearing power in the
-pack, over beads, over origin refs, over the city's own config and over
-sessions: the sole holder of each power, the evidence an act requires, and what
-the holder may never do.
+pack, over beads, over origin refs, over the live rig checkouts, over the city's
+own config and over sessions: the sole holder of each power, the evidence an act
+requires, and what the holder may never do.
 
 **Boundaries.** It names holders and their limits, not how an act runs; each
 holder's own script or doc carries its mechanics. The anchor lifecycle these
@@ -65,6 +65,12 @@ apart from them.
 | Power | Sole holder | Evidence required | May never |
 |---|---|---|---|
 | End a retired branch: pin its tip, then delete it from origin | `assets/scripts/branch-end.sh`, which `bead-rehome.sh` runs once a disposition's close reads back, and which an operator may run by hand for one branch | no live owner: no bead in the rig's store whose status is outside the `done` category names the branch in `metadata.branch` or `metadata.target`, read from a status contract and from the store's listing of the live beads naming the branch in each field, all of which parsed, where the review scaffolding of the retired bead (`anchor_bead` naming it) counts only while that bead is not closed; the tip read from origin's refs and pinned before the delete, by a `refs/pull/<n>/head` equal to it or by an annotated `archive/<branch>@<short-sha>` tag read back on origin; a delete whose lease names that tip; the branch read back gone | end the default branch, `main` or a `claude/*` branch; end a branch while a live owner names it, or while the ledger does not read; delete a tip nothing pins; delete a branch that moved after it was checked; move or delete a tag; push a commit; write to the ledger; fail or undo the close that ran it |
+
+## Powers over the live rig checkouts
+
+| Power | Sole holder | Evidence required | May never |
+|---|---|---|---|
+| Move a live `rigs/*` checkout: fast-forward it to its default branch, set aside the local changes that block that fast-forward, or reset away SHA churn | `assets/scripts/reconcile-rig-checkouts.sh`, which `orders/reconcile-rig-checkouts.toml` runs | HEAD on the default branch. A set-aside only on a checkout that is only behind its remote, when no blocking path is unmerged or an untracked file, and each one's working copy is absent, equals HEAD or the remote, or matches a blob a remote-tracking ref's history holds, after pinning every dirty path's staged and working-tree state under `refs/gc-toolkit/reconcile-set-aside/`. A reset only on a diverged checkout whose local commits, merges, staged and working-tree content and untracked files on remote-tracked paths are all proven upstream | commit, merge or rebase in the checkout; move a HEAD parked off the default branch; change a dirty path the fast-forward does not rewrite; discard content it has neither pinned nor proven upstream |
 
 ## Powers over the city's own config
 

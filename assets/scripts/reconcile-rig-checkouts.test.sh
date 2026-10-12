@@ -23,7 +23,12 @@
 # feature/integration branch ahead of origin) is surfaced and left untouched,
 # not silently counted advanced by a no-op fast-forward; (m) the reset heal
 # refuses when an untracked file sits on a path the remote tracks with other
-# content.
+# content; (n) a checkout that is only behind, blocked by local changes on the
+# paths the fast-forward rewrites, pins them under
+# refs/gc-toolkit/reconcile-set-aside/ and advances when each working copy is
+# committed, upstream or on a pushed branch, keeping a dirty path the
+# fast-forward does not touch, and escalates untouched when a working copy or a
+# staged edit is local-only or an untracked file sits on an added path.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -477,6 +482,117 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/rho" rev-parse HEAD)" "$RHO_LOCAL" "an untracked file the reset would overwrite blocks the reset heal"
 eq "$(cat "$TMP/rho/new.txt")" "mine" "the untracked file the reset would overwrite is left untouched"
 eq "$(esc_count rho)" "1" "an untracked file the reset would overwrite escalates"
+
+# ===========================================================================
+# Set aside what blocks a checkout that is only behind. HEAD is an ancestor of
+# origin, so ff-only refuses only over local changes on the paths the incoming
+# commits rewrite. Each rig below gets its own remote: base commit b1 carries
+# f.txt and cfg.txt, the checkout sits on b1, and origin's b2 rewrites f.txt
+# alone, so a local cfg.txt edit stands in for machine-local config the
+# fast-forward does not touch.
+# ===========================================================================
+behind_rig() { # name -> a clone on b1 of a remote whose main is b2
+  local s="$TMP/$1.src"
+  git init -q -b main "$s"
+  echo base > "$s/f.txt"; echo cfg > "$s/cfg.txt"
+  git -C "$s" add -A; git -C "$s" commit -qm b1
+  git clone -q --bare "$s" "$TMP/$1.git"
+  git clone -q "$TMP/$1.git" "$TMP/$1"
+  echo upstream > "$s/f.txt"; git -C "$s" commit -qam b2
+  git -C "$s" push -q "$TMP/$1.git" main
+  git -C "$TMP/$1" fetch -q origin
+}
+set_aside_refs() { git -C "$TMP/$1" for-each-ref --format='%(refname)' refs/gc-toolkit/reconcile-set-aside/; }
+# mu: a stray staged copy of content no ref holds, with the working copy still
+# equal to HEAD, plus a local cfg.txt edit the fast-forward does not touch. The
+# reset --hard heal cannot help: cfg.txt differs from origin. The set-aside pins
+# the staged copy, restores f.txt, fast-forwards, and leaves cfg.txt alone.
+behind_rig mu
+printf 'stray-staged\n' > "$TMP/mu/f.txt"; git -C "$TMP/mu" add f.txt
+echo base > "$TMP/mu/f.txt"                                      # working copy back to HEAD: MM f.txt
+echo machine-local > "$TMP/mu/cfg.txt"
+MU_HEAD="$(git -C "$TMP/mu" rev-parse HEAD)"
+MU_REMOTE="$(git -C "$TMP/mu.git" rev-parse main)"
+rigs_json mu
+: > "$TMP/escalations"; : > "$TMP/retractions"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/mu" rev-parse HEAD)" "$MU_HEAD" "RECONCILE_NO_AUTOHEAL leaves a blocked behind checkout unmutated"
+eq "$(git -C "$TMP/mu" show :f.txt)" "stray-staged" "RECONCILE_NO_AUTOHEAL leaves the staged copy in place"
+eq "$(esc_count mu)" "1" "RECONCILE_NO_AUTOHEAL escalates a blocked behind checkout"
+MU_BEAD="$(bead_for mu)"
+MU_OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$TMP/mu" rev-parse HEAD)" "$MU_REMOTE" "a behind checkout blocked by a staged-only change fast-forwards"
+eq "$(cat "$TMP/mu/f.txt")" "upstream" "the blocking path carries the fast-forwarded content"
+eq "$(cat "$TMP/mu/cfg.txt")" "machine-local" "a dirty path the fast-forward does not rewrite is left as it is"
+# A missing pin reads as a ref that cannot resolve; an empty one would make
+# `git show :<path>` read the index instead.
+MU_REF="$(set_aside_refs mu)"
+[ -n "$MU_REF" ] && ok "the set-aside is pinned under refs/gc-toolkit/reconcile-set-aside/" || bad "the set-aside is pinned under refs/gc-toolkit/reconcile-set-aside/"
+eq "$(git -C "$TMP/mu" show "${MU_REF:-refs/gc-toolkit/absent}^2:f.txt" 2>/dev/null)" "stray-staged" "the pin's second parent keeps the staged copy"
+eq "$(git -C "$TMP/mu" show "${MU_REF:-refs/gc-toolkit/absent}:cfg.txt" 2>/dev/null)" "machine-local" "the pin also keeps every other dirty path's working copy"
+eq "$(esc_count mu)" "1" "a set-aside heal raises no fresh escalation"
+eq "$(open_count mu)" "0" "a set-aside heal closes the open reconcile bead"
+eq "$(retract_count mu)" "1" "a set-aside heal retracts the tracking visit as moot"
+eq "$(retract_subject mu)" "$MU_BEAD" "the set-aside retract names the reconcile bead"
+grep -q '1 auto-healed' <<< "$MU_OUT" && ok "the summary counts a set-aside as an auto-heal" || bad "the summary counts a set-aside as an auto-heal (got '$MU_OUT')"
+
+# nu: a stray `git checkout <branch> -- f.txt` staged AND wrote a pushed branch's
+# copy. The working copy is neither HEAD nor origin/main, but a remote-tracking
+# ref's history carries it, so the copy is set aside and the checkout advances.
+behind_rig nu
+git -C "$TMP/nu.src" checkout -q -b feature HEAD~1
+echo feature-copy > "$TMP/nu.src/f.txt"; git -C "$TMP/nu.src" commit -qam feature
+git -C "$TMP/nu.src" push -q "$TMP/nu.git" feature
+git -C "$TMP/nu" fetch -q origin
+git -C "$TMP/nu" checkout -q origin/feature -- f.txt              # index and working copy = feature
+NU_REMOTE="$(git -C "$TMP/nu.git" rev-parse main)"
+rigs_json nu
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/nu" rev-parse HEAD)" "$NU_REMOTE" "a working copy a pushed branch carries is set aside and the checkout advances"
+NU_REF="$(set_aside_refs nu)"
+eq "$(git -C "$TMP/nu" show "${NU_REF:-refs/gc-toolkit/absent}:f.txt" 2>/dev/null)" "feature-copy" "the pin keeps the pushed branch's working copy"
+eq "$(esc_count nu)" "0" "a working copy a pushed branch carries is not escalated"
+
+# xi: a local edit on a path the fast-forward rewrites, found in no ref. It may
+# be machine-local config or real work, so nothing moves and the stall escalates.
+behind_rig xi
+echo local-edit > "$TMP/xi/f.txt"
+XI_HEAD="$(git -C "$TMP/xi" rev-parse HEAD)"
+rigs_json xi
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/xi" rev-parse HEAD)" "$XI_HEAD" "a local-only working copy on a rewritten path blocks the set-aside"
+eq "$(cat "$TMP/xi/f.txt")" "local-edit" "the local-only working copy is left untouched"
+eq "$(esc_count xi)" "1" "a local-only working copy on a rewritten path escalates"
+eq "$(open_count xi)" "1" "a local-only working copy on a rewritten path files a reconcile bead"
+eq "$(set_aside_refs xi)" "" "a refused set-aside pins nothing"
+
+# omicron: staging the local edit proves nothing about it either.
+behind_rig omicron
+echo staged-local-edit > "$TMP/omicron/f.txt"; git -C "$TMP/omicron" add f.txt
+OMICRON_HEAD="$(git -C "$TMP/omicron" rev-parse HEAD)"
+rigs_json omicron
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/omicron" rev-parse HEAD)" "$OMICRON_HEAD" "a staged local-only edit on a rewritten path blocks the set-aside"
+eq "$(git -C "$TMP/omicron" show :f.txt)" "staged-local-edit" "the staged local-only edit is left untouched"
+eq "$(esc_count omicron)" "1" "a staged local-only edit on a rewritten path escalates"
+
+# pi: an untracked file on a path the fast-forward adds. Nothing proves it
+# expendable, so nothing moves and the stall escalates.
+behind_rig pi
+echo added > "$TMP/pi.src/new.txt"; git -C "$TMP/pi.src" add new.txt; git -C "$TMP/pi.src" commit -qm b3
+git -C "$TMP/pi.src" push -q "$TMP/pi.git" main
+git -C "$TMP/pi" fetch -q origin                                 # still on b1, now behind b2 and b3
+echo mine > "$TMP/pi/new.txt"
+PI_HEAD="$(git -C "$TMP/pi" rev-parse HEAD)"
+rigs_json pi
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/pi" rev-parse HEAD)" "$PI_HEAD" "an untracked file on a path the fast-forward adds blocks the set-aside"
+eq "$(cat "$TMP/pi/new.txt")" "mine" "the untracked file in the way is left untouched"
+eq "$(esc_count pi)" "1" "an untracked file in the way escalates"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
