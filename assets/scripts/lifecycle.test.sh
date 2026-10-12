@@ -26,6 +26,10 @@ SUT="$HERE/lifecycle.sh"
 TOML="$ROOT/lifecycle/lifecycle.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lifecycle-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# The real git, for the cases that fetch a landing. It is captured before
+# harness_init, which puts the stub bin and then the test floor at the front of
+# PATH, and the floor refuses git.
+REAL_GIT="$(command -v git)"
 
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -846,7 +850,6 @@ eq "$(meta w-5 gc.work_outcome)" "<absent>" "a non-landing transition writes no 
 # real git against a local origin; the harness's git stub stays for every other
 # section.
 echo "# the landing is fetched before the close"
-REAL_GIT="$(PATH="${PATH#"$BIN:"}" command -v git)"
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 "$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.name tester
 "$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.email tester@example.com
