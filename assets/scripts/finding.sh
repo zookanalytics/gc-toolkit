@@ -370,8 +370,7 @@ cmd_upsert() {
     # It is closed rather than left open where no finding reader sees it. A read
     # that failed proves nothing about the bead, so it closes nothing.
     if [ -z "$got" ] && printf '%s' "$row" | jq -e --arg id "$id" '.[0].id == $id' >/dev/null 2>&1; then
-      gc bd update "$id" --status=closed --set-metadata gc.outcome=abandoned \
-        --append-notes "Unmade by finding.sh upsert: the create landed without its metadata, so no finding reader could see this bead. The next upsert of key $key on $anchor files the finding afresh." >/dev/null 2>&1 \
+      bd_unmake "$id" "Unmade by finding.sh upsert: the create landed without its metadata, so no finding reader could see this bead. The next upsert of key $key on $anchor files the finding afresh." \
         || warn "could not close $id, which landed without its metadata"
     fi
     warn "finding $id key did not read back (got '$got', want '$key')"

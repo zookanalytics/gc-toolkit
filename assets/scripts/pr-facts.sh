@@ -814,8 +814,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     br_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.branch // ""' 2>/dev/null)
     pn_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.pr_number // ""' 2>/dev/null)
     if [ -z "$rr_now" ] && { [ -n "$br_now" ] || [ -n "$pn_now" ]; }; then
-      gc bd update "$fix" --status=closed --set-metadata gc.outcome=abandoned \
-        --append-notes "Unmade by $PROG: a partial stamp left it able to veto (branch/pr_number) but with no rejection_reason to be rescued by, so it is closed rather than left as a half-stamped husk (atomic birth)." >/dev/null 2>&1 || true
+      bd_unmake "$fix" "Unmade by $PROG: a partial stamp left it able to veto (branch/pr_number) but with no rejection_reason to be rescued by, so it is closed rather than left as a half-stamped husk (atomic birth)." || true
     fi
     return 1
   fi
