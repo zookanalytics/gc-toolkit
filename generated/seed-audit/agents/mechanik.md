@@ -133,16 +133,30 @@ RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $
 CONVOY=$(GC_RIG=<rig> "[[PACK-ROOT]]/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
     --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# File child work beads in the rig's store under the convoy, read the link back,
-# and sling normally. The link and its read-back name the rig too: a dep add
-# that crosses stores prints success and exits 0 with no edge to read back, and
-# a child slung unlinked opens its PR against the default branch.
+# File each child work bead in the rig's store under the convoy, read the link
+# back, and stamp the convoy's target on it before you sling. The link and its
+# read-back name the rig too: a dep add that crosses stores prints success and
+# exits 0 with no edge to read back, and a child left unlinked is not one of
+# the convoy's members, so graduation does not wait for it.
+TARGET=$(gc bd --rig <rig> show "$CONVOY" --json | jq -r '.[0].metadata.target // empty')
+[ -n "$TARGET" ] || { echo "convoy $CONVOY has no readable target; file and sling nothing" >&2; exit 1; }
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
 gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
 LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
 [ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
-gc sling <rig>/gc-toolkit.polecat "$WORK"   # inherits metadata.target via convoy walk
+gc bd --rig <rig> update "$WORK" --set-metadata target="$TARGET"
+gc sling <rig>/gc-toolkit.polecat "$WORK"   # branches from the bead's own target
 ```
+
+`gc sling` takes `base_branch` from the bead's own `metadata.target` first.
+Without one, it reads the first convoy target on the one parent chain bd
+reports, and then falls back to the rig default branch. A child filed under
+an epic and also linked to the convoy can report the epic as its parent, and
+then sling resolves the default branch. The stamp in the recipe above makes
+every child branch from the integration branch whichever parent bd reports,
+and the refinery lands their work back onto it, never onto the default
+branch. A child slung without the stamp, whose reported parent is not the
+convoy, is held at workspace-setup before any branch is cut.
 
 A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
 and "Choosing a design-convoy" below is the test for one. The molecule runs the
@@ -154,11 +168,8 @@ on an initiative bead in the rig's store:
 gc sling <rig>/gc-toolkit.polecat <initiative> --on mol-design-convoy --var issue=<initiative>
 ```
 
-Children inherit `metadata.target = integration/<convoy-id>` via the
-convoy-ancestor walk in `gc sling`: polecats branch from the integration
-branch and the refinery lands their work back onto it, never onto the default
-branch. When all children close AND the ledger records at least one landing on
-the branch, the cadence graduates the convoy automatically — a human-approved
+When all children close AND the ledger records at least one landing on the
+branch, the cadence graduates the convoy automatically — a human-approved
 `integration/<id>` -> default-branch PR through the same work-bead machine. Children
 closed having landed nothing leave "all closed" vacuously true, and the
 pass reports the convoy vacuous rather than graduating it; land a genuinely
@@ -166,6 +177,9 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
+A convoy child takes its override as `metadata.target` instead, stamped before
+the sling: workspace-setup holds a convoy child whose base differs from its
+own target or, when it names none, from its convoy's target.
 
 **Anti-pattern:** dispatching a shared input artifact to land on the default
 branch by itself, with no convoy above it. Catching this shape is a dispatch
@@ -338,6 +352,47 @@ per-store `events` table (`SELECT issue_id, event_type, actor, created_at
 FROM <prefix>.events WHERE issue_id = '<bead-id>'`).
 
 
+
+### Closing a visit: never by hand
+
+A closed visit records why it closed in two keys: `gc.outcome`, one word,
+and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
+outcome from them, so a visit closed without them looks like a need nobody
+met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+
+A sitting closes the visit it works. Outside a sitting, a visit is closed
+only by the role that raised it, and only when it was filed in error, when
+another visit already carries its need, or when its premise is gone. That
+close goes through one of two writers:
+
+```bash
+for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
+done
+# An open escalation you raised on a bead:
+"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
+# Any other visit you raised:
+"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+```
+
+`escalate.sh --retract` finds the open visit by the subject and key it was
+filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
+with an assignee or a bound session open for whoever holds it.
+`visit-close.sh` stamps both keys and reads them back before it closes. On a
+visit that is already closed it records the two keys and leaves the close as
+it was, so it also repairs a visit closed by hand.
+
+The word carries weight. `moot` (the premise is gone) and `benign` (it holds
+but needs nobody) stop `escalate.sh` filing the same key and subject again
+for a day. Any other word means someone acted. Use `duplicate` when another
+visit carries the need, and `resolved` when you acted to end it.
+
+A visit another role raised, or one a sitting has claimed, is the sitting's
+to close, even after you resolve its situation. Append what you did to its
+notes and leave it open. Close it yourself only when the operator tells you
+to, and then through `visit-close.sh`.
+
+
 ## Upstream engagement (gascity)
 
 For every bug or design gap in upstream `gascity`, three options, in order
@@ -471,11 +526,14 @@ sits below it.
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces

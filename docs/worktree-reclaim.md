@@ -13,6 +13,17 @@ grew from 351 worktrees to 790 in five weeks, `.gc/worktrees/gc-toolkit` from
 Dolt, which makes `bd` queries return false-empty results, so the failure
 presents as a city with no work rather than as a disk alarm.
 
+## Scope
+
+**Mandate.** Reclaiming the git worktrees and `polecat/<bead-id>` branches that
+closed work leaves behind: when each may go, how a removal is pinned so it can
+be restored, what the reports mean, and the rails that protect live work.
+
+**Boundaries.** Refs outside the `polecat/<bead-id>` family, and agent homes,
+are outside it. Which bead statuses count as live is `bd`'s own status
+contract, which the reaper reads rather than restates. Harness scratch is
+[scratch-reclaim.md](scratch-reclaim.md).
+
 ## What the reaper does
 
 `orders/worktree-reap.toml` runs `assets/scripts/worktree-reap.sh` hourly,

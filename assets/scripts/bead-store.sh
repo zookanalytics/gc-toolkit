@@ -51,8 +51,8 @@
 #         about a different or an ambiguous id rather than this exact one. A
 #         verdict mode ends here for every unresolved prefix as well: an id no
 #         rig claims is a store nobody asked, not a bead nobody has.
-# Callers: escalation-rig.sh, bead-rehome.sh, and any gate whose next act is
-# destructive. Test: bead-store.test.sh.
+# Callers: escalation-rig.sh, bead-rehome.sh, gc-proactive.sh's sling, and any
+# gate whose next act is destructive. Test: bead-store.test.sh.
 set -uo pipefail
 
 PROG="bead-store"
