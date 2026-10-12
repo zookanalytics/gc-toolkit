@@ -306,22 +306,23 @@ if [ "$ROOT_NOT_CLOSED" = "1" ]; then
     # Under --if-source-closed the names come only off a step a session has
     # claimed (assigned, or in_progress) and can still run: not the root, not a
     # held (`blocked`) step, not an end bead.
-    declare -A LIVE_SET=()
-    while IFS= read -r _id; do
-        [ -n "$_id" ] && LIVE_SET["$_id"]=1
-    done <<EOF
-$(printf '%s' "$SESS" | jq -r --arg own "$OWNER" --arg sid "${GC_SESSION_ID:-}" --arg sname "${GC_SESSION_NAME:-}" '
+    # The set is one name per line, and a chain name is in it when it equals a
+    # whole line. A login bash on macOS puts /bin ahead of Homebrew on PATH
+    # (path_helper, run from /etc/profile), so `env bash` there is /bin/bash
+    # 3.2, which has no associative arrays.
+    NL='
+'
+    LIVE_SET="$(printf '%s' "$SESS" | jq -r --arg own "$OWNER" --arg sid "${GC_SESSION_ID:-}" --arg sname "${GC_SESSION_NAME:-}" '
     .[]
     | select(((.state // "") | tostring) == "active" or (.running == true))
     | select($own != "1"
              or ((($sid != "" and ((.id // "") | tostring) == $sid)
                   or ($sname != "" and ((.session_name // "") | tostring) == $sname)) | not))
-    | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "")' 2>/dev/null)
-EOF
+    | (.id, .session_name, .alias, .name, .agent_name) | select((. // "") != "")' 2>/dev/null)"
     LIVE_SESSION=""
     while IFS= read -r _cand; do
         [ -n "$_cand" ] || continue
-        if [ -n "${LIVE_SET[$_cand]:-}" ]; then LIVE_SESSION="$_cand"; break; fi
+        case "$NL$LIVE_SET$NL" in *"$NL$_cand$NL"*) LIVE_SESSION="$_cand"; break ;; esac
     done <<EOF
 $(printf '%s' "$ALL" | jq -r --arg r "$ROOT" --arg runnable "$IF_SOURCE_CLOSED" '
     .[]

@@ -285,6 +285,19 @@ jq -c 'map(if .id=="tk-himpl" then (.status="in_progress" | .assignee="gc-toolki
 OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
 has "$OUT" "result=live_root" "a member pinned by agent-address assignee keeps the molecule (LIVE_SET reads agent_name)"
 has "$OUT" "live_session=gc-toolkit/gc-toolkit.polecat-1" "the agent-address live session is named"
+# A chain name is live only when it equals a whole name an active session
+# carries. Here one live name has the chain's lx-dead-wisp as a prefix and the
+# other has it as a suffix, so neither keeps the molecule. These runs use
+# /bin/bash, which is bash 3.2 on macOS, where a login bash resolves `env bash`
+# to it.
+husk '{"sessions":[{"id":"lx-dead-wisp-2","session_name":"","alias":"","state":"active"},
+  {"id":"pre-lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+OUT=$(/bin/bash "$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=disposed" "a live name that only contains a chain name does not keep the molecule"
+husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"active"}]}'
+OUT=$(/bin/bash "$SCRIPT" tk-hroot --apply 2>&1)
+has "$OUT" "result=live_root" "under /bin/bash, a live session the chain names keeps the molecule"
+has "$OUT" "live_session=lx-dead-wisp" "under /bin/bash, that live session is named"
 # A non-active session is not live: a stopped roster entry does not protect.
 husk '{"sessions":[{"id":"lx-dead-wisp","session_name":"","alias":"","state":"stopped"}]}'
 OUT=$("$SCRIPT" tk-hroot --apply 2>&1)
