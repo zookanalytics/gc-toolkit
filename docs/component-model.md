@@ -213,10 +213,11 @@ marooned by construction; the operator-queue decisions routed to human, daily
 digests, and doctor and tech-debt advisories that legitimately live there are
 exempt).
 Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
-rather than structure: whether the demo:capture toolchain — Node, a Chromium
-build, ffmpeg, and `OPENAI_API_KEY` — is resolvable, warn-only, so a demo
-session learns before it captures whether the clip will narrate or degrade to a
-silent, captioned one.
+rather than structure: whether the demo:capture toolchain — Node, ffmpeg,
+`OPENAI_API_KEY`, and the `gh` that delivers a clip inline — is resolvable,
+warn-only, so a demo session learns before it captures whether the clip will
+narrate or degrade to a silent, captioned one. The capture installs its own
+browser, so the check does not probe for one.
 That is the whole set: every check asserts a live structural property or reports
 toolchain readiness, and none greps the source for a past fix.
 
