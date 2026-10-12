@@ -87,6 +87,8 @@ bash "$SCRIPT" --check-name triage > "$TMP/tri.out" 2>/dev/null
 hasF "$TMP/tri.out" '## Check: `triage`' "(CHECK) --check-name triage names the triage check"
 hasF "$TMP/tri.out" '--add-gates' "(CHECK) triage names the widening verdict call"
 hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage states the common no-op case"
+hasF "$TMP/tri.out" '--reopen <lanes>|none --round-reason <why> [--dismiss-approval]' "(CHECK) triage names the bring-current round ruling it carries on the same call"
+hasF "$TMP/tri.out" 'bring-current-audit.sh render --anchor <anchor>' "(CHECK) …and where the round's account is read"
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
 hasF "$TMP/demo.out" 'skills/review-demo/SKILL.md' "(CHECK) demo names its method skill"

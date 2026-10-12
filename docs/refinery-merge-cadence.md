@@ -307,7 +307,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    the pass budget, and per anchor requires both sides to resolve there and
    probes `git merge-tree --write-tree`; a conflict files the same merge-in
    rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase). An anchor pr-open
+   branch shape is brought current by merge, never rebase), whose hand-off the
+   bring-current guard holds to the same audit. An anchor pr-open
    flipped this pass carries a PR, where `mergeable` answers the question and
    arm 7 owns the dispatch. Both arms probe
    children on `metadata.branch` and write the same `head <oid>` phrasing, so
@@ -385,8 +386,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head, on an
    approved PR only, by the approval rule merge.sh lands on; the child's
-   handoff runs `bring-current-guard.sh`, which dismisses the approval and
-   files a visit when bringing the branch current took judgment. When the
+   handoff runs `bring-current-guard.sh`, which refuses it until the worker's
+   audit covers every conflict and, when the round conflicted, reopens triage
+   to rule on what it reopens and whether the approval stands, or rules closed
+   itself on an anchor that declares no triage lane
+   ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
    child, as for arm 5), `BLOCKED`
