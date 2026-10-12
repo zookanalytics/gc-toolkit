@@ -17,7 +17,7 @@
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route or a takeaway disposition that will not stamp),
+# a --route, or a takeaway headline or disposition, that will not stamp),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own visit instead of
@@ -1198,6 +1198,39 @@ cmd_takeaway() {
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
+    # The headline is what this verb exists to write, so it is read back first,
+    # in every mode: it rides the bare stamp, the park and a closed anchor's
+    # quiesce alike. One `--set-metadata` pair in a multi-pair update can fail to
+    # land while its siblings land, and a headline that does not land leaves the
+    # one the bead carried before this call, empty or an earlier sitting's. So
+    # the read-back compares with the text this call wrote, not with empty. The
+    # repair re-stamps the headline together with this call's disposition, as
+    # every headline write does (lifecycle.toml [holds]): a headline repaired
+    # alone could land beside the disposition an earlier sitting left, and read
+    # as a wait already discharged. The disposition is still read back on its
+    # own below. A repair that also misses is a verb failure, because callers
+    # read a zero exit as the headline being set. The miss is reported here with
+    # its repair. Its exit comes last, after the edges, the quiesce and every
+    # other check have run and printed their own repairs. The messages carrying
+    # the headline go through printf, because sh's echo interprets backslash
+    # escapes, and a headline is free text.
+    takeaway_missed=""
+    takeaway_got=$(meta_now "$bead" gc.takeaway)
+    if [ "$takeaway_got" != "$text" ]; then
+        printf '%s\n' "$PROG: takeaway: gc.takeaway on $bead read back as '$takeaway_got', expected '$text' — repairing" >&2
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.takeaway=$text" --set-metadata "gc.takeaway_settled=$no_wait" >/dev/null 2>&1 || true
+        takeaway_got=$(meta_now "$bead" gc.takeaway)
+        if [ "$takeaway_got" = "$text" ]; then
+            echo "$PROG: takeaway: the headline repair landed on $bead" >&2
+        else
+            takeaway_missed=1
+            # The by-hand repair is pasted into a shell, so the headline is
+            # single-quoted, with each ' inside it written as '\''.
+            takeaway_arg=$(printf '%s' "gc.takeaway=$text" | sed "s/'/'\\\\''/g")
+            printf '%s\n' "$PROG: takeaway: $bead still reads gc.takeaway='$takeaway_got', not the headline this call wrote, so the board does not show it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata '$takeaway_arg' --set-metadata gc.takeaway_settled=$no_wait" >&2
+        fi
+    fi
     # A route that lands EMPTY is the worst outcome of all: the bead is open,
     # unassigned and routed to nobody, which no pool's exact-match query can
     # see. One `--set-metadata` pair in a multi-pair update can land
@@ -1391,6 +1424,11 @@ cmd_takeaway() {
     fi
     if [ -n "$assign" ] && [ -z "$release_park" ]; then
         echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        exit 4
+    fi
+    # Reported at its read-back above, with its repair. The exit stands in for
+    # the success line, which would say the headline is set.
+    if [ -n "$takeaway_missed" ]; then
         exit 4
     fi
     rel_note=""
