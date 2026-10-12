@@ -101,9 +101,30 @@ reports whether the `gh` it needs is present.
   session. Without it the clip is silent and captioned, and it still shows the
   change. `doctor/check-demo-toolchain` reports which parts of the capture
   toolchain resolve in this session.
-- `screenshot` and `repo-artifact`: this pack has no production path for either.
-  Record the modality you picked and approve with the note that it fits and was
-  not delivered.
+- `repo-artifact`: list the visuals the reviewed commit already carries.
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" candidates --base "origin/$BASE" --oid "$REVIEWED_OID" --anchor <anchor>
+  ```
+
+  Each line gives a reason and a path. `changed` is a visual the diff adds or
+  edits. `named` is one whose path appears in a line the diff adds or in the
+  anchor. `near` is one in a directory close to a changed file's, nearest
+  first. Exit 3 means the commit carries no such visual, so this modality does
+  not fit. Open an image candidate at `$REVIEW_WT/<path>` before you pick it.
+  A committed visual shows what its author recorded, not a run of the reviewed
+  commit. Pick one that matches what the diff does, because one that shows a
+  state the reviewed commit no longer produces would mislead the human.
+  Deliver the one you pick:
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --oid "$REVIEWED_OID" --subject <anchor>
+  ```
+
+  It attaches the file as the reviewed commit stores it, through
+  `demo-deliver.sh`.
+- `screenshot`: this pack has no production path for it. Record the modality
+  you picked and approve with the note that it fits and was not delivered.
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
