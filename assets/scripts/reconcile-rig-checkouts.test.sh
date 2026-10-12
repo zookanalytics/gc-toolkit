@@ -21,7 +21,9 @@
 # copy matches the remote fails the guard closed, so reset --hard cannot discard
 # the staged content; (l) a rig root parked off the default branch (HEAD on a
 # feature/integration branch ahead of origin) is surfaced and left untouched,
-# not silently counted advanced by a no-op fast-forward.
+# not silently counted advanced by a no-op fast-forward; (m) the reset heal
+# refuses when an untracked file sits on a path the remote tracks with other
+# content.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -450,6 +452,31 @@ eq "$(bead_for lambda)" "$LAMBDA_BEAD" "the same subject stays open — no fresh
 bash "$SCRIPT" >/dev/null
 eq "$(retract_count lambda)" "1" "the next patrol retries the retract on the still-open subject"
 eq "$(open_count lambda)" "0" "a successful retract finally closes the subject"
+
+rigs_json() { # names... -> the rig list holds the HQ root plus these rigs
+  local n
+  { printf '{"rigs":[\n  {"name":"loomington","path":"%s","hq":true}' "$TMP/hqrepo"
+    for n in "$@"; do printf ',\n  {"name":"%s","path":"%s"}' "$n" "$TMP/$n"; done
+    printf '\n]}\n'; } > "$TMP/rigs.json"
+}
+
+# rho: an already-upstream SHA churn whose rewritten origin also adds new.txt,
+# while the checkout holds an untracked new.txt with other content. reset --hard
+# would overwrite it, so the reset guard refuses and escalates.
+git init -q -b main "$TMP/rho.src"; commit "$TMP/rho.src" r1; commit "$TMP/rho.src" r2
+git clone -q --bare "$TMP/rho.src" "$TMP/rho.git"
+git clone -q "$TMP/rho.git" "$TMP/rho"                           # HEAD = r2 (pre-rewrite SHA)
+RHO_LOCAL="$(git -C "$TMP/rho" rev-parse HEAD)"
+git -C "$TMP/rho.src" commit -q --amend --no-edit --date "2020-01-01T00:00:00"   # churn r2's SHA
+echo theirs > "$TMP/rho.src/new.txt"; git -C "$TMP/rho.src" add new.txt; git -C "$TMP/rho.src" commit -qm r3
+git -C "$TMP/rho.src" push -qf "$TMP/rho.git" main
+echo mine > "$TMP/rho/new.txt"
+rigs_json rho
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/rho" rev-parse HEAD)" "$RHO_LOCAL" "an untracked file the reset would overwrite blocks the reset heal"
+eq "$(cat "$TMP/rho/new.txt")" "mine" "the untracked file the reset would overwrite is left untouched"
+eq "$(esc_count rho)" "1" "an untracked file the reset would overwrite escalates"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

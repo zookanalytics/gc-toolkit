@@ -34,10 +34,12 @@
 #   - git status --porcelain is readable (a failed read is not proof of a clean
 #     tree), and no dirty tracked path carries local-only content: its working
 #     tree differs from the remote, or its staged index matches neither the
-#     remote nor the committed HEAD.
-# It then resets --hard to the remote (untracked files are preserved) and closes
-# the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this and escalate
-# every divergence instead.
+#     remote nor the committed HEAD;
+#   - no untracked file sits on a path the remote tracks unless it already holds
+#     the remote's content, because reset --hard overwrites it.
+# It then resets --hard to the remote, which keeps every other untracked file,
+# and closes the divergence bead. Set RECONCILE_NO_AUTOHEAL=1 to disable this
+# and escalate every divergence instead.
 #
 # A genuine divergence — a unique local commit, or a tracked change not yet
 # upstream — fails that guard and takes the exception path: the checkout is
@@ -164,10 +166,10 @@ while IFS=$'\t' read -r name path; do
     # guard proves it: git cherry (patch-id) finds no unique local commit, no
     # merge commit is unique to local (git cherry ignores merges, so a local
     # merge's tree content is not provably upstream), the status read succeeds,
-    # and no dirty tracked path carries local-only content (a working tree that
+    # no dirty tracked path carries local-only content (a working tree that
     # differs from the remote, or a staged index matching neither remote nor
-    # HEAD). Untracked files are
-    # never touched by reset --hard. Anything the guard cannot prove — a real
+    # HEAD), and no untracked file on a path the remote tracks holds other
+    # content. Anything the guard cannot prove — a real
     # divergence, an unreadable status, a local merge — falls through to the
     # escalation path unchanged. RECONCILE_NO_AUTOHEAL=1 disables the heal.
     if [ -z "$parked" ] \
@@ -177,7 +179,7 @@ while IFS=$'\t' read -r name path; do
        && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
        && [ -z "$merges" ] \
        && status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null); then
-        unique_tracked=0
+        unique_local=0
         while IFS= read -r changed; do
             [ -n "$changed" ] || continue
             # reset --hard overwrites both the working tree and the staged index
@@ -189,13 +191,23 @@ while IFS=$'\t' read -r name path; do
             # HEAD and the remote) is discarded with no way back, even when an
             # upstream-matching worktree copy hides it from a diff against remote.
             if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
-                unique_tracked=$((unique_tracked + 1))
+                unique_local=$((unique_local + 1))
             elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null \
                  && ! git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
-                unique_tracked=$((unique_tracked + 1))
+                unique_local=$((unique_local + 1))
             fi
         done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
-        if [ "$unique_tracked" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
+        # reset --hard also writes every path the remote tracks, so an untracked
+        # file on one is overwritten: safe only when it already holds the
+        # remote's content. A name git quotes cannot be looked up, so it counts.
+        while IFS= read -r untracked; do
+            [ -n "$untracked" ] || continue
+            case "$untracked" in \"*) unique_local=$((unique_local + 1)); continue ;; esac
+            remote_blob=$(git -C "$path" rev-parse -q --verify "$remote:$untracked" 2>/dev/null) || continue
+            [ "$(git -C "$path" hash-object -- "$untracked" 2>/dev/null)" = "$remote_blob" ] \
+                || unique_local=$((unique_local + 1))
+        done < <(printf '%s\n' "$status_out" | sed -n 's/^?? //p')
+        if [ "$unique_local" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
             healed=$((healed + 1))
             bead=$(open_bead "$name")
             if [ -n "$bead" ]; then
