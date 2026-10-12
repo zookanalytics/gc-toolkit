@@ -375,7 +375,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept) and two read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |

@@ -37,7 +37,7 @@ Every other bead waits for placement. A bead held this way carries
 
 ## The writers that hold new work
 
-Three writers file or dispose new work, and each follows the rule.
+Each writer that files or disposes new work follows the rule.
 
 - **The first reaction** (`assets/scripts/first-reaction-dispose.sh`). It still
   reacts to every finding, because its card is the placement sitting's triage.
@@ -99,9 +99,10 @@ For each bead in the queue, the sitting does one of three things.
 
 - **Place it under an epic.** Give it the epic as its parent
   (`gc bd update <bead> --parent <epic>`), then route it to its pool
-  (`gc sling <rig>/<rig>.polecat <bead>`). A park on the epic holds it from then
-  on, through bd's parent-child cascade.
-- **Route it on its own.** Route it to its pool with no parent.
+  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
+  then on, through bd's parent-child cascade.
+- **Route it on its own.** Route it to its pool with the same sling, and give it
+  no parent.
 - **Close it**, when the work is not wanted.
 
 A placed bead leaves the queue as soon as it has a parent or a route. Clearing
