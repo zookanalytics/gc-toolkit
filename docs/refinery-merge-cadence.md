@@ -800,9 +800,11 @@ changes on those paths and fast-forwards, when each working copy is absent,
 committed, upstream or on a pushed branch. It pins the staged and working-tree
 state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
 a dirty path the fast-forward does not rewrite, such as local bd config, as it
-is. An untracked file on a path the fast-forward adds goes only when it already
-holds the incoming content. A diverged checkout resets to the remote when its
-content is provably upstream. Anything else files one idempotent visit per
+is. Untracked content in the way of the fast-forward goes only when it is a
+file that already holds the incoming bytes on its own path. A diverged checkout
+resets to the remote when its content is provably upstream, with
+`git reset --keep`, which refuses rather than deletes untracked content in its
+way. Anything else files one idempotent visit per
 blocked rig (via `escalate.sh`, carrying what blocked it and `git status`),
 which auto-closes once the rig fast-forwards cleanly. The 15-minute window is
 also the exposure behind component-model I9, watched by
