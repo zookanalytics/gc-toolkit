@@ -14,8 +14,8 @@ own. A blocker on an epic holds everything under the epic that has not started,
 and work already in flight finishes. This design does that with bd's own blocks
 edges, the parent-child cascade and bead priorities. It needs no gascity change.
 
-The operator steers with these `gc-helm.sh` verbs. Each takes any bead, and none
-has logic for epics alone.
+The operator steers with these `gc-helm.sh` verbs. Each verb that names a bead
+takes any bead, and none has logic for epics alone.
 
 ```
 gc-helm.sh park <bead-id> "<text>" [--body "<detail>"]
@@ -371,8 +371,8 @@ dropped, and its shift starts at 0 unless the writer that gives it something to
 follow sets one: `place --shift`, or a PR-finishing creator's -1. `bd create`
 files a bead at P2 unless the filer names another priority (beads
 `cmd/bd/create.go:923`), so a filed priority cannot tell a choice from the
-default. Read as a shift, the default would move every member of a P1 epic one
-level later.
+default. If the filed priority set the starting shift, every member of a P1 epic
+filed at the default would start one level later than its epic.
 
 **Moving a priority.** `gc-helm.sh priority <bead-id> <P0-P4>` sets the priority
 of a bead that follows nothing. `gc-helm.sh priority <bead-id> --shift <±n>` sets
@@ -622,13 +622,13 @@ choices. It associates only when exactly one open epic's contract covers the ite
 
 ## 6. A Checkpoint records the next priority
 
-A Checkpoint ruling of `continue` or `shift` names the epic's next priority, and
-whether the epic is parked. The sitting that records the ruling applies it with
-the moves before it ends: `gc-helm.sh priority` on the epic, and `gc-helm.sh park`
-on it or the close of its park gate. The ruling stamps `epic_ruling_evidence` with
-its visit, a field from the close-gate change (PR #977, tk-isd5sa). bd records who
-made each move and when (fact 8), and a park the ruling makes states the ruling in
-its gate's title.
+A Checkpoint's `epic_ruling` of `continue` or `shift` names the epic's next
+priority, and whether the epic is parked. The sitting that records the ruling
+applies it with the moves before it ends: `gc-helm.sh priority` on the epic, and
+`gc-helm.sh park` on it or the close of its park gate. The ruling stamps
+`epic_ruling_evidence` with its visit, a field from the close-gate change
+(PR #977, tk-isd5sa). bd records who made each move and when (fact 8), and a park
+the ruling makes states the ruling in its gate's title.
 
 A close ruling names no next priority. A parked epic's park is released before the
 epic closes, because its own edge to the gate is a live direct blocker, and bd
@@ -642,10 +642,10 @@ refuses a close with one (fact 5).
   conflicts, a child for a red required check (up to three attempts), and a
   comment rework. Each is routed directly.
 - `assets/scripts/pre-open-rebase.sh` makes a merge-in child before a PR exists.
-- `assets/scripts/rework-child.sh`, the one writer of a rework child, makes a
-  rework and slings it with mol-polecat-work. `signoff.sh` calls it when a review
-  requests changes, and `converse-rework.sh` calls it for an operator ruling on
-  an open PR.
+- `assets/scripts/rework-child.sh` makes the rework a review verdict or an
+  operator ruling demands, and slings it with mol-polecat-work. `signoff.sh` calls
+  it when a review requests changes, and `converse-rework.sh` calls it for an
+  operator ruling on an open PR.
 - `assets/scripts/gate-ensure.sh` dispatches the review beads, and the validation
   passes that `pr-facts.sh` and `signoff.sh` open.
 
