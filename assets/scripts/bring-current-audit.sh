@@ -7,12 +7,11 @@
 # what collided and why it chose what it chose, so it writes that down as it
 # resolves: one entry per conflicted file, and one per edit beyond the merge.
 # bring-current-guard.sh holds the hand-back to that coverage, stores the entries
-# on the anchor beside its own diff evidence, and routes the round to triage, or
-# rules it closed on an anchor that declares no triage lane.
+# on the anchor beside its own diff evidence, and routes the round to triage.
 # Every message about the round is rendered here from that stored record: the
-# triage verdict posted on the PR, the note on a dismissed approval, the visit
-# that re-asks for one, and the visit that asks for a decision the worker could
-# not make. None is composed from diff shapes alone.
+# triage verdict posted on the PR, the note on a dismissed approval, and the
+# visit that asks for a decision the worker could not make. None is composed
+# from diff shapes alone.
 #
 # AN ENTRY. metadata.conflict_audit on the bead the worker holds is a JSON array
 # of entries, one per path:
@@ -37,7 +36,7 @@
 #   bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...]
 #       --collided <text> --question <text>
 #   bring-current-audit.sh show (--bead <id> | --anchor <id>)
-#   bring-current-audit.sh render --anchor <id> --as comment|dismissal|visit [--logins <text>]
+#   bring-current-audit.sh render --anchor <id> --as comment|dismissal
 # add records or replaces the entry for <file>. show prints the bead's entries,
 # or the anchor's stored record, as JSON. render prints a message composed from
 # the anchor's record.
@@ -143,8 +142,6 @@ def headline:
     + (if $u > 0 then " No entry from the worker covers " + count($u; "item"; "items")
          + ", so only the evidence from git describes " + (if $u == 1 then "it" else "them" end) + "." else "" end);
 def lanes: ((.triage.reopen // []) + (.triage.add // [])) | unique;
-def by_guard: (.triage.by? // "") == "guard";
-def cap: if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end;
 def decision:
   if .triage == null then "Triage has not ruled on this round yet."
   else lanes as $l
@@ -160,48 +157,33 @@ def generated: [ .evidence[]? | select(.kind == "generated") | .path ] | unique;
 '
 
 # Print a message composed from a record. <as> is comment (markdown, the
-# triage verdict's round section), dismissal (one paragraph, the note on a
-# dismissed approval), or visit (the re-ask visit: a title line, then the body).
-bca_render_record() { # <record-json> <as> <pr-number> <pr-url> [logins]
-  local rec="$1" as="$2" num="${3:-}" url="${4:-}" logins="${5:-}"
-  printf '%s' "$rec" | jq -r --arg as "$as" --arg num "$num" --arg url "$url" \
-    --arg logins "$logins" --argjson max "$BCA_MAX_NOTE_ENTRIES" "$BCA_RENDER_DEF"'
+# triage verdict's round section) or dismissal (one paragraph, the note on a
+# dismissed approval).
+bca_render_record() { # <record-json> <as>
+  local rec="$1" as="$2"
+  printf '%s' "$rec" | jq -r --arg as "$as" --argjson max "$BCA_MAX_NOTE_ENTRIES" "$BCA_RENDER_DEF"'
     . as $r
     | if $as == "comment" then
         "**Bringing this branch current with \(.target // "the base")**\n\n"
         + headline + "\n\n"
-        + (if by_guard then "**Ruling:** " else "**Triage:** " end) + decision
+        + "**Triage:** " + decision
         + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
         + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n"))
         + (if (generated | length) > 0
            then "\n\nGenerated files the merge re-rendered, which need no entry: " + (generated | map("`" + . + "`") | joinand) + "."
            else "" end)
-      elif $as == "dismissal" then
+      else
         (entries | judgment_first) as $e
         | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) "
-          + (if by_guard then "changed code by hand that this approval did not see. " else "took judgment this approval did not see. " end)
+          + "took judgment this approval did not see. "
           + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" "))
           + (if ($e | length) > $max then " And \(($e | length) - $max) more." else "" end)
           + (unaccounted | if length > 0 then " No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end)
           + (if (.triage.reason // "") == "" then ""
-             elif by_guard then " " + (.triage.reason | clip(300) | sentence | cap)
              else " Triage: " + (.triage.reason | clip(300) | sentence) end)
-          + (if by_guard then "" else " The triage comment on this PR has the round in full." end)
+          + " The triage comment on this PR has the round in full."
           + " Please review the change and approve again."
-      else
-        (if by_guard then "PR#\($num) approval dismissed: bringing it current changed code by hand, and no triage lane weighs it\n"
-         else "PR#\($num) approval dismissed: triage ruled that bringing it current took judgment\n" end)
-        + "Bringing PR#\($num) (\($url)) current with \(.target // "the base") changed code the approval"
-        + (if $logins != "" then " from \($logins)" else "" end) + " did not see. "
-        + headline
-        + (if (.triage.reason // "") == "" then ""
-           elif by_guard then " " + (.triage.reason | sentence | cap)
-           else " Triage ruled: " + (.triage.reason | sentence) end) + "\n\n"
-        + "File by file:\n"
-        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
-           + (unaccounted | map("- " + bare_line)) | join("\n")) + "\n\n"
-        + "Your call: review the change on the PR and approve again to let it land, or say what to change. This visit holds the merge while it is open."
       end' 2>/dev/null
 }
 
@@ -227,7 +209,7 @@ bca_usage() {
   echo "usage: bring-current-audit.sh add --bead <id> --path <file> --collided <text> --resolution <text> --check <text> --rating routine|judgment" >&2
   echo "       bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...] --collided <text> --question <text>" >&2
   echo "       bring-current-audit.sh show (--bead <id> | --anchor <id>)" >&2
-  echo "       bring-current-audit.sh render --anchor <id> --as comment|dismissal|visit [--logins <text>]" >&2
+  echo "       bring-current-audit.sh render --anchor <id> --as comment|dismissal" >&2
   exit 2
 }
 
@@ -351,22 +333,20 @@ bca_cmd_show() {
 }
 
 bca_cmd_render() {
-  local anchor="" as="" logins="" row rec num url out
+  local anchor="" as="" row rec out
   while [ $# -gt 0 ]; do
     case "$1" in
       --anchor) anchor="${2:-}"; shift 2 ;;
       --as) as="${2:-}"; shift 2 ;;
-      --logins) logins="${2:-}"; shift 2 ;;
       *) bca_usage ;;
     esac
   done
   [ -n "$anchor" ] || bca_usage
-  case "$as" in comment|dismissal|visit) : ;; *) bca_usage ;; esac
+  case "$as" in comment|dismissal) : ;; *) bca_usage ;; esac
   row=$(bd_json show "$anchor")
   rec=$(bca_meta_json "$row" bring_current_record)
   [ -n "$rec" ] || { echo "bring-current-audit: $anchor carries no bring-current record" >&2; return 1; }
-  num=$(bca_meta "$row" pr_number); url=$(bca_meta "$row" pr_url)
-  out=$(bca_render_record "$rec" "$as" "$num" "$url" "$logins")
+  out=$(bca_render_record "$rec" "$as")
   [ -n "$out" ] || { echo "bring-current-audit: the record on $anchor could not be rendered" >&2; return 1; }
   printf '%s\n' "$out"
 }

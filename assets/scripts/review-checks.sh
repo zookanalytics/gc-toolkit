@@ -42,7 +42,7 @@
 # method states in prose, not a column here, so this parser reads no applies-when.
 # Callers: signoff.sh, skills/review-triage, pr-open.sh, merge.sh, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
-# bring-current-guard.sh, review-checks.test.sh.
+# review-checks.test.sh.
 # Exit: 0 ok · 1 no readable index or --check not declared (emit), or a --at
 # commit that cannot be read or a declared phase outside the ordered set
 # (resolve) · 2 usage.

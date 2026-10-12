@@ -653,13 +653,13 @@ fi
 **Conflicts: resolve, write the audit, then commit.** You are the only party
 that knows what collided and why you chose what you chose, so you write it
 down as you resolve. Every message a person later reads about this round is
-composed from your entries: the triage verdict on the PR, a dismissal note, a
-re-ask visit. This applies to the merge above and to any merge of the base you
-run later in this bead. For each file git could not merge, resolve it, stage
-it, and record one entry before you commit the merge. An edit beyond what the
-merge needed, such as a test repair a conflict forced, owes an entry too, and
-on a bead whose only job is the bring-current every file a commit of your own
-changes owes one:
+composed from your entries: the triage verdict on the PR and, when triage
+lifts the approval, the note on the dismissed approval. This applies to the
+merge above and to any merge of the base you run later in this bead. For each
+file git could not merge, resolve it, stage it, and record one entry before
+you commit the merge. An edit beyond what the merge needed, such as a test
+repair a conflict forced, owes an entry too, and on a bead whose only job is
+the bring-current every file a commit of your own changes owes one:
 ```bash
 # >>> bring-current-audit-entry
 BCA=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/bring-current-audit.sh" ] && { BCA="$c/assets/scripts/bring-current-audit.sh"; break; }; done
@@ -1493,11 +1493,10 @@ A conflicted round is handed off only when your audit has an entry for every
 item the guard names, and then the guard stores the audit with its diff
 evidence on the anchor and reopens triage, which rules from your entries on
 what else reopens and whether the approval still covers the merged code. On
-an anchor whose check_set declares no triage lane, the guard rules on the
-round itself: every lane the anchor declares runs again, and an approval given
-before the round is withdrawn. A guard that cannot finish hands nothing off:
-the bead stays open and still blocks the anchor, so nothing lands on a round
-nobody accounted for.
+an anchor whose check_set declares no triage lane, the guard adds triage to
+it, so triage rules on that round too. A guard that cannot finish hands
+nothing off: the bead stays open and still blocks the anchor, so nothing lands
+on a round nobody accounted for.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the

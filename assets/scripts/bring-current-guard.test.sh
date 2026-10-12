@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/bring-current-guard.sh, the guard that holds a
 # bring-current round to the worker's audit and routes a conflicted one to
-# triage, or rules it closed on an anchor that declares no triage lane.
+# triage.
 #
 # classify, over real git histories built here:
 #   clean: a merge of the base git made on its own; a generated-tier conflict;
@@ -25,16 +25,14 @@
 #   covered one stores the audit and evidence, reopens triage with the round's
 #   time, and supersedes the triage lane, reading GitHub not at all; a re-run is
 #   idempotent, and one after triage ruled reopens nothing; an anchor whose
-#   check_set declares no triage lane is ruled closed: every declared lane
-#   reopens and, where a PR stands, the approval given before the round is
-#   dismissed, visit first, while one given after it stands; with no lane
-#   declared nothing reopens and the approval still goes; a pre-open anchor
-#   withdraws nothing and reads no GitHub; a re-run carries out the recorded
-#   ruling; lanes that do not resolve, a failed supersede or a visit that does
-#   not land hands nothing off; a merge-only bead owes entries for its
-#   own commits; a pre-open-rebase child and a re-queued anchor are guarded; an
-#   earlier round awaiting triage rides into the next record, and a re-run keeps
-#   where it began; no stamp and nothing pushed is refused; the resume stamp
+#   check_set declares no triage lane gains triage, with a note, and its round
+#   goes to triage like any other, reopening no other lane, lifting no approval
+#   and filing no visit; a re-run adds triage once; the none opt-out and a
+#   pre-open anchor gain it too; a check_set that does not read back hands
+#   nothing off; a merge-only bead owes entries for its own commits; a
+#   pre-open-rebase child and a re-queued anchor are guarded; an earlier round
+#   awaiting triage rides into the next record, and a re-run keeps where it
+#   began; no stamp and nothing pushed is refused; the resume stamp
 #   marks the start; a start stamped with no scope owes no entries, and its
 #   round is recorded and routed all the same; the anchor resolves from the
 #   branch; a failed write or supersede exits 1.
@@ -42,13 +40,16 @@
 # decide: refuses with no conflicted round, a lane the anchor does not declare,
 #   or a round another review already ruled on; records the ruling, unions the
 #   reopened lanes, supersedes each, renders the round's account; a dismissal
-#   files the visit composed from the audit FIRST, then re-requests and
-#   dismisses with a note composed from it; it dismisses every standing
-#   approval given before the round, every one of an account that approved
-#   twice and one behind a later CHANGES_REQUESTED, re-requesting each account
-#   once; an approval given after the round stands; no approval dismisses
-#   nothing; a visit that does not land dismisses nothing; a retry carries out
-#   what was recorded.
+#   draws the lift line at the round's time FIRST and files no visit, then
+#   re-requests and dismisses with a note composed from the audit; it
+#   dismisses every standing approval given before the round, every one of an
+#   account that approved twice and one behind a later CHANGES_REQUESTED,
+#   re-requesting each account once; an approval given after the round stands;
+#   no approval dismisses nothing and still draws the line; a line that does
+#   not read back dismisses nothing; a dismissal GitHub refuses is noted on the
+#   anchor while the line holds the merge; a ruling that keeps the approval
+#   leaves the line where it was, a later lift moves it on, and it never moves
+#   back; a retry carries out what was recorded.
 # The resume block, extracted from mol-polecat-work, stamps the start and the
 # scope and clears the last round's audit before its merge, and the filers'
 # rejection prefixes it reads are pinned.
@@ -77,7 +78,7 @@ git config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
 git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$SD" "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh"
 SUT="$SD/bring-current-guard.sh"
 # escalate.sh's contract: ONE visit per subject+key, stamped so the caller can
 # find it again, logged to the gh log too so a case can read the order of the
@@ -458,95 +459,62 @@ has "$out" "triage has ruled on it" "…saying the round is settled"
 eq "$(rec_of AN1 | jq -r '.triage.review')" "RV9" "the ruling stays in the record"
 eq "$(cat "$STUB_RO_LOG")" "" "…and nothing is reopened again"
 
-echo "# guard: an anchor whose check_set declares no triage lane is ruled closed"
-# No review rules on the round there, and approval is a merge rule no check_set
-# opts out of, so every declared lane runs again and the approval given before
-# the round is dismissed, its re-ask visit first.
+echo "# guard: an anchor whose check_set declares no triage lane gains triage, and triage rules on its round"
+# The guard rules on no round. Triage is added to the check_set in the record's
+# write, with a note saying why, so gate-ensure dispatches it and the merge,
+# which waits on every declared lane, waits for its ruling.
 store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = "correctness, arch"')]"
 reviews "$(approve human1 501),$(approve human2 502 APPROVED 2099-01-01T00:00:00Z)"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
-has "$out" "declares no triage lane, so the guard ruled closed" "…saying why"
+has "$out" "check_set ('correctness, arch') declared no triage lane, so triage is added ('correctness,arch,triage') to decide what the round reopens" "…saying triage is added to rule on it"
+eq "$(meta AN1 check_set)" "correctness,arch,triage" "the check_set declares triage"
+has "$(notes AN1)" "check_set 'correctness, arch' declared no triage lane, so triage is added ('correctness,arch,triage')" "…and the anchor's notes say why it grew"
 REC=$(rec_of AN1)
 eq "$(printf '%s' "$REC" | jq -r '.class')" "conflicted" "the round is recorded"
-eq "$(printf '%s' "$REC" | jq -c '.triage | {by, reopen, add, dismiss}')" '{"by":"guard","reopen":["arch","correctness"],"add":[],"dismiss":true}' "…with the closed ruling where triage's goes"
-has "$(printf '%s' "$REC" | jq -r '.triage.reason')" "no triage lane is declared on this anchor (check_set 'correctness, arch')" "…and why it is closed"
-eq "$(meta AN1 bring_current_reopened)" "arch,correctness" "every declared lane is reopened"
-ROUND_AT=$(meta AN1 bring_current_round_at)
-case "$ROUND_AT" in 20*Z) ok "…stamped with the round's time" ;; *) bad "bring_current_round_at is '$ROUND_AT'" ;; esac
-has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane arch" "the arch lane's standing review is superseded"
-has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane correctness" "…and the correctness lane's"
-hasnt "$(cat "$STUB_RO_LOG")" "--lane triage" "…and no triage lane, which the anchor does not declare"
-has "$(cat "$STUB_ESC_LOG")" "--subject AN1 --key bring-current-dismissal.1.$MODIFY_H" "the re-ask visit is filed on the anchor, keyed to the round"
-has "$(cat "$STUB_ESC_LOG")" "PR#1 approval dismissed: bringing it current changed code by hand, and no triage lane weighs it" "…headed by what happened"
-V=$(visit_of)
-hasnt "$V" "<none>" "an open visit holds the merge"
-has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
-hasnt "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "…and the one given after it stands"
-order_ok "ESCALATE" "DISMISS" && ok "the visit is filed before the dismissal" || bad "the visit must be filed before the dismissal"
+eq "$(printf '%s' "$REC" | jq -r '.triage')" "null" "…with no ruling: triage makes it"
+eq "$(meta AN1 bring_current_reopened)" "triage" "triage is the lane the round reopens"
+case "$(meta AN1 bring_current_round_at)" in 20*Z) ok "…stamped with the round's time" ;; *) bad "bring_current_round_at is '$(meta AN1 bring_current_round_at)'" ;; esac
+has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane triage" "the triage lane is reopened"
+hasnt "$(cat "$STUB_RO_LOG")" "--lane arch" "…and no other lane: triage decides what else reopens"
+hasnt "$(cat "$STUB_RO_LOG")" "--lane correctness" "…correctness included"
+eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_ESC_LOG")" "" "no GitHub read, no approval lifted, and no visit"
+eq "$(meta AN1 bring_current_lifted_at)" "<absent>" "…and no lift line drawn"
 
-echo "# guard: a re-run of a hand-off the guard ruled closed carries out the recorded ruling"
-jq -c 'map(if .id == "AN1" then .metadata.bring_current_record = ((.metadata.bring_current_record | fromjson) | .triage.reopen = ["correctness"] | .triage.at = "kept" | tojson) else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-reviews "$(approve human1 501 DISMISSED),$(approve human2 502 APPROVED 2099-01-01T00:00:00Z)"
+echo "# guard: a re-run of that hand-off adds triage once"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
-eq "$(rec_of AN1 | jq -r '.triage.at')" "kept" "the recorded ruling is kept, not made again"
-has "$(cat "$STUB_RO_LOG")" "--lane correctness" "…and carried out as recorded"
-hasnt "$(cat "$STUB_RO_LOG")" "--lane arch" "…not as the check_set reads now"
-eq "$(meta AN1 bring_current_round_at)" "$ROUND_AT" "the round keeps its time"
-eq "$(meta AN1 bring_current_reopened)" "arch,correctness" "…and its reopened lanes, each once"
-eq "$(visit_of)" "$V" "the same visit stands"
-hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an approval already dismissed is not dismissed again"
+eq "$(meta AN1 check_set)" "correctness,arch,triage" "the check_set is unchanged"
+eq "$(notes AN1 | grep -c 'declared no triage lane')" "1" "…and the note is not written again"
 
-echo "# guard: with no lane declared, the closed ruling reopens nothing and still withdraws the approval"
+echo "# guard: the none opt-out gains triage too, and a pre-open anchor reads no GitHub"
 store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = "none"')]"
-reviews "$(approve human1 501)"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
-eq "$(rec_of AN1 | jq -c '.triage | {by, reopen, dismiss}')" '{"by":"guard","reopen":[],"dismiss":true}' "the ruling reopens nothing and withdraws the approval"
-eq "$(meta AN1 bring_current_reopened)" "<absent>" "no lane is recorded as reopened"
-case "$(meta AN1 bring_current_round_at)" in 20*Z) ok "…but the round's time is" ;; *) bad "bring_current_round_at is '$(meta AN1 bring_current_round_at)'" ;; esac
-eq "$(cat "$STUB_RO_LOG")" "" "nothing is superseded"
-has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
-
-echo "# guard: on a pre-open anchor the closed ruling reopens the declared lanes and reads no GitHub"
+eq "$(meta AN1 check_set)" "none,triage" "the opt-out keeps its token and gains triage, the one lane the resolver reads in it"
+has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane triage" "triage is reopened to rule"
 PRE_CHILD4=$(child MI4 "$(audit_meta "$(entry v.txt)")" "Merge main into polecat/x1: base moved, the branch no longer merges" \
   | jq -c 'del(.metadata.pr_number, .metadata.pr_url, .metadata.existing_pr)')
 store "[$PRE_CHILD4, $(anchorrow AN1 | jq -c '.metadata.merge_result = "pre_open_gate" | .metadata.check_set = "correctness" | del(.metadata.pr_number, .metadata.pr_url)')]"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
-eq "$rc" "0" "it exits 0"
-eq "$(rec_of AN1 | jq -c '.triage | {by, reopen, dismiss}')" '{"by":"guard","reopen":["correctness"],"dismiss":false}' "correctness runs again, and no approval stands to withdraw"
-has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane correctness" "…its standing review superseded"
-eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_ESC_LOG")" "" "no GitHub read and no visit"
+eq "$rc" "0" "on a pre-open anchor it exits 0"
+eq "$(meta AN1 check_set)" "correctness,triage" "…triage is added"
+eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_ESC_LOG")" "" "…and nothing reads GitHub or files a visit"
 
-echo "# guard: a closed ruling whose lanes do not resolve, whose supersede fails, or whose visit does not land hands nothing off"
+echo "# guard: a check_set that does not read back hands nothing off"
 store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = "correctness"')]"
-reviews "$(approve human1 501)"
-cp "$SD/review-checks.sh" "$TMP/review-checks.real"
-printf '#!/usr/bin/env bash\nexit 1\n' > "$SD/review-checks.sh"
 fresh
-out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
-cp "$TMP/review-checks.real" "$SD/review-checks.sh"
-eq "$rc" "1" "lanes that do not resolve exit 1"
-has "$out" "could not be resolved" "…saying so"
-eq "$(rec_of AN1)" "null" "…and nothing is recorded"
-eq "$(cat "$STUB_RO_LOG")$(cat "$STUB_GH_LOG")" "" "…reopened or dismissed"
-fresh
-out=$(STUB_RO_RC=2 guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
-eq "$rc" "1" "a supersede that fails exits 1, so the hand-off retries"
-hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…dismissing nothing"
-fresh
-out=$(STUB_ESC_RC=1 guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
-eq "$rc" "1" "a re-ask visit that does not land exits 1"
-hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…dismissing nothing"
+out=$(STUB_DROP_KEYS="AN1:check_set" guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
+eq "$rc" "1" "it exits 1, so the hand-off retries"
+eq "$(cat "$STUB_RO_LOG")" "" "…before the triage lane loses its backing"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "the retry that lands exits 0"
-has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "…and carries the ruling out"
+eq "$(meta AN1 check_set)" "correctness,triage" "…with triage declared"
 
 echo "# guard: a failed record write or supersede hands nothing off"
 store "[$(child MI5 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1)]"
@@ -712,21 +680,16 @@ eq "$rc" "0" "a retry by the same review exits 0"
 has "$(cat "$STUB_RO_LOG")" "--lane correctness" "…and carries out what was recorded, not the new flags"
 eq "$(rec_of AN1 | jq -r '.triage.reason')" "the merged default changes behaviour" "…leaving the ruling as recorded"
 
-echo "# decide: a dismissal files the visit composed from the audit first, then re-requests and dismisses"
+echo "# decide: a dismissal lifts the approval at the round's time first, files no visit, then re-requests and dismisses"
 store "[$(round_anchor)]"
 reviews "$(approve human1 501),$(approve human2 502),$(approve gc-city-bot 503)"
 fresh
 out=$(decide --anchor AN1 --review-bead RV1 --reopen correctness --dismiss-approval --reason "the merge chose the branch value over main's new default"); rc=$?
-eq "$rc" "0" "it exits 0 once the visit holds the merge"
-has "$(cat "$STUB_ESC_LOG")" "--subject AN1 --key bring-current-dismissal.1.$MODIFY_H" "the visit is filed on the anchor, keyed to the round"
-has "$(cat "$STUB_ESC_LOG")" "PR#1 approval dismissed: triage ruled that bringing it current took judgment" "…headed by what happened"
-has "$(cat "$STUB_ESC_LOG")" "the approval from human1 and human2 did not see" "…naming the approvers"
-has "$(cat "$STUB_ESC_LOG")" "Collided: main set x to 3 for the new default" "…telling what collided, from the audit"
-has "$(cat "$STUB_ESC_LOG")" "Triage ruled: the merge chose the branch value over main's new default." "…and why triage dismissed"
-has "$(cat "$STUB_ESC_LOG")" "Your call: review the change on the PR and approve again" "…and what the operator decides"
-V=$(visit_of)
-hasnt "$V" "<none>" "an open visit stands"
-eq "$(meta "$V" 'gc.continuation_group')" "AN1" "…on the anchor, so it holds the anchor's merge"
+eq "$rc" "0" "it exits 0"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "the lift line is the round's time"
+has "$out" "the approval on PR#1 is lifted at 2026-10-01T00:00:00Z: the approvals from human1 and human2 dismissed, and each approver asked to review again" "…and the outcome says so"
+eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
+eq "$(visit_of)" "<none>" "…and none stands to hold the merge"
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=human1" "human1 is re-requested"
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=human2" "…and human2"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "human1's approval is dismissed"
@@ -734,8 +697,8 @@ has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/502/d
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/503/dismissals" "the city's own approval is never touched"
 has "$(cat "$STUB_GH_LOG")" "v.txt: kept 2 because the feature reads it." "the dismissal note is composed from the audit"
 has "$(cat "$STUB_GH_LOG")" "Triage: the merge chose the branch value" "…and carries triage's reason"
-order_ok "ESCALATE" "DISMISS" && ok "the visit is filed before any dismissal" || bad "the visit must be filed before any dismissal"
-order_ok "requested_reviewers" "reviews/501/dismissals" && ok "…and the re-request comes before the dismissal" || bad "the re-request must come before the dismissal"
+has "$(cat "$STUB_GH_LOG")" "Please review the change and approve again." "…and asks for a fresh approval"
+order_ok "requested_reviewers" "reviews/501/dismissals" && ok "the re-request comes before the dismissal" || bad "the re-request must come before the dismissal"
 eq "$(rec_of AN1 | jq -r '.triage.dismiss')" "true" "the ruling records the dismissal"
 
 echo "# decide: an approval given after the round saw the merged code, and stands"
@@ -747,13 +710,14 @@ eq "$rc" "0" "it exits 0"
 has "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "the approval from before the round is dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "…and the one given after it stands"
 hasnt "$(cat "$STUB_GH_LOG")" "reviewers[]=human1" "…its approver is not re-requested"
-has "$(cat "$STUB_ESC_LOG")" "the approval from human2 did not see" "…and the visit names only the approval it dismisses"
+has "$out" "the approval from human2 dismissed" "…and the outcome names only the approval it dismisses"
 store "[$(round_anchor)]"
 reviews "$(approve human1 501 APPROVED 2026-10-02T00:00:00Z)"
 fresh
 out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
 eq "$rc" "0" "with every approval given after the round it exits 0"
 has "$out" "every standing approval was given after the round" "…saying so"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "…with the line drawn all the same"
 eq "$(cat "$STUB_ESC_LOG")" "" "…filing no visit"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and dismissing nothing"
 
@@ -765,7 +729,7 @@ store "[$(round_anchor)]"
 reviews "$(approve human1 501),$(approve human1 504),$(approve human3 505),$(approve human3 506 CHANGES_REQUESTED)"
 fresh
 out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
-eq "$rc" "0" "it exits 0 once the visit holds the merge"
+eq "$rc" "0" "it exits 0"
 has "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "an account's older approval is dismissed"
 has "$(cat "$STUB_GH_LOG")" "reviews/504/dismissals" "…and its newer one"
 has "$(cat "$STUB_GH_LOG")" "reviews/505/dismissals" "an approval behind its author's later CHANGES_REQUESTED is dismissed too"
@@ -774,30 +738,66 @@ eq "$(grep -c 'reviewers\[\]=human1' "$STUB_GH_LOG")" "1" "an account that appro
 order_ok "reviewers\[\]=human1" "reviews/501/dismissals" && ok "…before its approvals are dismissed" || bad "the re-request must come before the dismissals"
 has "$out" "the approvals from human1 and human3 dismissed" "the outcome names each account once"
 
-echo "# decide: no standing approval dismisses nothing; a visit that does not land dismisses nothing"
+echo "# decide: no standing approval dismisses nothing, and a line that does not read back dismisses nothing"
 store "[$(round_anchor)]"
 reviews "$(approve gc-city-bot 503)"
 fresh
 out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
 eq "$rc" "0" "it exits 0"
 has "$out" "no approval stands to dismiss" "the city's own approval is no approval"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "…and the line is drawn for any approval to come"
 eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
 store "[$(round_anchor)]"
 reviews "$(approve human1 501)"
 fresh
-out=$(STUB_ESC_RC=1 decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
-eq "$rc" "2" "a visit that does not land exits 2, so the verdict call retries"
+out=$(STUB_DROP_KEYS="AN1:bring_current_lifted_at" decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$rc" "2" "a lift line that does not read back exits 2, so the verdict call retries"
+has "$out" "did not read back" "…saying why"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and nothing is dismissed"
-store "[$(round_anchor)]"
-fresh
-out=$(STUB_DISMISS_RC=1 decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
-eq "$rc" "0" "a dismissal that does not land exits 0: the visit holds the merge"
-has "$(notes "$(visit_of)")" "the approval from human1 (review 501) could not be dismissed" "…and the visit carries the failure"
+hasnt "$(cat "$STUB_GH_LOG")" "requested_reviewers" "…or re-requested"
 store "[$(round_anchor)]"
 fresh
 out=$(STUB_SELF_LOGIN="" decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
 eq "$rc" "2" "an unresolved acting login exits 2"
-eq "$(cat "$STUB_ESC_LOG")" "" "…filing no visit"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…dismissing nothing"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and filing no visit"
+
+echo "# decide: a dismissal GitHub refuses leaves the line to hold the merge, noted on the anchor"
+store "[$(round_anchor)]"
+reviews "$(approve human1 501)"
+fresh
+out=$(STUB_DISMISS_RC=1 decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$rc" "0" "it exits 0: the approval rule no longer counts the approval"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "the line is drawn"
+has "$(notes AN1)" "the approval from human1 (review 501) could not be dismissed" "the anchor's notes carry the failure"
+has "$(notes AN1)" "The approval rule counts no approval submitted at or before 2026-10-01T00:00:00Z" "…and what still holds the merge"
+eq "$(cat "$STUB_ESC_LOG")" "" "…with no visit"
+
+echo "# decide: a later ruling that keeps the approval leaves the line where it was, and a later lift moves it on"
+store "[$(round_anchor | jq -c '.metadata.bring_current_lifted_at = "2026-09-01T00:00:00Z"')]"
+reviews "$(approve human1 501 APPROVED 2026-09-15T00:00:00Z)"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen correctness --reason "routine"); rc=$?
+eq "$rc" "0" "a ruling that keeps the approval exits 0"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-09-01T00:00:00Z" "…and the line stays at the earlier lift"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…dismissing nothing"
+store "[$(round_anchor | jq -c '.metadata.bring_current_lifted_at = "2026-09-01T00:00:00Z"')]"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "a later ruling that lifts the approval moves the line to its round"
+has "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "…and dismisses the approval given between the two"
+
+echo "# decide: the line never moves back, and a stored line that is not an instant is replaced"
+store "[$(round_anchor | jq -c '.metadata.bring_current_lifted_at = "2026-11-01T00:00:00Z"')]"
+reviews "$(approve human1 501 APPROVED 2026-10-15T00:00:00Z)"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$(meta AN1 bring_current_lifted_at)" "2026-11-01T00:00:00Z" "a line later than the round is kept"
+has "$(cat "$STUB_GH_LOG")" "reviews/501/dismissals" "…and an approval at or before it is dismissed"
+store "[$(round_anchor | jq -c '.metadata.bring_current_lifted_at = "garbage"')]"
+fresh
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --dismiss-approval --reason "judgment"); rc=$?
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "a stored line that is not an instant gives way to the round's time"
 
 # --- the resume block -------------------------------------------------------------
 echo "# the filers' rejection prefixes are the ones the resume block reads as merge-only"

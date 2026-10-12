@@ -232,10 +232,14 @@ nor vetoes, and it does not hide its author's older approval. A small fix after
 an approval lands on it. An outside approval is dismissed when the code that
 would land is not the code the approver saw: by `bring-current-guard.sh` when
 the ruling on a conflicted [bring-current round](#bringing-a-branch-current)
-withdraws it, and by `approval-withdraw.sh` when the validator rules a fresh
+lifts it, and by `approval-withdraw.sh` when the validator rules a fresh
 whole-diff review warranted. Each dismisses every approval an account has not
 had dismissed (the guard, every one given before the round), not only its
-latest, because an older approval would otherwise count again. No
+latest, because an older approval would otherwise count again. A ruling that
+lifts the approval also draws a line on the anchor, `bring_current_lifted_at`,
+at the round's time, and no approval submitted at or before it counts, so a
+dismissal GitHub refuses cannot land the PR and an approval given after the
+round lands it. No
 `check.approval` marker and no `check_set` token arms it or opts out, and GitHub
 branch protection is an extra layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
@@ -360,9 +364,10 @@ than silently releasing a park a human is relying on.
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
 an unnormalized anchor holds); every check named in `check_set` reads `green`; a
-latest APPROVED review from a non-city account, given at any commit and not
-dismissed since, with no standing CHANGES_REQUESTED (the universal approval
-rule); no unclosed rework or review
+latest APPROVED review from a non-city account, given at any commit, not
+dismissed since and not given at or before the anchor's
+`bring_current_lifted_at`, with no standing CHANGES_REQUESTED (the universal
+approval rule); no unclosed rework or review
 child; PR base equals `merged_target`; GitHub reports CLEAN; no holds
 (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
@@ -706,8 +711,7 @@ review's result set.
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
   The child's handoff runs `bring-current-guard.sh`, which holds the round to
-  the worker's audit. A round that conflicted goes to triage, or, on an anchor
-  that declares no triage lane, the guard rules on it closed
+  the worker's audit. A round that conflicted goes to triage
   ([Bringing a branch current](#bringing-a-branch-current)).
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
@@ -757,9 +761,8 @@ review's result set.
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator or an operator ruling makes, or the ruling on a bring-current
-  round that conflicted (triage's, or the guard's closed ruling), not a trigger
-  a push pulls.
+  the validator or an operator ruling makes, or triage's ruling on a
+  bring-current round that conflicted, not a trigger a push pulls.
   gate-ensure holds dispatch rather than pouring a second review while an open
   rework child is already in flight for the lane — a `blocks`-dep bead on the
   anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
@@ -808,7 +811,11 @@ review to keep current (its anchor is gating, or a PR stands on it):
   `bring_current_record` with the guard's evidence beside each entry (what git's
   replay of the conflict shows the resolution kept), and the triage lane is
   reopened: it is added to `bring_current_reopened` with the round's time,
-  `bring_current_round_at`, and its standing review is superseded.
+  `bring_current_round_at`, and its standing review is superseded. An anchor
+  whose `check_set` declares no triage lane (`correctness` alone, say, or the
+  `none` opt-out) gains `triage` in the same write, with a note saying why, so
+  triage rules on every conflicted round and the merge, which waits on every
+  declared lane, waits for that ruling. The guard rules on no round itself.
 
 Generated renders (linguist-generated) owe no entry. A hand-off with no
 `bring_current_from` stamp that pushed nothing past the origin head it started
@@ -824,36 +831,31 @@ verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
 [--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
 that run again on the merged code (any the anchor declares, and any it adds with
 `--add-gates`); and whether the human approval still covers what would land.
-`bring-current-guard.sh decide` records the ruling in the anchor's record,
-supersedes each reopened lane, and on a dismissal files the re-ask visit first,
-then re-requests and dismisses each standing approval given before the round;
-one submitted after `bring_current_round_at` saw the merged code and stands. A
-lane in `bring_current_reopened` is backed by a GitHub approval only when the
-approval was submitted after `bring_current_round_at` (`lane-state.sh`), so a
-standing approval neither lets the merge skip a reopened lane nor keeps its
-review from being dispatched. A routine round can therefore keep the approval
-while its lanes re-run, and material judgment removes it.
-
-**With no triage lane, the guard rules closed.** An anchor whose `check_set`
-declares no triage lane (`correctness` alone, say, or the `none` opt-out) has no
-review to rule on the round, and approval is a merge rule no `check_set` opts
-out of. So the guard rules on the round itself and assumes the worst: every lane
-the anchor declares runs again on the merged code (the lanes `review-checks.sh`
-resolves for the merge, none for `none`), and where a PR stands, each approval
-given before the round is dismissed the way a triage dismissal is, re-ask visit
-first. The ruling is stored in the record where triage's goes, marked
-`by: guard`, so gate-ensure and `signoff.sh` read the round as ruled, and a
-re-run of the hand-off carries it out again. The lanes it reopens are added to
-`bring_current_reopened` with the round's time, so `lane-state.sh` lets no
-approval given before the round back them. A person who adds the triage lane
-to the anchor's `check_set` gives the next round to triage.
+`bring-current-guard.sh decide` records the ruling in the anchor's record and
+supersedes each reopened lane. A ruling that lifts the approval first draws the
+lift line: the round's time is stored as `bring_current_lifted_at` and read
+back, and from then on the approval rule counts no approval submitted at or
+before it. Each approver is then re-requested and each standing approval given
+before the round is dismissed; one submitted after the round saw the merged
+code and stands. When GitHub refuses a dismissal, the line still holds the
+merge, the failure is noted on the anchor, and an approval given after the
+round lands the PR with nothing else to clear. A later round whose ruling keeps
+the approval leaves the line where it was. A lane in `bring_current_reopened`
+is backed by a GitHub approval only when the approval was submitted after
+`bring_current_round_at` (`lane-state.sh`), so a standing approval neither lets
+the merge skip a reopened lane nor keeps its review from being dispatched. A
+routine round can therefore keep the approval while its lanes re-run, and
+material judgment removes it.
 
 **Every message is composed from the audit.** The round section that opens
-triage's posted verdict, the dismissal note and the re-ask visit render from
-the stored record with `bring-current-audit.sh`: a headline of what the round
+triage's posted verdict and the note on a dismissed approval render from the
+stored record with `bring-current-audit.sh`: a headline of what the round
 needed, then per entry what collided, what was decided and why, and what to
-check. An item no entry covers is listed with the guard's evidence alone. The
-question visit renders from the worker's entries so far and its question.
+check. An item no entry covers is listed with the guard's evidence alone. A
+lifted approval files no visit: the re-request, the dismissal note and the
+posted verdict are what a person reads. The one visit a round files is the
+question the worker could not resolve, rendered from its entries so far and
+its question.
 
 What no guard reaches: the refinery's own prepare merge, which aborts on any
 conflict and so only ever pushes git's own result; and a merge the worker ran

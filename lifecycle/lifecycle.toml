@@ -186,6 +186,9 @@ writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.s
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
+# Triage widens it (signoff.sh --add-gates), and bring-current-guard.sh adds
+# triage to a set that lacks it when a bring-current round conflicts, so triage
+# rules on every such round.
 check_set_default = "correctness,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
@@ -199,10 +202,12 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # standing across later pushes until it is dismissed, with a standing
 # CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
 # before each reviewer's latest is taken, so it neither approves nor vetoes, and
-# it does not hide its author's older approval. No check.approval marker and no
-# check_set token arm or opt out of it; GitHub branch protection is an extra
-# layer, not the authority. Declaration only, like the rest of this section (the
-# rule lives in merge.sh).
+# it does not hide its author's older approval. Once a ruling on a bring-current
+# round lifts the approval, no approval submitted at or before the anchor's
+# bring_current_lifted_at counts, dismissed or not. No check.approval marker
+# and no check_set token arm or opt out of it; GitHub branch protection is an
+# extra layer, not the authority. Declaration only, like the rest of this
+# section (the rule lives in merge.sh).
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -448,6 +453,7 @@ keys = [
   "opened_as_draft", "draft_readied",
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
+  "bring_current_lifted_at",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -610,18 +616,28 @@ keys = [
 # bring_current_record — the anchor's record of its latest bring-current round
 #   (bring-current-guard.sh guard): the head, the start, the target, the class
 #   (clean or conflicted), the guard's evidence per item, the worker's audit,
-#   and the round's ruling once made: triage's (bring-current-guard.sh decide,
-#   run by signoff.sh), or the guard's closed ruling, marked by=guard, on an
-#   anchor whose check_set declares no triage lane. A conflicted round no
-#   ruling covers yet is carried into the next round's record. Every message
-#   about a round renders from it. A JSON object, overwritten each round.
+#   and triage's ruling once made (bring-current-guard.sh decide, run by
+#   signoff.sh). A conflicted round no ruling covers yet is carried into the
+#   next round's record. Every message about a round renders from it. A JSON
+#   object, overwritten each round.
 # bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
-#   triage, written by the guard; the lanes triage's rulings reopened or added;
-#   and every lane a closed ruling reopened. lane-state.sh lets no GitHub
-#   approval submitted before bring_current_round_at back one of these lanes.
-#   A comma list that only grows.
+#   triage, written by the guard, and the lanes triage's rulings reopened or
+#   added. lane-state.sh lets no GitHub approval submitted before
+#   bring_current_round_at back one of these lanes. A comma list that only
+#   grows.
 # bring_current_round_at — when the latest conflicted round was recorded (UTC,
 #   ISO 8601), written by the guard with that round's record.
+# bring_current_lifted_at — the round time of the latest conflicted round whose
+#   ruling lifted the human approval (UTC, YYYY-MM-DDTHH:MM:SSZ; the ruling's
+#   own time when the round recorded none). Written by bring-current-guard.sh
+#   decide once triage's ruling to lift the approval is recorded, and read back
+#   before any approval is dismissed; it never moves back. The approval rule
+#   (review-verdict.sh) counts no approval submitted at or before it, in
+#   merge.sh's gate and visit order and in pr-facts.sh's conflict arm, so an
+#   approval GitHub would not let the guard dismiss still lands nothing, and
+#   one submitted after it lands the PR. A later round whose ruling keeps the
+#   approval leaves it as it is. Absent means no ruling lifted the approval.
+#   Never cleared.
 
 [metadata.gates]
 keys = [

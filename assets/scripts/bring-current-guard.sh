@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # bring-current-guard — holds a bring-current to the worker's audit of it, and
-# routes a conflicted one to triage, or rules it closed on an anchor that
-# declares no triage lane, so no review covers code it never saw.
+# routes a conflicted one to triage, so no review covers code it never saw.
 #
 # Bringing a branch current merges its base in. Run at every hand-off
 # (submit-and-exit in formulas/mol-polecat-work.toml, right after the push),
@@ -36,19 +35,20 @@
 #   step asks for no audit, and the submit step poured with it drains on any
 #   refusal, so a refusal would only re-offer the same hand-off. A covered
 #   round, or one that owes no entries, is stored on the anchor with the
-#   evidence, and routed to triage: the triage lane is
-#   superseded, so gate-ensure.sh dispatches it again, and triage is added to
-#   the lanes this anchor's rounds reopened (bring_current_reopened) with the
-#   round's time (bring_current_round_at). lane-state.sh lets no approval given
-#   before that time vouch for a reopened lane, so a standing approval neither
-#   lets the merge skip triage nor keeps triage from being dispatched. An anchor
-#   whose check_set declares no triage lane gets the CLOSED RULING below
-#   instead.
+#   evidence, and routed to triage: the triage lane is superseded, so
+#   gate-ensure.sh dispatches it again, and triage is added to the lanes this
+#   anchor's rounds reopened (bring_current_reopened) with the round's time
+#   (bring_current_round_at). lane-state.sh lets no approval given before that
+#   time vouch for a reopened lane, so a standing approval neither lets the
+#   merge skip triage nor keeps triage from being dispatched. An anchor whose
+#   check_set declares no triage lane (correctness alone, say, or the none
+#   opt-out) gains triage in the same write, with a note saying why, so triage
+#   rules on its round as on every other and the merge waits for that ruling.
 #
-# The guard weighs no round, and the worker's rating of an entry gates
-# nothing. Triage decides what the round reopens, and records it through
-# signoff.sh, which runs `decide` here: lanes to run again, and whether the
-# human approval is dismissed.
+# The guard weighs no round and rules on none, and the worker's rating of an
+# entry gates nothing. Triage decides what the round reopens, and records it
+# through signoff.sh, which runs `decide` here: lanes to run again, and whether
+# the human approval is lifted.
 #
 # EVIDENCE. Each conflicted file is replayed with git's own merge (diff3, so
 # each hunk shows what the merge base had there) and its resolution compared:
@@ -65,29 +65,22 @@
 # DECIDE. `decide` records triage's ruling in the anchor's record, adds the
 # lanes it reopens to bring_current_reopened, supersedes each reopened lane's
 # standing review so gate-ensure.sh dispatches it again, and, when triage rules
-# the approval no longer covers what would land, dismisses it. The visit that
-# re-asks for the review is filed and read back first, so no dismissal strands
-# a PR without a signal; each approving account is then re-requested and every
-# approval it has standing is dismissed, the order pr-facts.sh uses when it
-# clears a human review. An account that approved twice before the round loses
-# both approvals, because a dismissed review drops out of the approval rule and
-# the older approval would count again. An approval submitted after
-# bring_current_round_at saw the merged code, so it stands, the same line
-# lane-state.sh draws. A dismissal that does not land is noted on the visit,
-# which still holds the merge. The visit, the dismissal note and the round
-# section of triage's posted verdict are all rendered from the stored record.
-#
-# CLOSED RULING. A conflicted round on an anchor whose check_set declares no
-# triage lane (correctness alone, say, or the none opt-out) has no review to
-# rule on it, and approval is a merge rule no check_set opts out of. So the
-# guard rules on the round itself and assumes the worst: every lane the anchor
-# declares runs again on the merged code (the lanes review-checks.sh resolves
-# for the merge, none for the none opt-out), and where a PR stands the
-# approvals given before the round are dismissed the way `decide` dismisses
-# them, re-ask visit first. The ruling is stored in the record where triage's
-# goes, marked `by: guard`, so every reader treats the round as ruled, and a
-# re-run of the same hand-off carries it out again. A person who wants triage
-# to rule instead adds the triage lane to the anchor's check_set.
+# the approval no longer covers what would land, lifts it. The lift line is
+# drawn first: the round's time is stored as bring_current_lifted_at and read
+# back, and from then on the approval rule (review-verdict.sh) counts no
+# approval submitted at or before it, so the merge waits for a new approval
+# whether or not GitHub lets the dismissal land. Each approving account is then
+# re-requested and every approval it has standing at or before the line is
+# dismissed, the order pr-facts.sh uses when it clears a human review. An
+# account that approved twice before the round loses both approvals, because a
+# dismissed review drops out of the approval rule and the older approval would
+# count again. An approval submitted after the round saw the merged code, so it
+# stands, the same line lane-state.sh draws with bring_current_round_at. A later
+# round whose ruling keeps the approval leaves the line where it was. The signal
+# a person gets is the re-request, the dismissal note and the round section of
+# triage's posted verdict, all rendered from the stored record, and a write
+# GitHub refuses is noted on the anchor. A visit is filed only for a conflict
+# the worker could not resolve (bring-current-audit.sh ask).
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]
@@ -104,7 +97,7 @@
 # audit covers it. classify: prints none, clean, conflicted or unreadable, then
 # one evidence line per item. All three read the git repository of the working
 # directory.
-# Exit: 0 nothing owed, or the round recorded (and routed, or ruled closed) ·
+# Exit: 0 nothing owed, or the round recorded (and routed to triage) ·
 # 1 a read or a write failed, so nothing was handed off and the caller retries ·
 # 2 usage · 3 the audit does not cover the round, or nothing records where it
 # began: the worker completes it and re-runs
@@ -119,18 +112,15 @@ PROG="bring-current-guard"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
 REVIEW_OUTCOME="${GC_REVIEW_OUTCOME_TOOL:-$SCRIPTS_DIR/review-outcome.sh}"
-# The one resolver of which check_set tokens are lanes: the closed ruling reopens
-# the lanes it names for the merge.
-REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
 # The audit's reads and every rendering of a round come from one place.
 # shellcheck source=bring-current-audit.sh
 . "$SCRIPTS_DIR/bring-current-audit.sh" || { echo "$PROG: cannot source bring-current-audit.sh beside this script" >&2; exit 2; }
 # The approval rule merge.sh lands on: standing_approvals($self) is every
-# approval not yet dismissed from an account other than the city's.
+# approval not yet dismissed from an account other than the city's, and the
+# lift line this script draws is the one review_verdict($self; $lifted) reads.
 # shellcheck source=review-verdict.sh
 . "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
 # The PR and approval naming the two approval dismissers share (pr_coords,
@@ -138,7 +128,6 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 # shellcheck source=review-dismissal.sh
 . "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 
-LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 TAB=$(printf '\t')
 TRIAGE_LANE="triage"
 
@@ -569,7 +558,7 @@ cmd_coverage() {
 
 # --- guard ---------------------------------------------------------------------
 cmd_guard() {
-  local bead="" to="" from_arg="" rc audit missing="" ev_json existing same_round triage_prev round_at prior record cs reopened got
+  local bead="" to="" from_arg="" rc audit missing="" ev_json existing same_round triage_prev round_at prior record cs cs_tokens newcs writes reopened got
   while [ $# -gt 0 ]; do
     case "$1" in
       --bead) bead="${2:-}"; shift 2 ;;
@@ -641,13 +630,7 @@ cmd_guard() {
     return 0
   fi
 
-  # A ruling the guard made itself belongs to a hand-off that is being re-run,
-  # so it is carried out again. Triage's ruling is carried out by the verdict
-  # that recorded it.
-  if [ "$(printf '%s' "$triage_prev" | jq -r '.by? // ""' 2>/dev/null)" = "guard" ]; then
-    closed_ruling "$record" "$round_at"
-    return $?
-  fi
+  # Triage's ruling is carried out by the verdict that recorded it.
   if [ "$triage_prev" != "null" ]; then
     gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
     got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
@@ -657,24 +640,32 @@ cmd_guard() {
   fi
 
   # An empty check_set is stamped with the default, which declares triage. A
-  # set that declares no triage lane has no review to rule on the round.
-  cs=$(bca_meta "$AROW" check_set | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
-  if [ -n "$cs" ] && ! grep -qx -- "$TRIAGE_LANE" <<< "$cs"; then
-    closed_ruling "$record" "$round_at"
-    return $?
+  # set that declares no triage lane gains it in the record's write, so triage
+  # rules on this round as on every other, and the merge, which waits on every
+  # declared lane, waits for that ruling. The note says why the set grew.
+  cs=$(bca_meta "$AROW" check_set)
+  cs_tokens=$(printf '%s' "$cs" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
+  newcs=""
+  if [ -n "$cs_tokens" ] && ! grep -qx -- "$TRIAGE_LANE" <<< "$cs_tokens"; then
+    newcs=$(printf '%s\n%s\n' "$cs_tokens" "$TRIAGE_LANE" | awk '!seen[$0]++' | paste -sd, -)
   fi
   reopened=$(printf '%s,%s' "$(bca_meta "$AROW" bring_current_reopened)" "$TRIAGE_LANE" \
     | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
   [ -n "$round_at" ] || round_at=$(now)
-  # The reopened lanes and the round's time land with the record, before the
-  # triage lane loses its backing: from the moment the backing goes, no approval
-  # older than the round vouches for the lane, so the merge cannot slip past it.
-  gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" \
-    --set-metadata "bring_current_reopened=$reopened" --set-metadata "bring_current_round_at=$round_at" >/dev/null 2>&1 || true
+  # The reopened lanes, the round's time and a widened check_set land with the
+  # record, before the triage lane loses its backing: from the moment the
+  # backing goes, no approval older than the round vouches for the lane, so the
+  # merge cannot slip past it.
+  writes=(--set-metadata "bring_current_record=$record" --set-metadata "bring_current_reopened=$reopened"
+          --set-metadata "bring_current_round_at=$round_at")
+  [ -z "$newcs" ] || writes+=(--set-metadata "check_set=$newcs"
+    --append-notes "bring-current-guard: check_set '$cs' declared no triage lane, so triage is added ('$newcs') to rule on the conflicted bring-current round up to $(short "$TO")")
+  gc bd update "$ANCHOR" "${writes[@]}" >/dev/null 2>&1 || true
   got=$(bd_json show "$ANCHOR")
   if [ "$(bca_meta_json "$got" bring_current_record | jq -r '.head // ""' 2>/dev/null)" != "$TO" ] \
      || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ] \
-     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ]; then
+     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ] \
+     || { [ -n "$newcs" ] && [ "$(bca_meta "$got" check_set)" != "$newcs" ]; }; then
     echo "$PROG: the round's record did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2
     return 1
   fi
@@ -683,81 +674,55 @@ cmd_guard() {
     echo "$PROG: the triage lane on $ANCHOR could not be reopened; nothing is handed off and the caller retries" >&2
     return 1
   fi
-  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")); the audit and evidence are recorded on $ANCHOR, and triage is reopened to decide what the round reopens"
-  return 0
-}
-
-# --- the closed ruling ---------------------------------------------------------
-# Rule closed on a conflicted round whose anchor declares no triage lane (see
-# CLOSED RULING above), or carry out again the closed ruling a re-run of the
-# same hand-off finds in its record. The record with the ruling, the reopened
-# lanes and the round's time are written and read back before any lane loses
-# its backing, as for the triage lane, and the dismissal runs last because it
-# reads the round's time. rc 0 recorded and carried out · 1 a read or a write
-# failed; nothing is handed off and the caller retries.
-closed_ruling() { # <record-json> <round-at, empty for a new round>
-  local record="$1" round_at="$2" ruling cs lanes lanes_json url num dismiss=false reopened got lane writes
-  cs=$(bca_meta "$AROW" check_set)
-  ruling=$(printf '%s' "$record" | jq -c 'if (.triage.by? // "") == "guard" then .triage else empty end' 2>/dev/null)
-  if [ -z "$ruling" ]; then
-    if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$cs" --through merge 2>/dev/null); then
-      echo "$PROG: the lanes $ANCHOR's check_set ('$cs') declares could not be resolved, so the round cannot be ruled on; nothing is handed off and the caller retries" >&2
-      return 1
-    fi
-    lanes_json=$(printf '%s' "$lanes" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')
-    # Where a PR stands, the same test dismiss_approvals applies.
-    url=$(bca_meta "$AROW" pr_url); [ -n "$url" ] || url=$(bca_meta "$AROW" existing_pr)
-    num=$(bca_meta "$AROW" pr_number)
-    [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
-    [ -n "$url" ] && [ -n "$num" ] && dismiss=true
-    ruling=$(jq -nc --argjson l "$lanes_json" --argjson d "$dismiss" --arg cs "$cs" --arg at "$(now)" \
-      '{by: "guard", reopen: $l, add: [], dismiss: $d,
-        reason: "no triage lane is declared on this anchor (check_set \u0027\($cs)\u0027), so no review weighs what the round changed, and it is ruled the safe way", at: $at}')
-    [ -n "$ruling" ] || { echo "$PROG: the closed ruling could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
-    record=$(printf '%s' "$record" | jq -c --argjson t "$ruling" '.triage = $t' 2>/dev/null)
-    [ -n "$record" ] || { echo "$PROG: the round's record could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
+  if [ -n "$newcs" ]; then
+    echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")); the audit and evidence are recorded on $ANCHOR, and its check_set ('$cs') declared no triage lane, so triage is added ('$newcs') to decide what the round reopens"
+  else
+    echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")); the audit and evidence are recorded on $ANCHOR, and triage is reopened to decide what the round reopens"
   fi
-  lanes_json=$(printf '%s' "$ruling" | jq -c '.reopen // []')
-  reopened=$(printf '%s\n%s' "$(bca_meta "$AROW" bring_current_reopened | tr ',' '\n')" "$(printf '%s' "$lanes_json" | jq -r '.[]')" \
-    | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
-  [ -n "$round_at" ] || round_at=$(now)
-  writes=(--set-metadata "bring_current_record=$record" --set-metadata "bring_current_round_at=$round_at")
-  [ -n "$reopened" ] && writes+=(--set-metadata "bring_current_reopened=$reopened")
-  gc bd update "$ANCHOR" "${writes[@]}" >/dev/null 2>&1 || true
-  got=$(bd_json show "$ANCHOR")
-  if [ "$(bca_meta_json "$got" bring_current_record | jq -r '(.head // "") + " " + (.triage.by // "")' 2>/dev/null)" != "$TO guard" ] \
-     || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ] \
-     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ]; then
-    echo "$PROG: the round's record and its closed ruling did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2
-    return 1
-  fi
-  for lane in $(printf '%s' "$lanes_json" | jq -r '.[]'); do
-    if ! "$REVIEW_OUTCOME" supersede-lane --anchor "$ANCHOR" --lane "$lane" \
-         --reason "bring-current round up to $(short "$TO") conflicted, and the anchor declares no triage lane to rule on it, so every declared lane runs again" >/dev/null; then
-      echo "$PROG: lane $lane on $ANCHOR could not be reopened; nothing is handed off and the caller retries" >&2
-      return 1
-    fi
-  done
-  if [ "$(printf '%s' "$ruling" | jq -r '.dismiss')" = "true" ]; then
-    dismiss_approvals "$ANCHOR" "$got" "$(bca_meta_json "$got" bring_current_record)" || return 1
-  fi
-  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")), and $ANCHOR's check_set ('$cs') declares no triage lane, so the guard ruled closed: $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "no lane is declared to run again" else join(", ") + (if length == 1 then " runs" else " run" end) + " again on the merged code" end')$([ "$(printf '%s' "$ruling" | jq -r '.dismiss')" = "true" ] && echo ", and the approval given before the round is withdrawn")"
   return 0
 }
 
 # --- dismiss -------------------------------------------------------------------
-# Dismiss the standing approvals on the anchor's PR given before the round, the
-# re-ask visit first. rc 0 nothing stood, or the visit holds the merge · 1
-# nothing was dismissed and the caller retries.
+# The lift line a ruling that lifts the approval draws: the round's time, or the
+# ruling's own when the round recorded none, and never earlier than a line an
+# earlier ruling drew. A stored line that is not an instant is no line to keep.
+lift_line() { # <anchor-row> <ruling-at>
+  local have round
+  have=$(bca_meta "$1" bring_current_lifted_at)
+  round=$(bca_meta "$1" bring_current_round_at)
+  [ -n "$round" ] || round="$2"
+  printf '%s\n' "$have" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || have=""
+  printf '%s\n%s\n' "$have" "$round" | LC_ALL=C sort | tail -1
+}
+
+# Lift the approval the round's ruling no longer lets stand. The lift line is
+# drawn first: once bring_current_lifted_at reads back, the approval rule
+# (review-verdict.sh) counts no approval submitted at or before it, so a
+# dismissal GitHub refuses cannot land the PR, and an approval submitted after
+# the line lands it with nothing else to clear. Then each approving account is
+# re-requested and every approval it has standing at or before the line is
+# dismissed, with a note composed from the round's record. rc 0 the line drawn,
+# whatever GitHub did with the dismissals · 1 the line did not read back, or the
+# PR's approvals could not be read, so nothing was dismissed and the caller
+# retries.
 dismiss_approvals() { # <anchor> <anchor-row> <record-json>
-  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun key msg dmsg rows visit failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN
+  local anchor="$1" arow="$2" record="$3" url num host repo self reviews approvals since later logins noun dmsg failed="" dismissed="" rid login PR_HOST PR_REPO APPROVERS APPROVAL_NOUN
   # shellcheck disable=SC2034  # approval_phrase sets it; these messages render from the record and use no verb
   local APPROVAL_VERB
+  since=$(lift_line "$arow" "$(printf '%s' "$record" | jq -r '.triage.at // ""' 2>/dev/null)")
+  [ -n "$since" ] || { echo "$PROG: neither the round nor its ruling on $anchor records a time to lift the approval at; nothing is dismissed and the caller retries" >&2; return 1; }
+  if [ "$(bca_meta "$arow" bring_current_lifted_at)" != "$since" ]; then
+    gc bd update "$anchor" --set-metadata "bring_current_lifted_at=$since" >/dev/null 2>&1 || true
+    if [ "$(bca_meta "$(bd_json show "$anchor")" bring_current_lifted_at)" != "$since" ]; then
+      echo "$PROG: the lift line $since did not read back on $anchor; nothing is dismissed and the caller retries" >&2
+      return 1
+    fi
+  fi
   url=$(bca_meta "$arow" pr_url); [ -n "$url" ] || url=$(bca_meta "$arow" existing_pr)
   num=$(bca_meta "$arow" pr_number)
   [ -n "$num" ] || num=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
   if [ -z "$url" ] || [ -z "$num" ]; then
-    echo "$PROG: no PR stands on $anchor, so no approval stands to dismiss"
+    echo "$PROG: the approval on $anchor is lifted at $since; no PR stands, so no approval stands to dismiss"
     return 0
   fi
   if ! pr_coords "$url" "$num"; then
@@ -774,11 +739,10 @@ dismiss_approvals() { # <anchor> <anchor-row> <record-json>
     echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
     return 1
   fi
-  # An approval submitted after the round saw the merged code, so it stands.
-  since=$(bca_meta "$arow" bring_current_round_at)
+  # An approval submitted after the line saw the merged code, so it stands.
   approvals=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
     [ standing_approvals($self)[]
-      | select($since == "" or (((.submitted_at // "") | tostring) <= $since))
+      | select(((.submitted_at // "") | tostring) <= $since)
       | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
   if [ -z "$approvals" ]; then
     echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2
@@ -787,36 +751,17 @@ dismiss_approvals() { # <anchor> <anchor-row> <record-json>
   if [ "$approvals" = "[]" ]; then
     later=$(printf '%s' "$reviews" | scrub | jq -s --arg self "$self" --arg since "$since" "$REVIEW_VERDICT_DEF"'
       [ standing_approvals($self)[] | select(((.submitted_at // "") | tostring) > $since) ] | length' 2>/dev/null)
-    if [ -n "$since" ] && [ "${later:-0}" != "0" ]; then
-      echo "$PROG: the round's ruling withdraws the approval on PR#$num, but every standing approval was given after the round and saw the merged code, so none is dismissed"
+    if [ "${later:-0}" != "0" ]; then
+      echo "$PROG: the approval on PR#$num is lifted at $since, but every standing approval was given after the round and saw the merged code, so none is dismissed"
     else
-      echo "$PROG: the round's ruling withdraws the approval on PR#$num, but no approval stands to dismiss"
+      echo "$PROG: the approval on PR#$num is lifted at $since, and no approval stands to dismiss"
     fi
     return 0
   fi
   approval_phrase "$approvals"
   logins="$APPROVERS"; noun="$APPROVAL_NOUN"
 
-  key="bring-current-dismissal.$num.$(printf '%s' "$record" | jq -r '.head // ""')"
-  msg=$(bca_render_record "$record" visit "$num" "$url" "$logins")
-  [ -n "$msg" ] || { echo "$PROG: the re-ask visit could not be composed; nothing is dismissed and the caller retries" >&2; return 1; }
-  if ! "$ESCALATE" --subject "$anchor" --key "$key" --message "$msg"; then
-    echo "$PROG: the visit on $anchor did not land; the $noun is NOT dismissed, so it is never cleared without a signal, and the caller retries" >&2
-    return 1
-  fi
-  if ! rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" --metadata-field "gc.continuation_group=$anchor"); then
-    echo "$PROG: the visit on $anchor could not be read back; nothing is dismissed and the caller retries" >&2
-    return 1
-  fi
-  visit=$(printf '%s' "$rows" | jq -r --arg s "$anchor" --arg k "$key" '
-    [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-          | select(((.metadata.escalation_key // "") | tostring) == $k) | .id ] | .[0] // empty' 2>/dev/null)
-  if [ -z "$visit" ]; then
-    echo "$PROG: escalate.sh left no open visit for this dismissal (a sitting has already answered it), so the $noun from $logins stays standing"
-    return 0
-  fi
-
-  dmsg=$(bca_render_record "$record" dismissal "$num" "$url" "$logins")
+  dmsg=$(bca_render_record "$record" dismissal)
   [ "${#dmsg}" -le 2000 ] || dmsg="${dmsg:0:1990}…"
   while IFS= read -r login; do
     [ -n "$login" ] || continue
@@ -837,12 +782,12 @@ APPROVERS
 $(printf '%s' "$approvals" | jq -r '.[] | "\(.id)\t\(.login)"')
 APPROVALS
   if [ -n "$failed" ]; then
-    gc bd update "$visit" --append-notes "Not every write on GitHub landed: ${failed#; }. Any approval still showing there predates the ruling on this bring-current, and this visit holds the merge until it closes." >/dev/null 2>&1 \
-      || echo "$PROG: WARN the dismissal failures could not be noted on visit $visit" >&2
-    echo "$PROG: visit $visit holds PR#$num's merge; dismissed: ${dismissed:-none}; not cleared: ${failed#; }" >&2
+    gc bd update "$anchor" --append-notes "bring-current-guard: lifting the approval on PR#$num at $since, not every write on GitHub landed: ${failed#; }. The approval rule counts no approval submitted at or before $since (bring_current_lifted_at), so one still showing there lands nothing, and a new approval lands the PR." >/dev/null 2>&1 \
+      || echo "$PROG: WARN the GitHub failures could not be noted on $anchor" >&2
+    echo "$PROG: the approval on PR#$num is lifted at $since, so the approval rule no longer counts what predates it; dismissed: ${dismissed:-none}; not cleared on GitHub: ${failed#; }" >&2
     return 0
   fi
-  echo "$PROG: visit $visit holds PR#$num's merge, and the $noun from $logins dismissed"
+  echo "$PROG: the approval on PR#$num is lifted at $since: the $noun from $logins dismissed, and each approver asked to review again"
   return 0
 }
 
@@ -851,7 +796,7 @@ APPROVALS
 # triage verdict. rc 0 recorded and carried out · 1 refused, nothing written ·
 # 2 a write did not land; the review stays open and the same call retries.
 cmd_decide() {
-  local anchor="" review="" reopen="" add="" dismiss="" reason="" body_out="" arow record decided tokens lane bad="" lanes_json add_json triage new reopened got num url
+  local anchor="" review="" reopen="" add="" dismiss="" reason="" body_out="" arow record decided tokens lane bad="" lanes_json add_json triage new reopened got
   while [ $# -gt 0 ]; do
     case "$1" in
       --anchor)           anchor="${2:-}"; shift 2 ;;
@@ -926,10 +871,9 @@ cmd_decide() {
     dismiss_approvals "$anchor" "$got" "$new" || return 2
   fi
   if [ -n "$body_out" ]; then
-    num=$(bca_meta "$got" pr_number); url=$(bca_meta "$got" pr_url)
-    bca_render_record "$new" comment "$num" "$url" > "$body_out" || { echo "$PROG: the round's account could not be rendered; the review stays open and the same call retries" >&2; return 2; }
+    bca_render_record "$new" comment > "$body_out" || { echo "$PROG: the round's account could not be rendered; the review stays open and the same call retries" >&2; return 2; }
   fi
-  echo "$PROG: triage's ruling on $anchor's bring-current round recorded: reopened $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing" else join(", ") end')$([ -n "$dismiss" ] && echo ", approval dismissal requested")"
+  echo "$PROG: triage's ruling on $anchor's bring-current round recorded: reopened $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing" else join(", ") end')$([ -n "$dismiss" ] && echo ", approval lifted")"
   return 0
 }
 

@@ -7,12 +7,11 @@
 #   unknown rating, an empty field, an unreadable bead, and a write that does not
 #   read back, recording nothing.
 # show: prints a bead's entries and question, and an anchor's record.
-# render: composes the comment, the dismissal note and the re-ask visit from the
-#   anchor's record (the headline counts, judgment entries first, each entry's
-#   collision, decision and check beside the guard's evidence for its own
-#   round, an item no entry covers beside its evidence alone, the round's
-#   ruling, triage's or the guard's closed ruling, the generated renders);
-#   refuses an anchor with no record.
+# render: composes the comment and the dismissal note from the anchor's record
+#   (the headline counts, judgment entries first, each entry's collision,
+#   decision and check beside the guard's evidence for its own round, an item
+#   no entry covers beside its evidence alone, triage's ruling, the generated
+#   renders); refuses an anchor with no record, and any other form.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
 #   then the branch, then the bead itself; refuses an empty question; a visit
@@ -120,19 +119,11 @@ has "$out" "b.sh: pointed the new call at start." "…names each decision"
 has "$out" "Triage: the rename changes what the new call does." "…carries triage's reason"
 eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "…in one paragraph"
 
-echo "# render --as visit: the re-ask, title line first"
-out=$("$SUT" render --anchor AN1 --as visit --logins "human1")
-eq "$(printf '%s\n' "$out" | head -1)" "PR#7 approval dismissed: triage ruled that bringing it current took judgment" "the title names the PR and what happened"
-has "$out" "changed code the approval from human1 did not see" "…the body names the approver"
-has "$out" "File by file:" "…lists the entries"
-has "$out" "Your call: review the change on the PR and approve again to let it land, or say what to change." "…and ends with the operator's call"
-
 echo "# render: an item no entry covers is listed with the guard's evidence alone"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit |= map(select(.path != "c.sh"))' | jq -Rc .)")]"
 out=$("$SUT" render --anchor AN1 --as comment)
 has "$out" "No entry from the worker covers 1 item, so only the evidence from git describes it." "the headline counts the item no entry covers"
 has "$out" "- \`c.sh\`, no entry from the worker. Git: changed beyond what merging x produces." "…and the account lists it with the guard's evidence"
-has "$("$SUT" render --anchor AN1 --as visit)" "- \`c.sh\`, no entry from the worker." "the re-ask visit lists it too"
 has "$("$SUT" render --anchor AN1 --as dismissal)" "No entry from the worker covers c.sh." "…and the dismissal note names it"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
 hasnt "$("$SUT" render --anchor AN1 --as comment)" "no entry from the worker" "a round every entry covers lists no such item"
@@ -153,28 +144,13 @@ store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$CARRY" | jq -
 out=$("$SUT" render --anchor AN1 --as comment)
 has "$(printf '%s\n' "$out" | grep -F 'took main wording')" "Git: conflicted where the merge base had lines" "the earlier round's entry carries the earlier round's evidence"
 has "$(printf '%s\n' "$out" | grep -F 'Decided: kept both')" "Git: conflicted where both sides only added lines" "…and this round's entry carries this round's"
-has "$(printf '%s\n' "$("$SUT" render --anchor AN1 --as visit)" | grep -F 'took main wording')" "Git: conflicted where the merge base had lines" "the re-ask visit pairs them the same way"
-
-echo "# render: the guard's closed ruling is told as the guard's, not triage's"
-GREC=$(printf '%s' "$REC" | jq -c --arg why "no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed, and it is ruled the safe way" \
-  '.triage = {by: "guard", reopen: ["correctness"], add: [], dismiss: true, reason: $why, at: "t"}')
-store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$GREC" | jq -Rc .)")]"
-out=$("$SUT" render --anchor AN1 --as comment)
-has "$out" "**Ruling:** correctness runs again on the merged code, and the approval given before the round no longer covers what would land, so the PR needs a fresh human review. Why: no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed, and it is ruled the safe way." "the comment carries the closed ruling and its reason"
-hasnt "$out" "**Triage:**" "…crediting nothing to triage"
-out=$("$SUT" render --anchor AN1 --as dismissal)
-has "$out" "(pushed head 0123456789ab) changed code by hand that this approval did not see." "the dismissal note says what happened"
-has "$out" " No triage lane is declared on this anchor (check_set 'correctness')" "…and why, as a sentence of its own"
-hasnt "$out" "triage comment" "…pointing at no triage comment, since none is posted"
-out=$("$SUT" render --anchor AN1 --as visit --logins "human1")
-eq "$(printf '%s\n' "$out" | head -1)" "PR#7 approval dismissed: bringing it current changed code by hand, and no triage lane weighs it" "the visit's title says no triage lane weighs the round"
-has "$out" "No triage lane is declared on this anchor" "…and its body says why"
-hasnt "$out" "Triage ruled" "…crediting no ruling to triage"
 
 echo "# render: an anchor with no record is refused"
 store "[$(anchorrow AN1)]"
 "$SUT" render --anchor AN1 --as comment >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "it exits 1"
+"$SUT" render --anchor AN1 --as visit >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "a form other than comment or dismissal is a usage error"
 
 # --- ask ---------------------------------------------------------------------------
 echo "# ask: the question is recorded, and one visit composed from the audit asks it on the anchor"

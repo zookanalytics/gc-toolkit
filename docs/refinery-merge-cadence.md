@@ -388,8 +388,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    approved PR only, by the approval rule merge.sh lands on; the child's
    handoff runs `bring-current-guard.sh`, which refuses it until the worker's
    audit covers every conflict and, when the round conflicted, reopens triage
-   to rule on what it reopens and whether the approval stands, or rules closed
-   itself on an anchor that declares no triage lane
+   to rule on what it reopens and whether the approval stands, adding triage
+   to an anchor whose `check_set` declares none; a ruling that lifts the
+   approval draws `bring_current_lifted_at`, before which no approval counts,
+   and files no visit
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
