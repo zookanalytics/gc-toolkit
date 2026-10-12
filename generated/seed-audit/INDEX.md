@@ -33,20 +33,20 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,999 | 1,499 |
 | [`codex`](agents/codex.md) | 5,999 | 1,499 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 37,144 | 9,286 |
-| [`converse-fable`](agents/converse-fable.md) | 37,144 | 9,286 |
-| [`converse-opus`](agents/converse-opus.md) | 37,144 | 9,286 |
-| [`deacon`](agents/deacon.md) | 15,930 | 3,982 |
+| [`converse-codex`](agents/converse-codex.md) | 37,527 | 9,381 |
+| [`converse-fable`](agents/converse-fable.md) | 37,527 | 9,381 |
+| [`converse-opus`](agents/converse-opus.md) | 37,527 | 9,381 |
+| [`deacon`](agents/deacon.md) | 16,313 | 4,078 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
-| [`keeper`](agents/keeper.md) | 24,089 | 6,022 |
-| [`mechanik`](agents/mechanik.md) | 35,398 | 8,849 |
-| [`polecat`](agents/polecat.md) | 28,456 | 7,114 |
-| [`polecat-codex`](agents/polecat-codex.md) | 28,486 | 7,121 |
-| [`proactive`](agents/proactive.md) | 23,004 | 5,751 |
-| [`refinery`](agents/refinery.md) | 13,347 | 3,336 |
-| [`witness`](agents/witness.md) | 18,311 | 4,577 |
+| [`keeper`](agents/keeper.md) | 24,472 | 6,118 |
+| [`mechanik`](agents/mechanik.md) | 35,781 | 8,945 |
+| [`polecat`](agents/polecat.md) | 28,839 | 7,209 |
+| [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
+| [`proactive`](agents/proactive.md) | 23,387 | 5,846 |
+| [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
+| [`witness`](agents/witness.md) | 18,694 | 4,673 |
 
 ## Formula recipes
 
