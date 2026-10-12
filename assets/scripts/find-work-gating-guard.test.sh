@@ -170,7 +170,7 @@ printf 'tk-pre|pre_open_gate\n' > "$FAKE_ROWS"
 eq "$(select_work)" "" "(4) parked pre_open_gate anchor is NOT selected"
 
 # (5) ANY merge_result, not just the gating pair. Every path that legitimately
-#     returns a bead to this queue clears the field first (mr-aware-rejection
+#     returns a bead to this queue clears the field first (rejection-repool.sh
 #     folds --unset-metadata merge_result into the repool), so a value present
 #     means some pass recorded a disposition and this queue is not it.
 for mr in merged blocked refused_false_completion abandoned retargeted held; do

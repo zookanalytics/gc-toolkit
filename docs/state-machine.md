@@ -60,7 +60,7 @@ stateDiagram-v2
   pull_request --> merged: merge.sh
   merged --> [*]
 
-  handed_off --> routed: mol-refinery-patrol — rejection_reason
+  handed_off --> routed: mol-refinery-patrol — rejection_reason, then a fresh pour
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
   handed_off --> refused_false_completion: mol-refinery-patrol — no commits
@@ -143,7 +143,7 @@ route, one carrying an assignee, and one that has left `status=open`.
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
-| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
+| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written, then a fresh `mol-polecat-work` pour dispatches the rebuild |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
 | held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
@@ -655,10 +655,14 @@ apart. A review bead carries `task_kind=review`. An anchor carries
 also narrows by `task_kind=review` or by title, so a marked child joins no
 review's result set.
 
-- **Rejection** (refinery judgment): the anchor's branch is not accepted —
-  `mol-refinery-patrol` writes `rejection_reason` and re-routes the bead to
-  the polecat pool. Back to `routed`; the next claimant starts from the
-  recorded reason.
+- **Rejection** (refinery judgment): the anchor's branch is not accepted.
+  `mol-refinery-patrol` hands the bead back through `rejection-repool.sh`: one
+  lifecycle transition writes `rejection_reason`, then a fresh
+  `mol-polecat-work` pour dispatches the rebuild. It is a pour, not a route on
+  the bead, because the bead is a member of its epic and bd's blocked flag
+  cascades down parent-child edges, while a poured workflow's root has no
+  parent, so a hold on the epic leaves the rebuild running. Back to `routed`;
+  the next claimant starts from the recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh` and clears the
   check marker, returning the lane to `unreviewed`, so gate-ensure re-arms the

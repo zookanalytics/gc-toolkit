@@ -3,16 +3,17 @@
 # blocks in formulas/mol-refinery-patrol.toml).
 #
 # THE CONTRACT:
-#   1. FAIL CLOSED on an unreadable bead — `gc bd` fails open (errors to
-#      stderr, empty stdout), so an unread bead must never be repooled as if
-#      it were a plain direct-mode work bead.
-#   2. FAIL CLOSED when lifecycle.sh is missing — every merge_result
-#      transition goes through the one writer; a hand-rolled repool is how
-#      split transitions come back.
-#   3. The repool is ONE lifecycle transition to `unanchored`: assignee
-#      cleared, routed back to the polecat pool, rejection_reason carried.
-#   4. A bead with a live PR (pr_url) carries it over as existing_pr, so the
-#      rework reuses the same PR instead of minting a duplicate.
+#   1. The repool is ONE call to rejection-repool.sh, which owns the release and
+#      the pour (rejection-repool.test.sh pins that script): the work bead, the
+#      pool the binding prefix names, and the rejection reason as one word, in
+#      bash and in zsh, the shells an agent pastes the block into.
+#   2. FAIL CLOSED when rejection-repool.sh is missing: the block repools
+#      nothing by hand, and ends the turn.
+#   3. A repool that stops short but leaves an armed dispatch or a visit (exit 2)
+#      ends the arm as a landed one does. One that recorded nothing (exit 1 or
+#      3) ends the turn.
+#   4. After the repool the block reads the bead once, shape-validated, for the
+#      branch decision: an unreadable bead ends the turn with the branch kept.
 #   5. The rejection KEEPS the branch unless the bead is direct-mode with
 #      nothing PR-shaped on it. In mr mode the PR is opened later by the
 #      cadence's pr-open, so "no PR on the bead yet" is not evidence that
@@ -24,7 +25,7 @@
 #      that cannot delete is reported and the cycle continues.
 #
 # Executes the real blocks extracted verbatim from the formula against stub
-# `gc` + `lifecycle.sh`. No live city, Dolt, network, or worktrees.
+# `gc` + `rejection-repool.sh`. No live city, Dolt, network, or worktrees.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +49,9 @@ NBLOCKS=$(awk '
   f { print > ("'"$TMP"'/block-" n ".sh") }
   END { print n }' "$TOML")
 eq "$NBLOCKS" "2" "both rejection arms carry the mr-aware-rejection block"
+cmp -s "$TMP/block-1.sh" "$TMP/block-2.sh" \
+  && ok "the two rejection arms carry the same block" \
+  || bad "the two rejection arms carry the same block"
 
 for i in 1 2; do
   [ -s "$TMP/block-$i.sh" ] || { bad "block $i extracted"; continue; }
@@ -69,105 +73,86 @@ esac
 
 # --- Stubs. ---------------------------------------------------------------------
 # gc: bd show answers $FAKE_META (or nothing when FAKE_BD_FAILS=1); drain-ack
-# is recorded. lifecycle.sh: records its argv, lives under a fake rig root so
-# the block's candidate resolution finds it.
-mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts" "$TMP/rig-nopr/assets/scripts"
+# and any bd update are recorded. rejection-repool.sh: records its argv, one
+# argument per field, and exits $FAKE_REPOOL_RC; it lives under a fake rig root
+# so the block's candidate resolution finds it.
+mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 1
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update") shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
-  "agent list") printf '%s' "${FAKE_AGENTS:-}"; exit 0 ;;
 esac
 exit 0
 GC
-cat > "$TMP/rig/assets/scripts/lifecycle.sh" <<'LC'
-#!/usr/bin/env bash
-printf 'LIFECYCLE|%s\n' "$*" >> "$FAKE_LOG"
-exit 0
-LC
-# The repool proves the polecat route through the sibling pool-route.sh; the real
-# script runs here against the stubbed `gc agent list` ($FAKE_AGENTS). A second
-# rig root carries lifecycle.sh but NOT pool-route.sh, for the fail-closed case
-# where the route cannot be proved at all.
-cp "$HERE/pool-route.sh" "$TMP/rig/assets/scripts/pool-route.sh"
-cp "$TMP/rig/assets/scripts/lifecycle.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
-chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/lifecycle.sh" \
-         "$TMP/rig/assets/scripts/pool-route.sh" "$TMP/rig-nopr/assets/scripts/lifecycle.sh"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rig/assets/scripts/rejection-repool.sh" <<'REPOOL'
+printf 'REPOOL' >> "$FAKE_LOG"
+for a in "$@"; do printf '|%s' "$a" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+exit "${FAKE_REPOOL_RC:-0}"
+REPOOL
+chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/rejection-repool.sh"
 export PATH="$TMP/bin:$PATH"
 
-# run <block#> <meta-json|-> [rig-root] [agents-json] [gc-rig] -> "<rc>|<log>"
+# run <block#> <meta-json|-> [rig-root] [repool-rc] [shell] -> "<rc>|<log>"
 run() {
   : > "$TMP/log"
   local rc=0 fails=0 meta="$2"
   [ "$meta" = "-" ] && { fails=1; meta='{}'; }
   # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
-  # fallback cannot resolve the real repo and shadow the stub lifecycle.sh.
-  # GC_RIG defaults empty and the roster unreadable, so pool-route.sh returns the
-  # bare pool name UNVERIFIED and the existing cases keep asserting that name.
+  # fallback cannot resolve the real repo and shadow the stub repool.
   ( cd "$TMP" && \
-    WORK=tk-work REJECT_REASON="conflict with main" GC_RIG="${5-}" \
+    WORK=tk-work REJECT_REASON="conflict with main; resume by merge" \
     GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_AGENTS="${4-}" FAKE_LOG="$TMP/log" \
-    bash "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
+    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_REPOOL_RC="${4:-0}" FAKE_LOG="$TMP/log" \
+    "${5:-bash}" "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
+CALL="REPOOL|tk-work|--pool|gc-toolkit.polecat|--reason|conflict with main; resume by merge;"
 
 for i in 1 2; do
   echo "── block $i ──"
 
-  # (1) Unreadable bead: repool NOTHING; leave the bead with the refinery.
-  eq "$(run "$i" -)" "1|DRAIN;" \
-     "block $i: unreadable bead -> no repool, drain (fails closed)"
+  # (1) The repool is one call to rejection-repool.sh, and the bead is read
+  #     once after it for the branch decision.
+  eq "$(run "$i" '{}')" "0|$CALL" \
+     "block $i: one rejection-repool.sh call with the pool and the whole reason"
 
-  # (2) Missing lifecycle.sh: same fail-closed shape — never hand-roll the write.
+  # (2) Missing rejection-repool.sh: repool nothing by hand, end the turn.
   eq "$(run "$i" '{}' "$TMP/nowhere")" "1|DRAIN;" \
-     "block $i: missing lifecycle.sh -> no repool, drain (single-writer rule)"
+     "block $i: missing rejection-repool.sh -> no repool, drain"
 
-  # (3) Plain work bead: one lifecycle transition to unanchored, routed back to
-  #     the polecat pool with the reason; no existing_pr invented.
-  eq "$(run "$i" '{}')" \
-     "0|LIFECYCLE|transition tk-work --to unanchored --assignee  --route gc-toolkit.polecat --set rejection_reason=conflict with main;" \
-     "block $i: plain bead -> one unanchored transition, routed to the pool"
+  # (3) An armed dispatch or a visit carries a repool that stopped short.
+  eq "$(run "$i" '{}' "$TMP/rig" 2)" "0|$CALL" \
+     "block $i: repool exit 2 (an arm or a visit carries it) -> the arm ends normally"
 
-  # (4) An anchor with a live PR carries it over so the rework reuses the PR.
-  eq "$(run "$i" '{"merge_result":"pull_request","pr_url":"https://github.com/o/r/pull/7"}')" \
-     "0|LIFECYCLE|transition tk-work --to unanchored --assignee  --route gc-toolkit.polecat --set rejection_reason=conflict with main --set existing_pr=https://github.com/o/r/pull/7;" \
-     "block $i: mr anchor -> existing_pr carried into the repool"
+  # (4) A repool that recorded nothing ends the turn.
+  eq "$(run "$i" '{}' "$TMP/rig" 3)" "1|${CALL}DRAIN;" \
+     "block $i: repool exit 3 (nothing recorded) -> drain"
+  eq "$(run "$i" '{}' "$TMP/rig" 1)" "1|${CALL}DRAIN;" \
+     "block $i: repool exit 1 (usage) -> drain"
 
-  # (5) The block never writes the bead directly — lifecycle.sh is the writer.
+  # (5) An unreadable bead after the repool ends the turn; the repool stands.
+  eq "$(run "$i" -)" "1|${CALL}DRAIN;" \
+     "block $i: unreadable bead after the repool -> drain, branch decision skipped"
+
+  # (6) The block never writes the bead itself — rejection-repool.sh is the writer.
   run "$i" '{}' >/dev/null
   grep -q '^UPDATE|' "$TMP/log" \
     && bad "block $i: no direct bead writes" "found a gc bd update" \
-    || ok "block $i: no direct bead writes (lifecycle.sh is the writer)"
+    || ok "block $i: no direct bead writes (rejection-repool.sh is the writer)"
 done
 
-# --- The repool proves the route before it stamps it. ---------------------------
-# Both blocks are byte-identical (asserted above), so the route gate is exercised
-# once. pool-route.sh qualifies the bare pool name with GC_RIG and proves it
-# against the live agent set: a rejection repooled to a name no pool claims sits
-# unclaimed with a rejection_reason nobody reads, which is the strand it gates.
-echo "── route gate ──"
-
-# Readable roster that carries the polecat pool + a rig to qualify into: the
-# repool routes to the proven, rig-qualified identity, not the bare name.
-eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}' gc-toolkit)" \
-   "0|LIFECYCLE|transition tk-work --to unanchored --assignee  --route gc-toolkit/gc-toolkit.polecat --set rejection_reason=conflict with main;" \
-   "readable roster + GC_RIG -> repool routes to the proven rig-qualified pool"
-
-# Readable roster that does NOT carry the polecat pool: the route is refused, so
-# the block fails closed (drains, leaves the bead with the refinery) rather than
-# stamp an address nothing claims.
-eq "$(run 1 '{}' "$TMP/rig" '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"}]}' gc-toolkit)" \
-   "1|DRAIN;" \
-   "readable roster, no polecat identity -> fail closed (no unclaimable repool)"
-
-# pool-route.sh absent from the pack: the route cannot be proved, so the block
-# fails closed rather than repool to an unvalidated address.
-eq "$(run 1 '{}' "$TMP/rig-nopr")" \
-   "1|DRAIN;" \
-   "pool-route.sh missing -> fail closed, never repools unproven"
+# An agent pastes the block into its own shell, and zsh does not split an
+# unquoted expansion. The reason has to reach the script as one word there too.
+if command -v zsh >/dev/null 2>&1; then
+  echo "── zsh ──"
+  eq "$(run 1 '{}' "$TMP/rig" 0 zsh)" "0|$CALL" \
+     "zsh: the same one call, with the reason as one word"
+else
+  echo "skip - zsh not installed; the zsh run of the block is not exercised"
+fi
 
 # --- One reading of the merge strategy. -----------------------------------------
 # handle-failures decides whether the branch survives a rejection; merge-push
@@ -208,7 +193,7 @@ done
 
 # git: records the branch delete. Everything else fails, so the block's
 # `git rev-parse --show-toplevel` fallback stays unresolved and the stub
-# lifecycle.sh under the fake rig root remains the only candidate.
+# rejection-repool.sh under the fake rig root remains the only candidate.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 case "$1 $2 $3" in
   "push origin --delete")

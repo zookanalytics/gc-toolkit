@@ -486,15 +486,17 @@ eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assign
 # --- unassigning takes the executor identity with it ----------------------------
 # gc.session_id and gc.session_name name the session that claimed the bead, so
 # they are the third field of the same let-go as the route and the assignee. The
-# mr-aware-rejection repool hands a rejected rework back to the pool with
-# --assignee ""; a stamp that survives is doctor/executor-identity-residue's
-# report the moment the bead next carries a route, and the runtime's stale
-# orphan-recovery pin. So the clear rides the same atomic update as the unassign.
+# refinery's rejection repool (rejection-repool.sh) hands a rejected bead back to
+# the pool with --assignee ""; a stamp that survives is
+# doctor/executor-identity-residue's report the moment the bead next carries a
+# route, and the runtime's stale orphan-recovery pin. So the clear rides the same
+# atomic update as the unassign.
 echo "# unassigning clears the executor identity"
-store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition x-1 --to unanchored --assignee "" --route gc-toolkit/gc-toolkit.polecat --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
-eq "$rc" 0 "the mr-aware-rejection repool shape exits 0"
+out="$("$SUT" transition x-1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
+eq "$rc" 0 "the rejection repool's shape exits 0"
+eq "$(meta x-1 'gc.execution_routed_to')" "<absent>" "the repool's release clears the last pour's stamp"
 eq "$(bassignee x-1)" "" "the repool cleared the assignee"
 eq "$(meta x-1 'gc.session_id')" "<absent>" "gc.session_id went with the assignee"
 eq "$(meta x-1 'gc.session_name')" "<absent>" "gc.session_name went with the assignee"
