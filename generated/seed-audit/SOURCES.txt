@@ -56,7 +56,7 @@ agents/witness/agent.toml
 agents/witness/prompt.template.md
 2e6c8d3c8f7c6ead2ae5b5a17ebe2dc2803f0250c1b00f452af0e80e9f1a4890
 assets/scripts/render-seed-audit.sh
-0824be6eef588f240033b64193f7680a0af6d9b5a135928fcf950a6586b0670d
+1438725b5f4e93491e1a4bf8b032f99bc1a80168eee5c71f1d63f4d25c50f47f
 formulas/mol-deacon-patrol.toml
 07d6f0db15dab10e9d25e5fcb6e403d5289291cd321e3ef08d6df671d4e136d3
 formulas/mol-design-convoy.toml
