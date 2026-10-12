@@ -3,9 +3,11 @@
 # and firing. Per orders/*.toml (name, interval, scope; scope defaults to rig
 # in the loader): a registration exists — per importing rig for scope="rig"
 # (importing = the rig has ANY of this pack's orders registered), once
-# otherwise — and the order fired within max(3×interval, 15m). `--limit 0` on
-# the history read is LOAD-BEARING: any positive limit returns city-store rows
-# only under a RIG column, so the answer looks city-wide and is not.
+# otherwise — and the order fired within max(3×interval, 15m). One history
+# read, naming no order, answers for every order, and each order's runs inside
+# its own window are cut from it. `--limit 0` on that read is LOAD-BEARING: a
+# positive limit keeps only the newest runs across every order, so a slower
+# order's last run falls off the end and the order reads as stopped.
 # Condition-triggered orders (no interval) get the registration arm alone.
 # `gc order list` omits orders disabled in city.toml (an `[[orders.overrides]]`
 # `enabled = false`, or an `[orders] skip` entry), so the registration arm reads
@@ -90,6 +92,26 @@ EOF
 done
 [ -n "$order_rows" ] || { echo "OK: orders/ is empty — this pack ships no cadence"; exit 0; }
 
+# The registry, the rig roster and the run history share nothing, so the three
+# reads are in flight at once. On a loaded host a gc call costs 5-15s of wall
+# time whatever it reads, so the check takes about one call's time, not three.
+# The roster and the history answer into files, and each is waited on before
+# it is read. Their stdio is redirected, so an early exit never holds the
+# doctor's pipe open behind it.
+probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/null) || {
+    echo "cadence liveness undetermined (I10) — cannot stage the registry, roster and history reads"
+    detail "mktemp -d failed (e.g. /tmp under disk pressure); nothing was read, so a stopped cadence would not be visible."
+    exit 1
+}
+trap 'rm -rf "$probe_dir"' EXIT
+# build-scratch-reap removes a gctk-* temp dir that no process holds open.
+exec 9>"$probe_dir/held"
+# Every retained run of every registration. The read carries no --since: gc
+# applies that bound only after fetching every retained run, so it would not
+# make the read cheaper, and without it the answer covers every order's window.
+run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
+run_bounded gc rig list --json >"$probe_dir/rigs.json" 2>/dev/null & rigs_pid=$!
+
 orders_json=$(run_bounded gc order list --json 2>/dev/null)
 if ! printf '%s' "$orders_json" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
     echo "cadence liveness undetermined (I10) — cannot read the order registry"
@@ -105,7 +127,8 @@ pack_rigs=$(printf '%s' "$orders_json" | jq -r --arg names "$pack_names" '
     | unique | .[]' 2>/dev/null)
 
 suspended_rigs=""
-rigs_json=$(run_bounded gc rig list --json 2>/dev/null)
+wait "$rigs_pid"
+rigs_json=$(cat "$probe_dir/rigs.json" 2>/dev/null)
 if printf '%s' "$rigs_json" | jq -e '(.rigs | type) == "array"' >/dev/null 2>&1; then
     suspended_rigs=$(printf '%s' "$rigs_json" \
         | jq -r '.rigs[]? | select((.suspended // false) == true) | .name // empty' 2>/dev/null)
@@ -113,6 +136,23 @@ else
     warnings+=("could not read the rig roster (\`gc rig list --json\`) — a suspended rig cannot be told apart from a stalled one below")
 fi
 is_suspended() { [ -n "$suspended_rigs" ] && printf '%s\n' "$suspended_rigs" | grep -qxF "$1"; }
+
+# The run history every liveness arm below reads. It is read whole or not at
+# all: an entry that does not name its order and a parseable time would leave
+# that order's last run unjudgeable, and an unjudged run reads as a stopped
+# order. `now` anchors every window, taken once the read has answered.
+EP='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
+runs_file="$probe_dir/runs.json"
+runs_ok=0
+wait "$runs_pid"; runs_rc=$?
+if [ "$runs_rc" -eq 0 ] && jq -e "$EP"'(.entries | type) == "array"
+        and all(.entries[]; (.order | type) == "string" and ((.created_at | ep) | type) == "number")' \
+        "$runs_file" >/dev/null 2>&1; then
+    runs_ok=1
+    now=$(budget_now)
+else
+    warnings+=("could not read the order run history (\`gc order history --limit 0 --json\`) — the liveness arm did not run, so no order's last run was checked")
+fi
 
 # Orders disabled in city.toml are absent from `gc order list`, so the
 # registration arm would read a deliberate disable as a missing registration.
@@ -196,11 +236,13 @@ while IFS=$'\t' read -r name secs scope; do
         continue
     fi
     window=$(( secs * 3 )); [ "$window" -lt "$FLOOR" ] && window=$FLOOR
-    hist=$(run_bounded gc order history "$name" --since "${window}s" --limit 0 --json 2>/dev/null)
-    if ! printf '%s' "$hist" | jq -e '(.entries | type) == "array"' >/dev/null 2>&1; then
-        warnings+=("$name: could not read run history (\`gc order history $name --since ${window}s --limit 0 --json\`) — the liveness arm did not run for this order")
+    [ "$runs_ok" -eq 1 ] || continue
+    # This order's runs inside its own window, cut from the one history read.
+    hist=$(jq -c --arg n "$name" --argjson since "$(( now - window ))" "$EP"'
+        {entries: [.entries[] | select(.order == $n and (.created_at | ep) >= $since)]}' "$runs_file" 2>/dev/null) || {
+        warnings+=("$name: could not cut its runs from the run history — the liveness arm did not run for this order")
         continue
-    fi
+    }
     fresh=$(printf '%s' "$hist" | jq -r '[.entries[]? | (.rig // "")] | unique | .[]' 2>/dev/null)
     if [ "$scope" = "rig" ]; then
         while read -r rig; do
