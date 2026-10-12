@@ -58,13 +58,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bring-current-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# Captured before harness_init shadows PATH with the stub bin.
+REAL_GIT="$(command -v git)"
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_init
-# The guard reads real histories, so the harness's git stub goes; its gc and gh
-# stubs stay. Git's own configuration is pinned to a file here, so a host's
-# conflict style, rerere or signing cannot reach a case.
-rm -f "$BIN/git"
+# The guard reads real histories, so the real git replaces the harness's git
+# stub, linked into the stub bin, because the test floor beneath the stubs
+# refuses git. The gc and gh stubs stay. Git's own configuration is pinned to a
+# file here, so a host's conflict style, rerere or signing cannot reach a case.
+ln -sf "$REAL_GIT" "$BIN/git"
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 git config --file "$GIT_CONFIG_GLOBAL" user.name "tester"
 git config --file "$GIT_CONFIG_GLOBAL" user.email "tester@example.com"
@@ -268,7 +271,6 @@ printf 'hand edit\n' > "$R/notes.txt"; git -C "$R" add notes.txt; git -C "$R" co
 has "$(cls HEAD merge-only)" "audit notes.txt: changed by" "a commit outside the tier is an item on a merge-only bead"
 
 echo "# classify: a git read that fails is never clean"
-REAL_GIT=$(command -v git)
 mkdir -p "$TMP/failgit"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/failgit/git" <<SHIM
 sub=""; i=1

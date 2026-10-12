@@ -10,10 +10,17 @@
 # can be dispositioned.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Probes bounded; an UNREADABLE store warns (1), never passes.
+#
+# Cost. The whole check shares one doctor budget, and on a loaded host every
+# `gc bd list` takes seconds however few rows it returns. So the stores are read
+# at once, each by its own background job, and the check costs one rig list plus
+# its slowest store rather than the sum of every store. Each read asks only for
+# what the check judges: --status closed and --metadata-field task_kind=visit
+# select the closed visits, and --brief omits their free text. A job's listing
+# lands in a file, since a background job cannot hand its parent a variable.
 
 set -u
 
-dir="${GC_PACK_DIR:-.}"
 # How many findings are PRINTED, not how many are found: the headline count is
 # taken before this cap, so no value here can make a store read as clean. 0
 # prints all, which is what draining the backlog wants.
@@ -73,6 +80,24 @@ detail_capped() { # <cap> <item...> — at most <cap> items, then the rest as a 
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
+# The scratch every store read lands in. The descriptor held open on a file
+# inside it keeps the tree held for the whole run, because the host's scratch
+# reaper removes any gctk-* tree that no process holds open.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-visit-outcome-recorded.XXXXXX" 2>/dev/null) || WORK=""
+trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+if [ -z "$WORK" ] || ! { exec 9>"$WORK/.hold"; } 2>/dev/null; then
+    echo "cannot determine whether every closed visit records an outcome"
+    detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every store read lands in; no store was checked."
+    exit 1
+fi
+# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
+# <file>, and returns the probe's own exit status.
+read_to() {
+    local f="$1"; shift
+    run_bounded "$@" 2>/dev/null | scrub >"$f"
+    return "${PIPESTATUS[0]}"
+}
+
 # `gc rig list` names the stores this check scans, and it can fail transiently:
 # a momentary Dolt or lock blip returns a non-zero rc that a later call clears.
 # Since a check that cannot enumerate files an all-rigs finding, a single blip
@@ -98,7 +123,12 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
-checked=0
+# Each unsuspended store's read starts here, and they all run at once. The
+# --include-* flags are load-bearing: bd list hides gate, infrastructure and
+# template beads by default, and a closed visit missing its outcome is a finding
+# whether or not it sits in one of those categories. So is --all: given a
+# --status without it, bd list also hides pinned beads.
+n=0; labels=(); paths=(); pids=()
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -106,22 +136,33 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    # The --include-* flags are load-bearing: bd list hides gate, infrastructure
-    # and template beads by default, and a closed visit missing its outcome is a
-    # finding whether or not it sits in one of those categories.
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --all \
-        --has-metadata-key task_kind --include-gates --include-infra --include-templates \
-        --json --limit 0 2>/dev/null); rc=$?
-    if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
-        warnings+=("$label: could not list task_kind-carrying beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+    read_to "$WORK/$n.json" gc bd list --db "$rig_path/.beads" --all --status closed \
+        --metadata-field task_kind=visit --include-gates --include-infra --include-templates \
+        --json --limit 0 --brief </dev/null >/dev/null 2>&1 &
+    pids[n]=$!; labels[n]="$label"; paths[n]="$rig_path"
+    n=$((n + 1))
+done <<< "$scopes"
+
+# The listings are judged in rig order however their reads finished, so one
+# state of the stores always produces the same report.
+checked=0; i=0
+while [ "$i" -lt "$n" ]; do
+    label="${labels[i]}"; rig_path="${paths[i]}"; listing="$WORK/$i.json"
+    wait "${pids[i]}"; rc=$?
+    i=$((i + 1))
+    if [ "$rc" -ne 0 ] || [ ! -s "$listing" ]; then
+        warnings+=("$label: could not list closed visits in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    rows=$(printf '%s' "$raw" | scrub | jq -r '
-        [ .[]? | select(((.metadata.task_kind // "") | tostring) == "visit")
-                | select(((.status // "") | tostring) == "closed")
-                | select(((.metadata["gc.outcome"] // "") | tostring) == "") ]
-        | .[] | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " "))
-                + "\u001f" + ((.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:80])' 2>/dev/null)
+    rows=$(jq -r -s '
+        # One JSON array, or the listing is unreadable: whitespace, an error
+        # object or two documents must not pass as an empty store.
+        if length == 1 and (.[0] | type) == "array" then .[0][] else error("not one JSON array") end
+        | select(((.metadata.task_kind // "") | tostring) == "visit")
+        | select(((.status // "") | tostring) == "closed")
+        | select(((.metadata["gc.outcome"] // "") | tostring) == "")
+        | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " "))
+          + "\u001f" + ((.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:80])' "$listing" 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: the visit listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
@@ -132,7 +173,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$id" ] || continue
         missing+=("$label bead $id: closed visit with no gc.outcome — \"$title\"")
     done <<< "$rows"
-done <<< "$scopes"
+done
 
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")

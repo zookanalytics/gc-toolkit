@@ -733,17 +733,25 @@ review's result set.
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 11): a duplicate
-  dispatch a polecat diagnosed and parked has no other way out, since polecats
-  never close work beads. The arm closes it through `bead-rehome.sh --kind
-  duplicate` only when the named successor resolves and is closed or shipped
-  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It also closes an unmarked rework
-  twin, an open rework child that was never dispatched (no dispatch metadata,
-  no convoy tracking it) whose source is closed (the review it answers, or the
-  visit a ruling's child answers) and whose same-source, same-anchor sibling
-  landed. That twin would otherwise hold its anchor forever. It writes nothing
-  to the successor's branch or PR, and holds on anything it cannot establish.
+- **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
+  close-with-successor writer): a bead that duplicates another or was fixed
+  upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
+  gates its own evidence — the named successor resolves and is closed or shipped
+  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
+  work-product key at all), unless the origin carries the operator's
+  pre-recorded PR-close disposition for that kind and successor — and holds on
+  anything it cannot establish. Converse and operator dispositions use the same
+  writer, and so does `duplicate-sweep.sh` (cadence arm 11). The sweep reads
+  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
+  duplicate dispatch: polecats never close work beads, so the bead has no other
+  way out. It checks the same evidence before it calls the writer. It also
+  closes an unmarked rework twin: an open rework child that was never
+  dispatched (no dispatch metadata, no convoy tracking it) whose source is
+  closed (the review it answers, or the visit a ruling's child answers) and
+  whose same-source, same-anchor sibling landed. That twin would otherwise hold
+  its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
+  close. A first reaction never closes a bead: it hands a confident no-op to the
+  validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -869,6 +877,30 @@ mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
 twins), and any patrol judging a closed bead.
+
+A disposition ends the bead's branch, the way a merge ends a landed one
+through the repository's delete-on-merge setting. Once the close reads back,
+`bead-rehome.sh` hands the branch the bead names in `metadata.branch` to
+`assets/scripts/branch-end.sh`, which deletes it from the git remote. The
+branch stays while a live owner names it. A live owner is a bead in the rig's
+store whose status is outside the `done` category and whose `metadata.branch`
+or `metadata.target` is the branch: another anchor, work not yet handed off, a
+convoy or a member landing on its integration branch, or a successor that
+resumed the branch. The retired bead's own review scaffolding, the beads whose
+`anchor_bead` names it, is not an owner. `scaffolding-sweep.sh` retires that
+scaffolding, and `review-sweep.sh` closes a review only once the branch is
+gone, so counting it would keep nearly every retired branch. A ledger that does
+not read keeps the branch, and the default branch, `main` and `claude/*` are
+never ended. Before the delete the tip is pinned. A pull request whose
+`refs/pull/<n>/head` on origin equals the tip already pins it, because GitHub
+keeps that ref after the branch is deleted. Otherwise an annotated
+`archive/<branch>@<short-sha>` tag is pushed at the tip and read back on
+origin. The delete's lease names the checked tip, so origin refuses it if the
+branch moved, and a moved branch is left alone. The bead's notes record what
+became of its branch: ended and what pins its tip, kept and which owner names
+it, or still on the remote and the `branch-end.sh` command that ends it. The
+close never depends on any of it: a branch that cannot be ended leaves the
+disposition standing.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is
