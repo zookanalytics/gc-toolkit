@@ -1,6 +1,6 @@
 ---
 name: Steer work by epic — priority flow, parks as blockers, placement
-description: The design for the epic "Steer work by epic" (tk-rl8gz4b). It settles how an epic's priority, or a park on it, decides when the epic's work runs, with an epic treated as an ordinary bead and a park as an ordinary blocker. It covers the park move and its gate, how armed and slung work stays held, why the operator's pending decision is not a hold, how a bead's queue priority follows its parent's and its own, where that priority is computed and written, where PR-finishing work ranks, which checks and boards must read a hold, how intake holds findings for the placement sitting, and how a Checkpoint records the next priority. It lists the implementation units. Read it to review the design or to build one of its units.
+description: The design for the epic "Steer work by epic" (tk-rl8gz4b). It settles how an epic's priority, or a park on it, decides when the epic's work runs, with an epic treated as an ordinary bead and a park as an ordinary blocker. It covers the park move and its gate, how armed and slung work stays held, why the operator's pending decision is not a hold, how a bead's queue priority follows its parent's and its own, where that priority is computed and written, where PR-finishing work ranks, which checks and boards must read a hold, how intake holds findings and the feedback distiller's beads for the placement sitting, and how a Checkpoint records the next priority. It lists the implementation units. Read it to review the design or to build one of its units.
 ---
 
 # Steer work by epic
@@ -58,6 +58,13 @@ These points are decided.
   associate findings with an epic belongs to the first-class-epics epic
   (tk-rctkrj). Until it lands, every finding that is not an emergency waits for
   the placement sitting.
+- **The feedback distiller's beads wait for placement too.** Its prompt-update
+  and engineering beads are new work, and the operator's "hold everything" ruling
+  of 2026-10-11 at 00:25Z excluded only existing PR work. So they follow the
+  intake rule a finding follows: each reaches a polecat once the sitting places
+  it, and a park on the epic it is placed under holds it. The operator still
+  reviews each one at its PR. The cost is one placement per bead, at most three
+  a day (section 5).
 
 One recommendation still needs a yes or a no.
 
@@ -82,9 +89,9 @@ field cannot also keep the bead's own.
 
 Waiting has a cost. Today a hand sling or any newly armed bead under a parked
 epic starts work. Priority does nothing yet: work queues at whatever priority
-each bead was filed with. Patrol findings still become polecat work. The board
-shows every parked epic as stalled. [What waiting costs](#what-waiting-costs) has
-the detail.
+each bead was filed with. Patrol findings and the distiller's beads still become
+polecat work. The board shows every parked epic as stalled.
+[What waiting costs](#what-waiting-costs) has the detail.
 
 ## Facts this design rests on
 
@@ -480,9 +487,13 @@ paths.
   The blocked exit's then-route arms a dispatch for when the blocker closes.
 - *The witness* files mail about a pack defect as a bug routed to the polecat pool
   at creation (`formulas/mol-witness-patrol.toml`, the bug-dispatch block).
+- *The feedback distiller* files prompt-update and engineering beads, and routes
+  each one to the polecat pool as it files it
+  (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step).
 
 So section 7 of `city.toml` stops only the sweep. A patrol finding still becomes
-polecat work through its reaction.
+polecat work through its reaction, and a distiller bead through the route it is
+filed with.
 
 **The rule.** A bead may be routed or armed to the polecat pool only when one of
 these holds:
@@ -502,15 +513,32 @@ Everything else waits for placement.
   `placement=pending` and leaves unrouted. The blocked exit's then-route follows
   the same rule.
 - The witness's bug dispatch follows the rule at creation.
+- The feedback distiller follows the rule when it files a bead: it marks each
+  prompt-update and engineering bead `placement=pending` and leaves it unrouted.
 - With the hold in place, the scheduled sweep comes back on. The town repo deletes
   sections 6 and 7 of `city.toml`, as their own release notes say to.
 - `epic-steer.sh unplaced` lists the sitting's queue.
 
 First reaction's close exit keeps its validating closer, because that closer
-closes beads and so shrinks the queue. The learning loop's promotion work stays as
-it is too (`formulas/mol-feedback-distiller.toml` routes prompt-update and
-engineering beads at creation): it is not a finding, and the operator gates each
-one at its PR.
+closes beads and so shrinks the queue.
+
+**The distiller's beads wait like findings.** A distiller bead is not a finding,
+and the operator reviews each one at its PR. It is still new work, and the
+operator's "hold everything" ruling of 2026-10-11 at 00:25Z excluded only existing
+PR work. The distiller files its beads with no parent, so parking an epic never
+holds one. From that ruling to 2026-10-12, every bead the distiller filed was
+parked by hand: tk-ymhd3o4 and tk-06ac0rv by the polecats that claimed them, and
+tk-csqkf5w by the distiller's own session as it filed it. Under the rule, the
+sitting places a distiller bead under an epic, where the epic's priority ranks it
+and a park on the epic holds it, or routes it with `place --standalone`. The cost
+is one placement for each bead before a polecat builds it. The distiller's order
+fires at most once a day, and a run files at most three beads
+(`max_beads_per_run`).
+
+*Rejected:* keeping the distiller's route at filing. A park on an epic would never
+hold its beads, so a hold on all new work would reach one only if an agent noticed
+the hold and parked the bead by hand: the distiller's session as it files the
+bead, or the polecat that claims it. Nothing in the pack makes either one check.
 
 **Association means membership.** Placing an item under an epic writes a
 parent-child edge. The board, the cascade and the priority writers all read that
@@ -657,7 +685,7 @@ authoritative statement of the model, and the units after it extend it.
 | 6 | **PR-finishing rank and its invariant.** The function ranks anchor children and their workflows; each PR-finishing creator settles its child before it routes or slings it; `pr-facts.sh` settles an anchor's children when the posture it records turns approved or stops being approved; each creator's suite asserts that the child it files has no parent. | 7 | 5 | With the order off, each creator routes or slings its child at its rank: an approved PR's merge-in child at P0, and a review rework at P1 under a P2 epic. When an anchor's posture turns approved, its open children and their workflows reach P0 in the pass that records it. Every fixture anchor with a PR records its posture in the stored shape, `approved@<head>@<since>` for an approved PR. Each suite with an approved PR holds one under a P2 epic, where unapproved finishing work runs at P1, so a rank changed to compare the whole stored value fails it. A creator changed to file its child with a parent fails its own suite. |
 | 7 | **Checks and converse context read the hold.** `check-blocked-work-armed` flags only a bead with an open blocker of its own; `bead-context.sh` reads a hold and names its blocker. | 4 | 2 | A member held through its parked epic draws no finding and no arm remedy. An unarmed member with an open blocker of its own still does. |
 | 8 | **The helm board shows steering.** Each epic's priority and open blockers with their titles; held epics in their own section, with their idle children not called stranded; the takeaway notion renamed. | 4 | 2 | The board fixture renders a parked epic under its own section with its park's condition, and an unparked one with its priority. The Go and shell predicates agree on the shared fixture. |
-| 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; `unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. The sweep runs again. |
+| 9 | **Intake holds findings for placement.** First reaction's actionable and blocked exits; the witness's bug dispatch; the feedback distiller's filing, and the promotion path in `docs/feedback-learning.md` that describes it; `unplaced`; the scheduled sweep back on, with `city.toml` sections 6 and 7 deleted in a town-repo commit. | 5 | — | A patrol finding with no epic ends with `placement=pending`, unrouted. A finding for a red main routes at P0. A distiller run leaves each bead it files with `placement=pending`, unrouted. The sweep runs again. |
 | 10 | **The placement verb.** `place`, with unrelate-then-reparent and a route that carries the item's queue priority; `--standalone`; the refusal of PR-finishing work. | 5 | 5 | Placing an item with a relates-to edge to its epic makes it a member and routes it. With the order off, an item filed at P3 and placed under a P0 epic is routed at P0, in the same write as its route. Under a parked epic the cascade holds it. Placing a bead that carries `anchor_bead` is refused. |
 | 11 | **The Checkpoint records the next priority.** epics.md and epic-stewardship.md state the section 6 rule. | 6 | 1, 5, PR #977 (tk-isd5sa) | The docs carry it, and a checkpoint sitting's recipe applies the moves before the sitting ends. |
 | 12 | **Retire the demand-gate exception.** Deferred dispatch and the held predicate read `bd ready` alone. | 2 | 2, tk-n18e15 | No open demand gate blocks a bead with children, and the exception's code and tests are gone. |
@@ -687,6 +715,11 @@ Until the units land:
 - **Findings still become polecat work.** A patrol finding becomes polecat work
   through its first reaction, though `city.toml` section 7 reads as if intake were
   off.
+- **The distiller's beads still route themselves.** The feedback distiller routes
+  each bead to the polecat pool as it files it, so no park on an epic holds one.
+  While a hold on all new work stands, an agent has to notice the hold and park
+  each such bead by hand: the distiller's session as it files the bead, or the
+  polecat that claims it.
 - **Checks and the board read the park as a stall.**
   `check-blocked-work-armed` flags parked members that have no route or arm, and
   following its remedy would start them. The helm board shows every parked epic
