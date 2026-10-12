@@ -35,10 +35,13 @@
 #     blob in a remote-tracking ref's history. Any other working copy may be
 #     machine-local config or real work, so the pass escalates instead;
 #   - it has no unmerged entry.
-# An unignored untracked file on a path the fast-forward adds blocks it too.
-# One that already holds the bytes the remote adds there is removed before the
-# retry, because the fast-forward writes the same content back; any other
-# escalates.
+# Untracked content in the way of what the fast-forward writes blocks it too: a
+# file on a path it writes, a file where it writes a directory, and anything
+# under a directory it replaces with a file. A regular file that already holds
+# the bytes written on its own path is removed before the retry, because the
+# fast-forward writes the same content back; anything else escalates. git's own
+# listing says what is untracked, so an ignored file, which git overwrites,
+# never counts, and nothing behind a symlink is touched.
 # A staged change needs no proof of its own: a directory-imported pack runs from
 # the working tree, so the index holds nothing the runtime executes. Before a
 # tracked path moves, `git stash create` pins the staged and working-tree state
@@ -55,8 +58,8 @@
 # (commits are authored in worktrees and the refinery clone, never here), so its
 # tracked content is already fully represented in origin. That case is provably
 # lossless to reset, so the refusal branch tries to auto-heal it. The reset runs
-# only when every check holds, and fails closed (escalates, mutates nothing) on
-# anything it cannot prove:
+# only when every check holds, and a check that does not hold escalates with
+# nothing touched:
 #   - git cherry (patch-id) finds no unique local commit, so a rebased or
 #     squashed commit with a new SHA still matches;
 #   - git rev-list --merges finds no merge commit unique to local — git cherry
@@ -66,10 +69,18 @@
 #     tree), and no dirty tracked path carries local-only content: its working
 #     tree differs from the remote, or its staged index matches neither the
 #     remote nor the committed HEAD;
-#   - no untracked file sits on a path the remote tracks unless it already holds
-#     the remote's content, because reset --hard overwrites it.
-# It then resets --hard to the remote, which keeps every other untracked file,
-# and closes the divergence bead.
+#   - nothing untracked is in the way of the remote's tree, judged as for the
+#     fast-forward above, except a regular file that already holds the remote's
+#     bytes on its own path.
+# It then removes those copies, stages each dirty path whose index still holds
+# HEAD, and runs git reset --keep to the remote. That leaves the checkout where
+# reset --hard would, but git refuses, rather than deletes, anything untracked
+# in its way. An untracked collision the checks above cannot see, such as a
+# name that differs only in case on a file system that ignores case, therefore
+# escalates instead of losing content, and the report names what the heal had
+# staged and removed. reset --keep still resets every index entry, so staged
+# content stays the guard's to prove. Every other untracked file stays, and the
+# divergence bead closes.
 #
 # Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
 # escalate every refusal instead.
@@ -181,6 +192,72 @@ in_list() {
     return 1
 }
 
+# Prints each unignored untracked entry of the checkout at $1 that writing a
+# tree would overwrite or delete, as "same<TAB><path>" or "other<TAB><path>".
+# The tree written is all of $2, as a reset writes it, or with $3 only what $2
+# changes from $3, as a fast-forward from $3 writes it. An entry is in the way
+# when a file is written on its path or on a directory above it, or when a
+# directory is written where it is a file. "same" is a regular file on a path
+# where a regular file is written, already holding that file's bytes, so
+# writing over it loses nothing. git lists untracked files one by one and never
+# behind a symlink. It lists a nested repository, which it does not enter, as
+# one entry ending in "/", which is in the way of anything written on or under
+# its path. A name git quotes keeps its quoted form, which the tree listing
+# quotes the same way, but it cannot be hashed, so it is never "same".
+untracked_in_way() {
+    local path="$1" to="$2" from="${3:-}" written untracked kind blob p
+    if [ -n "$from" ]; then
+        written=$(git -C "$path" -c core.quotepath=false diff-tree -r -t "$from" "$to" 2>/dev/null) || return 1
+    else
+        written=$(git -C "$path" -c core.quotepath=false ls-tree -r -t --full-tree "$to" 2>/dev/null) || return 1
+    fi
+    untracked=$(git -C "$path" -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null) || return 1
+    [ -n "$untracked" ] || return 0
+    while IFS=$'\t' read -r kind blob p; do
+        if [ "$kind" = file ] && [ -f "$path/$p" ] && [ ! -L "$path/$p" ] \
+           && [ "$(git -C "$path" hash-object -- "$p" 2>/dev/null)" = "$blob" ]; then
+            printf 'same\t%s\n' "$p"
+        else
+            printf 'other\t%s\n' "$p"
+        fi
+    done < <(printf '%s\n\n%s\n' "$written" "$untracked" | awk '
+        BEGIN { FS = "\t" }
+        # Unquoted, a path git lists holds no double quote or backslash, so the
+        # inside of a quoted one is a key no unquoted path shares, and "/" still
+        # separates its components.
+        function key(s) { return (substr(s, 1, 1) == "\"") ? substr(s, 2, length(s) - 2) : s }
+        !listed && $0 == "" { listed = 1; next }
+        !listed {
+            split($1, f, " ")
+            if (substr(f[1], 1, 1) == ":") {
+                # diff-tree. A path the change deletes is not written.
+                if (f[2] == "000000") next
+                mode = f[2]; oid = f[4]
+            } else {
+                mode = f[1]; oid = f[3]
+            }
+            k = key($2)
+            if (mode == "040000") kind[k] = "dir"
+            else if (mode == "100644" || mode == "100755") kind[k] = "file"
+            else kind[k] = "other"
+            sha[k] = oid
+            next
+        }
+        $0 == "" { next }
+        {
+            k = key($0); nested = 0
+            if (substr(k, length(k)) == "/") { nested = 1; k = substr(k, 1, length(k) - 1) }
+            n = split(k, part, "/"); up = ""
+            for (i = 1; i < n; i++) {
+                up = (i == 1) ? part[1] : (up "/" part[i])
+                if ((up in kind) && kind[up] != "dir") { print "other\t-\t" $0; next }
+            }
+            if (!(k in kind)) next
+            if (!nested && substr($0, 1, 1) != "\"" && kind[k] == "file") print "file\t" sha[k] "\t" $0
+            else print "other\t-\t" $0
+        }')
+}
+
 # The behind-checkout heal (see the header). On success the checkout has
 # fast-forwarded, and set_aside_ref names the pin when tracked paths were set
 # aside. On failure blocking_report says what blocked it and names whatever the
@@ -189,7 +266,7 @@ in_list() {
 set_aside_ref=""; blocking_report=""
 set_aside_and_advance() {
     local path="$1" remote="$2" name="$3"
-    local dirty incoming added p blob listed="" gone="" stuck="" moved="" msg pin ref unsafe=0
+    local dirty incoming in_way_out kind p blob listed="" gone="" stuck="" moved="" msg pin ref unsafe=0
     local -a dirty_paths=() blocking=() in_way=()
     set_aside_ref=""; blocking_report=""
     # Tracked paths whose working tree or index differs from HEAD. git quotes a
@@ -212,26 +289,22 @@ set_aside_and_advance() {
             blocking+=("$p")
         done <<< "$incoming"
     fi
-    # An untracked file on a path the fast-forward adds blocks it too. git
-    # overwrites an ignored one, so only an unignored file counts. A regular
-    # file holding the remote's blob for its path can go, since the
-    # fast-forward writes those bytes back.
-    added=$(git -C "$path" -c core.quotepath=false diff --name-only --no-renames --diff-filter=A HEAD "$remote" 2>/dev/null) \
-        || { blocking_report="could not list the paths the fast-forward adds"; return 1; }
-    while IFS= read -r p; do
+    # Untracked content in the way of what the fast-forward writes blocks it too
+    # (untracked_in_way). A copy of what is written on its own path can go,
+    # since the fast-forward writes those bytes back. A path staged for deletion
+    # is untracked to git but dirty here, so the proof below covers it.
+    in_way_out=$(untracked_in_way "$path" "$remote" HEAD) \
+        || { blocking_report="could not list the untracked files in the fast-forward's way"; return 1; }
+    while IFS=$'\t' read -r kind p; do
         [ -n "$p" ] || continue
-        [ -e "$path/$p" ] || [ -L "$path/$p" ] || continue
         in_list "$p" ${dirty_paths[@]+"${dirty_paths[@]}"} && continue
-        git --literal-pathspecs -C "$path" check-ignore -q -- "$p" 2>/dev/null && continue
-        if [ -f "$path/$p" ] && [ ! -L "$path/$p" ] \
-           && blob=$(git -C "$path" hash-object -- "$p" 2>/dev/null) \
-           && [ "$blob" = "$(git -C "$path" rev-parse -q --verify "$remote:$p" 2>/dev/null)" ]; then
+        if [ "$kind" = same ]; then
             in_way+=("$p")
         else
-            blocking_report+="untracked file in the way: $p (it holds other content than $remote adds there)"$'\n'
+            blocking_report+="untracked in the way: $p (the fast-forward would write over or remove it, and it is no copy of what $remote holds there)"$'\n'
             unsafe=1
         fi
-    done <<< "$added"
+    done <<< "$in_way_out"
     if [ "${#blocking[@]}" -eq 0 ] && [ "${#in_way[@]}" -eq 0 ] && [ "$unsafe" -eq 0 ]; then
         blocking_report="no local change sits on a path the fast-forward rewrites"
         return 1
@@ -290,6 +363,69 @@ set_aside_and_advance() {
     fi
 }
 
+# The diverged-checkout heal (see the header). On success the checkout sits on
+# the remote. A check that does not hold leaves the checkout untouched and
+# blocking_report empty. When git refuses the reset itself, blocking_report
+# says so and names what the heal had already staged and removed.
+reset_and_advance() {
+    local path="$1" remote="$2"
+    local cherry_out merges status_out in_way_out changed kind p err acted="" unique_local=0
+    local -a stage=() same=()
+    blocking_report=""
+    cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) || return 1
+    [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] || return 1
+    merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) || return 1
+    [ -z "$merges" ] || return 1
+    status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null) || return 1
+    in_way_out=$(untracked_in_way "$path" "$remote") || return 1
+    while IFS= read -r changed; do
+        [ -n "$changed" ] || continue
+        # A name git quotes is no usable pathspec, so nothing about it is proven.
+        case "$changed" in \"*) unique_local=$((unique_local + 1)); continue ;; esac
+        # Neither the working tree nor the staged index may carry content the
+        # reset would lose. Working tree: safe only when it already equals the
+        # remote (the regenerated-to-upstream case). Index: safe when it equals
+        # the remote, or equals HEAD — committed content, proven upstream by the
+        # cherry check above — and then the working tree is staged over it,
+        # since reset --keep refuses an unstaged change on a path it moves.
+        # Content staged but never committed (differs from both HEAD and the
+        # remote) has no way back, even when an upstream-matching worktree copy
+        # hides it from a diff against remote.
+        if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
+            unique_local=$((unique_local + 1))
+        elif git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
+            stage+=("$changed")
+        elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null; then
+            unique_local=$((unique_local + 1))
+        fi
+    done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
+    while IFS=$'\t' read -r kind p; do
+        case "$kind" in
+            same) same+=("$p") ;;
+            other) unique_local=$((unique_local + 1)) ;;
+        esac
+    done <<< "$in_way_out"
+    [ "$unique_local" -eq 0 ] || return 1
+    if [ "${#stage[@]}" -gt 0 ]; then
+        if ! git --literal-pathspecs -C "$path" add -- "${stage[@]}" 2>/dev/null; then
+            blocking_report="the reset heal could not stage ${stage[*]}"
+            return 1
+        fi
+        acted="staged ${stage[*]}"
+    fi
+    for p in ${same[@]+"${same[@]}"}; do
+        if ! rm -f -- "$path/$p"; then
+            blocking_report="the reset heal ${acted:+$acted, then }could not remove the untracked $p"
+            return 1
+        fi
+        acted="${acted:+$acted, }removed the untracked $p, a copy of $remote's"
+    done
+    if ! err=$(git -C "$path" reset -q --keep "$remote" 2>&1); then
+        blocking_report="git reset --keep $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
+        return 1
+    fi
+}
+
 advanced=0; healed=0; blocked=0
 rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
 
@@ -335,61 +471,21 @@ while IFS=$'\t' read -r name path; do
     fi
 
     # A diverged checkout is almost always SHA churn from an upstream
-    # rebase/squash/force-push, with its content already upstream. reset --hard
-    # is lossless only when the guard proves it: git cherry (patch-id) finds no
-    # unique local commit, no merge commit is unique to local (git cherry ignores
-    # merges, so a local merge's tree content is not provably upstream), the
-    # status read succeeds, no dirty tracked path carries local-only content (a
-    # working tree that differs from the remote, or a staged index matching
-    # neither remote nor HEAD), and no untracked file on a path the remote tracks
-    # holds other content. Anything the guard cannot prove — a real divergence,
-    # an unreadable status, a local merge — falls through to the escalation path
-    # unchanged.
-    if [ -z "$parked" ] && [ -z "$behind" ] \
-       && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
-       && cherry_out=$(git -C "$path" cherry "$remote" HEAD 2>/dev/null) \
-       && [ -z "$(printf '%s' "$cherry_out" | grep '^+' || true)" ] \
-       && merges=$(git -C "$path" rev-list --merges "$remote"..HEAD 2>/dev/null) \
-       && [ -z "$merges" ] \
-       && status_out=$(git -C "$path" -c core.quotepath=false status --porcelain 2>/dev/null); then
-        unique_local=0
-        while IFS= read -r changed; do
-            [ -n "$changed" ] || continue
-            # reset --hard overwrites both the working tree and the staged index
-            # for this path, so neither may carry content the reset would lose.
-            # Working tree: safe only when it already equals the remote (the
-            # regenerated-to-upstream case). Index: safe when it equals the remote,
-            # or equals HEAD — committed content, proven upstream by the cherry
-            # check above. Content staged but never committed (differs from both
-            # HEAD and the remote) is discarded with no way back, even when an
-            # upstream-matching worktree copy hides it from a diff against remote.
-            if ! git -C "$path" diff --quiet "$remote" -- "$changed" 2>/dev/null; then
-                unique_local=$((unique_local + 1))
-            elif ! git -C "$path" diff --cached --quiet "$remote" -- "$changed" 2>/dev/null \
-                 && ! git -C "$path" diff --cached --quiet HEAD -- "$changed" 2>/dev/null; then
-                unique_local=$((unique_local + 1))
-            fi
-        done < <(printf '%s\n' "$status_out" | grep -v '^??' | sed -E 's/^.{3}//; s/^.* -> //')
-        # reset --hard also writes every path the remote tracks, so an untracked
-        # file on one is overwritten: safe only when it already holds the
-        # remote's content. A name git quotes cannot be looked up, so it counts.
-        while IFS= read -r untracked; do
-            [ -n "$untracked" ] || continue
-            case "$untracked" in \"*) unique_local=$((unique_local + 1)); continue ;; esac
-            remote_blob=$(git -C "$path" rev-parse -q --verify "$remote:$untracked" 2>/dev/null) || continue
-            [ "$(git -C "$path" hash-object -- "$untracked" 2>/dev/null)" = "$remote_blob" ] \
-                || unique_local=$((unique_local + 1))
-        done < <(printf '%s\n' "$status_out" | sed -n 's/^?? //p')
-        if [ "$unique_local" -eq 0 ] && git -C "$path" reset --hard "$remote" >/dev/null 2>&1; then
-            healed=$((healed + 1))
-            resolve_subject "$name" "rigs/$name auto-healed: already-upstream, reset --hard to $remote"
-            continue
-        fi
+    # rebase/squash/force-push, with its content already upstream, and takes
+    # the reset heal (see the header). Anything its checks cannot prove — a real
+    # divergence, an unreadable status, a local merge, untracked content in the
+    # way — falls through to the escalation path untouched.
+    if [ -z "$parked" ] && [ -z "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+       && reset_and_advance "$path" "$remote"; then
+        healed=$((healed + 1))
+        resolve_subject "$name" "rigs/$name auto-healed: already-upstream, reset --keep to $remote"
+        continue
     fi
 
     # Reached three ways: the HEAD is parked off the default branch, a behind
     # checkout's blocking changes could not all be set aside, or a divergence
-    # the guard could not prove lossless. File the subject bead and escalate.
+    # the reset heal could not prove lossless or git refused to reset. File the
+    # subject bead and escalate.
     blocked=$((blocked + 1))
     if [ -n "$parked" ]; then
         body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nIt auto-closes when the rig next fast-forwards cleanly.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
@@ -408,8 +504,11 @@ while IFS=$'\t' read -r name path; do
             "$name" "$remote" "$path" "$report" "$pinned" "$path" \
             "$(git -C "$path" status --porcelain 2>/dev/null)")
     else
-        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
-            "$name" "$remote" "$path" "$path" "$remote" \
+        nl=$'\n'
+        stopped=""
+        [ -z "$blocking_report" ] || stopped="## The reset heal stopped$nl$blocking_report$nl$nl"
+        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): already-upstream -> git -C %s reset --hard %s; machine-local\nconfig -> leave it; real work -> handle it.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$remote" "$path" "$stopped" "$path" "$remote" \
             "$(git -C "$path" status --porcelain 2>/dev/null)" \
             "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
     fi
