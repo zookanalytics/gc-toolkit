@@ -24,11 +24,29 @@
 # a live worker's, and reconcile would not dispose over it; a non-open bead is a
 # deliberate hold the pass leaves alone; neither is owed a disposition.
 #
+# A bead that carries live work is never disposed either, and the marks that
+# say so come from assets/scripts/live-work.sh, the definition the pass itself
+# reads: an anchor with a PR, work slung to a pool, a kind another component
+# closes, a convoy or an open child on its edges. Once its `until` targets have
+# closed past the window, such a bead is reported as a decision for a person:
+# remove the edge if the work is still wanted, or retire the work. That is not
+# the order failing, so the finding says which it is.
+#
 # Read-only. Exit 0=OK 1=Warning. stdout: first line = message, then
 # "  - detail" lines. Warn-only. An UNREADABLE probe warns (1), never passes —
 # an unread store is not a clean one.
 
 set -u
+
+# What makes a bead live work, from the one definition the reconcile pass reads.
+# Exposes $LIVE_WORK_JQ. An unsourceable one warns: without it a bead the pass
+# leaves alone as live work would read as a disposition the order failed to make.
+# shellcheck source=../../assets/scripts/live-work.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/live-work.sh" || {
+    echo "cannot determine whether owed resolved-by dispositions are firing"
+    printf '  - %s\n' "assets/scripts/live-work.sh could not be sourced from this pack, so a bead the pass leaves alone as live work cannot be told from a disposition it failed to make."
+    exit 1
+}
 
 # A disposition owed longer than this has waited out three reconcile intervals.
 # Mirrors check-cadence-live's I10 window, max(3×interval, 15m), which is 900s
@@ -39,7 +57,7 @@ OWED_WINDOW_SECONDS=900
 
 UNTIL_TYPE="until"
 
-findings=(); warnings=(); notes=()
+findings=(); livework=(); warnings=(); notes=()
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
 # --check-timeout` (default 60s) abandons an overrunning check and discards
@@ -99,7 +117,7 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
 fi
 
 now=$(now_epoch)
-declare -A until_of=(); declare -A blocks_of=()
+declare -A until_of=(); declare -A blocks_of=(); declare -A marks_of=()
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
@@ -122,8 +140,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # Its row carries its own outgoing edges under `.dependencies` in the list-edge
     # shape ({depends_on_id, type}), so the until targets and any `blocks` blockers
     # are read off this one listing, no per-bead dep call. Emits one line per
-    # candidate: id, comma-joined until-target ids, comma-joined blocks-blocker ids.
-    classified=$(printf '%s' "$raw" | scrub | jq -r --arg ut "$UNTIL_TYPE" '
+    # candidate: id, comma-joined until-target ids, comma-joined blocks-blocker ids,
+    # and the live-work marks its row carries. An empty column is written "-":
+    # TAB is IFS whitespace, so an empty one would collapse and shift the next left.
+    classified=$(printf '%s' "$raw" | scrub | jq -r --arg ut "$UNTIL_TYPE" "$LIVE_WORK_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | (($b.status // "") | tostring) as $st
@@ -131,7 +151,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | [ ($b.dependencies // [])[] | select(.type == $ut) | .depends_on_id ] as $u
         | select($st == "open" and $as == "" and ($u | length) > 0)
         | [ ($b.dependencies // [])[] | select(.type == "blocks") | .depends_on_id ] as $blk
-        | "\($id)\t\($u | unique | join(","))\t\($blk | unique | join(","))"' 2>/dev/null) || {
+        | ($b | live_work_reasons | join("; ")) as $marks
+        | "\($id)\t\($u | unique | join(","))\t\(if ($blk | length) == 0 then "-" else ($blk | unique | join(",")) end)\t\(if $marks == "" then "-" else $marks end)"' 2>/dev/null) || {
         warnings+=("$label: could not evaluate open beads in $rig_path/.beads — this store was NOT checked")
         continue
     }
@@ -143,10 +164,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # gate/infra/template target is not hidden and read as unresolved; --id silently
     # drops an id with no row, so a referenced id still absent from the result is
     # treated as unresolved below (its candidate is NOT checked), never as closed.
-    cand_ids=(); until_of=(); blocks_of=()
-    while IFS=$'\t' read -r cid utargets blockers; do
+    cand_ids=(); until_of=(); blocks_of=(); marks_of=()
+    while IFS=$'\t' read -r cid utargets blockers marks; do
         [ -n "$cid" ] || continue
-        cand_ids+=("$cid"); until_of["$cid"]="$utargets"; blocks_of["$cid"]="$blockers"
+        [ "$blockers" != "-" ] || blockers=""
+        cand_ids+=("$cid"); until_of["$cid"]="$utargets"; blocks_of["$cid"]="$blockers"; marks_of["$cid"]="${marks:--}"
     done <<< "$classified"
     [ "${#cand_ids[@]}" -gt 0 ] || continue
 
@@ -201,7 +223,26 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         # readable timestamp, and a real stall persists to be caught then.
         [ -n "$since_epoch" ] || continue
         age=$(( now - since_epoch ))
-        if [ "$age" -ge "$OWED_WINDOW_SECONDS" ]; then
+        [ "$age" -ge "$OWED_WINDOW_SECONDS" ] || continue
+        # A clean row still needs its edges read: a convoy tracking the bead or
+        # an open child under it is live work no row field shows. The same two
+        # reads the pass makes before a close, bounded like every probe here.
+        marks="${marks_of[$cid]:--}"
+        if [ "$marks" = "-" ]; then
+            row=$(run_bounded gc bd show --db "$rig_path/.beads" "$cid" --json 2>/dev/null | scrub)
+            up=$(run_bounded gc bd dep list --db "$rig_path/.beads" "$cid" --direction=up --json 2>/dev/null | scrub)
+            if ! printf '%s' "$row" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+               || ! printf '%s' "$up" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                warnings+=("$label bead $cid: could not read it and its dependents in $rig_path/.beads, so live work on its edges cannot be ruled out — NOT checked")
+                continue
+            fi
+            marks=$(printf '%s' "$row" | jq -r --slurpfile up <(printf '%s' "$up") "$LIVE_WORK_JQ"'
+                .[0] | (live_work_reasons + live_work_edge_reasons($up[0])) | join("; ")' 2>/dev/null) || marks=""
+            [ -n "$marks" ] || marks="-"
+        fi
+        if [ "$marks" != "-" ]; then
+            livework+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s, but it carries live work ($marks), which the deferred-dispatch reconcile pass never disposes. A person decides: if the work is still wanted, remove the resolve-by edge (gc bd dep remove $cid <target>); if the target's close made it moot, retire the work and dispose $cid by ruling")
+        else
             findings+=("$label bead $cid: its \`until\` resolved-by target(s) [$utargets] have been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not been disposed. The deferred-dispatch reconcile pass disposes a resolved \`until\` bead within its 5m cadence, so a disposition owed this long means that order is not firing (check-cadence-live/I10) or the close is stuck — commonly an open visit on $cid holds it (conclude the visit), or the resolve-by edge is no longer wanted (remove it: gc bd dep remove $cid <target>)")
         fi
     done
@@ -210,10 +251,15 @@ done <<< "$scopes"
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every store was scanned — what follows is partial, and a store skipped for time is not a store that passed")
 fi
-if [ "${#findings[@]}" -ne 0 ] || [ "${#warnings[@]}" -ne 0 ]; then
+if [ "${#findings[@]}" -ne 0 ] || [ "${#livework[@]}" -ne 0 ] || [ "${#warnings[@]}" -ne 0 ]; then
     if [ "${#findings[@]}" -ne 0 ]; then
         echo "resolved-by dispositions owed but not firing: ${#findings[@]} finding(s)"
         detail "${findings[@]}"
+        detail ${livework[@]+"${livework[@]}"}
+        detail ${warnings[@]+"${warnings[@]}"}
+    elif [ "${#livework[@]}" -ne 0 ]; then
+        echo "resolved-by beads left open because they carry live work: ${#livework[@]} bead(s) need a person's decision"
+        detail "${livework[@]}"
         detail ${warnings[@]+"${warnings[@]}"}
     else
         echo "until-resolved-owed check ran partially"

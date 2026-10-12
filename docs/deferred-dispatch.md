@@ -214,6 +214,36 @@ ONLY `until` disposes: a `blocks` edge is never a dispose trigger, so the common
 sequencing edge ("land A before B", where B is still owed after A) is never
 auto-closed.
 
+Open and unassigned is not the same as idle. An anchor stays open and
+unassigned for as long as its PR is reviewed, and a bead slung to a pool stays
+that way until a worker claims it. bd closes either without complaint, so the
+guard is the pass's own. The pass disposes only a pure wait: a bead that
+carries no live work as `assets/scripts/live-work.sh` defines it. The marks of
+live work fall into these groups:
+
+- **Dispatched:** a pool route, a deferred-dispatch arm or its sling marker, a
+  formula pour, a deferred route, a claim, or a bound session.
+- **Worked:** a branch, a worktree, a commit, a review round, a landing target,
+  a PR, a landing state, or an outcome.
+- **Owned by another closer:** any `task_kind`, a molecule step or workflow
+  root, a demand, a duplicate diagnosis, or an issue type outside plain work
+  (task, bug, feature, chore, spike). An epic closes on its own ruling.
+- **Parked:** a `hold_reason` or a `rebase_hold`.
+- **Structural:** a convoy that tracks the bead or parents it, or an open child
+  under it.
+
+The pass reads these marks twice. The first read is the row the pass-start
+listing returns. The second is a fresh read of the bead and of what depends on
+it, made just before the close, because a sling or a claim can land
+mid-pass. That includes a sling the pass's own dispatch half made moments
+earlier. A bead with any mark is reported and left open, which is never a pass
+failure. A dispatch that lands after the fresh read meets a closed bead: no
+pool offers it, and `mol-polecat-work`'s load-context quiesces a pour over it.
+The guard runs before `bead-rehome` is called, because `bead-rehome` stamps its
+successor pointer before anything can refuse the close. A pointer on an anchor
+reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that
+anchor's review scaffolding.
+
 When the close is held — an open visit tracking the bead, or another open
 blocker — `bead-rehome` records the successor pointer and refuses the close
 rather than forcing it, leaving an open, pointed, findable bead that a later
@@ -230,7 +260,11 @@ resolved-by mirror of `check-armed-dispatch-owed`: it flags an open, unassigned
 bead whose `until` targets have all closed and that no open `blocks` blocker
 still holds, yet that has stayed undisposed past the reconcile window — the
 disposition silently not firing, surfaced before the bead drifts back into a
-triage sitting.
+triage sitting. It reads live work from the same `live-work.sh` definition, so
+a resolved bead the pass left open because it carries live work is reported
+separately, as a decision for a person. If the work is still wanted, the person
+removes the `until` edge. If the target's close made it moot, the work is
+retired and the bead disposed by ruling.
 
 ## What this does not do
 

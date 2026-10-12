@@ -204,7 +204,9 @@ and `doctor/check-until-resolved-owed` (the resolved-by mirror of
 bead through `bead-rehome.sh` within its cadence once every one of its own `until`
 targets has closed, so one still undisposed past that window, with no open
 `blocks` blocker holding it, is a disposition silently not firing; the common
-stuck case is an open visit on the bead holding the close; warn-only),
+stuck case is an open visit on the bead holding the close. A bead the order leaves
+open because it carries live work, read from the same `live-work.sh`, is reported
+apart from that, as a decision for a person; warn-only),
 and `doctor/check-feedback-routing-owed` (the complement to the merge cadence's
 feedback arm: a cheap pre-merge arm records a PR's review posture on the anchor and
 a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture` is
@@ -341,7 +343,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed, and disposes work whose `until` targets have closed. |
-| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs. A pending dispatch is a fact about the work, so it lives on the work bead, and so does a resolution: an `until` edge records that the bead is resolved when another one closes. The pass slings an armed bead once its blockers close, and disposes an open, unassigned bead through `bead-rehome.sh` once every one of its `until` targets has closed. A `blocks` edge never disposes. |
+| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs. A pending dispatch is a fact about the work, so it lives on the work bead, and so does a resolution: an `until` edge records that the bead is resolved when another one closes. The pass slings an armed bead once its blockers close, and disposes an open, unassigned bead through `bead-rehome.sh` once every one of its `until` targets has closed, unless the bead carries live work (`live-work.sh`). A `blocks` edge never disposes. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
@@ -451,6 +453,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |
 | `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
 | `assets/scripts/rework-child.sh` | shared primitive | The one writer of a review- or ruling-sourced rework child, the fix unit that blocks an anchor while a worker resumes its branch. Review (`signoff.sh`, on a request-changes verdict) and visit (`converse-rework.sh`, on an operator ruling) file through it for the same reason, each passing its provenance as the child's source key and deciding the work order. |
+| `assets/scripts/live-work.sh` | shared primitive | The definition of live work, which no automated disposal may close: what a bead or its edges record when it is dispatched, worked, owned by another closer, parked, tied to a convoy, or holding an open child. Work's deferred-dispatch pass sources it to dispose only a pure wait its `until` targets resolved. Patrol's doctor sweep runs `check-until-resolved-owed`, which sources it to report such a bead as a decision for a person rather than as a disposal the order failed to make. |
 
 ### The placements worth arguing about
 

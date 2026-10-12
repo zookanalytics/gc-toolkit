@@ -9,8 +9,11 @@
 # since the latest); the fail-closed probes (unreadable open listing, unreadable
 # status listing, an until target the status read drops as unresolvable, an
 # unreadable rig list); the gate-target resolution (bd hides gates unless asked);
-# the suspended-rig skip; the quiet path; and that a store's statuses are read in
-# ONE batch, not one call per candidate.
+# the suspended-rig skip; the quiet path; that a store's statuses are read in
+# ONE batch, not one call per candidate; and the live-work report (a bead the
+# pass never disposes because it carries live work, read from its row or from
+# its edges, is reported as a decision for a person, never as the order not
+# firing, and an unreadable edge read leaves it unchecked).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -41,6 +44,11 @@ GC
 #     (<name>.open.json): each bead's status, assignee, and its own outgoing edges
 #     under `.dependencies` in the list-edge shape ({depends_on_id, type}).
 #     BD_FAIL_LIST names a store whose open listing fails outright.
+#   * `bd show <id> --json`               → the bead's row, from <name>.show.json
+#     when that file names it, else from the open listing.
+#   * `bd dep list <id> --direction=up`   → the beads that depend on it, from
+#     <name>.up.json (an object of id → array), else []. BD_FAIL_UP names a store
+#     whose dependents read answers an error object.
 #   * `bd list --id <csv> --all ...`       → the referenced target/blocker beads
 #     (<name>.refs.json), DROPPING ids with no row (real --id is silent about a
 #     miss) and hiding a gate/infra/template row unless the matching --include
@@ -87,6 +95,20 @@ case "$sub" in
       [ "$name" = "${BD_FAIL_LIST:-}" ] && exit 3
       f="$STORES/$name.open.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
     fi ;;
+  show)
+    sid=""; for a in "$@"; do case "$a" in --*|"$db") ;; *) [ -n "$sid" ] || sid="$a" ;; esac; done
+    f="$STORES/$name.show.json"
+    [ -f "$f" ] && jq -e --arg id "$sid" 'any(.[]; .id == $id)' "$f" >/dev/null 2>&1 || f="$STORES/$name.open.json"
+    if [ -f "$f" ] && jq -e --arg id "$sid" 'any(.[]; .id == $id)' "$f" >/dev/null 2>&1; then
+      jq -c --arg id "$sid" '[ .[] | select(.id == $id) ]' "$f"
+    else
+      echo '{"error":"no issues found matching the provided IDs","schema_version":1}'
+    fi ;;
+  dep)
+    [ "$name" = "${BD_FAIL_UP:-}" ] && { echo '{"error":"simulated dependents failure","schema_version":1}'; exit 0; }
+    did=""; for a in "$@"; do case "$a" in list|--*|"$db") ;; *) [ -n "$did" ] || did="$a" ;; esac; done
+    f="$STORES/$name.up.json"
+    if [ -f "$f" ]; then jq -c --arg id "$did" '.[$id] // []' "$f"; else printf '[]'; fi ;;
   *) printf '[]'; exit 0 ;;
 esac
 BD
@@ -101,12 +123,16 @@ clear_stores() { rm -f "$TMP/stores/"*.json; }
 # Open-bead fixtures (the check reads status + assignee + .dependencies here).
 open_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.open.json"; }
 # A bead with one until edge (+ optional extra edge JSON fragments appended).
-o_until()  { printf '{"id":"%s","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2"; }
-o_until2() { printf '{"id":"%s","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"},{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3"; }
-o_until_blk() { printf '{"id":"%s","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"},{"depends_on_id":"%s","type":"blocks"}]}' "$1" "$2" "$3"; }
-o_until_assigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2"; }
-o_until_status() { printf '{"id":"%s","status":"%s","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3"; }
-o_blocks_only() { printf '{"id":"%s","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"blocks"}]}' "$1" "$2"; }
+# Every candidate names issue_type task: the check reports a bead of any other
+# type as live work, which the pass never disposes.
+o_until()  { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2"; }
+o_until2() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"},{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3"; }
+o_until_blk() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"},{"depends_on_id":"%s","type":"blocks"}]}' "$1" "$2" "$3"; }
+o_until_assigned() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"rig/rig.refinery","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2"; }
+o_until_status() { printf '{"id":"%s","issue_type":"task","status":"%s","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3"; }
+o_blocks_only() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"blocks"}]}' "$1" "$2"; }
+# A bead with one until edge, a type and metadata of the caller's choosing.
+o_until_meta() { printf '{"id":"%s","issue_type":"%s","status":"open","assignee":"","metadata":%s,"dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3" "$4"; }
 
 # Referenced-bead fixtures (status + closed_at the --id lookup resolves).
 refs_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.refs.json"; }
@@ -258,6 +284,66 @@ has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 IDN=$( [ -f "$IDLOG" ] && wc -l < "$IDLOG" | tr -d ' ' || echo 0 )
 eq "$IDN" "1" "the store's target statuses are read in ONE batch, not one call per candidate"
+
+# --- 17. LIVE WORK on the row: an anchor mid-PR is a decision, not a stall ---
+open_store alpha "$(o_until_meta l-1 task '{"branch":"polecat/l-1","merge_result":"pull_request","pr_url":"https://github.com/o/r/pull/7"}' x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a resolved bead carrying live work warns (exit 1)"
+has "$OUT" "left open because they carry live work" "the headline says why it is open"
+has "$OUT" "alpha bead l-1" "the bead is named"
+has "$OUT" "merge_result=pull_request" "the mark that makes it live is named"
+has "$OUT" "gc bd dep remove l-1" "the remove-edge remedy is named"
+hasnt "$OUT" "owed but not firing" "live work is not reported as the order failing"
+clear_stores
+
+# --- 18. LIVE WORK on the row: work slung to a pool, and a non-work type ------
+open_store alpha "$(o_until_meta l-2 task '{"gc.routed_to":"rig/rig.polecat"}' x-0)" "$(o_until_meta l-3 epic '{}' x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "slung work and an epic warn (exit 1)"
+has "$OUT" "gc.routed_to=rig/rig.polecat" "the route is named"
+has "$OUT" "issue_type=epic" "the epic is named as not plain work"
+hasnt "$OUT" "owed but not firing" "neither is reported as the order failing"
+clear_stores
+
+# --- 19. LIVE WORK on the edges: a clean row tracked by a convoy --------------
+open_store alpha "$(o_until l-4 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+printf '%s' '{"l-4":[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]}' > "$TMP/stores/alpha.up.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a convoy-tracked resolved bead warns (exit 1)"
+has "$OUT" "tracked by convoy c-1 (open)" "the convoy is named"
+hasnt "$OUT" "owed but not firing" "a pour is not reported as the order failing"
+clear_stores
+
+# --- 20. LIVE WORK on the edges: an open child; a closed one is no mark ------
+open_store alpha "$(o_until l-5 x-0)" "$(o_until l-6 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+printf '%s' '{"l-5":[{"id":"k-1","dependency_type":"parent-child","issue_type":"task","status":"open"}],"l-6":[{"id":"k-2","dependency_type":"parent-child","issue_type":"task","status":"closed"}]}' > "$TMP/stores/alpha.up.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the check warns (exit 1)"
+has "$OUT" "open child k-1" "an open child makes l-5 live work"
+has "$OUT" "owed but not firing" "l-6, whose only child is closed, is owed"
+has "$OUT" "alpha bead l-6: its \`until\` resolved-by target(s) [x-0] have been closed" "l-6 is the owed finding"
+clear_stores
+
+# --- 21. FAIL CLOSED: an unreadable dependents read leaves the bead unchecked -
+open_store alpha "$(o_until l-7 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(BD_FAIL_UP=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable dependents read warns (exit 1)"
+has "$OUT" "NOT checked" "the bead is named as unchecked"
+hasnt "$OUT" "owed but not firing" "an unread edge set is NOT a firm finding"
+clear_stores
+
+# --- 22. WINDOW: live work whose target closed just now is not reported ------
+open_store alpha "$(o_until_meta l-8 task '{"gc.routed_to":"rig/rig.polecat"}' x-0)"
+refs_store alpha "$(r_closed x-0 "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "live work inside the reconcile window is not reported (exit 0)"
+hasnt "$OUT" "alpha bead l-8" "the bead is not named"
+clear_stores
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

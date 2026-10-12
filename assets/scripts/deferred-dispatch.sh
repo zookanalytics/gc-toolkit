@@ -19,7 +19,9 @@
 # disposed through bead-rehome once that dep closes, so a wait whose named cause
 # has landed is closed with a successor pointer, not handed back to triage as
 # fresh work. ONLY `until` disposes — a `blocks` edge is sequencing, and its
-# target closing still leaves the dependent fully owed.
+# target closing still leaves the dependent fully owed. And only a pure wait is
+# disposed: a bead carrying live work (live-work.sh), such as an anchor with a
+# PR or work slung to a pool, is left open and reported, never closed.
 #
 # `arm` is the default move for a blocked follow-up you file or hold by hand:
 # arm it instead of leaving it unrouted for someone to route once its blocker
@@ -101,6 +103,13 @@ UNTIL_TYPE="until"
 # resolution is folded into the target it waited on. The --note states the exact
 # mechanism; the pointer bead-rehome stamps (gc.superseded_by) is the precise record.
 UNTIL_KIND="folded"
+# What makes a bead live work, which the until consumer never disposes. The
+# doctor mirror sources the same file, so the two agree on what a pure wait is.
+# Nothing else in this script reads it, so when it cannot be sourced the
+# consumer disposes nothing and fails the pass, while arm, disarm, list and the
+# dispatch half still run.
+# shellcheck source=live-work.sh
+. "$SCRIPTS_DIR/live-work.sh" 2>/dev/null || LIVE_WORK_JQ=""
 
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
@@ -147,6 +156,7 @@ Verbs:
              convoy per pass. The same pass disposes every open bead whose `until`
              dependency ("X resolves me") has closed, through bead-rehome, so a
              resolved wait is closed with a successor pointer not re-triaged.
+             A bead carrying live work (live-work.sh) is reported, never closed.
              Driven by orders/deferred-dispatch.toml (cooldown, scope="rig").
 
 --sling-arg is repeatable and is passed through to `gc sling` verbatim after the
@@ -571,38 +581,78 @@ sling_bead() { # id target args_json -> rc
 # before me": when the target closes the dependent is disposed, not re-triaged as
 # fresh work. bd keeps one edge type per pair, so an `until` dep is never paired
 # with a `blocks` dep on the same target. This enumerates every OPEN, UNASSIGNED
-# bead carrying an `until` dep. A non-open status is a deliberate hold and an
-# assignee is a live worker; both are left alone, so the attempt is skipped. The
-# status filter is the only guard for a held bead: bd closes a blocked, deferred
-# or in_progress bead without complaint, and refuses only a foreign assignee.
+# bead carrying an `until` dep, each listed with the live-work marks its row
+# carries (live-work.sh). A non-open status is a deliberate hold and an assignee
+# is a live worker; neither is a candidate. An open, unassigned bead can still be
+# live work: an anchor stays open and unassigned while its PR is reviewed, and so
+# does a bead slung to a pool until a worker claims it. bd closes such a bead
+# without complaint, so the marks are the guard, not bd.
 # The `until` edge carries no metadata key to scope on, so enumeration is one
 # whole-store list; until edges are rare, so the per-candidate work below is
 # usually zero. Fail closed: an unreadable or non-array listing returns non-zero
 # so the caller leaves the beads for the next pass rather than reading "none"
 # from a store it could not see.
-until_candidates() { # out_file -> "<id>\t<target_ids_csv>" per candidate; rc1 if unreadable
+until_candidates() { # out_file -> "<id>\t<target_ids_csv>\t<marks or ->" per candidate; rc1 if unreadable
     local out="$1" all
     all="$(bd_ list --brief --json --limit 0 2>/dev/null)" || return 1
     [ -n "$all" ] || return 1
     printf '%s' "$all" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    printf '%s' "$all" | scrub | jq -r --arg ut "$UNTIL_TYPE" '
+    printf '%s' "$all" | scrub | jq -r --arg ut "$UNTIL_TYPE" "$LIVE_WORK_JQ"'
         .[]
         | select((.status // "") == "open")
         | select((.assignee // "") == "")
         | [ (.dependencies // [])[] | select(.type == $ut) | .depends_on_id ] as $u
         | select(($u | length) > 0)
-        | "\(.id)\t\($u | unique | join(","))"' > "$out" 2>/dev/null || return 1
+        | (live_work_reasons | join("; ")) as $marks
+        | "\(.id)\t\($u | unique | join(","))\t\(if $marks == "" then "-" else $marks end)"' > "$out" 2>/dev/null || return 1
     return 0
 }
 
-# Dispose every candidate whose `until` targets have ALL closed, through
-# bead-rehome so the close carries a successor pointer. Returns non-zero only on a
-# hard dispose failure; a held close (an open visit, or another open blocker — bead-rehome
-# refuses rather than force-closing) and an already-recorded different successor
-# are expected states, reported and retried, never a pass failure. "all closed"
-# is conservative: a target absent from the status read, or not yet closed, leaves
-# its candidate waiting — an unread target never reads as a released one.
+# The bead as the store holds it now, read immediately before its close: the
+# pass-start listing ages while the pass runs, and a sling or a claim can land
+# in between. Two reads: `bd show` for the row and its own edges, and
+# `bd dep list --direction=up` for what depends on it, because `bd show` leaves
+# a convoy's tracks edge out of its dependents. Prints "<until targets not
+# closed, or ->\t<marks, or ->". rc1 when either read fails or does not parse,
+# so the bead is left for the next pass. A dispatch that lands after this read
+# meets a closed bead: no pool offers it, and mol-polecat-work's load-context
+# quiesces a pour over it.
+fresh_marks() { # id -> "<open until targets csv or ->\t<marks or ->"; rc1 if unreadable
+    local id="$1" row up upf
+    row="$(show_bead "$id" </dev/null)" || return 1
+    [ -n "$row" ] || return 1
+    up="$(bd_ dep list "$id" --direction=up --json </dev/null 2>/dev/null)" || return 1
+    mktemp_tracked || return 1; upf="$REPLY"
+    printf '%s' "$up" | scrub > "$upf"
+    jq -e 'type == "array"' "$upf" >/dev/null 2>&1 || return 1
+    printf '%s' "$row" | jq -r --slurpfile up "$upf" --arg ut "$UNTIL_TYPE" "$LIVE_WORK_JQ"'
+        [ (.dependencies | if type == "array" then .[] else empty end) | objects
+          | select(((.dependency_type // .type // "") | tostring) == $ut)
+          | select(((.status // "") | tostring | ascii_downcase) != "closed")
+          | ((.id // "?") | tostring) ] as $open
+        | (live_work_reasons + live_work_edge_reasons($up[0])) as $marks
+        | "\(if ($open | length) == 0 then "-" else ($open | join(",")) end)\t\(if ($marks | length) == 0 then "-" else ($marks | join("; ")) end)"' 2>/dev/null
+}
+
+# Dispose every candidate whose `until` targets have ALL closed and that carries
+# no live work, through bead-rehome so the close carries a successor pointer.
+# bead-rehome stamps that pointer before anything can refuse the close, and a
+# pointer on an anchor reads as a disposed anchor to scaffolding-sweep, so a bead
+# with live work never reaches it: its marks are read from the pass-start row,
+# and again from a fresh read of the bead and its edges just before the call. A
+# bead with marks is reported and left open. That is an expected state, never a
+# pass failure, and doctor/check-until-resolved-owed reports it as a decision for
+# a person. Returns non-zero on a hard dispose failure, and when a bead owed a
+# disposal could not be re-read. A held close (an open visit, or another open
+# blocker; bead-rehome refuses rather than force-closing) and an
+# already-recorded different successor are expected states, reported and
+# retried. "all closed" is conservative: a target absent from the status read,
+# or not yet closed, leaves its candidate waiting; an unread target never reads
+# as a released one.
 reconcile_until() {
+    [ -n "${LIVE_WORK_JQ:-}" ] || {
+        echo "$PROG: reconcile: cannot source live-work.sh beside this script — disposing no until-gated bead, since nothing could tell live work from a pure wait" >&2
+        return 1; }
     local cand
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; cand="$REPLY"
     until_candidates "$cand" || {
@@ -629,8 +679,10 @@ reconcile_until() {
         [ -n "$map_json" ] || map_json="{}"
     fi
 
-    local disposed=0 held=0 waiting=0 ufailed=0 id blks decision allclosed succ rc
-    while IFS=$'\t' read -r id blks; do
+    # The candidates are read on fd 3, so no command in the loop can consume them
+    # through an inherited stdin.
+    local disposed=0 live=0 held=0 waiting=0 ufailed=0 id blks marks decision allclosed succ rc fresh reopened
+    while IFS=$'\t' read -r id blks marks <&3; do
         [ -n "$id" ] || continue
         decision="$(printf '%s' "$blks" | jq -Rc --argjson m "$map_json" '
             (split(",") | map(select(length > 0))) as $bs
@@ -642,6 +694,20 @@ reconcile_until() {
         if [ "$allclosed" != "true" ] || [ -z "$succ" ]; then
             waiting=$((waiting + 1)); continue
         fi
+        if [ "${marks:--}" = "-" ]; then
+            if ! fresh="$(fresh_marks "$id")" || [ -z "$fresh" ]; then
+                echo "$PROG: WARN could not re-read $id and its edges before disposing it — leaving it for the next pass" >&2
+                ufailed=$((ufailed + 1)); continue
+            fi
+            reopened="${fresh%%$'\t'*}"; marks="${fresh#*$'\t'}"
+            if [ "$reopened" != "-" ]; then
+                waiting=$((waiting + 1)); continue
+            fi
+        fi
+        if [ "$marks" != "-" ]; then
+            echo "$PROG: LEFT $id — its until target $succ closed, but it carries live work ($marks); this pass never disposes live work" >&2
+            live=$((live + 1)); continue
+        fi
         if [ "$DRY_RUN" = 1 ]; then
             echo "$PROG: DRY-RUN would dispose $id — until target $succ closed — via bead-rehome --kind $UNTIL_KIND"
             disposed=$((disposed + 1)); continue
@@ -651,7 +717,7 @@ reconcile_until() {
             ufailed=$((ufailed + 1)); continue
         fi
         "$REHOME" --origin "$id" --successor "$succ" --kind "$UNTIL_KIND" \
-            --note "resolved by its 'until' dependency on $succ, which has closed (deferred-dispatch until-consumer)" >/dev/null 2>&1
+            --note "resolved by its 'until' dependency on $succ, which has closed (deferred-dispatch until-consumer)" </dev/null >/dev/null 2>&1
         rc=$?
         case "$rc" in
             0) echo "$PROG: disposed $id — its until target $succ closed"; disposed=$((disposed + 1)) ;;
@@ -659,9 +725,9 @@ reconcile_until() {
             6) echo "$PROG: $id already records a successor other than its until target $succ — leaving that disposition alone" >&2; held=$((held + 1)) ;;
             *) echo "$PROG: WARN could not dispose until-resolved $id via bead-rehome (rc=$rc) — leaving it for the next pass" >&2; ufailed=$((ufailed + 1)) ;;
         esac
-    done < "$cand"
+    done 3< "$cand"
 
-    echo "$PROG: until-resolved: $disposed disposed, $held held, $waiting waiting (of $total until-gated)"
+    echo "$PROG: until-resolved: $disposed disposed, $live live, $held held, $waiting waiting (of $total until-gated)"
     [ "$ufailed" = 0 ]
 }
 
