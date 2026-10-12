@@ -57,7 +57,8 @@
 # RUN_TESTS_PART=<part> and RUN_TESTS_PARTS=<every declared part> in its
 # environment, and the file executes only that part's sections (part() in
 # assets/scripts/test-harness.sh). Run directly, with RUN_TESTS_PART unset, the
-# file runs every part in order.
+# file runs each part in order, each in a process of its own as here, and prints
+# one tally summed over the parts (harness_run_parts in the same harness).
 #
 # Each file runs in its own process group with its output captured to a file,
 # never a pipe. A file that leaves a background child behind (pr-facts.test.sh

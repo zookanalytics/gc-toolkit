@@ -22,7 +22,8 @@
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block inside the body both arms share, so a part runs its own sections in
 # both arms. tools/run-tests.sh runs each part as its own run under its own
-# timeout; run directly, the file runs every part in order.
+# timeout. Run directly, the file runs each part in order, each in a process of
+# its own (test-harness.sh), so no part reads the fixtures an earlier part left.
 # run-tests-parts: gates approval record machine reread pacing
 set -uo pipefail
 
