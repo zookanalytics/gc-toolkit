@@ -5,7 +5,9 @@
 # deferred-dispatch.test.sh pattern: stubs log invocations and serve canned
 # JSON; tests assert on the logs, the store, and exit codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
-# exports STUB_* env the stubs read. No live city, network, gc, bd or gh.
+# exports STUB_* env the stubs read. No live city, network, gc, bd or gh: the
+# test floor (tools/test-floor) sits beneath the stubs, so a call no stub
+# answers is refused rather than handed to the real binary.
 
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
@@ -102,7 +104,20 @@ harness_init() {
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
   chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
-  export PATH="$BIN:$PATH"
+  # The stubs live in TMP, which can go while a script under test still runs:
+  # the suite killed by a signal its children never get, its EXIT trap removing
+  # TMP, or the scratch reaper removing it. The test floor goes directly beneath
+  # them, so a PATH search that misses a stub lands on a refusal, never on the
+  # real gc that finds the live city from the working directory
+  # (tools/test-floor/refuse.sh). harness/ refuses git, which this harness
+  # stubs and other suites run for real. A tree without the floor does not run.
+  local floor
+  floor="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../tools/test-floor" 2>/dev/null && pwd)" || floor=""
+  if [ -z "$floor" ] || [ ! -x "$floor/gc" ] || [ ! -x "$floor/harness/git" ]; then
+    echo "harness_init: no test floor at tools/test-floor, so nothing would stand between the stubs and the real gc, bd, gh and git; not running" >&2
+    exit 2
+  fi
+  export PATH="$BIN:$floor/harness:$floor:$PATH"
 }
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
