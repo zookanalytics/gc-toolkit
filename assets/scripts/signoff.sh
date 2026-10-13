@@ -88,7 +88,7 @@ usage() {
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>] [--needs-you <text>] [--add-gates <checks>]
-                  [--visual <decision>]
+                  [--visual <decision> [--visual-fallback-from <modality>]]
                   [--reopen <lanes>|none --round-reason <text> [--dismiss-approval]]
 
   --review-bead  the dispatched review bead this verdict answers (required)
@@ -99,8 +99,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --needs-you    the one decision this review needs from the operator: what it
                  is, what it means, and where to look. The opening line names
                  it; absent, it says nothing needs them. A finding is not one,
-                 because the city fixes it. Refused with --dismiss-approval,
-                 whose --round-reason is the decision.
+                 because the city fixes it. Refused beside a ruling that lifts
+                 the approval, on this call or recorded by this review's
+                 earlier attempt, whose round reason is the decision.
   --findings-file
                  the structured finding set as a JSON array, one object per
                  blocking finding, each with a rebase-stable `locus` (a file and
@@ -126,14 +127,25 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  screenshot or video). Required on every demo verdict and
                  refused on any other check's; none records with approve only.
                  Stamped on the review bead as visual=<decision> and named on
-                 the posted artifact's `Visual:` line.
+                 the posted artifact's `Visual:` line, where repo-artifact
+                 reads `author-committed`: a committed visual is what an
+                 author recorded, not a capture of the reviewed commit.
+  --visual-fallback-from
+                 the modality that fits when --visual names a cheaper one
+                 delivered in its place because the fitting one could not be
+                 produced: screenshot or video, costlier than --visual.
+                 Stamped as visual_fallback_from and named on the `Visual:`
+                 line as `fallback from <modality>`. A demo verdict without it
+                 clears the stamp.
   --reopen       triage's ruling on a bring-current round that conflicted:
                  the lanes the anchor declares that run again on the merged
                  code, or none. Required on a triage approve while the anchor's
                  bring_current_record holds a conflicted round triage has not
-                 ruled on, and refused otherwise. A check the anchor does not
-                 declare is added with --add-gates, and a lane added on this
-                 call runs on the merged code as well.
+                 ruled on. A check the anchor does not declare is added with
+                 --add-gates, and a lane added on this call runs on the merged
+                 code as well. On a round this review already ruled on, the
+                 verdict's retry carries out the recorded ruling, with these
+                 flags dropped or stating that ruling. Refused anywhere else.
   --round-reason why the round reopens what it does, one line; required with
                  --reopen. With --dismiss-approval it is the call the operator
                  is asked to make, and it opens the posted verdict and the
@@ -150,7 +162,7 @@ U
 warn() { echo "signoff: $*" >&2; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
-REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
+VISUAL_FALLBACK=""; REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -161,6 +173,7 @@ while [ $# -gt 0 ]; do
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --visual-fallback-from) VISUAL_FALLBACK="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reopen)       REOPEN="${2:-}";          shift 2 || { usage; exit 1; } ;;
     --round-reason) ROUND_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --dismiss-approval) DISMISS_APPROVAL=1;   shift ;;
@@ -191,10 +204,6 @@ case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
   *[.!?]) : ;;
   *) NEEDS_YOU="$NEEDS_YOU." ;;
 esac
-if [ -n "$NEEDS_YOU" ] && [ -n "$DISMISS_APPROVAL" ]; then
-  warn "--dismiss-approval asks the operator the call its --round-reason names, and the opening line names one decision; drop --needs-you. Nothing written"
-  exit 1
-fi
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
@@ -281,7 +290,15 @@ fi
 # refused rather than recorded without the decision it exists to make, and no
 # other check records one. none is approve-only: a check that found no visual
 # needed has nothing to block on. Refused before a marker is touched.
+#
+# --visual-fallback-from records that the visual delivered stands in for the
+# modality that fits, which could not be produced here. A fallback is cheaper
+# than what it stands in for, and the modalities rank by cost: repo-artifact,
+# then screenshot, then video. So the flag names a modality costlier than
+# --visual, and --visual none, which delivers nothing, takes none.
 VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+VISUAL_FALLBACK=$(printf '%s' "$VISUAL_FALLBACK" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+modality_cost() { case "$1" in repo-artifact) echo 1 ;; screenshot) echo 2 ;; video) echo 3 ;; *) echo 0 ;; esac; }
 if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
   case "$VISUAL" in
     none|repo-artifact|screenshot|video) ;;
@@ -292,7 +309,21 @@ if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
     warn "--visual none records that the change needs no visual, which leaves the '$VISUAL_GATE' check nothing to block on; it records with --verdict approve only. Nothing written"
     exit 1
   fi
-elif [ -n "$VISUAL" ]; then
+  if [ -n "$VISUAL_FALLBACK" ]; then
+    case "$VISUAL_FALLBACK" in
+      screenshot|video) ;;
+      *) warn "--visual-fallback-from must be screenshot or video, the modality that fits (got '$VISUAL_FALLBACK'); nothing written"; exit 1 ;;
+    esac
+    if [ "$VISUAL" = none ]; then
+      warn "--visual-fallback-from names the modality a delivered visual stands in for, and --visual none delivers no visual; nothing written"
+      exit 1
+    fi
+    if [ "$(modality_cost "$VISUAL")" -ge "$(modality_cost "$VISUAL_FALLBACK")" ]; then
+      warn "a fallback is cheaper than the modality it stands in for, so '$VISUAL' cannot be a fallback from '$VISUAL_FALLBACK'; nothing written"
+      exit 1
+    fi
+  fi
+elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
   warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
   exit 1
 fi
@@ -309,21 +340,54 @@ fi
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
 
-# A bring-current round that conflicted and that triage has not ruled on. The
-# guard filed it on the anchor and reopened the triage lane, so a triage verdict
-# on this anchor is that ruling as well as its classification, and it is not
-# recorded without one.
-ROUND_HEAD=""
+# A bring-current round that conflicted and awaits this triage verdict's ruling.
+# The guard filed it on the anchor and reopened the triage lane, so a triage
+# verdict on this anchor is that ruling as well as its classification, and it is
+# not recorded without one. decide records a ruling on the round before it
+# reopens a lane or dismisses an approval, so a round this same review already
+# ruled on may hold a ruling that was never carried out: its retry runs decide
+# again, which carries out what was recorded. A round another review ruled on
+# owes this verdict nothing.
+ROUND_HEAD=""; ROUND_RULING=""
 if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
-  ROUND_HEAD=$(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].metadata.bring_current_record // null)
+  ROUND=$(printf '%s' "$ANCHOR_ROW" | jq -c --arg rv "$REVIEW_BEAD" '(.[0].metadata.bring_current_record // null)
     | if type == "string" then (fromjson? // null) else . end
-    | if type == "object" and .class == "conflicted" and .triage == null then (.head // "") else "" end' 2>/dev/null)
+    | if type == "object" and .class == "conflicted"
+         and (.triage == null or ((.triage | type) == "object" and (.triage.review // "") == $rv))
+      then {head: (.head // ""), ruling: .triage} else empty end' 2>/dev/null)
+  ROUND_HEAD=$(printf '%s' "$ROUND" | jq -r '.head // ""' 2>/dev/null)
+  ROUND_RULING=$(printf '%s' "$ROUND" | jq -c '.ruling // empty' 2>/dev/null)
 fi
 if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
     || { warn "--reopen, --round-reason and --dismiss-approval carry triage's ruling on a bring-current round, which only a triage approve records; nothing written"; exit 1; }
   [ -n "$ROUND_HEAD" ] \
     || { warn "no bring-current round on $ANCHOR awaits triage's ruling; drop --reopen, --round-reason and --dismiss-approval. Nothing written"; exit 1; }
+fi
+# The lanes a --reopen names, as decide reads them: none, or the lanes sorted and
+# comma-joined.
+round_lanes() { if [ "$1" = "none" ]; then echo none; else gate_tokens "$1" | LC_ALL=C sort -u | paste -sd, -; fi; }
+if [ -n "$ROUND_HEAD" ] && [ -n "$ROUND_RULING" ] && [ "$VERDICT" = "approve" ]; then
+  # This review's ruling is already recorded, and a retry carries it out as
+  # recorded. A call that states a different one is refused rather than replaced
+  # unseen, since the posted account of the round renders the recorded ruling.
+  RULED_LANES=$(printf '%s' "$ROUND_RULING" | jq -r '[ .reopen[]? | tostring | ascii_downcase ] | unique | if length == 0 then "none" else join(",") end' 2>/dev/null)
+  RULED_DISMISS=$(printf '%s' "$ROUND_RULING" | jq -r 'if .dismiss == true then "1" else "" end' 2>/dev/null)
+  if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ] \
+     && { [ "$(round_lanes "$REOPEN")" != "$RULED_LANES" ] || [ "$DISMISS_APPROVAL" != "$RULED_DISMISS" ]; }; then
+    warn "$REVIEW_BEAD already ruled on the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR (reopen $RULED_LANES$([ -n "$RULED_DISMISS" ] && echo ", dismiss the approval")), and a recorded ruling is carried out as recorded: re-run with that ruling, or with no --reopen, --round-reason or --dismiss-approval. Nothing written"
+    exit 1
+  fi
+  REOPEN="$RULED_LANES"; DISMISS_APPROVAL="$RULED_DISMISS"
+  RULED_REASON=$(printf '%s' "$ROUND_RULING" | jq -r '.reason // ""' 2>/dev/null)
+  [ -z "$RULED_REASON" ] || ROUND_REASON="$RULED_REASON"
+fi
+# A ruling that lifts the approval, passed on this call or recorded by this
+# review's earlier attempt, names its decision in the round's reason, and the
+# opening line names one decision.
+if [ -n "$NEEDS_YOU" ] && [ -n "$DISMISS_APPROVAL" ]; then
+  warn "a ruling that lifts the approval asks the operator the call its round reason names, and the opening line names one decision; drop --needs-you. Nothing written"
+  exit 1
 fi
 if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
   if [ -z "$REOPEN" ] || [ -z "$(printf '%s' "$ROUND_REASON" | tr -d '[:space:]')" ]; then
@@ -490,14 +554,21 @@ check_label() { # <check-name>
 # fixes it.
 verdict_head() { printf '%s: %s.' "$(check_label "$CHECK_NAME")" "$VERDICT"; }
 compose_artifact() {
-  local needs="Nothing needs you."
+  local needs="Nothing needs you." visual_note=""
   if [ -n "$ROUND_ASK" ]; then needs="$ROUND_ASK"
   elif [ -n "$NEEDS_YOU" ]; then needs="Needs you: $NEEDS_YOU"; fi
+  # The Visual line says what the visual is, not only its modality: a
+  # repo-artifact is what an author committed, not a capture of the reviewed
+  # commit, and a fallback names the modality that fits.
+  if [ -n "$VISUAL" ]; then
+    [ "$VISUAL" != repo-artifact ] || visual_note="author-committed"
+    [ -z "$VISUAL_FALLBACK" ] || visual_note="${visual_note:+$visual_note; }fallback from $VISUAL_FALLBACK"
+  fi
   {
     printf '%s %s\n\n' "$(verdict_head)" "$needs"
     [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
     [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
-    [ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL"
+    [ -z "$VISUAL" ] || printf 'Visual: %s%s\n' "$VISUAL" "${visual_note:+ ($visual_note)}"
     printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID"
   } > "$BODY_FILE"
 }
@@ -515,11 +586,20 @@ compose_artifact() {
 # is part of the same ledger. Because the record is written first, a store that
 # will not take it costs a re-run instead of a marker nothing accounts for. A
 # demo verdict's visual decision rides in the same write, so the record names
-# what the check decided as well as the commit it decided on.
+# what the check decided as well as the commit it decided on. So does its
+# fallback, which the write clears when this verdict names none, because a
+# retried verdict must not keep an earlier attempt's.
 post_artifact() {
   compose_artifact
   local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
-  [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
+  if [ -n "$VISUAL" ]; then
+    rec+=(--set-metadata "visual=$VISUAL")
+    if [ -n "$VISUAL_FALLBACK" ]; then
+      rec+=(--set-metadata "visual_fallback_from=$VISUAL_FALLBACK")
+    else
+      rec+=(--unset-metadata visual_fallback_from)
+    fi
+  fi
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
   local row got
   row=$(bd_json show "$REVIEW_BEAD")
@@ -531,6 +611,11 @@ post_artifact() {
   got=$(row_meta "$row" visual)
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
     warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" visual_fallback_from)
+  if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL_FALLBACK" ]; then
+    warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted and no marker stamped, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then

@@ -43,7 +43,9 @@
 #   where it began; no stamp and nothing pushed is refused; the resume stamp
 #   marks the start; a start stamped with no scope owes no entries, and its
 #   round is recorded and routed all the same; the anchor resolves from the
-#   branch; a failed write or supersede exits 1.
+#   branch; a failed write or supersede exits 1; the refusal for a hand-off
+#   that records no start asks for the start with its scope beside it, so
+#   doing what it says leaves the round owing its entries.
 # coverage: lists each item and whether the audit covers it, writing nothing.
 # decide: refuses with no conflicted round, a lane the anchor does not declare,
 #   or a round another review already ruled on; records the ruling, unions the
@@ -727,6 +729,28 @@ has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane triage" "…its 
 out=$( cd "$R" && "$SUT" coverage --bead MI10 --to "$MODIFY_H" 2>&1 ); rc=$?
 eq "$rc" "0" "coverage on such a round exits 0"
 has "$out" "owes no entries" "…saying it owes none"
+
+echo "# guard: a hand-off that records no start asks for the start and its scope, so doing what it says owes the round's entries"
+# A re-run of the hand-off pushed nothing past the head it reads, and no resume
+# stamped where the work began. A start stamped alone is the mark of a resume
+# that asks for no audit, so a refusal that asked for the start alone would waive
+# the entries this round owes.
+R="$MODIFY_R"; A="$MODIFY_A"; git -C "$R" reset -q --hard "$MODIFY_H"
+store "[$(child MI11), $(anchorrow AN1)]"
+fresh
+out=$(guard --bead MI11 --from "$MODIFY_H" --to "$MODIFY_H"); rc=$?
+eq "$rc" "3" "a re-run with no stamp and nothing pushed past the head exits 3"
+eq "$(rec_of AN1)$(cat "$STUB_RO_LOG")" "null" "…writing nothing"
+ASKED=$(printf '%s\n' "$out" | sed -n 's/.*: \(gc bd update MI11 .*\), then re-run.*/\1/p')
+has "$ASKED" "--set-metadata bring_current_from=<oid>" "the refusal's command stamps the start"
+has "$ASKED" "--set-metadata bring_current_scope=with-work" "…and the scope beside it"
+eval "${ASKED//<oid>/$A}" >/dev/null 2>&1
+eq "$(meta MI11 bring_current_from) $(meta MI11 bring_current_scope)" "$A with-work" "running that command stamps both"
+fresh
+out=$(guard --bead MI11 --to "$MODIFY_H"); rc=$?
+eq "$rc" "3" "…so the re-run reads the round, and its conflict owes an entry"
+has "$out" "NEEDS AN ENTRY  v.txt" "…naming it"
+eq "$(rec_of AN1)" "null" "…and nothing is recorded until it has one"
 
 # --- decide ----------------------------------------------------------------------
 decide() { ( cd "$R" && "$SUT" decide "$@" 2>&1 ); }

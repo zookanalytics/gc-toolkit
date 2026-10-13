@@ -104,6 +104,7 @@ hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides nee
 hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
 hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
 hasF "$TMP/demo.out" '--visual none|repo-artifact|screenshot|video' "(CHECK) demo names the verdict call that records its decision"
+hasF "$TMP/demo.out" '[--visual-fallback-from screenshot|video]' "(CHECK) …and the flag that records a fallback"
 notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an unrecordable demo is no longer a finding against the change"
 [ -r "$(cd "$HERE/../.." && pwd)/skills/review-demo/SKILL.md" ] \
   && ok "(CHECK) the demo method skill ships where the note points" \
