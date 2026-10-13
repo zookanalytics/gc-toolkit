@@ -2642,16 +2642,17 @@ $CBODY"
           echo "$PROG: $id — PR#$num comment-rework orphan probe failed; nothing dispatched (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        # The child is filed whole: its work order and the blocks edge that
-        # holds the anchor ride the create. A create whose reply is lost has
-        # still landed with the anchor_bead the batch probe above matches, so
-        # the next pass finds it rather than minting a twin. bd_create writes a
-        # short child its whole order once more, and closes one still short of
-        # anchor_bead, since no later pass could find it while its blocks edge
-        # held the merge (no id comes back). It prints the id of a child short
-        # of any other key too (its rc 2), so the id says the child exists, not
-        # that it can be routed. The work-order check below says that.
-        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
+        # The child is filed whole: its work order, the blocks edge that holds
+        # the anchor and the membership edge onto it (--child-of) ride the
+        # create. A create whose reply is lost has still landed with the
+        # anchor_bead the batch probe above matches, so the next pass finds it
+        # rather than minting a twin. bd_create writes a short child its whole
+        # order once more, and closes one still short of anchor_bead, since no
+        # later pass could find it while its blocks edge held the merge (no id
+        # comes back). It prints the id of a child short of any other key too
+        # (its rc 2), so the id says the child exists, not that it can be
+        # routed. The work-order check below says that.
+        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" --child-of "$id" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
@@ -2813,20 +2814,21 @@ $CBODY"
         # closes nothing and the pass is filed anyway.
         bd_unmake_orphans "$VALIDATION_SELECT" "Validate PR#$num feedback" \
           "Unmade by $PROG: a human-lane validation pass for PR#$num filed without the shape the human-lane probe selects it by, so no validator could rule it, while its blocks edge held $id. A pass carrying it is filed in its place." >/dev/null || true
-        # The pass is filed whole: the shape mol-validate reads and the blocks
-        # edge that holds the anchor ride the create. A create whose reply is
-        # lost has still landed with anchor_bead, task_kind and check_name, so
-        # the next pass's human-lane probe above finds it rather than minting a
-        # twin that would double-block the anchor. One that stays short of a
-        # VALIDATION_SELECT key is closed by bd_create, which then prints no id.
+        # The pass is filed whole: the shape mol-validate reads, the blocks edge
+        # that holds the anchor and the membership edge onto it (--child-of)
+        # ride the create. A create whose reply is lost has still landed with
+        # anchor_bead, task_kind and check_name, so the next pass's human-lane
+        # probe above finds it rather than minting a twin that would
+        # double-block the anchor. One that stays short of a VALIDATION_SELECT
+        # key is closed by bd_create, which then prints no id.
         vident=$(validation_work_order "$id" human "$head_oid")
         vbody=""
         [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
         if [ -n "$vbody" ]; then
-          VPASS=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$id" --body-file -)
+          VPASS=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" --child-of "$id" "$vident" "$vtitle" -t task --deps "blocks:$id" --body-file -)
         else
           echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
-          VPASS=$(bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$id")
+          VPASS=$(bd_create --select "$VALIDATION_SELECT" --child-of "$id" "$vident" "$vtitle" -t task --deps "blocks:$id")
         fi
         if [ -z "$VPASS" ]; then
           echo "$PROG: WARN $id — PR#$num could not open a validation pass; nothing watermarked (retry next pass)" >&2
@@ -2859,9 +2861,9 @@ $CBODY"
       v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
       v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
       v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
-      # A pass about to take anchor_bead is joined to the anchor first (a fresh
-      # one carries the edge from its create, an adopted orphan does not), so the
-      # stamp never lands on a pass the anchor's closed-children read cannot reach.
+      # A pass about to take anchor_bead is joined to the anchor first, so the
+      # stamp never lands on a pass the anchor's closed-children read cannot
+      # reach. A pass filed above carries the edge from its create.
       if [ "$v_anchor" != "$id" ] && ! bd_anchor_link "$id" "$VPASS"; then
         echo "$PROG: WARN $id — PR#$num validation pass $VPASS could not be joined to the anchor; nothing stamped or watermarked (retry next pass)" >&2
         skipped=$((skipped + 1)); continue

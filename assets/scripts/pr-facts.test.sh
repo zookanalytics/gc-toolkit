@@ -2333,8 +2333,9 @@ hasnt "$CW2" "<none>" "the next pass files the comment rework afresh"
 eq "$(meta "$CW2" 'gc.routed_to')|$(meta W2 pr_comment_watermark)" "$FIX|9100" "…routes it, and only then moves the mark"
 
 echo "# …a comment rework is filed whole, so a create whose reply is lost is found next pass, never twinned"
-# The work order and the blocks edge ride the create, so the child that landed
-# behind a lost reply carries the anchor_bead the batch probe matches.
+# The work order, the blocks edge and the membership edge ride the create, so
+# the child that landed behind a lost reply carries the anchor_bead the batch
+# probe matches.
 store "[$(anchor W3 47)]"
 printf '%s' "$(prview 47 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_47.json"
 echo '[]' > "$GH_DIR/reviews_47.json"
@@ -2346,6 +2347,7 @@ CW=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.m
 hasnt "$CW" "<none>" "…yet the child landed with its work order"
 eq "$(meta "$CW" prepare_mode)|$(meta "$CW" merge_strategy)|$(meta "$CW" pr_number)" "merge|mr|47" "…all of it, on the create"
 grep -qxF "$CW|blocks|W3" "$STUB_DEPS" && ok "…and holds the merge through the edge it was born with" || bad "the lost-reply child carries no blocks edge"
+grep -qxF "$CW|related|W3" "$STUB_DEPS" && ok "…and is joined to the anchor by the membership edge it was born with" || bad "the lost-reply child carries no membership edge"
 hasnt "$(grep "^bd update $CW" "$STUB_GC_LOG")" "--set-metadata task_kind" "…with no second write stamping it"
 eq "$(meta W3 pr_comment_disposition)" "<absent>" "…and the batch is not watermarked past it"
 out=$(run)
@@ -2924,7 +2926,7 @@ eq "$(meta "$HP" check_name)" "human" "…named human, the lane the validator ru
 eq "$(meta "$HP" reviewed_oid)" "sha-77" "…pinned to the head the batch was produced at"
 grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the correctness pass" || bad "human-lane validation-pass blocks edge missing"
 
-echo "# the human-lane pass is filed whole: its shape and its blocks edge ride the create"
+echo "# the human-lane pass is filed whole: its shape, its blocks edge and its membership edge ride the create"
 # A create whose reply is lost has then still landed where the human-lane probe
 # finds it, so the next pass reuses it rather than minting a twin.
 store "[$(anchor Vo 72)]"
@@ -2938,6 +2940,8 @@ hasnt "$VO" "<none>" "the batch opens a human-lane pass"
 VOC=$(grep '^bd create Validate PR#72' "$STUB_GC_LOG")
 has "$VOC" '"task_kind":"validation","anchor_bead":"Vo","check_name":"human"' "…whose shape rides its create"
 has "$VOC" "--deps blocks:Vo" "…and so does the blocks edge onto the anchor"
+has "$VOC" "--deps related:Vo" "…and the membership edge onto it"
+grep -qxF "$VO|related|Vo" "$STUB_DEPS" && ok "…which lands with the pass" || bad "the human-lane pass carries no membership edge"
 hasnt "$(grep "^bd update $VO" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a held anchor: the batch opens a pass but does NOT lift the operator's hold"

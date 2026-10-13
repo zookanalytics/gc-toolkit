@@ -381,8 +381,9 @@ bd_live_children() {
     | @tsv' 2>/dev/null
 }
 
-# bd_create [--select <keys>] <metadata-json> <gc-bd-create-args...> — file one
-# bead with its metadata in the same write, and print its id.
+# bd_create [--select <keys>] [--child-of <anchor>] <metadata-json>
+#   <gc-bd-create-args...> — file one bead with its metadata in the same write,
+#   and print its id.
 #
 # The metadata a bead is born with is what its readers select it by: its
 # task_kind, the anchor it hangs on, the key its producer dedups on. Written in
@@ -395,8 +396,15 @@ bd_live_children() {
 # <metadata-json> must be a JSON object with at least one key. Anything else is
 # refused before a create runs, so this helper never files a bead with no
 # metadata. The other arguments are `gc bd create`'s own: the title, -t, -d or
-# --body-file - (stdin reaches the create), --status, --notes, --db and the
-# rest. The helper adds --metadata and --json.
+# --body-file - (stdin reaches the create), --status, --notes, --deps, --db and
+# the rest. The helper adds --metadata and --json.
+#
+# --child-of files the bead as a child of <anchor>, which the payload must name
+# as its anchor_bead. A child's membership edge stands no later than its
+# anchor_bead, and here anchor_bead lands with the create, so the edge rides the
+# create too: it goes through bd_create_child, and the child is born joined to
+# its anchor or not filed at all. An empty <anchor>, or one the payload's
+# anchor_bead does not name, is refused before a create runs.
 #
 # The bead is read back from the store the create wrote, and every key must
 # read back with the value written. A bead short of a key is written the whole
@@ -413,8 +421,9 @@ bd_live_children() {
 #
 # Returns:
 #   0  filed, and every key read back. Prints the id.
-#   1  nothing a reader can find was filed. Either the payload or --select was
-#      refused, or bd refused the create (its reason goes to stderr), or no id
+#   1  nothing a reader can find was filed. Either the payload, --select or
+#      --child-of was refused, or bd refused the create (its reason goes to
+#      stderr: a --child-of anchor that does not resolve is one), or no id
 #      came back, or the bead stayed short of a --select key, or of every key,
 #      and was closed (gc.outcome=abandoned) so that no reader meets it. A
 #      create whose reply was lost can still have landed whole, so a caller
@@ -424,8 +433,19 @@ bd_live_children() {
 #      with no --select, so the caller's next run can find it, and a caller
 #      hands it on only once bd_meta_ensure has made it whole.
 bd_create() {
-  local sel="" meta db="" prev="" a reply id row got short lost="" err
-  if [ "${1:-}" = "--select" ]; then sel="${2:-}"; shift 2 || true; fi
+  local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
+  while :; do
+    case "${1:-}" in
+      --select) sel="${2:-}" ;;
+      --child-of) child=1; anchor="${2:-}" ;;
+      *) break ;;
+    esac
+    shift 2 || { echo "bd_create: $1 takes a value; nothing filed" >&2; return 1; }
+  done
+  if [ -n "$child" ] && [ -z "$anchor" ]; then
+    echo "bd_create: --child-of names no anchor; nothing filed" >&2
+    return 1
+  fi
   meta="${1:-}"
   shift || true
   printf '%s' "$meta" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1 \
@@ -437,6 +457,11 @@ bd_create() {
     echo "bd_create: --select '$sel' names a key the payload does not carry; nothing filed" >&2
     return 1
   fi
+  if [ -n "$anchor" ] && ! printf '%s' "$meta" | jq -e --arg a "$anchor" \
+       '((.anchor_bead // "") | tostring) == $a' >/dev/null 2>&1; then
+    echo "bd_create: --child-of $anchor is not the anchor_bead the payload names; nothing filed" >&2
+    return 1
+  fi
   # The read-back, the second write and the close go to the store the create
   # wrote.
   for a in "$@"; do
@@ -444,7 +469,11 @@ bd_create() {
     case "$a" in --db=*) db="${a#--db=}" ;; esac
     prev="$a"
   done
-  reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  if [ -n "$anchor" ]; then
+    reply=$(bd_create_child "$anchor" "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  else
+    reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  fi
   bd_cache_clear
   id=$(printf '%s' "$reply" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   if [ -z "$id" ] || [ "$id" = "null" ]; then

@@ -358,6 +358,14 @@ while IFS= read -r row; do
   if [ -n "$stranded" ]; then
     FIX="$stranded"
     echo "$PROG: $id re-routing stranded rework $FIX for '$branch' (a prior pass's route stamp did not land)"
+    # The order written below carries anchor_bead, so the child is joined to
+    # the anchor first. A failed join writes nothing and routes nothing, so no
+    # child carries anchor_bead where the anchor's closed-children read cannot
+    # reach it.
+    if ! bd_anchor_link "$id" "$FIX"; then
+      echo "$PROG: $id could not join rework $FIX to the anchor; left unstamped and unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
       || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
     # A stranded child is written the whole order once and read back again
@@ -377,14 +385,15 @@ while IFS= read -r row; do
       echo "$PROG: $id — '$branch' conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # A fresh child is filed whole: the work order and the blocks edge ride the
-    # create, so a create whose reply is lost has still landed with the branch
-    # the dedup above finds it by, and the next pass re-routes it as stranded.
+    # A fresh child is filed whole: the work order, the blocks edge and the
+    # membership edge onto the anchor (--child-of) ride the create, so a create
+    # whose reply is lost has still landed with the branch the dedup above finds
+    # it by, and the next pass re-routes it as stranded.
     # bd_create writes a short child its whole order once more, closes one
     # still short of a FIX_SELECT key, since no later pass could find it while
     # its blocks edge held the anchor (rc 1, no id), and prints the id of one
     # short of any other key (rc 2), which the strand probe finds next pass.
-    FIX=$(bd_create --select "$FIX_SELECT" "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
+    FIX=$(bd_create --select "$FIX_SELECT" --child-of "$id" "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2

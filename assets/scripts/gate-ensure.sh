@@ -1109,9 +1109,11 @@ STRAY
     fi
 
     # The review is filed whole. One create carries every key a reader selects
-    # it by and the blocks edge that holds the anchor, so no review exists that
-    # inflight_review cannot see. A create whose reply is lost has still landed
-    # whole, and the next pass finds it in flight and re-slings it as stranded.
+    # it by, the blocks edge that holds the anchor, and the membership edge
+    # (--child-of) the anchor's closed-children read follows once the review
+    # closes with its verdict, so no review exists that inflight_review cannot
+    # see. A create whose reply is lost has still landed whole, and the next
+    # pass finds it in flight and re-slings it as stranded.
     # A review short of a REVIEW_SELECT key after bd_create's second write is
     # one no later pass could find, so bd_create closes it and files nothing
     # (rc 1). One short of any other key (rc 2) is not slung, because a pour
@@ -1122,10 +1124,10 @@ STRAY
     body=""
     [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
     if [ -n "$body" ]; then
-      RID=$(printf '%s' "$body" | bd_create --select "$REVIEW_SELECT" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
+      RID=$(printf '%s' "$body" | bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
     else
       echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-      RID=$(bd_create --select "$REVIEW_SELECT" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
+      RID=$(bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
     fi
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2

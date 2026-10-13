@@ -141,7 +141,8 @@ case "${1:-}" in
     # refuses only invalid JSON and stores any other document as given. The stub
     # also refuses a document that is not an object: it holds no key a
     # --metadata-field query can match, so a caller that sends one fails here.
-    # --deps <type:id> rides the insert too, as an edge row from the new bead.
+    # --deps <type:id> rides the insert too, as an edge row from the new bead,
+    # except blocks:<id>, which bd turns around: <id> depends on the new bead.
     cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -164,7 +165,12 @@ case "${1:-}" in
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
-    for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
+    for d in $cdeps; do
+      case "$d" in
+        blocks:*) printf '%s|fix-%s|blocks\n' "${d#blocks:}" "$n" >> "$DEPS" ;;
+        *) printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS" ;;
+      esac
+    done
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -1012,6 +1018,9 @@ VPC=$(grep "^bd create Validate PR#42" "$STUB_GC_LOG")
 has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'"}' \
   "the pass's shape rides its create"
 has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
+has "$VPC" "--deps related:tk-anc" "…and the membership edge onto it"
+eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")" "1|1" \
+  "…both landing with the pass, each the way bd orients it"
 hasnt "$(grep "^bd update $VP" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a different lane's open pass is not reused — one pass per lane"

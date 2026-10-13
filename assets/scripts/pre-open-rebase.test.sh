@@ -10,9 +10,10 @@
 # whose edited code main deleted getting the operator's supersession decision
 # instead of a child, a pending decision holding without a second escalation, and
 # a decision that cannot be recorded falling through to the ordinary child; dedup on
-# branch and head against a live child, a stranded child re-routed rather than
-# buried, and a child filed with its work order and blocks edge on the create,
-# so a lost create reply is re-routed rather than twinned; the read-backs that
+# branch and head against a live child, a stranded child joined to its anchor
+# and re-routed rather than buried, and a child filed with its work order, its
+# blocks edge and its membership edge on the create, so a lost create reply is
+# re-routed rather than twinned; the read-backs that
 # route a child only once every key of its work order and the route persist, a
 # short fresh child completed in the pass or left for the strand probe, and one
 # that probe could never find closed rather than left holding the anchor;
@@ -160,6 +161,8 @@ eq "$(meta "$K" pr_url)" "<absent>" "no pr_url either"
 eq "$(meta "$K" existing_pr)" "<absent>" "and no existing_pr to adopt"
 has "$(cat "$STUB_DEPS")" "$K|blocks|A1" "the child blocks the anchor it was filed for"
 has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps blocks:A1" "…born with that edge on the create"
+has "$(cat "$STUB_DEPS")" "$K|related|A1" "the child is joined to its anchor by its membership edge"
+has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps related:A1" "…which rides the same create"
 has "$(grep '^bd create' "$STUB_GC_LOG")" '"prepare_mode":"merge"' "…and with its work order on the create"
 hasnt "$(grep "^bd update $K" "$STUB_GC_LOG")" "--set-metadata task_kind" "…so no second write stamps the work order"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
@@ -267,6 +270,23 @@ eq "$(meta S1 "gc.routed_to")" "$POOL" "and the route it was missing is stamped"
 eq "$(meta S1 task_kind)|$(meta S1 anchor_bead)|$(meta S1 target)|$(meta S1 prepare_mode)|$(meta S1 merge_strategy)" "rework|AA|main|merge|mr" \
   "…once it carries the whole work order, brought up to it before the route"
 has "$(meta S1 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…the reason included, so the polecat routed to it reads this pass's work order"
+has "$(cat "$STUB_DEPS")" "S1|related|AA" "…and it is joined to the anchor by its membership edge"
+JL=$(grep -n '^bd dep add S1 AA' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+WL=$(grep -n '^bd update S1 .*anchor_bead=AA' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$JL" ] && [ -n "$WL" ] && [ "$JL" -lt "$WL" ]; then
+  ok "…before the work order that names the anchor is written"
+else
+  bad "the stranded child was not joined before its work order was written (join at log line '${JL:-none}', write at '${WL:-none}')"
+fi
+
+# A stranded child that cannot be joined to the anchor is neither written nor
+# routed, so no child carries anchor_bead where the anchor's closed-children read
+# cannot reach it, and the next pass tries the join again.
+reset "$(pre AA3 polecat/tk-c1)" "$(printf '{"id":"S3","status":"open","assignee":"","title":"stranded","metadata":{"branch":"polecat/tk-c1","rejection_reason":"stale base at head %s: ..."}}' "$C1_HEAD")"
+OUT=$(STUB_DEP_ADD_FAIL=S3 run --fix-pool "$POOL")
+has "$OUT" "could not join rework S3 to the anchor; left unstamped and unrouted" "a stranded child the join refuses is reported"
+eq "$(meta S3 "gc.routed_to")|$(meta S3 anchor_bead)|$(bstatus S3)" "<absent>|<absent>|open" "…and left open, unwritten and unrouted for the next pass"
+eq "$(newcount)" "0" "…with no twin filed beside it"
 
 # A stranded child whose work order will not take stays unrouted. The strand
 # probe found it by its branch and head, so it is left for the next pass, never

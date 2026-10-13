@@ -227,6 +227,8 @@ eq "$(meta "$rid" review_pool)" "$POOL" "durable route copy stamped in the metad
 grep -qxF "$rid|blocks|A1" "$STUB_DEPS" && ok "review blocks the anchor" || bad "blocks edge missing"
 eq "$(grep -c '^bd create Review branch' "$STUB_GC_LOG")" "1" "the review is filed by one create"
 has "$(grep '^bd create Review branch' "$STUB_GC_LOG")" "--deps blocks:A1" "…which carries the blocks edge onto the anchor"
+grep -qxF "$rid|related|A1" "$STUB_DEPS" && ok "review is joined to the anchor by its membership edge" || bad "membership edge missing"
+has "$(grep '^bd create Review branch' "$STUB_GC_LOG")" "--deps related:A1" "…which rides the same create"
 hasnt "$(grep "^bd update $rid" "$STUB_GC_LOG")" "--set-metadata" "…and no second write stamps the review's metadata"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formula is attached by an explicit gc sling --on (no default hijack)"
 hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no formula vars (the quorum pilot is opt-in)"

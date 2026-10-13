@@ -562,20 +562,20 @@ ensure_validation_pass() {
     # unreadable listing closes nothing and the pass is filed anyway.
     bd_unmake_orphans "$VALIDATION_SELECT" "$vtitle" \
       "Unmade by signoff: a $CHECK_NAME validation pass on $ANCHOR filed without the shape the lane probe selects it by, so no validator could rule it, while its blocks edge held $ANCHOR. A pass carrying it is filed in its place." >/dev/null || true
-    # The pass is filed whole: the shape the validator path reads and the blocks
-    # edge that holds the anchor ride the create. A create whose reply is lost
-    # has still landed where the lane probe above finds it, so the retry reuses
-    # it rather than minting a twin that would double-block the anchor. One that
-    # stays short of a VALIDATION_SELECT key is closed by bd_create, which then
-    # prints no id.
+    # The pass is filed whole: the shape the validator path reads, the blocks
+    # edge that holds the anchor and the membership edge onto it (--child-of)
+    # ride the create. A create whose reply is lost has still landed where the
+    # lane probe above finds it, so the retry reuses it rather than minting a
+    # twin that would double-block the anchor. One that stays short of a
+    # VALIDATION_SELECT key is closed by bd_create, which then prints no id.
     vident=$(validation_work_order "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID")
     vbody=""
     [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
     if [ -n "$vbody" ]; then
-      vpass=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR" --body-file -)
+      vpass=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" --child-of "$ANCHOR" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR" --body-file -)
     else
       warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
-      vpass=$(bd_create --select "$VALIDATION_SELECT" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR")
+      vpass=$(bd_create --select "$VALIDATION_SELECT" --child-of "$ANCHOR" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR")
     fi
     if [ -z "$vpass" ]; then
       warn "could not open a validation pass for lane $CHECK_NAME on $ANCHOR; review left open for a retry"
@@ -589,9 +589,9 @@ ensure_validation_pass() {
   # it opened at rather than a validator mid-rule being moved under it.
   vmeta=$(bd_json show "$vpass")
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
-  # A pass about to take anchor_bead is joined to the anchor first (a fresh one
-  # carries the edge from its create, an adopted orphan does not), so the stamp
-  # never lands on a pass the anchor's closed-children read cannot reach.
+  # A pass about to take anchor_bead is joined to the anchor first, so the stamp
+  # never lands on a pass the anchor's closed-children read cannot reach. A pass
+  # filed above carries the edge from its create.
   if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
     warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
     exit 2

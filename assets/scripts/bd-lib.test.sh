@@ -489,6 +489,34 @@ store '[]'; reset_log
 id=$(bd_create "$META" "pinned" -t task --db=/y/.beads)
 has "$(grep '^bd show new-1' "$STUB_GC_LOG")" "--db /y/.beads" "…the --db=<path> spelling too"
 
+# --child-of files the bead as a child of its anchor: the membership edge rides
+# the one create (bd_create_child), so the child is born joined or not filed.
+ANC='[{"id":"tk-anc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{}}]'
+store "$ANC"; : > "$STUB_DEPS"; reset_log
+id=$(bd_create --select task_kind,anchor_bead --child-of tk-anc "$META" "child" -t task --deps "blocks:tk-anc" 2>"$TMP/err"); rc=$?
+eq "$rc|$id" "0|new-2" "bd_create --child-of: a child whose metadata reads back returns 0 and prints its id"
+eq "$(create_calls)" 1 "…filed by one create"
+has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps related:tk-anc" "…which carries the membership edge"
+grep -qxF "new-2|related|tk-anc" "$STUB_DEPS" && ok "…so the child depends on its anchor by that edge" || bad "the membership edge did not land"
+grep -qxF "new-2|blocks|tk-anc" "$STUB_DEPS" && ok "…beside the caller's own --deps edge" || bad "the caller's --deps edge did not land"
+store '[]'; : > "$STUB_DEPS"; reset_log
+id=$(bd_create --child-of tk-anc "$META" "orphan" -t task 2>"$TMP/err"); rc=$?
+eq "$rc|$id|$(jq 'length' "$STUB_STORE")" "1||0" "bd_create --child-of: an anchor that does not resolve refuses the whole create"
+store "$ANC"; reset_log
+out=$(bd_create --child-of "" "$META" "never" -t task 2>&1); rc=$?
+eq "$rc|$(create_calls)" "1|0" "bd_create --child-of '': refused before any create"
+has "$out" "names no anchor" "…and the refusal says why"
+store "$ANC"; reset_log
+out=$(bd_create --child-of tk-other "$META" "never" -t task 2>&1); rc=$?
+eq "$rc|$(create_calls)" "1|0" "bd_create --child-of: an anchor the payload's anchor_bead does not name is refused before any create"
+has "$out" "is not the anchor_bead the payload names" "…and the refusal says why"
+store "$ANC"; reset_log
+out=$(bd_create --child-of 2>&1); rc=$?
+eq "$rc|$(create_calls)" "1|0" "bd_create --child-of with no value: refused before any create"
+store "$ANC"; reset_log
+id=$(STUB_DROP_KEYS="new-2:anchor_bead" bd_create --child-of tk-anc --select anchor_bead "$META" "either order" -t task 2>/dev/null); rc=$?
+eq "$rc|$id|$(bstatus new-2)" "1||closed" "bd_create: --child-of ahead of --select still applies the selection"
+
 # A create changes what a list answers, so the per-pass cache is dropped.
 export GC_RECONCILE_BD_CACHE="$CACHE"; mkdir -p "$CACHE"; bd_cache_clear
 store '[]'
