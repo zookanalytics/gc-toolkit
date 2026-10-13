@@ -8,14 +8,15 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED slings mol-first-reaction (framing card; a reaction that puts the
+# PREFERRED files a first reaction (framing card; a reaction that puts the
 # topic to the operator files a human gate, and gate-visit-sweep files that
 # gate's visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
-# a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction (gc-helm react exit 5)
-# or a live workflow already drives it (exit 6), so the sling is a no-op that
-# dispatches nothing: nothing would file the visit, so this does.
+# a reaction routed into a downed pool waits invisibly; today's tool always says
+# yes), and when the subject already has an open first reaction or a live owner
+# owns it (gc-helm react exit 5) or a live workflow already drives it (exit 6),
+# so react is a no-op that files nothing: nothing would file the visit, so this
+# does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
@@ -38,6 +39,12 @@ PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # shellcheck source=converse-capability.sh
 . "${GC_CONVERSE_CAPABILITY_LIB:-$SCRIPT_DIR/converse-capability.sh}" \
     || { printf '%s: cannot source converse-capability.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
+# The one reading of the liveness flags in `gc rig list --json`, shared with
+# gc-helm.sh's engage so this intake's note and that guard read them the same
+# way. Exposes RIG_PROJECTION_JQ, rig_suspended and city_controller_state.
+# shellcheck source=city-liveness.sh
+. "${GC_CITY_LIVENESS_LIB:-$SCRIPT_DIR/city-liveness.sh}" \
+    || { printf '%s: cannot source city-liveness.sh from %s\n' "$PROG" "$SCRIPT_DIR" >&2; exit 3; }
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
@@ -186,10 +193,11 @@ enumerate_rigs() {
         5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
         *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
     esac
-    # suspended/running ride through so the liveness guard below reads them from
-    # this same enumeration. A `gc rig list` that omits either leaves it null,
-    # which the guard treats as unknown and never refuses on.
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, suspended, running}]' 2>/dev/null)
+    # The projection carries the flags the wait-note below reads from this same
+    # enumeration (city-liveness.sh says which, and why a rig row's running is
+    # not one). A `gc rig list` that omits a flag leaves it null, which the note
+    # treats as unknown and says nothing about.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c "$RIG_PROJECTION_JQ" 2>/dev/null)
     [ -n "$RIGS" ] || RIGS='[]'
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
         || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
@@ -233,6 +241,32 @@ require_reaction_agent() {
           | select(test("/gc-toolkit[.](proactive|converse)"))
           | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)
     die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
+}
+
+# note_if_report_waits <rig> — say when what this files will wait for triage.
+# A suspended rig has its agents skipped by the reconciler, and while the city
+# controller is down the reconciler does not run at all, so on either nothing
+# triages the report yet. Neither refuses: `gc rig suspend` leaves the beads
+# store accessible, so the report is recorded now and triaged when the rig
+# resumes or the controller is back, and refusing would deny a rig paused on
+# purpose and filed into to process later. Every filing path says it, because a
+# topic and an existing subject wait the same way.
+#
+# A rig with no agents running gets no note, by design. It is idle, the
+# reconciler launches its triage like anywhere else, and a rig row's running
+# cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
+# reaction pool that cannot run at all, because it is unregistered, suspended
+# or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
+# choice below diverts on it to a direct visit and prints the reason.
+note_if_report_waits() {
+    if [ "$(rig_suspended "$1")" = "true" ]; then
+        note "$PROG: rig '$1' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $1)."
+        return 0
+    fi
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        note "$PROG: the city controller did not answer ($CONTROLLER_SEEN) — the report is recorded now and triaged once it answers (gc status and gc supervisor status show why)."
+    fi
 }
 
 # derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
@@ -309,25 +343,6 @@ else
     # filed where no agent could engage it.
     require_reaction_agent "$RIG"
 
-    # ── Filing into a paused rig is allowed; say the report will wait ────
-    # A suspended rig has its agents skipped by the reconciler, and a rig with
-    # no agents running has nothing to triage yet — but `gc rig suspend` leaves
-    # the beads store accessible, so the report is recorded now and triaged
-    # when the rig resumes. Suspend means paused, not gone: refusing would deny
-    # a legitimate target (a rig paused on purpose, filed into to process
-    # later). So do not refuse — just note that the report waits. suspended and
-    # running come from the enumeration above; a gc that reports neither leaves
-    # the field null, read here as unknown, which says nothing.
-    RIG_SUSPENDED=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
-        '.[] | select(.name==$n) | if (.suspended==null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1)
-    RIG_RUNNING=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
-        '.[] | select(.name==$n) | if (.running==null) then "" else (.running|tostring) end' 2>/dev/null | head -n1)
-    if [ "$RIG_SUSPENDED" = "true" ]; then
-        note "$PROG: rig '$RIG' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $RIG)."
-    elif [ "$RIG_RUNNING" = "false" ]; then
-        note "$PROG: rig '$RIG' has no agents running — the report is recorded now and triaged once the rig is running (gc rig status $RIG shows why it is down)."
-    fi
-
     # A question is a decision, everything else a task; --type overrides.
     if [ -z "$SUBJ_TYPE" ]; then
         case "$ARG" in
@@ -369,6 +384,7 @@ fi
 if [ -n "$looks_like_bead_id" ] || [ -n "$looks_like_pr_ref" ]; then
     require_reaction_agent "$RIG_NAME"
 fi
+note_if_report_waits "$RIG_NAME"
 
 # ── Record the origin as a KEY, not only as prose ────────────────────
 # gc.origin=operator is the machine-readable fact ("operator commissioned
@@ -385,7 +401,7 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a slung first reaction actually be picked up? ─
+# ── Path selection: can a filed first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
 REACT=""; REACT_WHY=""
@@ -406,8 +422,8 @@ if [ -n "$REACT" ]; then
     # The reaction owns visit creation from here; a second visit would split
     # the conversation.
     if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
-        printf '%s: subject %s — first reaction slung (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
-        printf '       The reaction writes a framing card and files the visit; it is not filed yet.\n'
+        printf '%s: subject %s — first reaction filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+        printf '       The reaction writes a framing card, and when it puts the topic to you the visit is filed for it; it is not filed yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
     else
@@ -415,20 +431,21 @@ if [ -n "$REACT" ]; then
     fi
     # No reaction was dispatched, so nothing downstream will file the visit —
     # fall through and file it directly; a conversation beats a bead nobody is
-    # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
-    # slung nothing because a first reaction happens once) and exit 6 the
-    # live-workflow no-op (the guard slung nothing because a reaction never races
-    # work in flight), both distinct from a real sling failure: name the actual
-    # cause so the visit body the converse session reads is accurate.
+    # coming to. gc-helm react exit 5 is the already-reacting no-op (the guard
+    # filed nothing because a first reaction happens once at a time, or a live
+    # owner owns it) and exit 6 the live-workflow no-op (the guard filed nothing
+    # because a reaction never races work in flight), both distinct from a real
+    # failure to file: name the actual cause so the visit body the converse
+    # session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
-        REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+        note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the visit directly"
+        REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the visit directly"
+        note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the visit directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     else
-        note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
-        REACT_WHY="no: the first-reaction sling failed"
+        note "$PROG: filing the first reaction FAILED — falling back to filing the visit directly"
+        REACT_WHY="no: filing the first reaction failed"
     fi
 fi
 

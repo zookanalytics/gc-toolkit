@@ -25,7 +25,9 @@
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
 # (rebasing is one horn of what a demand asks, so performing it answers the
-# person's question by fait accompli).
+# person's question by fait accompli). And the same supersession guard: a
+# branch whose conflict is a landed change deleting or rewriting the code it
+# edits gets the operator's decision instead of a child (branch-supersession.sh).
 #
 # Dedup is shared with pr-facts.sh by construction rather than by bookkeeping:
 # both arms probe children on `metadata.branch`, and the `rejection_reason`
@@ -64,6 +66,8 @@ done
 # nothing here can move a branch or a remote-tracking ref; the same device
 # merge.sh uses for its seed-audit merge gate.
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
+# Tells a branch a landed change made moot from one that only drifted.
+SUPERSESSION="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/branch-supersession.sh"
 
 # The target an anchor that records none lands on, derived per rig from
 # origin/HEAD so a rig whose default branch is not `main` gets its own.
@@ -278,7 +282,11 @@ while IFS= read -r row; do
         elif ((($x.assignee // "") | tostring) != "") then "ok"
         elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
         else "restamp" end' 2>/dev/null)
-    if [ "$dneed" = "restamp" ]; then
+    if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
+      # The join lands before the marker, so a marker never stands on a child
+      # the anchor's closed-children read cannot reach.
+      echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
+    elif [ "$dneed" = "restamp" ]; then
       # `gc bd update` returns 0 without writing (the claim guard is one such
       # path), so the exit code cannot prove the marker landed. Read both keys
       # back and re-stamp once, claiming it only when it persists; the next pass
@@ -306,6 +314,19 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts but $frozen holds it with rebase_hold (operator gate); no rework dispatched"
     held=$((held + 1)); continue
   fi
+  # A conflict is not always drift. When a change already on the target deleted
+  # or rewrote the code this branch edits, bringing it current decides whether
+  # the branch still has work to do, and a child sent to merge it would stop and
+  # ask. branch-supersession.sh tells the two apart and puts that decision to the
+  # operator; it holds only behind an open decision visit, so anything it cannot
+  # classify or record falls through to the ordinary child. Read after the dedup
+  # above, so a live child stands the arm down first, and before the strand
+  # re-route below, so a superseded branch's strand is not routed either.
+  if [ -x "$SUPERSESSION" ] && "$SUPERSESSION" hold --anchor "$id" --branch "$branch" \
+       --target "$target" --base "$base_oid" --head "$head_oid"; then
+    held=$((held + 1)); continue
+  fi
+  FIX_JOINED=""
   if [ -n "$stranded" ]; then
     FIX="$stranded"
     echo "$PROG: $id re-routing stranded rework $FIX for '$branch' (a prior pass's route stamp did not land)"
@@ -325,12 +346,21 @@ while IFS= read -r row; do
     if [ -n "$FIX" ]; then
       echo "$PROG: $id adopting unstamped rework orphan $FIX for '$branch' (created by a prior pass whose stamp failed)"
     else
-      FIX=$(gc bd create "$FIX_TITLE base moved, the branch no longer merges" -t task --json 2>/dev/null \
+      FIX=$(bd_create_child "$id" "$FIX_TITLE base moved, the branch no longer merges" -t task --json 2>/dev/null \
         | scrub | jq -r '.id // empty' 2>/dev/null)
+      FIX_JOINED=1
     fi
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  # The child is joined to the anchor before its role marker lands: a create
+  # carries the edge (bd_create_child), and a stranded or adopted child is
+  # joined here. A failed join stamps nothing, so no marked child sits where
+  # the anchor's closed-children read cannot reach it.
+  if [ -z "$FIX_JOINED" ] && ! bd_anchor_link "$id" "$FIX"; then
+    echo "$PROG: $id could not join rework $FIX to the anchor; left unstamped and unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # The route is stamped separately, after prepare_mode reads back. A dropped

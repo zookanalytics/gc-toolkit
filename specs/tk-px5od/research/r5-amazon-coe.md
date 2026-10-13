@@ -1,3 +1,8 @@
+---
+name: R5 Amazon COE and the postmortem tradition
+description: Research report R5 for the escalation work (tk-px5od), on Amazon's Correction of Error and adjacent incident-review traditions. It proposes an agent COE with a two-layer cadence and warns that a COE corpus read as ground truth overfits future agents to past surface forms.
+---
+
 # R5: Amazon COE and the Postmortem Tradition
 
 ## Summary

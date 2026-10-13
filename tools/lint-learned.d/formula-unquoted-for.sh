@@ -14,15 +14,20 @@
 # span, an escape or a substitution is data: it neither ends the list nor
 # hides an expansion after it. Scope: fenced shell blocks in formula
 # TOMLs, agent prompt templates, startup fragments, skills, and named
-# paste-to-run docs runbooks. Rendered (generated/, base-snapshots/) and
-# frozen (specs/) trees are excluded. Fix: capture to a file and
-# `while IFS= read -r X`, or pipe into it.
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# paste-to-run docs runbooks. A block fenced as bash, sh or shell is shell,
+# and so is an untagged block, which some fragments and skills use for a
+# command. Rendered (generated/, base-snapshots/) and frozen (specs/) trees
+# are excluded. Fix: capture to a file and `while IFS= read -r X`, or pipe
+# into it.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
 # Extraction/classification in awk so quote-stripping is done by something
-# that can see a quote; heredoc'd so its own single quotes survive.
+# that can see a quote; heredoc'd so its own single quotes survive. A load
+# that fails leaves an empty program, which awk runs as a clean scan of every
+# file, so it ends the run instead.
 SCAN_AWK=$(cat <<'AWKEOF'
 function is_shell_fence(l,   lang) {
     lang = l
@@ -123,10 +128,12 @@ function judge(text, last,   flat, remain, k, seg, list, at, seen, hits) {
 /^[[:space:]]*```/ {
     # A fence ends the block, as the end of the file does. Either one ends a
     # line still being joined, which is judged as it stands so it cannot run
-    # on into the next block.
+    # on into the next block. A fence closes whichever block is open, shell or
+    # not, and only a fence that opens a block is read for its tag: a bare
+    # closing fence would read as an untagged, and so shell, opening.
     if (pending != "") judge(pending, 1)
     pending = ""
-    if (inb) { inb = 0 } else { inb = is_shell_fence($0) }
+    if (infence) { infence = 0; inb = 0 } else { infence = 1; inb = is_shell_fence($0) }
     next
 }
 !inb { next }
@@ -145,7 +152,7 @@ function judge(text, last,   flat, remain, k, seg, list, at, seen, hits) {
 }
 END { if (pending != "") judge(pending, 1) }
 AWKEOF
-)
+) || { echo "formula-unquoted-for: could not load its scan program — detector cannot scan" >&2; exit 2; }
 
 found=0
 for f in "$@"; do
@@ -176,12 +183,18 @@ for f in "$@"; do
         */docs/gascity-dispatch-containment.md | docs/gascity-dispatch-containment.md) ;;
         *) continue ;;
     esac
+    # A failed scan can print nothing, which is also what a clean file
+    # prints, so its status is read before its output.
+    if ! hits="$(awk "$SCAN_AWK" "$f" 2>/dev/null)"; then
+        echo "formula-unquoted-for: awk failed on $f — detector cannot scan it" >&2
+        exit 2
+    fi
     while IFS= read -r hit; do
         [ -n "$hit" ] || continue
         no="${hit%%:*}"
         echo "$f:$no: shell block iterates an UNQUOTED parameter expansion — zsh does not word-split \$VAR, so the body runs once on the joined list; capture to a file and \`while IFS= read -r X\`, or write \${=VAR} and mean it (learned rule: formula-unquoted-for)"
         found=1
-    done < <(awk "$SCAN_AWK" "$f" 2>/dev/null)
+    done <<< "$hits"
 done
 
 [ "$found" -eq 0 ]

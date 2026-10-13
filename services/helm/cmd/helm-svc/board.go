@@ -471,7 +471,7 @@ func renderCoverage(c board.PRCoverage, rigCount int) string {
 		gaps = append(gaps, fmt.Sprintf("%d of %d have no position recorded by the merge cadence", c.MachineUnknown, c.Rows))
 	}
 	if c.ConversationUnknown > 0 {
-		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the acknowledgement watermarks are not built yet)", c.ConversationUnknown))
+		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the merge cadence has not recorded it)", c.ConversationUnknown))
 	}
 	if c.ApprovalUnanswered > 0 {
 		gaps = append(gaps, fmt.Sprintf("%d are green with no readable answer on whether GitHub wants a review", c.ApprovalUnanswered))
@@ -520,7 +520,34 @@ func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(needsCell(t), colNeedsMax)+"\n")
+}
+
+// needsCell is a row's NEEDS cell: its needs behind the accept marker
+// ([acceptCell]), then where a pull request row's conversation stands
+// ([conversationNote]). NEEDS is the unpadded last column, so the note never
+// pushes another column out of line.
+func needsCell(t board.Tile) string {
+	n, c := acceptCell(t), conversationNote(t)
+	switch {
+	case c == "":
+		return n
+	case n == "":
+		return c
+	}
+	return n + " · " + c
+}
+
+// conversationNote names where a live pull request row's conversation with the
+// operator stands, in the wire's own word, which is how this board shows which
+// pull requests carry the operator's comments. A row that is not a merge anchor
+// has no conversation. An asking row already names its question in its needs.
+// A closed row's conversation is nobody's move. Each of those reads "".
+func conversationNote(t board.Tile) string {
+	if t.PRConversation == "" || t.PRConversation == board.ConversationAsking || !t.ClosedAt.IsZero() {
+		return ""
+	}
+	return "conversation " + t.PRConversation
 }
 
 // acceptCell prefixes a row's needs with a compact affordance marker when the
@@ -604,7 +631,7 @@ func renderFamilyRows(w io.Writer, shown []board.Tile) {
 // family header rather than a member row, so its own ask rides here.
 func familyBanner(root board.Tile) string {
 	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
-	if n := acceptCell(root); n != "" {
+	if n := needsCell(root); n != "" {
 		line += " · " + n
 	}
 	return clip(line, colHeld+2+colNeedsMax)
@@ -616,7 +643,7 @@ func familyBanner(root board.Tile) string {
 func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
 		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(acceptCell(t), colNeedsMax)+"\n")
+		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(needsCell(t), colNeedsMax)+"\n")
 }
 
 // renderFamilyLegend is the overview's trailer: what a family is, and what the
@@ -630,7 +657,12 @@ func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
 	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
+	fmt.Fprint(w, conversationLegend)
 }
+
+// conversationLegend says what the conversation note on a pull request row
+// ([conversationNote]) means. renderLegend and renderFamilyLegend print it.
+const conversationLegend = "A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
 
 // clusterMemberCap bounds how many members a folded cluster spells out before it
 // says how many more it held. Enough that an ordinary cluster is listed in full,
@@ -652,7 +684,13 @@ func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
 			fmt.Fprintf(w, "%s… (+%d more, all in --json)\n", indent, len(cr.Members)-clusterMemberCap)
 			break
 		}
-		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(m.Title, colNeedsMax))
+		// The fold shares the needs sentence, not the conversation, so a pull
+		// request member keeps its own conversation beside its title.
+		title := m.Title
+		if c := conversationNote(m); c != "" {
+			title += " · " + c
+		}
+		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(title, colNeedsMax))
 	}
 }
 
@@ -701,6 +739,7 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
 	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
+	fmt.Fprint(w, conversationLegend)
 }
 
 // Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by

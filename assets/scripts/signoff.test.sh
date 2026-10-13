@@ -25,8 +25,7 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -142,11 +141,13 @@ case "${1:-}" in
     # refuses only invalid JSON and stores any other document as given. The stub
     # also refuses a document that is not an object: it holds no key a
     # --metadata-field query can match, so a caller that sends one fails here.
-    cmeta='{}'
+    # --deps <type:id> rides the insert too, as an edge row from the new bead.
+    cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --metadata=*) cmeta="${1#--metadata=}" ;;
+        --deps) shift; cdeps="$cdeps ${1:-}" ;;
       esac
       shift || true
     done
@@ -163,6 +164,7 @@ case "${1:-}" in
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -172,9 +174,23 @@ case "${1:-}" in
     # A row is "<dependent>|<blocker>|<type>", matching the real binary:
     # `dep add A B` is "A depends on B", `dep S --blocks D` is "D depends on S",
     # --direction=down lists what an id depends on and =up lists what depends
-    # on it. Model these backwards and a reversed edge reads as correct.
+    # on it, every type unless -t names one, each row carrying dependency_type.
+    # Model these backwards and a reversed edge reads as correct.
     case "${1:-}" in
-      add) printf '%s|%s|%s\n' "$2" "$3" "${4#--type=}" >> "$DEPS"; echo "dep added" ;;
+      add)
+        # --file <path|->: newline-delimited {"from","to","type"} edges.
+        if [ "${2:-}" = "--file" ]; then
+          if [ "${3:-}" = "-" ]; then lines=$(cat); else lines=$(cat "${3:-}"); fi
+          printf '%s\n' "$lines" | jq -r 'select(type == "object") | "\(.from)|\(.to)|\(.type // "blocks")"' >> "$DEPS"
+          echo "deps added"
+        else
+          a="${2:-}"; b="${3:-}"; ty=""; shift 3 || true
+          while [ $# -gt 0 ]; do
+            case "$1" in --type=*) ty="${1#--type=}" ;; --type|-t) shift; ty="${1:-}" ;; esac
+            shift || true
+          done
+          printf '%s|%s|%s\n' "$a" "$b" "$ty" >> "$DEPS"; echo "dep added"
+        fi ;;
       list)
         shift; id="$1"; shift
         dir=""; typ=""
@@ -187,12 +203,12 @@ case "${1:-}" in
         first=1
         while IFS='|' read -r f t ty; do
           [ -n "$f" ] || continue
-          [ "$ty" = "$typ" ] || continue
+          [ -z "$typ" ] || [ "$ty" = "$typ" ] || continue
           other=""
           if [ "$dir" = "down" ] && [ "$f" = "$id" ]; then other="$t"; fi
           if [ "$dir" = "up" ] && [ "$t" = "$id" ]; then other="$f"; fi
           [ -n "$other" ] || continue
-          row=$(jq -c --arg id "$other" '(.[] | select(.id == $id)) // {"id":$id,"metadata":{}}' "$STORE")
+          row=$(jq -c --arg id "$other" --arg ty "$ty" '((.[] | select(.id == $id)) // {"id":$id,"metadata":{}}) + {dependency_type: $ty}' "$STORE")
           [ "$first" = 1 ] || out="$out,"
           out="$out$row"; first=0
         done < "$DEPS"
@@ -239,8 +255,7 @@ case "${1:-}" in
 esac
 STUB
 
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 printf '%s\n' "$*" >> "${STUB_GH_ALL:?}"
@@ -271,8 +286,7 @@ esac
 exit 0
 STUB
 
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 # resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
 # then reads the check index at the reviewed commit with
 # `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
@@ -1175,6 +1189,79 @@ reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=none"
 out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
 eq "$rc" 0 "triage on a none anchor still records its verdict"
 eq "$(meta tk-anc check_set)" "none" "the none opt-out stays human-only, not widened"
+
+# --- a bring-current round awaiting triage: the verdict carries the round's ruling ---
+# The guard's decide is stubbed: it logs its argv, writes the round's account to
+# --body-out, and exits STUB_BC_RC. bring-current-guard.test.sh proves what it does.
+cat > "$BIN/bring-current" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_BC_LOG:?}"
+out=""
+while [ $# -gt 0 ]; do case "$1" in --body-out) out="${2:-}"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] && printf 'ROUND ACCOUNT: what collided and what was decided\n' > "$out"
+exit "${STUB_BC_RC:-0}"
+STUB
+chmod +x "$BIN/bring-current"
+export GC_BRING_CURRENT_TOOL="$BIN/bring-current" STUB_BC_LOG="$TMP/bc.log"
+ROUND_OWED=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted", triage: null}')
+ROUND_RULED=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted", triage: {review: "rv-old"}}')
+
+echo "# a triage verdict on a round awaiting it is refused without the ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a triage approve with no ruling exits 1"
+has "$out" "awaits this triage's ruling: pass --reopen" "…naming the flags the ruling takes"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none 2>&1); rc=$?
+eq "$rc" 1 "a ruling with no --round-reason exits 1"
+
+echo "# the ruling rides the verdict: the guard decides, and the posted verdict opens with the round"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" 2>&1); rc=$?
+eq "$rc" 0 "a ruled triage approve exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "the guard's decide gets the anchor, the review, the lanes and the reason"
+has "$(cat "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was decided" "the posted verdict carries the round's account"
+first=$(head -1 "$STUB_GH_BODY")
+has "$first" "ROUND ACCOUNT" "…ahead of the reviewer's own notes"
+has "$(cat "$STUB_GH_BODY")" "triage body" "…which still follow"
+eq "$(meta tk-anc "check.triage")" "green" "the marker is stamped"
+eq "$(status rv-tri)" "closed" "…and the review closed"
+
+echo "# lanes triage adds, and a dismissal, reach the ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reopen none --round-reason "material judgment" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 0 "it exits 0"
+has "$(cat "$STUB_BC_LOG")" "--add demo" "a lane added on the call is reopened with the round"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…and the dismissal is passed on"
+has "$(meta tk-anc check_set)" "demo" "the widening still lands"
+
+echo "# a ruling the guard refuses or cannot land records nothing"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"
+out=$(STUB_BC_RC=1 "$SUT" --review-bead rv-tri --verdict approve --reopen pm --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a refused ruling exits 1"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…with no marker"
+out=$(STUB_BC_RC=2 "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
+eq "$rc" 2 "a ruling that did not land exits 2"
+eq "$(status rv-tri)" "in_progress" "…leaving the review open for the retry"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…and no marker stamped"
+
+echo "# the ruling flags are refused where no round awaits them, and on any other check"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "no round on the anchor: --reopen exits 1"
+has "$out" "no bring-current round on tk-anc awaits" "…saying so"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_RULED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a round already ruled on owes this verdict nothing"
+eq "$(cat "$STUB_BC_LOG")" "" "…and the guard is not called"
+reset "$ANCHOR_PR"; anchor_meta "bring_current_record=$ROUND_OWED"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a correctness review cannot carry the ruling"
+has "$out" "only a triage approve records" "…naming the rule"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness verdict on an anchor whose round awaits triage is not held for it"
 
 echo "# --add-gates is validated against the check index at the reviewed commit"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"

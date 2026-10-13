@@ -304,8 +304,7 @@ PANE
 cp "$TMP/panes/lx-claude" "$TMP/panes/lx-attached"
 
 # --- Fake gc: only the surface the script touches. --------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   # A session list that FAILS, as opposed to one that comes back empty. The
   # script may not treat the two alike: an empty list is a complete pass over

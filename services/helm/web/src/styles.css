@@ -398,6 +398,42 @@ th {
 }
 
 /*
+ * The PR conversation chip: where the exchange with the operator stands on the
+ * pull request. outstanding, answered and asking carry the operator's side of
+ * the conversation, so they are colored to read at a glance; quiet stays muted,
+ * and unknown is muted and set in italics because it is a gap, not an answer.
+ */
+.pr-conversation {
+  font-size: 0.8125rem;
+  margin-left: 0.4em;
+  white-space: nowrap;
+}
+
+.pr-conversation--outstanding {
+  color: #8a6100;
+  font-weight: 600;
+}
+
+.pr-conversation--answered {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.pr-conversation--asking {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.pr-conversation--quiet {
+  opacity: 0.7;
+}
+
+.pr-conversation--unknown {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/*
  * Parked conversations (tk-2v08m). A second section rather than more rows: these
  * are findable-not-urgent, and the whole point is that they do not compete with
  * the ranked table above.

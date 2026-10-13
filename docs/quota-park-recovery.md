@@ -17,6 +17,18 @@ Twice observed, two different providers:
 Both times every agent resumed within 20s of a single `gc session nudge`.
 Bug: `tk-al95k`.
 
+## Scope
+
+**Mandate.** Recovering a session parked at an idle prompt under a provider
+quota block: how the order detects a park and nudges it, the status surface
+the patrols read before they warrant a session, and the order's tuning and
+state rules.
+
+**Boundaries.** Nudging is the order's only action. Killing a wedged session is
+the dog pool's, on a warrant, per [authority-map.md](authority-map.md), and each
+patrol's warrant path is its own formula's. How an escalation visit reaches a
+person is [gascity-human-engagement.md](gascity-human-engagement.md).
+
 ## Mechanism
 
 `orders/quota-park-nudge.toml` runs `assets/scripts/quota-park-nudge.sh` every
@@ -123,7 +135,7 @@ wedged during the very incidents this order recovers from. Unbounded, one hung
 capped at `QUOTA_PARK_CALL_TIMEOUT` (a wedged one is skipped, not fatal) and the
 pass as a whole at `QUOTA_PARK_SWEEP_BUDGET`, after which the remainder defers
 to the next cycle rather than overlapping it — reported in the summary line, not
-silently. Same `run_bounded` idiom as `assets/scripts/merge.sh`.
+silently.
 
 **And the bound is a hard one where the host allows it.** `timeout N` sends
 SIGTERM and then *waits*: a child free to ignore the signal runs as long as it

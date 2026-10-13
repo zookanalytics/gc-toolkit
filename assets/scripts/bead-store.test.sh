@@ -43,8 +43,7 @@ export FAKE_GC_LOG="$TMP/gc.log"; : > "$FAKE_GC_LOG"
 export FAKE_BD_LOG="$TMP/bd.log"; : > "$FAKE_BD_LOG"
 mkbead() { : > "$1/.beads/$2"; }
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-store.sh touches. Every call is logged so the test can
 # prove which store was asked, not merely what came back.
 set -u
@@ -94,8 +93,7 @@ case "$1 $2" in
 esac
 GC
 
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The guard reaches every store through `gc bd --db`; a direct `bd` is the
 # regression this stub exists to fail on. It records the call rather than only
 # failing it, so the assertion reads a log of the whole run.

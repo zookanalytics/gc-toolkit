@@ -12,7 +12,12 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded.
+# id-read-unguarded, doc-filing.
+#
+# Every detector in the directory, one added later included, is also held to
+# the runner's rule that a broken detector never reads as a clean scan. When a
+# tool it runs fails, it exits 2 or reports what it reports with every tool
+# working, and a file it cannot read exits 2.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -773,6 +778,231 @@ runm "$TMP/continued.md"
 eq "$RC" 1 "a continued bare call in a marker-fenced snippet is scanned as one call"
 has "$OUT" "continued.md:2:" "and reported where it opened"
 
+# ── doc-filing ──────────────────────────────────────────────────────────
+#
+# The detector reads paths relative to the repository root, so every run
+# starts in a fixture root.
+DET_DF="$HERE/lint-learned.d/doc-filing.sh"
+[ -x "$DET_DF" ] || { echo "no detector at $DET_DF"; exit 1; }
+DF="$TMP/doc-filing"
+mkdir -p "$DF"
+rundf() { OUT="$(cd "$DF" && "$DET_DF" "$@" 2>&1)"; RC=$?; }
+# page <path> — write a fixture page from stdin under the fixture root.
+page() { mkdir -p "$DF/$(dirname "$1")" && cat > "$DF/$1"; }
+
+echo "── doc-filing: what is a finding ──"
+
+page docs/new.md <<'MD'
+---
+name: New
+description: A central page that never states its charter.
+---
+
+# New
+MD
+page docs/topic/nested.md <<'MD'
+# Nested
+MD
+page docs/fenced.md <<'MD'
+# Fenced
+
+```markdown
+## Scope
+```
+MD
+page docs/long-fence.md <<'MD'
+# A fence opened by four backticks
+
+````markdown
+```
+## Scope
+```
+````
+MD
+page docs/deeper.md <<'MD'
+# Deeper
+
+### Scope
+MD
+page docs/longer.md <<'MD'
+## Scope and history
+MD
+page docs/empty.md < /dev/null
+page specs/tk-a/notes.md <<'MD'
+# Notes with no frontmatter
+MD
+page specs/tk-a/name-only.md <<'MD'
+---
+name: Name only
+---
+MD
+page specs/tk-a/blank.md <<'MD'
+---
+description: ""
+---
+MD
+page specs/tk-a/null.md <<'MD'
+---
+description: ~
+---
+MD
+page specs/tk-a/empty-fold.md <<'MD'
+---
+description: >
+name: A folded value with no lines under it
+---
+MD
+page specs/tk-a/unclosed.md <<'MD'
+---
+description: The block never closes, so it is not frontmatter.
+MD
+page specs/tk-a/late.md <<'MD'
+# A title first
+
+---
+description: Frontmatter opens the page or it is not frontmatter.
+---
+MD
+page specs/tk-a/nested-key.md <<'MD'
+---
+meta:
+  description: Only a top-level key counts.
+---
+MD
+page specs/tk-a/deep/er/notes.md <<'MD'
+# Deep
+MD
+DF_NO_SCOPE=(docs/new.md docs/topic/nested.md docs/fenced.md docs/long-fence.md docs/deeper.md
+    docs/longer.md)
+DF_NO_DESC=(specs/tk-a/notes.md specs/tk-a/name-only.md specs/tk-a/blank.md specs/tk-a/null.md
+    specs/tk-a/empty-fold.md specs/tk-a/unclosed.md specs/tk-a/late.md specs/tk-a/nested-key.md
+    specs/tk-a/deep/er/notes.md)
+# docs/empty.md is named only as ./docs/empty.md, and docs/new.md both ways.
+rundf "${DF_NO_SCOPE[@]}" "${DF_NO_DESC[@]}" ./docs/empty.md ./docs/new.md
+eq "$RC" 1 "a page missing its tier's part exits 1"
+for p in "${DF_NO_SCOPE[@]}" docs/empty.md; do
+    has "$OUT" "$p:1: no \"## Scope\" section" "$p is reported for a missing Scope"
+done
+for p in "${DF_NO_DESC[@]}"; do
+    has "$OUT" "$p:1: no frontmatter description" "$p is reported for a missing description"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 16 "each page is reported once, whatever spelling named it, and nothing else is"
+has "$OUT" "specs/<bead-id>/" "a missing Scope names the other home a page can have"
+has "$OUT" "\"Inside docs/\"" "and points at the placement rule"
+has "$OUT" "(learned rule: doc-filing)" "the finding names the rule"
+
+echo "── doc-filing: what is not ──"
+
+page docs/good.md <<'MD'
+---
+name: Good
+description: A central page with its charter.
+---
+
+# Good
+
+## Scope
+
+**Mandate.** What the page owns.
+MD
+page docs/bare.md <<'MD'
+# Bare
+
+A description is encouraged on a docs/ page, not required.
+
+## Scope
+MD
+page docs/closing-hashes.md <<'MD'
+## Scope ##
+MD
+page docs/after-fence.md <<'MD'
+~~~sh
+echo "a fence that closes"
+~~~
+
+## Scope
+MD
+page docs/rule-first.md <<'MD'
+---
+A page that opens with a rule it never closes has no frontmatter.
+
+## Scope
+MD
+page docs/inline-code.md <<'MD'
+`code` at the start of a line opens no fence.
+
+## Scope
+MD
+page specs/tk-b/plain.md <<'MD'
+---
+name: Plain
+description: Why the page exists.
+---
+MD
+page specs/tk-b/folded.md <<'MD'
+---
+description: >-
+  A folded value on the lines below its key.
+---
+MD
+page specs/tk-b/next-line.md <<'MD'
+---
+description:
+  A plain value that starts on the next line.
+---
+MD
+page specs/tk-b/quoted.md <<'MD'
+---
+description: 'Quoted: a colon inside.'
+---
+MD
+page specs/tk-b/no-scope.md <<'MD'
+---
+description: A spec page needs no Scope section.
+---
+MD
+printf -- '---\r\ndescription: Written with CRLF line ends.\r\n---\r\n\r\n## Scope\r\n' > "$DF/specs/tk-b/crlf.md"
+cp "$DF/specs/tk-b/crlf.md" "$DF/docs/crlf.md"
+page docs/notes.txt <<'MD'
+not markdown
+MD
+page README.md <<'MD'
+# Outside both tiers
+MD
+page services/helm/docs/guide.md <<'MD'
+# A docs directory below the root is not the central tier
+MD
+page generated/out.md <<'MD'
+# Generated
+MD
+DF_GOOD=(docs/good.md docs/bare.md docs/closing-hashes.md docs/after-fence.md docs/rule-first.md
+    docs/inline-code.md docs/crlf.md
+    specs/tk-b/plain.md specs/tk-b/folded.md specs/tk-b/next-line.md specs/tk-b/quoted.md
+    specs/tk-b/no-scope.md specs/tk-b/crlf.md)
+rundf "${DF_GOOD[@]}" docs/notes.txt README.md services/helm/docs/guide.md generated/out.md docs/absent.md
+eq "$RC" 0 "pages carrying their tier's part, and paths outside the tiers, are clean"
+eq "$OUT" "" "a clean run prints nothing"
+
+echo "── doc-filing: a check that cannot read says so ──"
+
+chmod 000 "$DF/docs/good.md"
+if [ -r "$DF/docs/good.md" ]; then
+    ok "an unreadable page (not exercised: this user can read anything)"
+else
+    rundf docs/good.md docs/new.md
+    eq "$RC" 2 "an unreadable page is an error, never a pass"
+    has "$OUT" "docs/good.md: cannot read it" "and the page is named"
+    has "$OUT" "docs/new.md:1: no \"## Scope\"" "the readable pages are still checked"
+fi
+chmod 644 "$DF/docs/good.md"
+
+mkdir -p "$TMP/doc-filing-bin"
+printf '#!/bin/sh\nexit 3\n' > "$TMP/doc-filing-bin/awk"
+chmod +x "$TMP/doc-filing-bin/awk"
+OUT="$(cd "$DF" && PATH="$TMP/doc-filing-bin:$PATH" "$DET_DF" docs/new.md 2>&1)"; RC=$?
+eq "$RC" 2 "a scan that fails is an error, never a pass"
+has "$OUT" "the page scan failed" "and says so"
+
 echo "── zsh-colon-modifier: what is a finding ──"
 
 # The detector is path-scoped to agent-run surfaces, so fixtures are planted at
@@ -1500,6 +1730,24 @@ for n in 2 3 4 5 6 7; do
     has "$OUT" "params.toml:$n:" "params.toml line $n is reported"
 done
 
+# A block fenced as sh or shell is shell, and so is an untagged block.
+cat > "$TMP/formulas/tags.toml" <<'FIX'
+```sh
+for x in $LIST; do echo "$x"; done
+```
+```shell
+for x in $LIST; do echo "$x"; done
+```
+```
+for x in $LIST; do echo "$x"; done
+```
+FIX
+runf "$TMP/formulas/tags.toml"
+eq "$RC" 1 "sh, shell and untagged blocks are shell"
+for n in 2 5 8; do
+    has "$OUT" "tags.toml:$n:" "tags.toml line $n is reported"
+done
+
 echo "── formula-unquoted-for: what is not ──"
 
 # A quoted list, zsh's explicit \${=VAR} split, and a literal list are all fine;
@@ -1717,12 +1965,14 @@ done
 eq "$(printf '%s\n' "$OUT" | grep -c .)" 4 "and nothing else is, the commented-out loops included"
 
 # Scope excludes rendered and frozen trees even when they carry the defect: the
-# fix belongs in the source they render from or froze.
+# fix belongs in the source they render from or froze. lint-learned.d/ is
+# excluded too, because the text there states the rule.
 mkdir -p "$TMP/specs/b/formulas" "$TMP/generated/seed-audit/agents/a" \
-         "$TMP/base-snapshots/x/formulas"
+         "$TMP/base-snapshots/x/formulas" "$TMP/lint-learned.d/skills/s"
 for p in specs/b/formulas/f.toml \
          generated/seed-audit/agents/a/prompt.template.md \
-         base-snapshots/x/formulas/f.toml; do
+         base-snapshots/x/formulas/f.toml \
+         lint-learned.d/skills/s/SKILL.md; do
     cat > "$TMP/$p" <<'FIX'
 ```bash
 for x in $LIST; do echo "$x"; done
@@ -1731,8 +1981,9 @@ FIX
 done
 runf "$TMP/specs/b/formulas/f.toml" \
      "$TMP/generated/seed-audit/agents/a/prompt.template.md" \
-     "$TMP/base-snapshots/x/formulas/f.toml"
-eq "$RC" 0 "specs/, generated/, and base-snapshots/ are excluded"
+     "$TMP/base-snapshots/x/formulas/f.toml" \
+     "$TMP/lint-learned.d/skills/s/SKILL.md"
+eq "$RC" 0 "specs/, generated/, base-snapshots/ and lint-learned.d/ are excluded"
 
 # Docs are named one at a time, not matched by a docs/* glob — an ordinary doc
 # whose fenced example happens to hold an unquoted loop is illustrative, not a
@@ -1744,6 +1995,90 @@ for x in $LIST; do echo "$x"; done
 FIX
 runf "$TMP/docs/other-doc.md"
 eq "$RC" 0 "a doc not on the runbook list is not scanned"
+
+echo "── formula-unquoted-for: a fence closes the block it opened ──"
+
+# A fence closes whichever block is open, so the bare fence that closes a json
+# block opens nothing: each shell block after it is scanned, and the prose
+# between them is not.
+cat > "$TMP/formulas/after-json.toml" <<'FIX'
+```json
+{"a": 1}
+```
+```bash
+for x in $LIST; do echo "$x"; done
+```
+for x in $LIST; do echo "$x"; done
+```bash
+for y in $LIST; do echo "$y"; done
+```
+FIX
+runf "$TMP/formulas/after-json.toml"
+eq "$RC" 1 "the shell blocks after a non-shell block are scanned"
+for n in 5 9; do
+    has "$OUT" "after-json.toml:$n:" "after-json.toml line $n is reported"
+done
+hasnt "$OUT" "after-json.toml:7:" "the prose between them is not"
+
+# A canary loop goes in before the closing fence of every block in every
+# in-scope file of this checkout, and another just after it. The scan must
+# report the canary inside each shell block and no other: a fence misread
+# that skips a shell block hides its canary, and one that runs past the end
+# of a block reports the canary after it. The test pairs the fences with a
+# tracker of its own, so a fence-state error in the detector cannot also
+# decide where the canaries go.
+FUF_ROOT="$(cd "$HERE/.." && pwd)"
+FCAN="$TMP/fuf-canary"
+mkdir -p "$FCAN"
+: > "$FCAN/.want"
+planted=()
+while IFS= read -r p; do
+    case "$p" in
+        specs/* | */specs/* | generated/* | */generated/* \
+        | base-snapshots/* | */base-snapshots/*) continue ;;
+        formulas/*.toml | */formulas/*.toml \
+        | template-fragments/*.template.md | */template-fragments/*.template.md \
+        | agents/*/prompt.template.md | */agents/*/prompt.template.md \
+        | skills/*/SKILL.md | */skills/*/SKILL.md \
+        | docs/gascity-dispatch-containment.md) ;;
+        *) continue ;;
+    esac
+    mkdir -p "$(dirname "$FCAN/$p")"
+    awk -v want="$FCAN/.want" -v m="$FCAN/$p" '
+        function shell_fence(l,   lang) {
+            lang = l
+            sub(/^[[:space:]]*```[[:space:]]*/, "", lang)
+            sub(/[[:space:]].*$/, "", lang)
+            return (lang == "" || lang == "bash" || lang == "sh" || lang == "shell")
+        }
+        /^[[:space:]]*```/ {
+            if (open) {
+                print "for c in $CANARY; do :; done"; n++
+                if (shell) print m ":" n >> want
+                print; n++
+                print "for c in $CANARY; do :; done"; n++
+                open = 0
+                next
+            }
+            open = 1; shell = shell_fence($0)
+        }
+        { print; n++ }
+    ' "$FUF_ROOT/$p" > "$FCAN/$p"
+    planted+=("$FCAN/$p")
+done < <(git -C "$FUF_ROOT" ls-files)
+sort "$FCAN/.want" > "$FCAN/.want.sorted"
+"$DET_FUF" ${planted[@]+"${planted[@]}"} | cut -d: -f1,2 | sort > "$FCAN/.got"
+FENCES="$(grep -c . "$FCAN/.want.sorted")"
+if [ "$FENCES" -gt 0 ]; then
+    ok "the checkout has shell blocks to plant ($FENCES in ${#planted[@]} files)"
+else
+    bad "the checkout has shell blocks to plant" "no in-scope shell block found under $FUF_ROOT"
+fi
+if cmp -s "$FCAN/.want.sorted" "$FCAN/.got"; then
+    ok "the canary inside every shell block is reported, and no other canary is"
+else
+    bad "the canary inside every shell block is reported, and no other canary is" "$(diff "$FCAN/.want.sorted" "$FCAN/.got" | head -20)"
+fi
 
 echo "── pr-post-bypass: what is a finding ──"
 
@@ -1913,6 +2248,169 @@ plantpp "$TMP/pp-exempt/specs/record.md" <<'FIX'
 FIX
 runpp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh" "$TMP/pp-exempt/specs/record.md"
 eq "$RC" 0 "pr-post.sh, lint-learned.d/ and specs/ are skipped"
+
+echo "── every detector: a tool that fails never reads as a clean scan ──"
+
+# The runner tells a broken detector from a clean one only by its exit status,
+# so no tool a detector runs may fail into a clean scan. Every executable in
+# lint-learned.d/ is run on the fixtures below, which hold a violation of each
+# rule, with the tools on PATH replaced by shims. One run fails one call of one
+# tool, and across the runs every call fails once. The detector must then exit
+# 2 and say why, or report what it reports with every tool working. A detector
+# added later is held to the same contract, so these fixtures must carry a
+# violation it reports.
+CT="$TMP/contract"
+mkdir -p "$CT/bin" "$CT/tree/formulas" "$CT/tree/docs" "$CT/tree/skills/x" "$CT/tree/specs/x"
+
+# A shim numbers its own call by creating the first free <tool>.<n> file in
+# $GCTK_CALLS with noclobber set. The create is atomic, so calls that run at
+# once in one pipeline still get distinct numbers. The redirect hangs on
+# `true`, not `:`, because a failed redirect on a special builtin such as `:`
+# ends a POSIX shell like dash. The call $GCTK_FAIL names fails the way a
+# broken tool does, and every other call runs the real tool. PATH holds only
+# these shims and bash, so a detector that runs any other tool reports
+# differently under them, and the comparison below says so.
+for tool in awk grep sed sort tr cat; do
+    real="$(command -v "$tool")" || { echo "no $tool on PATH"; exit 1; }
+    cat > "$CT/bin/$tool" <<SHIM
+#!/bin/sh
+[ -d "\${GCTK_CALLS:-}" ] || { echo "$tool shim: no call log" >&2; exit 3; }
+set -C
+n=1
+until { true > "\$GCTK_CALLS/$tool.\$n"; } 2>/dev/null; do
+    n=\$((n + 1))
+    [ "\$n" -le 10000 ] || { echo "$tool shim: cannot number its call" >&2; exit 3; }
+done
+if [ "\${GCTK_FAIL:-}" = "$tool.\$n" ]; then
+    echo "$tool: failed by the contract test" >&2
+    exit 2
+fi
+exec "$real" "\$@"
+SHIM
+    chmod +x "$CT/bin/$tool"
+done
+ln -s "$(command -v bash)" "$CT/bin/bash"
+
+# ct_run <detector> <file> [<call>] — run a detector on one fixture under the
+# shims, failing <call> (such as awk.2) when one is named. It runs from the
+# fixture root because doc-filing reads paths relative to the repository root.
+# Sets RC and OUT, and leaves one file per tool call in $CT/calls.
+ct_run() {
+    rm -rf "$CT/calls"; mkdir "$CT/calls"
+    OUT="$(cd "$CT/tree" && env PATH="$CT/bin" GCTK_CALLS="$CT/calls" GCTK_FAIL="${3:-}" "$1" "$2" 2>&1)"; RC=$?
+}
+# ct_locs <output> — the <file>:<line> locations a run reports, sorted.
+ct_locs() { printf '%s\n' "$1" | grep -oE '^[^: ]+:[0-9]+:' | sort -u; }
+
+# The fixtures are written with placeholders, as in the sections above, so this
+# file carries none of the shapes it plants.
+plantct() {
+    sed -e 's/@BD@/bd/g' -e 's/@MKT@/mktemp/g' -e 's/@J@/bd_json/g' -e 's/@CTL@/[:cntrl:]/g' \
+        -e 's/@GH@/gh/g' -e 's/@NOTES@/--notes/g' -e 's#@OR@#//#g' \
+        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' > "$CT/tree/$1"
+}
+plantct x.sh <<'FIX'
+#!/usr/bin/env bash
+set -o @PF@
+printf '%s\n' "$X" | @GQ@ x
+@BD@ list --json
+@MKT@ -d
+@J@ "$ID"
+x=$(printf '%s' "$J" | tr -d '@CTL@')
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+@BD@ close "$GC_BEAD_ID"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+FIX
+plantct formulas/x.toml <<'FIX'
+[[steps]]
+id = "x"
+description = """
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+@BD@ close "$GC_BEAD_ID"
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@MKT@ -d
+@GH@ pr comment 5 --body x
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+# <<< contract
+```
+"""
+FIX
+plantct docs/x.md <<'FIX'
+# x
+
+```bash
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+@MKT@ -d
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@BD@ close "$GC_BEAD_ID"
+# <<< contract
+```
+FIX
+plantct skills/x/SKILL.md <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+```
+FIX
+plantct specs/x/y.md <<'FIX'
+# y
+FIX
+
+for det in "$HERE"/lint-learned.d/*; do
+    [ -f "$det" ] && [ -x "$det" ] || continue
+    name="$(basename "$det")"
+    reached=0
+    for f in x.sh formulas/x.toml docs/x.md skills/x/SKILL.md specs/x/y.md; do
+        # With every tool working, a file the detector does not scan, or finds
+        # clean, has no finding a failure could lose.
+        want="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; wrc=$?
+        [ "$wrc" -eq 0 ] && continue
+        if [ "$wrc" -ne 1 ]; then
+            bad "$name on $f: with every tool working" "exit $wrc: $want"
+            continue
+        fi
+        reached=$((reached + 1))
+        ct_run "$det" "$f"
+        if [ "$RC" -ne "$wrc" ] || [ "$OUT" != "$want" ]; then
+            bad "$name on $f: reports differently under the shims" "so it runs a tool they do not cover; exit $RC: $OUT"
+            continue
+        fi
+        calls=()
+        for c in "$CT/calls"/*; do [ -e "$c" ] && calls+=("${c##*/}"); done
+        broke=()
+        for call in ${calls[@]+"${calls[@]}"}; do
+            ct_run "$det" "$f" "$call"
+            if [ "$RC" -eq 2 ]; then
+                [ -n "$(printf '%s\n' "$OUT" | grep -v ': failed by the contract test$')" ] \
+                    || broke+=("$call: exit 2 with no word of its own")
+            elif [ "$RC" -ne "$wrc" ] || [ "$(ct_locs "$OUT")" != "$(ct_locs "$want")" ]; then
+                broke+=("$call: exit $RC, $(ct_locs "$OUT" | tr '\n' ' ')")
+            fi
+        done
+        if [ "${#broke[@]}" -eq 0 ]; then
+            ok "$name on $f: each of its ${#calls[@]} tool calls, failing, is reported or changes nothing"
+        else
+            bad "$name on $f: a failing tool call changes what it reports" "$(printf '%s; ' "${broke[@]}")"
+        fi
+        # A file it cannot read is a scan that cannot run. Skipped where the
+        # suite runs as root, which reads a file whatever its mode.
+        chmod 000 "$CT/tree/$f"
+        if [ ! -r "$CT/tree/$f" ]; then
+            OUT="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; RC=$?
+            eq "$RC" 2 "$name on $f: a file it cannot read exits 2"
+        fi
+        chmod 644 "$CT/tree/$f"
+    done
+    [ "$reached" -gt 0 ] || bad "$name: no contract fixture holds a violation it reports" "add one to the fixtures above, or the contract checks nothing for it"
+done
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"

@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# approval-withdraw — dismisses the approvals on an anchor's pull request when
+# the validator rules that a fresh whole-diff review is warranted.
+#
+# An approval stands across later pushes until someone dismisses it
+# (review-verdict.sh), so a small fix after an approval lands on it. A change
+# big enough to need another whole-diff review is different: the code the
+# approval was given to is not the code that will land. The validator judges
+# which kind of change a batch calls for (formulas/mol-validate.toml,
+# rule-convergence), and it runs this on every ruling that a fresh whole-diff
+# review is warranted. Without the dismissal the old approval would merge the
+# reworked PR. It would also keep the fresh review the ruling ordered from being
+# dispatched, because lane-state.sh reads an APPROVED GitHub review as the green
+# of a lane with no backing of its own. So the validator runs this before it
+# supersedes the lane, and supersedes only once this exits 0.
+#
+# WHAT IT DISMISSES. Every approval on the PR that has not been dismissed, from
+# every account other than the city's: standing_approvals in review-verdict.sh,
+# the definition merge.sh lands on. That is not only each account's latest
+# approval. A dismissed review drops out of the approval rule, so an older
+# approval left standing would count again, and so would an approval behind its
+# author's later CHANGES_REQUESTED once that request is dismissed. A
+# CHANGES_REQUESTED review is never dismissed here, and neither is the city's own
+# review.
+#
+# RECORD FIRST. A dismissal cannot be undone, so before the first one this
+# stamps approval_dismissed (the review ids) on the validation pass and reads
+# it back, then appends the judgment to the anchor's notes, once per pass. The
+# stamp fixes what this pass withdraws: a retry dismisses only the recorded
+# reviews that still read APPROVED, and stops at a recorded review the PR does
+# not list as approved or dismissed. A retry finishes an interrupted
+# withdrawal, notes the anchor when the run before it could not, and never
+# reaches an approval the operator gave after reading this pass's dismissal.
+# When no approval stands, nothing is written, so a retry looks again.
+#
+# UNROUTED FEEDBACK WAITS. GitHub keeps the inline comments of a dismissed
+# review, but a dismissal retires them: they stop counting as feedback, by the
+# rule pr-facts.sh reads the comment space with (review-dismissal.sh). An
+# approval can carry inline comments the operator means as feedback. While one
+# of them is feedback the loop has not routed yet (unrouted_comment_ids: above
+# both of the anchor's routing marks), dismissing its review now would drop it
+# unread. This then dismisses nothing and exits 1, and the retry after the next
+# reconcile pass finds it routed.
+#
+# NO RE-REQUEST. The change the ruling calls for has not been pushed yet, so a
+# review request now would ask for a look at code that is about to change. The
+# PR reads review-required on GitHub and on the board, and the board asks for
+# the review once the rework settles (gctk prstatus: needs-review when nothing
+# is in flight and no approval stands).
+#
+# Usage:
+#   approval-withdraw.sh --pass <id> --reason <text>
+# <id> is the validation pass whose ruling this carries out; its anchor_bead is
+# the anchor, whose pr_url names the PR. <text> opens the dismissal message the
+# approver reads on GitHub: what the change will be, and why it needs another
+# look.
+# Exit: 0 nothing stood to dismiss, or every approval this pass recorded reads
+# dismissed · 1 a read or a write failed, the anchor's PR record or this pass's
+# stamp is malformed, or an approval carries feedback not yet routed, and the
+# caller retries · 2 usage
+set -u
+
+PROG="approval-withdraw"
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
+# The approval rule merge.sh lands on: standing_approvals($self) is every
+# approval not yet dismissed from an account other than the city's.
+# shellcheck source=review-verdict.sh
+. "$SCRIPTS_DIR/review-verdict.sh" || { echo "$PROG: cannot source review-verdict.sh beside this script" >&2; exit 2; }
+# What a dismissal retires, REVIEW_DISMISSAL_DEF, and the PR and approval naming
+# the two dismissers share (pr_coords, approval_phrase).
+# shellcheck source=review-dismissal.sh
+. "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
+# The city's-own rule unrouted_comment_ids reads, from the writer of the city's
+# PR posts.
+CITY_OWN_DEF=$("$SCRIPTS_DIR/pr-post.sh" own-def 2>/dev/null) && [ -n "$CITY_OWN_DEF" ] \
+  || { echo "$PROG: pr-post.sh beside this script did not print its provenance definition; cannot tell feedback from the city's own posts" >&2; exit 2; }
+
+usage() {
+  echo "usage: $PROG --pass <validation-pass-id> --reason <text>" >&2
+  exit 2
+}
+
+pass=""; reason=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pass)   [ $# -ge 2 ] || usage; pass="$2"; shift 2 ;;
+    --reason) [ $# -ge 2 ] || usage; reason="$2"; shift 2 ;;
+    *) usage ;;
+  esac
+done
+[ -n "$pass" ] && [ -n "$reason" ] || usage
+case "$reason" in *[.!?]) : ;; *) reason="$reason." ;; esac
+
+prow=$(bd_json show "$pass" | jq -c '.[0] | select(type == "object")' 2>/dev/null)
+[ -n "$prow" ] || { echo "$PROG: validation pass $pass could not be read; nothing is dismissed and the caller retries" >&2; exit 1; }
+anchor=$(printf '%s' "$prow" | jq -r '(.metadata.anchor_bead // "") | tostring')
+recorded=$(printf '%s' "$prow" | jq -r '(.metadata.approval_dismissed // "") | tostring')
+[ -n "$anchor" ] || { echo "$PROG: validation pass $pass names no anchor_bead, so there is no PR to read" >&2; exit 2; }
+case "$recorded" in
+  '') : ;;
+  *[!0-9,]*|,*|*,|*,,*)
+    echo "$PROG: approval_dismissed on $pass reads '$recorded', which is not a list of review ids; nothing is dismissed" >&2
+    exit 1 ;;
+esac
+
+arow=$(bd_json show "$anchor" | jq -c '.[0] | select(type == "object")' 2>/dev/null)
+[ -n "$arow" ] || { echo "$PROG: anchor $anchor could not be read; nothing is dismissed and the caller retries" >&2; exit 1; }
+num=$(printf '%s' "$arow" | jq -r '(.metadata.pr_number // "") | tostring')
+url=$(printf '%s' "$arow" | jq -r '(.metadata.pr_url // .metadata.existing_pr // "") | tostring')
+if [ -z "$num" ] && [ -z "$url" ]; then
+  echo "$PROG: $anchor has no pull request, so no approval stands to dismiss"
+  exit 0
+fi
+# An anchor's PR is recorded as pr_url and pr_number in one write (pr-open.sh,
+# or the refinery adopting existing_pr), and neither is ever cleared. A url
+# beside no usable number is a damaged record, not an absent PR, and an
+# approval may stand on the PR it half names, so it fails closed.
+case "$num" in
+  ''|*[!0-9]*)
+    echo "$PROG: $anchor's pr_number reads '${num:-<absent>}', which names no pull request${url:+, beside pr_url '$url'}; nothing is dismissed and the caller retries" >&2
+    exit 1 ;;
+esac
+if ! pr_coords "$url" "$num"; then
+  echo "$PROG: $anchor names PR#$num but its pr_url '$url' does not; nothing is dismissed and the caller retries" >&2
+  exit 1
+fi
+host="$PR_HOST"; repo="$PR_REPO"
+
+if ! reviews=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/reviews?per_page=100" --jq '.[]' 2>/dev/null); then
+  echo "$PROG: PR#$num's reviews could not be read; nothing is dismissed and the caller retries" >&2
+  exit 1
+fi
+self=$(gh api --hostname "$host" user --jq '.login' 2>/dev/null)
+if [ -z "$self" ]; then
+  echo "$PROG: the acting login is unresolved, so an outside approval cannot be told from the city's own; nothing is dismissed and the caller retries" >&2
+  exit 1
+fi
+
+if [ -n "$recorded" ]; then
+  # A retry of this pass: finish the recorded set and nothing else. An approval
+  # only ever turns DISMISSED, so each recorded review reads APPROVED, still to
+  # dismiss, or DISMISSED, done. A recorded review the list does not carry in
+  # either state is not read as done: the list may be another PR's, or cut short.
+  rset=$(printf '%s' "$reviews" | scrub | jq -sc --arg ids "$recorded" '
+    ($ids | split(",")) as $want
+    | (map({key: ((.id // "") | tostring), value: .}) | from_entries) as $by
+    | { targets: [ $want[] | ($by[.] // empty) | select(.state == "APPROVED")
+                   | {id: .id, login: (.user.login // "")} ],
+        stray: [ $want[] | select((($by[.] // {}).state // "") as $s
+                                  | $s != "APPROVED" and $s != "DISMISSED") ] }' 2>/dev/null)
+  [ -n "$rset" ] || { echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
+  stray=$(printf '%s' "$rset" | jq -r '.stray | join(",")')
+  if [ -n "$stray" ]; then
+    echo "$PROG: PR#$num lists no approved or dismissed review $stray, which $pass recorded as an approval it withdraws; nothing is dismissed and the caller retries" >&2
+    exit 1
+  fi
+  targets=$(printf '%s' "$rset" | jq -c '.targets')
+  if [ "$targets" = "[]" ]; then
+    echo "$PROG: every approval $pass withdrew on PR#$num (review $recorded) reads dismissed"
+    exit 0
+  fi
+else
+  targets=$(printf '%s' "$reviews" | scrub | jq -sc --arg self "$self" "$REVIEW_VERDICT_DEF"'
+    [ standing_approvals($self)[] | {id: (.id // 0), login: (.user.login // "")} | select(.id != 0 and .login != "") ]' 2>/dev/null)
+  [ -n "$targets" ] || { echo "$PROG: PR#$num's reviews did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
+  if [ "$targets" = "[]" ]; then
+    echo "$PROG: no approval stands on PR#$num, so the fresh review needs nothing dismissed"
+    exit 0
+  fi
+fi
+
+if ! comments=$(gh api --hostname "$host" --paginate "repos/$repo/pulls/$num/comments?per_page=100" --jq '.[]' 2>/dev/null); then
+  echo "$PROG: PR#$num's inline comments could not be read; nothing is dismissed and the caller retries" >&2
+  exit 1
+fi
+unread=$({ printf '%s' "$reviews" | scrub | jq -sc '.'; printf '%s' "$comments" | scrub | jq -sc '.'; } \
+  | jq -nr --argjson t "$targets" --argjson m "$(printf '%s' "$arow" | jq -c '.metadata // {}')" --arg self "$self" \
+      "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'(input) as $revs | input
+      | unrouted_comment_ids($revs; [ $t[].id ]; $m; $self) | map(tostring) | join(",")' 2>/dev/null) \
+  || { echo "$PROG: PR#$num's inline comments did not parse; nothing is dismissed and the caller retries" >&2; exit 1; }
+if [ -n "$unread" ]; then
+  echo "$PROG: PR#$num: an approval to dismiss carries inline comments the feedback loop has not routed (comment $unread). A dismissal now would retire them unread, so nothing is dismissed and the caller retries after pr-facts.sh routes them" >&2
+  exit 1
+fi
+
+ids=$(printf '%s' "$targets" | jq -r '[ .[].id | tostring ] | join(",")')
+approval_phrase "$targets"
+logins="$APPROVERS"; noun="$APPROVAL_NOUN"; verb="$APPROVAL_VERB"
+if [ "$noun" = "approvals" ]; then rnoun="reviews"; else rnoun="review"; fi
+
+if [ -z "$recorded" ]; then
+  gc bd update "$pass" --set-metadata "approval_dismissed=$ids" >/dev/null 2>&1
+  got=$(bd_json show "$pass" | jq -r '(.[0].metadata.approval_dismissed // "") | tostring' 2>/dev/null)
+  if [ "$got" != "$ids" ]; then
+    echo "$PROG: approval_dismissed did not read back on $pass; nothing is noted or dismissed and the caller retries" >&2
+    exit 1
+  fi
+fi
+# The anchor takes the note once per pass. The stamp lands first, so a run that
+# stamped the set and then failed to note it is retried as a retry, which notes
+# it here; a run that already noted it adds nothing.
+judged="Validation pass $pass ruled that a fresh whole-diff review is warranted"
+if ! printf '%s' "$arow" | jq -e --arg j "$judged, " '(.notes // "") | tostring | contains($j)' >/dev/null 2>&1; then
+  if ! gc bd update "$anchor" --append-notes "$judged, so the $noun from $logins on PR#$num ($rnoun $ids) $verb dismissed: $reason" >/dev/null 2>&1; then
+    echo "$PROG: the dismissal could not be noted on $anchor; nothing is dismissed, and the retry notes it before it dismisses" >&2
+    exit 1
+  fi
+fi
+
+msg="$reason The validator ruled that this change needs a fresh whole-diff review, so this approval does not cover the code that will land. Please review the PR again once that change is pushed."
+dismissed=""; failed=""
+while IFS=$'\t' read -r rid login; do
+  [ -n "$rid" ] || continue
+  if gh api --hostname "$host" -X PUT "repos/$repo/pulls/$num/reviews/$rid/dismissals" \
+       -f message="$msg" </dev/null >/dev/null 2>&1; then
+    dismissed="$dismissed${dismissed:+, }$login (review $rid)"
+  else
+    failed="$failed${failed:+, }$login (review $rid)"
+  fi
+done <<TARGETS
+$(printf '%s' "$targets" | jq -r '.[] | "\(.id)\t\(.login)"')
+TARGETS
+if [ -n "$failed" ]; then
+  echo "$PROG: PR#$num: dismissed ${dismissed:-none}; could not dismiss $failed. The set is recorded on $pass, so a retry finishes it" >&2
+  exit 1
+fi
+echo "$PROG: PR#$num: dismissed the $noun from $logins ($rnoun $ids), recorded on $pass and in $anchor's notes"
+exit 0

@@ -77,8 +77,7 @@ bash -n "$SCRIPT" && ok "liveness-recheck.sh: valid bash" \
 #   gc bd list --has-metadata-key gc.demand_for  <- $STUB_DEMANDS ("FAIL" => exit 1)
 #   gc bd ready --unassigned ...                 <- $STUB_READY   ("FAIL" => exit 1)
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] || exit 0
 demandq=""
 for a in "$@"; do case "$a" in --has-metadata-key) demandq=1 ;; esac; done
@@ -385,8 +384,7 @@ HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$RECHECK_SUT" |
     || bad "the sweep writes a visit.* key" "found none in liveness-sweep.sh"
 eq "$HOOK_KEY" "$STAMP_KEY" "the key the sweep stamps is the key the sitting reads"
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
 cat "${STUB_VISIT:-/dev/null}"
 GC

@@ -1,3 +1,8 @@
+---
+name: V4 AI-native inventions with no clean precedent
+description: Validation report V4 for the escalation work (tk-px5od), on the problem areas where the borrowed disciplines of R1 to R5 run out. For each it says why no precedent applies, surveys what is emerging, and proposes a practice to adopt or invent.
+---
+
 # V4 — AI-Native Inventions (No Clean Precedent)
 
 > **Status: drafting.** Research pass on AI-native problem areas where the

@@ -1,3 +1,8 @@
+---
+name: Reachability report for gc bd universe --slice and CI wiring (tk-oqmc7)
+description: What Phase 2 of bead-universe v1 shipped, namely the gc bd universe slice tool with its fed, fetchable, and out tiers, the tri-state CI fetch, the token ceiling, and the hermetic fixture that gates recall. Read it for the contract a bead's universe is projected through.
+---
+
 # Reachability report: `gc bd universe --slice` + CI wiring (`tk-oqmc7`)
 
 **Bead:** `tk-oqmc7` — *Reachability: gc bd universe --slice (fed/fetchable tiers) + CI wiring*

@@ -9,7 +9,8 @@
 # --status=closed` takes a GC_*BEAD_ID variable. Not flagged: non-closing
 # writes, prose, specs/ (dated records), generated/ (render duplicates).
 # Fix: close through assets/scripts/step-close.sh --step <formula>.<step-id>.
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -22,6 +23,13 @@ UPDATE_CLOSE='bd[[:space:]]+update[[:space:]]+'"$ENV_ID"'[^|;&]*--status[= ]clos
 # A COMMAND line, not prose (the hazard is quoted all over the pack).
 CMD_SHAPE='^[[:space:]]*(gc[[:space:]]+bd|bd|\[)[[:space:]]'
 
+# cannot_scan <file> — a grep that failed on a file left it unscanned, and
+# reporting nothing would pass it as clean, so the run ends in an error.
+cannot_scan() {
+    echo "step-close-env-id: grep failed on $1 — detector cannot scan it" >&2
+    exit 2
+}
+
 found=0
 for f in "$@"; do
     [ -f "$f" ] || continue
@@ -29,13 +37,19 @@ for f in "$@"; do
         */lint-learned.d/* | */base-snapshots/* | */specs/* | specs/* | */generated/* | generated/*) continue ;;
     esac
     case "$f" in *.toml | *.sh | *.md) ;; *) continue ;; esac
+    # grep exits 1 when nothing matches, and past 1 when it failed.
+    hits="$(grep -nE "$CLOSE_CMD"'|'"$UPDATE_CLOSE" "$f" 2>/dev/null)"; rc=$?
+    [ "$rc" -le 1 ] || cannot_scan "$f"
     while IFS= read -r hit; do
+        [ -n "$hit" ] || continue
         no="${hit%%:*}"; body="${hit#*:}"
         case "$(printf '%s' "$body" | tr -d '[:space:]')" in '#'*) continue ;; esac
-        grep -qE "$CMD_SHAPE" <<< "$body" || continue
+        grep -qE "$CMD_SHAPE" <<< "$body"; rc=$?
+        [ "$rc" -le 1 ] || cannot_scan "$f"
+        [ "$rc" -eq 0 ] || continue
         echo "$f:$no: closes a bead on an id from the environment — \$GC_TRIGGER_BEAD_ID goes stale across \`gc hook --claim\` (closes another session's bead) and \$GC_BEAD_ID is unset in steps (closes nothing); use assets/scripts/step-close.sh --step <formula>.<step-id> (learned rule: step-close-env-id)"
         found=1
-    done < <(grep -nE "$CLOSE_CMD"'|'"$UPDATE_CLOSE" "$f" 2>/dev/null)
+    done <<< "$hits"
 done
 
 [ "$found" -eq 0 ]

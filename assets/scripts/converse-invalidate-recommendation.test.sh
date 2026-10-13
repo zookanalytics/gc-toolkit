@@ -38,8 +38,7 @@ mkdir -p "$BIN"
 #                 (a silent drop that the read-back must catch).
 #   MODE=unreadable — show returns the object form bd emits when nothing
 #                 resolves, which `.[0]` cannot index (an unreadable subject).
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update) printf 'update %s\n' "$*" >>"$LOG" ;;

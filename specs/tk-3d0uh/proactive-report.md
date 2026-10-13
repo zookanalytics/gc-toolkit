@@ -1,3 +1,8 @@
+---
+name: Proactive-via-slung-mol report (tk-3d0uh)
+description: What Phase 4 of bead-universe v1 shipped, namely the mol-first-reaction formula, the proactive pool, the two triggers, the budget clamps, the mr-only security invariant, and the fixture gate. Read it for why a first reaction advances a bead and never closes it.
+---
+
 # Proactive report: `mol-first-reaction` + budget + mr-invariant (`tk-3d0uh`)
 
 **Bead:** `tk-3d0uh` — *Proactive-via-slung-mol: mol-first-reaction + budget + mr-invariant*

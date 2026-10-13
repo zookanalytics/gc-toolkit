@@ -50,7 +50,33 @@
 #       visit — the key is a write of its own, never a precondition;
 #   (ab) a dropped gc.work_outcome on a visit that records its outcome is read
 #       back and written again before the close;
-#   (ac) a work outcome the visit already records is never written over.
+#   (ac) a work outcome the visit already records is never written over;
+#   (ad) once the close reads back, the branch the bead names in metadata.branch
+#       goes to branch-end.sh with the bead's rig and id, once, after the close;
+#   (ae) a branch-end that cannot end the branch leaves the close standing: exit
+#       0, the bead closed and pointed, and a WARN naming the branch and the
+#       command that ends it;
+#   (af) a branch kept for a live owner is reported, not warned about;
+#   (ag) no branch-end runs when the close is refused or held, when the bead
+#       names no branch, or on a dry run, which names the branch in its plan;
+#   (ah) the repair path ends an already-closed bead's branch too;
+#   (ai) a close that does not read back closed leaves the branch, with a WARN;
+#   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
+#       ends the branch with its tip pinned, and a delete origin refuses leaves
+#       the close standing;
+#   (ak) the command a WARN names, pasted, hands branch-end a branch name that
+#       carries shell metacharacters as one argument and runs nothing it spells.
+# The evidence gates this writer enforces for every caller:
+#   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
+#   (gate-held) EVERY kind — no close over a bead another session holds
+#       in_progress, while a bead this session holds is fine;
+#   (gate-b) fixed-upstream|duplicate — the successor is in the same store and
+#       is closed or shipped, and the origin did no work (no-op stamp, or no
+#       work-product key, so unlanded work is refused), the no-op stamp
+#       overriding a twin's leftover branch; a judgment kind is not held to it,
+#       and an origin carrying the operator's pre-recorded PR-close disposition
+#       for that kind and successor satisfies it;
+#   (check) --check evaluates all of the above and writes nothing, exit 0/1.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +89,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (got '$1', wanted substring '$2')" ;; esac; }
+hasnt() { case "$1" in *"$2"*) bad "$3 (got '$1', wanted no '$2')" ;; *) ok "$3" ;; esac; }
 
 # --- fake stores ------------------------------------------------------------
 mkdir -p "$TMP/rigs/alpha/.beads" "$TMP/rigs/beta/.beads" "$TMP/bin"
@@ -80,8 +107,7 @@ JSON
 mkbead() { printf 'status=%s\n' "${2:-open}" > "$TMP/rigs/$1/.beads/$3"; }
 field()  { sed -n "s/^$2=//p" "$TMP/rigs/$1/.beads/$3" 2>/dev/null | tail -1; }
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-rehome.sh touches.
 case "$1 $2" in
   "rig list") cat "$FAKE_RIGS_JSON" ;;
@@ -90,8 +116,7 @@ case "$1 $2" in
 esac
 GC
 
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
@@ -130,6 +155,42 @@ if [ "$sub" = "dep" ]; then
   exit 0
 fi
 
+# The status contract and the live listing: the two reads branch-end.sh makes
+# besides show, for the end-to-end case.
+if [ "$sub" = "statuses" ]; then
+  printf '%s\n' '{"built_in_statuses":[{"name":"open","category":"active"},{"name":"in_progress","category":"wip"},{"name":"closed","category":"done"}]}'
+  exit 0
+fi
+if [ "$sub" = "list" ]; then
+  # --metadata-field is bd's: split at the first `=`, every pair must match.
+  st=""; mf='[]'
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --status) st="$2"; shift 2 ;;
+      --status=*) st="${1#--status=}"; shift ;;
+      --metadata-field)
+        mf=$(jq -cn --argjson m "$mf" --arg k "${2%%=*}" --arg v "${2#*=}" '$m + [{k: $k, v: $v}]')
+        shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  rows='[]'
+  for bf in "$DB"/*; do
+    [ -f "$bf" ] || continue
+    bs=$(sed -n 's/^status=//p' "$bf" | tail -1)
+    case ",$st," in *",$bs,"*) ;; *) continue ;; esac
+    lines=$(sed -n 's/^m\.//p' "$bf")
+    meta='{}'
+    [ -z "$lines" ] || meta=$(printf '%s' "$lines" | jq -R -s 'split("\n") | map(select(length > 0))
+      | map(split("=") | {key: .[0], value: (.[1:] | join("="))}) | from_entries')
+    rows=$(jq -nc --argjson r "$rows" --arg id "${bf##*/}" --arg st "$bs" --argjson m "$meta" \
+      '$r + [{id: $id, status: $st, metadata: $m}]')
+  done
+  printf '%s\n' "$rows" | jq -c --argjson mf "$mf" \
+    '[.[] | select(. as $row | all($mf[]; $row.metadata[.k] as $x | $x != null and ($x | tostring) == .v))]'
+  exit 0
+fi
+
 id="${1:-}"; shift || true
 f="$DB/$id"
 [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
@@ -164,11 +225,13 @@ open_blockers() {
 
 case "$sub" in
   show)
+    as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
     jq -n --arg id "$id" --arg st "$(sed -n 's/^status=//p' "$f" | tail -1)" \
+          --arg as "$as" \
           --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
           --argjson meta "$(meta_json)" \
           --argjson deps "$(deps_json)" \
-          '[{id: $id, status: $st, notes: $notes, metadata: $meta, dependencies: $deps}]'
+          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, metadata: $meta, dependencies: $deps}]'
     ;;
   update)
     # FAKE_BD_REFUSE_WORK_OUTCOME refuses any update naming gc.work_outcome,
@@ -209,6 +272,8 @@ case "$sub" in
       echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2
       exit 1
     fi
+    # FAKE_BD_CLOSE_NOOP reports a close that never persisted.
+    [ -z "${FAKE_BD_CLOSE_NOOP:-}" ] || exit 0
     # A stub that closes a blocked bead would report a green suite for the bug
     # in case (n) below: the whole defect is that real bd refuses here.
     BLOCKED=$(open_blockers)
@@ -243,6 +308,35 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${FG_LOG:?}"\ncase "${FG_V
 chmod +x "$FG_STUB"
 export GC_FINALIZE_GATE_TOOL="$FG_STUB"
 export FG_LOG="$TMP/finalize-gate.log"; : > "$FG_LOG"
+
+# branch-end.sh is a sibling bead-rehome forks once the close reads back. Stub it
+# so this suite tests the wiring; its own logic is covered by branch-end.test.sh,
+# and case (aj) runs the real one end to end. Each call's argv, with the bead's
+# status as the stub finds it in the fake store, is appended to BE_LOG; BE_RC
+# picks its exit (0 ended, 3 kept, anything else not ended).
+BE_STUB="$TMP/bin/branch-end-stub.sh"
+cat > "$BE_STUB" <<'STUB'
+#!/usr/bin/env bash
+args="$*"; bead=""; rig=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --bead) bead="$2"; shift 2 ;;
+    --rig) rig="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+st=$(sed -n 's/^status=//p' "${FAKE_RIGS_ROOT:?}/$rig/.beads/$bead" 2>/dev/null | tail -1)
+printf '%s status-at-call=%s\n' "$args" "$st" >> "${BE_LOG:?}"
+case "${BE_RC:-0}" in
+  0) echo "branch-end (stub): ended" ;;
+  3) echo "branch-end (stub): kept for a live owner" ;;
+  *) echo "branch-end (stub): did NOT end" >&2 ;;
+esac
+exit "${BE_RC:-0}"
+STUB
+chmod +x "$BE_STUB"
+export GC_BRANCH_END_TOOL="$BE_STUB" BE_LOG="$TMP/branch-end.log" FAKE_RIGS_ROOT="$TMP/rigs"
+: > "$BE_LOG"
 
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 
@@ -307,9 +401,11 @@ eq "$(field alpha status al-origin3)" open "origin stays OPEN when the pointer d
 has "$(cat "$TMP/err")" "NOT closing" "the refusal says the close was skipped"
 
 # --- (d) close refused: the pointer is still recorded ----------------------
+# A judgment kind: its close reaches `bd close` (the evidence kinds are gated
+# earlier and never would), which is where the refusal under test happens.
 mkbead alpha open al-origin4
 mkbead beta  open bt-succ4
-rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor bt-succ4 --kind duplicate || rc=$?
+rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor bt-succ4 --kind folded || rc=$?
 eq "$rc" 5 "a refused close exits non-zero"
 eq "$(field alpha m.gc.superseded_by al-origin4)" bt-succ4 "the pointer survives a refused close"
 eq "$(field alpha status al-origin4)" open "the bead is left open, pointed and visible"
@@ -326,11 +422,23 @@ eq "$(field alpha m.gc.superseded_by al-origin5)" bt-other "the prior dispositio
 eq "$(field alpha status al-origin5)" open "the bead is not closed over a conflicting disposition"
 
 # --- (f) each kind renders its own phrasing -------------------------------
-for pair in "folded:folded into" "fixed-upstream:fixed upstream by" "duplicate:duplicate of" "not-needed:not needed, per"; do
+# The judgment kinds re-home work that is being carried elsewhere and gate only
+# on the origin, so a cross-store open successor is fine.
+for pair in "re-homed:re-homed to" "folded:folded into" "not-needed:not needed, per"; do
   kind="${pair%%:*}"; want="${pair#*:}"
   mkbead alpha open "al-k$kind"; mkbead beta open "bt-k$kind"
   rc=0; run --origin "al-k$kind" --successor "bt-k$kind" --kind "$kind" || rc=$?
   eq "$rc" 0 "kind '$kind' is accepted"
+  has "$(field alpha reason "al-k$kind")" "$want" "kind '$kind' renders '$want'"
+done
+# The evidence kinds assert the work already shipped, so they carry that
+# evidence: same-store successor, closed, over a no-op origin.
+for pair in "fixed-upstream:fixed upstream by" "duplicate:duplicate of"; do
+  kind="${pair%%:*}"; want="${pair#*:}"
+  mkbead alpha open "al-k$kind"; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-k$kind"
+  mkbead alpha closed "al-s$kind"
+  rc=0; run --origin "al-k$kind" --successor "al-s$kind" --kind "$kind" || rc=$?
+  eq "$rc" 0 "kind '$kind' is accepted with its evidence"
   has "$(field alpha reason "al-k$kind")" "$want" "kind '$kind' renders '$want'"
 done
 
@@ -432,7 +540,7 @@ mkbead alpha open al-origin14
 mkbead alpha open al-succ14
 mkbead alpha open al-block14
 printf 'dep.al-succ14=blocks\ndep.al-block14=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin14"
-rc=0; run --origin al-origin14 --successor al-succ14 --kind duplicate || rc=$?
+rc=0; run --origin al-origin14 --successor al-succ14 --kind folded || rc=$?
 eq "$rc" 5 "an unrelated blocker still refuses the close"
 eq "$(field alpha status al-origin14)" open "the bead is left open, pointed and visible"
 eq "$(field alpha m.gc.superseded_by al-origin14)" al-succ14 "the pointer is recorded either way"
@@ -619,6 +727,308 @@ eq "$(field alpha status al-visit5)" open "the visit stays OPEN when the reason 
 has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome stamp"
 eq "$(field alpha m.gc.outcome_reason al-visit5)" "" "the reason really was dropped by the fake"
 eq "$(field alpha m.gc.superseded_by al-visit5)" bt-vsucc5 "the pointer is still recorded, so the bead is findable"
+
+# --- (gate-b) unlanded work: refused under an evidence kind ---------------
+# merge_result names in-flight work, so an evidence kind (which claims the origin
+# did no work) is refused over it.
+mkbead alpha open al-unlanded
+mkbead alpha closed al-usucc
+printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-unlanded"
+rc=0; run --origin al-unlanded --successor al-usucc --kind duplicate || rc=$?
+eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
+eq "$(field alpha status al-unlanded)" open "the origin is left open"
+eq "$(field alpha m.gc.superseded_by al-unlanded)" "" "and nothing is stamped"
+has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
+# A judgment kind is a person's call: the converse retire path disposes an
+# in-flight anchor through this writer on the operator's ruling.
+mkbead alpha open al-retire
+mkbead beta  open bt-rtsucc
+printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
+rc=0; run --origin al-retire --successor bt-rtsucc --kind re-homed || rc=$?
+eq "$rc" 0 "a judgment kind (re-homed) disposes an in-flight anchor"
+eq "$(field alpha status al-retire)" closed "…and closes it"
+# The operator's pre-recorded PR-close disposition (pr-dispose.sh) is a ruling
+# already made: pr-facts.sh consummates it under whatever kind was recorded, so an
+# evidence kind recorded for this successor is not re-judged.
+mkbead alpha open al-ruled
+mkbead alpha open al-rsucc
+printf 'm.merge_result=pull_request\nm.branch=polecat/al-ruled\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-rsucc\n' >> "$TMP/rigs/alpha/.beads/al-ruled"
+rc=0; run --origin al-ruled --successor al-rsucc --kind duplicate || rc=$?
+eq "$rc" 0 "a pre-recorded PR-close disposition consummates under the recorded evidence kind"
+eq "$(field alpha status al-ruled)" closed "…and closes the anchor"
+# …but only the disposition it records: another successor is judged afresh.
+mkbead alpha open al-ruledx
+mkbead alpha closed al-rxsucc
+printf 'm.merge_result=pull_request\nm.gc.pr_close_disposition_kind=duplicate\nm.gc.pr_close_disposition_successor=al-other\n' >> "$TMP/rigs/alpha/.beads/al-ruledx"
+rc=0; run --origin al-ruledx --successor al-rxsucc --kind duplicate || rc=$?
+eq "$rc" 7 "a disposition record naming another successor is no ruling for this one"
+eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
+
+# --- (gate-a) not a review/step/workflow bead ------------------------------
+# merge_result=merged is landed work, not in-flight: it may be disposed.
+mkbead alpha open al-merged
+mkbead beta  open bt-msucc
+printf 'm.merge_result=merged\n' >> "$TMP/rigs/alpha/.beads/al-merged"
+rc=0; run --origin al-merged --successor bt-msucc --kind re-homed || rc=$?
+eq "$rc" 0 "merge_result=merged is landed work and may be disposed"
+
+mkbead alpha open al-review
+mkbead beta  open bt-rsucc
+printf 'm.task_kind=review\n' >> "$TMP/rigs/alpha/.beads/al-review"
+rc=0; run --origin al-review --successor bt-rsucc --kind re-homed || rc=$?
+eq "$rc" 7 "a review bead is refused: its own machinery closes it"
+mkbead alpha open al-step
+mkbead beta  open bt-ssucc
+printf 'm.gc.step_ref=mol-x.load\n' >> "$TMP/rigs/alpha/.beads/al-step"
+rc=0; run --origin al-step --successor bt-ssucc --kind re-homed || rc=$?
+eq "$rc" 7 "a step bead is refused"
+mkbead alpha open al-wf
+mkbead beta  open bt-wsucc
+printf 'm.gc.kind=workflow\n' >> "$TMP/rigs/alpha/.beads/al-wf"
+rc=0; run --origin al-wf --successor bt-wsucc --kind re-homed || rc=$?
+eq "$rc" 7 "a workflow root is refused"
+
+# --- (gate-held) another actor holds it, but self may ---------------------
+mkbead alpha in_progress al-held
+mkbead beta  open bt-hsucc
+printf 'assignee=someone-else-lx-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
+rc=0; run --origin al-held --successor bt-hsucc --kind re-homed || rc=$?
+eq "$rc" 7 "an origin in_progress under another actor is refused"
+has "$(cat "$TMP/err")" "in_progress under someone-else-lx-9999" "the refusal names the holder"
+# A worker re-homing the bead it holds is the holder.
+mkbead alpha in_progress al-mine
+mkbead beta  open bt-msucc2
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-mine"
+rc=0; run --origin al-mine --successor bt-msucc2 --kind re-homed || rc=$?
+eq "$rc" 0 "an origin this session holds is not treated as someone else's"
+
+# --- (gate-b) the evidence gates for fixed-upstream|duplicate -------------
+# Same store required.
+mkbead alpha open al-xstore; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-xstore"
+mkbead beta closed bt-xsucc
+rc=0; run --origin al-xstore --successor bt-xsucc --kind duplicate || rc=$?
+eq "$rc" 7 "a duplicate close needs the successor in the same store"
+has "$(cat "$TMP/err")" "same store" "the refusal names the same-store requirement"
+# Successor must be closed or shipped.
+mkbead alpha open al-openS; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-openS"
+mkbead alpha open al-openSucc
+rc=0; run --origin al-openS --successor al-openSucc --kind duplicate || rc=$?
+eq "$rc" 7 "a duplicate close needs the successor closed or shipped"
+# An OPEN successor that records work_outcome=shipped is accepted.
+mkbead alpha open al-shipO; printf 'm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-shipO"
+mkbead alpha open al-shipSucc; printf 'm.gc.work_outcome=shipped\n' >> "$TMP/rigs/alpha/.beads/al-shipSucc"
+rc=0; run --origin al-shipO --successor al-shipSucc --kind fixed-upstream || rc=$?
+eq "$rc" 0 "a shipped-but-open successor satisfies the evidence"
+# Origin must have done no work: no work_outcome AND a work-product key refuses.
+mkbead alpha open al-didwork
+mkbead alpha closed al-dwSucc
+printf 'm.branch=polecat/al-didwork\n' >> "$TMP/rigs/alpha/.beads/al-didwork"
+rc=0; run --origin al-didwork --successor al-dwSucc --kind duplicate || rc=$?
+eq "$rc" 7 "an origin with a work-product key and no no-op stamp is refused"
+has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
+# …but a no-op stamp is accepted even beside that work-product key (the twin's
+# branch names the twin, not a push this bead made).
+mkbead alpha open al-twin
+mkbead alpha closed al-twinSucc
+printf 'm.branch=polecat/al-twinSucc\nm.gc.work_outcome=no-op\n' >> "$TMP/rigs/alpha/.beads/al-twin"
+rc=0; run --origin al-twin --successor al-twinSucc --kind duplicate || rc=$?
+eq "$rc" 0 "work_outcome=no-op is accepted even with a work-product key present"
+eq "$(field alpha status al-twin)" closed "and the duplicate is closed"
+
+# --- (check) --check evaluates the gates and writes nothing --------------
+mkbead alpha open al-chkok
+mkbead beta  open bt-chkok
+rc=0; run --origin al-chkok --successor bt-chkok --kind re-homed --check || rc=$?
+eq "$rc" 0 "--check passes an eligible origin"
+eq "$(field alpha status al-chkok)" open "--check does not close"
+eq "$(field alpha m.gc.superseded_by al-chkok)" "" "--check stamps nothing"
+has "$(cat "$TMP/out")" "eligible to close" "--check reports eligibility"
+
+mkbead alpha open al-chkno
+mkbead beta  closed bt-chkno
+rc=0; run --origin al-chkno --successor bt-chkno --kind duplicate --check || rc=$?
+eq "$rc" 1 "--check refuses a cross-store duplicate with exit 1"
+eq "$(field alpha status al-chkno)" open "--check refusal writes nothing"
+eq "$(field alpha m.gc.superseded_by al-chkno)" "" "--check refusal stamps nothing"
+has "$(cat "$TMP/err")" "--check refused" "--check names the refusal"
+
+# --check over an already-closed origin: the repair path is not gated.
+mkbead alpha closed al-chkclosed
+mkbead beta  open bt-chkclosed
+rc=0; run --origin al-chkclosed --successor bt-chkclosed --kind re-homed --check || rc=$?
+eq "$rc" 0 "--check over an already-closed origin passes (repair path)"
+eq "$(field alpha m.gc.superseded_by al-chkclosed)" "" "--check still writes nothing"
+
+# A bead that names the branch its work was pushed to.
+mkbranched() { mkbead "$1" "$2" "$3"; printf 'm.branch=polecat/%s\n' "$3" >> "$TMP/rigs/$1/.beads/$3"; }
+
+# --- (ad) the retired bead's branch goes to branch-end, after the close ------
+# A merge ends a landed branch; a retire ends its own the same way, once the
+# bead it retires reads back closed.
+mkbranched alpha open al-br1
+mkbead beta open bt-br1
+: > "$BE_LOG"
+rc=0; run --origin al-br1 --successor bt-br1 --kind re-homed || rc=$?
+eq "$rc" 0 "a retire whose bead names a branch succeeds"
+eq "$(field alpha status al-br1)" closed "…and closes the bead"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br1 --bead al-br1 status-at-call=closed" \
+   "branch-end is handed the bead's rig, branch and id, once, after the close"
+has "$(cat "$TMP/out")" "branch-end (stub): ended" "…and its report is printed"
+has "$(field alpha notes al-br1)" "branch-end (stub): ended" "…and recorded on the bead"
+
+# --- (ae) a branch that cannot be ended leaves the close standing -----------
+mkbranched alpha open al-br2
+mkbead beta open bt-br2
+rc=0; BE_RC=4 run --origin al-br2 --successor bt-br2 --kind not-needed || rc=$?
+eq "$rc" 0 "a branch-end that fails does not fail the retire"
+eq "$(field alpha status al-br2)" closed "…the close stands"
+eq "$(field alpha m.gc.superseded_by al-br2)" bt-br2 "…with its pointer"
+has "$(cat "$TMP/err")" "branch-end (stub): did NOT end" "…branch-end's own reason is passed on"
+has "$(cat "$TMP/err")" "the close stands, but branch polecat/al-br2 is still on the git remote" "…and a WARN names the branch"
+has "$(cat "$TMP/err")" "end it with: $BE_STUB --rig alpha --branch polecat/al-br2 --bead al-br2" "…and the command that ends it"
+has "$(field alpha notes al-br2)" "Branch polecat/al-br2 is still on the git remote (branch-end exit 4: branch-end (stub): did NOT end)" \
+    "…and the bead records that the branch is still there"
+has "$(field alpha notes al-br2)" "End it with: $BE_STUB --rig alpha --branch polecat/al-br2 --bead al-br2" "…with the command that ends it"
+
+# --- (af) a branch kept for a live owner is reported, not warned about ------
+mkbranched alpha open al-br3
+mkbead beta open bt-br3
+rc=0; BE_RC=3 run --origin al-br3 --successor bt-br3 --kind folded || rc=$?
+eq "$rc" 0 "a branch kept for a live owner does not fail the retire"
+has "$(cat "$TMP/out")" "kept for a live owner" "…its report is printed"
+hasnt "$(cat "$TMP/err")" "WARN" "…and nothing is warned"
+has "$(field alpha notes al-br3)" "kept for a live owner" "…and the bead records why its branch stays"
+
+# --- (ag) no branch-end without a landed close, a branch, or a real run -----
+mkbranched alpha open al-br4
+mkbead beta open bt-br4
+: > "$BE_LOG"
+rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-br4 --successor bt-br4 --kind folded || rc=$?
+eq "$rc" 5 "a refused close still exits 5"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+mkbranched alpha open al-br5
+mkbead beta open bt-br5
+rc=0; FG_VERDICT=hold run --origin al-br5 --successor bt-br5 --kind re-homed || rc=$?
+eq "$rc" 5 "a held close still exits 5"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+mkbead alpha open al-br6
+mkbead beta open bt-br6
+rc=0; run --origin al-br6 --successor bt-br6 --kind re-homed || rc=$?
+eq "$rc" 0 "a bead that names no branch retires"
+eq "$(cat "$BE_LOG")" "" "…and calls no branch-end"
+mkbranched alpha open al-br7
+mkbead beta open bt-br7
+rc=0; run --origin al-br7 --successor bt-br7 --kind re-homed --dry-run || rc=$?
+eq "$rc" 0 "a dry run over a branch succeeds"
+eq "$(cat "$BE_LOG")" "" "…and ends no branch"
+has "$(cat "$TMP/out")" "end polecat/al-br7 on the git remote of rig:alpha once the close reads back" "…and its plan names the branch"
+eq "$(field alpha status al-br7)" open "…and closes nothing"
+
+# --- (ah) the repair path ends an already-closed bead's branch too ----------
+mkbranched alpha closed al-br8
+mkbead beta open bt-br8
+: > "$BE_LOG"
+rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
+eq "$rc" 0 "a repair over a bead that names a branch succeeds"
+eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br8 --bead al-br8 status-at-call=closed" \
+   "the repair hands the closed bead's branch to branch-end"
+rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
+eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
+   "a re-run that reaches the same outcome records it once"
+
+# --- (ai) a close that does not read back closed leaves the branch ----------
+mkbranched alpha open al-br9
+mkbead beta open bt-br9
+: > "$BE_LOG"
+rc=0; FAKE_BD_CLOSE_NOOP=1 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
+eq "$(cat "$BE_LOG")" "" "a close that does not read back ends no branch"
+has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the branch was left"
+
+# --- (aj) end to end: the real branch-end.sh against a bare origin -----------
+# A rig of its own, gamma, is a git checkout whose origin is a bare repository:
+# url.insteadOf sends a GitHub-shaped origin to it. Its pre-receive hook refuses
+# branch deletes while the refuse-delete file exists. Nothing from the session's
+# git environment reaches it.
+unset "${!GIT_@}" 2>/dev/null || true
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+: > "$GIT_CONFIG_GLOBAL"
+# A commit or tag made where no repository sets an identity takes it from here.
+# Without it git falls back to the login account's name, which a Linux CI
+# runner leaves empty, so such a commit fails there and passes on a Mac.
+git config --file "$GIT_CONFIG_GLOBAL" user.name T
+git config --file "$GIT_CONFIG_GLOBAL" user.email t@e.com
+GM="$TMP/rigs/gamma"; GM_BARE="$TMP/gamma-origin.git"
+mkdir -p "$GM/.beads"
+cat > "$TMP/rigs.json" <<JSON
+{"rigs":[
+  {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
+  {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":true},
+  {"name":"gamma","path":"$GM","prefix":"gm","hq":false}
+]}
+JSON
+git init -q --bare -b main "$GM_BARE"
+cat > "$GM_BARE/hooks/pre-receive" <<HOOK
+#!/usr/bin/env bash
+while read -r old new ref; do
+  case "\$ref" in refs/heads/*) case "\$new" in *[!0]*) ;; *) [ -e "$TMP/refuse-delete" ] && { echo "refusing branch deletes" >&2; exit 1; } ;; esac ;; esac
+done
+exit 0
+HOOK
+chmod +x "$GM_BARE/hooks/pre-receive"
+git init -q -b main "$GM"
+git -C "$GM" config user.email t@e.com
+git -C "$GM" config user.name T
+git -C "$GM" config commit.gpgsign false
+git -C "$GM" remote add origin https://github.com/test/gamma.git
+git -C "$GM" config "url.$GM_BARE.insteadOf" https://github.com/test/gamma.git
+echo seed > "$GM/seed"; git -C "$GM" add seed; git -C "$GM" commit -qm seed
+git -C "$GM" push -q origin main
+for b in polecat/gm-e2e1 polecat/gm-e2e2 polecat/gm-bystander; do
+  git -C "$GM" checkout -q -b "$b" main
+  echo "$b" > "$GM/work"; git -C "$GM" add work; git -C "$GM" commit -qm "work on $b"
+  git -C "$GM" push -q origin "$b"
+  git -C "$GM" checkout -q main
+done
+gm_tip() { git -C "$GM_BARE" rev-parse -q --verify "refs/heads/$1" 2>/dev/null || true; }
+TIP1=$(gm_tip polecat/gm-e2e1); TIP2=$(gm_tip polecat/gm-e2e2)
+
+mkbranched gamma open gm-e2e1
+mkbead beta open bt-e2e1
+rc=0; GC_BRANCH_END_TOOL='' run --origin gm-e2e1 --successor bt-e2e1 --kind re-homed || rc=$?
+eq "$rc" 0 "end to end: the retire succeeds"
+eq "$(field gamma status gm-e2e1)" closed "end to end: the bead is closed"
+eq "$(gm_tip polecat/gm-e2e1)" "" "end to end: its branch is gone from origin"
+eq "$(git -C "$GM_BARE" rev-parse -q --verify "refs/tags/archive/polecat/gm-e2e1@${TIP1:0:12}^{commit}" || true)" "$TIP1" \
+   "end to end: an archive tag on origin pins the tip"
+has "$(cat "$TMP/out")" "branch-end: ended polecat/gm-e2e1" "end to end: the end is reported"
+has "$(field gamma notes gm-e2e1)" "branch-end: ended polecat/gm-e2e1 at ${TIP1:0:12}; its tip is kept by refs/tags/archive/polecat/gm-e2e1@${TIP1:0:12}" \
+    "end to end: the bead records where the tip is kept"
+[ -n "$(gm_tip polecat/gm-bystander)" ] && ok "end to end: a branch no retire names stays" || bad "end to end: a branch no retire names stays"
+
+mkbranched gamma open gm-e2e2
+mkbead beta open bt-e2e2
+: > "$TMP/refuse-delete"
+rc=0; GC_BRANCH_END_TOOL='' run --origin gm-e2e2 --successor bt-e2e2 --kind re-homed || rc=$?
+rm -f "$TMP/refuse-delete"
+eq "$rc" 0 "end to end: a delete origin refuses does not fail the retire"
+eq "$(field gamma status gm-e2e2)" closed "end to end: the close stands"
+eq "$(gm_tip polecat/gm-e2e2)" "$TIP2" "end to end: the branch stays at its tip"
+has "$(cat "$TMP/err")" "branch-end: did NOT end polecat/gm-e2e2: origin refused the delete" "end to end: branch-end's reason reaches the caller"
+has "$(cat "$TMP/err")" "the close stands" "end to end: and the WARN says the close stands"
+has "$(field gamma notes gm-e2e2)" "Branch polecat/gm-e2e2 is still on the git remote" "end to end: the bead records that its branch is still there"
+
+# --- (ak) the command a WARN names survives a paste --------------------------
+mkbead alpha open al-br10
+printf 'm.branch=%s\n' 'polecat/al-br10;$(touch pwned)' >> "$TMP/rigs/alpha/.beads/al-br10"
+mkbead beta open bt-br10
+rc=0; BE_RC=4 run --origin al-br10 --successor bt-br10 --kind re-homed || rc=$?
+eq "$rc" 0 "a retire whose branch name carries shell metacharacters succeeds"
+PASTE=$(sed -n 's/.*(branch-end exit 4); end it with: //p' "$TMP/err" | tail -1)
+: > "$BE_LOG"
+( cd "$TMP" && eval "$PASTE" ) >/dev/null 2>&1 || true
+has "$(cat "$BE_LOG")" '--branch polecat/al-br10;$(touch pwned) --bead al-br10 ' \
+    "the WARN's command, pasted, hands branch-end the branch as one argument"
+if [ -e "$TMP/pwned" ]; then bad "…and runs nothing the branch name spells"; else ok "…and runs nothing the branch name spells"; fi
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

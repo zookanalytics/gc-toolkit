@@ -4,8 +4,13 @@
 # framing is posted.
 #
 # A hold IS a demand: the operator owes an answer before the conversation can
-# conclude. So this files three things and gates on two of them:
-#   1. the board-visible takeaway headline on the subject (best-effort);
+# conclude. So this files three things and gates on each of them:
+#   1. the board-visible takeaway headline, "holding — <need>", on the bead the
+#      demand gates. It is the board's NEEDS cell and the hold marker beside the
+#      demand's edge, so a hold whose headline the writer refuses is a hold the
+#      board cannot show, and the caller must NOT post the framing (exit 1). It
+#      is the first write, so a refused headline stops the hold before any
+#      demand is filed;
 #   2. the demand bead — the human gate the conversation waits on. A conversation
 #      about a PR anchor must NOT freeze the merge by default, so the demand gates
 #      the VISIT: the conversation cannot conclude until the operator answers, and
@@ -29,9 +34,20 @@
 # lifecycle.sh) are SEARCHED for on the candidate roots, never assumed, because
 # $GC_RIG_ROOT is the rig that imported this agent and may hold no assets/.
 #
+# The visit is read before the first write, and a visit that cannot be read
+# stops the hold (exit 1). The visit's escalation_key is the topic every demand
+# this hold files carries. A read that fails is not a visit with no topic. Taken
+# as one, the demand is filed without a topic, and a demand with no topic
+# matches any demand already on the gated bead. On a subject that sibling
+# sittings share, it can refresh another sitting's demand in place and
+# overwrite the question that sitting is holding.
+#
 # Inputs:
-#   $1           the one decision or input needed (≤140 chars); the takeaway
-#                reads "holding — <this>" and the demand reads "<this>"
+#   $1           the one decision or input needed, ≤130 chars. The takeaway
+#                reads "holding — <this>" and the demand reads "<this>".
+#                gc-helm.sh refuses a headline over its TAKEAWAY_MAX, so the
+#                decision gets that cap less the prefix, and a longer one is
+#                refused before anything is written (exit 2).
 #   --hold-merge pause the PR merge too: file a SECOND demand on the anchor
 #                ($SUBJECT), the opt-in merge hold. A no-op on an unanchored
 #                subject, whose single demand already gates it. Fails closed
@@ -41,9 +57,10 @@
 #   SUBJECT      its continuation group, which the hold writes to (environment);
 #                when empty, the subject the visit records (its tracks edge,
 #                else its gc.continuation_group stamp)
-# Exit: 0 the hold is real and stamped — post the framing; 1 a gate failed —
-# do NOT post the framing, raise the failure in the thread; 2 usage, or no
-# subject resolves — nothing was written, do NOT post the framing.
+# Exit: 0 the hold is real and stamped — post the framing; 1 the visit could not
+# be read or a gate failed — do NOT post the framing, raise the failure in the
+# thread; 2 usage, a decision too long for the headline, or no writer or subject
+# to write to — nothing was written, do NOT post the framing.
 set -u
 
 # >>> control-char-scrub
@@ -53,6 +70,24 @@ set -u
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# show_one <id> — print `gc bd show <id> --json`, scrubbed, when it reads as an
+# array whose first row is <id>. Returns 3 when the store answers that <id> does
+# not exist, and 1 on any other failure. The exit status is read on its own: a
+# pipeline answers with its last command's, and scrub succeeds whatever gc did.
+# gc exits non-zero on a missing id but still prints its not-found object, so
+# the output is classified before the status is trusted.
+show_one() {
+  local raw rc
+  raw=$(gc bd show "$1" --json); rc=$?
+  raw=$(printf '%s' "$raw" | scrub)
+  if [ "$rc" -eq 0 ] && printf '%s' "$raw" | jq -e --arg id "$1" 'type == "array" and ((.[0].id // "") == $id)' >/dev/null 2>&1; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  printf '%s' "$raw" | jq -e 'type == "object" and ((.error // "") | test("no issues found"))' >/dev/null 2>&1 && return 3
+  return 1
+}
 
 # The one definition of what subject a visit covers (its tracks edge, the
 # gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
@@ -80,8 +115,57 @@ SUBJECT="${SUBJECT:-}"
 [ -n "$NEED" ]  || { echo "converse-hold: the one decision or input needed is required (arg 1)" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "converse-hold: jq is required" >&2; exit 2; }
 command -v gc >/dev/null 2>&1 || { echo "converse-hold: gc is required" >&2; exit 2; }
+HELM=""
+for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
+done
+[ -n "$HELM" ] || { echo "converse-hold: NO TAKEAWAY WRITER (gc-helm.sh) on any candidate root. Neither the headline nor the demand can land without it, and nothing was written, so do NOT post the framing. Raise it in the thread." >&2; exit 2; }
 
-V=$(gc bd show "$VISIT" --json | scrub)
+# >>> hold-headline-length-gate
+# The takeaway is the headline "holding — <need>", and gc-helm.sh refuses one
+# over its TAKEAWAY_MAX. The prefix spends part of that cap, so the decision
+# gets the cap less the prefix. The headline is measured here, before anything
+# is written, the way the writer measures it: whitespace runs collapsed to one
+# space, the ends trimmed, codepoints counted. The cap is read off the writer
+# this hold calls, so the two cannot disagree. When that cap cannot be read, the
+# length is left to the takeaway gate below, which refuses the hold when the
+# writer refuses the headline.
+HOLD_PREFIX="holding — "
+headline_length() {
+  local h n
+  h=$(printf '%s' "$1" | tr -s '[:space:]' ' ')
+  h="${h# }"; h="${h% }"
+  n=$(printf '%s' "$h" | jq -Rsr 'length' 2>/dev/null || true)
+  case "$n" in ''|*[!0-9]*) n=${#h} ;; esac
+  printf '%s' "$n"
+}
+NEED_LEN=$(headline_length "$NEED")
+[ "$NEED_LEN" -gt 0 ] || { echo "converse-hold: the one decision or input needed is required (arg 1 is only whitespace)" >&2; exit 2; }
+CAP=$(sed -n 's/^TAKEAWAY_MAX=\([0-9][0-9]*\).*/\1/p' "$HELM" 2>/dev/null | head -n 1)
+if [ -n "$CAP" ]; then
+  HEADLINE_LEN=$(headline_length "$HOLD_PREFIX$NEED")
+  if [ "$HEADLINE_LEN" -gt "$CAP" ]; then
+    echo "converse-hold: the decision is $NEED_LEN chars; keep it to $((CAP - HEADLINE_LEN + NEED_LEN)). The takeaway reads \"$HOLD_PREFIX<decision>\" and the headline cap is $CAP. Cut it to the one sentence the operator needs and put the rest in the notes. Nothing was written, so do NOT post the framing." >&2
+    exit 2
+  fi
+fi
+# <<< hold-headline-length-gate
+
+# >>> hold-visit-read-gate
+# The visit names the subject and this sitting's topic, so a visit that cannot
+# be read stops the hold here, before anything is written. Read as empty, it
+# would leave the topic empty and every demand below without it.
+V=$(show_one "$VISIT"); VRC=$?
+case "$VRC" in
+  0) ;;
+  3) echo "NO SUCH VISIT: $VISIT does not exist in the store gc bd answers from, so this run wrote nothing. Do NOT post the framing."
+     echo "Check that \$VISIT names this sitting's visit, then re-run this block. If it does, raise it in the thread, and do not describe the subject as held."
+     exit 1 ;;
+  *) echo "VISIT UNREADABLE: $VISIT could not be read, and its escalation_key is the topic that keeps this sitting's demand its own, so this run wrote nothing. Do NOT post the framing."
+     echo "Re-run this block once the store answers. If the visit cannot be read, that failure is what the operator needs to hear: raise it in the thread, and do not describe the subject as held."
+     exit 1 ;;
+esac
+# <<< hold-visit-read-gate
 # Every write below lands on the subject or the visit. Step 1 resolves SUBJECT,
 # and the visit records it twice, as its tracks edge and as its
 # gc.continuation_group stamp, so an empty one is recovered here the way
@@ -103,11 +187,6 @@ fi
 TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
-HELM=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
-done
-[ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
 # Resolve the lifecycle writer and read $SUBJECT's state up front: it decides
 # what the conversation demand gates. An anchored subject (a PR anchor) must not
 # have its merge frozen, so the wait gates the VISIT and the anchor keeps
@@ -139,7 +218,19 @@ esac
 # holding nothing), the subject otherwise. Stamping the anchor would both strand
 # an unedged marker and tell the board the anchor is holding while its merge
 # runs.
-"$HELM" takeaway "$GATED" "holding — $NEED" --by converse
+# >>> hold-takeaway-gate
+# The headline is how the board shows the hold, so when the writer refuses it
+# the hold is not framed. The gate reads the writer's exit on its own line, the
+# way the demand gate below does, and stops before the demand is filed.
+"$HELM" takeaway "$GATED" "$HOLD_PREFIX$NEED" --by converse
+TAKEAWAY_RC=$?
+if [ "$TAKEAWAY_RC" -ne 0 ]; then
+  echo "NO HOLDING HEADLINE on $GATED (status $TAKEAWAY_RC). The board cannot show this hold, so this run filed no demand. Do NOT post the framing."
+  echo "The writer printed its reason on stderr. Fix what it names, then re-run this block until it exits 0."
+  echo "If it cannot be fixed, that failure is what the operator needs to hear. Raise it in the thread, and do not describe $SUBJECT as held."
+  exit 1
+fi
+# <<< hold-takeaway-gate
 # A hold IS a demand: the operator owes an answer before the conversation can
 # conclude. File it as a bead and let the edge carry the wait — on the VISIT for
 # a proven PR anchor, on $SUBJECT otherwise (the fail-closed default resolved

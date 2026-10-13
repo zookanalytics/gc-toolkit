@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # converse-hold.test.sh — the step-5 hold mechanism (assets/scripts/converse-hold.sh):
-# the takeaway on the GATED bead (visit for a PR anchor, subject otherwise, so the
-# hold marker sits beside its edge), the demand gate, the gc.hold_demand
-# stamp-and-readback gate, the --hold-merge opt-in (a second demand on the anchor,
-# failing closed), and the held lifecycle transition. The gates fail CLOSED:
-# unless the demand lands and the stamp reads back off the visit, the script exits
-# non-zero and the caller must not post the framing. This suite drives the shipped
-# script against stubs whose demand, stamp, gate-visit and merge-demand outcomes
-# are dialed independently, and carries a positive control proving the read-back
-# closes a real regression rather than pinning a line the old shape already caught.
+# the decision's length budget (the headline cap less the "holding — " prefix,
+# checked before any write), the visit read gate (a visit that cannot be read
+# stops the hold before any write), the takeaway on the GATED bead (visit for a
+# PR anchor, subject otherwise, so the hold marker sits beside its edge) and its
+# gate, the demand gate, the gc.hold_demand stamp-and-readback gate, the
+# --hold-merge opt-in (a second demand on the anchor, failing closed), and the
+# held lifecycle transition. The gates fail CLOSED: unless the visit is read,
+# the headline and the demand land and the stamp reads back off the visit, the
+# script exits non-zero and the caller must not post the framing. This suite
+# drives the shipped script against stubs whose visit read, takeaway, demand,
+# stamp, gate-visit and merge-demand outcomes are dialed independently. The
+# stub writer enforces the shipped gc-helm.sh's cap, and the shipped writer's
+# own length gate is run on the budget's boundary. A positive control proves the
+# read-back closes a real regression rather than pinning a line the old shape
+# already caught.
 #
-# Hermetic: stubs gc, gc-helm.sh and lifecycle.sh, reads the repo only; no city,
-# no network.
+# Hermetic: stubs gc, gc-helm.sh and lifecycle.sh, and runs the shipped
+# gc-helm.sh only against the stub gc; reads the repo only; no city, no network.
 
 set -u
 
@@ -33,9 +39,14 @@ command -v jq >/dev/null 2>&1 || { printf 'converse-hold: jq is required\n' >&2;
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-hold-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; PACK="$TMPD/pack"; FOREIGN="$TMPD/foreign"; CITY="$TMPD/city"; BARE="$TMPD/bare"
-mkdir -p "$BIN" "$PACK/assets/scripts" "$FOREIGN" "$CITY/rigs/gc-toolkit/assets/scripts" "$BARE"
+CAPLESS="$TMPD/capless"
+mkdir -p "$BIN" "$PACK/assets/scripts" "$FOREIGN" "$CITY/rigs/gc-toolkit/assets/scripts" "$BARE" \
+    "$CAPLESS/assets/scripts"
 PERSIST="$TMPD/persist"   # what `gc bd update` has stamped for gc.hold_demand
 HLOG="$TMPD/hlog"         # every gc-helm.sh / lifecycle.sh invocation, in order
+
+# rep <text> <n> — <text> repeated <n> times.
+rep() { local s="" i; for ((i = 0; i < $2; i++)); do s+="$1"; done; printf '%s' "$s"; }
 
 echo "── the script is shipped executable and syntactically valid ──"
 [ -x "$SUT" ] && ok "converse-hold.sh is executable" \
@@ -43,24 +54,50 @@ echo "── the script is shipped executable and syntactically valid ──"
 bash -n "$SUT" && ok "converse-hold.sh: valid bash" \
     || bad "converse-hold.sh: valid bash" "bash -n failed"
 
+# The headline cap converse-hold.sh reads off its writer, read here off the
+# shipped one. The decision's budget is that cap less the prefix the takeaway
+# puts in front of it.
+CAP="$(sed -n 's/^TAKEAWAY_MAX=\([0-9][0-9]*\).*/\1/p' "$REPO/assets/scripts/gc-helm.sh" | head -n 1)"
+case "$CAP" in
+    ''|*[!0-9]*)
+        bad "gc-helm.sh declares the TAKEAWAY_MAX line converse-hold.sh reads its cap from" \
+            "no TAKEAWAY_MAX=<n> line in $REPO/assets/scripts/gc-helm.sh"
+        echo; echo "converse-hold: $PASS passed, $FAIL failed"; exit 1 ;;
+    *) ok "gc-helm.sh declares the TAKEAWAY_MAX line converse-hold.sh reads its cap from" ;;
+esac
+PREFIX="holding — "
+BUDGET=$((CAP - $(printf '%s' "$PREFIX" | jq -Rsr 'length')))
+
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
-# the visit with whatever the stamp has persisted; `bd update`
-# persists the stamped id unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
-# the landed-wrong case, and exits STAMP_RC. Anything else exits 2 so a script
-# that grows a third call fails here rather than reaching the live store.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+# the visit with whatever the stamp has persisted, or STUB_SHOW_OUT in its place
+# when that is set (empty for no answer at all), and exits STUB_SHOW_RC. Its
+# first STUB_SHOW_FAILS reads answer nothing and exit 1, a store that recovers
+# between the hold's reads. `bd update` persists the stamped id unless
+# STAMP_PERSIST=0, overridable by STAMP_VALUE for the landed-wrong case, and
+# exits STAMP_RC. Anything else exits 2 so a script that grows a third call
+# fails here rather than reaching the live store.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
-        hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-        jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
-            --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
-            '[{id:"v-x", metadata:(({"task_kind":"visit"}
-                + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
-                + (if $tp == "" then {} else {"escalation_key":$tp} end)
-                + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
-              + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]' ;;
+        if [ "${STUB_SHOW_FAILS:-0}" -gt 0 ]; then
+            n=0; [ -r "$PERSIST.reads" ] && n="$(cat "$PERSIST.reads")"
+            printf '%s' "$((n + 1))" >"$PERSIST.reads"
+            [ "$n" -lt "$STUB_SHOW_FAILS" ] && exit 1
+        fi
+        if [ -n "${STUB_SHOW_OUT+x}" ]; then
+            printf '%s' "$STUB_SHOW_OUT"
+        else
+            hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
+            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
+                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
+                '[{id:"v-x", metadata:(({"task_kind":"visit"}
+                    + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
+                    + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                    + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
+                  + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]'
+        fi
+        exit "${STUB_SHOW_RC:-0}" ;;
     update)
         [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
         # The gc.hold_demand write on the visit is the stamp gate under test; the
@@ -84,20 +121,34 @@ esac
 STUB
 chmod +x "$BIN/gc"
 
-# stub_helm <root> — a gc-helm.sh under <root> that logs each call (with the
-# root, so resolution is observable) and dials its verbs from the environment:
-#   takeaway -> exit $STUB_TAKEAWAY_RC (default 0)
+# stub_helm <root> <label> [nocap] — a gc-helm.sh under <root> that logs each
+# call (with <label>, so resolution is observable) and dials its verbs from the
+# environment:
+#   takeaway -> refuse a headline over the shipped writer's cap, measured the way
+#               it measures (whitespace collapsed, codepoints), with its message
+#               and exit 2; else exit $STUB_TAKEAWAY_RC (default 0)
 #   demand   -> print $STUB_DEMAND_OUT if set, else "demand $STUB_DEMAND_ID filed"
 #               (default id d-x); exit $STUB_DEMAND_RC (default 0). A demand on a
 #               bead OTHER than the visit v-x — the --hold-merge second demand on
 #               the anchor — exits $STUB_MERGE_DEMAND_RC instead when that is set,
 #               so the merge-hold arm can be failed without failing the first.
+# It declares TAKEAWAY_MAX the way the shipped writer does. `nocap` leaves that
+# line out and still enforces the cap: a writer whose cap cannot be read.
 stub_helm() {
+    local cap_line="TAKEAWAY_MAX=$CAP"
+    [ "${3:-}" = nocap ] && cap_line="# no cap declared"
     cat >"$1/assets/scripts/gc-helm.sh" <<HELM
 #!/usr/bin/env bash
+$cap_line
 printf 'helm[$2] %s\n' "\$*" >>"\$HLOG"
 case "\${1:-}" in
-    takeaway) exit "\${STUB_TAKEAWAY_RC:-0}" ;;
+    takeaway)
+        h=\$(printf '%s' "\${3:-}" | tr -s '[:space:]' ' '); h="\${h# }"; h="\${h% }"
+        n=\$(printf '%s' "\$h" | jq -Rsr 'length')
+        if [ "\$n" -gt $CAP ]; then
+            echo "gc-helm: takeaway: text is \$n chars; the cap is $CAP" >&2; exit 2
+        fi
+        exit "\${STUB_TAKEAWAY_RC:-0}" ;;
     demand)
         if [ -n "\${STUB_DEMAND_OUT+x}" ]; then printf '%s\n' "\$STUB_DEMAND_OUT"
         else printf 'demand %s filed\n' "\${STUB_DEMAND_ID:-d-x}"; fi
@@ -125,23 +176,27 @@ LC
 chmod +x "$PACK/assets/scripts/lifecycle.sh"
 stub_helm "$PACK" RIG
 stub_helm "$CITY/rigs/gc-toolkit" CITY
+stub_helm "$CAPLESS" CAPLESS nocap
 
-# run [VAR=val ...] — run converse-hold.sh "need X" from a non-git cwd with the
-# owning-rig pack on GC_RIG_ROOT, resetting the persist file and call log first.
-# Trailing VAR=val pairs override any default (env: last assignment wins), so a
-# case dials STAMP_RC/STAMP_PERSIST/STUB_DEMAND_RC/GC_RIG_ROOT/… inline.
+# run_need <need> [VAR=val ...] — run converse-hold.sh "<need>" from a non-git
+# cwd with the owning-rig pack on GC_RIG_ROOT, resetting the persist file, the
+# stub's read count and the call log first. Trailing VAR=val pairs override any
+# default (env: last assignment wins), so a case dials STAMP_RC/STAMP_PERSIST/
+# STUB_DEMAND_RC/GC_RIG_ROOT/… inline. run [VAR=val ...] is run_need "need X".
 OUT=""; RC=0
-run() {
-    rm -f "$PERSIST" "$HLOG"; : >"$HLOG"
+run_need() {
+    local need="$1"; shift
+    rm -f "$PERSIST" "$PERSIST.reads" "$HLOG"; : >"$HLOG"
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
-        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" "need X" 2>&1)"
+        VISIT=v-x SUBJECT=item-x "$@" bash "$SUT" "$need" 2>&1)"
     RC=$?
 }
+run() { run_need "need X" "$@"; }
 # Like run, but passes the --hold-merge opt-in flag to the script.
 run_hold_merge() {
-    rm -f "$PERSIST" "$HLOG"; : >"$HLOG"
+    rm -f "$PERSIST" "$PERSIST.reads" "$HLOG"; : >"$HLOG"
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
@@ -163,6 +218,92 @@ echo "── the hold writes to the subject it is handed ──"
 run SUBJECT=item-y
 has "the hold writes to the subject it is handed" "takeaway item-y holding" "$(calls)"
 hasnt "…and to no other bead" "takeaway item-x" "$(calls)"
+
+echo "── the decision gets the headline cap less the prefix, checked before any write ──"
+# The writer refuses a takeaway over its cap, and the takeaway puts the prefix in
+# front of the decision, so the decision gets the cap less the prefix. One over
+# that is refused with its own budget before anything is read or written; the
+# boundary is inclusive.
+run_need "$(rep x "$BUDGET")"
+is "a decision of exactly the budget holds" "$(verdict)" "held"
+has "…and its headline reaches the writer whole" "takeaway item-x $PREFIX$(rep x "$BUDGET") --by converse" "$(calls)"
+run_need "$(rep x $((BUDGET + 1)))"
+is "a decision one over the budget is refused as usage (exit 2)" "$RC" "2"
+has "…and the refusal names its length and its budget" "the decision is $((BUDGET + 1)) chars; keep it to $BUDGET" "$OUT"
+is "…before any takeaway, demand or update is written" "$(calls)" ""
+is "…so no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+run_need "$(rep x "$CAP")"
+is "a decision as long as the whole cap is refused too" "$RC" "2"
+is "…before any write" "$(calls)" ""
+# Measured the way the writer measures it: codepoints, after the whitespace collapse.
+run_need "$(rep é "$BUDGET")"
+is "the budget counts codepoints, so a multi-byte decision of the budget holds" "$(verdict)" "held"
+run_need "$(rep x $((BUDGET - 2)))   y"
+is "the budget counts the collapsed text, so a run of spaces costs one" "$(verdict)" "held"
+run_need "   "
+is "a decision that is only whitespace is refused as usage" "$RC" "2"
+is "…before any write" "$(calls)" ""
+
+echo "── the visit read gate: a visit that cannot be read stops the hold before any write ──"
+# The visit's escalation_key is the topic every demand carries. A failed read
+# taken as an empty answer files the demand with no topic, and a topic-less
+# demand matches whatever demand already sits on the gated bead, a sibling
+# sitting's on a shared subject. So a read counts only when it exits 0 with the
+# visit's own row, and anything else exits 1 having written nothing. The lead
+# case fails one read and lets the store answer after it, so the stamp's
+# read-back finds the stamp and nothing later in the hold refuses in its place.
+run STUB_TOPIC=finding-b STUB_SHOW_FAILS=1
+is "a visit read that fails refuses the hold (exit 1)" "$RC" "1"
+has "…and says the visit could not be read" "VISIT UNREADABLE: v-x could not be read" "$OUT"
+hasnt "…and files no demand, so none goes out without the topic" "demand item-x" "$(calls)"
+hasnt "…and writes no holding headline" "takeaway" "$(calls)"
+is "…and writes nothing at all" "$(calls)" ""
+is "…so no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+run STUB_TOPIC=finding-b STUB_SHOW_RC=1 STUB_SHOW_OUT=
+is "a store that does not answer at all refuses the hold too" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_TOPIC=finding-b STUB_SHOW_RC=1
+is "a read that exits non-zero refuses even when it printed the visit (the exit is the signal)" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT="Error: search count issues: invalid connection"
+is "a zero-exit read whose answer does not parse refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT="[]"
+is "a zero-exit read that answers with no row refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT='[{"id":"v-other","metadata":{"escalation_key":"finding-a"}}]'
+is "a read that answers with another bead's row refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_RC=1 STUB_SHOW_OUT='{"error":"no issues found matching the provided IDs"}'
+is "a visit the store says does not exist refuses the hold (exit 1)" "$RC" "1"
+has "…and says it does not exist" "NO SUCH VISIT: v-x does not exist" "$OUT"
+is "…before any write" "$(calls)" ""
+run SUBJECT= STUB_SHOW_RC=1 STUB_SHOW_OUT=
+is "with no SUBJECT, a visit that cannot be read refuses as unreadable (exit 1)" "$RC" "1"
+hasnt "…not as a visit that names no subject" "no subject" "$OUT"
+is "…before any write" "$(calls)" ""
+
+echo "── the takeaway gate: a headline the writer refuses stops the hold ──"
+# The headline is how the board shows the hold, and it is the first write, so a
+# refused one stops the hold before the demand is filed.
+run STUB_TAKEAWAY_RC=4
+is "a takeaway the writer refuses refuses the hold (exit 1)" "$RC" "1"
+has "…and says the board cannot show it" "NO HOLDING HEADLINE on item-x" "$OUT"
+hasnt "…and files no demand" "demand item-x" "$(calls)"
+is "…and stamps no hold_demand" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+hasnt "…and makes no held transition" "lc transition" "$(calls)"
+run STUB_TAKEAWAY_RC=4 STUB_STATE=pull_request
+is "an anchored hold whose headline is refused is refused too" "$RC" "1"
+hasnt "…with no demand on the visit" "demand v-x" "$(calls)"
+# A writer whose cap cannot be read leaves the length to it, and its refusal must
+# still stop the hold.
+run_need "$(rep x $((BUDGET + 1)))" GC_RIG_ROOT="$CAPLESS"
+is "a writer whose cap cannot be read still stops an over-long hold" "$RC" "1"
+has "…because the writer refused the headline" "the cap is $CAP" "$OUT"
+hasnt "…and no demand is filed under it" "demand item-x" "$(calls)"
+is "…and no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+run_need "$(rep x "$BUDGET")" GC_RIG_ROOT="$CAPLESS"
+is "…while a decision within the budget holds through it" "$(verdict)" "held"
 
 echo "── the demand gate fails closed unless a demand id lands ──"
 run STUB_DEMAND_RC=4
@@ -312,6 +453,29 @@ has "a rig with no assets/ falls through to the city pack" "helm[CITY]" "$(calls
 run GC_RIG_ROOT="$FOREIGN" GC_CITY_PATH="$TMPD/no-such-city"
 has "no writer on any candidate root is LOUD" "NO TAKEAWAY WRITER" "$OUT"
 is "…and with no writer the hold cannot land, so it refuses" "$(verdict)" "refused"
+
+echo "── the shipped writer's cap falls on the budget's boundary ──"
+# The stub writers enforce the cap read off the shipped gc-helm.sh, so this holds
+# the shipped writer to the same boundary: it refuses the headline a decision one
+# over the budget composes and passes the one a budget decision composes. Its
+# length gate runs before any store read, and the stub gc answers anything but
+# `bd show`/`bd update` with exit 2, so neither run reaches a store.
+real_takeaway() {
+    (cd "$BARE" && { env PATH="$BIN:$PATH" TMPDIR="$TMPD" GC_CITY_PATH="$CITY" \
+        sh "$REPO/assets/scripts/gc-helm.sh" takeaway item-x "$1" --by converse >/dev/null; } 2>&1)
+}
+has "the shipped writer refuses the headline of a decision one over the budget" \
+    "the cap is $CAP" "$(real_takeaway "$PREFIX$(rep x $((BUDGET + 1)))")"
+hasnt "…and its length gate passes the headline of a budget decision" \
+    "the cap is" "$(real_takeaway "$PREFIX$(rep x "$BUDGET")")"
+
+echo "── the documented budget is the writer's cap less the prefix ──"
+# A sitting writes to the length its docs state, so every decision length the
+# hold's docs state is the budget the writer enforces.
+is "every decision length the converse-hold skill states is the budget" \
+    "$(grep -o '≤[0-9]* char' "$REPO/skills/converse-hold/SKILL.md" | sort -u)" "≤$BUDGET char"
+is "…and so is the one converse-hold.sh's header states" \
+    "$(grep -o '≤[0-9]* char' "$SUT" | sort -u)" "≤$BUDGET char"
 
 echo
 echo "converse-hold: $PASS passed, $FAIL failed"

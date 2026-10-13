@@ -108,6 +108,8 @@ Escalate what a human must act on; a PR awaiting the operator's approval is
 a HEALTHY resting state worth zero escalations. Most idle wakes escalate
 nothing — log the verdict line and move on.
 
+{{ template "visit-close" . }}
+
 {{ template "heartbeat-no-consent-ui" . }}
 
 {{ template "work-quality-base" . }}

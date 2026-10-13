@@ -76,16 +76,55 @@ the file to it in a comment, inline and uncommitted. It refuses a PR outside the
 rig's origin and exits non-zero when it cannot attach. `doctor/check-demo-toolchain`
 reports whether the `gh` it needs is present.
 
-- `video`: `skills/gc-demo-script/SKILL.md` writes a `demo:capture` script from
-  the anchor and the diff. `skills/demo-capture/SKILL.md` records that script
-  against the running app and assembles the narrated MP4. The app is the
-  draft's preview where one deploys, and otherwise the app served from the
-  reviewed commit. Write the clip outside the tracked tree.
-  `doctor/check-demo-toolchain` reports whether the capture toolchain resolves
-  in this session.
-- `screenshot` and `repo-artifact`: this pack has no production path for either.
-  Record the modality you picked and approve with the note that it fits and was
-  not delivered.
+- `video`: record it in this review with `assets/scripts/rig-demo-capture.sh`,
+  the rig-demo mol's capture core. Do not pour `mol-rig-demo` for it. A pour
+  runs later in another session, so this verdict could not judge its clip,
+  and by then the reviewed worktree is gone.
+  `skills/gc-demo-script/SKILL.md` writes the `demo:capture` script from the
+  anchor and the diff. Keep the script and the clip in the review workspace,
+  the directory that holds `$REVIEW_WT`, and capture from there, so the
+  engine's working files stay out of the reviewed tree. Run the capture under
+  `hb`, the review step's lease keepalive, because a capture takes minutes:
+
+  ```bash
+  cd "$(dirname "$REVIEW_WT")"
+  hb "$SCRIPTS/rig-demo-capture.sh" --script demo.md --output demo.mp4 <app target>
+  ```
+
+  The app target is the draft's preview, `--base-url <url>`, where one
+  deploys. Otherwise serve the reviewed worktree, so the clip shows the
+  reviewed commit: `--serve-dir "$REVIEW_WT/<dir>"` for a static build, or
+  `--serve "<command>" --cwd "$REVIEW_WT"` for a dev server. Exit 0 is a clip
+  in which every step's proof held, exit 3 is a clip in which at least one
+  step failed its proof, and exit 1 is no clip. The last line names the clip
+  and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
+  session. Without it the clip is silent and captioned, and it still shows the
+  change. `doctor/check-demo-toolchain` reports which parts of the capture
+  toolchain resolve in this session.
+- `repo-artifact`: list the visuals the reviewed commit already carries.
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" candidates --base "origin/$BASE" --oid "$REVIEWED_OID" --anchor <anchor>
+  ```
+
+  Each line gives a reason and a path. `changed` is a visual the diff adds or
+  edits. `named` is one whose path appears in a line the diff adds or in the
+  anchor. `near` is one in a directory close to a changed file's, nearest
+  first. Exit 3 means the commit carries no such visual, so this modality does
+  not fit. Open an image candidate at `$REVIEW_WT/<path>` before you pick it.
+  A committed visual shows what its author recorded, not a run of the reviewed
+  commit. Pick one that matches what the diff does, because one that shows a
+  state the reviewed commit no longer produces would mislead the human.
+  Deliver the one you pick:
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --oid "$REVIEWED_OID" --subject <anchor>
+  ```
+
+  It attaches the file as the reviewed commit stores it, through
+  `demo-deliver.sh`.
+- `screenshot`: this pack has no production path for it. Record the modality
+  you picked and approve with the note that it fits and was not delivered.
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
@@ -101,6 +140,14 @@ The visual is evidence: judge what it shows, not what the diff claims. A capture
 in which the surface errors, a flow breaks, or a step fails against what the
 change claims is a finding against the change. Request changes, and name the
 visual as the evidence.
+
+A video capture that exits 3 recorded a step whose proof failed. The engine's
+step lines name that step and the assertion that did not hold. A capture run
+with `--mode proof` also keeps a screenshot of every step in the working
+directory its last line names. Read them to tell whether the change fails or
+the script asserted the wrong thing. A change that fails is the finding above,
+and the clip is its evidence to deliver. A script that asserted the wrong thing
+is yours to correct before you capture again.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, or no
@@ -124,7 +171,8 @@ the posted comment.
 
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
-and where the visual was delivered, or what stopped it.
+and where the visual was delivered, or what stopped it. A delivered video's
+sentence also says whether the clip is narrated or silent.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.

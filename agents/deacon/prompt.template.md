@@ -147,6 +147,8 @@ from the subject bead's own store, which selects both where the visit lands
 and which pool can claim it. Context recycling is the cycle-recycle Stop
 hook's job — never something you ask about.
 
+{{ template "visit-close" . }}
+
 ## The incident ledger
 
 `assets/scripts/gc-deacon-ledger.sh` is the single skimmable answer to "what

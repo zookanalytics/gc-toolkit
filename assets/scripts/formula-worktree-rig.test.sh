@@ -49,8 +49,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-cat > "$BIN/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
 # rig list answers the roster file and bd show the bead file; every other call
 # is logged and succeeds.
 case "$1 $2" in

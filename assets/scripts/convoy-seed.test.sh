@@ -39,8 +39,7 @@ unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 # --- Stub gc: convoy create emits JSON and requires --owned; convoy target is
 #     logged; every other subcommand is refused, as real `gc convoy` would. -----
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 printf '%s\n' "$*" >> "${GC_LOG:?}"
 [ "${1:-}" = convoy ] || { echo "gc stub: unsupported '${1:-}'" >&2; exit 2; }

@@ -22,6 +22,17 @@ is why this file reads the product's value as value to the operator. Where the
 generic PM review method asks who the product serves, in this rig the answer is the
 operator.
 
+## Scope
+
+**Mandate.** What the city is for, from the operator's side: the problems it
+solves for them, the surfaces they judge a change through, and what lets them
+decide from those surfaces.
+
+**Boundaries.** The beliefs and goals it reads out are
+[foundation.md](foundation.md). How the PM check judges a change against it is
+`skills/review-pm/SKILL.md`. It states goals and surfaces, not features, so what
+a component does is that component's own doc.
+
 ## The operator's problem
 
 The operator wants trustworthy work out of the city without having to babysit it.

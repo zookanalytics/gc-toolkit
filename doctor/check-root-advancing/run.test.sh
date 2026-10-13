@@ -34,8 +34,7 @@ cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"},{"name":"beta","path":"$TMP/beta"}]}
 EOF
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "session list") rc="${SESSIONS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$SESSIONS_JSON" ;;
   "rig list")     rc="${RIGS_RC:-0}";     [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
@@ -47,8 +46,7 @@ GC
 # --id and --all filters the real bd applies server-side, and hides closed beads
 # unless a --status names it or --all is passed — the visibility the landed check
 # and the closed-step read both turn on.
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 sub="$1"; shift
 db=""; status=""; hmk=""; ids=""; all=0; mfk=""; mfv=""; prev=""

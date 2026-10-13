@@ -36,21 +36,29 @@
 #                   unmoved head. A bare request-changes lane has no approve
 #                   backing, so retiring only backings would leave its verdict
 #                   standing and the bar blocking the re-review this rules for.
-#   supersede-anchor  The anchor-wide form of supersede-lane, for a human
-#                   feedback batch (check_name=human) the validator ruled has not
-#                   converged. A batch rules the whole diff, so it supersedes the
-#                   approve backing of EVERY lane the anchor's check_set declares —
-#                   not the check_name=human pseudo-lane no check reader derives
-#                   green from. This is what returns the real checks to unreviewed
-#                   so a fresh whole-diff review is dispatched and holds the merge.
+#   supersede-anchor  The anchor-wide form of supersede-lane, for operator input
+#                   the whole diff has not been reviewed against: a human feedback
+#                   batch (check_name=human) the validator ruled has not
+#                   converged, and an operator ruling whose rework child
+#                   converse-rework.sh has filed. Either rules the whole diff, so
+#                   it supersedes the approve backing of EVERY lane the anchor's
+#                   check_set declares — not the check_name=human pseudo-lane no
+#                   check reader derives green from. This is what returns the real
+#                   checks to unreviewed so a fresh whole-diff review is
+#                   dispatched and holds the merge. --by names the caller in the
+#                   note each superseded review carries; the default names the
+#                   validator's human batch.
 #
 # A must-fix finding still open holds the lane at `fixing` and the merge on its
 # `blocks` edge; this writes no finding and reads none. Backing a lane whose
 # must-fix set is not yet closed is correct: the lane derives green only when
 # those close, which the merge predicate and the board resolve, never this.
 #
-# Callers: the validator (formulas/mol-validate.toml). Exit 0 on success; 2 when
-# the store would not read or a write did not read back.
+# Callers: the validator (formulas/mol-validate.toml), every verb;
+# converse-rework.sh, supersede-anchor only, once an operator ruling's rework
+# child is filed; and bring-current-guard.sh, supersede-lane only, on each lane
+# a conflicted bring-current round reopens. Exit 0 on success; 2 when the store
+# would not read or a write did not read back.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -63,6 +71,9 @@ scrub() { tr -d '\000-\037'; }
 warn() { echo "review-outcome: $*" >&2; }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# The review beads on an anchor are its children (bd-lib.sh's anchor graph).
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "review-outcome: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # The one resolver of the check index: the anchor-wide supersede asks it for
 # every declared lane (`--through merge` spans all phases), which drops the
 # non-lanes none/off and the approval merge rule in one place.
@@ -78,7 +89,7 @@ usage() {
 usage:
   review-outcome.sh back-lane --anchor <id> --lane <lane> --oid <oid> [--batch <id>] [--reason <r>]
   review-outcome.sh supersede-lane --anchor <id> --lane <lane> [--reason <r>]
-  review-outcome.sh supersede-anchor --anchor <id> [--reason <r>]
+  review-outcome.sh supersede-anchor --anchor <id> [--reason <r>] [--by <who>]
 USAGE
 }
 
@@ -91,8 +102,7 @@ USAGE
 # read so a caller never mistakes an unreadable store for "nothing backs the lane".
 backing_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select((($m.task_kind // "") | tostring) == "review")
@@ -117,8 +127,7 @@ backing_ids() { # <anchor> <lane>
 # line; exit 2 when the store would not read.
 stranded_ids() { # <anchor> <lane> <title>
   local anchor="$1" lane="$2" title="$3" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" --arg title "$title" '
     [ .[] | (.metadata // {}) as $m
           | select(((.status // "") | tostring | ascii_downcase) != "closed")
@@ -164,8 +173,7 @@ EOF
 # would not read so a caller never mistakes an unreadable store for "nothing stands".
 superseding_review_ids() { # <anchor> <lane>
   local anchor="$1" lane="$2" rows
-  rows=$(gc bd list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  rows=$(bd_anchor_children "$anchor" "$ALL_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | (.metadata // {}) as $m
           | select((($m.task_kind // "") | tostring) == "review")
@@ -247,7 +255,8 @@ cmd_back_lane() {
   fi
 
   # Atomic birth: the outcome is created closed, carrying every stamp
-  # lane-state.sh keys on and the note, in one write. A refused create leaves
+  # lane-state.sh keys on, the note and its edge onto the anchor
+  # (bd_create_child), in one write. A refused create leaves
   # nothing behind, and a create whose reply is lost has still filed a whole
   # backing, so no attempt leaves a bare bead that a retry cannot find.
   local meta id
@@ -255,7 +264,7 @@ cmd_back_lane() {
     '{task_kind: "review", anchor_bead: $ab, check_name: $ln, reviewed_oid: $oid,
       signoff_verdict: "approve", "gc.outcome": "recorded"}' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not compose the approve outcome for lane $lane on $anchor"; exit 2; }
-  id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
+  id=$(bd_create_child "$anchor" "$title" -t task -d "$desc" --metadata "$meta" --status=closed --notes "$note" --json 2>/dev/null \
     | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 
   # Read back the shape lane-state.sh keys on: a bead that did not close, or lost
@@ -293,21 +302,23 @@ cmd_supersede_lane() {
 }
 
 cmd_supersede_anchor() {
-  local anchor="" reason=""
+  local anchor="" reason="" by="validator" scope="anchor-wide human batch"
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --by) by="${2:-}"; scope="anchor-wide"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "supersede-anchor needs --anchor"; exit 1; }
+  [ -n "$by" ] || { warn "supersede-anchor --by needs a value"; exit 1; }
 
-  # A human feedback batch rules the whole diff, so its non-convergence returns
-  # every lane the anchor's check_set declares to unreviewed. The lanes are read
-  # from the anchor here rather than passed in: the pass carries check_name=human,
-  # a pseudo-lane no check_set names, and superseding it moves nothing a check
-  # reader derives green from. Fail closed if the anchor or its check_set will not
-  # read — a silent no-op here leaves the merge open on a review the validator
-  # required.
+  # Operator input rules the whole diff, so a human batch's non-convergence, or a
+  # ruling's rework, returns every lane the anchor's check_set declares to
+  # unreviewed. The lanes are read from the anchor here rather than passed in: a
+  # validation pass carries check_name=human, a pseudo-lane no check_set names,
+  # and superseding it moves nothing a check reader derives green from. Fail
+  # closed if the anchor or its check_set will not read — a silent no-op here
+  # leaves the merge open on a review the caller required.
   local arow checkset
   arow=$(gc bd show "$anchor" --json 2>/dev/null | scrub)
   printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
@@ -324,14 +335,14 @@ cmd_supersede_anchor() {
   # The resolver's exit status separates a crash from a deliberately checkless
   # anchor: a non-zero exit could not name the lanes and must fail closed (exit 2,
   # like the unreadable-anchor arms above), never collapse to a zero no-op that
-  # leaves the merge open on a review the validator required.
+  # leaves the merge open on a review the caller required.
   if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
     warn "the check resolver failed for anchor $anchor; refusing to supersede on an unreadable lane set"; exit 2
   fi
   [ -n "$lanes" ] || { echo 0; return 0; }
 
-  local note="validator: superseded (anchor-wide human batch) — a fresh whole-diff review is warranted"
-  [ -n "$reason" ] && note="validator: superseded (anchor-wide human batch) — $reason"
+  local note="$by: superseded ($scope) — a fresh whole-diff review is warranted"
+  [ -n "$reason" ] && note="$by: superseded ($scope) — $reason"
   local lane total=0 c
   while IFS= read -r lane; do
     [ -n "$lane" ] || continue

@@ -1,3 +1,8 @@
+---
+name: Bead-Universe Operating Model PRD review
+description: The synthesis of the PRD-review legs run against prd-draft.md, with the critical questions it put to the operator's gate. Its claims about consult-host are wrong, so read human-clarifications.md first.
+---
+
 # PRD Review: The Bead-Universe Operating Model (gc-toolkit)
 
 > ⚠️ **READ `.plan-reviews/bead-universe/human-clarifications.md` FIRST — it is authoritative and

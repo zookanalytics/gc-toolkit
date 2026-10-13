@@ -1,3 +1,8 @@
+---
+name: R1 Toyota Production System research
+description: Research report R1 for the escalation work (tk-px5od), covering the Toyota Production System's practices, their software and AI-development adaptations, the counter-arguments, and references. Its sharpest limit is that jidoka cannot catch a semantic defect the producer cannot tell from correct output.
+---
+
 # Toyota Production System: Research for the Gas City Pack
 
 ## Summary

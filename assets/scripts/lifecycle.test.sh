@@ -862,8 +862,7 @@ done
 # have.
 SVC="$TMP/svc-bin"
 mkdir -p "$SVC"
-cat > "$SVC/gc" <<EOF
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SVC/gc" <<EOF
 [ "\${1:-} \${2:-}" = "service list" ] && { printf '{"city_path":"%s"}\n' "$CITY"; exit 0; }
 exec "$BIN/gc" "\$@"
 EOF

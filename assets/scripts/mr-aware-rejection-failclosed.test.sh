@@ -72,8 +72,7 @@ esac
 # is recorded. lifecycle.sh: records its argv, lives under a fake rig root so
 # the block's candidate resolution finds it.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts" "$TMP/rig-nopr/assets/scripts"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show") [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 1
@@ -210,8 +209,7 @@ done
 # git: records the branch delete. Everything else fails, so the block's
 # `git rev-parse --show-toplevel` fallback stays unresolved and the stub
 # lifecycle.sh under the fake rig root remains the only candidate.
-cat > "$TMP/bin/git" <<'GIT'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 case "$1 $2 $3" in
   "push origin --delete")
     [ "${FAKE_DELETE_FAILS:-0}" = "1" ] && { printf 'DELETE-REFUSED|%s\n' "$4" >> "$FAKE_LOG"; exit 1; }

@@ -15,6 +15,19 @@ footprint climbs while its commit count stays low, so a commit-count cadence
 never reaches it. `gc dolt compact --gc-only` is the recovery: it runs the full
 GC regardless of commit count and skips the flatten entirely.
 
+## Scope
+
+**Mandate.** The scheduled reclaim of a managed Dolt store's dead chunks:
+which stores a pass selects, the garbage collection it runs, the brakes that
+bound a pass, and how an operator runs it.
+
+**Boundaries.** The flatten that rewrites a store's commit history stays an
+operator action and is not covered here. The scheduled commit-count
+compaction, the `gc dolt` commands, and the `dolt-noms-size` doctor check are
+gascity's, and flagging commit bloat is the deacon patrol's. Disk outside the
+bead stores is reclaimed by [scratch-reclaim.md](scratch-reclaim.md) and
+[worktree-reclaim.md](worktree-reclaim.md).
+
 ## What the pass does
 
 `orders/dolt-reclaim.toml` runs `assets/scripts/dolt-reclaim.sh` daily,

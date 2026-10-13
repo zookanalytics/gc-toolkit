@@ -31,8 +31,7 @@ MARK='<!-- gc:city -->'
 # gh stub: every call's argv lands in $GHLOG one argument per line, framed by a
 # `--` line per call, and the content of a --body-file is copied to $GHBODY
 # while the file still exists. $GH_RC fails the call; $GH_OUT is its stdout.
-cat >"$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 { echo "--"; printf '%s\n' "$@"; } >>"${GHLOG:?}"
 prev=""
 for a in "$@"; do

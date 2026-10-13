@@ -1,3 +1,8 @@
+---
+name: Escalation selection menu
+description: A contact sheet over the escalation ideation and research (tk-px5od) that lays out the load-bearing decisions with options, a lean, and the effects of each pick. Superseded by marching-orders.md and the foundation updates, and kept as the record of how the selection was framed.
+---
+
 # Escalation Selection Menu — Contact Sheet for Curation
 
 > **You are the editor. The candidates are laid out for sweep. Each cluster

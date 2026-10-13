@@ -16,10 +16,13 @@
 # Playwright headlessly): the only path available to a pool session, which
 # carries no browser MCP.
 #
-# It FAILS CLOSED. A missing engine, a script the linter rejects, a capture that
-# errors, or an output file that never appears all exit non-zero, because a
-# capture that quietly produces nothing is the silent non-delivery the rig-demo
-# mol exists to prevent.
+# It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
+# script the linter rejects, a capture that errors, or an output file that never
+# appears all exit 1, because a capture that quietly produces nothing is the
+# silent non-delivery the rig-demo mol exists to prevent. A clip in which a step
+# failed its proof is a different result: the engine exits non-zero for it too,
+# but the clip shows what failed, so it exits 3 and names the clip and the
+# working files the engine kept.
 #
 # Usage:
 #   rig-demo-capture.sh --script <demo.md> --output <file.mp4> \
@@ -43,12 +46,14 @@
 #
 # Narration is best-effort: with OPENAI_API_KEY set the clip is voiced, without
 # it the clip is silent and captioned. A missing key never fails the capture.
+# The last line says whether the clip is narrated or silent.
 #
 # $SPRINTSHOW_BIN, when set and executable, overrides engine resolution and is
 # invoked in its place — the seam the hermetic test drives with a stub engine,
 # and an escape hatch for a caller that has already resolved the engine.
 #
-# Exit: 0 captured (output exists and is non-empty), 2 bad arguments, 1 anything
+# Exit: 0 captured and every step's proof held (output exists and is non-empty),
+# 3 captured but at least one step failed its proof, 2 bad arguments, 1 anything
 # that stopped the capture.
 set -u
 
@@ -116,6 +121,12 @@ mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'"
 # provisioning its deps and ffmpeg on first use; fall back to the published npm
 # package. $SPRINTSHOW_BIN overrides both. assets/scripts/rig-demo-capture.test.sh
 # extracts this block and checks the resolution order; keep the markers.
+#
+# The browser is installed through the engine's own Playwright on every
+# capture, local or published. The engine launches the chromium-headless-shell
+# revision its Playwright pins, so only that Playwright's installer knows which
+# build to fetch and where to keep it. The installer skips a build that is
+# already installed, so a capture on a provisioned host downloads nothing.
 scrub() { tr -d '\000-\037'; }
 if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
   sprintshow() { "$SPRINTSHOW_BIN" "$@"; }
@@ -129,9 +140,11 @@ else
   if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
     [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install ) || { echo "$PROG: 'npm install' failed in the sprintshow rig checkout" >&2; exit 1; }
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg ) || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
+    ( cd "$SS_DIR" && npm run provision:browser ) || { echo "$PROG: could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)" >&2; exit 1; }
     sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
     echo "$PROG: engine = local sprintshow rig ($SS_DIR)" >&2
   else
+    npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell || { echo "$PROG: could not provision the browser (the published engine's 'playwright install chromium-headless-shell' failed)" >&2; exit 1; }
     sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
     echo "$PROG: engine = published @zookanalytics/sprintshow (no local rig checkout)" >&2
   fi
@@ -163,8 +176,27 @@ fi
 [ "$KEEP" -eq 1 ]  && set -- "$@" --keep
 
 echo "$PROG: capturing $SCRIPT ($MODE) -> $OUTPUT" >&2
-if ! sprintshow "$@"; then
-  echo "$PROG: capture failed (sprintshow run exited non-zero)" >&2
+REPORT=$(mktemp "${TMPDIR:-/tmp}/rig-demo-capture.XXXXXX") || { echo "$PROG: cannot create a file for the engine's report" >&2; exit 1; }
+trap 'rm -f "$REPORT"' EXIT
+sprintshow "$@" | tee "$REPORT"
+RC=${PIPESTATUS[0]}
+
+# The engine exits non-zero both when it could not capture and when a step of
+# the clip it captured failed its proof. Its closing report tells them apart: it
+# is printed only once the clip is assembled, says whether the clip is narrated
+# or silent, counts the failed steps, and names the working directory it kept,
+# relative to the engine's own working directory, which is ours.
+NARRATION=$(sed -n -E 's/.* (narrated|silent)( \+ music bed)? demo .*/\1/p' "$REPORT" | tail -n 1)
+FAILED=$(sed -n -E 's/.* ([0-9]+) step\(s\) failed their proof.*/\1/p' "$REPORT" | tail -n 1)
+KEPT=$(sed -n -E 's/.* failed their proof.* kept: (.+)$/\1/p' "$REPORT" | tail -n 1)
+case "$KEPT" in ""|/*) ;; *) KEPT="$(pwd)/$KEPT" ;; esac
+
+if [ "$RC" -ne 0 ]; then
+  if [ -n "$FAILED" ] && [ -s "$OUTPUT" ]; then
+    echo "$PROG: captured $OUTPUT (${NARRATION:-narration unreported}), but $FAILED step(s) failed their proof${KEPT:+; the engine kept its working files in $KEPT}"
+    exit 3
+  fi
+  echo "$PROG: capture failed (sprintshow run exited $RC)" >&2
   exit 1
 fi
 
@@ -174,5 +206,5 @@ fi
 [ -f "$OUTPUT" ] || { echo "$PROG: capture reported success but '$OUTPUT' does not exist" >&2; exit 1; }
 [ -s "$OUTPUT" ] || { echo "$PROG: capture produced '$OUTPUT' but it is empty" >&2; exit 1; }
 
-echo "$PROG: captured $OUTPUT ($(wc -c <"$OUTPUT" | tr -d ' ') bytes)"
+echo "$PROG: captured $OUTPUT (${NARRATION:-narration unreported}, $(wc -c <"$OUTPUT" | tr -d ' ') bytes)"
 exit 0

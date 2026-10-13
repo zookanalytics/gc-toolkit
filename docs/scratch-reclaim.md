@@ -15,6 +15,17 @@ city loses its shell at once and nothing in the failure names the cause. `df`
 is no guide either: it reports the filesystem's free space, while the binding
 limit is the quota, so the two disagree by gigabytes exactly when it matters.
 
+## Scope
+
+**Mandate.** Reclaiming the session trees Claude Code leaves under the per-uid
+scratch root: what a pass removes and when, what holds a tree, the rails on its
+deletes, and how an operator runs it.
+
+**Boundaries.** It reclaims only the harness's scratch root. Bead worktrees are
+[worktree-reclaim.md](worktree-reclaim.md)'s, and build scratch and review
+workspaces have reapers of their own. The recycle that hands the reaper a
+retiring session is [cycle-recycle.md](cycle-recycle.md).
+
 ## What the reaper does
 
 `orders/scratch-reap.toml` runs `assets/scripts/scratch-reap.sh` hourly,

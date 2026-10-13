@@ -69,8 +69,7 @@ extract() {
 # `gc bd update` so the assertions can see what a snippet DID, not just what it
 # printed. Honours the same flags the real queries pass.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 # Fixture-backed stand-in for the parts of `gc` the snippets touch. Anything
 # not matched below (e.g. `gc runtime drain-ack`) is a silent no-op.
 set -u

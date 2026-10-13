@@ -61,8 +61,7 @@ bash -n "$SUT" && ok "converse-claim.sh: valid bash" \
 #   bd close <id>        -> exits CLOSE_RC (default 0).
 # Updates and closes are logged to EVENTS, when set, in the order they ran.
 # Any other call exits 2, so a script that grows one fails here, not live.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 case "${1:-}" in
     hook)
         if [ "${CLAIM_MODE-}" = nowork ]; then printf '{}\n'; exit 0; fi

@@ -63,8 +63,7 @@ fi
 # ── stubs ─────────────────────────────────────────────────────────────────
 mkdir -p "$SANDBOX/bin" "$SANDBOX/stores" "$SANDBOX/pack/assets/scripts"
 
-cat > "$SANDBOX/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SANDBOX/bin/gc" <<'STUB'
 # Only `gc bd --rig <R> list ...` is reachable from the block: the poured rig
 # list means `gc rig list` is never called, and a poured name carries no path.
 rig=""; prev=""

@@ -182,7 +182,7 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 # answer; the caller holds the dispatch.
 inflight_review() { # <anchor-id> <check>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" '
     [ .[]
       | select(((.metadata.task_kind // "") | tostring) == "review")
@@ -216,7 +216,7 @@ inflight_review() { # <anchor-id> <check>
 # here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
     [ .[]
       | (.metadata // {}) as $m
@@ -230,12 +230,14 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 }
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
-# child is a blocks-dep bead whose metadata carries a non-empty
-# source_review_bead, which request-changes stamps on the one child it files as
-# it clears check.<g>, so a lane back to unreviewed with one of these still
-# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
-# could not answer; the caller holds the dispatch, the same as an unreadable
-# in-flight-review lookup.
+# child here is a blocks-dep bead whose metadata carries a source key, which
+# rework-child.sh stamps on each child it files: source_review_bead on the one a
+# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
+# one an operator ruling files. Either is changing the branch, so a review that
+# read it now would read a mid-change diff, and a lane back to unreviewed with
+# one still open is owed the rework landing, not a fresh review. Non-zero rc =
+# the ledger could not answer; the caller holds the dispatch, the same as an
+# unreadable in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -245,7 +247,8 @@ open_rework_child() { # <anchor-id>
     ($ls | split(",")) as $live
     | [ .[]
         | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
-        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | select(((.metadata.source_review_bead // "") | tostring) != ""
+                 or ((.metadata.source_ruling_bead // "") | tostring) != "")
         | .id ] | (.[0] // empty)' 2>/dev/null
 }
 
@@ -260,7 +263,7 @@ open_rework_child() { # <anchor-id>
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r '
     .[] | select(((.metadata.task_kind // "") | tostring) == "validation") | .id' 2>/dev/null
 }
@@ -284,7 +287,7 @@ open_validation_pass() { # <anchor-id>
 # answering), and quiesce_unreadable (a probe could not answer — fail closed, hold
 # and retry next pass). The clauses, in order, first hold wins:
 #   (a) a fix unit in flight answering an open must-fix finding, ANY lane [finding.sh fix-in-flight]
-#   (b) a fix unit in flight resolving a finding on the anchor            [open_rework_child]
+#   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
 # with inflight_review at the dispatch site. Each clause is an open-bead query;
@@ -292,14 +295,15 @@ open_validation_pass() { # <anchor-id>
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
-# and names it. Clause (b) cannot stand in for it: it sees only a request-changes
-# rework child, never the fix unit pr-facts.sh files for a human batch. A must-fix
-# finding nothing answers, with no fix unit in flight and no validation pass, sits
-# on a diff no one is changing, which is not the mid-change read quiescence
-# forbids. It holds no dispatch: a lane short of green dispatches as it would
-# without the finding, still subject to the per-head bar. It still holds the
-# merge through its blocks edge, and the settle decision still reads it as owed,
-# so it is reported here once per anchor instead of being named as an actor.
+# and names it. Clause (b) cannot stand in for it: it sees only the rework child
+# a request-changes verdict or a ruling files, never the fix unit pr-facts.sh
+# files for a human batch. A must-fix finding nothing answers, with no fix unit
+# in flight and no validation pass, sits on a diff no one is changing, which is
+# not the mid-change read quiescence forbids. It holds no dispatch: a lane short
+# of green dispatches as it would without the finding, still subject to the
+# per-head bar. It still holds the merge through its blocks edge, and the settle
+# decision still reads it as owed, so it is reported here once per anchor instead
+# of being named as an actor.
 compute_quiescence() { # <anchor-id>
   quiesce_hold=""; quiesce_reason=""; quiesce_unanswered=""; quiesce_unreadable=0
   local fif rc fu fst mf vp
@@ -313,7 +317,7 @@ compute_quiescence() { # <anchor-id>
     1) quiesce_unanswered=$(printf '%s' "$fif" | tr '\n' ' ' | sed 's/ *$//') ;;
     *) quiesce_unreadable=1; return 0 ;; # 2 unreadable, or the tool is missing
   esac
-  # (b) fix unit in flight (a live blocks-dep child carrying source_review_bead).
+  # (b) fix unit in flight (a live blocks-dep child carrying a source key).
   if ! fu=$(open_rework_child "$1"); then quiesce_unreadable=1; return 0; fi
   if [ -n "$fu" ]; then quiesce_hold=1; quiesce_reason="fix unit $fu in flight"; return 0; fi
   # (c) validation pass in flight.
@@ -770,7 +774,7 @@ STRAY
   # already derives each lane as green (settled) or short of green; these two
   # flags keep that answer instead of discarding it at the end of the iteration.
   #
-  # The cap's wedge — shared with merge.sh's is_held arm — is evaluated once
+  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
   # HERE, per anchor, not inside the per-check loop: the park sits on the
   # anchor's own merge_hold, not on any one lane, so a fully green capped
   # anchor (one check hand-greened, or all of them) must still record the
@@ -901,6 +905,19 @@ STRAY
       esac
     fi
     why="lane '$g' does not derive green (no non-superseded approve review backs it)"
+    # A lane the latest bring-current round reopened: the review reads that
+    # round's account, and the triage dispatch also rules on the round when no
+    # ruling is recorded yet.
+    round_lane=$(printf '%s' "$row" | jq -r --arg g "$g" '(.metadata.bring_current_record // null)
+      | if type == "string" then (fromjson? // null) else . end
+      | if type != "object" or .class != "conflicted" then ""
+        elif .triage == null then (if $g == "triage" then "rule" else "" end)
+        elif ((((.triage.reopen // []) + (.triage.add // [])) | index($g)) != null) then "read"
+        else "" end' 2>/dev/null)
+    case "$round_lane" in
+      rule) why="lane '$g' was reopened by a bring-current round that conflicted: rule on the round (signoff.sh --reopen, --round-reason, --dismiss-approval) after reading its account, bring-current-audit.sh render --anchor $id --as comment" ;;
+      read) why="lane '$g' was reopened by the ruling on a bring-current round: read the round's account first, bring-current-audit.sh render --anchor $id --as comment" ;;
+    esac
 
     # A lane short of green is what machine `progressing` names — not the outcome
     # of this particular attempt. A dispatch the operator hold defers, one held
@@ -1048,6 +1065,12 @@ STRAY
     # half-stamped review is never adopted here and re-stamped with this lane's
     # check_name onto a body the body-emitter wrote for the other check. An
     # unreadable probe dispatches nothing (retry next pass).
+    #
+    # The review is joined to the anchor BEFORE anchor_bead is stamped: a create
+    # carries the edge (bd_create_child), and an adopted orphan is joined first.
+    # So a stamp that lands always lands on a joined review, whose verdict the
+    # anchor's closed-children read reaches once it closes, and a failed join
+    # leaves an orphan the next pass adopts again.
     RID_TITLE="Review branch $branch -> $target ($g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
@@ -1057,16 +1080,20 @@ STRAY
       [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
     if [ -n "$RID" ]; then
       echo "$PROG: $id adopting unstamped review orphan $RID for check '$g' (created by a prior pass whose stamp failed)"
+      if ! bd_anchor_link "$id" "$RID"; then
+        echo "$PROG: $id could not join review orphan $RID to the anchor; dispatching nothing (merge stays held, retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
     else
       body=""
       [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
-          | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
+          | bd_create_child "$id" "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       else
         echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-        RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
+        RID=$(bd_create_child "$id" "$RID_TITLE $title" -t task --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       fi
     fi

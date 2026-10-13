@@ -71,8 +71,7 @@ if [ ! -s "$BLOCK" ]; then
   bad "no '# >>> escalation-rig' block in the formula to execute"
 else
   ok "the formula's rig derivation is extractable as a marked block"
-  cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 set -u
 [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ] || exit 0
 printf '%s\n' '{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/c/rigs/gc-toolkit"},

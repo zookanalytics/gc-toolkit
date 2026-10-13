@@ -77,8 +77,7 @@ cat > "$TMP/rigs.json" <<JSON
 ]}
 JSON
 : > "$TMP/ledger"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1" in
   rig) cat "$FAKE_RIGS_JSON" ;;
   bd)
@@ -348,8 +347,7 @@ cat > "$TMP/rigs.json" <<JSON
 JSON
 : > "$TMP/escalations"
 REAL_GIT="$(PATH="${PATH#"$TMP/bin:"}" command -v git)"
-cat > "$TMP/bin/git" <<GITSHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<GITSHIM
 for a in "\$@"; do [ "\$a" = "status" ] && exit 128; done
 exec "$REAL_GIT" "\$@"
 GITSHIM

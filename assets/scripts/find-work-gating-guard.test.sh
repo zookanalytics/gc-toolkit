@@ -99,8 +99,7 @@ esac
 # starvation case below actually exercises the widened window: with --limit=1 a
 # leading parked anchor is the only row the filter ever sees.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
 [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 0   # bd fails open: empty stdout
 lim=0

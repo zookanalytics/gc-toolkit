@@ -1,3 +1,8 @@
+---
+name: V6 inversions against field consensus
+description: Validation report V6 for the escalation work (tk-px5od), which inverts the AI-assisted-development field's 2026 consensus framings and tests where each inversion challenges or reinforces the pack's current shape.
+---
+
 # V6 — Inversions Against Field Consensus
 
 > **Status: drafting.** Recovery-Oriented Computing flipped a dominant

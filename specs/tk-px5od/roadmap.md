@@ -1,3 +1,8 @@
+---
+name: Escalation roadmap of phased and future work
+description: The parking lot for escalation items (tk-px5od) that were judged load-bearing or directionally right but deferred, each with what would unblock it. Read it before proposing work this program may already have weighed.
+---
+
 # Escalation — Roadmap (Future / Phased Work)
 
 > **What's not in v1 but should land in some phase.** Items here were
