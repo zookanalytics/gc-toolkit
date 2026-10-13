@@ -64,8 +64,11 @@ overrule — but declining a human objection owes them an answer, passed as
 silent decline; a deferral owes the same answer, its follow-up id posted the same
 way, and a comment the pass genuinely cannot judge is `needs-you` — it files a
 visit, holds the review changes-requested until the operator rules it, and posts
-the visit id to their thread; a re-raise re-blocks because the closed finding
-re-adopts fresh on re-review),
+the visit id to their thread; a comment whose question an open visit on the
+anchor's feedback already carries is `needs-you --visit` on that visit, never
+ruled on its merits, and `finding.sh` refuses any other ruling while that visit
+sits on the comment's own rework; a re-raise re-blocks because the closed
+finding re-adopts fresh on re-review),
 and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
