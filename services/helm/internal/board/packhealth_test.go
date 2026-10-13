@@ -228,6 +228,21 @@ func TestBehindMainIsElevatedEvenWhenLocallyCurrent(t *testing.T) {
 	}
 }
 
+func TestBehindMainDetailFitsEveryComponent(t *testing.T) {
+	// Every compiled component's builder records behind_main under its own
+	// sources, so the row's detail must not name another component's: gctk's
+	// row speaking of "the helm sources" would send the operator to the wrong
+	// module.
+	got := one(t, PackBuild{Component: "gctk", SourceRev: "cafe0123456789ab", BinaryRev: "cafe0123456789ab",
+		BehindMain: 2})
+	if got.Severity != SevElevated {
+		t.Errorf("severity = %s, want ELEVATED", got.Severity)
+	}
+	if strings.Contains(got.Detail, "helm") {
+		t.Errorf("detail %q names helm on gctk's row", got.Detail)
+	}
+}
+
 func TestBehindMainZeroLeavesTheRowCurrent(t *testing.T) {
 	// A checkout on main and current: behind_main is 0 and the row reads exactly
 	// as it did before the field existed.
