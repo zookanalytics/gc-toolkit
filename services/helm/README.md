@@ -506,8 +506,9 @@ field would be lying on a normal day.
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
 marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
-record it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>`
-shape the gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+record it through the lifecycle writer, gate-ensure through `lifecycle.sh` and
+`gctk merge` in-process, in the head-pinned `<value>@<oid>@<since>` shape the
+gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
 
 **No per-PR GitHub call.** A conversation read costs one GitHub round trip per
 open pull request, and a backlog of ordinary size spends the board's whole cache
