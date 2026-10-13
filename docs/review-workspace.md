@@ -1,6 +1,6 @@
 ---
 name: Review workspace
-description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing how a review runs its tests or how review leftovers in /tmp are reclaimed.
+description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit or runs a suite, or how review leftovers in /tmp are reclaimed.
 ---
 
 # Review workspace
