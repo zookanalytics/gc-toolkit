@@ -5,7 +5,9 @@
 # lifecycle transition closing with merged_sha); every validate hold in order
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, the universal approval
-# rule + veto, CLEAN/UNSTABLE handling, BLOCKED naming its cause from
+# rule + veto and the lift line a bring-current ruling draws on it, which the
+# visit order and the terminal re-read read too, CLEAN/UNSTABLE handling,
+# BLOCKED naming its cause from
 # reviewThreads + reviewDecision, an UNKNOWN merge state read again within one
 # budget per pass so one pass lands every approved clean PR); the check
 # resolver, whose crash holds the merge and whose absence holds the pass; a
@@ -1997,26 +1999,38 @@ rcf_case 309 "a branch read that fails" "unknown" - - "repos/zook/gc-toolkit/bra
 
 echo "# the approval rule: review-verdict.sh and gctk merge reach one verdict"
 # gctk merge shows its verdict at its approval gate: it merges an approved,
-# green, CLEAN PR, holds a vetoed one naming the reviewer, and holds one with no
-# outside approval. The review histories are review-verdict.test.sh's cases.
+# green, CLEAN PR, holds a vetoed one naming the reviewer, holds one with no
+# outside approval, and holds one whose only approval the anchor's lift line
+# set aside, naming that approval. The review histories are
+# review-verdict.test.sh's cases. A case with a lift line puts it on the anchor
+# as bring_current_lifted_at and judges by the two-argument review_verdict,
+# which pr-facts.sh's conflict arm applies.
 # shellcheck source=review-verdict.sh
 . "$HERE/review-verdict.sh" || bad "review-verdict.sh sources beside this suite"
 rvw() { # id login state submitted_at
   printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"sha-0","submitted_at":"%s"}' "$1" "$2" "$3" "$4"
 }
-verdict_case() { # <num> <label> <want: veto:<login> | approver:<login> | none> <reviews-json>
-  local num="$1" label="$2" want="$3" reviews="$4" id="AV$1" v veto approver got line
-  v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" "$REVIEW_VERDICT_DEF"'review_verdict($self)')
+verdict_case() { # <num> <label> <want: veto:<login> | approver:<login> | lifted:<login> | none> <reviews-json> [<lift line>]
+  local num="$1" label="$2" want="$3" reviews="$4" lift="${5:-}" id="AV$1" v veto approver setaside got line extra=""
+  if [ -n "$lift" ]; then
+    v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" --arg lifted "$lift" "$REVIEW_VERDICT_DEF"'review_verdict($self; $lifted)')
+    extra=",\"bring_current_lifted_at\":\"$lift\""
+  else
+    v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" "$REVIEW_VERDICT_DEF"'review_verdict($self)')
+  fi
   veto=$(printf '%s' "$v" | jq -r '.veto // ""')
   approver=$(printf '%s' "$v" | jq -r '.approver // ""')
-  if [ -n "$veto" ]; then got="veto:$veto"; elif [ -n "$approver" ]; then got="approver:$approver"; else got="none"; fi
+  setaside=$(printf '%s' "$v" | jq -r '.lifted // ""')
+  if [ -n "$veto" ]; then got="veto:$veto"; elif [ -n "$approver" ]; then got="approver:$approver"
+  elif [ -n "$setaside" ]; then got="lifted:$setaside"; else got="none"; fi
   eq "$got" "$want" "review-verdict.sh judges $label as $want"
   case "$got" in
     veto:*)     line="merge: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED" ;;
     approver:*) line="merge: merged + recorded $id" ;;
+    lifted:*)   line="merge: PR#$num the approval from '$setaside' was given at or before the bring-current round whose ruling lifted it ($lift)" ;;
     *)          line="merge: PR#$num no external APPROVED review stands" ;;
   esac
-  store "[$(anchor "$id" "$num"), $(rev "$id")]"
+  store "[$(anchor "$id" "$num" "$extra"), $(rev "$id")]"
   printf '%s' "$(prview "$num" OPEN CLEAN)" > "$GH_DIR/pr_view_$num.json"
   printf '%s' "$reviews" > "$GH_DIR/reviews_$num.json"
   out=$("$SUT" 2>&1)
@@ -2042,6 +2056,27 @@ verdict_case 320 "a tie on the timestamp, which the higher review id breaks" "ap
   "[$(rvw 2 human1 APPROVED $T0),$(rvw 1 human1 CHANGES_REQUESTED $T0)]"
 verdict_case 321 "two accounts requesting changes" "veto:human2" \
   "[$(rvw 1 human3 CHANGES_REQUESTED $T0),$(rvw 2 human2 CHANGES_REQUESTED $T0)]"
+LIFT=2026-08-21T00:00:00Z; T2=2026-08-22T00:00:00Z
+verdict_case 322 "an approval submitted before the lift line" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $T0)]" "$LIFT"
+verdict_case 323 "an approval submitted at the lift line itself" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $LIFT)]" "$LIFT"
+verdict_case 324 "an approval submitted one second after the lift line" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED 2026-08-21T00:00:01Z)]" "$LIFT"
+verdict_case 325 "an approval after the line beside one it set aside" "approver:human2" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human2 APPROVED $T2)]" "$LIFT"
+verdict_case 326 "an account that approved again after the line" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human1 APPROVED $T2)]" "$LIFT"
+verdict_case 327 "two approvals the line set aside, named in login order" "lifted:human1" \
+  "[$(rvw 1 human2 APPROVED $T0),$(rvw 2 human1 APPROVED $T0)]" "$LIFT"
+verdict_case 328 "a veto given before the line, beside an approval after it" "veto:human2" \
+  "[$(rvw 1 human1 APPROVED $T2),$(rvw 2 human2 CHANGES_REQUESTED $T0)]" "$LIFT"
+verdict_case 329 "the city's own approval after the line" "none" \
+  "[$(rvw 1 "$STUB_SELF_LOGIN" APPROVED $T2)]" "$LIFT"
+verdict_case 330 "a dismissed approval with a line" "none" \
+  "[$(rvw 1 human1 DISMISSED $T0)]" "$LIFT"
+verdict_case 331 "a lift line that is not YYYY-MM-DDTHH:MM:SSZ" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $T2)]" "2026-08-21"
 
 fi # part gates
 

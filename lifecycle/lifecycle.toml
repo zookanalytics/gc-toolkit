@@ -634,12 +634,13 @@ keys = [
 #   own time when the round recorded none). Written by bring-current-guard.sh
 #   decide once triage's ruling to lift the approval is recorded, and read back
 #   before any approval is dismissed; it never moves back. The approval rule
-#   (review-verdict.sh) counts no approval submitted at or before it, in
-#   merge.sh's gate and visit order and in pr-facts.sh's conflict arm, so an
-#   approval GitHub would not let the guard dismiss still lands nothing, and
-#   one submitted after it lands the PR. A later round whose ruling keeps the
-#   approval leaves it as it is. Absent means no ruling lifted the approval.
-#   Never cleared.
+#   counts no approval submitted at or before it: gctk merge's reviewVerdict
+#   at the merge's approval gate and in its visit order, whose terminal re-read
+#   holds a merge when the line moved after validation, and review-verdict.sh
+#   in pr-facts.sh's conflict arm. So an approval GitHub would not let the
+#   guard dismiss still lands nothing, and one submitted after it lands the PR.
+#   A later round whose ruling keeps the approval leaves it as it is. Absent
+#   means no ruling lifted the approval. Never cleared.
 
 [metadata.gates]
 keys = [
