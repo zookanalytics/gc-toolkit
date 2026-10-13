@@ -651,6 +651,8 @@ FAILLOG
 )
 # The lookup matches the failure_key stamp, which a retitle leaves in place,
 # over every live status, because a red persists while someone fixes it. A
+# tracker that a fold closed answers with the live bead its failure moved to,
+# such as a batch, and that bead is the filing the merge notes cite. A
 # lookup that could not read the store exits non-zero. That is UNKNOWN, never
 # "no duplicate": file nothing and merge nothing, and the next patrol
 # re-probes.
