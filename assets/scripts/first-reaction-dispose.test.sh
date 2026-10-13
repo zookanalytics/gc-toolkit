@@ -54,8 +54,23 @@ case "$1 ${2:-}" in
     _prev=""; _reco_set=""; _reco_unset=""
     for _a in "$@"; do
       case "$_prev" in
-        --set-metadata)   case "$_a" in gc.recommended_formula=*) _reco_set="${_a#gc.recommended_formula=}" ;; esac ;;
+        --set-metadata)   case "$_a" in
+                            gc.recommended_formula=*) _reco_set="${_a#gc.recommended_formula=}" ;;
+                            # Intake's marker, read back by the script before it
+                            # releases the bead. FAKE_DROP_PLACEMENT models a
+                            # silent drop: =once drops the first write only.
+                            placement=*)
+                              case "${FAKE_DROP_PLACEMENT:-}" in
+                                once) if [ -e "$FAKE_STATE.placement-dropped" ]; then printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement"
+                                      else : > "$FAKE_STATE.placement-dropped"; fi ;;
+                                ?*)   : ;;
+                                *)    printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement" ;;
+                              esac ;;
+                          esac ;;
         --unset-metadata) [ "$_a" = "gc.recommended_formula" ] && _reco_unset=1 ;;
+        # An emergency's P0, read back before its route. FAKE_DROP_PRIORITY
+        # models a priority write that reports success and does not move.
+        --priority) [ -n "${FAKE_DROP_PRIORITY:-}" ] || printf '%s' "$_a" > "$FAKE_STATE.priority" ;;
       esac
       _prev="$_a"
     done
@@ -91,13 +106,19 @@ case "$1 ${2:-}" in
     fi
     # Overlay the current gc.recommended_formula state (set by bd update above)
     # onto the fixture, so a read-back sees what the last write actually did.
+    # Intake's placement marker and an emergency's priority overlay the same way.
     _base="${FAKE_SHOW_JSON:-$DEFAULT_SHOW}"
     _reco="$(cat "$FAKE_STATE" 2>/dev/null || printf '')"
+    _placement="$(cat "$FAKE_STATE.placement" 2>/dev/null || printf '')"
+    _priority="$(cat "$FAKE_STATE.priority" 2>/dev/null || printf '')"
     if [ -n "$_reco" ]; then
-      printf '%s' "$_base" | jq -c --arg v "$_reco" '.[0].metadata = ((.[0].metadata // {}) + {"gc.recommended_formula": $v})' 2>/dev/null || printf '%s\n' "$_base"
+      _shown=$(printf '%s' "$_base" | jq -c --arg v "$_reco" '.[0].metadata = ((.[0].metadata // {}) + {"gc.recommended_formula": $v})' 2>/dev/null || printf '%s\n' "$_base")
     else
-      printf '%s' "$_base" | jq -c '.[0].metadata = ((.[0].metadata // {}) | del(.["gc.recommended_formula"]))' 2>/dev/null || printf '%s\n' "$_base"
-    fi ;;
+      _shown=$(printf '%s' "$_base" | jq -c '.[0].metadata = ((.[0].metadata // {}) | del(.["gc.recommended_formula"]))' 2>/dev/null || printf '%s\n' "$_base")
+    fi
+    [ -n "$_placement" ] && _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_placement" '.[0].metadata.placement = $v' 2>/dev/null || printf '%s' "$_shown")
+    [ -n "$_priority" ] && _shown=$(printf '%s' "$_shown" | jq -c --argjson v "$_priority" '.[0].priority = $v' 2>/dev/null || printf '%s' "$_shown")
+    printf '%s\n' "$_shown" ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
@@ -143,13 +164,23 @@ if [ "${1:-}" = demand ]; then
   printf 'demand %s blocks %s (by proactive): %s\n' "${FAKE_GATE_ID:-tk-gate1}" "$2" "$3"
   exit 0
 fi
-# Model gc-helm.sh takeaway --release retiring the pour stamp as provenance. The
-# shared-state file stands in for gc.execution_routed_to; a run that does not opt
-# in (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm no longer depends on
-# this clear — a plain arm lands whether or not the stamp is set — so the clear
-# is hygiene the release owes, not a precondition for the dispatch.
+# Model gc-helm.sh takeaway --release retiring the pour stamp. The shared-state
+# file stands in for gc.execution_routed_to; a run that does not opt in
+# (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm does not depend on this
+# clear: a plain arm lands whether or not the stamp is set. FAKE_HELM_KEEPS_STAMP
+# models a clear that does not land. gc-helm.sh then fails the release (exit 4)
+# when the stamp is all that places the bead. That is a bead intake marked
+# placement=pending, released with no route or assignee. Everywhere else it warns
+# and exits 0.
 case " $* " in
-  *" --release "*) [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ] && : > "$FAKE_EXEC_ROUTED_FILE" ;;
+  *" --release "*)
+    if [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ]; then
+      if [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ]; then
+        : > "$FAKE_EXEC_ROUTED_FILE"
+      elif [ "$(cat "$FAKE_STATE.placement" 2>/dev/null)" = pending ]; then
+        case " $* " in *" --route "*|*" --assign "*) ;; *) exit 4 ;; esac
+      fi
+    fi ;;
 esac
 exit 0
 HELM
@@ -186,13 +217,60 @@ exit 0
 DD
 chmod +x "$TMP/deferred"
 
+# An emergency's check reads the subject's repository from its rig checkout and
+# main's checks from GitHub. FAKE_ORIGIN_URL is the origin the checkout names
+# (unset: no origin). FAKE_GH picks GitHub's answer: red (a failing check run),
+# status-red (only a legacy commit status fails), green (passing, cancelled and
+# still-running runs, none red), down (gh answers nothing), hang (gh stalls on
+# the check runs until something kills it). red-page2 and status-red-page2 put
+# the failure on a second page, which gh prints only under --paginate, as one
+# more JSON object after the first page's.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
+case "$*" in
+  *"remote get-url origin"*) [ -n "${FAKE_ORIGIN_URL:-}" ] || exit 2; printf '%s\n' "$FAKE_ORIGIN_URL" ;;
+  *) exit 1 ;;
+esac
+GIT
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
+printf 'GH %s\n' "$*" >> "$FAKE_LOG"
+[ "${FAKE_GH:-}" = down ] && exit 1
+PAGINATE=""; case " $* " in *" --paginate "*) PAGINATE=1 ;; esac
+GREEN_RUNS='{"total_count":3,"check_runs":[{"name":"lint","status":"completed","conclusion":"success","head_sha":"abcdef1234567890"},{"name":"test-linux","status":"completed","conclusion":"cancelled","head_sha":"abcdef1234567890"},{"name":"test-macos","status":"in_progress","conclusion":null,"head_sha":"abcdef1234567890"}]}'
+GREEN_STATUS='{"state":"success","sha":"abcdef1234567890","statuses":[]}'
+case "${2:-}" in
+  repos/*/check-runs*)
+    case "${FAKE_GH:-}" in
+      hang) exec sleep 30 ;;
+      red) printf '%s\n' '{"total_count":2,"check_runs":[{"name":"lint","status":"completed","conclusion":"success","head_sha":"abcdef1234567890"},{"name":"test-macos","status":"completed","conclusion":"failure","head_sha":"abcdef1234567890"}]}' ;;
+      red-page2) printf '%s\n' "$GREEN_RUNS"
+                 [ -z "$PAGINATE" ] || printf '%s\n' '{"total_count":4,"check_runs":[{"name":"test-e2e","status":"completed","conclusion":"timed_out","head_sha":"abcdef1234567890"}]}' ;;
+      *)   printf '%s\n' "$GREEN_RUNS" ;;
+    esac ;;
+  repos/*/status*)
+    case "${FAKE_GH:-}" in
+      status-red) printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/legacy","state":"failure"}]}' ;;
+      status-red-page2) printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/docs","state":"success"}]}'
+                        [ -z "$PAGINATE" ] || printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/legacy","state":"error"}]}' ;;
+      *)          printf '%s\n' "$GREEN_STATUS" ;;
+    esac ;;
+  repos/*) printf '%s\n' '{"default_branch":"main"}' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$TMP/bin/git" "$TMP/bin/gh"
+
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/log"
 export FAKE_STATE="$TMP/reco_state"
 # The subject fixture when a test sets no FAKE_SHOW_JSON. Held in a variable
 # because a literal `{}` inside a ${var:-default} confuses brace matching and
-# yields malformed JSON.
-export DEFAULT_SHOW='[{"id":"tk-sub","metadata":{}}]'
+# yields malformed JSON. The default subject is a member of an epic, which intake
+# admits to a pool; UNPLACED is the same subject with no parent, which intake
+# holds for placement. MEMBER splices the membership into a fixture of a test's
+# own.
+MEMBER='"parent":"tk-epic","dependencies":[{"id":"tk-epic","dependency_type":"parent-child","status":"open"}]'
+UNPLACED='[{"id":"tk-sub","metadata":{}}]'
+export DEFAULT_SHOW='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}}]'
 export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
        GC_PROACTIVE_TOOL="$TMP/proactive"
 
@@ -201,7 +279,7 @@ R="tk-react"   # the reaction bead the worker holds
 # Reset per run, then seed the recommendation state from the fixture so the first
 # `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
 run() {
-  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped"
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped" "$FAKE_STATE.placement" "$FAKE_STATE.placement-dropped" "$FAKE_STATE.priority"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
   RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")";
@@ -446,7 +524,7 @@ hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …so nothing is armed on a wait that doe
 # sling ever poured.
 export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed"
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}}]'
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
@@ -459,7 +537,8 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
 
 # Control: a release that leaves the pour stamp set still lets the plain arm land.
-# The coupled surface is gc-helm.sh takeaway --release: it WARNS on a surviving
+# The coupled surface is gc-helm.sh takeaway --release: on a bead nothing holds
+# for placement, here a member its parent places, it WARNS on a surviving
 # gc.execution_routed_to and returns 0 rather than failing, because no arm or
 # reconcile guard reads that stamp. The stub returns 0 with the stamp still set to
 # model exactly that path, so this control exercises the real release, not a state
@@ -474,10 +553,10 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 unset FAKE_HELM_KEEPS_STAMP
 
 # Contract: the arm is downstream of a release that SUCCEEDED. A genuine release
-# failure — not a cosmetic surviving stamp, but gc-helm exiting non-zero because a
-# write it owed did not land — dies before the arm, so a bead whose disposition
-# only half-wrote is never armed to auto-resume from that state, and no landed
-# proof or closed R says otherwise.
+# failure — not a surviving stamp gc-helm only warns on, but gc-helm exiting
+# non-zero because a write it owed did not land — dies before the arm, so a bead
+# whose disposition only half-wrote is never armed to auto-resume from that
+# state, and no landed proof or closed R says otherwise.
 export FAKE_HELM_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
@@ -506,7 +585,7 @@ hasnt "disposed as blocked" "$OUT" "(BLKARMFAIL) …and the run does not report 
 # The re-offered R re-runs the same call once the cause is cleared. The failed
 # run left the headline and the hold on the subject and no landed proof, so
 # nothing refuses the re-run: the arm lands, then the landed proof, then R closes.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.takeaway":"t","gc.takeaway_by":"proactive"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open",'"$MEMBER"',"metadata":{"gc.takeaway":"t","gc.takeaway_by":"proactive"}}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(BLKARMFAIL) the re-run after a failed arm succeeds"
@@ -843,7 +922,7 @@ eq "$LOG" "" "(RECO) …and writes nothing"
 # triaged on its merits, so every exit is open to it. The guardrail that a fork
 # or an irreversible action still goes to a human lives in the reacting agent's
 # rubric, not here.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.origin":"operator"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.origin":"operator"}}]'
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"},{"id":"tk-visit1"}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(ORIGIN) an operator-origin subject may take the actionable exit"
@@ -1007,7 +1086,7 @@ hasnt "SLING" "$LOG" "(REOFFER) …which slings no second closer"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
 hasnt "HELM demand" "$LOG" "(REOFFER) …and the gate form files no second gate"
 # A marker naming a DIFFERENT reaction does not suppress this one (re-reaction).
-export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.reacted_by":"tk-oldreact"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open",'"$MEMBER"',"metadata":{"gc.reacted_by":"tk-oldreact"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(REOFFER) a marker from a DIFFERENT reaction does not block this one"
 has "HELM takeaway tk-sub" "$LOG" "(REOFFER) …the reaction proceeds"
@@ -1067,14 +1146,17 @@ eq "$RC" "0" "(LEGACY-REOFFER) the number form bd stores is read as the landed p
 hasnt "HELM" "$LOG" "(LEGACY-REOFFER) …with no re-release"
 
 # Positive finding only: an unreadable bead is not evidence of a prior reaction.
+# The exit here hands the bead to a named agent, which intake does not read: an
+# unreadable subject proves no membership, so a pool route on it is held (see
+# INTAKEUNREAD below).
 export FAKE_SHOW_JSON='not json'
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik
 eq "$RC" "0" "(LEGACY-REOFFER) an unreadable bead is not evidence of a prior reaction"
 has "HELM takeaway tk-sub" "$LOG" "(LEGACY-REOFFER) …so the act runs"
 
 # A retired attempt record left by an older reaction is not a landed proof: it
 # neither refuses the run nor is written again.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z"}}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(RESUME) a retired gc.first_reaction record does not refuse the run"
 has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the act runs"
@@ -1131,6 +1213,266 @@ hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a dispo
 hasnt "gc.reacted_by" "$LOG" "(HELMFAIL) …and the landed proof is not stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(HELMFAIL) …and the reaction bead is not closed"
 unset FAKE_HELM_FAILS
+
+# ── Intake: only placed work, PR-finishing work or an emergency enters a pool ──
+# Every case above routes a member of an epic. A bead with no parent waits for
+# the operator's placement sitting instead: the actionable exit marks it
+# placement=pending and releases it with no route, and the blocked exit's
+# --then-route arms nothing.
+#   (INTAKE)       an unplaced subject is marked and released unrouted, settled
+#   (INTAKEORDER)  the marker lands before the release, the landed proof after
+#   (INTAKENOTE)   the marker's write carries a note naming why it was held
+#   (INTAKEPOOL)   the route it never writes is not probed
+#   (INTAKEMEMBER) a parent-child dependency is membership even with no .parent,
+#                  and a blocks edge is not
+#   (INTAKEANCHOR) PR-finishing work (anchor_bead) is routed
+#   (INTAKEMARK)   a marker that does not land stops the exit before the release
+#   (INTAKESTAMP)  a pour stamp the release cannot clear from a held subject
+#                  stops the exit before its landed proof
+#   (INTAKEBLK)    an unplaced blocked subject's edge lands and nothing is armed
+#   (INTAKEDRY)    a dry run names the hold and writes nothing
+#   (INTAKEUNREAD) an unreadable subject proves no membership, so it is held
+export FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "states a done condition and a branch" \
+    --takeaway "ready to build once placed" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKE) an unplaced subject's actionable exit succeeds"
+has "UPDATE bd update tk-sub --set-metadata placement=pending --append-notes ## Intake (first reaction" "$LOG" \
+    "(INTAKE) …marking it placement=pending"
+has "HELM takeaway tk-sub ready to build once placed --by proactive --release --no-wait" "$LOG" \
+    "(INTAKE) …and releasing it with no route, nothing waiting on a bead"
+hasnt "--route" "$LOG" "(INTAKE) …so no pool is offered it"
+before 'placement=pending' '^HELM takeaway' "(INTAKEORDER) the marker lands before the release"
+before '^HELM takeaway' 'gc.reacted_by' "(INTAKEORDER) …and the landed proof after it"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(INTAKE) …and the reaction bead closes"
+has "disposed as actionable (held for placement)" "$OUT" "(INTAKE) …and the run says the bead is held for placement"
+has "tk-sub has no parent epic and is not PR-finishing work" "$LOG" "(INTAKENOTE) the note names why it was held"
+has "gc-helm.sh unplaced lists it" "$LOG" "(INTAKENOTE) …and where the sitting finds it"
+hasnt "PROACTIVE deliverable" "$LOG" "(INTAKEPOOL) the route it never writes is not probed"
+hasnt "GH " "$LOG" "(INTAKE) …and with no emergency claimed, GitHub is not read"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","dependencies":[{"id":"tk-feat","dependency_type":"parent-child","status":"open"}],"metadata":{}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+has "--release --route gc-toolkit/gc-toolkit.polecat --no-wait" "$LOG" "(INTAKEMEMBER) a parent-child dependency alone is membership"
+hasnt "placement=pending" "$LOG" "(INTAKEMEMBER) …and a member is not marked"
+export FAKE_SHOW_JSON='[{"id":"tk-sub","dependencies":[{"id":"tk-rl","dependency_type":"blocks","status":"open"}],"metadata":{}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+has "placement=pending" "$LOG" "(INTAKEMEMBER) a blocks edge onto an epic is not membership"
+hasnt "--route" "$LOG" "(INTAKEMEMBER) …so the bead is not routed"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"anchor_bead":"tk-anchor"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKEANCHOR) PR-finishing work's actionable exit succeeds"
+has "--release --route gc-toolkit/gc-toolkit.polecat --no-wait" "$LOG" "(INTAKEANCHOR) …and it is routed"
+hasnt "placement=pending" "$LOG" "(INTAKEANCHOR) …unmarked"
+
+export FAKE_SHOW_JSON="$UNPLACED" FAKE_DROP_PLACEMENT=always
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(INTAKEMARK) a marker that does not land stops the exit"
+has "placement=pending did not land" "$ERR" "(INTAKEMARK) …naming the write that missed"
+hasnt "HELM takeaway" "$LOG" "(INTAKEMARK) …before the release, so the bead is not left unrouted without its marker"
+hasnt "gc.reacted_by" "$LOG" "(INTAKEMARK) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(INTAKEMARK) …and the reaction bead open for a re-run"
+export FAKE_DROP_PLACEMENT=once
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKEMARK) a marker that lands on the retry lets the exit through"
+has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKEMARK) …and the bead is released"
+unset FAKE_DROP_PLACEMENT
+
+# (INTAKESTAMP) a held subject still carries a dead pour's stamp, and the release
+# cannot clear it. gc-helm.sh fails the release, because placement.sh reads the
+# stamp as a live pour and the queue would not list the bead. The exit stops
+# there, before its landed proof, so the reaction is not recorded done over a hold
+# the sitting cannot see, and R stays open for a re-run.
+export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed" FAKE_HELM_KEEPS_STAMP=1
+printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(INTAKESTAMP) a held subject whose pour stamp survives the release fails the exit"
+has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKESTAMP) …at the release"
+has "gc-helm.sh takeaway failed on tk-sub" "$ERR" "(INTAKESTAMP) …naming the release that failed"
+hasnt "gc.reacted_by" "$LOG" "(INTAKESTAMP) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(INTAKESTAMP) …and the reaction bead open for a re-run"
+# Control: the same stamp on a member is no hold, so the release warns and exits
+# 0, and the reaction lands.
+printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKESTAMP) the same stamp on a member does not fail the exit"
+has "gc.reacted_by" "$LOG" "(INTAKESTAMP) …and the landed proof is stamped"
+unset FAKE_EXEC_ROUTED_FILE FAKE_HELM_KEEPS_STAMP
+
+export FAKE_SHOW_JSON="$UNPLACED" FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "waits on the migration" --takeaway "held: migration first" \
+    --waiting-on tk-blk1 --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKEBLK) an unplaced blocked subject's exit succeeds"
+has "placement=pending" "$LOG" "(INTAKEBLK) …marked for placement"
+has "--release --waiting-on tk-blk1" "$LOG" "(INTAKEBLK) …its wait still an edge"
+hasnt "DEFERRED arm" "$LOG" "(INTAKEBLK) …and no dispatch armed: placing it is the sitting's"
+hasnt "PROACTIVE deliverable" "$LOG" "(INTAKEBLK) …so the then-route is not probed"
+has "disposed as blocked (tk-blk1; held for placement)" "$OUT" "(INTAKEBLK) …and the run names both waits"
+unset FAKE_DEPS_JSON
+
+export FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --dry-run
+eq "$RC" "0" "(INTAKEDRY) a dry run of a held exit succeeds"
+has "would hold tk-sub for placement (placement=pending, unrouted)" "$OUT" "(INTAKEDRY) …naming the hold"
+hasnt "UPDATE" "$LOG" "(INTAKEDRY) …and writing nothing"
+
+export FAKE_SHOW_JSON='not json'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(INTAKEUNREAD) an unreadable subject is held, and a marker it cannot read back stops the exit"
+hasnt "HELM takeaway" "$LOG" "(INTAKEUNREAD) …so it is never routed on an unread membership"
+unset FAKE_SHOW_JSON
+
+# ── Intake's emergency: checked, not asserted ────────────────────────────────
+# --emergency <check> claims a red main or a broken gate, naming the check whose
+# failure it is about. The claim admits a bead at P0 only when that check is
+# failing on the head of main, read from GitHub through the subject's own rig
+# checkout.
+#   (EMERG)       a confirmed emergency is written P0, read back, then routed
+#   (EMERGSTATUS) a failing commit status confirms it as a failing check run does
+#   (EMERGMEMBER) an emergency outranks membership: a member is routed at P0
+#   (EMERGNO)     a green main confirms nothing, so the bead is held, and the
+#                 note says what the check found
+#   (EMERGOTHER)  another check failing on main confirms nothing, and neither
+#                 does a check main does not carry; the note names what fails
+#   (EMERGDOWN)   a check that cannot run confirms nothing
+#   (EMERGPAGE)   a failure past the first page of check runs or commit
+#                 statuses confirms it, because both are read across every page
+#   (EMERGSLOW)   a GitHub that stalls is cut off at the bound and confirms
+#                 nothing, so the exit lands rather than hold its pool slot
+#   (EMERGPRIO)   a P0 that does not land stops the exit before the route
+#   (EMERGBLK)    an emergency's then-route arms at P0
+#   (EMERGARGS)   --emergency rides only a pool route, and names a check
+mkdir -p "$TMP/rig/.beads"
+export FAKE_RIG_PATH="$TMP/rig" FAKE_ORIGIN_URL="git@github.com:zook/repo.git"
+export FAKE_SHOW_JSON="$UNPLACED" FAKE_GH=red
+run tk-sub --disposition actionable --reason "test-macos fails on main" --takeaway "fix red main" \
+    --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+eq "$RC" "0" "(EMERG) a confirmed emergency's actionable exit succeeds"
+has "GH api repos/zook/repo/commits/main/check-runs" "$LOG" "(EMERG) the claim is checked against main's own checks"
+has "UPDATE bd update tk-sub --priority 0 --append-notes ## Intake (first reaction" "$LOG" "(EMERG) …P0 is written"
+before '--priority 0' '^HELM takeaway' "(EMERG) …before the route"
+has "--release --route gc-toolkit/gc-toolkit.polecat --no-wait" "$LOG" "(EMERG) …and the bead is routed"
+hasnt "placement=pending" "$LOG" "(EMERG) …unmarked"
+has "main of zook/repo at abcdef123456 is red: test-macos (failure)" "$LOG" "(EMERG) the note names the head and the failing check"
+has "disposed as actionable (gc-toolkit/gc-toolkit.polecat at P0)" "$OUT" "(EMERG) …and the run says P0"
+
+export FAKE_GH=status-red
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency ci/legacy --reaction-bead "$R"
+has "--priority 0" "$LOG" "(EMERGSTATUS) a failing commit status confirms an emergency"
+has "ci/legacy (failure)" "$LOG" "(EMERGSTATUS) …named in the note"
+
+export FAKE_GH=red FAKE_SHOW_JSON="$DEFAULT_SHOW"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+has "--priority 0" "$LOG" "(EMERGMEMBER) a member claimed as a confirmed emergency is written P0"
+has "--release --route gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGMEMBER) …and routed"
+
+export FAKE_GH=green FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+eq "$RC" "0" "(EMERGNO) an unconfirmed emergency's exit still lands"
+has "placement=pending" "$LOG" "(EMERGNO) …held for placement"
+hasnt "--priority" "$LOG" "(EMERGNO) …at the priority it was filed at"
+hasnt "--route" "$LOG" "(EMERGNO) …and unrouted"
+has "--emergency was not confirmed: test-macos is not failing on main of zook/repo at abcdef123456" "$LOG" \
+    "(EMERGNO) the note says what the check found"
+hasnt "other checks failing" "$LOG" "(EMERGNO) …and names no other failing check, because none fails"
+export FAKE_GH=green FAKE_SHOW_JSON="$DEFAULT_SHOW"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+has "--release --route gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGNO) an unconfirmed emergency on a member still routes as a member"
+hasnt "--priority" "$LOG" "(EMERGNO) …at its own priority"
+
+# Main is red on test-macos. A claim naming a check that passes there, or one
+# main does not carry, says nothing about this bead, so it is held.
+export FAKE_GH=red FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency lint --reaction-bead "$R"
+eq "$RC" "0" "(EMERGOTHER) a claim on a passing check, while another check fails, still lands"
+has "placement=pending" "$LOG" "(EMERGOTHER) …held for placement"
+hasnt "--priority" "$LOG" "(EMERGOTHER) …at the priority it was filed at"
+hasnt "--route" "$LOG" "(EMERGOTHER) …and unrouted"
+has "--emergency was not confirmed: lint is not failing on main of zook/repo at abcdef123456; other checks failing there: test-macos (failure)" "$LOG" \
+    "(EMERGOTHER) the note names the claimed check and the check that does fail"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-windows --reaction-bead "$R"
+has "placement=pending" "$LOG" "(EMERGOTHER) a claim on a check main does not carry is held"
+has "main of zook/repo at abcdef123456 has no check named test-windows; other checks failing there: test-macos (failure)" "$LOG" \
+    "(EMERGOTHER) …and the note says no check by that name runs there"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency=test-macos --reaction-bead "$R"
+has "--priority 0" "$LOG" "(EMERGOTHER) --emergency=<check> names the check the same way"
+
+export FAKE_GH=down FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+eq "$RC" "0" "(EMERGDOWN) a GitHub that does not answer leaves the exit landing"
+has "placement=pending" "$LOG" "(EMERGDOWN) …held, because an unread check confirms nothing"
+has "GitHub did not answer for the default branch of zook/repo (gh exit 1)" "$LOG" "(EMERGDOWN) …and the note says so"
+export FAKE_GH=red
+unset FAKE_ORIGIN_URL
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+has "placement=pending" "$LOG" "(EMERGDOWN) a checkout with no origin confirms nothing"
+has "is not a GitHub repository" "$LOG" "(EMERGDOWN) …and the note names why"
+hasnt "GH " "$LOG" "(EMERGDOWN) …and GitHub is not asked about a repository nobody named"
+export FAKE_ORIGIN_URL="https://github.com/zook/repo"
+
+export FAKE_GH=red-page2
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-e2e --reaction-bead "$R"
+has "GH api repos/zook/repo/commits/main/check-runs?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the check runs are read across every page"
+has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing run on the second page confirms the emergency"
+has "test-e2e (timed_out)" "$LOG" "(EMERGPAGE) …named in the note"
+export FAKE_GH=status-red-page2
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency ci/legacy --reaction-bead "$R"
+has "GH api repos/zook/repo/commits/main/status?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the commit statuses are read across every page"
+has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing status on the second page confirms the emergency"
+has "ci/legacy (error)" "$LOG" "(EMERGPAGE) …named in the note"
+
+export FAKE_GH=hang GC_FIRST_REACTION_GH_TIMEOUT=1
+SLOW_T0=$SECONDS
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+SLOW_DT=$((SECONDS - SLOW_T0))
+eq "$RC" "0" "(EMERGSLOW) a GitHub that stalls leaves the exit landing"
+[ "$SLOW_DT" -lt 15 ] && ok "(EMERGSLOW) …cut off at the bound rather than held for the stall (${SLOW_DT}s)" \
+    || bad "(EMERGSLOW) …cut off at the bound rather than held for the stall (took ${SLOW_DT}s)"
+has "placement=pending" "$LOG" "(EMERGSLOW) …held, because a read that ran out of time confirms nothing"
+has "GitHub did not answer for the check runs on main of zook/repo within 1s" "$LOG" "(EMERGSLOW) …and the note says the read timed out"
+unset GC_FIRST_REACTION_GH_TIMEOUT
+export FAKE_GH=red
+
+export FAKE_DROP_PRIORITY=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+eq "$RC" "4" "(EMERGPRIO) a P0 that does not land stops the exit"
+has "priority P0 did not land" "$ERR" "(EMERGPRIO) …naming the write that missed"
+hasnt "HELM takeaway" "$LOG" "(EMERGPRIO) …before the route, so it is never claimable at the wrong priority"
+unset FAKE_DROP_PRIORITY
+
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
+eq "$RC" "0" "(EMERGBLK) a blocked emergency's exit succeeds"
+before '--priority 0' '^DEFERRED arm' "(EMERGBLK) …P0 written before the arm"
+has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGBLK) …and the dispatch armed"
+has "disposed as blocked (tk-blk1; armed at P0)" "$OUT" "(EMERGBLK) …and the run says the arm is at P0"
+unset FAKE_DEPS_JSON
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --emergency test-macos
+eq "$RC" "2" "(EMERGARGS) --emergency beside --assign is refused"
+eq "$LOG" "" "(EMERGARGS) …and nothing was written"
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --emergency test-macos
+eq "$RC" "2" "(EMERGARGS) --emergency on a blocked exit that arms nothing is refused"
+run tk-sub --disposition close --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos
+eq "$RC" "2" "(EMERGARGS) close refuses --emergency"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --emergency test-macos
+eq "$RC" "2" "(EMERGARGS) ruling refuses --emergency"
+eq "$LOG" "" "(EMERGARGS) …and nothing was written"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R" --emergency
+eq "$RC" "2" "(EMERGARGS) --emergency that names no check is refused"
+has "needs the name of the check that fails on main" "$ERR" "(EMERGARGS) …saying what it needs"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is one followed by another flag instead of a check"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency= --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is an empty --emergency="
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency "  " --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is a blank check name"
+eq "$LOG" "" "(EMERGARGS) …and nothing was written"
+unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
 
 echo ""
 echo "first-reaction-dispose (five exits, reaction-bead): $PASS passed, $FAIL failed"
