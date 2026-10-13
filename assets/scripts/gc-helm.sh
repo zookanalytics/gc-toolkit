@@ -198,6 +198,27 @@ assignee_now() {
         | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
 }
 
+# row_now <bead> — the bead's own row as the store answers it now, one line of
+# JSON, or empty when it does not resolve. Same pinned store as meta_now.
+row_now() {
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        | jq -c --arg b "$1" \
+            'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' \
+            2>/dev/null || true
+}
+
+# blocks_edge_reads_back <bead> <blocker> — 0 iff the bead's own row, read now,
+# carries a `blocks` edge onto <blocker>. A row that will not read is a missing
+# edge. demand and park report an edge as landed only through this read, never
+# through the exit status of the `dep add` or create that wrote it.
+blocks_edge_reads_back() {
+    row_now "$1" | jq -e --arg d "$2" '
+        [ (.dependencies // [])[]? | select(type == "object")
+          | select(((.dependency_type // .type // "") | tostring) == "blocks")
+          | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0' >/dev/null 2>&1
+}
+
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
 # a demand bead's TITLE is the same board headline a takeaway stamp carries, so
@@ -1708,14 +1729,7 @@ cmd_demand() {
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then continue; fi
-        w_after=$(gc bd show "$_w" --json 2>/dev/null | scrub || true)
-        have_edge=$(printf '%s' "$w_after" | jq -r --arg d "$demand" \
-            '[ .[0].dependencies[]?
-               | select(((.dependency_type // .type // "") | tostring) == "blocks")
-               | ((.id // .depends_on_id // "") | tostring) ]
-             | map(select(. == $d)) | length' 2>/dev/null || true)
-        case "$have_edge" in ''|*[!0-9]*) have_edge=0 ;; esac
-        if [ "$have_edge" -lt 1 ]; then unwired="$unwired $_w"; fi
+        blocks_edge_reads_back "$_w" "$demand" || unwired="$unwired $_w"
     done
     if [ -n "$unwired" ]; then
         for _w in $unwired; do
@@ -1816,21 +1830,6 @@ PARK_SURVEY_JQ='
       poured: [ $rows[] | select(.id != $b and .why == "" and (.armed | not) and .poured != "") | {id, root: .poured} ],
       held: [ $rows[] | select(.why == "" and (.id == $b or ((.armed | not) and .poured == ""))) | .id ] }'
 
-# park_edge_reads_back <bead> <blocker> — 0 iff <bead>'s own row, read now from
-# the pinned store ($db), carries a `blocks` edge onto <blocker>. An unreadable
-# row is a missing edge.
-park_edge_reads_back() {
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-        | jq -e --arg b "$1" --arg d "$2" '
-            if type == "array" then
-              [ .[] | select(type == "object" and (.id // "") == $b) | (.dependencies // [])[]?
-                | select(type == "object")
-                | select(((.dependency_type // .type // "") | tostring) == "blocks")
-                | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0
-            else false end' >/dev/null 2>&1
-}
-
 # park_open_gate_titled <bead-row-json> <text> — the open gate the bead already
 # waits on under exactly this title, or empty. A re-run finds the gate it filed.
 # Only a gate in the shape the text form files counts: no await type and no
@@ -1898,11 +1897,7 @@ cmd_park() {
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
     prefix="${bead%%-*}"
 
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    bead_row=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-        | jq -c --arg b "$bead" \
-            'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' \
-            2>/dev/null || true)
+    bead_row=$(row_now "$bead")
     [ -n "$bead_row" ] \
         || { echo "$PROG: park: '$bead' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
     bead_status=$(printf '%s' "$bead_row" | jq -r '.status // ""' 2>/dev/null || true)
@@ -1955,11 +1950,7 @@ cmd_park() {
             echo "$PROG: park: $wait_on lives in another store than $bead, and bd resolves an edge only within one store, so an edge onto $wait_on would hold nothing. Park with the text form and name $wait_on in it: $PROG park $bead \"<why it is parked and what releases it>\". Nothing was written." >&2
             exit 2
         fi
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        wait_row=$(gc bd show "$wait_on" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-            | jq -c --arg b "$wait_on" \
-                'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' \
-                2>/dev/null || true)
+        wait_row=$(row_now "$wait_on")
         [ -n "$wait_row" ] \
             || { echo "$PROG: park: --waiting-on '$wait_on' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
         if [ "$(printf '%s' "$wait_row" | jq -r '.status // ""' 2>/dev/null || true)" = closed ]; then
@@ -1994,10 +1985,7 @@ cmd_park() {
             # A create that landed and lost its answer left its gate on the bead,
             # under this title: the edge was born with it.
             if [ -z "$blocker" ] || [ "$blocker" = null ]; then
-                # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-                _pk_again=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-                    | jq -c --arg b "$bead" 'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' 2>/dev/null || true)
-                blocker=$(park_open_gate_titled "$_pk_again" "$text")
+                blocker=$(park_open_gate_titled "$(row_now "$bead")" "$text")
             fi
             case "$blocker" in
                 ""|null)
@@ -2012,11 +2000,11 @@ cmd_park() {
         blocker_title="$text"
     fi
 
-    if ! park_edge_reads_back "$bead" "$blocker"; then
+    if ! blocks_edge_reads_back "$bead" "$blocker"; then
         # One repair: re-adding an edge that is there already is a no-op.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         gc bd dep add "$bead" "$blocker" -t blocks ${db:+--db "$db"} >/dev/null 2>&1 || true
-        if ! park_edge_reads_back "$bead" "$blocker"; then
+        if ! blocks_edge_reads_back "$bead" "$blocker"; then
             echo "$PROG: park: $bead is NOT blocked by $blocker: the edge did not land, so nothing holds $bead or anything under it. Wire it by hand: gc bd dep add $bead $blocker -t blocks${db:+ --db $db}" >&2
             [ -n "$wait_on" ] || echo "$PROG: park: or close the gate, which holds nothing without its edge: gc bd close $blocker${db:+ --db $db}" >&2
             exit 4
