@@ -1358,6 +1358,86 @@ eq "$rc" 0 "a correctness verdict needs no --visual"
 hasnt "$(cat "$STUB_GH_BODY")" "Visual:" "…and its artifact carries no Visual line"
 eq "$(meta rv-1 visual)" "<absent>" "…and its review bead no visual stamp"
 
+echo "# a repo-artifact is named author-committed on the Visual line"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual repo-artifact exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed)" "the posted line says the visual was committed, not captured"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and names no fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the stamp stays the bare modality"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "no fallback is stamped"
+
+echo "# a delivered fallback names the modality that fits"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from ' Video ' 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed; fallback from video)" "the posted line names the provenance and the fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the delivered modality is stamped as visual"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and the modality that fits as visual_fallback_from, lowercase"
+eq "$(meta tk-anc check.demo)" "green" "the demo lane reads green"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual screenshot --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 0 "a demo request-changes carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: screenshot (fallback from video)" "a captured fallback names only the fallback"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and stamps it"
+
+echo "# pre-open, the fallback reaches the notes the PR replays"
+reset "$ANCHOR_PRE" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from screenshot 2>&1); rc=$?
+eq "$rc" 0 "a pre-open demo approve with a fallback exits 0"
+has "$(notes rv-demo)" "Visual: repo-artifact (author-committed; fallback from screenshot)" "the pre-open notes carry the whole line"
+
+echo "# a verdict without a fallback clears one an earlier attempt stamped"
+DEMO_STALE='{"id":"rv-demo","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"demo","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat","visual":"repo-artifact","visual_fallback_from":"video"},"notes":"demo body: the board reads better seen"}'
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "the retried verdict exits 0"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "the earlier fallback is cleared"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and the posted line names none"
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+printf 'rv-demo visual_fallback_from\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+
+echo "# a fallback is read back before anything is posted"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$(STUB_DROP_KEYS="rv-demo:visual_fallback_from" "$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 2 "a fallback that did not read back exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# a fallback that is not cheaper than what it stands in for is refused, nothing written"
+for pair in "video screenshot" "screenshot screenshot"; do
+  set -- $pair
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual "$1" --visual-fallback-from "$2" 2>&1); rc=$?
+  eq "$rc" 1 "--visual $1 with --visual-fallback-from $2 exits 1"
+  has "$out" "a fallback is cheaper than the modality it stands in for" "…naming the cost rule"
+  eq "$(meta rv-demo visual)" "<absent>" "…with no decision stamped"
+  eq "$(cat "$STUB_GH_BODY")" "" "…and nothing posted"
+done
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual none --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a fallback beside --visual none exits 1"
+has "$out" "--visual none delivers no visual" "the refusal says none delivers nothing"
+eq "$(meta rv-demo visual)" "<absent>" "no decision is stamped"
+for bad in repo-artifact gif; do
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from "$bad" 2>&1); rc=$?
+  eq "$rc" 1 "--visual-fallback-from $bad exits 1"
+  has "$out" "--visual-fallback-from must be screenshot or video" "…naming the values a fallback can stand in for"
+done
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a correctness verdict carrying --visual-fallback-from exits 1"
+has "$out" "only the 'demo' check records a visual decision" "the refusal names the owning check"
+eq "$(meta rv-1 visual_fallback_from)" "<absent>" "no fallback is stamped"
+
 echo "# the decision is read back before anything is posted"
 reset "$ANCHOR_PR" ",$DEMO"
 out=$(STUB_DROP_KEYS="rv-demo:visual" "$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
