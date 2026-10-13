@@ -405,8 +405,7 @@ anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreig
 anchor_decision_held() { # <anchor-id>
   local kids kid
   takeaway_is_holding "${1:-}" && return 0
-  kids=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "anchor_bead=${1:-}") || return 0
+  kids=$(bd_anchor_children "${1:-}" open,in_progress,blocked,deferred,hooked,pinned) || return 0
   for kid in $(printf '%s' "$kids" | jq -r '.[] | select(((.metadata.task_kind // "") | tostring) == "rework") | .id' 2>/dev/null); do
     [ -n "$kid" ] || continue
     takeaway_is_holding "$kid" && return 0
@@ -776,6 +775,11 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   # fully-formed, dep-attached, UNROUTED child id and returns 0; the caller stamps
   # gc.routed_to last, so only a complete child becomes claimable. Prints nothing
   # and returns 1 when the caller should retry next pass.
+  #
+  # The child is joined to the anchor before anchor_bead lands on it: a create
+  # carries the edge (bd_create_child), and a reused strand or orphan is joined
+  # first. A join that fails stamps nothing, so no child carries anchor_bead
+  # without the edge the anchor's closed-children read follows.
   local reuse="$1" title="$2" anchor="$3" branch="$4" target="$5" reason="$6" mode="$7" prurl="$8" prnum="$9"
   local meta fix ok
   meta=$(jq -nc --arg ab "$anchor" --arg br "$branch" --arg tg "$target" --arg rr "$reason" \
@@ -784,13 +788,14 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   [ -n "$meta" ] || return 1
   if [ -n "$reuse" ]; then
     fix="$reuse"
+    bd_anchor_link "$anchor" "$fix" || return 1
     gc bd update "$fix" --set-metadata task_kind=rework --set-metadata anchor_bead="$anchor" \
       --set-metadata branch="$branch" --set-metadata target="$target" \
       --set-metadata rejection_reason="$reason" --set-metadata prepare_mode="$mode" \
       --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
       --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
   else
-    fix=$(gc bd create "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+    fix=$(bd_create_child "$anchor" "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
   # The child now exists in the store (freshly created, or reuse-restamped); drop
@@ -1151,7 +1156,7 @@ UTGATES
   # one. A ledger that will not read is not proof nothing is in flight, so it holds
   # the merge for the pass (return 2) rather than waving the anchor through; only a
   # clean, empty read spends the thread count.
-  inflight=$(bd_list --status="$LIVE_STATUSES" --metadata-field anchor_bead="$id") || return 2
+  inflight=$(bd_anchor_children "$id" "$LIVE_STATUSES") || return 2
   [ "$(printf '%s' "$inflight" | jq 'length' 2>/dev/null)" = 0 ] || return 1
   # A thread read that did not answer, or answered with no usable count, is the
   # gap this function exists to close: return 2 so the caller holds, never 1.
@@ -2194,7 +2199,7 @@ GATES
   # (in_progress). Idempotent: a child still citing the live head, or a head not
   # provably green, matches nothing.
   if [ "$state" = "OPEN" ] && [ -n "$head_oid" ]; then
-    reap_kids=$(bd_list --metadata-field anchor_bead="$id" --status=open 2>/dev/null) || reap_kids=""
+    reap_kids=$(bd_anchor_children "$id" open 2>/dev/null) || reap_kids=""
     # open, unclaimed rework children of this anchor, as "<id>\t<reason>" rows.
     # Only a conflict or red-check child has a premise that "mergeable + green"
     # falsifies (no longer conflicting; the check passed). A comment-rework child's
@@ -2439,7 +2444,11 @@ REAP_EOF
             elif ((($x.assignee // "") | tostring) != "") then "ok"
             elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
             else "restamp" end' 2>/dev/null)
-        if [ "$dneed" = "restamp" ]; then
+        if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
+          # The join lands before the marker, so a marker never stands on a child
+          # the anchor's closed-children read cannot reach.
+          echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
+        elif [ "$dneed" = "restamp" ]; then
           # `gc bd update` returns 0 without writing (the claim guard is one such
           # path), so the exit code cannot prove the marker landed — and a covering
           # child left unmarked on the anchor's own branch is the misread this stamp
@@ -2614,10 +2623,19 @@ $CBODY"
                   | ((.status // "open") | tostring | ascii_downcase) as $st
                   | select(($ls | index($st)) != null)
                   | .id ] | .[0] // empty' 2>/dev/null)
+        # The child is joined to the anchor before anchor_bead lands on it: a
+        # create carries the edge (bd_create_child), and an adopted orphan is
+        # joined first, so a failed join leaves an orphan the next pass adopts
+        # again rather than a stamped child the anchor's closed-children read
+        # misses once it closes.
         if [ -n "$CFIX" ]; then
           echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
+          if ! bd_anchor_link "$id" "$CFIX"; then
+            echo "$PROG: $id could not join comment-rework orphan $CFIX to the anchor; retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
         else
-          CFIX=$(printf '%s\n' "$CBODY" | gc bd create "$CTITLE" -t task --body-file - --json 2>/dev/null \
+          CFIX=$(printf '%s\n' "$CBODY" | bd_create_child "$id" "$CTITLE" -t task --body-file - --json 2>/dev/null \
                    | jq -r '.id // empty' 2>/dev/null)
         fi
         if [ -z "$CFIX" ]; then
@@ -2715,15 +2733,20 @@ $CBODY"
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      # A blocks edge would close a cycle: escalate.sh already files the visit
-      # DEPENDING on its subject (tracks), so an edge back is a two-node loop bd
-      # refuses. pr_number is what merge.sh's in-flight-holder probe reads, and
-      # it holds the merge until a human closes the visit. anchor_bead is safe
-      # beside it — every consumer of that key filters on task_kind=review.
-      gc bd update "$VID" \
-        --set-metadata anchor_bead="$id" \
-        --set-metadata pr_url="$live_url" \
-        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+      # The visit holds the merge through pr_number: merge.sh's in-flight-holder
+      # probe holds the merge while a live bead carries the PR's number, and a
+      # fold moves the stamp to its holder (visit-close.sh). anchor_bead makes
+      # the visit one of the anchor's children, so it lands only once the visit
+      # is joined to the anchor: escalate.sh's tracks edge usually joins it
+      # already, and bd_anchor_link joins it when that edge did not land. A
+      # failed join leaves anchor_bead off, and pr_number still holds the merge.
+      vstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
+      if bd_anchor_link "$id" "$VID"; then
+        vstamp+=(--set-metadata anchor_bead="$id")
+      else
+        echo "$PROG: WARN visit $VID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
+      fi
+      gc bd update "$VID" "${vstamp[@]}" >/dev/null 2>&1 \
         || echo "$PROG: WARN visit $VID not stamped with PR#$num; it will NOT hold the merge — stamp it by hand" >&2
       vgot=$(gc bd show "$VID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
       if [ "$vgot" != "$num" ]; then
@@ -2765,7 +2788,7 @@ $CBODY"
     # the batch retries next pass, and the routing's own dedup re-adopts the child
     # it already filed rather than twinning it. The routing above already holds the
     # merge, so the retry costs nothing.
-    if ! vpass_rows=$(bd_list --metadata-field anchor_bead="$id" --status="$LIVE_STATUSES"); then
+    if ! vpass_rows=$(bd_anchor_children "$id" "$LIVE_STATUSES"); then
       echo "$PROG: WARN $id — PR#$num validation-pass probe unreadable; nothing opened or watermarked (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     else
@@ -2810,10 +2833,10 @@ $CBODY"
             vbody=""
             [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
             if [ -n "$vbody" ]; then
-              VPASS=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+              VPASS=$(printf '%s' "$vbody" | bd_create_child "$id" "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
             else
               echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
-              VPASS=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+              VPASS=$(bd_create_child "$id" "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
             fi
           fi
         fi
@@ -2849,6 +2872,13 @@ $CBODY"
       v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
       v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
       v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
+      # A pass about to take anchor_bead is joined to the anchor first (a fresh
+      # one carries the edge from its create, an adopted orphan does not), so the
+      # stamp never lands on a pass the anchor's closed-children read cannot reach.
+      if [ "$v_anchor" != "$id" ] && ! bd_anchor_link "$id" "$VPASS"; then
+        echo "$PROG: WARN $id — PR#$num validation pass $VPASS could not be joined to the anchor; nothing stamped or watermarked (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
       vfix=()
       [ "$v_kind" != "validation" ] && vfix+=(--set-metadata task_kind=validation)
       [ "$v_anchor" != "$id" ] && vfix+=(--set-metadata anchor_bead="$id")
@@ -3126,10 +3156,15 @@ GATES
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
       skipped=$((skipped + 1))
     else
-      gc bd update "$UTVID" \
-        --set-metadata anchor_bead="$id" \
-        --set-metadata pr_url="$live_url" \
-        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+      # Stamped the way the comment-batch visit is: joined before anchor_bead
+      # lands, and pr_number holding the merge either way.
+      utvstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
+      if bd_anchor_link "$id" "$UTVID"; then
+        utvstamp+=(--set-metadata anchor_bead="$id")
+      else
+        echo "$PROG: WARN visit $UTVID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
+      fi
+      gc bd update "$UTVID" "${utvstamp[@]}" >/dev/null 2>&1 \
         || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
       utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
       if [ "$utvgot" != "$num" ]; then
@@ -3282,7 +3317,7 @@ GATES
             # stands down for an in-flight REVIEW child (a re-review that will move
             # the head), not only a rework: any LIVE child of this anchor means
             # work already covers it.
-            rc_kids=$(bd_list --metadata-field anchor_bead="$id" --status="$ALL_STATUSES") || {
+            rc_kids=$(bd_anchor_children "$id" "$ALL_STATUSES") || {
               echo "$PROG: $id — PR#$num has a red required check but the child probe failed; nothing dispatched (retry next pass)" >&2
               skipped=$((skipped + 1)); continue
             }
@@ -3951,7 +3986,7 @@ WB_RECORDS
   # plan as one jq argument, under the OS per-argument limit, so it carries
   # whether a finding owes a reply and never the reply's text.
   wfnd="[]"; wfnd_ok=0
-  if [ "$wbatch_ok" = 1 ] && wfrows=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+  if [ "$wbatch_ok" = 1 ] && wfrows=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
     wfnd=$(printf '%s' "$wfrows" | jq -c '[ .[]?
         | select(((.metadata.task_kind // "") | tostring) == "finding")
         | select(((.metadata["finding.lane"] // "") | tostring) == "human")
@@ -4381,7 +4416,7 @@ WB_SWAPS
   # the threads cleanly acts, the same $wplan_ok gate the plan above turns on.
   # Reads live + closed, because a needs-you finding owes its reply while still
   # open.
-  if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+  if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
     wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" '
         def norm: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
         .[0] as $v
@@ -4485,7 +4520,7 @@ WB_DECLINES
     # not mean answered. A needs-you or still-unvalidated finding is open, so its
     # review is not yet clear — a needs-you finding deliberately holds the review
     # changes-requested until the operator rules its visit.
-    if wrf=$(bd_list --metadata-field anchor_bead="$wid" --status="$ALL_STATUSES"); then
+    if wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
       wrev_ready=$(printf '%s' "$wrf" | jq -rc '
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
                 | select(((.metadata["finding.review_id"] // "") | tostring) != "")
