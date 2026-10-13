@@ -2251,7 +2251,7 @@ echo "── create-then-stamp: what is a finding ──"
 DET_CS="$HERE/lint-learned.d/create-then-stamp.sh"
 [ -x "$DET_CS" ] || { echo "no detector at $DET_CS"; exit 1; }
 runcs() { OUT="$("$DET_CS" "$@" 2>&1)"; RC=$?; }
-plantcs() { sed -e 's/@CREATE@/bd create/g' -e 's/@STAMP@/--set-metadata/g' > "$1"; }
+plantcs() { sed -e 's/@CREATE@/bd create/g' -e 's/@STAMP@/--set-metadata/g' -e 's/@CHILD@/bd_create_child/g' > "$1"; }
 
 # The shapes a bare create followed by its stamp takes: the id read straight
 # off the create, a continued create whose reply a second substitution reads
@@ -2322,6 +2322,21 @@ runcs "$TMP/cs-recipe.toml"
 eq "$RC" 1 "a fenced recipe that stamps its bare create exits 1"
 has "$OUT" "cs-recipe.toml:7:" "the fenced stamp is reported past a multi-line body"
 eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "prose outside a fence is not"
+
+# bd-lib.sh's bd_create_child runs a create, so a bead it files with no
+# --metadata and a later write stamps is a finding; one it files with
+# --metadata is not.
+plantcs "$TMP/cs-child.sh" <<'FIX'
+#!/usr/bin/env bash
+X=$(@CHILD@ "$A" "t" -t task --json | jq -r '.id')
+gc bd update "$X" @STAMP@ task_kind=review
+Y=$(@CHILD@ "$A" "t" -t task --metadata "$M" --json | jq -r '.id')
+gc bd update "$Y" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-child.sh"
+eq "$RC" 1 "a bead bd_create_child files bare, then stamped, exits 1"
+has "$OUT" "cs-child.sh:3:" "bd_create_child is read as the create it runs"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "…and a bd_create_child that carries --metadata is not a finding"
 
 echo "── create-then-stamp: what is not ──"
 

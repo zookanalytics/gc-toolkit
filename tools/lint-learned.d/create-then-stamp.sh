@@ -21,15 +21,17 @@
 #
 # A finding is one `bd update` (bare, as `gc bd`, or through a wrapper such as
 # `gc_bd`) whose id is a variable holding a bead that a `bd create` with no
-# --metadata filed, and whose own words include --set-metadata. The id is the
-# first word after any flags, so a write that names its store first
-# (`--db "$DB"`, or `${STORE_DB:+--db "$STORE_DB"}`) is read the same way. The
-# variable holds that bead when it was assigned from the create's command
-# substitution, quoted or not, or from a substitution that reads `.id` out of a
-# variable that holds it (the `VISIT=$(printf '%s' "$VISIT_JSON" | jq … .id …)`
-# step). Any other assignment to the variable, a create that carries
-# --metadata, and the start of a shell function forget it, so the scan tracks a
-# bead only along the straight line from its create.
+# --metadata filed, and whose own words include --set-metadata. A
+# `bd_create_child` call (assets/scripts/bd-lib.sh) is read as the create it
+# runs. The id is the first word after any flags, so a write that names its
+# store first (`--db "$DB"`, or `${STORE_DB:+--db "$STORE_DB"}`) is read the
+# same way. The variable holds that bead when it was assigned from the create's
+# command substitution, quoted or not, or from a substitution that reads `.id`
+# out of a variable that holds it (the
+# `VISIT=$(printf '%s' "$VISIT_JSON" | jq … .id …)` step). Any other assignment
+# to the variable, a create that carries --metadata, and the start of a shell
+# function forget it, so the scan tracks a bead only along the straight line
+# from its create.
 #
 # The scan folds continuation lines, carries quote state across lines, and
 # skips comments and here-doc bodies. Quoted text is data, so a message that
@@ -180,7 +182,7 @@ function judge_command(s, r, ln,   asg, rhs, k, pat, cmd, src) {
 }
 
 BEGIN {
-    CREATE = "(^|[^[:alnum:]_.-])(gc[[:space:]]+bd|gc_bd|bd)[[:space:]]+create([^[:alnum:]_-]|$)"
+    CREATE = "(^|[^[:alnum:]_.-])((gc[[:space:]]+bd|gc_bd|bd)[[:space:]]+create|bd_create_child)([^[:alnum:]_-]|$)"
     # The words an update can carry ahead of its id: a flag, with its value as
     # the next word or after `=`, and a `${VAR:+…}` expansion that adds one, the
     # form a write pinned to a store takes (`${STORE_DB:+--db "$STORE_DB"}`).
@@ -227,7 +229,7 @@ for f in "$@"; do
     esac
     # One cheap read decides whether the file is worth a scan at all.
     grep -Eq -- '--set-metadata' "$f" 2>/dev/null || continue
-    grep -Eq -- '(gc_bd|(^|[^[:alnum:]_.-])bd)[[:space:]]+create([^[:alnum:]_-]|$)' "$f" 2>/dev/null || continue
+    grep -Eq -- '((gc_bd|(^|[^[:alnum:]_.-])bd)[[:space:]]+create|(^|[^[:alnum:]_.-])bd_create_child)([^[:alnum:]_-]|$)' "$f" 2>/dev/null || continue
     hits="$(awk -v mode="$mode" "$SCAN_AWK" "$f")" || {
         echo "create-then-stamp: awk failed on $f — detector cannot scan it" >&2
         exit 2
