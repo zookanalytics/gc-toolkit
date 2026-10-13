@@ -15,7 +15,7 @@
 # the census the liveness sweep files would disagree about which beads wait on
 # the sitting. The behavioral half lives beside each reader
 # (gc-helm-unplaced.test.sh, liveness-classify.test.sh,
-# doctor/check-blocked-work-armed/run.test.sh).
+# doctor/check-blocked-work-armed/run.test.sh, tools/gc-proactive.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -68,7 +68,8 @@ echo "# every reader sources the one definition"
 SOURCERS="assets/scripts/gc-helm.sh
 doctor/check-blocked-work-armed/run.sh
 assets/scripts/liveness-sweep.sh
-assets/scripts/liveness-sweep-precheck.sh"
+assets/scripts/liveness-sweep-precheck.sh
+tools/gc-proactive.sh"
 for r in $SOURCERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi
@@ -80,7 +81,7 @@ for r in $SOURCERS; do
         && ok "(READERS) $r applies \$PLACEMENT_JQ" \
         || bad "(READERS) $r applies \$PLACEMENT_JQ"
 done
-for r in assets/scripts/gc-helm.sh doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh; do
+for r in assets/scripts/gc-helm.sh doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh tools/gc-proactive.sh; do
     code="$(grep -vE '^[[:space:]]*#' "$ROOT/$r" 2>/dev/null)"
     grep -q 'awaiting_placement' <<< "$code" \
         && ok "(READERS) $r asks awaiting_placement" \

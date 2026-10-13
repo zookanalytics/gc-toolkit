@@ -92,12 +92,14 @@ does not answer, it names that store and exits 4 after printing the rest.
 `assets/scripts/placement.sh` is the one definition of a bead in the queue: it
 carries `placement=pending`, and nothing has placed it since. A parent, a route,
 an arm, an assignee or a live pour each places a bead, whether or not the marker
-was cleared. The same definition serves two other readers:
+was cleared. The same definition serves the queue's other readers:
 
 - the liveness sweep names such a bead's wait, so it does not report the bead as
   an unnamed wait;
 - `doctor/check-blocked-work-armed` owes such a bead no arm, because its
-  dispatch is the route the sitting gives it.
+  dispatch is the route the sitting gives it;
+- the proactive scan files no first reaction for such a bead, because its next
+  move is the sitting's.
 
 ## Placing a bead
 
