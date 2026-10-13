@@ -28,7 +28,9 @@
 # its render and one removed with its render kept; a head that changes the
 # renderer, judged by the renderer it ships, against a control rendered by this
 # checkout's; no gc on PATH; a merge result that does not render; a merge result
-# carrying no audit, and the stub tree before a first render; the cannot-tell
+# carrying no audit, and the stub tree before a first render; a head that
+# deletes INDEX.md and leaves renders committed, one of them stale, and the
+# stub's README beside a render the head left; the cannot-tell
 # exits (unresolvable rev, conflicting merge, missing revs, no scratch dir); and
 # the merge shape, against a control carrying the per-agent size rows the index
 # no longer commits. For the renderer and sizes: what INDEX.md carries and
@@ -248,6 +250,27 @@ commit "the pre-render stub"
 out=$(check_merge c0 stub); rc=$?
 eq "$rc" 0 "a stub carrying no INDEX.md exits 0"
 has "$out" "carries no seed audit" "…for the stated reason, not by falling through a file test"
+
+echo "# a head that deletes INDEX.md and leaves renders committed is judged, not passed"
+branch base no-index
+edit_prompt alpha "moved by the head that drops the index"
+git -C "$R" rm -q generated/seed-audit/INDEX.md
+commit "move alpha's prompt, render nothing, delete the index"
+out=$(check_merge base no-index); rc=$?
+eq "$rc" 1 "an index deleted beside committed renders exits 1"
+hasnt "$out" "carries no seed audit" "…since renders left behind are an audit, not its absence"
+has "$out" "INDEX.md (rendered, but the merge does not commit it)" "…naming the missing index"
+has "$out" "agents/alpha.md (the merge changes its render but keeps the copy base commits)" \
+    "…and the render the head left stale"
+
+branch base stub-beside-render
+git -C "$R" rm -rq generated/seed-audit/INDEX.md generated/seed-audit/agents
+printf 'rendered on first install\n' > "$R/generated/seed-audit/README.md"
+commit "keep only the formula's render, beside the pre-render stub"
+out=$(check_merge base stub-beside-render); rc=$?
+eq "$rc" 1 "the stub's README beside a leftover render exits 1"
+hasnt "$out" "carries no seed audit" "…since the README is the stub only when nothing else is committed"
+has "$out" "INDEX.md (rendered, but the merge does not commit it)" "…naming the missing index"
 
 echo "# cannot-tell exits 2 rather than passing"
 out=$(PATH="$(without_gc)" "$BASH" "$SUT" --root "$R" --check-merge base fresh 2>&1); rc=$?

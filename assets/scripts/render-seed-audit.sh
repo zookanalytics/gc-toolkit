@@ -235,10 +235,21 @@ if [ "$MODE" = "check-merge" ]; then
     materialize "$merged_tree" "$MERGED" \
         || die "--check-merge: could not materialize merged tree $merged_tree"
 
-    # No INDEX.md in the merge result means no artifact, or the stub tree a pack
-    # carries before its first render. Either way there is nothing to keep
-    # current, and nothing to render.
-    if [ ! -f "$MERGED/$AUDIT/INDEX.md" ]; then
+    # Two files with the same bytes, or two paths that both hold no file.
+    same() { if [ -f "$1" ] && [ -f "$2" ]; then cmp -s "$1" "$2"; else [ ! -f "$1" ] && [ ! -f "$2" ]; fi; }
+    files_under() { [ -d "$1" ] && ( cd "$1" && find . -type f -print ) | sed 's|^\./||'; }
+
+    # The merge result carries no audit when it commits no file under the
+    # audit's directory, or only the README.md stub a pack carries there before
+    # its first render. Either way there is nothing to keep current, and nothing
+    # to render. Any other file belongs to an audit, and the render below judges
+    # it, so a head that deletes INDEX.md and leaves rendered agents or formulas
+    # behind is held for the index the merge no longer commits.
+    committed=()
+    while IFS= read -r p; do
+        [ "$p" = README.md ] || committed+=("$p")
+    done < <(files_under "$MERGED/$AUDIT")
+    if [ "${#committed[@]}" -eq 0 ]; then
         printf 'merging %s into %s carries no seed audit — nothing to keep current\n' \
             "$MERGE_HEAD" "$MERGE_BASE"
         exit 0
@@ -248,10 +259,6 @@ if [ "$MODE" = "check-merge" ]; then
 
     render_tree "$MERGED" "$MERGED_RENDER"; rc=$?
     [ "$rc" -eq 0 ] || render_failed "the merge of $MERGE_HEAD into $MERGE_BASE" "$MERGED_RENDER" "$rc"
-
-    # Two files with the same bytes, or two paths that both hold no file.
-    same() { if [ -f "$1" ] && [ -f "$2" ]; then cmp -s "$1" "$2"; else [ ! -f "$1" ] && [ ! -f "$2" ]; fi; }
-    files_under() { [ -d "$1" ] && ( cd "$1" && find . -type f -print ) | sed 's|^\./||'; }
 
     unmatched=()
     while IFS= read -r p; do
