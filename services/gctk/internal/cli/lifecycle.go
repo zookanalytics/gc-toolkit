@@ -173,13 +173,14 @@ var landingFetchTimeout = 60 * time.Second
 // `gc bd update` and asks the rig's checkout whether gc.work_commit is an
 // ancestor of refs/remotes/origin/<gc.work_branch>. It runs git in the bead's
 // gc.work_dir when the bead records one, and the pack's worker checkouts are
-// worktrees of the rig checkout, sharing its refs, so the fetch lands where the
-// gate reads either way. A merge GitHub performed is on origin before that
+// worktrees of the rig checkout that share its refs, so the answer is the rig
+// checkout's either way. A merge GitHub performed is on origin before the rig
 // checkout has fetched it, whether merge.sh's squash made it or pr-facts.sh
-// found it already done, and the gate reads such a commit as unreachable. Under GC_WORK_RECORD_ENFORCE it then refuses the close. So when
-// the ref does not already hold the commit, the branch is fetched before the
-// write. The direct strategy fetches its target before it records, which leaves
-// nothing to fetch here.
+// found it already done, and the gate reads such a commit as unreachable. Under
+// GC_WORK_RECORD_ENFORCE it then refuses the close. So when the ref does not
+// already hold the commit, the branch is fetched before the write. The direct
+// strategy fetches its target before it records, which leaves nothing to fetch
+// here.
 //
 // The checkout is $GC_RIG_ROOT. The merge cadence exports the root it runs in,
 // and the refinery's direct strategy hands its transition the root it resolved.
