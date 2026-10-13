@@ -48,7 +48,13 @@
 # overwrites one the guard's listing misses, including a name only case
 # separates from the remote's on a file system that ignores case; (s) neither
 # heal runs the rig's post-checkout hook, so a failing one neither stops nor
-# escalates a heal, and the reset leaves the branch's upstream config as it is.
+# escalates a heal, and the reset leaves the branch's upstream config as it is;
+# (t) a diverged rig's escalation names what stopped the reset heal, a line for
+# each finding, and hands a person steps to reset by hand that lose nothing: its
+# checkout refuses rather than overwrites an ignored file or a dirty path in its
+# way, and resets the checkout once the dirty path is restored and the named
+# file moved aside; no escalation tells a person to run git reset --hard or
+# --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +82,12 @@ body_for()   { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger
 esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
 esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
 esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
+# the message of the last escalate.sh call for a rig key.
+msg_for()     { cat "$TMP/escalations.reconcile-diverged-$1.msg" 2>/dev/null; }
+# the checkout a diverged rig's subject bead hands a person on a line of its own.
+remedy_for()  { sed -n 's/^ *\(git -C [^ ]* checkout .*\)$/\1/p' <<< "$(body_for "$1")"; }
+# 0 when the open reconcile bead for a rig key has a line matching an ERE.
+body_has()    { grep -q -E -- "$2" <<< "$(body_for "$1")"; }
 # escalate.sh --retract calls recorded for a rig key, and the subject of the first.
 retract_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/retractions" 2>/dev/null | wc -l | tr -d ' '; }
 retract_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/retractions" 2>/dev/null; }
@@ -143,13 +155,13 @@ chmod +x "$TMP/bin/gc"
 # live agent claims.
 cat > "$TMP/bin/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
-subject=""; key=""; pool=""; retract=0
+subject=""; key=""; pool=""; message=""; retract=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --retract) retract=1; shift;;
     --subject) subject="${2:-}"; shift 2;;
     --key)     key="${2:-}";     shift 2;;
-    --message) shift 2;;
+    --message) message="${2:-}"; shift 2;;
     --pool)    pool="${2:-}";    shift 2;;
     *) shift;;
   esac
@@ -165,6 +177,7 @@ if [ "$retract" = 1 ]; then
   exit 0
 fi
 printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
+printf '%s\n' "$message" > "$FAKE_ESCALATIONS.$key.msg"
 [ -n "$pool" ] && [ "$pool" = "${FAKE_BAD_POOL:-}" ] && exit 1
 exit 0
 ESC
@@ -194,6 +207,9 @@ eq "$(esc_count loomington)" "0" "HQ root is not escalated"
 # A still-diverged rig's visit must stay claimable: nothing is retracted while
 # the subject is unresolved.
 eq "$(retract_count beta)" "0" "a still-diverged rig retracts no visit"
+body_has beta '^local commit not upstream: [0-9a-f]+ c3-local$' \
+  && ok "the diverged escalation names the local commit that is not upstream" \
+  || bad "the diverged escalation names the local commit that is not upstream (got '$(body_for beta)')"
 
 # --- Run 2: idempotent — no duplicate reconcile bead. ------------------------
 # escalate.sh is called again (it dedups the visit on its own side, proven in
@@ -266,6 +282,9 @@ RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/gamma" rev-parse HEAD)" "$GAMMA_OLD" "RECONCILE_NO_AUTOHEAL leaves an already-upstream checkout unmutated"
 eq "$(esc_count gamma)" "1" "RECONCILE_NO_AUTOHEAL escalates instead of healing"
 eq "$(open_count gamma)" "1" "RECONCILE_NO_AUTOHEAL files a reconcile bead"
+body_has gamma '^not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off$' \
+  && ok "RECONCILE_NO_AUTOHEAL's diverged escalation says the checks did not run" \
+  || bad "RECONCILE_NO_AUTOHEAL's diverged escalation says the checks did not run (got '$(body_for gamma)')"
 
 # Now with auto-heal enabled (default): gamma resets to origin, keeps its
 # untracked file, closes the bead the escape-hatch run filed, and is not
@@ -284,6 +303,9 @@ eq "$(retract_count delta)" "0" "a still-diverged rig alongside retracts nothing
 grep -q '1 auto-healed' <<< "$OUT" && ok "summary line reports the auto-heal count" || bad "summary line reports the auto-heal count (got '$OUT')"
 eq "$(git -C "$TMP/delta" rev-parse HEAD)" "$DELTA_DIVERGED" "a genuine unique-commit divergence is not mutated"
 eq "$(open_count delta)" "1" "a genuine unique-commit divergence keeps its reconcile bead"
+body_has delta '^local commit not upstream: [0-9a-f]+ d3-local$' \
+  && ok "a pass that runs the reset heal rewrites the bead to name the local commit that is not upstream" \
+  || bad "a pass that runs the reset heal rewrites the bead to name the local commit that is not upstream (got '$(body_for delta)')"
 
 # epsilon: an already-upstream SHA churn PLUS a dirty tracked change whose
 # content is NOT upstream -> the per-file guard blocks the heal and escalates.
@@ -306,6 +328,9 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/epsilon" rev-parse HEAD)" "$EPS_HEAD" "a dirty tracked change not upstream blocks the heal"
 eq "$(esc_count epsilon)" "1" "a dirty tracked change not upstream escalates"
 eq "$(cat "$TMP/epsilon/f.txt")" "local-wip" "the un-upstreamed dirty change is left untouched"
+body_has epsilon '^local-only content: f\.txt \(its working copy differs from origin/main\)$' \
+  && ok "the escalation names the dirty path and why it is not proven upstream" \
+  || bad "the escalation names the dirty path and why it is not proven upstream (got '$(body_for epsilon)')"
 
 # zeta: the .husky case — an already-upstream divergence PLUS a dirty tracked
 # file the checkout regenerated to the *upstream* content, so its per-file
@@ -362,6 +387,9 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/eta" rev-parse HEAD)" "$ETA_LOCAL" "a unique local merge commit blocks the heal (git cherry ignores merges)"
 eq "$(esc_count eta)" "1" "a unique local merge commit escalates"
 [ -f "$TMP/eta/evil.txt" ] && ok "the merge commit's unique tree content is preserved" || bad "the merge commit's unique tree content is preserved"
+body_has eta '^local merge commit: [0-9a-f]+ et-merge \(git cherry does not compare a merge' \
+  && ok "the escalation names the local merge commit" \
+  || bad "the escalation names the local merge commit (got '$(body_for eta)')"
 
 # theta: an already-upstream SHA churn where git status cannot be read. An
 # unreadable status is not proof of a clean tree, so the dirty-tracked proof must
@@ -391,6 +419,9 @@ bash "$SCRIPT" >/dev/null
 rm -f "$TMP/bin/git"
 eq "$(git -C "$TMP/theta" rev-parse HEAD)" "$THETA_HEAD" "an unreadable git status blocks the heal (fail closed)"
 eq "$(esc_count theta)" "1" "an unreadable git status escalates instead of healing"
+body_has theta '^could not read git status$' \
+  && ok "the escalation says the status could not be read" \
+  || bad "the escalation says the status could not be read (got '$(body_for theta)')"
 
 # iota: an already-upstream SHA churn PLUS a tracked path staged with local-only
 # content whose worktree copy was then restored to the upstream bytes. git status
@@ -419,6 +450,9 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/iota" rev-parse HEAD)" "$IOTA_LOCAL" "staged local-only content (hidden by an upstream-matching worktree) blocks the heal"
 eq "$(esc_count iota)" "1" "staged local-only content escalates instead of healing"
 eq "$(git -C "$TMP/iota" show :f.txt)" "staged-local-only" "the staged local-only content is left untouched"
+body_has iota '^local-only content: f\.txt \(its staged copy matches neither HEAD nor origin/main\)$' \
+  && ok "the escalation names the path whose staged copy is not proven upstream" \
+  || bad "the escalation names the path whose staged copy is not proven upstream (got '$(body_for iota)')"
 
 # kappa: the rig root parked off the default branch — an agent checked out an
 # integration branch in the rig root and left a seed commit on it, ahead of
@@ -510,6 +544,9 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/rho" rev-parse HEAD)" "$RHO_LOCAL" "an untracked file the reset would overwrite blocks the reset heal"
 eq "$(cat "$TMP/rho/new.txt")" "mine" "the untracked file the reset would overwrite is left untouched"
 eq "$(esc_count rho)" "1" "an untracked file the reset would overwrite escalates"
+body_has rho '^untracked in the way: new\.txt \(the reset would write over or remove it' \
+  && ok "the escalation names the untracked file in the reset's way" \
+  || bad "the escalation names the untracked file in the reset's way (got '$(body_for rho)')"
 
 # The reset writes the remote's whole tree, so untracked content is in its way
 # on a path where the remote has a file, under a directory the remote turns into
@@ -548,6 +585,9 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/tau" rev-parse HEAD)" "$TAU_LOCAL" "an untracked directory where the remote has a file blocks the reset heal"
 eq "$(cat "$TMP/tau/new/keep" 2>/dev/null)" "mine" "the untracked directory's file is left untouched"
 refused_untouched tau "an untracked directory where the remote has a file"
+body_has tau '^untracked in the way: new/keep ' \
+  && ok "the escalation names the file in the untracked directory the reset would delete" \
+  || bad "the escalation names the file in the untracked directory the reset would delete (got '$(body_for tau)')"
 
 # upsilon: the remote turns the tracked directory a/b into a file while the
 # checkout holds an untracked a/b/c. git lists c on its own, because a/b holds
@@ -626,6 +666,9 @@ rm -f "$TMP/bin/git"
 eq "$(cat "$TMP/omega/new/keep" 2>/dev/null)" "mine" "untracked content the guard's listing misses is not deleted by the reset"
 eq "$(git -C "$TMP/omega" rev-parse HEAD)" "$OMEGA_LOCAL" "a reset git refuses leaves the checkout where it was"
 eq "$(esc_count omega)" "1" "a reset git refuses escalates"
+body_has omega '^git checkout --no-overwrite-ignore --no-track -B main origin/main refused: ' \
+  && ok "the escalation says git refused the reset" \
+  || bad "the escalation says git refused the reset (got '$(body_for omega)')"
 
 # casefold: an untracked Readme where the remote adds README. On a file system
 # that ignores case they are one file, which the guard's listing does not
@@ -639,6 +682,66 @@ rigs_json casefold
 : > "$TMP/escalations"
 bash "$SCRIPT" >/dev/null
 eq "$(cat "$TMP/casefold/Readme" 2>/dev/null)" "mine" "an untracked file only case separates from a file the remote adds keeps its bytes"
+
+# both: a local commit that is not upstream, and an untracked file where the
+# remote adds one. The escalation names each, not only the first check that
+# failed.
+churned_rig both
+echo theirs > "$TMP/both.src/new.txt"; push_churn both
+echo work > "$TMP/both/work.txt"; git -C "$TMP/both" add work.txt; git -C "$TMP/both" commit -qm both-local
+echo mine > "$TMP/both/new.txt"
+rigs_json both
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+body_has both '^local commit not upstream: [0-9a-f]+ both-local$' && body_has both '^untracked in the way: new\.txt ' \
+  && ok "the escalation names every check that stopped the reset heal" \
+  || bad "the escalation names every check that stopped the reset heal (got '$(body_for both)')"
+
+# handed: the remote's rewritten history adds new.txt, same.txt and copy.cfg
+# and rewrites a/top. The checkout holds an untracked new.txt with other
+# content, which stops the reset heal. It also holds what the heal would have
+# cleared itself: an unstaged a/top already holding the remote's bytes, an
+# untracked copy of same.txt, and an ignored copy of copy.cfg. A person follows
+# the steps the escalation hands them. Each step they skip costs a refusal, and
+# the reset lands once every listed item is cleared. The next pass then closes
+# the bead.
+churned_rig handed
+echo theirs > "$TMP/handed.src/new.txt"; echo same > "$TMP/handed.src/same.txt"; echo copy > "$TMP/handed.src/copy.cfg"
+echo top2 > "$TMP/handed.src/a/top"; push_churn handed
+echo mine > "$TMP/handed/new.txt"; echo same > "$TMP/handed/same.txt"; echo top2 > "$TMP/handed/a/top"
+printf '%s\n' copy.cfg >> "$TMP/handed/.git/info/exclude"; echo copy > "$TMP/handed/copy.cfg"
+HANDED_REMOTE="$(git -C "$TMP/handed.git" rev-parse main)"
+rigs_json handed
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(esc_count handed)" "1" "an untracked file in the reset's way escalates beside what the heal would clear"
+body_has handed '^dirty, already upstream: a/top \(its working copy holds what origin/main holds there\)$' \
+  && body_has handed '^untracked, already upstream: same\.txt \(it holds what origin/main holds there\)$' \
+  && body_has handed '^ignored, already upstream: copy\.cfg \(git status does not list it, and it holds what origin/main holds there\)$' \
+  && ok "the escalation names what the heal would have staged or removed before resetting" \
+  || bad "the escalation names what the heal would have staged or removed before resetting (got '$(body_for handed)')"
+HANDED_REMEDY="git -C $TMP/handed checkout --no-overwrite-ignore -B main origin/main"
+eq "$(remedy_for handed)" "$HANDED_REMEDY" "the diverged escalation hands a person a checkout that refuses what is in its way"
+grep -qF -- "$HANDED_REMEDY" <<< "$(msg_for handed)" \
+  && ok "the diverged visit message hands a person the same checkout" \
+  || bad "the diverged visit message hands a person the same checkout (got '$(msg_for handed)')"
+grep -qF -- "git -C $TMP/handed restore --source=HEAD --staged --worktree -- <path>" <<< "$(body_for handed)" \
+  && ok "the diverged escalation hands a person the restore for a dirty path already upstream" \
+  || bad "the diverged escalation hands a person the restore for a dirty path already upstream (got '$(body_for handed)')"
+read -ra REMEDY <<< "$(remedy_for handed)"
+remedy_rc() { if ${REMEDY[@]+"${REMEDY[@]}"} >/dev/null 2>&1; then echo 0; else echo 1; fi; }
+mv "$TMP/handed/new.txt" "$TMP/handed-new.txt.saved" 2>/dev/null || true
+eq "$(remedy_rc)" "1" "the handed checkout refuses while a dirty path it rewrites is not restored"
+eq "$(cat "$TMP/handed/a/top")" "top2" "a refused handed checkout leaves the dirty path as it was"
+git -C "$TMP/handed" restore --source=HEAD --staged --worktree -- a/top 2>/dev/null || true
+eq "$(remedy_rc)" "1" "the handed checkout refuses while an untracked copy it writes over is in its way"
+eq "$(cat "$TMP/handed/copy.cfg")" "copy" "a refused handed checkout leaves the ignored copy as it was"
+rm -f "$TMP/handed/same.txt" "$TMP/handed/copy.cfg"
+eq "$(remedy_rc)" "0" "the handed checkout runs once every listed item is cleared"
+eq "$(git -C "$TMP/handed" rev-parse HEAD)" "$HANDED_REMOTE" "the handed steps, followed in order, reset the checkout"
+eq "$(git -C "$TMP/handed" status --porcelain)" "" "the checkout is clean after the handed reset"
+bash "$SCRIPT" >/dev/null
+eq "$(open_count handed)" "0" "the pass after a person's reset closes the bead"
 
 # ===========================================================================
 # Set aside what blocks a checkout that is only behind. HEAD is an ancestor of
@@ -911,6 +1014,20 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/churnignored" rev-parse HEAD)" "$CHURNIGNORED_LOCAL" "an ignored file on a path the remote adds blocks the reset heal"
 eq "$(cat "$TMP/churnignored/local.cfg")" "mine" "the ignored file in the reset's way is left untouched"
 refused_untouched churnignored "an ignored file on a path the remote adds"
+body_has churnignored '^ignored and in the way: local\.cfg \(git status does not list it, the reset would' \
+  && ok "the diverged escalation names the blocking file as ignored" \
+  || bad "the diverged escalation names the blocking file as ignored (got '$(body_for churnignored)')"
+# With the untracked copy the escalation lists cleared and the ignored file
+# left in place, the checkout the escalation hands a person refuses rather than
+# overwrites it.
+body_has churnignored '^untracked, already upstream: same\.txt ' \
+  && ok "the escalation lists the untracked copy a reset by hand must clear" \
+  || bad "the escalation lists the untracked copy a reset by hand must clear (got '$(body_for churnignored)')"
+rm -f "$TMP/churnignored/same.txt"
+read -ra REMEDY <<< "$(remedy_for churnignored)"
+eq "$(remedy_rc)" "1" "the handed checkout refuses an ignored file in its way"
+eq "$(cat "$TMP/churnignored/local.cfg")" "mine" "the handed checkout leaves the ignored file's bytes"
+eq "$(git -C "$TMP/churnignored" rev-parse HEAD)" "$CHURNIGNORED_LOCAL" "a refused handed checkout leaves the checkout where it was"
 
 # churnignoredcopy: the ignored local.cfg already holds the remote's bytes, so
 # it goes and the checkout heals. An ignored file the remote does not track,
@@ -996,6 +1113,11 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/hookedbehind" rev-parse HEAD)" "$HOOKEDBEHIND_REMOTE" "a failing post-checkout hook does not stop the set-aside heal"
 eq "$(esc_count hookedbehind)" "0" "a set-aside under a failing post-checkout hook is not escalated"
 eq "$(cat "$TMP/hookruns")" "" "the set-aside heal runs no hook"
+
+# No subject bead or visit message this suite filed tells a person to run a
+# reset that overwrites what is in its way.
+RESET_TOLD="$(grep -l -E 'reset --(hard|keep)' "$TMP"/ledger.*.body "$TMP"/escalations.*.msg 2>/dev/null || true)"
+eq "$RESET_TOLD" "" "no escalation tells a person to run git reset --hard or --keep"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
