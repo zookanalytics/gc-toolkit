@@ -139,10 +139,11 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  is asked to make, and it opens the posted verdict and the
                  dismissal note.
   --dismiss-approval
-                 the round took judgment the standing human approval did not
-                 see: lift it. No approval given at or before the round counts
-                 toward the merge from then on, and each approver is asked to
-                 review again.
+                 the round made a call that is the operator's to make: it
+                 changed what the PR does, by inferring one side's intent or
+                 by choosing between two live designs. Lift the approval: no
+                 approval given at or before the round counts toward the merge
+                 from then on, and each approver is asked to review again.
 U
 }
 
@@ -326,7 +327,7 @@ if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
 fi
 if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
   if [ -z "$REOPEN" ] || [ -z "$(printf '%s' "$ROUND_REASON" | tr -d '[:space:]')" ]; then
-    warn "the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR awaits this triage's ruling: pass --reopen <lanes>|none and --round-reason <why>, and --dismiss-approval when the approval no longer covers what would land (bring-current-audit.sh render --anchor $ANCHOR --as comment reads the round). Nothing written"
+    warn "the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR awaits this triage's ruling: pass --reopen <lanes>|none and --round-reason <why>, and --dismiss-approval only when the round made a call that is the operator's to make, with --round-reason naming it (bring-current-audit.sh render --anchor $ANCHOR --as comment reads the round). Nothing written"
     exit 1
   fi
 fi

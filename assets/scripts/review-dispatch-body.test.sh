@@ -89,6 +89,8 @@ hasF "$TMP/tri.out" '--add-gates' "(CHECK) triage names the widening verdict cal
 hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage states the common no-op case"
 hasF "$TMP/tri.out" '--reopen <lanes>|none --round-reason <why> [--dismiss-approval]' "(CHECK) triage names the bring-current round ruling it carries on the same call"
 hasF "$TMP/tri.out" 'bring-current-audit.sh render --anchor <anchor>' "(CHECK) …and where the round's account is read"
+hasF "$TMP/tri.out" 'only when the round made a call that is the operator' "(CHECK) …and lifts the approval only for a call that is the operator's"
+notF "$TMP/tri.out" 'whether the human approval still covers it' "(CHECK) …not whenever the approval predates the round"
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
 hasF "$TMP/demo.out" 'skills/review-demo/SKILL.md' "(CHECK) demo names its method skill"

@@ -162,8 +162,9 @@ the method. Correctness findings are the `correctness` check's, not yours.
 
 When bringing the branch current conflicted, the same verdict also rules on
 that round: read its account (`bring-current-audit.sh render --anchor <anchor>
---as comment`), then decide which lanes run again on the merged code and
-whether the human approval still covers it, on the same call:
+--as comment`), then decide which lanes run again on the merged code, and lift
+the human approval only when the round made a call that is the operator's to
+make, naming that call in `--round-reason`, on the same call:
 
     signoff.sh ... --reopen <lanes>|none --round-reason <why> [--dismiss-approval]
 

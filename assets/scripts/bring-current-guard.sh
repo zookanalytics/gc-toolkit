@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bring-current-guard — holds a bring-current to the worker's audit of it, and
 # routes a conflicted one to triage, or lifts the approval on an anchor that
-# opts out of review, so no review or approval covers code it never saw.
+# opts out of review, so no review covers code it never saw and no approval
+# stands over a call the operator never made.
 #
 # Bringing a branch current merges its base in. Run at every hand-off
 # (submit-and-exit in formulas/mol-polecat-work.toml, right after the push),
@@ -81,8 +82,8 @@
 # DECIDE. `decide` records triage's ruling in the anchor's record, adds the
 # lanes it reopens to bring_current_reopened, supersedes each reopened lane's
 # standing review so gate-ensure.sh dispatches it again, and, when triage rules
-# the approval no longer covers what would land, lifts it. The lift line is
-# drawn first: the round's time is stored as
+# that the round made a call that is the operator's to make, lifts the
+# approval. The lift line is drawn first: the round's time is stored as
 # bring_current_lifted_at and read back, and from then on the approval rule
 # (review-verdict.sh) counts no approval submitted at or before it, so the merge
 # waits for a new approval whether or not GitHub lets the dismissal land. Each
