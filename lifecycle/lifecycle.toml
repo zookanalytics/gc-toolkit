@@ -532,8 +532,8 @@ keys = [
 #   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
 #   (existing_pr unusable, a PR closed or retargeted out of band). Written by
-#   pr-facts.sh and molecule-hold.sh; it is also a [holds] marker, so a live
-#   bead carrying it owes a blocks edge. Freeform.
+#   pr-facts.sh; it is also a [holds] marker, so a live bead carrying it owes a
+#   blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
@@ -978,8 +978,8 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
 # from its stall arms with the remedy status=blocked, and duplicate-sweep.sh notes
 # that a disposed duplicate had been parked, leaving the text on the bead. No pack
-# script writes it — molecule-hold.sh writes blocked_reason instead; an operator or
-# the refinery stamps it by hand when parking a branch. Never cleared. Freeform.
+# script writes it; an operator or the refinery stamps it by hand when parking a
+# branch. Never cleared. Freeform.
 
 [metadata.proactive]
 # The proactive first-reaction surface. A first reaction is its own leased task
@@ -1365,10 +1365,11 @@ keys = [
 ]
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
-#   stood), `superseded`, `moot`, `dismissed` and `stand-down`; written by the
-#   pack component that reached the outcome (step-close.sh, signoff.sh,
-#   review-outcome.sh, pr-facts.sh, gc-helm.sh and the done arms) and read by the
-#   done gates and the review graph. gc.routed_to and gc.execution_routed_to are
+#   stood), `superseded`, `moot` and `dismissed`, written by the pack component
+#   that reached the outcome (step-close.sh, signoff.sh, review-outcome.sh,
+#   pr-facts.sh, gc-helm.sh and the done arms), and `canceled`, which gascity's
+#   run cancel stamps on every member of a run it ends; read by the done gates
+#   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
 #   the session and claim stamps, the step and root linkage, the poured vars and
 #   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
@@ -1378,15 +1379,13 @@ keys = [
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
 #   bead it finds otherwise unrouted, so the pool re-offers stranded work. No
-#   pack script writes or reads it; dead-molecule-dispose.sh clears it with the
-#   other ROUTE_KEYS when de-routing a dead molecule's members. Absent or empty
-#   means unrouted. A route value, per the ROUTE rule in the preamble. A formula
+#   pack script writes or reads it. Absent or empty means unrouted. A route value, per the ROUTE rule in the preamble. A formula
 #   step can also declare it in its step metadata: gascity's sling routes a
 #   poured step by its assignee, else by this key, which is how
 #   mol-review-quorum-signoff sends each lane to its provider's pool
 #   ([metadata.review_quorum]).
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
-#   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
+#   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
 #   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
 # gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-tracking
@@ -1409,7 +1408,7 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `no-op`
-#   from dead-molecule-dispose.sh, duplicate-sweep.sh on a rework twin it
+#   from duplicate-sweep.sh on a rework twin it
 #   disposes, first-reaction-dispose.sh on the reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every visit close, the
 #   observation-filing recipes, and converse by hand. duplicate-sweep.sh reads it

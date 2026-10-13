@@ -369,6 +369,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `assets/scripts/work-tree-holder.sh` | work | Tells load-context whether a live session is working the bead's tree, the one sign of a run in flight on a work bead the workflow never claims. |
+| `assets/scripts/await-ruling.sh` | work | Records a declined run's wait on its work bead: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
@@ -482,6 +483,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, which the gc-toolkit rig's lint command runs. |
 | `assets/scripts/branch-end.sh` | shared primitive | Ends a retired bead's branch on the git remote, the way delete-on-merge ends a landed one: keeps a branch a live bead still names, pins the tip (the PR's `refs/pull/<n>/head`, or an annotated `archive/<branch>@<short-sha>` tag read back on origin), then deletes it at that tip. `bead-rehome.sh` runs it after every disposition close, so it serves that writer's callers for the same reason: converse (visit), and `pr-facts.sh`, `duplicate-sweep.sh` and `scaffolding-sweep.sh` (merge). Its origin write is granted in [authority-map.md](authority-map.md). |
 | `assets/scripts/rework-child.sh` | shared primitive | The one writer of a review- or ruling-sourced rework child, the fix unit that blocks an anchor while a worker resumes its branch. Review (`signoff.sh`, on a request-changes verdict) and visit (`converse-rework.sh`, on an operator ruling) file through it for the same reason, each passing its provenance as the child's source key and deciding the work order. |
+| `assets/scripts/run-cancel.sh` | shared primitive | Ends a molecule's run through gascity's run cancel, which closes the root and every step that is not closed, so no pack script writes a molecule member. Work (`mol-polecat-work`'s declines), review (`mol-validate`'s), visit (`gc-helm.sh takeaway --release`) and patrol (the witness's orphan recovery, for a run whose root already closed) call it for the same reason: a run that should not continue. |
 
 ### The placements worth arguing about
 

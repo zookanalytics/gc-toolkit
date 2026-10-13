@@ -193,7 +193,9 @@ has "$esc" "Nothing was pushed" "…saying nothing was pushed"
 has "$esc" "The question: keep the retry loop with the branch's extension, or drop both?" "…asking the question"
 has "$esc" "What collided in \`lib/retry.sh\`: main deleted the retry loop; the branch extended it." "…saying what collided"
 has "$esc" "- \`docs/a.md\`, routine. Decided: kept both." "…carrying the entries so far"
-has "$esc" "Record the answer in the notes of B2 as you release it" "…and how the answer reaches the worker"
+has "$esc" "record the answer in the notes of B2" "…and where the answer goes"
+has "$esc" "when B2 waits on this visit, closing the visit re-slings it" "…how a cancelled run's work comes back"
+has "$esc" "when it is parked for a person, route it back to the polecat pool" "…and how a parked bead does"
 
 echo "# ask: the anchor resolves through the branch, or is the bead itself"
 store "[$(bead B3 | jq -c 'del(.metadata.anchor_bead)'), $(anchorrow AN5)]"
@@ -204,6 +206,18 @@ store "[$(anchorrow AN6 ",\"target\":\"main\"" | jq -c 'del(.metadata.merge_resu
 : > "$STUB_ESC_LOG"
 "$SUT" ask --bead AN6 --path x --collided "c" --question "q" >/dev/null 2>&1
 has "$(cat "$STUB_ESC_LOG")" "--subject AN6 " "an anchor the refinery re-queued asks on itself"
+
+echo "# anchor: the bead ask files its visit on"
+store "[$(bead B2), $(anchorrow AN1)]"
+eq "$("$SUT" anchor --bead B2)" "AN1" "a rework bead's anchor"
+store "[$(bead B3 | jq -c 'del(.metadata.anchor_bead)'), $(anchorrow AN5)]"
+eq "$("$SUT" anchor --bead B3)" "AN5" "…resolved through its branch when it names none"
+store "[$(anchorrow AN6)]"
+eq "$("$SUT" anchor --bead AN6)" "AN6" "…and an anchor is its own"
+"$SUT" anchor --bead NOPE >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "an unreadable bead exits 1"
+"$SUT" anchor >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "no --bead is a usage error"
 
 echo "# ask: an empty question, a visit that does not land, or a question that does not read back exits 1"
 store "[$(bead B4), $(anchorrow AN1)]"

@@ -46,8 +46,8 @@ covers that dimension.
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,472 | 6,118 |
 | [`mechanik`](agents/mechanik.md) | 35,781 | 8,945 |
-| [`polecat`](agents/polecat.md) | 28,839 | 7,209 |
-| [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
+| [`polecat`](agents/polecat.md) | 28,750 | 7,187 |
+| [`polecat-codex`](agents/polecat-codex.md) | 28,780 | 7,195 |
 | [`proactive`](agents/proactive.md) | 23,481 | 5,870 |
 | [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
 | [`witness`](agents/witness.md) | 19,204 | 4,801 |
@@ -78,7 +78,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
-| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,545 | 1,136 |
+| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,646 | 1,161 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |

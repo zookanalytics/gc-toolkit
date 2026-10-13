@@ -175,41 +175,34 @@ presents as a routing or pool bug; it is a missing `--status=closed`.
 
 **Terminal steps close, then drain-ack** — in that order.
 
-**A step that must NOT close has a third state: `blocked`.** Some refusal arms
-cannot close, because closing advances the graph and the next step is
-destructive — `mol-polecat-work`'s duplicate-dispatch hold is the case, where
+**A step that must not advance ends its run instead.** Some refusal arms
+cannot close their step, because closing advances the graph and the next step is
+destructive — `mol-polecat-work`'s duplicate-dispatch gate is the case, where
 `workspace-setup` would recreate the branch over a live worker's commits. The
 tempting reading is that not-closed means `open`, and that is the respawn loop
 above by another door: `open` is claimable, so the pool re-offers the same step
-every cycle and each fresh worker re-derives the same refusal.
-
-Clearing `gc.routed_to` alone does not fix it.
+every cycle and each fresh worker re-derives the same refusal. Clearing
+`gc.routed_to` alone does not fix it either.
 `unclaimWorkAssignedToRetiredSessionInfo` (`cmd/gc/session_beads.go`) sweeps
 `{open, in_progress}` assigned to a drained session and calls
 `ReleaseWorkBead`, which stamps a `run_target` fallback route "only when
-otherwise unrouted" — so an open step with its route cleared is exactly what
-gets re-routed. The same two statuses gate drain-ack's assigned-work close gate
-(`sessionHasOpenAssignedWorkInStoreByIdentifiersForCloseGate`,
-`cmd/gc/session_reconciler.go`) and the pool offer. `blocked` sits outside all
-three while still not being closed, so it holds the workflow without advancing
-it.
+otherwise unrouted".
 
-`assets/scripts/molecule-hold.sh` is the writer. It blocks the step, clears the
-route on the step, on the molecule root — a routed root re-offers the molecule
-even with every step quiet — and on the root's other steps, skipping
-`workflow-finalize` so the graph can still retire. It closes nothing. The
-blocking write deliberately carries no assignee: bd's claim guard refuses
-`--assignee ""` on an `in_progress` bead and the refusal is atomic over the
-whole update, so batching the two loses the status change as well.
-Sibling claims are cleared afterwards, route first, because the reverse order
-leaves a bead briefly `open + unassigned + routed`, which is the offer predicate
-itself.
+A molecule's lifecycle is gascity's, so the refusal ends the run through
+gascity's run cancel, `POST /v0/city/<city>/runs/<root>/cancel` on the
+supervisor API (`humaHandleRunCancel`, `internal/api/huma_handlers_runs.go`). The
+cancel closes the root and every member that is not closed, a `blocked` one
+included, with `gc.outcome=canceled`, blockers first, and runs none of them. A
+session mid-step finishes that step and idles. `assets/scripts/run-cancel.sh`
+sends it, after resolving the run from the step this session holds, and the
+pack writes no member of the molecule. Nothing resumes a cancelled run, so a
+wait for a person sits on the work bead: `assets/scripts/await-ruling.sh` makes
+the work bead wait on the visit with a `blocks` edge and arms its re-sling, and
+closing the visit pours a fresh run.
 
-It reports success only when all of that landed. The caller drains on exit 0,
-and a molecule still routed anywhere is re-offered however quiet its steps are,
-so a route that survived on the root or on a sibling exits non-zero instead. A
-sibling whose route clear failed keeps its claim, because unassigning it there
-writes the offer predicate rather than escaping it.
+The refusal drains only after the cancel lands. A cancel that does not land
+leaves the step claimed by this session, and the step goes back to the pool
+only once the session ends, so the next worker retries it.
 
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.
