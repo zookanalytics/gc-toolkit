@@ -103,9 +103,12 @@ direct blocker, so `merge.sh` would hold its merge and bd would refuse its close
 Parking its parent instead holds the rest of the parent's work and leaves the PR
 landing.
 
-A park does hold a rejected handoff. When the refinery rejects a handed-off
-bead, it routes the work bead itself back to the polecat pool, and a member is
-inside the cascade, so the rework waits for the park's release.
+A park leaves a rejected handoff running too. When the refinery rejects a
+handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
+dispatches the rebuild as a fresh `mol-polecat-work` pour. The cascade does not
+reach a poured workflow, and load-context reads only the bead's own blockers,
+so the rebuild runs. When that sling fails, the script arms a retry, which
+deferred dispatch slings once the bead's own blockers close.
 
 ### What a park holds
 
