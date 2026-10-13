@@ -121,9 +121,17 @@ done
 "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
-`--about` names the bead the finding is about. It narrows the dedup to that
-bead, so one key over two beads stays two findings rather than collapsing
-into one.
+`--about` names the bead the finding is about, and the dedup matches on it
+together with the key. Leave it off for a finding about the patrol itself. A
+patrol wisp is burned when its pass ends, so patrol-finding.sh drops a wisp
+subject and dedups on the key alone.
+
+patrol-finding.sh files a new bead only when no live witness finding already
+shares its key or its subject. When one does, it files nothing, lists those
+findings, and exits 3. If your finding reports one of those situations, re-run
+with that finding's own `--key` and `--about`, and the report lands on it as an
+occurrence. Add `--distinct` only when your situation differs from every
+finding it listed.
 
 Routine recoveries (pool resize, config change) are logged, not filed. File
 what needs someone to act: repeated recovery of one bead (crash loop),
@@ -250,11 +258,14 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
