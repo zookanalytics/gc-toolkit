@@ -33,6 +33,7 @@
 # stays claimed, so whichever worker the step goes to next retries the cancel.
 #
 # Callers: the decline arms of mol-polecat-work, mol-validate and mol-rig-demo;
+# molecule-hold.sh (--step, for step text that names that script);
 # orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail

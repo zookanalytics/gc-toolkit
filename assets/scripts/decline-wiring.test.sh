@@ -9,7 +9,10 @@
 # What is exercised here:
 #   * NO PACK LIFECYCLE: no formula, doctrine fragment or agent prompt calls
 #     molecule-hold.sh, dead-molecule-dispose.sh or dead-molecule-sweep.sh, or
-#     tells a reader to retire a molecule with `gc convoy delete`;
+#     tells a reader to retire a molecule with `gc convoy delete`. The two
+#     disposers do not ship. molecule-hold.sh ships only as the name that step
+#     text from an earlier version of a formula calls: it hands the call to
+#     run-cancel.sh and reads or writes no bead itself;
 #   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
 #     decline cancels the run this shell is executing and no other;
 #   * ORDER, executed: workspace-setup's missing-branch arm files the visit,
@@ -46,9 +49,17 @@ LEFT=$(git -C "$ROOT" grep -n -E 'molecule-hold\.sh|dead-molecule-dispose\.sh|de
 eq "$LEFT" "" "no formula, fragment, prompt or skill names a pack hold or disposer"
 RETIRE=$(git -C "$ROOT" grep -n -F 'gc convoy delete' -- 'formulas/*.toml' 'template-fragments/*.md' 2>/dev/null || true)
 eq "$RETIRE" "" "no formula or fragment tells a reader to retire a molecule with gc convoy delete"
-for script in molecule-hold.sh dead-molecule-dispose.sh dead-molecule-sweep.sh; do
+for script in dead-molecule-dispose.sh dead-molecule-sweep.sh; do
   [ -e "$HERE/$script" ] && bad "$script still ships" || ok "$script does not ship"
 done
+HOLD_CODE=$(grep -v -E '^[[:space:]]*#' "$HERE/molecule-hold.sh" 2>/dev/null || true)
+# shellcheck disable=SC2016  # the literal text of the script's exec line
+has "$HOLD_CODE" 'exec "$RUN_CANCEL"' "molecule-hold.sh hands its call to run-cancel.sh"
+case "$HOLD_CODE" in
+  *"gc bd"*|*"bd update"*|*"bd_json"*|*"bd-lib"*|*"--status"*|*"routed_to"*)
+    bad "molecule-hold.sh reads or writes a bead itself" ;;
+  *) ok "molecule-hold.sh reads and writes no bead itself" ;;
+esac
 
 # --- 2. Each cancel names the step it sits in. ----------------------------------
 if TOML_PY="$(tomllib_python)"; then

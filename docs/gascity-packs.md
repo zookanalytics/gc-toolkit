@@ -204,6 +204,15 @@ The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool
 only once the session ends, so the next worker retries it.
 
+A molecule keeps the step text it was poured with, while the scripts that text
+calls are read from the rig checkout when the step runs. So a pack script that
+open step text names stays callable under that name until no open step bead
+names it. Step text from an earlier version of these formulas requires
+`assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
+scripts, and calls it to decline. That script hands the call to
+`run-cancel.sh --step` unchanged, so such a run ends through gascity's run
+cancel like any other.
+
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.
 A root-only in-session wisp runs every formula step in one worker session and
