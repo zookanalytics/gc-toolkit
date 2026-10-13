@@ -885,5 +885,78 @@ chmod +x "$TMP/quietdep/gc"
 PATH="$TMP/quietdep:$PATH" "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
 eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "…and so does one whose lookup prints nothing and exits 0"
 
+# ---------------------------------------------------------------------------
+# A ruling that replaces must-fix releases the must-fix hold only after its own
+# commit. A deferral, decline or needs-you ruling that fails anywhere before the
+# commit leaves the finding must-fix, open and still blocking the anchor, so the
+# objection holds the merge until a ruling lands.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancH","status":"open","assignee":"","title":"ancH","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+        {"id":"fuH","status":"open","assignee":"","title":"a bead that blocks a finding","notes":"","metadata":{}}]'
+must_fix_h() { # <slug> <message>: a finding on tk-ancH, ruled must-fix
+  local f
+  f=$("$SUT" upsert --anchor tk-ancH --lane correctness --locus "assets/scripts/hold.sh:$1()" --message "$2")
+  "$SUT" set-disposition --finding "$f" --anchor tk-ancH --disposition must-fix
+  printf '%s\n' "$f"
+}
+still_holds() { # <finding> <rc> <what failed>
+  eq "$2|$(meta "$1" 'finding.disposition')|$(bstatus "$1")" "2|must-fix|open" "$3 exits 2 and leaves the finding must-fix and open"
+  has " $(probe_blockers tk-ancH) " " $1 " "…still blocking the anchor through the probe the merge runs"
+}
+defer_h() { "$SUT" set-disposition --finding "$1" --anchor tk-ancH --disposition deferred --reason "later work"; }
+
+HL=$(must_fix_h lookup "defer past an unread follow-up lookup")
+STUB_DEP_GARBAGE=discovered-from defer_h "$HL" 2>/dev/null; rc=$?
+still_holds "$HL" "$rc" "a deferral whose follow-up lookup does not read"
+HC=$(must_fix_h create "defer past a refused follow-up create")
+STUB_CREATE_FAIL=1 defer_h "$HC" 2>/dev/null; rc=$?
+still_holds "$HC" "$rc" "a deferral whose follow-up create is refused"
+HA=$(must_fix_h arm "defer past a failed arm")
+GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" defer_h "$HA" 2>/dev/null; rc=$?
+still_holds "$HA" "$rc" "a deferral whose arm fails"
+HR=$(must_fix_h reply "defer past a refused reply")
+STUB_UPDATE_FAIL="$HR" defer_h "$HR" 2>/dev/null; rc=$?
+still_holds "$HR" "$rc" "a deferral whose reply stamp is refused"
+HX=$(must_fix_h close "defer past a refused close")
+STUB_CLOSE_FAIL="$HX" defer_h "$HX" 2>/dev/null; rc=$?
+still_holds "$HX" "$rc" "a deferral whose close is refused"
+# The clean re-run commits, and only then releases the hold. A fix unit wired
+# onto the finding meanwhile is stripped before the close, which bd would refuse
+# while it blocks the finding; the finding's own edge onto the anchor does not
+# block that close.
+gc bd dep fuH --blocks "$HX" >/dev/null
+STUB_ENFORCE_BLOCKS=1 defer_h "$HX"; rc=$?
+eq "$rc|$(meta "$HX" 'finding.disposition')|$(bstatus "$HX")" "0|deferred|closed" "the clean re-run commits the deferral"
+hasnt " $(probe_blockers tk-ancH) " " $HX " "…and releases the hold once it has"
+hasnt "$(deps)" "$HX|blocks|tk-ancH" "…dropping the edge itself"
+eq "$(followups "$HX" | grep -c .)" "1" "…on the one follow-up the refused attempt filed"
+
+HD=$(must_fix_h declined "decline past a refused close")
+STUB_CLOSE_FAIL="$HD" "$SUT" set-disposition --finding "$HD" --anchor tk-ancH --disposition declined --reason "not an objection" 2>/dev/null; rc=$?
+still_holds "$HD" "$rc" "a decline whose close is refused"
+HDR=$(must_fix_h declined-reply "decline past a refused reply")
+STUB_UPDATE_FAIL="$HDR" "$SUT" set-disposition --finding "$HDR" --anchor tk-ancH --disposition declined --reason "not an objection" --reply "No change needed." 2>/dev/null; rc=$?
+still_holds "$HDR" "$rc" "a decline whose owed reply is refused"
+STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$HD" --anchor tk-ancH --disposition declined --reason "not an objection"; rc=$?
+eq "$rc|$(meta "$HD" 'finding.disposition')|$(bstatus "$HD")" "0|declined|closed" "the clean re-run commits the decline"
+hasnt "$(deps)" "$HD|blocks|tk-ancH" "…and releases the hold once it has"
+
+cat > "$TMP/escalate-fail.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "escalate: simulated failure" >&2
+exit 1
+STUB
+chmod +x "$TMP/escalate-fail.sh"
+HN=$(must_fix_h needs-you "escalate past an unfiled visit")
+GC_ESCALATE_SH="$TMP/escalate-fail.sh" "$SUT" set-disposition --finding "$HN" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+still_holds "$HN" "$rc" "a needs-you ruling whose visit cannot be filed"
+HNC=$(must_fix_h needs-you-commit "escalate past a refused commit")
+STUB_UPDATE_FAIL="$HNC" GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+still_holds "$HNC" "$rc" "a needs-you ruling whose commit is refused"
+GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call"; rc=$?
+eq "$rc|$(meta "$HNC" 'finding.disposition')|$(bstatus "$HNC")" "0|needs-you|open" "the clean re-run commits needs-you"
+hasnt " $(probe_blockers tk-ancH) " " $HNC " "…and releases the hold once it has"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

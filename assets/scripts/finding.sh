@@ -268,6 +268,17 @@ strip_inbound_blocks() { # <finding>
   done
 }
 
+# Drop the hold a must-fix ruling hung from <finding> onto <anchor>: the pair with
+# the anchor depending on the finding. Only that pair is removed; the reverse pair
+# is the finding's membership edge onto its anchor, which the anchor's
+# closed-children read follows. A ruling that replaces must-fix calls this only
+# after its own commit. Exit 1 when the hold survives.
+release_hold() { # <finding> <anchor>
+  edge_exists "$1" "$2" || return 0
+  gc bd dep remove "$2" "$1" >/dev/null 2>&1 || true
+  ! edge_exists "$1" "$2"
+}
+
 # The live follow-up a deferral of <finding> already filed, or empty. A follow-up
 # is born discovered-from the finding it carries forward and stamped
 # source_finding=<finding>, and the stamp is what marks it as the deferral's.
@@ -432,6 +443,14 @@ cmd_set_disposition() {
   # current disposition (`unvalidated` on a first ruling), so any failure leaves it
   # retryable. The arms carry the per-disposition stamp; `*` rejects a bad name
   # before any write.
+  #
+  # The finding keeps what its current disposition holds until the commit, too. An
+  # arm that replaces a must-fix ruling releases that ruling's hold on the anchor
+  # only after its own commit lands, so a failure anywhere before the commit leaves
+  # the finding must-fix and still holding the merge. A deferral or decline closes
+  # the finding in its commit, and the edge left on a closed finding holds nothing:
+  # bd refuses a close only on a live blocker, and the merge counts only live
+  # blockers.
   case "$disp" in
     must-fix)
       # The hold merge.sh's blocker probe already reads. Idempotent: a re-run
@@ -504,19 +523,6 @@ cmd_set_disposition() {
       local dispatcher="${GC_DEFERRED_DISPATCH_SH:-$_bd_lib_dir/deferred-dispatch.sh}"
       [ -x "$dispatcher" ] \
         || { warn "deferred $finding: deferred-dispatch.sh not executable at $dispatcher; cannot arm its follow-up; NOT closing"; exit 2; }
-      # Retract the blocks edge a prior must-fix ruling may have wired — merge.sh
-      # reads blocks downward, so a survivor would keep a deferral holding the merge
-      # it must release — and fail closed if it survives; strip inbound blocks so the
-      # close is not refused by a cross-wired fix unit. The hold is the pair with the
-      # anchor depending on the finding, and only that pair is removed: the reverse
-      # pair is the finding's membership edge onto its anchor, which the
-      # anchor's closed-children read follows.
-      if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
-      fi
-      ! edge_exists "$finding" "$anchor" \
-        || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
-      strip_inbound_blocks "$finding"
       # One finding has one follow-up. Every step after the follow-up is filed can
       # fail and exit 2, which leaves the finding at its prior disposition, so the
       # validator rules it again. That retry reuses the follow-up the failed attempt
@@ -591,24 +597,26 @@ cmd_set_disposition() {
       dreply="$dreply. It will be picked up after this merges."
       gc bd update "$finding" --set-metadata finding.reply="$dreply" >/dev/null 2>&1 \
         || { warn "could not stamp finding.reply on $finding; NOT closing (a silent deferral)"; exit 2; }
+      # Nothing may block the finding at its close: a fix unit wired onto it by an
+      # earlier must-fix ruling, or cross-wired at dispatch, would have bd refuse
+      # the close with "cannot close blocked issue".
+      strip_inbound_blocks "$finding"
       local dnote="deferred: tracked as follow-up $followup"
       [ -n "$reason" ] && dnote="$dnote — $reason"
       gc bd update "$finding" --set-metadata finding.disposition=deferred --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
         || { warn "could not close deferred finding $finding"; exit 2; }
+      release_hold "$finding" "$anchor" \
+        || warn "deferred $finding still blocks $anchor after its close; the edge on a closed finding holds nothing"
       ;;
     declined)
       # No objection to answer: close it with the reason. A declined finding
-      # holds nothing and nothing holds it, so drop BOTH sides before the close:
-      # its own must-fix hold on the anchor (finding --blocks anchor, never the
-      # finding's membership edge), and every blocker wired INTO it. The inbound
-      # strip is what the close depends on — a fix unit wired onto this finding
-      # (from an earlier must-fix ruling, or a dispatch that cross-wired before
-      # the validator ran) would make bd refuse the close with "cannot close
-      # blocked issue" and stall the whole triage.
-      if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
-      fi
-      strip_inbound_blocks "$finding"
+      # holds nothing and nothing holds it, so both sides go: every blocker wired
+      # INTO it just before the close, and its own must-fix hold on the anchor
+      # once the close lands. The inbound strip is what the close depends on — a
+      # fix unit wired onto this finding (from an earlier must-fix ruling, or a
+      # dispatch that cross-wired before the validator ran) would make bd refuse
+      # the close with "cannot close blocked issue" and stall the whole triage.
+      #
       # A declined HUMAN objection owes its raiser an answer on the PR: the
       # operator read the diff and objected, so overruling them in silence is the
       # gap the peer model closes. Stamp the owed reply BEFORE the close, and fail
@@ -621,10 +629,13 @@ cmd_set_disposition() {
         gc bd update "$finding" --set-metadata finding.reply="$reply" >/dev/null 2>&1 \
           || { warn "could not stamp finding.reply on $finding; NOT closing (a silent decline)"; exit 2; }
       fi
+      strip_inbound_blocks "$finding"
       local note="declined"
       [ -n "$reason" ] && note="declined: $reason"
       gc bd update "$finding" --set-metadata finding.disposition=declined --status=closed --append-notes "$note" >/dev/null 2>&1 \
         || { warn "could not close declined finding $finding"; exit 2; }
+      release_hold "$finding" "$anchor" \
+        || warn "declined $finding still blocks $anchor after its close; the edge on a closed finding holds nothing"
       ;;
     needs-you)
       # The objection turns on a call only the operator can make, so this ruling
@@ -635,13 +646,10 @@ cmd_set_disposition() {
       # the human review, so the review holds the merge changes-requested until the
       # operator rules the visit; their ruling then re-dispositions this finding
       # (must-fix, declined, or deferred). needs-you holds nothing of its own, so
-      # retract any blocks edge a prior must-fix ruling hung (the hold, never the
-      # finding's membership edge) and strip inbound blocks — the hold is the
-      # review, carried by this finding staying open.
-      if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
-      fi
-      strip_inbound_blocks "$finding"
+      # once the ruling is committed it releases the hold a prior must-fix ruling
+      # hung and strips inbound blocks — the hold is the review, carried by this
+      # finding staying open.
+      #
       # One visit per finding, keyed on its id; escalate.sh dedups on the
       # (escalation_key, subject) pair, so a re-ruled finding reuses its open visit
       # rather than filing a second. The path is overridable for the hermetic test.
@@ -664,6 +672,9 @@ cmd_set_disposition() {
         --set-metadata finding.visit="$vid" \
         --set-metadata finding.reply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it." >/dev/null 2>&1 \
         || { warn "could not stamp finding.disposition/finding.visit/finding.reply on $finding"; exit 2; }
+      release_hold "$finding" "$anchor" \
+        || warn "needs-you $finding still blocks $anchor; that edge holds the merge until the operator's ruling re-dispositions the finding"
+      strip_inbound_blocks "$finding"
       local nnote="needs-you: opened visit $vid"
       [ -n "$reason" ] && nnote="$nnote — $reason"
       gc bd update "$finding" --append-notes "$nnote" >/dev/null 2>&1 \
