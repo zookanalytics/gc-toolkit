@@ -14,6 +14,11 @@
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
 # id-read-unguarded, doc-filing.
 #
+# Every detector in the directory, one added later included, is also held to
+# the runner's rule that a broken detector never reads as a clean scan. When a
+# tool it runs fails, it exits 2 or reports what it reports with every tool
+# working, and a file it cannot read exits 2.
+#
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
 
@@ -2243,6 +2248,169 @@ plantpp "$TMP/pp-exempt/specs/record.md" <<'FIX'
 FIX
 runpp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh" "$TMP/pp-exempt/specs/record.md"
 eq "$RC" 0 "pr-post.sh, lint-learned.d/ and specs/ are skipped"
+
+echo "── every detector: a tool that fails never reads as a clean scan ──"
+
+# The runner tells a broken detector from a clean one only by its exit status,
+# so no tool a detector runs may fail into a clean scan. Every executable in
+# lint-learned.d/ is run on the fixtures below, which hold a violation of each
+# rule, with the tools on PATH replaced by shims. One run fails one call of one
+# tool, and across the runs every call fails once. The detector must then exit
+# 2 and say why, or report what it reports with every tool working. A detector
+# added later is held to the same contract, so these fixtures must carry a
+# violation it reports.
+CT="$TMP/contract"
+mkdir -p "$CT/bin" "$CT/tree/formulas" "$CT/tree/docs" "$CT/tree/skills/x" "$CT/tree/specs/x"
+
+# A shim numbers its own call by creating the first free <tool>.<n> file in
+# $GCTK_CALLS with noclobber set. The create is atomic, so calls that run at
+# once in one pipeline still get distinct numbers. The redirect hangs on
+# `true`, not `:`, because a failed redirect on a special builtin such as `:`
+# ends a POSIX shell like dash. The call $GCTK_FAIL names fails the way a
+# broken tool does, and every other call runs the real tool. PATH holds only
+# these shims and bash, so a detector that runs any other tool reports
+# differently under them, and the comparison below says so.
+for tool in awk grep sed sort tr cat; do
+    real="$(command -v "$tool")" || { echo "no $tool on PATH"; exit 1; }
+    cat > "$CT/bin/$tool" <<SHIM
+#!/bin/sh
+[ -d "\${GCTK_CALLS:-}" ] || { echo "$tool shim: no call log" >&2; exit 3; }
+set -C
+n=1
+until { true > "\$GCTK_CALLS/$tool.\$n"; } 2>/dev/null; do
+    n=\$((n + 1))
+    [ "\$n" -le 10000 ] || { echo "$tool shim: cannot number its call" >&2; exit 3; }
+done
+if [ "\${GCTK_FAIL:-}" = "$tool.\$n" ]; then
+    echo "$tool: failed by the contract test" >&2
+    exit 2
+fi
+exec "$real" "\$@"
+SHIM
+    chmod +x "$CT/bin/$tool"
+done
+ln -s "$(command -v bash)" "$CT/bin/bash"
+
+# ct_run <detector> <file> [<call>] — run a detector on one fixture under the
+# shims, failing <call> (such as awk.2) when one is named. It runs from the
+# fixture root because doc-filing reads paths relative to the repository root.
+# Sets RC and OUT, and leaves one file per tool call in $CT/calls.
+ct_run() {
+    rm -rf "$CT/calls"; mkdir "$CT/calls"
+    OUT="$(cd "$CT/tree" && env PATH="$CT/bin" GCTK_CALLS="$CT/calls" GCTK_FAIL="${3:-}" "$1" "$2" 2>&1)"; RC=$?
+}
+# ct_locs <output> — the <file>:<line> locations a run reports, sorted.
+ct_locs() { printf '%s\n' "$1" | grep -oE '^[^: ]+:[0-9]+:' | sort -u; }
+
+# The fixtures are written with placeholders, as in the sections above, so this
+# file carries none of the shapes it plants.
+plantct() {
+    sed -e 's/@BD@/bd/g' -e 's/@MKT@/mktemp/g' -e 's/@J@/bd_json/g' -e 's/@CTL@/[:cntrl:]/g' \
+        -e 's/@GH@/gh/g' -e 's/@NOTES@/--notes/g' -e 's#@OR@#//#g' \
+        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' > "$CT/tree/$1"
+}
+plantct x.sh <<'FIX'
+#!/usr/bin/env bash
+set -o @PF@
+printf '%s\n' "$X" | @GQ@ x
+@BD@ list --json
+@MKT@ -d
+@J@ "$ID"
+x=$(printf '%s' "$J" | tr -d '@CTL@')
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+@BD@ close "$GC_BEAD_ID"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+FIX
+plantct formulas/x.toml <<'FIX'
+[[steps]]
+id = "x"
+description = """
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+@BD@ close "$GC_BEAD_ID"
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@MKT@ -d
+@GH@ pr comment 5 --body x
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+# <<< contract
+```
+"""
+FIX
+plantct docs/x.md <<'FIX'
+# x
+
+```bash
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+@MKT@ -d
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@BD@ close "$GC_BEAD_ID"
+# <<< contract
+```
+FIX
+plantct skills/x/SKILL.md <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+```
+FIX
+plantct specs/x/y.md <<'FIX'
+# y
+FIX
+
+for det in "$HERE"/lint-learned.d/*; do
+    [ -f "$det" ] && [ -x "$det" ] || continue
+    name="$(basename "$det")"
+    reached=0
+    for f in x.sh formulas/x.toml docs/x.md skills/x/SKILL.md specs/x/y.md; do
+        # With every tool working, a file the detector does not scan, or finds
+        # clean, has no finding a failure could lose.
+        want="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; wrc=$?
+        [ "$wrc" -eq 0 ] && continue
+        if [ "$wrc" -ne 1 ]; then
+            bad "$name on $f: with every tool working" "exit $wrc: $want"
+            continue
+        fi
+        reached=$((reached + 1))
+        ct_run "$det" "$f"
+        if [ "$RC" -ne "$wrc" ] || [ "$OUT" != "$want" ]; then
+            bad "$name on $f: reports differently under the shims" "so it runs a tool they do not cover; exit $RC: $OUT"
+            continue
+        fi
+        calls=()
+        for c in "$CT/calls"/*; do [ -e "$c" ] && calls+=("${c##*/}"); done
+        broke=()
+        for call in ${calls[@]+"${calls[@]}"}; do
+            ct_run "$det" "$f" "$call"
+            if [ "$RC" -eq 2 ]; then
+                [ -n "$(printf '%s\n' "$OUT" | grep -v ': failed by the contract test$')" ] \
+                    || broke+=("$call: exit 2 with no word of its own")
+            elif [ "$RC" -ne "$wrc" ] || [ "$(ct_locs "$OUT")" != "$(ct_locs "$want")" ]; then
+                broke+=("$call: exit $RC, $(ct_locs "$OUT" | tr '\n' ' ')")
+            fi
+        done
+        if [ "${#broke[@]}" -eq 0 ]; then
+            ok "$name on $f: each of its ${#calls[@]} tool calls, failing, is reported or changes nothing"
+        else
+            bad "$name on $f: a failing tool call changes what it reports" "$(printf '%s; ' "${broke[@]}")"
+        fi
+        # A file it cannot read is a scan that cannot run. Skipped where the
+        # suite runs as root, which reads a file whatever its mode.
+        chmod 000 "$CT/tree/$f"
+        if [ ! -r "$CT/tree/$f" ]; then
+            OUT="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; RC=$?
+            eq "$RC" 2 "$name on $f: a file it cannot read exits 2"
+        fi
+        chmod 644 "$CT/tree/$f"
+    done
+    [ "$reached" -gt 0 ] || bad "$name: no contract fixture holds a violation it reports" "add one to the fixtures above, or the contract checks nothing for it"
+done
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"
