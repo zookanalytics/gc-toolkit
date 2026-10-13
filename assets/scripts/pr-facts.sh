@@ -831,8 +831,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
     br_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.branch // ""' 2>/dev/null)
     pn_now=$(printf '%s' "$snap" | jq -r '.[0].metadata.pr_number // ""' 2>/dev/null)
     if [ -z "$rr_now" ] && { [ -n "$br_now" ] || [ -n "$pn_now" ]; }; then
-      gc bd update "$fix" --status=closed --set-metadata gc.outcome=abandoned \
-        --append-notes "Unmade by $PROG: a partial stamp left it able to veto (branch/pr_number) but with no rejection_reason to be rescued by, so it is closed rather than left as a half-stamped husk (atomic birth)." >/dev/null 2>&1 || true
+      bd_unmake "$fix" "Unmade by $PROG: a partial stamp left it able to veto (branch/pr_number) but with no rejection_reason to be rescued by, so it is closed rather than left as a half-stamped husk (atomic birth)." || true
     fi
     return 1
   fi
@@ -2582,12 +2581,10 @@ REAP_EOF
       # branch shape is brought current by MERGE, never a rebase/force-push.
       prepare_mode=merge
       # Deterministic per batch: the same outstanding feedback names the same
-      # child, a later batch names a different one. Both halves of the probe
-      # matter — a fully stamped hit means this batch was already dispatched and
-      # only the watermark write failed, an unstamped hit is an orphan from a
-      # pass whose stamp dropped, and re-creating either mints a twin. The title
-      # IS that probe's key, so rewording it strands every child in flight under
-      # the old one.
+      # child, a later batch names a different one. A hit that names this
+      # anchor means this batch was already dispatched and only the watermark
+      # write failed, and re-creating it mints a twin. The title IS that probe's
+      # key, so rewording it strands every child in flight under the old one.
       # The issue-comment coordinate joins the key only when there is one, so a PR
       # with no Conversation feedback keeps the exact title a child already in
       # flight was filed under, and only a batch that actually carries an issue
@@ -2611,107 +2608,111 @@ $CBODY"
         echo "$PROG: $id — PR#$num comment dedup probe failed; nothing dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
+      # The work order: branch and target say where the fix is pushed and where
+      # it lands, rejection_reason is the instruction, and prepare_mode says how
+      # the branch is brought current. merge_strategy=mr and the PR identity
+      # (existing_pr, pr_url, pr_number) name this PR as the one the refinery's
+      # PR pipeline reuses for the hand-back. task_kind and anchor_bead are the
+      # role marker, and anchor_bead is also the key the batch probe finds the
+      # child by. A fresh child is filed with this order, and a child the probe
+      # finds is held to it as well.
+      CMETA=$(jq -nc --arg a "$id" --arg b "$fix_branch" --arg t "$base" \
+        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+        --arg sr "$CSRC" --arg m "$prepare_mode" --arg u "$live_url" --arg n "$num" \
+        '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
+         + (if $sr == "" then {} else {source_review: $sr} end)
+         + {prepare_mode: $m, merge_strategy: "mr", existing_pr: $u, pr_url: $u, pr_number: $n}' 2>/dev/null)
+      # anchor_bead is the key the batch probe finds a child by, among the
+      # children the title probe above lists. A fresh child short of it is one
+      # no later pass can find, so it is bd_create's --select below, and the
+      # orphan close before that create names it too.
+      CSELECT="anchor_bead"
       CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
         [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
+      cwhole=""
       if [ -n "$CFIX" ]; then
         echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; re-checking its route before the watermark"
       else
-        # Live-only, unlike the batch probe above: a CLOSED orphan would take the
-        # stamp and the route, hold nothing, and still let the watermark advance
-        # past a comment no one ever read.
-        CFIX=$(printf '%s' "$ckids" | jq -r --arg live "$LIVE_STATUSES" '
-          ($live | split(",")) as $ls
-          | [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "")
-                  | ((.status // "open") | tostring | ascii_downcase) as $st
-                  | select(($ls | index($st)) != null)
-                  | .id ] | .[0] // empty' 2>/dev/null)
-        # The child is joined to the anchor before anchor_bead lands on it: a
-        # create carries the edge (bd_create_child), and an adopted orphan is
-        # joined first, so a failed join leaves an orphan the next pass adopts
-        # again rather than a stamped child the anchor's closed-children read
-        # misses once it closes.
-        if [ -n "$CFIX" ]; then
-          echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
-          if ! bd_anchor_link "$id" "$CFIX"; then
-            echo "$PROG: $id could not join comment-rework orphan $CFIX to the anchor; retry next pass" >&2
-            skipped=$((skipped + 1)); continue
-          fi
-        else
-          CFIX=$(printf '%s\n' "$CBODY" | bd_create_child "$id" "$CTITLE" -t task --body-file - --json 2>/dev/null \
-                   | jq -r '.id // empty' 2>/dev/null)
+        # A child an earlier two-write create left behind carries this batch's
+        # title but no anchor_bead, so the batch probe never found it, while its
+        # blocks edge holds the anchor beside the child filed below. It is
+        # closed first. An unreadable listing files nothing (retry next pass).
+        if ! bd_unmake_orphans "$CSELECT" "$CTITLE" \
+             "Unmade by $PROG: a comment rework for PR#$num filed without the anchor_bead the batch probe finds it by, so no pass could find it to route it, while its blocks edge held $id. A child carrying it is filed in its place." >/dev/null; then
+          echo "$PROG: $id — PR#$num comment-rework orphan probe failed; nothing dispatched (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
         fi
+        # The child is filed whole: its work order, the blocks edge that holds
+        # the anchor and the membership edge onto it (--child-of) ride the
+        # create. A create whose reply is lost has still landed with the
+        # anchor_bead the batch probe above matches, so the next pass finds it
+        # rather than minting a twin. bd_create writes a short child its whole
+        # order once more, and closes one still short of anchor_bead, since no
+        # later pass could find it while its blocks edge held the merge (no id
+        # comes back). It prints the id of a child short of any other key too
+        # (its rc 2), so the id says the child exists, not that it can be
+        # routed. The work-order check below says that.
+        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" --child-of "$id" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
         fi
-        CSRCSET=(); [ -z "$CSRC" ] || CSRCSET=(--set-metadata "source_review=$CSRC")
-        gc bd update "$CFIX" \
-          --set-metadata task_kind=rework \
-          --set-metadata anchor_bead="$id" \
-          --set-metadata branch="$fix_branch" \
-          --set-metadata target="$base" \
-          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not, posted through $PR_POST so it is not read back as new feedback — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
-          ${CSRCSET[@]+"${CSRCSET[@]}"} \
-          --set-metadata prepare_mode="$prepare_mode" \
-          --set-metadata merge_strategy=mr \
-          --set-metadata existing_pr="$live_url" \
-          --set-metadata pr_url="$live_url" \
-          --set-metadata pr_number="$num" >/dev/null 2>&1 \
-          || echo "$PROG: WARN comment rework $CFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-        gc bd dep "$CFIX" --blocks "$id" >/dev/null 2>&1 \
-          || echo "$PROG: WARN could not attach comment rework $CFIX as a blocks-dep of $id" >&2
-        # The comment-rework child now exists (created or adopted, then stamped);
-        # drop the per-pass bd_list cache so the title/anchor_bead dedup probe reads
-        # it on the next anchor and does not twin it. The gc bd show reads below do
-        # not repopulate the cache. No-op outside a reconcile pass.
+        # rc 0 is a child bd_create read back whole a moment ago: open, held by
+        # nobody, and carrying no route, since its work order holds none. The
+        # checks below need no read of it.
+        [ "$crc" -eq 0 ] && cwhole=1
+        # The comment-rework child now exists; drop the per-pass bd_list cache
+        # so the title/anchor_bead dedup probe reads it on the next anchor and
+        # does not twin it. The gc bd show reads below do not repopulate the
+        # cache. No-op outside a reconcile pass.
         bd_cache_clear
-        # anchor_bead is the dedup key the probe above reads; an unstamped child
-        # is invisible to it, so routing one would twin on the next pass.
-        agot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
-        if [ "$agot" != "$id" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
-          skipped=$((skipped + 1)); continue
-        fi
       fi
       # An unrouted child still holds the merge through its blocks edge, but no
       # pool can claim it, and the mark would retire the only signal that could
       # re-file it. A CLOSED child is already dispositioned, so refusing on one
-      # could never converge. Only a definitively closed status skips the check;
-      # an unreadable one still demands both stamps.
-      cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
-        | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      # could never converge. Only a definitively closed status skips the check.
+      # The one read of a child found by the batch probe, or filed short, serves
+      # its status, whether anyone has taken it, its work order and its route.
+      crow=""; cst="open"
+      if [ -z "$cwhole" ]; then
+        crow=$(bd_json show "$CFIX" </dev/null)
+        cst=$(printf '%s' "$crow" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      fi
       if [ "$cst" != "closed" ]; then
-        # prepare_mode is stamped merge and the resume path defaults to merge, so a
-        # child routed without it still merges rather than rewriting. Re-stamp for
-        # metadata completeness rather than refuse: a batch already covered skips
-        # the create block, so a child stranded by a dropped stamp could take one
-        # nowhere else.
-        mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
-        if [ "$mgot" != "$prepare_mode" ]; then
-          gc bd update "$CFIX" --set-metadata prepare_mode="$prepare_mode" >/dev/null 2>&1 || true
-          mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
+        rgot=""
+        if [ -z "$cwhole" ]; then
+          # A child that does not read back shows neither its status nor who
+          # holds it, so nothing is written to it and nothing moves: a write
+          # ignores bd's claim guard, and could land on a child a polecat is
+          # working.
+          if ! printf '%s' "$crow" | jq -e --arg c "$CFIX" 'type == "array" and ((.[0].id // "") == $c)' >/dev/null 2>&1; then
+            echo "$PROG: WARN comment rework $CFIX did not read back; nothing written or routed, and NOT watermarking (retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          # The route makes the child a polecat's work order, and the watermark
+          # retires the comments it answers, so neither moves until every key of
+          # that order reads back. A child nobody has taken (open, unassigned, and
+          # not poured) that is short of a key is written the whole order once and
+          # read back again (bd_meta_ensure, judging the row read above). It is
+          # this pass's order, so a child filed at an older head is brought up to
+          # this one before anyone works it. A child someone has taken was held to
+          # this check before it was routed, and its holder owns its metadata now:
+          # the resume clears its rejection_reason, and the hand-back clears its
+          # route. So it is not written. A child still short is left for the
+          # retry: the batch probe found it by its anchor_bead, or bd_create kept
+          # it only because it carried that key.
+          ctaken=$(printf '%s' "$crow" | jq -r '.[0] // {}
+            | if (((.assignee // "") | tostring) != "")
+                 or (((.status // "open") | tostring | ascii_downcase) != "open")
+                 or (((.metadata["gc.execution_routed_to"] // "") | tostring) != "")
+              then "taken" else "" end' 2>/dev/null)
+          if [ -z "$ctaken" ] && ! cshort=$(bd_meta_ensure --row "$crow" "$CFIX" "$CMETA"); then
+            echo "$PROG: WARN comment rework $CFIX did not record its whole work order (short: $cshort); left unrouted and NOT watermarking (retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          # The work order holds no route, so the row read above still shows it.
+          rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
-        if [ "$mgot" != "$prepare_mode" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (route only a fully-stamped child)" >&2
-          skipped=$((skipped + 1)); continue
-        fi
-        # task_kind=rework is the role marker. The create-path read-back proves
-        # anchor_bead (the dedup key), but never this, and a recheck of a child
-        # that already covers the batch skips that read-back entirely — so a
-        # create that half-landed without task_kind would leave a routed comment
-        # rework on the anchor's own branch with no marker. anchor_bead is already
-        # proven (it is how this child was found); re-stamp task_kind the same way
-        # as the mode, before the watermark advances past the comments it answers.
-        kgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.task_kind // empty' 2>/dev/null)
-        if [ "$kgot" != "rework" ]; then
-          gc bd update "$CFIX" --set-metadata task_kind=rework >/dev/null 2>&1 || true
-          kgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.task_kind // empty' 2>/dev/null)
-        fi
-        if [ "$kgot" != "rework" ]; then
-          echo "$PROG: WARN comment rework $CFIX did not record task_kind=rework; left unmarked and NOT watermarking" >&2
-          skipped=$((skipped + 1)); continue
-        fi
-        rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         if [ "$rgot" != "$FIX_POOL" ]; then
           gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
           rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
@@ -2806,41 +2807,28 @@ $CBODY"
         echo "$PROG: $id — PR#$num already carries a human-lane validation pass $VPASS; re-checking its shape before watermarking"
       else
         vtitle="Validate PR#$num feedback (through $vcoord)"
-        # Reclaim a same-anchor half-stamped pass before minting. A prior pass may
-        # have created THIS anchor's human pass and had the task_kind or check_name
-        # half of its one shaping write drop; the bead then carries anchor_bead=$id
-        # — so the probe above lists it — but the human-lane selector skips it
-        # because task_kind is not "validation", or check_name is unset. It is this
-        # anchor's pass by title, distinct from a real correctness-lane pass (check_name
-        # set to another lane), so reclaim only a title match whose lane is unset or
-        # already human and let the shape gate below repair the missing key, rather
-        # than mint a twin that would double-block the anchor.
-        VPASS=$(printf '%s' "$vpass_rows" | jq -r --arg t "Validate PR#$num feedback" '
-          [ .[] | select(((.title // "") | tostring) | startswith($t))
-                | select(((.metadata.check_name // "") | tostring) as $l | $l == "" or $l == "human")
-                | .id ] | .[0] // empty' 2>/dev/null)
-        if [ -n "$VPASS" ]; then
-          echo "$PROG: $id reclaiming half-stamped validation pass $VPASS for PR#$num (a prior pass's shaping write half-landed)"
+        # A pass an earlier two-write create left behind carries a title of
+        # this PR's feedback passes but not the shape the human-lane probe above
+        # reads, while its blocks edge holds the anchor beside the pass filed
+        # below, so it is closed first. Best-effort: an unreadable listing
+        # closes nothing and the pass is filed anyway.
+        bd_unmake_orphans "$VALIDATION_SELECT" "Validate PR#$num feedback" \
+          "Unmade by $PROG: a human-lane validation pass for PR#$num filed without the shape the human-lane probe selects it by, so no validator could rule it, while its blocks edge held $id. A pass carrying it is filed in its place." >/dev/null || true
+        # The pass is filed whole: the shape mol-validate reads, the blocks edge
+        # that holds the anchor and the membership edge onto it (--child-of)
+        # ride the create. A create whose reply is lost has still landed with
+        # anchor_bead, task_kind and check_name, so the next pass's human-lane
+        # probe above finds it rather than minting a twin that would
+        # double-block the anchor. One that stays short of a VALIDATION_SELECT
+        # key is closed by bd_create, which then prints no id.
+        vident=$(validation_work_order "$id" human "$head_oid")
+        vbody=""
+        [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
+        if [ -n "$vbody" ]; then
+          VPASS=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" --child-of "$id" "$vident" "$vtitle" -t task --deps "blocks:$id" --body-file -)
         else
-          # A prior pass that created the bead but failed to stamp anchor_bead left
-          # an orphan the probe above cannot see; adopt it by title rather than mint
-          # a twin. Live-only: a closed orphan is already dispositioned.
-          if vorphans=$(bd_list --title-contains "$vtitle" --status="$LIVE_STATUSES"); then
-            VPASS=$(printf '%s' "$vorphans" | jq -r '
-              [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-          fi
-          if [ -n "$VPASS" ]; then
-            echo "$PROG: $id adopting unstamped validation-pass orphan $VPASS for PR#$num"
-          else
-            vbody=""
-            [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules a human feedback batch on PR#$num (through $vcoord; $live_url). The findings to rule are the open task_kind=finding beads on anchor $id." 2>/dev/null) || vbody=""
-            if [ -n "$vbody" ]; then
-              VPASS=$(printf '%s' "$vbody" | bd_create_child "$id" "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-            else
-              echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
-              VPASS=$(bd_create_child "$id" "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-            fi
-          fi
+          echo "$PROG: WARN validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass" >&2
+          VPASS=$(bd_create --select "$VALIDATION_SELECT" --child-of "$id" "$vident" "$vtitle" -t task --deps "blocks:$id")
         fi
         if [ -z "$VPASS" ]; then
           echo "$PROG: WARN $id — PR#$num could not open a validation pass; nothing watermarked (retry next pass)" >&2
@@ -2854,29 +2842,28 @@ $CBODY"
       # passes it slings mol-validate onto by it — anchor_bead scopes the findings,
       # check_name is the lane it selects them by (a missing one defaults to correctness,
       # so the human findings would go unruled), and reviewed_oid is the pin it
-      # needs to back the lane. The one write below stamps all four together, so any
-      # can be the half that drops; a pass missing task_kind still matches an
+      # needs to back the lane. A pass missing task_kind still matches an
       # anchor_bead probe and still blocks the anchor by its edge, yet
       # open_validation_pass cannot see it, so it would watermark the batch behind a
-      # pass no validator-path selector reads. Every source of $VPASS reaches this
-      # one check — the probe's existing pass, a reclaimed half-stamped pass, an
-      # adopted orphan, a freshly minted bead — so it is re-read and repaired here,
-      # not trusted on the probe's word. Repair a field the pass lacks, read them
-      # all back, and skip the watermark unless each holds — a proxy check on
-      # anchor_bead alone would mark the batch handled behind a pass the validator
-      # cannot rule. Skipping holds the batch to retry; the rework child is already
-      # filed, so it costs nothing. reviewed_oid is only ADDED when absent, never
-      # overwritten: head_oid is the live PR head, not a per-batch constant, and a
-      # live human pass adopted across batches keeps the head it was opened at so a
-      # validator mid-rule does not have its back-lane pin moved under it.
+      # pass no validator-path selector reads. Both sources of $VPASS reach this one
+      # check — the probe's existing pass and a freshly filed one — so it is re-read
+      # and repaired here, not trusted on the probe's word or the create's. Repair a
+      # field the pass lacks, read them all back, and skip the watermark unless each
+      # holds — a proxy check on anchor_bead alone would mark the batch handled
+      # behind a pass the validator cannot rule. Skipping holds the batch to retry;
+      # the rework child is already filed, so it costs nothing. reviewed_oid is only
+      # ADDED when absent, never overwritten: head_oid is the live PR head, not a
+      # per-batch constant, and a live human pass reused across batches keeps the
+      # head it was opened at so a validator mid-rule does not have its back-lane pin
+      # moved under it.
       vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
       v_kind=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.task_kind // empty')
       v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
       v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
       v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
-      # A pass about to take anchor_bead is joined to the anchor first (a fresh
-      # one carries the edge from its create, an adopted orphan does not), so the
-      # stamp never lands on a pass the anchor's closed-children read cannot reach.
+      # A pass about to take anchor_bead is joined to the anchor first, so the
+      # stamp never lands on a pass the anchor's closed-children read cannot
+      # reach. A pass filed above carries the edge from its create.
       if [ "$v_anchor" != "$id" ] && ! bd_anchor_link "$id" "$VPASS"; then
         echo "$PROG: WARN $id — PR#$num validation pass $VPASS could not be joined to the anchor; nothing stamped or watermarked (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
