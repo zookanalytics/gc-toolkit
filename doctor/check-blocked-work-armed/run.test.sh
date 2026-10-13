@@ -7,8 +7,9 @@
 # merge anchor, waiting for placement, review/step/workflow/demand metadata,
 # every standing kind, decision/epic/infra types), a marked bead placed under an
 # epic, the per-rig labelling, the remedy string, the fail-closed probes
-# (unreadable blocked listing, unreadable marked listing, unreadable rig list),
-# and the quiet paths (empty store, all-armed store).
+# (unreadable blocked listing, unreadable marked listing, a marked listing that
+# fails after printing its rows, unreadable rig list), a raw control byte in a
+# listing's row, and the quiet paths (empty store, all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -48,12 +49,14 @@ case "$sub" in
   # not-found OBJECT (not an array), which the check reads as liveness-unverified.
   # `list --metadata-field placement=pending` is the placement step's read of the
   # marked beads, in the shape `bd list` prints (a parent included); each one is
-  # logged so a case can tell whether the check made it.
+  # logged so a case can tell whether the check made it. BD_PARTIAL_MARKED names
+  # a store whose listing prints its rows and then fails.
   list) case " $* " in
           *" placement=pending "*)
             printf '%s\n' "$name" >> "$STORES/marked.calls"
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
-            f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+            f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
+            if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
           *) f="$STORES/$name.alive.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
         esac ;;
   show) sid="$2"; f="$STORES/$name.show.$sid.json"
@@ -227,6 +230,48 @@ has "$OUT" "could not be read" "…it says the placement could not be read"
 has "$OUT" "NOT flagged" "…and that it withheld the flag"
 hasnt "$OUT" "no dispatch path" "…as a warning, not a stranded-work finding"
 hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…with no arm remedy"
+clear_stores
+# A listing that prints its rows and then fails has not answered for the store,
+# so its rows vouch for nothing: the candidate is warned, not exempted.
+blocked_store alpha "$(bmeta a-1 placement pending)"
+marked_store  alpha "$(bmarked a-1)"
+OUT=$(BD_PARTIAL_MARKED=alpha run_check); RC=$?
+eq "$RC" "1" "a marked listing that prints rows and then fails makes the pass report (exit 1)"
+has "$OUT" "could not be read" "…it says the placement could not be read, whatever the rows said"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…with no arm remedy"
+clear_stores
+
+# --- a raw control byte in one row does not void its listing -----------------
+# Each listing is scrubbed before jq first reads it, its type check included, so
+# one bead whose title carries a raw control byte leaves the rest judged: the
+# store is checked, liveness is confirmed, and a marked candidate's placement is
+# read.
+CTL_ROW=$(printf '{"id":"a-9","status":"open","assignee":"someone/else","issue_type":"task","title":"bell\001here","metadata":{"placement":"pending"}}')
+blocked_store alpha "$(bwork a-1)" "$CTL_ROW"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked listing with a raw control byte in a title is still judged (exit 1)"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…its stranded bead is flagged"
+hasnt "$OUT" "NOT checked" "…rather than the store reported unchecked"
+clear_stores
+blocked_store alpha "$(bexec a-1)"
+alive_store  alpha "$(broot root-1 convoy-1)" "$CTL_ROW"
+convoy_tracks convoy-1 a-1 alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an alive listing with a raw control byte in a title still confirms liveness"
+hasnt "$OUT" "liveness could not be confirmed" "…so the in-flight bead is not warned as unverifiable"
+clear_stores
+blocked_store alpha "$(bexec a-1)"
+alive_store  alpha "$(broot root-1 convoy-1)"
+printf '[{"id":"convoy-1","title":"bell\001here","dependencies":[{"dependency_type":"tracks","id":"a-1"}]}]' > "$TMP/stores/alpha.show.convoy-1.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a convoy whose title carries a raw control byte still confirms liveness"
+hasnt "$OUT" "liveness could not be confirmed" "…so the bead it tracks is not warned as unverifiable"
+clear_stores
+blocked_store alpha "$(bmeta a-1 placement pending)"
+marked_store  alpha "$(bmarked a-1)" "$CTL_ROW"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a marked listing with a raw control byte in a title still judges the placement"
+hasnt "$OUT" "could not be read" "…so a bead that waits for the sitting is not warned as unverifiable"
 clear_stores
 
 blocked_store alpha "$(bassigned a-1)"

@@ -169,7 +169,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
     # `bd blocked` returns exactly the beads held out of ready by an open
     # blocker, so the edge is a fact of the listing and needs no re-derivation.
+    # Every listing here is scrubbed before jq first reads it, its type check
+    # included: one raw control byte in a title would otherwise fail the whole
+    # listing, and the store or the candidates it vouches for would go unjudged.
     raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>/dev/null); rc=$?
+    raw=$(printf '%s' "$raw" | scrub)
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         # An empty array is a real answer (no blocked beads); a non-zero probe
         # or empty payload is not, and must not read as a clean store.
@@ -191,7 +195,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # waiting for placement on this listing is marked in the fourth column:
     # `bd blocked` prints no parent, so whether the sitting placed it is settled
     # below, on a listing that prints one.
-    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
+    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
@@ -223,15 +227,17 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # if the alive listing or any convoy read fails, so a candidate carrying the
     # exec stamp is warned rather than flagged when coverage cannot be confirmed.
     worked=" "; liveness_ok=1
-    alive=$(run_bounded gc bd list --db "$rig_path/.beads" --status open,in_progress --json --limit 0 2>/dev/null)
-    if printf '%s' "$alive" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        convoys=$(printf '%s' "$alive" | scrub | jq -r '[ .[]? | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' 2>/dev/null)
+    alive=$(run_bounded gc bd list --db "$rig_path/.beads" --status open,in_progress --json --limit 0 2>/dev/null); alive_rc=$?
+    alive=$(printf '%s' "$alive" | scrub)
+    if [ "$alive_rc" -eq 0 ] && printf '%s' "$alive" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        convoys=$(printf '%s' "$alive" | jq -r '[ .[]? | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' 2>/dev/null)
         while IFS= read -r convoy; do
             [ -n "$convoy" ] || continue
-            crows=$(run_bounded gc bd show "$convoy" --db "$rig_path/.beads" --json 2>/dev/null)
-            if printf '%s' "$crows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            crows=$(run_bounded gc bd show "$convoy" --db "$rig_path/.beads" --json 2>/dev/null); crows_rc=$?
+            crows=$(printf '%s' "$crows" | scrub)
+            if [ "$crows_rc" -eq 0 ] && printf '%s' "$crows" | jq -e 'type == "array"' >/dev/null 2>&1; then
                 while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \
-                    <<< "$(printf '%s' "$crows" | scrub | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' 2>/dev/null)"
+                    <<< "$(printf '%s' "$crows" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' 2>/dev/null)"
             else
                 liveness_ok=0   # a convoy we could not read may cover a candidate
             fi
@@ -246,13 +252,16 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # awaiting_placement judges that row. Read only when a candidate is marked,
     # and left unconfirmed ($placement_ok=0) when the listing fails, so a marked
     # candidate is warned rather than flagged: arming a bead that still waits for
-    # the sitting would start work the operator has not placed.
+    # the sitting would start work the operator has not placed. A listing that
+    # prints an array and then exits non-zero has not answered for the store, so
+    # bd's own exit status is read, not scrub's.
     waiting=" "; placement_ok=1
     if printf '%s\n' "$cand" | awk -F'\t' '$4 == "1" { found = 1 } END { exit !found }'; then
         marked=$(run_bounded gc bd list --db "$rig_path/.beads" --metadata-field placement=pending \
-            --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null)
-        if printf '%s' "$marked" | jq -e 'type == "array"' >/dev/null 2>&1 \
-            && waiting_ids=$(printf '%s' "$marked" | scrub | jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[]? | select(awaiting_placement) | .id' 2>/dev/null); then
+            --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); marked_rc=$?
+        marked=$(printf '%s' "$marked" | scrub)
+        if [ "$marked_rc" -eq 0 ] && printf '%s' "$marked" | jq -e 'type == "array"' >/dev/null 2>&1 \
+            && waiting_ids=$(printf '%s' "$marked" | jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[]? | select(awaiting_placement) | .id' 2>/dev/null); then
             while IFS= read -r w; do [ -n "$w" ] && waiting="$waiting$w "; done <<< "$waiting_ids"
         else
             placement_ok=0
