@@ -77,6 +77,73 @@ case ":$PATH:" in *":$TMP/bin:"*) ok "stub bin is on PATH" ;; *) bad "stub bin n
 export GC_RIG=myrig
 eq "$GC_RIG" "myrig" "a rig exported after harness_init is honored"
 
+# The test floor sits directly beneath the stubs, harness/ (git) first.
+FLOOR="$(cd "$HERE/../../tools/test-floor" && pwd)"
+case ":$PATH:" in
+  *":$TMP/bin:$FLOOR/harness:$FLOOR:"*) ok "the test floor is on PATH directly beneath the stub bin" ;;
+  *) bad "the test floor is not directly beneath the stub bin: $PATH" ;;
+esac
+
+# A script under test that outlives its suite's stubs is refused, never handed
+# the real binary. A suite in miniature sources the harness over its own TMP,
+# starts a script that waits, and is killed by a TERM that script never gets, so
+# the suite's EXIT trap removes TMP, stubs and all, while the script runs on.
+# CANARY, on the PATH the suite inherits, stands in for the real gc, bd, gh and
+# git: each one there records that it was reached. The script makes each call in
+# a subshell, as a script under test makes most of its calls, so each one
+# searches PATH afresh.
+CANARY="$TMP/floor-canary"; FLOOR_OUT="$TMP/floor-out"
+mkdir -p "$CANARY" "$FLOOR_OUT"
+for t in gc bd gh git; do
+  printf '#!/usr/bin/env bash\necho "%s reached" >> "$FLOOR_OUT/canary"\n' "$t" > "$CANARY/$t"
+  chmod +x "$CANARY/$t"
+done
+cat > "$TMP/floor-suite.sh" <<'SUITE'
+TMP="$(mktemp -d "$FLOOR_OUT/suite.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+. "$HARNESS"
+harness_init
+printf '%s\n' "$TMP" > "$FLOOR_OUT/suite-tmp"
+bash -c '
+  ( gc bd show x > "$FLOOR_OUT/with-stub" )
+  : > "$FLOOR_OUT/ready"
+  while [ ! -e "$FLOOR_OUT/go" ]; do sleep 0.1; done
+  for c in "gc bd create debris" "bd create debris" "gh pr comment 47" "git push origin"; do
+    ( $c 2>> "$FLOOR_OUT/refusals"; echo "$c rc=$?" >> "$FLOOR_OUT/rcs" )
+  done
+  : > "$FLOOR_OUT/done"
+' &
+wait
+SUITE
+( export FLOOR_OUT HARNESS="$HERE/test-harness.sh"; PATH="$CANARY:$PATH"; exec bash "$TMP/floor-suite.sh" ) &
+SUITE_PID=$!
+waited=0
+until [ -e "$FLOOR_OUT/ready" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+[ -e "$FLOOR_OUT/ready" ] && ok "floor: the script under test starts beneath a live suite" || bad "floor: the script under test never started"
+eq "$(cat "$FLOOR_OUT/with-stub" 2>/dev/null)" "[]" "floor: while the suite runs, its stub answers"
+kill -TERM "$SUITE_PID"; wait "$SUITE_PID" 2>/dev/null
+if [ -d "$(cat "$FLOOR_OUT/suite-tmp")" ]; then bad "floor: the killed suite's EXIT trap left its TMP"; else ok "floor: the killed suite's EXIT trap removed its TMP, stubs and all"; fi
+: > "$FLOOR_OUT/go"
+waited=0
+until [ -e "$FLOOR_OUT/done" ] || [ "$waited" -ge 200 ]; do sleep 0.05; waited=$((waited + 1)); done
+eq "$(tr '\n' ';' < "$FLOOR_OUT/rcs" 2>/dev/null)" "gc bd create debris rc=127;bd create debris rc=127;gh pr comment 47 rc=127;git push origin rc=127;" \
+  "floor: each call the orphaned script makes fails as a missing command"
+refusals="$(cat "$FLOOR_OUT/refusals" 2>/dev/null)"
+for c in "gc bd create" "bd create debris" "gh pr comment" "git push origin"; do
+  has "$refusals" "test-floor: refused '$c'" "floor: …the floor refuses '$c'"
+done
+if [ -e "$FLOOR_OUT/canary" ]; then bad "floor: a binary behind the floor was reached: $(cat "$FLOOR_OUT/canary")"; else ok "floor: …and no binary behind the floor is reached"; fi
+
+# A tree without the floor does not run: a harness whose ../../tools holds no
+# test-floor exits before any stub is used.
+NOFLOOR="$TMP/nofloor"
+mkdir -p "$NOFLOOR/assets/scripts" "$NOFLOOR/run"
+cp "$HERE/test-harness.sh" "$NOFLOOR/assets/scripts/"
+out=$(TMP="$NOFLOOR/run"; . "$NOFLOOR/assets/scripts/test-harness.sh"; harness_init 2>&1; echo "survived"); rc=$?
+eq "$rc" "2" "harness_init with no test floor refuses to run"
+has "$out" "no test floor at tools/test-floor" "…and names the missing floor"
+hasnt "$out" "survived" "…before the suite goes on"
+
 # The gc bd create stub lands a create the way real bd does: --metadata (a JSON
 # value, its types kept), --status and --notes ride the one insert, and a
 # --metadata that is not JSON is refused with nothing created. A stub that
@@ -357,6 +424,24 @@ gc bd update tk-desc -d third >/dev/null
 eq "$(jq -r '.[0].description' "$STUB_STORE")" "third" "...and -d is the same flag"
 eq "$(jq -c '.[0] | [.notes, .metadata.k, .status]' "$STUB_STORE")" '["n","v","open"]' "...leaving notes, metadata and status alone"
 
+# The gc bd update stub lands a whole write in one jq, and the gc bd list stub
+# answers a query and all of its --metadata-field filters in one, however many
+# flags the call carries. Each counted call is read back, so a call that stopped
+# before its jq cannot pass the count.
+store '[{"id":"tk-one","status":"open","assignee":"a","title":"o","notes":"n","metadata":{"old":"x","gone":"y"}},
+        {"id":"tk-two","status":"open","assignee":"","title":"t","notes":"","metadata":{"lane":"c","stage":"1"}}]'
+one=$(jq_runs gc bd update tk-one --set-metadata k1=1)
+many=$(jq_runs gc bd update tk-one --set-metadata k1=2 --set-metadata k2=b --set-metadata k1=3 \
+  --unset-metadata gone --unset-metadata k2 --assignee=bob --status=in_progress --append-notes more --description d)
+eq "$many" "$one" "update: a write with nine flags starts as many jq processes as one with a single key"
+eq "$(jq -c '.[] | select(.id == "tk-one") | [.metadata, .assignee, .status, .notes, .description]' "$STUB_STORE")" \
+  '[{"old":"x","k1":3},"bob","in_progress","n\nmore","d"]' "update: …and every flag of that write lands"
+one=$(jq_runs gc bd list --json)
+many=$(jq_runs gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json)
+eq "$many" "$one" "list: a read with three --metadata-field filters starts as many jq processes as one with none"
+eq "$(gc bd list --metadata-field lane=c --metadata-field stage=1 --metadata-field=old= --status=open --json | jq -r 'map(.id) | join(",")')" "tk-two" \
+  "list: …and that read answers with the one bead every filter matches"
+
 # part: tools/run-tests.sh runs a suite with parts once per part, exporting the
 # run's part and every declared one. Each probe runs in a subshell, so the
 # failure an undeclared name records is read back from its output rather than
@@ -375,6 +460,81 @@ out=$(export RUN_TESTS_PART=beta; unset RUN_TESTS_PARTS; base=$FAIL
       part gamma; echo "gamma=$? fails=$((FAIL - base))"; part beta; echo "beta=$?")
 has "$out" "gamma=1 fails=0" "part: one part picked by hand, with no declared list, skips the others without failing"
 has "$out" "beta=0" "…and runs the part it names"
+
+# harness_run_parts: a suite that declares parts, run directly, runs each part in
+# a process of its own, the way tools/run-tests.sh runs it. The fixture suite
+# records what each run was told, and its group one leaves state in its shell
+# and in its stub fixtures for group two to find. PARTS_FAIL and PARTS_CRASH
+# make a group fail an assertion, or exit before its tally.
+PARTS_DIR="$TMP/parts"; mkdir -p "$PARTS_DIR"
+export PARTS_HARNESS="$HERE/test-harness.sh" PARTS_STATE="$PARTS_DIR/runs"
+parts_fixture() { # <file> <head|late: where the declaration sits>
+  {
+    echo '#!/usr/bin/env bash'
+    [ "$2" = head ] && echo '# run-tests-parts: one two three'
+    echo 'set -uo pipefail'
+    [ "$2" = late ] && echo '# run-tests-parts: one two three'
+    cat <<'F'
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-parts-fixture.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+. "$PARTS_HARNESS"
+harness_init
+echo "${RUN_TESTS_PART-unset}|${RUN_TESTS_PARTS-unset}|$*" >> "$PARTS_STATE"
+if part one; then
+  LEFT_BY_ONE=1; echo '[]' > "$GH_DIR/left_by_one.json"
+  ok "one"
+fi
+if part two; then
+  eq "${LEFT_BY_ONE:-unset}" "unset" "two starts without the shell state one left"
+  if [ -e "$GH_DIR/left_by_one.json" ]; then bad "two reads the stub fixture one left"; else ok "two starts without the stub fixtures one left"; fi
+  [ "${PARTS_CRASH:-}" != two ] || exit 3
+fi
+if part three; then
+  ok "three"
+  [ "${PARTS_FAIL:-}" != three ] || bad "three fails as asked"
+fi
+echo
+echo "passed: $PASS  failed: $FAIL"
+[ "$FAIL" -eq 0 ]
+F
+  } > "$1"
+}
+parts_fixture "$PARTS_DIR/head.test.sh" head
+parts_fixture "$PARTS_DIR/late.test.sh" late
+# direct [NAME=value...] bash <suite> [arg...] — run a fixture with no part
+# named, as a person or the refinery runs a suite, whatever this shell exported.
+# Sets OUT, RC, RUNS (one part|parts|args line per run) and TALLY (the last line).
+direct() {
+  : > "$PARTS_STATE"
+  OUT="$(unset RUN_TESTS_PART RUN_TESTS_PARTS; env "$@" 2>&1)"; RC=$?
+  RUNS="$(tr '\n' ';' < "$PARTS_STATE")"; TALLY="$(printf '%s\n' "$OUT" | tail -n 1)"
+}
+direct bash "$PARTS_DIR/head.test.sh" x y
+eq "$RC" "0" "harness_run_parts: run directly, a suite with parts passes when every part does"
+eq "$RUNS" "one|one two three|x y;two|one two three|x y;three|one two three|x y;" \
+  "…running each declared part once, in order, told its part, every declared part and the suite's arguments"
+has "$OUT" "ok   - two starts without the stub fixtures one left" "…each in a process of its own, so no part reads the fixtures an earlier part left"
+has "$OUT" "ok   - two starts without the shell state one left" "…or the shell state"
+eq "$(printf '%s\n' "$OUT" | grep -cE '^passed: [0-9]+  failed: [0-9]+$')" "1" "…printing one tally line"
+eq "$TALLY" "passed: 4  failed: 0" "…last, summed over the parts"
+has "$OUT" "# part two: 2 passed, 0 failed" "…with each part's own count on a line of its own"
+direct PARTS_FAIL=three bash "$PARTS_DIR/head.test.sh"
+eq "$RC" "1" "harness_run_parts: a part that fails an assertion fails the run"
+has "$OUT" "FAIL - three fails as asked" "…printing that part's failure"
+has "$OUT" "# part three: 1 passed, 1 failed" "…in that part's count"
+eq "$TALLY" "passed: 4  failed: 1" "…and in the sum"
+direct PARTS_CRASH=two bash "$PARTS_DIR/head.test.sh"
+eq "$RC" "1" "harness_run_parts: a part that exits before its tally fails the run"
+has "$OUT" "FAIL - part two exited 3 with no failure counted" "…as one failure, naming the part and its exit"
+eq "$RUNS" "one|one two three|;two|one two three|;three|one two three|;" "…and the parts after it still run"
+eq "$TALLY" "passed: 2  failed: 1" "…their counts summed with it"
+direct RUN_TESTS_PART=two RUN_TESTS_PARTS="one two three" bash "$PARTS_DIR/head.test.sh"
+eq "$RUNS" "two|one two three|;" "harness_run_parts: a run told its part, as tools/run-tests.sh tells it, runs that part alone"
+hasnt "$OUT" "# ==== part" "…with no run per part under it"
+eq "$TALLY" "passed: 2  failed: 0" "…ending on the suite's own tally"
+direct bash "$PARTS_DIR/late.test.sh"
+eq "$RUNS" "unset|unset|;" "harness_run_parts: a declaration below the opening comment block is not one, so the suite runs once, every group in one process"
+has "$OUT" "FAIL - two reads the stub fixture one left" "…where a group reads the fixtures an earlier group left"
+eq "$RC" "1" "…and fails on them"
 
 # tomllib_python: each probe's PATH holds stand-in interpreters and a directory
 # with only the grep and sort the search runs, so no real Python on the host is
@@ -409,6 +569,86 @@ eq "$out" "tomllib needs Python 3.11 or newer, and PATH has $PYT/old/python3 3.9
 out=$(PATH="$PYT/tools"; tomllib_python); rc=$?
 eq "$rc" "1" "tomllib_python: with no Python at all, it returns 1"
 eq "$out" "tomllib needs Python 3.11 or newer, and PATH has no python3" "…and says there is none"
+
+# The dep stub's reads and writes, as real bd answers them: a row is the far-end
+# bead plus the edge's dependency_type; many ids read up answer bead rows and
+# many ids read down answer edge records; an id that does not resolve is an error
+# object at exit 1; a --file batch commits whole or not at all; and a create's
+# --deps rides the create, refusing it whole when a target does not resolve.
+store '[{"id":"tk-a","status":"open","metadata":{}},{"id":"tk-b","status":"open","metadata":{}},
+        {"id":"tk-c1","status":"open","metadata":{"anchor_bead":"tk-a"}},{"id":"tk-c2","status":"closed","metadata":{"anchor_bead":"tk-b"}}]'
+printf '%s\n' 'tk-c1|related|tk-a' 'tk-c2|related|tk-b' 'tk-c1|blocks|tk-a' > "$STUB_DEPS"
+out=$(gc bd dep list tk-a --direction=up --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | [.id, .dependency_type] ]')" '[["tk-c1","related"]]' "dep list up: the dependents, each with its edge's dependency_type"
+out=$(gc bd dep list tk-a --direction=down --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | [.id, .dependency_type] ]')" '[["tk-c1","blocks"]]' "dep list down: the dependencies, each with its type"
+out=$(gc bd dep list tk-a tk-b --direction=up --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | .id ] | sort')" '["tk-c1","tk-c2"]' "dep list up, many ids: every id's dependents as bead rows"
+out=$(gc bd dep list tk-a tk-b --direction=down --json)
+eq "$(printf '%s' "$out" | jq -c '.[0] | keys')" '["depends_on_id","issue_id","type"]' "dep list down, many ids: edge records"
+out=$(gc bd dep list tk-gone --direction=up --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r 'type')" "1:object" "dep list: an id that does not resolve is an error object at exit 1"
+out=$(gc bd dep list tk-a tk-gone --direction=up --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r 'type')" "1:object" "…and with many ids the error is the whole answer"
+for knob in STUB_DEP_GARBAGE STUB_DEP_PARTIAL STUB_DEP_TRAILING; do
+  out=$(env "$knob=--direction=down" gc bd dep list tk-a --direction=up --json 2>/dev/null); rc=$?
+  eq "$rc:$(printf '%s' "$out" | jq -c '[ .[].id ]' 2>/dev/null)" '0:["tk-c1"]' "$knob=<text>: a dep read whose argv lacks the text answers normally"
+done
+out=$(STUB_DEP_GARBAGE="--direction=down" gc bd dep list tk-a --direction=down --json)
+eq "$out" "not-json" "STUB_DEP_GARBAGE=<text>: a matching read answers garbage"
+out=$(STUB_DEP_PARTIAL="--direction=down" gc bd dep list tk-a --direction=down --json 2>/dev/null); rc=$?
+eq "$out|$rc" "[]|1" "STUB_DEP_PARTIAL=<text>: a matching read prints [] and exits 1"
+out=$(STUB_DEP_TRAILING="--direction=down" gc bd dep list tk-a --direction=down --json 2>/dev/null)
+eq "$(printf '%s\n' "$out" | tail -1)" "gc bd dep: simulated trailing output" "STUB_DEP_TRAILING=<text>: a matching read carries the tail"
+printf '%s\n' '{"from":"tk-c2","to":"tk-a","type":"related"}' '{"from":"tk-c1","to":"tk-a","type":"tracks"}' \
+  | gc bd dep add --file - 2>/dev/null; rc=$?
+eq "$rc" "1" "dep add --file: a batch with a refused pair exits 1"
+eq "$(grep -c 'tk-c2|related|tk-a' "$STUB_DEPS")" "0" "…and writes none of its edges"
+printf '%s\n' '{"from":"tk-c2","to":"tk-a","type":"related"}' '{"from":"tk-c1","to":"tk-a","type":"related"}' \
+  | gc bd dep add --file -; rc=$?
+eq "$rc:$(grep -c 'tk-c2|related|tk-a' "$STUB_DEPS"):$(grep -c 'tk-c1|related|tk-a' "$STUB_DEPS")" "0:1:1" \
+  "dep add --file: a clean batch lands, a same-type pair staying one edge"
+nid=$(gc bd create "born joined" --deps "related:tk-a" --json | jq -r '.id')
+eq "$(grep -c "$nid|related|tk-a" "$STUB_DEPS")" "1" "create --deps related:X: the new bead depends on X by that edge"
+nid=$(gc bd create "gate" --deps "blocks:tk-a" --json | jq -r '.id')
+eq "$(grep -c "$nid|blocks|tk-a" "$STUB_DEPS")" "1" "create --deps blocks:X: the new bead blocks X"
+nid=$(gc bd create "waits" --deps "tk-b" --json | jq -r '.id')
+eq "$(grep -c "tk-b|blocks|$nid" "$STUB_DEPS")" "1" "create --deps X: the new bead is blocked by X"
+before=$(jq 'length' "$STUB_STORE")
+gc bd create "orphan" --deps "related:tk-gone" --json >/dev/null 2>&1; rc=$?
+eq "$rc:$(jq 'length' "$STUB_STORE")" "1:$before" "create --deps with a target that does not resolve is refused whole"
+# STUB_DEP_ADD_FAIL refuses a dep add whose source it names, alone or inside a
+# --file batch, which then writes none of its edges.
+out=$(STUB_DEP_ADD_FAIL=tk-b gc bd dep add tk-b tk-a --type related 2>&1); rc=$?
+eq "$rc" "1" "STUB_DEP_ADD_FAIL: a named source's dep add is refused"
+has "$out" "simulated refusal for tk-b" "…with a reason on stderr"
+eq "$(grep -c 'tk-b|related|tk-a' "$STUB_DEPS")" "0" "…and writes no edge"
+printf '%s\n' '{"from":"tk-c1","to":"tk-b","type":"related"}' '{"from":"tk-b","to":"tk-a","type":"related"}' \
+  | STUB_DEP_ADD_FAIL=tk-b gc bd dep add --file - 2>/dev/null; rc=$?
+eq "$rc:$(grep -c 'tk-c1|related|tk-b' "$STUB_DEPS")" "1:0" "STUB_DEP_ADD_FAIL: a --file batch naming the source is refused whole"
+
+# The kv store, as real bd answers it: get --json is {found, key, value}, at exit
+# 1 for an unset key; set and clear write one key=value line each; a --db pin is
+# accepted anywhere; STUB_KV_FAIL fails every kv call with no answer.
+out=$(gc bd kv get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '1:[false,""]' "kv get: an unset key answers found=false at exit 1"
+gc bd kv set some.key "a value"
+out=$(gc bd kv --db /x get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '0:[true,"a value"]' "kv set then get: found, with the value, through a --db pin"
+gc bd kv set some.key2 other
+gc bd kv set some.key replaced
+eq "$(grep -c '^some\.key=' "$STUB_KV"):$(gc bd kv get some.key --json | jq -r '.value')" "1:replaced" "kv set replaces the key's one line"
+gc bd kv clear some.key
+eq "$(gc bd kv get some.key --json | jq -r '.found'):$(gc bd kv get some.key2 --json | jq -r '.value')" "false:other" "kv clear drops only that key"
+out=$(STUB_KV_FAIL=1 gc bd kv get some.key2 --json 2>/dev/null); rc=$?
+eq "$rc:$out" "1:" "STUB_KV_FAIL: a kv call fails with no answer"
+out=$(gc bd show tk-gone --json); rc=$?
+eq "$rc:$out" "0:[]" "show of an id the store does not hold answers [] by default"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-gone --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.error')" "1:no issues found matching the provided IDs" \
+  "STUB_SHOW_NOT_FOUND_ERROR: it answers bd's error object at exit 1"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-a --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.[0].id')" "0:tk-a" "…and a held id still answers its row"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

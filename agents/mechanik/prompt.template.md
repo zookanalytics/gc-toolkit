@@ -114,16 +114,30 @@ RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $
 CONVOY=$(GC_RIG=<rig> "{{ .ConfigDir }}/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
     --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
 
-# File child work beads in the rig's store under the convoy, read the link back,
-# and sling normally. The link and its read-back name the rig too: a dep add
-# that crosses stores prints success and exits 0 with no edge to read back, and
-# a child slung unlinked opens its PR against the default branch.
+# File each child work bead in the rig's store under the convoy, read the link
+# back, and stamp the convoy's target on it before you sling. The link and its
+# read-back name the rig too: a dep add that crosses stores prints success and
+# exits 0 with no edge to read back, and a child left unlinked is not one of
+# the convoy's members, so graduation does not wait for it.
+TARGET=$(gc bd --rig <rig> show "$CONVOY" --json | jq -r '.[0].metadata.target // empty')
+[ -n "$TARGET" ] || { echo "convoy $CONVOY has no readable target; file and sling nothing" >&2; exit 1; }
 WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
 gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
 LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
 [ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
-gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # inherits metadata.target via convoy walk
+gc bd --rig <rig> update "$WORK" --set-metadata target="$TARGET"
+gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # branches from the bead's own target
 ```
+
+`gc sling` takes `base_branch` from the bead's own `metadata.target` first.
+Without one, it reads the first convoy target on the one parent chain bd
+reports, and then falls back to the rig default branch. A child filed under
+an epic and also linked to the convoy can report the epic as its parent, and
+then sling resolves the default branch. The stamp in the recipe above makes
+every child branch from the integration branch whichever parent bd reports,
+and the refinery lands their work back onto it, never onto the default
+branch. A child slung without the stamp, whose reported parent is not the
+convoy, is held at workspace-setup before any branch is cut.
 
 A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
 and "Choosing a design-convoy" below is the test for one. The molecule runs the
@@ -135,11 +149,8 @@ on an initiative bead in the rig's store:
 gc sling <rig>/{{ .BindingPrefix }}polecat <initiative> --on mol-design-convoy --var issue=<initiative>
 ```
 
-Children inherit `metadata.target = integration/<convoy-id>` via the
-convoy-ancestor walk in `gc sling`: polecats branch from the integration
-branch and the refinery lands their work back onto it, never onto the default
-branch. When all children close AND the ledger records at least one landing on
-the branch, the cadence graduates the convoy automatically — a human-approved
+When all children close AND the ledger records at least one landing on the
+branch, the cadence graduates the convoy automatically — a human-approved
 `integration/<id>` -> default-branch PR through the same work-bead machine. Children
 closed having landed nothing leave "all closed" vacuously true, and the
 pass reports the convoy vacuous rather than graduating it; land a genuinely
@@ -147,6 +158,9 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
+A convoy child takes its override as `metadata.target` instead, stamped before
+the sling: workspace-setup holds a convoy child whose base differs from its
+own target or, when it names none, from its convoy's target.
 
 **Anti-pattern:** dispatching a shared input artifact to land on the default
 branch by itself, with no convoy above it. Catching this shape is a dispatch

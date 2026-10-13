@@ -57,7 +57,8 @@
 # RUN_TESTS_PART=<part> and RUN_TESTS_PARTS=<every declared part> in its
 # environment, and the file executes only that part's sections (part() in
 # assets/scripts/test-harness.sh). Run directly, with RUN_TESTS_PART unset, the
-# file runs every part in order.
+# file runs each part in order, each in a process of its own as here, and prints
+# one tally summed over the parts (harness_run_parts in the same harness).
 #
 # Each file runs in its own process group with its output captured to a file,
 # never a pipe. A file that leaves a background child behind (pr-facts.test.sh
@@ -99,6 +100,15 @@
 # TMPDIR ends in a slash and sits under /var, a symlink to /private/var, so
 # there a path built from it and the same path resolved compare unequal. A file
 # run directly, outside the runner, gets the caller's TMPDIR as it is.
+#
+# Every file runs with the test floor, tools/test-floor, at the front of PATH.
+# A file that stubs gc, bd or gh puts its stub directory in front of that, so
+# the floor sits between its stubs and the real binaries. When the stub
+# directory goes while a script the file started still runs, a call that would
+# have reached the real gc, and the live city it finds from the working
+# directory, is refused there instead (tools/test-floor/refuse.sh). A file run
+# directly gets the floor only through harness_init
+# (assets/scripts/test-harness.sh).
 #
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error.
@@ -398,6 +408,12 @@ export "GIT_CONFIG_KEY_$cfg_n=commit.gpgsign" "GIT_CONFIG_VALUE_$cfg_n=false" \
 tmp_real="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)" || {
   echo "run-tests: cannot resolve the temp directory '${TMPDIR:-/tmp}'" >&2; exit 2; }
 export TMPDIR="$tmp_real"
+
+# The test floor every file runs above (see the header). A tree without it does
+# not run, since nothing would stand between a file's stubs and the real gc.
+[ -x "$ROOT/tools/test-floor/gc" ] || {
+  echo "run-tests: no test floor at $ROOT/tools/test-floor; not running" >&2; exit 2; }
+export PATH="$ROOT/tools/test-floor:$PATH"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT

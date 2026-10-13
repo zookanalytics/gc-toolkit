@@ -34,7 +34,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
 preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars, refinery-gate) — keep
+patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands, refinery-gate) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -65,7 +65,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
+default = ""
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -319,8 +319,6 @@ id = "run-tests"
 title = "Run quality checks and tests"
 needs = ["rebase"]
 description = """
-**Config: run_tests = {{run_tests}}**
-
 The branch under test is staged in the prep worktree (the rebase step), so
 every check runs THERE, and the rig root's checkout is never touched. A tool
 call is cut off at ten minutes, and a cold build and test on a loaded host can
@@ -331,16 +329,29 @@ foreground calls. Launch a gate no other way. A hand-rolled background launch
 can fail without a word (macOS ships no `setsid`), and a background poll for a
 result that never comes never returns.
 
-Write the gate script below with each configured command, exactly as
-configured, on the lines between its `check` line and the `GATE_CMD` line
-after it. The quoted heredoc hands the command to a bash of its own, so a
-comment, a quote, a heredoc or a `cd` in it means what it would at a prompt,
-an `exit` in it ends only that check, and an empty one passes. A check's
-verdict is its command's exit status, so a command that sends its work to the
-background passes before that work ends: each must finish in the foreground.
-When the rig ships no commands at all, add the quality gates documented in the
-rig's CLAUDE.md as checks of the same form, with any environment they need,
-and never skip the gates silently. Then start the job:
+The checks are setup_command, typecheck_command, lint_command and
+build_command, then test_command when run_tests is "true". A rig sets them
+under its `[rigs.formula_vars]` in city.toml, and a value the rig sets wins
+over this formula's default, an empty one included. This wisp is poured
+root-only, so nothing renders those vars into this step, and a session that
+fills them in by hand can take either value. The block below reads both from
+one `gc formula show --rig` call and gives the gate the rig's value wherever
+the rig sets one, so every session runs the same checks. Never type a
+configured check in by hand.
+
+The gate runs each check in a bash of its own, in the prep worktree, with
+stdin closed. A comment, a quote, a heredoc or a `cd` in a command means what
+it would at a prompt, an `exit` in it ends only that check, and the checks
+after a failed one still run. A check's verdict is its command's exit status,
+so a command that sends its work to the background passes before that work
+ends: each must finish in the foreground.
+
+When the rig sets no check commands, the block says so and starts no gate.
+Add the quality gates documented in the rig's CLAUDE.md where the block marks,
+each as `add_check <name> '<command>'` with the command as documented and any
+environment it needs, and run the block again. Those checks run only for a rig
+that sets no check commands, and a gate with no check never starts, so the
+gates are never skipped silently. Start the gate:
 ```bash
 # >>> refinery-gate-start
 RIG_ROOT="${GC_RIG_ROOT:-}"
@@ -354,10 +365,62 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+[ -d "$PREP_WT" ] || { echo "cannot find the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # A gate a previous session left running tests a prep worktree the rebase
-# step has since rebuilt.
+# step has since rebuilt, and reads the checks this block rewrites.
 "$JOB" stop "$GATE" >/dev/null
-mkdir -p "$GATE"
+rm -rf "${GATE:?}/checks"
+mkdir -p "$GATE/checks"
+# >>> rig-check-commands
+# One read serves every check. An unreadable answer gives every check an empty
+# value, which is also what a rig with no checks gives, so the block runs
+# nothing and leaves the work with the refinery to retry.
+CHECKS_JSON=""
+[ -n "${GC_RIG:-}" ] && CHECKS_JSON=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json 2>/dev/null)
+if ! printf '%s' "$CHECKS_JSON" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1; then
+  echo "cannot read the check commands of rig '${GC_RIG:-}' (gc formula show --rig failed); running no checks and leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+# rig_default is the rig's own value and wins whenever it is present, so an
+# empty one turns that check off. Otherwise the formula default applies.
+check_value() {
+  printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
+}
+# add_check <name> <command>: the command becomes the gate's next check. A
+# check that cannot be written runs nothing and leaves the work with the
+# refinery to retry.
+CHECKS=0
+add_check() {
+  CHECKS=$((CHECKS + 1))
+  printf '%s' "$2" > "$GATE/checks/$(printf '%02d' "$CHECKS")-$1" && return 0
+  echo "cannot write the $1 check into $GATE/checks; running no checks and leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
+RUN_TESTS=$(check_value run_tests)
+for CHECK in setup_command typecheck_command lint_command build_command test_command; do
+  if [ "$CHECK" = "test_command" ] && [ "$RUN_TESTS" != "true" ]; then
+    echo "run-tests: test_command skipped (run_tests=${RUN_TESTS})"
+    continue
+  fi
+  CHECK_CMD=$(check_value "$CHECK")
+  if [ -z "$CHECK_CMD" ]; then
+    echo "run-tests: ${CHECK} not set"
+    continue
+  fi
+  echo "run-tests: ${CHECK} = ${CHECK_CMD}"
+  add_check "$CHECK" "$CHECK_CMD"
+done
+[ "$CHECKS" -gt 0 ] || echo "run-tests: rig ${GC_RIG} sets no check commands"
+# <<< rig-check-commands
+if [ "$CHECKS" -eq 0 ]; then
+  # The rig sets no check commands. Add each quality gate its CLAUDE.md
+  # documents here, in the order it gives them, as
+  #   add_check <name> '<the command as documented, with any environment it needs>'
+  :
+fi
+[ "$CHECKS" -gt 0 ] || { echo "run-tests: no check to run, so no gate started; add the quality gates the rig's CLAUDE.md documents where this block marks, and run it again"; exit 1; }
 cat > "$GATE/gate.sh" <<'GATE'
 cd "$1" || exit 2
 failed=""
@@ -371,27 +434,17 @@ check() {
   rc=$?
   [ "$rc" -eq 0 ] || failed="$failed $1:$rc"
 }
-check setup <<'GATE_CMD'
-{{setup_command}}
-GATE_CMD
-check typecheck <<'GATE_CMD'
-{{typecheck_command}}
-GATE_CMD
-check lint <<'GATE_CMD'
-{{lint_command}}
-GATE_CMD
-check build <<'GATE_CMD'
-{{build_command}}
-GATE_CMD
-if [ "{{run_tests}}" = "true" ]; then
-check test <<'GATE_CMD'
-{{test_command}}
-GATE_CMD
-fi
+# Each check is a file in the directory the job names, its name led by its
+# place in the order.
+for f in "$2"/*; do
+  [ -f "$f" ] || continue
+  name=${f##*/}
+  check "${name#*-}" < "$f"
+done
 [ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
 echo "GATE PASSED"
 GATE
-"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # <<< refinery-gate-start
 ```
 

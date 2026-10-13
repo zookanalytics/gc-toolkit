@@ -167,11 +167,9 @@ case "$1 ${2:-}" in
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.proactive_reaction reads back as. The release stamps it =1 as the
-    # completion proof two guards key on; FAKE_PROACTIVE holds it so a test models
-    # the stamp LANDING and landing empty (the silent drop a multi-pair update can
-    # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
-    proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
+    # What gc.takeaway, the headline itself, reads back as. It lands below the
+    # same way gc.takeaway_settled does, and FAKE_TAKEAWAY_DROP is its silent drop.
+    takeaway="$(cat "${FAKE_TAKEAWAY:-/dev/null}" 2>/dev/null || true)"
     # What gc.session_name / gc.session_id read back as: the executor identity a
     # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
     # test models the clear LANDING (empty) and being DROPPED (the pin still
@@ -217,8 +215,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
@@ -263,15 +261,17 @@ case "$1 ${2:-}" in
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
           esac ;;
-        # gc.proactive_reaction=1 is the release's completion proof, read back the
-        # way gc.takeaway_settled is. FAKE_PROACTIVE_DROP=1 loses every one of them
-        # (no repair recovers it); =multi loses it only out of a multi-pair release
-        # write, the shape the lone repair write recovers.
-        gc.proactive_reaction=*)
-          case "${FAKE_PROACTIVE_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
-            *)     printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
+        # gc.takeaway, the headline, lands here too. FAKE_TAKEAWAY_DROP=1 loses
+        # every one; =once loses only the first, marked by $FAKE_TAKEAWAY.dropped,
+        # the transient drop a repair recovers. The repair re-stamps the
+        # disposition beside the headline, so it is a multi-pair write itself,
+        # and a pair-count rule like the settled key's would drop it as well.
+        gc.takeaway=*)
+          case "${FAKE_TAKEAWAY_DROP:-}" in
+            1)    ;;
+            once) if [ -e "$FAKE_TAKEAWAY.dropped" ]; then printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY"
+                  else : > "$FAKE_TAKEAWAY.dropped"; fi ;;
+            *)    printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY" ;;
           esac ;;
         # gc.outcome lands per visit so the dismiss read-back sees the stamp.
         # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
@@ -362,7 +362,8 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
+       FAKE_SETTLED="$TMP/settled" FAKE_TAKEAWAY="$TMP/takeaway" \
+       FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
@@ -401,7 +402,7 @@ cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
 J
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
-: > "$TMP/settled"
+: > "$TMP/settled"; : > "$TMP/takeaway"
 # metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
 # w-pend and CLOSED-w-rider all share A-ONBR's branch; w-diff rides its own and
 # w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
@@ -443,8 +444,8 @@ A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
 grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
-grep -q 'gc.proactive_reaction=1' <<< "$A" \
-  && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
+grep -q 'gc.proactive_reaction' <<< "$A" \
+  && bad "(RELEASE) anchor still stamps the retired proactive_reaction" || ok "(RELEASE) anchor no longer stamps the retired proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
@@ -899,6 +900,144 @@ grep -q "expected '1'" "$TMP/serr" \
   || bad "(SETTLEDBACK) the refusal does not name the intended value (stderr: $(cat "$TMP/serr"))"
 : > "$TMP/settled"
 
+# ── the headline is READ BACK: a headline that did not land is not set ───────
+# The headline rides the same multi-pair write as the disposition, so the same
+# silent drop can leave it out. A headline that does not land leaves the one the
+# bead carried before: empty, or an earlier sitting's. The read-back compares
+# with the text this call wrote, so a stale headline is a miss as much as an
+# empty one. Covered:
+#   (TAKEAWAYOK)    a headline that reads back is written once, exit 0, no word
+#   (TAKEAWAYFIX)   a stale headline the stamp did not replace is re-stamped
+#                   with its disposition, exit 0
+#   (TAKEAWAYDEAD)  a repair that also misses is a verb failure, writes kept
+#   (TAKEAWAYEMPTY) a headline that reads back empty fails the verb the same way
+#   (TAKEAWAYREL)   under --release, the exit waits for the edges and the quiesce
+#   (TAKEAWAYFOLD)  on a closed anchor's quiesce too
+#   (TAKEAWAYQUOTE) the by-hand repair, pasted into a shell, stamps the exact text
+: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+TORC=0
+sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait >"$TMP/tout" 2>"$TMP/terr" || TORC=$?
+eq "$TORC" "0" "(TAKEAWAYOK) a headline that reads back exits 0"
+eq "$(grep -c -- '--set-metadata gc.takeaway=' "$TMP/updates" || true)" "1" \
+   "(TAKEAWAYOK) …and is written once, with no repair"
+eq "$(cat "$TMP/terr")" "" "(TAKEAWAYOK) …and says nothing about a read-back"
+grep -q 'takeaway set on A-PARKED' "$TMP/tout" \
+  && ok "(TAKEAWAYOK) …and reports the takeaway as set" \
+  || bad "(TAKEAWAYOK) the success line is missing (stdout: $(cat "$TMP/tout"))"
+
+# (TAKEAWAYFIX) the headline of the sitting before this one, and a stamp that
+# does not replace it: the stamp drops the pair, the repair carries it.
+# Non-empty and wrong, so only an equality check sees it.
+: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+rm -f "$TMP/takeaway.dropped"
+TFRC=0
+FAKE_TAKEAWAY_DROP=once sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait \
+  >"$TMP/tout" 2>"$TMP/terr" || TFRC=$?
+eq "$(grep -c -- '--set-metadata gc.takeaway=settled — the board was right' "$TMP/updates" || true)" "2" \
+   "(TAKEAWAYFIX) a headline that did not land is re-written"
+# Every headline write carries its disposition (lifecycle.toml [holds]), the
+# repair included, so the repaired headline never stands beside a disposition
+# an earlier sitting left.
+eq "$(grep -cxF -- 'bd update A-PARKED --set-metadata gc.takeaway=settled — the board was right --set-metadata gc.takeaway_settled=1' "$TMP/updates" || true)" "1" \
+   "(TAKEAWAYFIX) …and the repair re-stamps this call's disposition beside it"
+grep -q "gc.takeaway on A-PARKED read back as 'holding — an earlier sitting'" "$TMP/terr" \
+  && ok "(TAKEAWAYFIX) …and the miss is reported with the stale headline that stood" \
+  || bad "(TAKEAWAYFIX) the stale headline was read as landed (stderr: $(cat "$TMP/terr"))"
+grep -q 'the headline repair landed' "$TMP/terr" \
+  && ok "(TAKEAWAYFIX) …and so is the repair that fixed it" \
+  || bad "(TAKEAWAYFIX) the repair did not report landing (stderr: $(cat "$TMP/terr"))"
+eq "$TFRC" "0" "(TAKEAWAYFIX) …and a repaired headline is not a verb failure"
+eq "$(cat "$TMP/takeaway")" "settled — the board was right" "(TAKEAWAYFIX) …the bead ends on this call's headline"
+grep -q 'takeaway set on A-PARKED' "$TMP/tout" \
+  && ok "(TAKEAWAYFIX) …and the takeaway is reported as set" \
+  || bad "(TAKEAWAYFIX) a repaired headline was not reported (stdout: $(cat "$TMP/tout"))"
+
+# (TAKEAWAYDEAD) the store that will not take the headline at all. The bead
+# still carries the earlier sitting's headline, so a zero exit would tell the
+# caller the board shows a conclusion it does not show.
+: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+TDRC=0
+FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait \
+  >"$TMP/tout" 2>"$TMP/terr" || TDRC=$?
+eq "$TDRC" "4" "(TAKEAWAYDEAD) a headline that will not stamp is a verb runtime failure"
+grep -q "still reads gc.takeaway='holding — an earlier sitting'" "$TMP/terr" \
+  && ok "(TAKEAWAYDEAD) …and the message names the headline left standing" \
+  || bad "(TAKEAWAYDEAD) the persistent miss does not name the stale headline (stderr: $(cat "$TMP/terr"))"
+grep -q -- "--set-metadata 'gc.takeaway=settled — the board was right' --set-metadata gc.takeaway_settled=1$" "$TMP/terr" \
+  && ok "(TAKEAWAYDEAD) …and carries the by-hand repair, the headline with its disposition" \
+  || bad "(TAKEAWAYDEAD) no repair spelled out (stderr: $(cat "$TMP/terr"))"
+grep -q 'takeaway set on' "$TMP/tout" \
+  && bad "(TAKEAWAYDEAD) the verb reported a headline as set that the bead does not carry" \
+  || ok "(TAKEAWAYDEAD) …and does not report the takeaway as set"
+eq "$(cat "$TMP/settled")" "1" "(TAKEAWAYDEAD) …the disposition written beside it is kept, not rolled back"
+
+# (TAKEAWAYEMPTY) the same miss with no earlier headline to stand in its place.
+: > "$TMP/updates"; : > "$TMP/settled"; : > "$TMP/takeaway"
+TERC=0
+FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
+  >/dev/null 2>"$TMP/terr" || TERC=$?
+eq "$TERC" "4" "(TAKEAWAYEMPTY) a headline that reads back empty fails the verb too"
+grep -q "gc.takeaway on A-PARKED read back as '', expected 'holding — needs a ruling'" "$TMP/terr" \
+  && ok "(TAKEAWAYEMPTY) …and the message names what the writer asked for" \
+  || bad "(TAKEAWAYEMPTY) the miss does not name the intended headline (stderr: $(cat "$TMP/terr"))"
+
+# (TAKEAWAYREL) a park, with a wait, whose headline will not stamp. The exit
+# comes last, so the wait is still wired as an edge and the released molecule
+# is still quiesced: only the headline is left to repair by hand.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+TRRC=0
+FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "parked — waiting on the fix" --by proactive \
+  --release --waiting-on tk-blk9 >"$TMP/tout" 2>"$TMP/terr" || TRRC=$?
+eq "$TRRC" "4" "(TAKEAWAYREL) a release whose headline will not stamp is a verb failure"
+grep -qE '^bd dep add A-PARKED tk-blk9 -t blocks' "$TMP/deps" \
+  && ok "(TAKEAWAYREL) …after the wait is wired as an edge" \
+  || bad "(TAKEAWAYREL) the failure exited before the edge (deps: $(cat "$TMP/deps"))"
+grep -qE '^bd update s-impl( |$)' "$TMP/updates" \
+  && ok "(TAKEAWAYREL) …and after the released molecule is quiesced" \
+  || bad "(TAKEAWAYREL) the failure exited before quiescing the released molecule"
+TRL="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$TRL" in
+  *"--status=open"*"--assignee="*) ok "(TAKEAWAYREL) …and the release it already wrote is kept, not rolled back" ;;
+  *) bad "(TAKEAWAYREL) the release write was lost: ${TRL:-<none>}" ;;
+esac
+grep -q 'takeaway set on' "$TMP/tout" \
+  && bad "(TAKEAWAYREL) the verb reported the takeaway as set" \
+  || ok "(TAKEAWAYREL) …and success is not reported"
+
+# (TAKEAWAYFOLD) a closed anchor takes the headline and the quiesce alone, and
+# its headline is read back the same way.
+: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+TCRC=0
+FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded into CARRIER-1" --by proactive --release \
+  >"$TMP/tout" 2>"$TMP/terr" || TCRC=$?
+eq "$TCRC" "4" "(TAKEAWAYFOLD) a closed anchor's headline that will not stamp is a verb failure"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(TAKEAWAYFOLD) …after the folded molecule is reaped" \
+  || bad "(TAKEAWAYFOLD) the failure exited before the quiesce"
+grep -q 'anchor left closed' "$TMP/tout" \
+  && bad "(TAKEAWAYFOLD) the verb reported the quiesce as a set takeaway" \
+  || ok "(TAKEAWAYFOLD) …and success is not reported"
+
+# (TAKEAWAYQUOTE) the by-hand repair is pasted into a shell, and a headline is
+# free text. Run the printed command against the store and read what it stamps.
+QTEXT="it's the operator's call: \$HOME, \`date\` and C:\\new stay literal"
+: > "$TMP/updates"; : > "$TMP/settled"; : > "$TMP/takeaway"
+TQRC=0
+FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "$QTEXT" >/dev/null 2>"$TMP/terr" || TQRC=$?
+eq "$TQRC" "4" "(TAKEAWAYQUOTE) a free-text headline that will not stamp fails the verb"
+grep -qF "expected '$QTEXT' — repairing" "$TMP/terr" \
+  && ok "(TAKEAWAYQUOTE) …and the miss prints the headline exactly as written" \
+  || bad "(TAKEAWAYQUOTE) the miss rewrote the headline it reports (stderr: $(cat "$TMP/terr"))"
+QREPAIR="$(sed -n 's/.*Stamp it by hand: //p' "$TMP/terr")"
+case "$QREPAIR" in
+  "gc bd update A-PARKED --set-metadata "*) ok "(TAKEAWAYQUOTE) …and prints a by-hand repair" ;;
+  *) bad "(TAKEAWAYQUOTE) no by-hand repair to paste (stderr: $(cat "$TMP/terr"))" ;;
+esac
+sh -c "$QREPAIR" >/dev/null 2>&1 || true
+eq "$(cat "$TMP/takeaway")" "$QTEXT" \
+   "(TAKEAWAYQUOTE) …that, pasted into a shell, stamps the headline exactly"
+: > "$TMP/takeaway"
+
 # ── takeaway --release --route: release the bead TO a pool ────────────────────
 # A first reaction that concludes "this is work" hands the bead on instead of
 # back. The route rides the release write, so the disposition lands whole or
@@ -1072,72 +1211,6 @@ grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/
   && ok "(EXECWARN) …the headline write is kept" \
   || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
 : > "$TMP/exec"
-
-# ── takeaway --release: the completion-proof read-back ────────────────────────
-# gc.proactive_reaction=1 is the stamp two guards downstream key on to refuse a
-# SECOND release — first-reaction-dispose's retry guard and cmd_sling's
-# already-reacted skip — so a park whose stamp lands empty reads to both as a
-# partial that never completed, and the next dispose re-releases a bead a worker
-# may already hold. It rides the multi-pair release write, so the same silent
-# drop can hit it; it is read back and repaired like the route beside it, and —
-# unlike the cosmetic pour stamp — a repair that also misses is a verb failure.
-# Covered:
-#   (PROACTOK)   a stamp that reads back "1" is written once, no repair, exit 0
-#   (PROACTFIX)  a stamp dropped from the multi-pair write is re-stamped, exit 0
-#   (PROACTDEAD) a stamp that will not land is a verb failure, writes kept
-
-# (PROACTOK) the stamp lands: the release's own set is the only one written.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/perr" || PORC=$?
-eq "$PORC" "0" "(PROACTOK) a completion stamp that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "1" \
-   "(PROACTOK) …and is written once, with no repair"
-grep -q 'gc.proactive_reaction on' "$TMP/perr" \
-  && bad "(PROACTOK) a landed stamp should say nothing (stderr: $(cat "$TMP/perr"))" \
-  || ok "(PROACTOK) …and says nothing about a read-back"
-
-# (PROACTFIX) the stamp dropped from the multi-pair release write, recovered by
-# the lone repair set.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PFRC=0
-FAKE_PROACTIVE_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/perr" || PFRC=$?
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "2" \
-   "(PROACTFIX) a stamp that did not land is re-stamped"
-grep -q "gc.proactive_reaction on A-PARKED read back as ''" "$TMP/perr" \
-  && ok "(PROACTFIX) …and the miss is reported with the value that stood" \
-  || bad "(PROACTFIX) the dropped stamp was silent (stderr: $(cat "$TMP/perr"))"
-grep -q 'the proactive-reaction repair landed' "$TMP/perr" \
-  && ok "(PROACTFIX) …and the repair that fixed it says so" \
-  || bad "(PROACTFIX) the repair did not report landing (stderr: $(cat "$TMP/perr"))"
-eq "$PFRC" "0" "(PROACTFIX) …and a repaired stamp is not a verb failure"
-eq "$(cat "$TMP/proactive")" "1" "(PROACTFIX) …the bead ends carrying the completion proof"
-
-# (PROACTDEAD) the store that will not take the stamp at all. The bead is
-# released, so a zero exit would report a park whose completion proof — the thing
-# that stops the next dispose re-releasing it — never landed.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PDRC=0
-FAKE_PROACTIVE_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/pout" 2>"$TMP/perr" || PDRC=$?
-eq "$PDRC" "4" "(PROACTDEAD) a completion stamp that will not land is a verb runtime failure"
-grep -q "did not stamp as '1'" "$TMP/perr" \
-  && ok "(PROACTDEAD) …and the message names what was missing" \
-  || bad "(PROACTDEAD) the persistent miss is unexplained (stderr: $(cat "$TMP/perr"))"
-grep -q -- '--set-metadata gc.proactive_reaction=1' "$TMP/perr" \
-  && ok "(PROACTDEAD) …and carries the by-hand repair" \
-  || bad "(PROACTDEAD) no repair spelled out (stderr: $(cat "$TMP/perr"))"
-grep -q 'takeaway set on' "$TMP/pout" \
-  && bad "(PROACTDEAD) the verb reported success on a bead missing its completion proof" \
-  || ok "(PROACTDEAD) …and does not report the takeaway as set"
-PD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$PD" in
-  *"--status=open"*"--assignee="*) ok "(PROACTDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
-esac
-: > "$TMP/proactive"
 
 # ── takeaway --release: the executor-identity read-back ───────────────────────
 # The unassign takes the departing executor's identity with it, so the release
@@ -1475,8 +1548,8 @@ case "$ALINE" in
   *) bad "(TOAGENT) the headline split off the assign write: ${ALINE:-<none>}" ;;
 esac
 case "$ALINE" in
-  *"--set-metadata gc.proactive_reaction=1"*) ok "(TOAGENT) …and the completion proof" ;;
-  *) bad "(TOAGENT) the completion proof split off the assign write: ${ALINE:-<none>}" ;;
+  *"gc.proactive_reaction"*) bad "(TOAGENT) the assign write still stamps the retired proactive_reaction: ${ALINE:-<none>}" ;;
+  *) ok "(TOAGENT) …and stamps no retired proactive_reaction beside it" ;;
 esac
 case "$ALINE" in
   *"--unset-metadata gc.session_name --unset-metadata gc.session_id"*) ok "(TOAGENT) …and the prior executor's session pins go with the old assignee" ;;
@@ -2154,8 +2227,8 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
 # ── The releasing session's own step survives the release ────────────────────
-# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
-# the bead its own molecule is anchored to, and then has to close its own step
+# A releasing session may itself own a step of a molecule anchored to the bead it
+# disposes by `takeaway --release`, and then has to close its own step
 # bead. step-close.sh resolves that bead within its molecule and corroborates
 # it by the assignee; this live step carries no gc.session_id stamp, so the
 # assignee is the only handle that proves the bead is this session's, and a
@@ -2195,10 +2268,10 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
- {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-sample","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
@@ -2343,7 +2416,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
-  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+  bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
@@ -3033,7 +3106,7 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
-grep -q "already carries a first reaction" "$TMP/rerr" \
+grep -q "already has an open first reaction" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
 grep -q "failed" "$TMP/rerr" \
