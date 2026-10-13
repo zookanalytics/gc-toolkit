@@ -802,13 +802,16 @@ keys = [
   # Re-raising an objection whose key already has an open finding on this anchor
   # creates nothing; idempotency is by key, never by how often a check is read.
   "finding.key",
-  # One of: unvalidated | must-fix | deferred | declined | needs-you. A reviewer
-  # files a finding unvalidated and the validator rules it; every ruling ends the
-  # finding closed or converts it to a visit. must-fix wires finding --blocks
-  # anchor, the hold merge.sh's blocker probe reads, until the fix unit lands.
-  # deferred files a claimable follow-up bead (gated behind the anchor, its
-  # provenance edge --discovered-from the finding) and closes the finding; declined
-  # closes it with the reason, no edge.
+  # One of: unvalidated | must-fix | deferred | declined | needs-you | restates.
+  # A reviewer files a finding unvalidated and the validator rules it; every
+  # ruling ends the finding closed or converts it to a visit. must-fix wires
+  # finding --blocks anchor, the hold merge.sh's blocker probe reads, until the
+  # fix unit lands. deferred files a claimable follow-up bead (gated behind the
+  # anchor, its provenance edge --discovered-from the finding) and closes the
+  # finding; declined closes it with the reason, no edge. restates closes a human
+  # review body that only frames the review's own inline comments, each a finding
+  # of its own, with no edge and no answer owed: the review's living answer gives
+  # it no entry and no count.
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
   # human review changes-requested until the operator rules the visit holding
@@ -820,22 +823,27 @@ keys = [
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
   # The GitHub comment databaseId that raised a human finding, stamped by
-  # pr-facts.sh at file time. For an inline review comment it is also the id the
-  # reviewThread carries, so the write-back can find the thread and post the
-  # finding's owed reply into it.
+  # pr-facts.sh at file time: an inline review comment, a review body (the
+  # review's own id, so it equals finding.review_id), or a Conversation comment.
+  # For an inline comment it is also the id the reviewThread carries, so the
+  # write-back can find the thread and post the finding's owed reply into it.
   "finding.comment_id",
   # The answer a HUMAN objection owes its raiser, which pr-facts.sh's write-back
-  # posts to finding.comment_id's thread: a declined finding's overrule (set on
-  # `set-disposition declined --reply`), a deferred finding's follow-up id, or a
-  # needs-you finding's visit id (both set by set-disposition as it rules). A
-  # machine or no-objection finding owes none and sets it not. The peer model: the
-  # validator may overrule or defer a human objection, or send it to them, never
-  # in silence.
+  # delivers where the raiser wrote: a reply in an inline comment's thread, the
+  # review's living answer for a review body, which sits in no thread, or a
+  # Conversation comment linking a Conversation comment. A declined finding's
+  # overrule (set on `set-disposition declined --reply`), a deferred finding's
+  # follow-up id, or a needs-you finding's visit id (both set by set-disposition
+  # as it rules). A machine or no-objection finding owes none and sets it not.
+  # The peer model: the validator may overrule or defer a human objection, or
+  # send it to them, never in silence.
   "finding.reply",
-  # Set by pr-facts.sh's write-back once finding.reply's own text is on the PR,
-  # posted by it or found there, and dropped when that text is missing and its
-  # post fails. The write-back reads the reply back off GitHub on every pass, so
-  # this records the read for the review dismissal, which waits for it.
+  # Set by pr-facts.sh's write-back once the answer finding.reply holds is on the
+  # PR: for a thread or Conversation answer once its own text is posted or found
+  # there, and dropped when that text is missing and its post fails; for a review
+  # body once the review's living answer carrying it is on the PR. The write-back
+  # reads the answer back off GitHub on every pass, so this records the read for
+  # the review dismissal, which waits for it.
   "finding.reply_posted",
   # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
   # a machine finding ruled must-fix or deferred to its PR: a file-level review
@@ -886,6 +894,34 @@ keys = [
   # child's edge too. A finding filed without one falls back to the lane-level
   # match. A bead id.
   "finding.fix_unit",
+  # The words the review's living answer shows for a human finding
+  # (assets/scripts/review-answer.sh, written by pr-facts.sh's write-back). Each
+  # is plain text, absent until its writer records it, and never cleared, since
+  # a later write replaces it.
+  # finding.label — a few words naming the point, written by the validator as it
+  #   rules (`set-disposition --label`). The living answer labels a point with
+  #   its comment's own bold lead first, so this one shows only for a comment
+  #   that opens with no headline. Absent, the label is the comment's first
+  #   sentence.
+  # finding.answer — the one sentence the validator answers the point with, in
+  #   its own words (`set-disposition --answer`): a decline's reason, a deferral,
+  #   or for needs-you the question the visit asks, which defaults to the
+  #   ruling's --reason. Absent, the living answer shows finding.reply.
+  # finding.fix_answer — the fix unit's own sentence on how it answered the point
+  #   compared with what was asked (`finding.sh answer`). The living answer shows
+  #   it for a must-fix point, and for any point the fix flagged.
+  # finding.fix_flag — `1` when the fix unit flags the point for the reviewer's
+  #   look (`finding.sh answer --flag`): it chose among options they left open,
+  #   departed from their suggestion, or changed code the ruling declined. A
+  #   flagged point sits under Worth a look. Absent means unflagged, and an
+  #   answer given without --flag removes it.
+  "finding.label", "finding.answer", "finding.fix_answer", "finding.fix_flag",
+  # fix_notes — on the fix unit (task_kind=rework), not a finding: its notes on
+  #   the round, written by the fix unit through `finding.sh fix-notes` and shown
+  #   folded under the points of each living answer whose findings name it as
+  #   finding.fix_unit. Absent, the living answer has no notes block. Replaced by
+  #   a later write, never cleared. Plain text.
+  "fix_notes",
 ]
 
 [metadata.review_quorum]

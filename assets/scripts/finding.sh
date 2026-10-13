@@ -14,15 +14,31 @@
 #   finding.lane         the lane whose review raised it, or `human`
 #   finding.key          lane name + normalized locus + message; the dedup handle
 #   finding.disposition  unvalidated | must-fix | deferred | declined | needs-you
+#                        | restates
 #   finding.source       machine:<lane> | human:<login>
 #   finding.comment_id   the GitHub comment databaseId that raised it (stamped by
-#                        pr-facts.sh for a human finding); the thread the write-back
-#                        posts an owed reply into
+#                        pr-facts.sh for a human finding): an inline comment, whose
+#                        thread the write-back posts an owed reply into, a review
+#                        body, or a Conversation comment
 #   finding.reply        the answer a HUMAN objection owes its raiser, which
-#                        pr-facts.sh's write-back posts into finding.comment_id's
-#                        thread: a declined finding's overrule, a deferred finding's
-#                        follow-up id, or a needs-you finding's visit id. A machine
-#                        or no-objection finding owes none and sets it not.
+#                        pr-facts.sh's write-back delivers: a reply in the inline
+#                        comment's thread, the review's living answer for a review
+#                        body, or a Conversation comment linking a Conversation
+#                        comment. A declined finding's overrule, a deferred
+#                        finding's follow-up id, or a needs-you finding's visit id.
+#                        A machine or no-objection finding owes none and sets it not.
+#   finding.label        a few words naming the point, which the validator writes as
+#                        it rules (--label); the review's living answer shows it when
+#                        the comment opens with no bold headline of its own
+#   finding.answer       the one sentence the validator answers the point with in the
+#                        review's living answer (--answer): a decline's reason, a
+#                        deferral, or for needs-you the question (its --reason when
+#                        no --answer is given)
+#   finding.fix_answer   the fix unit's own sentence on how it answered the point
+#                        compared with what was asked (the answer verb)
+#   finding.fix_flag     1 when the fix unit flags the point for the reviewer's look:
+#                        it chose among options they left open, departed from their
+#                        suggestion, or changed code the ruling declined
 #   finding.follow_up    the deferred finding's later-work bead, armed to its fix
 #                        pool (deferred-dispatch) to dispatch once the anchor merges
 #   finding.visit        the open visit that carries a needs-you finding's decision:
@@ -35,6 +51,9 @@
 #                        (`upsert --fix-unit`, from pr-facts.sh for a human batch);
 #                        a later batch re-raising the finding records its own child
 #
+# The fix unit keeps its own notes on the round as fix_notes (the fix-notes verb),
+# which the review's living answer shows folded under the points.
+#
 # What a ruled finding holds, and how it ends (component-model I1: no wait lives
 # only in a metadata string):
 #
@@ -45,6 +64,10 @@
 #              armed to its fix pool,     to dispatch to the fix pool once the anchor
 #              --discovered-from finding  merges; the finding closes holding nothing
 #   declined   closed, no edge            not an objection: closed with the reason
+#   restates   closed, no edge            a human review body that only frames the
+#                                         review's own inline comments, each a finding
+#                                         of its own: no point of its own, no answer
+#                                         owed, and no entry in the living answer
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
 #                                         holds the review until the operator rules
@@ -56,13 +79,14 @@
 # `blocks` is the type must-fix uses, and not because it is the only edge that
 # blocks a close: merge.sh reads exactly `blocks` downward, so a finding held by
 # any other type would leave the PR free to land with the objection still open.
-# Every ruling ends the finding closed or converts it to a visit: a deferred or
-# declined finding closes, so the human review it belongs to auto-dismisses once
-# every finding clears (pr-facts.sh); a needs-you finding stays open, which is
-# what holds that review until the operator rules its visit and the work their
-# ruling calls for lands. The discovered-from edge is the follow-up's own — a
-# dispatchable bead — and points at the finding it carries forward. bd keeps one
-# edge per (issue, depends_on) pair, and the follow-up/anchor pair is the gate's.
+# Every ruling ends the finding closed or converts it to a visit: a deferred,
+# declined or restates finding closes, so the human review it belongs to
+# auto-dismisses once every finding clears (pr-facts.sh); a needs-you finding
+# stays open, which is what holds that review until the operator rules its visit
+# and the work their ruling calls for lands. The discovered-from edge is the
+# follow-up's own — a dispatchable bead — and points at the finding it carries
+# forward. bd keeps one edge per (issue, depends_on) pair, and the
+# follow-up/anchor pair is the gate's.
 #
 # The route never lives on a finding. A finding states an objection; the bead
 # that is dispatched is the fix unit, which carries two `blocks` edges — one
@@ -100,7 +124,9 @@
 #   finding.sh key           --lane L --locus LOC --message MSG
 #   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S] [--fix-unit FU]
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
-#                              [--visit V] [--unrelated-visit V1,V2,...]
+#                              [--visit V] [--unrelated-visit V1,V2,...] [--label L] [--answer TEXT]
+#   finding.sh answer        --finding F --answer TEXT [--flag]
+#   finding.sh fix-notes     --fix-unit FU (--notes TEXT | --notes-file PATH)
 #   finding.sh open-visits   --anchor A
 #   finding.sh wire-fix-unit --fix-unit FU --anchor A --findings F1,F2,...
 #   finding.sh open-must-fix --anchor A [--lane L]
@@ -114,6 +140,8 @@
 # set-disposition — which hangs the fix unit's edge onto a finding only as it
 # rules that finding must-fix, so the fix unit blocks only the findings it must
 # answer — and through open-visits, which it reads beside the batch it rules;
+# the fix unit answering a human batch (answer and fix-notes, as the rework
+# child's description from pr-facts.sh says);
 # pr-open.sh (open-must-fix holds a publish while the city has ruled the diff must
 # change), and gate-ensure, the sole owner of stage-3 resolution (fix-in-flight
 # names the fix unit quiescence holds on; close-answered releases a must-fix
@@ -148,8 +176,10 @@ usage() {
 usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>] [--fix-unit <id>]
-  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you [--reason <r>] [--reply <text>] [--fix-pool <pool>]
-                             [--visit <visit-id>] [--unrelated-visit <visit-id,...>]
+  finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you|restates [--reason <r>] [--reply <text>] [--fix-pool <pool>]
+                             [--visit <visit-id>] [--unrelated-visit <visit-id,...>] [--label <label>] [--answer <sentence>]
+  finding.sh answer --finding <id> --answer <sentence> [--flag]
+  finding.sh fix-notes --fix-unit <id> (--notes <text> | --notes-file <path>)
   finding.sh open-visits --anchor <id>
   finding.sh wire-fix-unit --fix-unit <id> --anchor <id> --findings <id,id,...>
   finding.sh open-must-fix --anchor <id> [--lane <lane>]
@@ -503,7 +533,7 @@ cmd_upsert() {
 }
 
 cmd_set_disposition() {
-  local finding="" anchor="" disp="" reason="" reply="" fix_pool="" visit="" unrelated=""
+  local finding="" anchor="" disp="" reason="" reply="" fix_pool="" visit="" unrelated="" label="" answer=""
   while [ $# -gt 0 ]; do case "$1" in
     --finding) finding="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
@@ -513,12 +543,40 @@ cmd_set_disposition() {
     --fix-pool) fix_pool="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --visit) visit="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --unrelated-visit) unrelated="${unrelated:+$unrelated,}${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --label) label="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --answer) answer="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
   if [ -n "$visit" ] && [ "$disp" != needs-you ]; then
     warn "--visit names the open visit a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
+  fi
+  # The words the review's living answer shows for this point ride the write
+  # that commits the ruling, so a ruled finding never shows an earlier ruling's
+  # words. A needs-you ruling's question defaults to its reason.
+  [ -n "$answer" ] || [ "$disp" != needs-you ] || answer="$reason"
+  local words=()
+  [ -z "$label" ] || words+=(--set-metadata "finding.label=$label")
+  [ -z "$answer" ] || words+=(--set-metadata "finding.answer=$answer")
+  # restates is a review body that only frames its own inline comments, so it
+  # takes a human finding raised by a review body (its comment is the review
+  # itself) whose review raised at least one other finding on the anchor.
+  if [ "$disp" = restates ]; then
+    local rrow rrid rcid rsib
+    rrow=$(bd_json show "$finding")
+    rrid=$(printf '%s' "$rrow" | jq -r '(.[0].metadata["finding.review_id"] // "") | tostring' 2>/dev/null)
+    rcid=$(printf '%s' "$rrow" | jq -r '(.[0].metadata["finding.comment_id"] // "") | tostring' 2>/dev/null)
+    [ -n "$rrid" ] && [ "$rrid" = "$rcid" ] \
+      || { warn "restates rules a review body, and $finding is not one (finding.review_id '$rrid', finding.comment_id '$rcid'); nothing ruled"; exit 1; }
+    rsib=$(bd_list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" \
+      | jq -r --arg r "$rrid" --arg f "$finding" '[ .[]? | select(.id != $f)
+          | select(((.metadata.task_kind // "") | tostring) == "finding")
+          | select(((.metadata["finding.review_id"] // "") | tostring) == $r) ] | length' 2>/dev/null) \
+      || { warn "could not read the findings on anchor $anchor to check $finding's review; nothing ruled"; exit 2; }
+    case "$rsib" in ''|*[!0-9]*) warn "could not count the findings review $rrid raised on anchor $anchor; nothing ruled"; exit 2 ;; esac
+    [ "$rsib" -gt 0 ] \
+      || { warn "review $rrid raised no inline comment beside its body, so its body is the whole review and is ruled on its points; nothing ruled"; exit 1; }
   fi
   # Every ruling of a human finding but needs-you --visit first meets the visits
   # already carrying its question: an open visit on a rework child minted for the
@@ -597,7 +655,7 @@ cmd_set_disposition() {
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
       fi
       # Commit the disposition now the anchor-blocking hold is proven wired.
-      gc bd update "$finding" --set-metadata finding.disposition=must-fix >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=must-fix ${words[@]+"${words[@]}"} >/dev/null 2>&1 \
         || { warn "could not record finding.disposition=must-fix on $finding"; exit 2; }
       # A later batch can re-raise this finding during the ruling and record its own
       # child after the read above. Its re-adoption reads the disposition only after
@@ -701,7 +759,7 @@ cmd_set_disposition() {
         || { warn "could not stamp finding.reply on $finding; NOT closing (a silent deferral)"; exit 2; }
       local dnote="deferred: tracked as follow-up $followup"
       [ -n "$reason" ] && dnote="$dnote — $reason"
-      gc bd update "$finding" --set-metadata finding.disposition=deferred --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=deferred ${words[@]+"${words[@]}"} --status=closed --append-notes "$dnote" >/dev/null 2>&1 \
         || { warn "could not close deferred finding $finding"; exit 2; }
       ;;
     declined)
@@ -731,8 +789,21 @@ cmd_set_disposition() {
       fi
       local note="declined"
       [ -n "$reason" ] && note="declined: $reason"
-      gc bd update "$finding" --set-metadata finding.disposition=declined --status=closed --append-notes "$note" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=declined ${words[@]+"${words[@]}"} --status=closed --append-notes "$note" >/dev/null 2>&1 \
         || { warn "could not close declined finding $finding"; exit 2; }
+      ;;
+    restates)
+      # No point of its own: the inline comments it frames are each ruled, and
+      # this closes holding nothing and owing no answer, like a no-objection
+      # decline, but it reads as neither a refusal nor a second hold.
+      if edge_exists "$finding" "$anchor"; then
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
+      fi
+      strip_inbound_blocks "$finding"
+      local rnote="restates its review's inline comments"
+      [ -n "$reason" ] && rnote="$rnote: $reason"
+      gc bd update "$finding" --set-metadata finding.disposition=restates ${words[@]+"${words[@]}"} --status=closed --append-notes "$rnote" >/dev/null 2>&1 \
+        || { warn "could not close restates finding $finding"; exit 2; }
       ;;
     needs-you)
       # The objection turns on a call only the operator can make, so this ruling
@@ -791,13 +862,13 @@ cmd_set_disposition() {
       gc bd update "$finding" \
         --set-metadata finding.disposition=needs-you \
         --set-metadata finding.visit="$vid" \
-        --set-metadata finding.reply="$vreply" >/dev/null 2>&1 \
+        --set-metadata finding.reply="$vreply" ${words[@]+"${words[@]}"} >/dev/null 2>&1 \
         || { warn "could not stamp finding.disposition/finding.visit/finding.reply on $finding"; exit 2; }
       [ -n "$reason" ] && nnote="$nnote — $reason"
       gc bd update "$finding" --append-notes "$nnote" >/dev/null 2>&1 \
         || warn "could not record the needs-you note on $finding"
       ;;
-    *) warn "--disposition must be must-fix, deferred, declined, or needs-you (got '$disp')"; exit 1 ;;
+    *) warn "--disposition must be must-fix, deferred, declined, needs-you or restates (got '$disp')"; exit 1 ;;
   esac
   # A ruling that went past open visits the caller judged to ask something else
   # records that judgment on the finding, so a reader of the finding can weigh it.
@@ -805,6 +876,69 @@ cmd_set_disposition() {
     gc bd update "$finding" --append-notes "ruled $disp past open visit(s) $past, judged by the validator not to carry this question" >/dev/null 2>&1 \
       || warn "could not record on $finding the open visits this ruling went past"
   fi
+}
+
+# The fix unit's own answer to one finding, which the review's living answer
+# shows: one sentence on how the point was answered compared with what was
+# asked (finding.fix_answer), and whether the reviewer should look at it
+# (finding.fix_flag): the fix chose among options they left open, departed from
+# their suggestion, or changed code the ruling declined. Each call states the
+# whole answer, so one without --flag clears an earlier flag. Exit 1 on a usage
+# error or a bead that is not a finding, 2 when a read or the write fails.
+cmd_answer() {
+  local finding="" answer="" flag=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --finding) finding="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --answer) answer="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --flag) flag=1; shift ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$finding" ] && [ -n "$(printf '%s' "$answer" | tr -d '[:space:]')" ] \
+    || { warn "answer needs --finding and a non-empty --answer"; exit 1; }
+  local kind
+  kind=$(bd_json show "$finding" | jq -r 'if type == "array" and length > 0 then ((.[0].metadata.task_kind // "") | tostring) else "?" end' 2>/dev/null) \
+    || { warn "could not read $finding; nothing recorded"; exit 2; }
+  case "$kind" in
+    finding) : ;;
+    "?") warn "could not read $finding; nothing recorded"; exit 2 ;;
+    *) warn "$finding is not a finding (task_kind '$kind'); nothing recorded"; exit 1 ;;
+  esac
+  local fl=(--unset-metadata finding.fix_flag)
+  [ -z "$flag" ] || fl=(--set-metadata finding.fix_flag=1)
+  gc bd update "$finding" --set-metadata "finding.fix_answer=$answer" "${fl[@]}" >/dev/null 2>&1 \
+    || { warn "could not record the answer on $finding"; exit 2; }
+}
+
+# The fix unit's notes on its round (fix_notes on the fix unit), which the
+# review's living answer shows folded under the points. Each call replaces the
+# notes. Exit 1 on a usage error or a bead that is not a fix unit, 2 when a read
+# or the write fails.
+cmd_fix_notes() {
+  local fu="" notes="" nfile="" have=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --fix-unit) fu="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --notes) notes="${2:-}"; have=1; shift 2 || { usage; exit 1; } ;;
+    --notes-file) nfile="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    *) warn "unknown arg '$1'"; usage; exit 1 ;;
+  esac; done
+  [ -n "$fu" ] || { warn "fix-notes needs --fix-unit"; exit 1; }
+  if [ -n "$have" ] && [ -n "$nfile" ]; then
+    warn "give --notes or --notes-file, not both"; exit 1
+  elif [ -n "$nfile" ]; then
+    [ -f "$nfile" ] || { warn "--notes-file '$nfile' does not exist"; exit 1; }
+    notes=$(cat "$nfile") || { warn "could not read --notes-file '$nfile'"; exit 2; }
+  fi
+  [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ] || { warn "fix-notes needs non-empty notes"; exit 1; }
+  local kind
+  kind=$(bd_json show "$fu" | jq -r 'if type == "array" and length > 0 then ((.[0].metadata.task_kind // "") | tostring) else "?" end' 2>/dev/null) \
+    || { warn "could not read $fu; nothing recorded"; exit 2; }
+  case "$kind" in
+    rework) : ;;
+    "?") warn "could not read $fu; nothing recorded"; exit 2 ;;
+    *) warn "$fu is not a fix unit (task_kind '$kind'); nothing recorded"; exit 1 ;;
+  esac
+  gc bd update "$fu" --set-metadata "fix_notes=$notes" >/dev/null 2>&1 \
+    || { warn "could not record the notes on $fu"; exit 2; }
 }
 
 # The open visits already on <anchor>'s feedback (feedback_visits), one per line:
@@ -1196,6 +1330,8 @@ case "$VERB" in
   key)               cmd_key "$@" ;;
   upsert)            cmd_upsert "$@" ;;
   set-disposition)   cmd_set_disposition "$@" ;;
+  answer)            cmd_answer "$@" ;;
+  fix-notes)         cmd_fix_notes "$@" ;;
   open-visits)       cmd_open_visits "$@" ;;
   wire-fix-unit)     cmd_wire_fix_unit "$@" ;;
   open-must-fix)     cmd_open_must_fix "$@" ;;

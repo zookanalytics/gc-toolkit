@@ -972,5 +972,65 @@ eq "$(bstatus "$FS")" "closed" "shed-orphaned closes a needs-you finding whose a
 eq "$(bstatus "visS")" "open" "…and leaves its visit to the operator"
 eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its visit"
 
+# ---------------------------------------------------------------------------
+# restates: a human review body that only frames its review's own inline
+# comments closes as no point of its own, with no edge and no answer owed. It
+# takes only a review body whose review raised another finding.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+FRB=$(human_finding tk-ancR "PR review" "Requesting changes for two issues; details are in the inline comments." 9100 9100)
+FRI=$(human_finding tk-ancR "a.sh:3" "The guard drops the opt-out." 9101 9100)
+FRL=$(human_finding tk-ancR "PR review" "A lone review body with a point of its own." 9200 9200)
+"$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc" "1" "restates refuses an inline comment: it rules a review body"
+eq "$(meta "$FRI" 'finding.disposition')" "unvalidated" "…writing nothing"
+"$SUT" set-disposition --finding "$FRL" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc" "1" "restates refuses a body whose review raised no other finding: that body is the whole review"
+eq "$(bstatus "$FRL")" "open" "…leaving it open"
+"$SUT" set-disposition --finding "$FRB" --anchor tk-ancR --disposition restates --reason "it lists the inline finding" --label "Summary of the inline points"; rc=$?
+eq "$rc" "0" "restates rules a body that frames its review's inline comments"
+eq "$(meta "$FRB" 'finding.disposition')" "restates" "…recording restates"
+eq "$(bstatus "$FRB")" "closed" "…closing the finding"
+eq "$(meta "$FRB" 'finding.reply')" "<absent>" "…owing no answer"
+hasnt "$(deps)" "$FRB|blocks|" "…and holding nothing"
+has "$(notes "$FRB")" "restates its review's inline comments: it lists the inline finding" "…with its reason in the notes"
+eq "$(meta "$FRB" 'finding.label')" "Summary of the inline points" "…and the label the ruling gave it"
+
+# The words a review's living answer shows ride the ruling's own write.
+"$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition declined --reason "already handled" \
+  --reply "the guard keeps the opt-out on this branch" --label "Opt-out guard" --answer "Declined: the branch already keeps the opt-out."
+eq "$(meta "$FRI" 'finding.label')" "Opt-out guard" "a ruling records the label it is given"
+eq "$(meta "$FRI" 'finding.answer')" "Declined: the branch already keeps the opt-out." "…and the sentence it answers with"
+eq "$(meta "$FRI" 'finding.reply')" "the guard keeps the opt-out on this branch" "…beside the reply its thread gets"
+FRN=$(human_finding tk-ancR "b.sh:9" "Should this be on by default?" 9102 9100)
+"$SUT" set-disposition --finding "$FRN" --anchor tk-ancR --disposition needs-you --reason "Should enforcement turn on now?" >/dev/null
+eq "$(meta "$FRN" 'finding.answer')" "Should enforcement turn on now?" "a needs-you ruling with no --answer records its reason as the question the living answer shows"
+
+# ---------------------------------------------------------------------------
+# answer: the fix unit's own sentence on a point, and its flag; fix-notes: its
+# notes on the round, on the fix unit itself.
+# ---------------------------------------------------------------------------
+"$SUT" answer --finding "$FRI" --answer "Changed anyway, though the ruling declined it: the guard now logs the skip." --flag
+eq "$(meta "$FRI" 'finding.fix_answer')" "Changed anyway, though the ruling declined it: the guard now logs the skip." "answer records the fix unit's sentence"
+eq "$(meta "$FRI" 'finding.fix_flag')" "1" "…and its flag"
+"$SUT" answer --finding "$FRI" --answer "Fixed as you suggested."
+eq "$(meta "$FRI" 'finding.fix_answer')" "Fixed as you suggested." "a later answer replaces the sentence"
+eq "$(meta "$FRI" 'finding.fix_flag')" "<absent>" "…and one given without --flag clears the flag"
+"$SUT" answer --finding tk-ancR --answer "x" 2>/dev/null; rc=$?
+eq "$rc" "1" "answer refuses a bead that is not a finding"
+"$SUT" answer --finding "$FRI" --answer "   " 2>/dev/null; rc=$?
+eq "$rc" "1" "…and an empty sentence"
+store "$(jq -c '. + [{"id":"tk-fuR","status":"open","assignee":"","title":"rework","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR"}}]' "$STUB_STORE")"
+printf 'Each point has its own commit.\n\nThe opt-out keeps its meaning.\n' > "$TMP/fix-notes.md"
+"$SUT" fix-notes --fix-unit tk-fuR --notes-file "$TMP/fix-notes.md"
+eq "$(meta tk-fuR fix_notes)" "$(cat "$TMP/fix-notes.md")" "fix-notes records the fix unit's notes from a file"
+"$SUT" fix-notes --fix-unit tk-fuR --notes "Replaced."
+eq "$(meta tk-fuR fix_notes)" "Replaced." "…and a later call replaces them"
+"$SUT" fix-notes --fix-unit "$FRI" --notes "x" 2>/dev/null; rc=$?
+eq "$rc" "1" "fix-notes refuses a bead that is not a fix unit"
+"$SUT" fix-notes --fix-unit tk-fuR 2>/dev/null; rc=$?
+eq "$rc" "1" "…and a call with no notes"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
