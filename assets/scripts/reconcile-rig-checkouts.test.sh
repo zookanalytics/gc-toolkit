@@ -46,7 +46,9 @@
 # goes and the checkout advances, the reset heal refuses one before touching
 # anything and removes an ignored copy, and the reset refuses rather than
 # overwrites one the guard's listing misses, including a name only case
-# separates from the remote's on a file system that ignores case.
+# separates from the remote's on a file system that ignores case; (s) neither
+# heal runs the rig's post-checkout hook, so a failing one neither stops nor
+# escalates a heal, and the reset leaves the branch's upstream config as it is.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -954,6 +956,46 @@ rigs_json churnignoredcase
 : > "$TMP/escalations"
 bash "$SCRIPT" >/dev/null
 eq "$(cat "$TMP/churnignoredcase/Readme.cfg" 2>/dev/null)" "mine" "an ignored file only case separates from a file the remote adds keeps its bytes"
+
+# ===========================================================================
+# Hooks. git checkout and git restore run the post-checkout hook and exit with
+# its status, so the heals run them with the rig's hooks off. Each checkout
+# below points core.hooksPath at a post-checkout hook that records its run and
+# fails.
+# ===========================================================================
+mkdir -p "$TMP/failhooks"
+printf '#!/bin/sh\necho "post-checkout $*" >> "%s"\nexit 1\n' "$TMP/hookruns" > "$TMP/failhooks/post-checkout"
+chmod +x "$TMP/failhooks/post-checkout"
+
+# churnhooked: an already-upstream SHA churn on a branch with no upstream
+# config. The reset heal moves it to the remote, runs no hook, and leaves the
+# upstream config unset.
+churned_rig churnhooked
+echo theirs > "$TMP/churnhooked.src/new.txt"; push_churn churnhooked
+git -C "$TMP/churnhooked" config core.hooksPath "$TMP/failhooks"
+git -C "$TMP/churnhooked" branch -q --unset-upstream
+CHURNHOOKED_REMOTE="$(git -C "$TMP/churnhooked.git" rev-parse main)"
+rigs_json churnhooked
+: > "$TMP/escalations"; : > "$TMP/hookruns"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/churnhooked" rev-parse HEAD)" "$CHURNHOOKED_REMOTE" "a failing post-checkout hook does not stop the reset heal"
+eq "$(esc_count churnhooked)" "0" "a reset heal under a failing post-checkout hook is not escalated"
+eq "$(cat "$TMP/hookruns")" "" "the reset heal runs no hook"
+eq "$(git -C "$TMP/churnhooked" config --get branch.main.merge || true)" "" "the reset heal leaves the branch's upstream config as it is"
+
+# hookedbehind: a stray staged f.txt blocks the fast-forward, as in mu. The
+# set-aside pins and restores it with no hook run, and the checkout advances.
+behind_rig hookedbehind
+printf 'stray-staged\n' > "$TMP/hookedbehind/f.txt"; git -C "$TMP/hookedbehind" add f.txt
+echo base > "$TMP/hookedbehind/f.txt"                            # working copy back to HEAD: MM f.txt
+git -C "$TMP/hookedbehind" config core.hooksPath "$TMP/failhooks"
+HOOKEDBEHIND_REMOTE="$(git -C "$TMP/hookedbehind.git" rev-parse main)"
+rigs_json hookedbehind
+: > "$TMP/escalations"; : > "$TMP/hookruns"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/hookedbehind" rev-parse HEAD)" "$HOOKEDBEHIND_REMOTE" "a failing post-checkout hook does not stop the set-aside heal"
+eq "$(esc_count hookedbehind)" "0" "a set-aside under a failing post-checkout hook is not escalated"
+eq "$(cat "$TMP/hookruns")" "" "the set-aside heal runs no hook"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

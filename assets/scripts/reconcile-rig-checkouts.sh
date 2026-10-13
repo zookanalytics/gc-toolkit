@@ -76,16 +76,17 @@
 #     fast-forward above, except a regular file that already holds the remote's
 #     bytes on its own path.
 # It then removes those copies, stages each dirty path whose index still holds
-# HEAD, and runs `git checkout --no-overwrite-ignore -B <default> <remote>`,
-# which moves the branch to the remote as a reset does. git refuses, rather
-# than overwrites or deletes, anything untracked in its way, an ignored file
-# included, where git reset --keep would overwrite the ignored file. It also
-# refuses rather than discards a staged change on a path it moves, and keeps one
-# on a path it does not. An untracked collision the checks above cannot see,
-# such as a name that differs only in case on a file system that ignores case,
-# therefore escalates instead of losing content, and the report names what the
-# heal had staged and removed. Every other untracked file stays, and the
-# divergence bead closes.
+# HEAD, and moves the branch to the remote as a reset does, with
+# `git checkout --no-overwrite-ignore --no-track -B <default> <remote>`. That
+# runs with the rig's hooks off and leaves the branch's upstream config as it
+# is. git refuses, rather than overwrites or deletes, anything untracked in its
+# way, an ignored file included, where git reset --keep would overwrite the
+# ignored file. It also refuses rather than discards a staged change on a path
+# it moves, and keeps one on a path it does not. An untracked collision the
+# checks above cannot see, such as a name that differs only in case on a file
+# system that ignores case, therefore escalates instead of losing content, and
+# the report names what the heal had staged and removed. Every other untracked
+# file stays, and the divergence bead closes.
 #
 # Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
 # escalate every refusal instead.
@@ -349,7 +350,9 @@ set_aside_and_advance() {
         git -C "$path" update-ref -m "$msg" "$ref" "$pin" "" 2>/dev/null \
             || { blocking_report="could not record the pin of $listed at $ref"; return 1; }
         set_aside_ref="$ref"
-        if ! git --literal-pathspecs -C "$path" restore --source=HEAD --staged --worktree -- "${blocking[@]}" 2>/dev/null; then
+        # Hooks off: git restore runs the rig's post-checkout hook and exits
+        # with its status, so a failing hook would report a done restore as failed.
+        if ! git -c core.hooksPath=/dev/null --literal-pathspecs -C "$path" restore --source=HEAD --staged --worktree -- "${blocking[@]}" 2>/dev/null; then
             blocking_report="could not restore $listed to HEAD after pinning them"
             return 1
         fi
@@ -431,8 +434,11 @@ reset_and_advance() {
         fi
         acted="${acted:+$acted, }removed the untracked $p, a copy of $remote's"
     done
-    if ! err=$(git -C "$path" checkout -q --no-overwrite-ignore -B "$branch" "$remote" 2>&1); then
-        blocking_report="git checkout --no-overwrite-ignore -B $branch $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
+    # Hooks off: git checkout runs the rig's post-checkout hook and exits with
+    # its status, so a failing hook would report a refusal after the branch had
+    # moved. --no-track leaves the branch's upstream config as it is.
+    if ! err=$(git -c core.hooksPath=/dev/null -C "$path" checkout -q --no-overwrite-ignore --no-track -B "$branch" "$remote" 2>&1); then
+        blocking_report="git checkout --no-overwrite-ignore --no-track -B $branch $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
         return 1
     fi
 }
