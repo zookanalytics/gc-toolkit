@@ -1213,6 +1213,23 @@ eq "$(grep 'status=closed' "$SCRIPT" | grep -v -E '^[[:space:]]*(note|die|#)' | 
 eq "$(grep 'status=closed' "$SCRIPT" | grep -v -E '^[[:space:]]*(note|die|#)' | grep -c .)" "1" \
    "(NEVERCLOSE) …and it has no other"
 
+# ── R has one close: the prompt that runs this script writes none ────────────
+# The proactive prompt is this script's caller. A close of R written into the
+# prompt is a second copy of close_reaction's write, free to drift from the work
+# record that close carries, so the prompt stands a reaction down through
+# --stand-down and closes nothing itself. This suite is the merge gate a prompt
+# change runs, since tools/run-tests.sh maps the prompt's path below to it;
+# tools/proactive-first-reaction-fixture.sh asserts the same, by hand only.
+PROMPT_MD="$HERE/../../agents/proactive/prompt.template.md"
+if [ -f "$PROMPT_MD" ]; then
+  PM="$(cat "$PROMPT_MD")"
+  has '"$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R>' "$PM" \
+      "(ONECLOSE) the prompt stands a reaction down through this script"
+  hasnt "--status=closed" "$PM" "(ONECLOSE) …and writes no close of its own"
+else
+  bad "(ONECLOSE) the proactive prompt is missing at $PROMPT_MD"
+fi
+
 # ── A failed act refers to the cause ─────────────────────────────────────────
 # gc-helm.sh exits non-zero for a release that did not write AND for a release
 # whose route would not stamp, and only it knows which — so this refers to its
