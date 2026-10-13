@@ -497,12 +497,17 @@ done
 WAIT_OUT=$("$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
 printf '%s' "$WAIT_OUT"; echo
 if [ "$WAIT_RC" -eq 3 ]; then
-  WISP=$(gc bd list --assignee="$GC_AGENT" --status=open,in_progress --type=molecule --include-infra --limit=0 --json 2>/dev/null | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty' 2>/dev/null)
+  # This patrol's own wisp, found the way patrol-wisp-pour finds the wisp it
+  # burns, so a leftover wisp never takes the note.
+  CURRENT_WISP=${GC_BEAD_ID:-}
+  if [ -z "$CURRENT_WISP" ]; then
+    CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty')
+  fi
   ELAPSED=$(printf '%s' "$WAIT_OUT" | sed -n 's/^elapsed=//p')
-  if [ -n "$WISP" ] && gc bd update "$WISP" --append-notes "run-tests: the gate has run ${ELAPSED:-?}s and is still running" >/dev/null 2>&1; then
-    echo "noted the running gate on patrol wisp $WISP"
+  if [ -n "$CURRENT_WISP" ] && gc bd update "$CURRENT_WISP" --append-notes "run-tests: the gate has run ${ELAPSED:-?}s and is still running" >/dev/null 2>&1; then
+    echo "noted the running gate on patrol wisp $CURRENT_WISP"
   else
-    echo "could not note the running gate on a patrol wisp ('$WISP'), so check-refinery-patrol-live may call this patrol stalled once its wisp is an hour old; keep waiting"
+    echo "could not note the running gate on this patrol's wisp ('$CURRENT_WISP'), so check-refinery-patrol-live may call this patrol stalled once its wisp is an hour old; keep waiting"
   fi
 fi
 exit "$WAIT_RC"

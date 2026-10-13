@@ -9,8 +9,9 @@
 #     name and exit code, not just the last one;
 #   - each command runs as configured, so a trailing comment or a heredoc in
 #     it works, and the rig's own value wins over the formula default;
-#   - a wait that finds the gate still running notes it on the refinery's
-#     patrol wisp, and one that finds it finished does not;
+#   - a wait that finds the gate still running notes it on this patrol's own
+#     wisp, found as patrol-wisp-pour finds it, and one that finds it finished
+#     does not;
 #   - an empty check is skipped, and run_tests=false skips the test command;
 #   - a gate a previous session left running is stopped before the new one
 #     starts, and its checks do not carry into the new one; one that will not
@@ -98,7 +99,8 @@ mkdir -p "$EMPTY_CITY"
 
 # A stub gc: the blocks call it to read the check commands (STUB_SHOW, the
 # JSON `formula show` prints), to drain, to list the refinery's patrol wisps
-# (STUB_WISPS, a JSON file), and to note a running gate on one.
+# (STUB_WISPS, a JSON file, filtered by the --status asked for), and to note a
+# running gate on one.
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 cat > "$BIN/gc" <<'STUB'
@@ -106,7 +108,11 @@ cat > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
   "formula show") cat "$STUB_SHOW" ;;
-  "bd list") [ -z "${STUB_WISPS:-}" ] || cat "$STUB_WISPS" ;;
+  "bd list")
+    [ -n "${STUB_WISPS:-}" ] || exit 0
+    st=""
+    for a in "$@"; do case "$a" in --status=*) st=${a#--status=} ;; esac; done
+    jq --arg st "$st" '[.[] | select((.status // "") as $s | $st == "" or ($st | split(",") | any(. == $s)))]' "$STUB_WISPS" ;;
 esac
 exit 0
 STUB
@@ -117,8 +123,10 @@ export DETACHED_JOB_POLL=1 DETACHED_JOB_STOP_GRACE=2
 
 # run_block <script> <city> [<rig root>]: run a block as the agent would, from
 # a directory outside any repo, so only GC_CITY_PATH can supply the script.
+# RUN_BEAD_ID is the session's GC_BEAD_ID, empty unless a case sets it.
 run_block() {
-  ( cd "$TMP" && env PATH="$BIN:$PATH" GC_RIG=testrig GC_RIG_ROOT="${3:-$REPO}" GC_CITY_PATH="$2" GC_AGENT=testrig/gc-toolkit.refinery bash "$1" )
+  ( cd "$TMP" && env PATH="$BIN:$PATH" GC_RIG=testrig GC_RIG_ROOT="${3:-$REPO}" GC_CITY_PATH="$2" GC_AGENT=testrig/gc-toolkit.refinery \
+      GC_BEAD_ID="${RUN_BEAD_ID:-}" bash "$1" )
 }
 
 echo "── a passing gate ──"
@@ -147,19 +155,31 @@ printf 'state=running\npid=4242\nelapsed=600\nwaited=540\ndir=%s\n' "$2"
 exit 3
 STUB
 chmod +x "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh"
-printf '[{"id":"tk-other","title":"mol-polecat-work"},{"id":"tk-wisp","title":"mol-refinery-patrol"}]\n' > "$TMP/wisps.json"
+# A leftover open patrol wisp is listed ahead of the one this patrol runs.
+printf '%s\n' '[{"id":"tk-other","title":"mol-polecat-work","status":"in_progress"},{"id":"tk-stale","title":"mol-refinery-patrol","status":"open"},{"id":"tk-wisp","title":"mol-refinery-patrol","status":"in_progress"}]' > "$TMP/wisps.json"
 : > "$STUB_GC_LOG"
 OUT=$(STUB_WISPS="$TMP/wisps.json" run_block "$TMP/wait.raw" "$RUNNING_CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)" 3/running "the wait still reports running, exit 3"
-has "$(cat "$STUB_GC_LOG")" "bd list --assignee=testrig/gc-toolkit.refinery --status=open,in_progress --type=molecule --include-infra" \
-  "it lists this refinery's patrol wisps as check-refinery-patrol-live does"
+has "$(cat "$STUB_GC_LOG")" "bd list --assignee=testrig/gc-toolkit.refinery --status=in_progress --type=molecule --include-infra" \
+  "with GC_BEAD_ID empty, it lists this refinery's in-progress patrol wisps"
 has "$(cat "$STUB_GC_LOG")" "bd update tk-wisp --append-notes run-tests: the gate has run 600s and is still running" \
-  "it notes the running gate on the patrol wisp"
+  "it notes the running gate on the patrol's own wisp"
+case "$(cat "$STUB_GC_LOG")" in *"bd update tk-stale"*) bad "a leftover open wisp gets no note" "tk-stale was noted" ;; *) ok "a leftover open wisp gets no note" ;; esac
 has "$OUT" "noted the running gate on patrol wisp tk-wisp" "it says so"
+: > "$STUB_GC_LOG"
+OUT=$(RUN_BEAD_ID=tk-current STUB_WISPS="$TMP/wisps.json" run_block "$TMP/wait.raw" "$RUNNING_CITY"); RC=$?
+has "$(cat "$STUB_GC_LOG")" "bd update tk-current --append-notes run-tests: the gate has run 600s" \
+  "with GC_BEAD_ID set, it notes the running gate on that wisp"
+case "$(cat "$STUB_GC_LOG")" in *"bd list"*) bad "with GC_BEAD_ID set, it lists nothing" "it listed wisps" ;; *) ok "with GC_BEAD_ID set, it lists nothing" ;; esac
 : > "$STUB_GC_LOG"
 OUT=$(run_block "$TMP/wait.raw" "$RUNNING_CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)" 3/running "with no patrol wisp found, the wait still reports running"
 has "$OUT" "could not note the running gate" "it says the note did not land"
+# The wait block finds the wisp with patrol-wisp-pour's lookup, copied verbatim.
+fence patrol-wisp-pour | sed -n '/^CURRENT_WISP=/,/^fi$/p' > "$TMP/pour-lookup"
+sed -n '/^ *CURRENT_WISP=/,/^ *fi$/p' "$TMP/wait.raw" | sed 's/^  //' > "$TMP/wait-lookup"
+[ -s "$TMP/pour-lookup" ] && ok "patrol-wisp-pour's wisp lookup extracted" || bad "patrol-wisp-pour's wisp lookup extracted"
+eq "$(cat "$TMP/wait-lookup")" "$(cat "$TMP/pour-lookup")" "the wait block's wisp lookup is patrol-wisp-pour's"
 
 echo "── a failing gate names every failed check ──"
 checks '' 'exit 3' 'cd /' '' 'echo test-output; pwd; false' true
