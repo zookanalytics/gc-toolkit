@@ -20,14 +20,18 @@
 # is one tracker whatever lines and codes the linter reports in it.
 #
 # `file` writes the key as `failure_key` metadata in the create itself and reads
-# it back, and `find` matches that stamp exactly, so a fixer who retitles the
-# tracker to name the fix does not hide it. A bug filed before the stamp existed
-# is found by the key in its title, but only while it carries no stamp, because
-# a stamped bead is the tracker of the key it names.
+# it back, and `find` matches that stamp exactly and nothing else, so a fixer
+# who retitles the tracker to name the fix does not hide it. A title is never
+# read. A key is a substring of titles that name other failures, as TestFoo is
+# of a TestFooBar tracker's title, and of titles that merely mention it, so a
+# title match can take an unrelated bug for the tracker. A bug that carries no
+# stamp is no key's tracker.
 #
 # Exit: 0 the store answered: `find` prints the tracker's id, or nothing when
-# there is none, and `file` prints the id of the tracker it filed or found · 1
-# the store could not be read or written, which is never "none" · 2 usage
+# there is none, and `file` prints the id of the tracker it filed or found, with
+# a warning when the new tracker could not be read back to confirm its stamp ·
+# 1 the store could not be read or written, or the new tracker read back with
+# its stamp missing or wrong, which is never "none" · 2 usage
 set -uo pipefail
 
 PROG="preexisting-failure"
@@ -71,9 +75,9 @@ usage: preexisting-failure.sh key --test <test function>
           package or build target. --lint takes the linter or learned rule and
           the repo-relative path of the file it flagged. A trailing
           :<line>[:<col>] on a path is dropped.
-  find    prints the id of the key's live tracker, or nothing when there is
-          none. --closed-after reads the trackers closed since that date
-          instead of the live ones.
+  find    prints the id of the live tracker stamped with the key, or nothing
+          when there is none. --closed-after reads the trackers closed since
+          that date instead of the live ones.
   file    files the key's tracker and prints its id: a P1 bug titled
           `Pre-existing failure: <key>`, with --message as its body and the
           key stamped as failure_key. When a live tracker already holds the
@@ -180,12 +184,12 @@ key_cmd() {
   printf '%s\n' "$k"
 }
 
-# find_tracker <key> <statuses> [<closed-after>] — the id of the key's tracker,
-# or nothing. Non-zero when a listing could not be read, which the caller must
-# treat as "unknown", never as "none". The stamp is matched first; the title
-# match is for a bug filed before the stamp existed. Each row is re-checked
-# against the filters it was listed by, so a listing that ignored one cannot
-# pass another bead off as the tracker.
+# find_tracker <key> <statuses> [<closed-after>] — the id of the bead stamped
+# with the key, or nothing. Non-zero when the listing could not be read, which
+# the caller must treat as "unknown", never as "none". Only the failure_key
+# stamp is matched, never a title. Each row is re-checked against the filters
+# it was listed by, so a listing that ignored one cannot pass another bead off
+# as the tracker.
 find_tracker() {
   local key="$1" st="$2" after="${3:-}" rows id
   local since=()
@@ -196,17 +200,18 @@ find_tracker() {
       | [ .[] | select((((.metadata // {}).failure_key // "") | tostring) == $k
                        and ((.status // "") as $s | $want | any(. == $s))) ]
       | .[0].id // empty' 2>/dev/null) || return 1
-  if [ -z "$id" ]; then
-    rows=$(bd_list --type=bug --status="$st" --title-contains "$key" ${since[@]+"${since[@]}"}) || return 1
-    id=$(printf '%s' "$rows" | jq -r --arg k "$key" --arg st "$st" '
-        ($st | split(",")) as $want
-        | [ .[] | select((((.metadata // {}).failure_key // "") | tostring) == ""
-                         and (.issue_type // "") == "bug"
-                         and ((.title // "") | ascii_downcase | contains($k | ascii_downcase))
-                         and ((.status // "") as $s | $want | any(. == $s))) ]
-        | .[0].id // empty' 2>/dev/null) || return 1
-  fi
   printf '%s' "$id"
+}
+
+# read_stamp <id> — the failure_key bead <id> carries, which is empty when it
+# carries none. Non-zero when the bead could not be read. `gc bd show` can
+# answer an error object or nothing at all, so a read counts only when it
+# returns that bead's own row.
+read_stamp() {
+  bd_json show "$1" | jq -er --arg id "$1" '
+      if type == "array" and length > 0 and ((.[0].id // "") | tostring) == $id
+      then (.[0].metadata // {}).failure_key // "" | tostring
+      else error("unread") end' 2>/dev/null
 }
 
 find_cmd() {
@@ -294,7 +299,15 @@ file_cmd() {
   fi
   [ -n "$id" ] || { warn "bd create filed nothing for '$key'"; exit 1; }
 
-  got=$(bd_json show "$id" | jq -r 'if type == "array" then (.[0].metadata.failure_key // "") else "" end' 2>/dev/null)
+  # A read that fails says nothing about the stamp, and the tracker exists, so
+  # it is retried once and then reported as filed. Only a read that returns the
+  # bead without the key fails the filing: the next gate's lookup cannot find
+  # that bead, and it would file another.
+  if ! got=$(read_stamp "$id") && ! got=$(read_stamp "$id"); then
+    warn "filed $id with failure_key '$key' in its create, but could not read $id back to confirm the stamp. If gc bd show $id lacks it, repair: gc bd update $id --set-metadata \"failure_key=$key\""
+    printf '%s\n' "$id"
+    exit 0
+  fi
   if [ "$got" != "$key" ]; then
     warn "failure_key on $id read back as '$got', expected '$key', so the next gate's lookup cannot find it by its stamp. Repair: gc bd update $id --set-metadata \"failure_key=$key\""
     exit 1

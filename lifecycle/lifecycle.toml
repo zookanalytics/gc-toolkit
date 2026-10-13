@@ -1269,9 +1269,8 @@ keys = ["failure_key"]
 #   a test function, a repo-relative path, or a linter and a path. `file` writes
 #   it in the create and reads it back; `find` matches it exactly, over the live
 #   statuses for both gates' lookup and over closed beads for the pre-flight's
-#   landed-fix check. Absent on a tracker filed before the stamp, which `find`
-#   matches by the key in its title only while it carries no failure_key. Never
-#   cleared, so a retitle leaves it in place. A string.
+#   landed-fix check. `find` reads no title, so a bug without it is no tracker.
+#   Never cleared, so a retitle leaves it in place. A string.
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session

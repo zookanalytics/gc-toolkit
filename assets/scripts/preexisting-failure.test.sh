@@ -9,7 +9,10 @@
 # matches the key stamped in the create, which a retitle leaves in place. The
 # second is DRIFT: two gates that type their own tokens for one lint finding
 # ("SC1087 gc-helm.sh", "SC1087 in gc-helm.sh") never meet, so the key is
-# derived from the failure and a hand-typed one is refused.
+# derived from the failure and a hand-typed one is refused. The third is a
+# TITLE that merely contains the key ("Pre-existing failure:
+# TestReconcileSessionBeads", "Fix TestFoo flake"): a bug is the key's tracker
+# only by its stamp, so none of those is taken for it.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,11 +39,16 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 #   STUB_LIST_FAIL     list exits non-zero
 #   STUB_LIST_EMPTY    list exits 0 with empty stdout (bd's fail-open shape)
 #   STUB_LIST_OBJECT   list answers an error object at exit 0
-#   STUB_LIST_IGNORE   a filter the list silently drops: metadata-field,
-#                      title-contains or status
+#   STUB_LIST_IGNORE   a filter the list silently drops: metadata-field or
+#                      status
 #   STUB_CREATE_FAIL   create refuses and files nothing
 #   STUB_CREATE_NO_ID  create files the bead but answers an empty id
 #   STUB_CREATE_DROP_META  create files the bead without its metadata
+#   STUB_CREATE_META   create files the bead with this metadata instead
+#   STUB_SHOW_FAILS    the first N shows fail, in the STUB_SHOW_SHAPE shape:
+#                      exit (non-zero, nothing on stdout), empty (exit 0,
+#                      nothing on stdout), object (an error object at exit 0)
+#                      or other (the bead's row under another bead's id)
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -76,9 +84,7 @@ case "${1:-}" in
       out=$(printf '%s' "$out" | jq -c --arg st ",$st," '[ .[] | select((.status // "open") as $s | $st | contains("," + $s + ",")) ]')
     fi
     [ -n "$ty" ] && out=$(printf '%s' "$out" | jq -c --arg t "$ty" '[ .[] | select((.issue_type // "") == $t) ]')
-    if [ -n "$tc" ] && [ "$ign" != "title-contains" ]; then
-      out=$(printf '%s' "$out" | jq -c --arg t "$tc" '[ .[] | select((.title // "") | ascii_downcase | contains($t | ascii_downcase)) ]')
-    fi
+    [ -n "$tc" ] && out=$(printf '%s' "$out" | jq -c --arg t "$tc" '[ .[] | select((.title // "") | ascii_downcase | contains($t | ascii_downcase)) ]')
     if [ "$ign" != "metadata-field" ]; then
       for f in ${fields[@]+"${fields[@]}"}; do
         out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" '[ .[] | select(((.metadata // {})[$k] // "") == $v) ]')
@@ -88,6 +94,17 @@ case "${1:-}" in
     printf '%s\n' "$out" ;;
   show)
     shift; id="${1:-}"
+    if [ -n "${STUB_SHOW_FAILS:-}" ]; then
+      c=$(cat "$STUB_SEQ.show" 2>/dev/null || echo 0); c=$((c + 1)); printf '%s' "$c" > "$STUB_SEQ.show"
+      if [ "$c" -le "$STUB_SHOW_FAILS" ]; then
+        case "${STUB_SHOW_SHAPE:-exit}" in
+          exit)   echo "bd: database is locked" >&2; exit 1 ;;
+          empty)  exit 0 ;;
+          object) echo '{"error":"database is locked"}'; exit 0 ;;
+          other)  jq -c --arg id "$id" '[ .[] | select(.id == $id) | .id = "tk-elsewhere" ]' "$STORE"; exit 0 ;;
+        esac
+      fi
+    fi
     out=$(jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found matching the provided IDs"}'
@@ -113,6 +130,7 @@ case "${1:-}" in
       shift || true
     done
     [ -n "${STUB_CREATE_DROP_META:-}" ] && meta="{}"
+    [ -n "${STUB_CREATE_META:-}" ] && meta="$STUB_CREATE_META"
     n=$(cat "${STUB_SEQ:?}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     jq -c --arg id "tk-new$n" --arg t "$title" --arg d "$body" --arg g "$design" \
           --arg ty "$ty" --arg p "$prio" --argjson m "$meta" \
@@ -139,13 +157,14 @@ bead() {
 store() {
   local IFS=,
   printf '[%s]\n' "$*" > "$STUB_STORE"
-  : > "$STUB_LOG"; rm -f "$STUB_SEQ"
+  : > "$STUB_LOG"; rm -f "$STUB_SEQ" "$STUB_SEQ.show"
 }
 run() {
   OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?
   ERR=$(cat "$TMP/err")
 }
 creates() { grep -c '^bd create' "$STUB_LOG"; }
+shows() { grep -c '^bd show' "$STUB_LOG"; }
 field() { jq -r --arg id "$1" ".[] | select(.id == \$id) | $2" "$STUB_STORE"; }
 
 echo "# key: one failure, one key"
@@ -187,16 +206,23 @@ TOP=$(git -C "$TMP/repo" rev-parse --show-toplevel)
 OUT=$(cd "$TMP/repo" && "$SUT" key --target "$TOP/sub/x.sh:3" 2>/dev/null); RC=$?
 eq "$RC/$OUT" "0/sub/x.sh" "an absolute path inside the checkout is made repo-relative"
 
-echo "# find: the stamp, then the title of an unstamped bug"
+echo "# find: the stamp alone, never a title"
 store "$(bead tk-fix open bug 'Reconcile scans the process table only when a prune consults it' '{"failure_key":"TestReconcile"}')"
 run find TestReconcile
 eq "$RC/$OUT" "0/tk-fix" "a RETITLED tracker is found by its stamp"
+hasnt "$(cat "$STUB_LOG")" "--title-contains" "the lookup never lists by title"
 store "$(bead tk-old in_progress bug 'Pre-existing failure: TestReconcile — misses the async window')"
 run find TestReconcile
-eq "$RC/$OUT" "0/tk-old" "an unstamped tracker filed before the stamp is found by its title"
-store "$(bead tk-task open task 'Pre-existing failure: TestReconcile — misses the async window')"
+eq "$RC/$OUT" "0/" "an unstamped bug titled with the key is not its tracker"
+store "$(bead tk-long open bug 'Pre-existing failure: TestReconcileSessionBeads_drain')"
 run find TestReconcile
-eq "$RC/$OUT" "0/" "a title match counts only on a bug"
+eq "$RC/$OUT" "0/" "a title naming a longer test function is not the tracker of its prefix"
+store "$(bead tk-gen open bug 'Pre-existing failure: internal/api/genclient')"
+run find internal/api
+eq "$RC/$OUT" "0/" "a title naming a path below the key is not the key's tracker"
+store "$(bead tk-flake open bug 'Fix TestFoo flake by raising timeout')"
+run find TestFoo
+eq "$RC/$OUT" "0/" "a bug whose title merely mentions the key is not its tracker"
 store "$(bead tk-other open bug 'Pre-existing failure: TestReconcileAll' '{"failure_key":"TestReconcileAll"}')"
 run find TestReconcile
 eq "$RC/$OUT" "0/" "a bead stamped with another key is not this key's tracker, though its title contains it"
@@ -205,7 +231,7 @@ eq "$RC/$OUT" "0/tk-other" "the same bead is its own key's tracker"
 store "$(bead tk-old open bug 'Pre-existing failure: TestReconcile')" \
       "$(bead tk-fix open bug 'Fix the reconcile window' '{"failure_key":"TestReconcile"}')"
 run find TestReconcile
-eq "$OUT" "tk-fix" "the stamped tracker is preferred over a title match"
+eq "$OUT" "tk-fix" "the stamped tracker is found, never an unstamped bug titled with the key"
 for st in open in_progress blocked deferred hooked pinned; do
   store "$(bead tk-live "$st" bug 'Renamed by its fixer' '{"failure_key":"TestReconcile"}')"
   run find TestReconcile
@@ -220,7 +246,7 @@ run find TestReconcile --closed-after 2026-10-10
 eq "$RC/$OUT" "0/" "a tracker closed before the cutoff is not a recent fix"
 store "$(bead tk-done closed bug 'Pre-existing failure: TestReconcile' null 2026-10-09T08:00:00Z)"
 run find TestReconcile --closed-after 2026-10-04
-eq "$OUT" "tk-done" "the landed-fix check finds an unstamped closed tracker by its title"
+eq "$RC/$OUT" "0/" "the landed-fix check takes no unstamped closed bug by its title"
 run find TestReconcile --closed-after "last week"
 eq "$RC" "2" "--closed-after takes a date"
 
@@ -236,9 +262,9 @@ has "$ERR" "not proof the tracker is missing" "the failure says why it is not an
 store "$(bead tk-stranger open bug 'Unrelated bug' '{"failure_key":"TestOther"}')"
 STUB_LIST_IGNORE=metadata-field run find TestReconcile
 eq "$OUT" "" "a listing that dropped the stamp filter cannot pass a stranger off as the tracker"
-store "$(bead tk-stranger open bug 'Unrelated bug')"
-STUB_LIST_IGNORE=title-contains run find TestReconcile
-eq "$OUT" "" "a listing that dropped the title filter cannot either"
+store "$(bead tk-twin open bug 'Pre-existing failure: TestReconcile')"
+STUB_LIST_IGNORE=metadata-field run find TestReconcile
+eq "$OUT" "" "nor an unstamped bug titled with the key"
 store "$(bead tk-done closed bug 'Renamed' '{"failure_key":"TestReconcile"}' 2026-10-09T08:00:00Z)"
 STUB_LIST_IGNORE=status run find TestReconcile
 eq "$OUT" "" "a listing that dropped the status filter cannot pass a closed tracker off as live"
@@ -279,9 +305,13 @@ eq "$RC/$OUT/$(creates)" "0/tk-new1/0" "a second filing files nothing and prints
 has "$ERR" "already tracked as tk-new1" "it says the key was already tracked"
 
 echo "# file: a live twin found at filing time, a closed one not"
+store "$(bead tk-twin blocked bug 'Renamed by its fixer' '{"failure_key":"TestReconcile"}')"
+run file TestReconcile --message "seen"
+eq "$RC/$OUT/$(creates)" "0/tk-twin/0" "a live twin filed since the caller's lookup is found by its stamp, not duplicated"
 store "$(bead tk-old blocked bug 'Pre-existing failure: TestReconcile — misses the window')"
 run file TestReconcile --message "seen"
-eq "$RC/$OUT/$(creates)" "0/tk-old/0" "an unstamped live twin filed since the caller's lookup is found, not duplicated"
+eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "an unstamped bug titled with the key does not stop the filing"
+eq "$(field tk-new1 '.metadata.failure_key')" "TestReconcile" "the tracker filed beside it carries the stamp"
 store "$(bead tk-done closed bug 'Fixed it' '{"failure_key":"TestReconcile"}' 2026-10-09T08:00:00Z)"
 run file TestReconcile --message "red again after the fix landed"
 eq "$RC/$(creates)" "0/1" "a closed tracker does not suppress the filing: a red that outlives a fix is new"
@@ -320,8 +350,28 @@ eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "a create that answers no id is recovered
 has "$ERR" "returned no id" "the recovery is reported"
 store
 STUB_CREATE_DROP_META=1 run file TestReconcile --message "log"
-eq "$RC" "1" "a stamp that did not land fails the filing"
+eq "$RC/$OUT" "1/" "a read-back that shows the stamp missing fails the filing"
 has "$ERR" "--set-metadata \"failure_key=TestReconcile\"" "the failure names the repair"
+store
+STUB_CREATE_META='{"failure_key":"TestOther"}' run file TestReconcile --message "log"
+eq "$RC/$OUT" "1/" "a read-back that shows another key fails the filing"
+has "$ERR" "read back as 'TestOther'" "the failure names the key it read"
+
+echo "# file: a read-back that fails is not a failed filing"
+store
+STUB_SHOW_FAILS=1 run file TestReconcile --message "log"
+eq "$RC/$OUT/$(creates)/$(shows)" "0/tk-new1/1/2" "one failed read is retried, and the retry confirms the stamp"
+hasnt "$ERR" "could not read" "a retry that reads the stamp warns nothing"
+for shape in exit empty object other; do
+  store
+  STUB_SHOW_FAILS=2 STUB_SHOW_SHAPE=$shape run file TestReconcile --message "log"
+  eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "two failed reads ($shape) still print the filed tracker"
+  has "$ERR" "could not read tk-new1 back" "the unconfirmed stamp is reported ($shape)"
+done
+has "$ERR" "--set-metadata \"failure_key=TestReconcile\"" "the warning names the repair"
+store
+STUB_SHOW_FAILS=1 STUB_CREATE_DROP_META=1 run file TestReconcile --message "log"
+eq "$RC/$OUT" "1/" "a retry that reads the stamp missing still fails the filing"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
