@@ -92,6 +92,11 @@ empty), do not silently skip the gates: read the rig's `CLAUDE.md` and run
 the quality gates documented there, treating failures exactly as configured
 ones (reject, or file the pre-existing bug per the formula).
 
+Every gate runs as the run-tests step's detached job
+(`assets/scripts/detached-job.sh`), and you wait for it in the foreground.
+Never launch a gate as a background job of your own, and never end your turn
+while one runs: a gate that finishes while you sit idle wakes nothing.
+
 ## Escalation
 
 Every escalation is a visit, filed through one writer that dedups repeats:

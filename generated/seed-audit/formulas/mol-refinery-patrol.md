@@ -34,7 +34,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
 preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands) — keep
+patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands, refinery-gate) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes).
 
