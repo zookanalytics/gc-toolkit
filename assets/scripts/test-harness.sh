@@ -257,6 +257,17 @@ case "$sub" in
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
+# Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
+# child A parent-childs parent B). Dependency orientation per type:
+# blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
+# depends_on=B).
+#
+# Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
+# type. Re-adding a pair with the type it already carries is a no-op that
+# exits 0; asking for any other type is refused with exit 1 and writes
+# nothing. The reversed pair is a different pair. Every edge writer (`dep`,
+# and `create --deps`) stores through dep_put, so no write through the stub
+# leaves two edges on one pair, a state bd refuses to create.
 dep_have() { # <A> <TYPE> <B>: print the type already on the pair row "A|TYPE|B" would take
   local issue="$1" on="$3"
   [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
@@ -453,10 +464,13 @@ case "$verb" in
     # list leaves the bead at the default open. STUB_CREATE_FAIL refuses the
     # create outright. STUB_CREATE_GARBAGE lets it land and answers with a
     # reply no JSON reader parses, the shape of a create whose id is lost.
-    # --deps <type:id,...> rides the create the way real bd's does: `T:id`
-    # makes the new bead depend on id by a T edge, `blocks:id` makes the new
-    # bead block id, and a target that does not resolve refuses the whole
-    # create with nothing written.
+    # --deps lands its edges with the bead, read the way bd reads them: a bare
+    # id, depends-on:<id> and blocked-by:<id> make the new bead depend on <id>
+    # (a blocks edge from <id>), blocks:<id> makes <id> depend on the new bead,
+    # and any other <type>:<id> makes the new bead depend on <id> with that type.
+    # A target that does not resolve refuses the whole create with nothing
+    # written. STUB_DEP_FAIL naming the minted id lands the bead without its
+    # edges, as it refuses a `dep` write from that id.
     title="${1:-}"; shift || true
     body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
     while [ $# -gt 0 ]; do
@@ -501,6 +515,7 @@ case "$verb" in
     nid="${out##*$'\n'}"
     tmp="${S%/*}/.gc-stub.$$"
     printf '%s\n' "${out%$'\n'*}" > "$tmp" && mv "$tmp" "$S"
+    case " ${STUB_DEP_FAIL:-} " in *" $nid "*) cdeps="" ;; esac
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
       ctyp="${cdep%%:*}"; ctgt="${cdep#*:}"
       [ "$ctyp" != "$cdep" ] || ctyp="blocked-by"
@@ -536,19 +551,8 @@ case "$verb" in
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
-    # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
-    # child A parent-childs parent B). Dependency orientation per type:
-    # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
-    # depends_on=B). Queries honor --direction (down = follow the id's own
-    # dependency rows; up = rows depending on the id) and -t/--type.
-    #
-    # Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
-    # type. Re-adding a pair with the type it already carries is a no-op that
-    # exits 0; asking for any other type is refused with exit 1 and writes
-    # nothing. The reversed pair is a different pair. Every edge writer, the
-    # ones below and create's --deps, stores through dep_put, so no write
-    # through the stub leaves two edges on one pair, a state bd refuses to
-    # create.
+    # Queries honor --direction (down = follow the id's own dependency rows; up
+    # = rows depending on the id) and -t/--type. Writes store through dep_put.
     case "${1:-}" in
       list)
         # Each dep-read knob below takes 1 for every dep read, or a text that

@@ -12,7 +12,12 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded, doc-filing.
+# id-read-unguarded, doc-filing, create-then-stamp.
+#
+# Every detector in the directory, one added later included, is also held to
+# the runner's rule that a broken detector never reads as a clean scan. When a
+# tool it runs fails, it exits 2 or reports what it reports with every tool
+# working, and a file it cannot read exits 2.
 #
 # Hermetic: fixture files in a tempdir, the real detector run against them by
 # path. No live city, no store, no network.
@@ -2243,6 +2248,343 @@ plantpp "$TMP/pp-exempt/specs/record.md" <<'FIX'
 FIX
 runpp "$TMP/pp-exempt/pr-post.sh" "$TMP/pp-exempt/lint-learned.d/other-detector.sh" "$TMP/pp-exempt/specs/record.md"
 eq "$RC" 0 "pr-post.sh, lint-learned.d/ and specs/ are skipped"
+
+echo "── create-then-stamp: what is a finding ──"
+
+# Fixtures spell the create @CREATE@ and the stamp flag @STAMP@, for the reason
+# the other detectors use placeholders: the runner scans this file too.
+DET_CS="$HERE/lint-learned.d/create-then-stamp.sh"
+[ -x "$DET_CS" ] || { echo "no detector at $DET_CS"; exit 1; }
+runcs() { OUT="$("$DET_CS" "$@" 2>&1)"; RC=$?; }
+plantcs() { sed -e 's/@CREATE@/bd create/g' -e 's/@STAMP@/--set-metadata/g' -e 's/@CHILD@/bd_create_child/g' > "$1"; }
+
+# The shapes a bare create followed by its stamp takes: the id read straight
+# off the create, a continued create whose reply a second substitution reads
+# the id out of, a wrapper inside a function, and a stamp on a continued line.
+plantcs "$TMP/cs-stamp.sh" <<'FIX'
+#!/usr/bin/env bash
+X=$(gc @CREATE@ "t" -t task --json | jq -r '.id')
+gc bd update "$X" @STAMP@ task_kind=review
+V_JSON=$(gc @CREATE@ -t task --title "visit: s" \
+  -d "body" --json)
+V=$(printf '%s' "$V_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end')
+gc bd update "$V" @STAMP@ "gc.routed_to=human" \
+  @STAMP@ task_kind=visit
+f() {
+  local id
+  id=$(gc_bd create "t" --json | jq -r .id)
+  [ -n "$id" ] && gc bd update "${id}" --status=closed @STAMP@ k=v
+}
+FIX
+runcs "$TMP/cs-stamp.sh"
+eq "$RC" 1 "a file that stamps a bare create's bead exits 1"
+has "$OUT" "cs-stamp.sh:3:" "a stamp on the id read off the create is reported"
+has "$OUT" "cs-stamp.sh:7:" "a stamp on an id read out of the create's reply is reported"
+has "$OUT" "cs-stamp.sh:12:" "a wrapper create inside a function is tracked to its stamp"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "and nothing else is"
+has "$OUT" "create-then-stamp" "the finding names the rule"
+has "$OUT" "at line 2 " "the finding names the create's line"
+has "$OUT" "fix: carry the keys on the create" "the finding names the fix"
+
+# The spellings a substitution and a stamp also take: the substitution quoted
+# whole (with quotes of its own inside), a create and its stamp on one line, a
+# stamp guarded by if, and a stamp that names its store ahead of the id.
+plantcs "$TMP/cs-spellings.sh" <<'FIX'
+#!/usr/bin/env bash
+X="$(gc @CREATE@ "t" -t task --json | jq -r '.id')"
+gc bd update "$X" @STAMP@ task_kind=review
+Y=$(gc @CREATE@ "t" --json | jq -r .id); gc bd update "$Y" @STAMP@ k=v
+if Z=$(gc @CREATE@ "t" --json | jq -r .id); then gc bd update "$Z" @STAMP@ k=v; fi
+W=$(gc @CREATE@ "t" --json | jq -r .id)
+gc bd update --db "$DB" "$W" @STAMP@ k=v
+gc bd update ${STORE_DB:+--db "$STORE_DB"} "$W" --status=open @STAMP@ k=v
+gc bd update --status=closed "$W" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-spellings.sh"
+eq "$RC" 1 "the other spellings of a bare create and its stamp exit 1"
+has "$OUT" "cs-spellings.sh:3:" "a create whose substitution is quoted whole is tracked to its stamp"
+has "$OUT" "cs-spellings.sh:4:" "a create and its stamp on one line are judged in order"
+has "$OUT" "cs-spellings.sh:5:" "…and so are an assignment and a stamp inside if and then"
+has "$OUT" "cs-spellings.sh:7:" "a stamp naming its store with --db before the id is reported"
+has "$OUT" "cs-spellings.sh:8:" "…and so is one naming it through a \${VAR:+--db …} expansion"
+has "$OUT" "cs-spellings.sh:9:" "…and one with another flag before the id"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 6 "and nothing else is"
+
+# A formula recipe is run as written: a fenced create whose body spans lines,
+# then its stamp, is a finding.
+plantcs "$TMP/cs-recipe.toml" <<'FIX'
+description = """
+Prose may say gc @CREATE@ then gc bd update $X @STAMP@ and it is not a finding.
+```bash
+OBS_JSON=$(gc @CREATE@ "obs: x" -t task -d "## Statement
+a body over two lines" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r '.id // empty')
+gc bd update "$OBS" @STAMP@ task_kind=observation --status=closed
+```
+"""
+FIX
+runcs "$TMP/cs-recipe.toml"
+eq "$RC" 1 "a fenced recipe that stamps its bare create exits 1"
+has "$OUT" "cs-recipe.toml:7:" "the fenced stamp is reported past a multi-line body"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "prose outside a fence is not"
+
+# bd-lib.sh's bd_create_child runs a create, so a bead it files with no
+# --metadata and a later write stamps is a finding; one it files with
+# --metadata is not.
+plantcs "$TMP/cs-child.sh" <<'FIX'
+#!/usr/bin/env bash
+X=$(@CHILD@ "$A" "t" -t task --json | jq -r '.id')
+gc bd update "$X" @STAMP@ task_kind=review
+Y=$(@CHILD@ "$A" "t" -t task --metadata "$M" --json | jq -r '.id')
+gc bd update "$Y" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-child.sh"
+eq "$RC" 1 "a bead bd_create_child files bare, then stamped, exits 1"
+has "$OUT" "cs-child.sh:3:" "bd_create_child is read as the create it runs"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "…and a bd_create_child that carries --metadata is not a finding"
+
+echo "── create-then-stamp: what is not ──"
+
+# A create that carries its metadata may be followed by any write; a bead the
+# variable no longer holds, a write with no stamp, a stamp in another command,
+# and the shape held as data (a message, a comment, a here-doc) are clean.
+plantcs "$TMP/cs-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(gc @CREATE@ "t" -t task --metadata "$META" --json | jq -r '.id')
+gc bd update "$A" @STAMP@ gc.routed_to=pool
+B=$(gc @CREATE@ "t" --json | jq -r '.id')
+B="$reused"
+gc bd update "$B" @STAMP@ k=v
+C=$(gc @CREATE@ "t" --json | jq -r '.id')
+gc bd update "$C" --status=closed --append-notes "done"
+gc bd update "$OTHER" @STAMP@ k=v
+gc bd update "$C" --status=open && gc bd update "$D" @STAMP@ k=v
+echo "repair: gc bd update $C @STAMP@ k=v"
+# gc bd update "$C" @STAMP@ k=v
+cat <<EOF
+gc bd update "$C" @STAMP@ k=v
+EOF
+E=$(bd_create "$META" "t" -t task)
+gc bd update "$E" @STAMP@ k=v
+g() { F=$(gc @CREATE@ "t" --json | jq -r .id); }
+h() { gc bd update "$F" @STAMP@ k=v; }
+FIX
+runcs "$TMP/cs-clean.sh"
+eq "$RC" 0 "stamped creates, reassigned and other ids, unstamped writes, data and another function are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+# A quoted substitution that holds more than the create, a stamp that runs
+# before the create on its line, a quoted create that carries --metadata, and
+# a stamp whose id is another variable after the store flag are clean.
+plantcs "$TMP/cs-spellings-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+A="$(gc @CREATE@ "t" --json | jq -r .id)-suffix"
+gc bd update "$A" @STAMP@ k=v
+gc bd update "$B" @STAMP@ k=v; B=$(gc @CREATE@ "t" --json | jq -r .id)
+C="$(gc @CREATE@ "t" --metadata "$M" --json | jq -r .id)"
+gc bd update --db "$DB" "$C" @STAMP@ k=v
+D=$(gc @CREATE@ "t" --json | jq -r .id)
+gc bd update --db "$DB" "$OTHER" @STAMP@ k=v
+gc bd update "$OTHER" --append-notes "$D" @STAMP@ k=v
+FIX
+runcs "$TMP/cs-spellings-clean.sh"
+eq "$RC" 0 "a substitution holding more than the create, a stamp before its create, a stamped create and another id are clean"
+[ "$RC" -eq 0 ] || printf '%s\n' "$OUT" | sed 's/^/        /'
+
+# A fence boundary ends the recipe, so a create in one fence does not reach a
+# stamp in the next.
+plantcs "$TMP/cs-fences.md" <<'FIX'
+```bash
+X=$(gc @CREATE@ "t" --json | jq -r .id)
+```
+
+```bash
+gc bd update "$X" @STAMP@ k=v
+```
+FIX
+runcs "$TMP/cs-fences.md"
+eq "$RC" 0 "a create and a stamp in separate fences are clean"
+
+echo "── create-then-stamp: scope ──"
+
+mkdir -p "$TMP/cs-scope/specs/tk-x" "$TMP/cs-scope/generated/agents" "$TMP/cs-scope/lint-learned.d"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/specs/tk-x/repro.sh"
+cp "$TMP/cs-recipe.toml" "$TMP/cs-scope/generated/agents/recipe.toml"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/lint-learned.d/other-detector.sh"
+cp "$TMP/cs-stamp.sh" "$TMP/cs-scope/stamp.go"
+runcs "$TMP/cs-scope/specs/tk-x/repro.sh" "$TMP/cs-scope/generated/agents/recipe.toml" \
+    "$TMP/cs-scope/lint-learned.d/other-detector.sh" "$TMP/cs-scope/stamp.go" "$TMP/cs-scope/missing.sh"
+eq "$RC" 0 "specs/, generated/, the detector directory, other file types and missing paths are skipped"
+
+echo "── create-then-stamp: a detector that cannot scan says so ──"
+OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_CS" "$TMP/cs-stamp.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
+has "$OUT" "detector cannot scan it" "and says which file it could not scan"
+
+echo "── every detector: a tool that fails never reads as a clean scan ──"
+
+# The runner tells a broken detector from a clean one only by its exit status,
+# so no tool a detector runs may fail into a clean scan. Every executable in
+# lint-learned.d/ is run on the fixtures below, which hold a violation of each
+# rule, with the tools on PATH replaced by shims. One run fails one call of one
+# tool, and across the runs every call fails once. The detector must then exit
+# 2 and say why, or report what it reports with every tool working. A detector
+# added later is held to the same contract, so these fixtures must carry a
+# violation it reports.
+CT="$TMP/contract"
+mkdir -p "$CT/bin" "$CT/tree/formulas" "$CT/tree/docs" "$CT/tree/skills/x" "$CT/tree/specs/x"
+
+# A shim numbers its own call by creating the first free <tool>.<n> file in
+# $GCTK_CALLS with noclobber set. The create is atomic, so calls that run at
+# once in one pipeline still get distinct numbers. The redirect hangs on
+# `true`, not `:`, because a failed redirect on a special builtin such as `:`
+# ends a POSIX shell like dash. The call $GCTK_FAIL names fails the way a
+# broken tool does, and every other call runs the real tool. PATH holds only
+# these shims and bash, so a detector that runs any other tool reports
+# differently under them, and the comparison below says so.
+for tool in awk grep sed sort tr cat; do
+    real="$(command -v "$tool")" || { echo "no $tool on PATH"; exit 1; }
+    cat > "$CT/bin/$tool" <<SHIM
+#!/bin/sh
+[ -d "\${GCTK_CALLS:-}" ] || { echo "$tool shim: no call log" >&2; exit 3; }
+set -C
+n=1
+until { true > "\$GCTK_CALLS/$tool.\$n"; } 2>/dev/null; do
+    n=\$((n + 1))
+    [ "\$n" -le 10000 ] || { echo "$tool shim: cannot number its call" >&2; exit 3; }
+done
+if [ "\${GCTK_FAIL:-}" = "$tool.\$n" ]; then
+    echo "$tool: failed by the contract test" >&2
+    exit 2
+fi
+exec "$real" "\$@"
+SHIM
+    chmod +x "$CT/bin/$tool"
+done
+ln -s "$(command -v bash)" "$CT/bin/bash"
+
+# ct_run <detector> <file> [<call>] — run a detector on one fixture under the
+# shims, failing <call> (such as awk.2) when one is named. It runs from the
+# fixture root because doc-filing reads paths relative to the repository root.
+# Sets RC and OUT, and leaves one file per tool call in $CT/calls.
+ct_run() {
+    rm -rf "$CT/calls"; mkdir "$CT/calls"
+    OUT="$(cd "$CT/tree" && env PATH="$CT/bin" GCTK_CALLS="$CT/calls" GCTK_FAIL="${3:-}" "$1" "$2" 2>&1)"; RC=$?
+}
+# ct_locs <output> — the <file>:<line> locations a run reports, sorted.
+ct_locs() { printf '%s\n' "$1" | grep -oE '^[^: ]+:[0-9]+:' | sort -u; }
+
+# The fixtures are written with placeholders, as in the sections above, so this
+# file carries none of the shapes it plants.
+plantct() {
+    sed -e 's/@BD@/bd/g' -e 's/@MKT@/mktemp/g' -e 's/@J@/bd_json/g' -e 's/@CTL@/[:cntrl:]/g' \
+        -e 's/@GH@/gh/g' -e 's/@NOTES@/--notes/g' -e 's#@OR@#//#g' \
+        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' -e 's/@SM@/--set-metadata/g' > "$CT/tree/$1"
+}
+plantct x.sh <<'FIX'
+#!/usr/bin/env bash
+set -o @PF@
+printf '%s\n' "$X" | @GQ@ x
+@BD@ list --json
+@MKT@ -d
+@J@ "$ID"
+x=$(printf '%s' "$J" | tr -d '@CTL@')
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+@BD@ close "$GC_BEAD_ID"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+Y=$(gc @BD@ create "t" --json | jq -r '.id')
+gc @BD@ update "$Y" @SM@ k=v
+FIX
+plantct formulas/x.toml <<'FIX'
+[[steps]]
+id = "x"
+description = """
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+@BD@ close "$GC_BEAD_ID"
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@MKT@ -d
+@GH@ pr comment 5 --body x
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+# <<< contract
+```
+"""
+FIX
+plantct docs/x.md <<'FIX'
+# x
+
+```bash
+# >>> contract
+printf '%s\n' "$X" | @GQ@ x
+@MKT@ -d
+@GH@ pr comment 5 --body x
+gc @BD@ update "$ID" @NOTES@ "x"
+ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+@BD@ close "$GC_BEAD_ID"
+# <<< contract
+```
+FIX
+plantct skills/x/SKILL.md <<'FIX'
+```bash
+for x in $LIST; do echo "$x"; done
+echo $V:hello
+```
+FIX
+plantct specs/x/y.md <<'FIX'
+# y
+FIX
+
+for det in "$HERE"/lint-learned.d/*; do
+    [ -f "$det" ] && [ -x "$det" ] || continue
+    name="$(basename "$det")"
+    reached=0
+    for f in x.sh formulas/x.toml docs/x.md skills/x/SKILL.md specs/x/y.md; do
+        # With every tool working, a file the detector does not scan, or finds
+        # clean, has no finding a failure could lose.
+        want="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; wrc=$?
+        [ "$wrc" -eq 0 ] && continue
+        if [ "$wrc" -ne 1 ]; then
+            bad "$name on $f: with every tool working" "exit $wrc: $want"
+            continue
+        fi
+        reached=$((reached + 1))
+        ct_run "$det" "$f"
+        if [ "$RC" -ne "$wrc" ] || [ "$OUT" != "$want" ]; then
+            bad "$name on $f: reports differently under the shims" "so it runs a tool they do not cover; exit $RC: $OUT"
+            continue
+        fi
+        calls=()
+        for c in "$CT/calls"/*; do [ -e "$c" ] && calls+=("${c##*/}"); done
+        broke=()
+        for call in ${calls[@]+"${calls[@]}"}; do
+            ct_run "$det" "$f" "$call"
+            if [ "$RC" -eq 2 ]; then
+                [ -n "$(printf '%s\n' "$OUT" | grep -v ': failed by the contract test$')" ] \
+                    || broke+=("$call: exit 2 with no word of its own")
+            elif [ "$RC" -ne "$wrc" ] || [ "$(ct_locs "$OUT")" != "$(ct_locs "$want")" ]; then
+                broke+=("$call: exit $RC, $(ct_locs "$OUT" | tr '\n' ' ')")
+            fi
+        done
+        if [ "${#broke[@]}" -eq 0 ]; then
+            ok "$name on $f: each of its ${#calls[@]} tool calls, failing, is reported or changes nothing"
+        else
+            bad "$name on $f: a failing tool call changes what it reports" "$(printf '%s; ' "${broke[@]}")"
+        fi
+        # A file it cannot read is a scan that cannot run. Skipped where the
+        # suite runs as root, which reads a file whatever its mode.
+        chmod 000 "$CT/tree/$f"
+        if [ ! -r "$CT/tree/$f" ]; then
+            OUT="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; RC=$?
+            eq "$RC" 2 "$name on $f: a file it cannot read exits 2"
+        fi
+        chmod 644 "$CT/tree/$f"
+    done
+    [ "$reached" -gt 0 ] || bad "$name: no contract fixture holds a violation it reports" "add one to the fixtures above, or the contract checks nothing for it"
+done
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"
