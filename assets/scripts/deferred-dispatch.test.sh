@@ -52,9 +52,10 @@
 #     only the pass process holds it, so no gc or escalate.sh call, and no
 #     process one leaves running, carries it past the pass; with no GC_RIG it is
 #     keyed by the rig root;
-#   * the PASS BUDGET — a pass starts a sling only while a full allowance is
-#     left, on a clock the test controls, and reports the beads it left armed
-#     and untouched; a dry run takes no lock and spends no budget;
+#   * the PASS BUDGET — a pass starts a sling or an escalation only while a full
+#     allowance is left, on a clock the test controls, and reports the beads it
+#     left armed and untouched; a pass that fails declares nothing; a dry run
+#     takes no lock and spends no budget;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
 #     mean the cadence that consumes these records was quietly un-shipped, and
 #     its timeout is bounded by the budget below it and the stall bound above;
@@ -1146,6 +1147,48 @@ GC_ORDER_OUTCOME_FILE="$TMP/outcome-full.json" "$SUT" reconcile >/dev/null 2>&1
 eq "$(slings)" "1" "the pass slings its ready bead"
 [ -s "$TMP/outcome-full.json" ] && bad "a complete pass wrote an outcome declaration: $(cat "$TMP/outcome-full.json")" \
     || ok "a complete pass leaves the controller's outcome file empty"
+
+echo "# past the budget, a capped bead's escalation waits for the next pass"
+# The escalation runs escalate.sh against the store, which the timeout can cut
+# short like a sling. The bead stays capped and armed, so the next pass files it.
+CAP_AFTER_READY='[
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
+ {"id":"b-cap","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"3"},"notes":"","_ready":true}]'
+store "$CAP_AFTER_READY"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-esc.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=60 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-esc.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(slings)" "1" "a 60s budget with a 30s allowance starts one 40s sling"
+eq "$(escalations)" "0" "and files no escalation once less than an allowance is left"
+has "$out" "CAPPED b-cap" "it still reports the capped bead"
+has "$out" "its escalation waits for the next pass" "and says the escalation waits"
+has "$out" "left the escalation of 1 capped bead(s) for the next pass: b-cap" "naming the bead"
+has "$out" "1 capped" "the summary counts it as capped"
+eq "$(meta b-cap gc.dispatch_when_ready)" "rig/pool" "the capped bead keeps its arm"
+eq "$(jq -r '.outcome' "$TMP/outcome-esc.json" 2>/dev/null)" "partial" "the pass declares itself partial"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-esc.json" 2>/dev/null)" "b-cap: escalation left for the next pass" \
+    "naming the bead and the escalation left on it"
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=60 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(escalations)" "1" "the next pass, with its budget unspent, files the escalation"
+eq "$(cut -f1 "$ESC_CALLS")" "b-cap" "on the capped bead"
+
+echo "# a pass that fails declares nothing, and its output names what it left"
+# The controller reads a declaration only after a run that exits 0, and keeps a
+# failed run's output instead. Two slings fail here, and the budget leaves two.
+store "$FOUR_READY"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-failed.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 STUB_SLING_RC=1 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-failed.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass with a failed sling exits 1"
+eq "$(slings)" "2" "after attempting two slings"
+has "$out" "left 2 ready bead(s) armed for the next pass: b-3 b-4" "its output names the beads it left"
+has "$out" "2 left for the next pass, 2 failed" "and its summary counts both"
+[ -s "$TMP/outcome-failed.json" ] && bad "a failed pass wrote an outcome declaration: $(cat "$TMP/outcome-failed.json")" \
+    || ok "and it writes no declaration the controller would not read"
 
 # --- positive control over the shipped cadence -------------------------------
 # The arm is only half the mechanism: without the order nothing consumes these

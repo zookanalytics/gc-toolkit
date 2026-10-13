@@ -221,7 +221,8 @@ the pass carries its own lock:
   unconfirmed sling through the `slinging@` recovery.
 - A pass that finds the lock held prints one line and exits 0 without
   listing or slinging. Under the order it also declares the run `skipped`
-  in the file the controller names in `GC_ORDER_OUTCOME_FILE`, which the
+  in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
+  exec-order outcome contract, `internal/orders/exec_outcome.go`), which the
   controller records as an `order.skipped` event. The controller keeps an
   exit-0 run's output nowhere else.
 - A holder older than `DEFERRED_DISPATCH_LOCK_STALL_SECS` (900s) is not a
@@ -238,11 +239,18 @@ workflow, and spends one of the bead's attempts. So a pass measures a
 budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
 0 = unpaced), and starts a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
-point it starts no sling. Each remaining ready bead keeps its arm with no
-marker on it, this pass counts no attempt against it, and the next pass
-slings it. The pass names the beads it left, counts them as `left for the
-next pass` in its summary, and declares the run `partial`. The retires and
-reports for the rest of the armed set still run.
+point it starts no sling and files no escalation, since `escalate.sh` is
+store work the timeout can cut short too. Each remaining ready bead keeps
+its arm with no marker on it, this pass counts no attempt against it, and
+the next pass slings it. A capped bead stays capped and armed, and the next
+pass files its escalation. The pass names the beads it left, counts the
+ready ones as `left for the next pass` in its summary, and declares the run
+`partial`, naming each bead and what it left there. The controller reads a
+declaration only after a run that exits 0, so a pass that also had a
+failure declares nothing. It exits 1, and its output, which the controller
+keeps for a failed run, names what it left. The retires and reports for the
+rest of the armed set still run. Each retire is one write, and a retire the
+timeout cuts short is made again by the next pass.
 
 The budget sits at least one allowance below the timeout, so the last
 sling a pass starts can run for twice its allowance before the timeout

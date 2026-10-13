@@ -28,9 +28,10 @@
 # must never read as an empty one.
 #
 # A reconcile pass holds a per-rig pass lock for its whole life, so two passes
-# never sling the same bead, and it starts a sling only while its pass budget
-# can still cover one, so the order's timeout does not kill it mid-sling. The
-# ready beads past the budget wait, still armed, for the next pass.
+# never sling the same bead. It starts a sling or an escalation only while its
+# pass budget can still cover a sling, so the order's timeout does not kill it
+# mid-sling. The ready beads past the budget wait, still armed, for the next
+# pass, and so do the escalations.
 set -u
 
 # >>> control-char-scrub
@@ -196,10 +197,10 @@ Verbs:
              scope="rig").
              A pass holds the rig's pass lock for its whole life; one that
              finds it held exits 0 without reading the store. It starts a sling
-             only while DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS (90) of its
-             DEFERRED_DISPATCH_PASS_BUDGET_SECS (420, 0 = unpaced) are left, and
-             leaves the rest armed for the next pass. --dry-run takes no lock
-             and spends no budget.
+             or an escalation only while DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS
+             (90) of its DEFERRED_DISPATCH_PASS_BUDGET_SECS (420, 0 = unpaced)
+             are left, and leaves the rest for the next pass. --dry-run takes no
+             lock and spends no budget.
 
 --sling-arg is repeatable and is passed through to `gc sling` verbatim after the
 target and bead, e.g. --sling-arg --on --sling-arg mol-pr-from-issue.
@@ -634,14 +635,17 @@ sling_fits_budget() { # -> 0 while at least one sling's allowance is left in the
 
 # The controller keeps an exec order's output only when it exits non-zero, so a
 # pass that exits 0 having skipped its work, or left some of it, also says so in
-# the per-run file the controller names in GC_ORDER_OUTCOME_FILE. The controller
-# records that declaration as an order.skipped event. Each id after the reason
-# is a bead the pass left armed for the next one.
-declare_outcome() { # <skipped|partial> <reason> [<bead-id>...]
+# the per-run file the controller names in GC_ORDER_OUTCOME_FILE (gascity's
+# exec-order outcome contract, internal/orders/exec_outcome.go). The controller
+# reads that file only after a run that exits 0, and records the declaration as
+# an order.skipped event. Pairs follow the reason: a bead the pass left for the
+# next one, and what it left undone on that bead.
+declare_outcome() { # <skipped|partial> <reason> [<bead-id> <what-was-left>]...
     [ -n "${GC_ORDER_OUTCOME_FILE:-}" ] || return 0
     local outcome="$1" reason="$2"; shift 2
     jq -nc --arg o "$outcome" --arg r "$reason" \
-        '{outcome: $o, reason: $r, scopes: [$ARGS.positional[] | {scope: ., reason: "pass budget spent"}]}' \
+        '{outcome: $o, reason: $r,
+          scopes: ($ARGS.positional | [range(0; length; 2) as $i | {scope: .[$i], reason: .[$i + 1]}])}' \
         --args "$@" > "$GC_ORDER_OUTCOME_FILE" 2>/dev/null || true
 }
 
@@ -704,8 +708,8 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0 left=0
-    local -a left_ids=()
+    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 capped=0 failed=0 left=0 budget_noted=0
+    local -a left_ids=() esc_left_ids=()
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
     local id status ready owncleared json target args_json assignee slung rc merge_result fails
@@ -834,11 +838,17 @@ cmd_reconcile() {
         # memory a bare rollback erases. At the cap, escalate once (escalate.sh
         # dedups on the key) and leave the arm — never retire an unproven
         # dispatch — so a person decides rather than reconcile looping forever.
+        # Past the pass budget the escalation waits too: the bead stays capped
+        # and armed, so the next pass files it.
         fails="$(meta_of "$json" "$K_FAILS")"
         case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         if [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would escalate capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
+            elif ! sling_fits_budget; then
+                [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; its escalation waits for the next pass" >&2
+                esc_left_ids+=("$id")
             else
                 echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; escalating and leaving the arm for a person" >&2
                 if [ -x "$ESCALATE" ]; then
@@ -856,11 +866,10 @@ cmd_reconcile() {
         # a dead pass left an unconfirmed marker, the recovery above already
         # cleared it, and the next pass re-attempts the sling just as this one
         # would have. The retires and reports for the rest of the armed set still
-        # run.
+        # run: each retire is one write, and a retire the timeout cuts short is
+        # made again by the next pass.
         if [ "$DRY_RUN" != 1 ] && ! sling_fits_budget; then
-            if [ "$left" = 0 ]; then
-                echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings this pass"
-            fi
+            [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
             left=$((left + 1)); left_ids+=("$id"); continue
         fi
 
@@ -918,9 +927,23 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
+    local esc_left="${#esc_left_ids[@]}" reason=""
+    local -a scopes=()
     if [ "$left" -gt 0 ]; then
         echo "$PROG: left $left ready bead(s) armed for the next pass: ${left_ids[*]}"
-        declare_outcome partial "pass budget spent: $left ready bead(s) left armed for the next pass" "${left_ids[@]}"
+        reason="$left ready bead(s) left armed for the next pass"
+        for id in "${left_ids[@]}"; do scopes+=("$id" "sling left for the next pass"); done
+    fi
+    if [ "$esc_left" -gt 0 ]; then
+        echo "$PROG: left the escalation of $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
+        reason="${reason:+$reason, }$esc_left capped bead(s) left for the next pass to escalate"
+        for id in "${esc_left_ids[@]}"; do scopes+=("$id" "escalation left for the next pass"); done
+    fi
+    # The controller reads a declaration only after a run that exits 0, so a pass
+    # with a failure declares nothing. The controller keeps a failed run's output,
+    # and the lines above are in it.
+    if [ -n "$reason" ] && [ "$failed" = 0 ]; then
+        declare_outcome partial "pass budget spent: $reason" "${scopes[@]}"
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
