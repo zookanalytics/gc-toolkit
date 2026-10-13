@@ -360,6 +360,7 @@ has "$ghlog" "pr create --repo github.com/zook/gc-toolkit --base main --head pol
 hasnt "$ghlog" "--draft" "the PR is non-draft"
 has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER, pinned"
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
+has "$ghlog" "--body VERDICT: APPROVE ok"$'\n\n'"Pre-open signoff (comment-only — not an approval)." "…opening with the verdict's own first line, the comment-only note after it"
 has "$ghlog" "<!-- gc:city -->" "the replayed verdict carries the city's provenance mark (posted through pr-post.sh)"
 hasnt "$ghlog" "pr review" "never an approval"
 

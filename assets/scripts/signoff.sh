@@ -3,11 +3,15 @@
 # audited writer for check.<gate> markers). Run once by the review agent after
 # mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
-#              [--notes-file <path>] [--reviewed-oid <oid>]
+#              [--notes-file <path>] [--reviewed-oid <oid>] [--needs-you <text>]
+# The posted artifact opens with one line, the same for every check: the check
+# and its verdict, then the one decision it needs from the operator or "Nothing
+# needs you". The reviewer's notes follow it as the trail.
 # A triage approve on an anchor whose bring-current round awaits triage also
 # carries that round's ruling (--reopen, --round-reason, --dismiss-approval),
 # which bring-current-guard.sh's `decide` records and carries out before the
-# artifact is posted; the posted artifact opens with the round's account.
+# artifact is posted. The round's account sits collapsed under the opening line,
+# and a ruling that lifts the approval is the decision that line names.
 # Both verdicts first record reviewed_oid on the review bead. A lane state names
 # no commit, but lane-state.sh derives green only from a local backing bead that
 # carries a reviewed_oid, so recording it here is what lets an approve close back
@@ -83,14 +87,20 @@ usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
-                  [--reviewed-oid <oid>] [--add-gates <checks>]
+                  [--reviewed-oid <oid>] [--needs-you <text>] [--add-gates <checks>]
                   [--visual <decision>]
                   [--reopen <lanes>|none --round-reason <text> [--dismiss-approval]]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
                  or request-changes (required)
-  --notes-file   the verdict body; default: the review bead's notes
+  --notes-file   the verdict body, the trail under the opening line; default:
+                 the review bead's notes
+  --needs-you    the one decision this review needs from the operator: what it
+                 is, what it means, and where to look. The opening line names
+                 it; absent, it says nothing needs them. A finding is not one,
+                 because the city fixes it. Refused with --dismiss-approval,
+                 whose --round-reason is the decision.
   --findings-file
                  the structured finding set as a JSON array, one object per
                  blocking finding, each with a rebase-stable `locus` (a file and
@@ -125,7 +135,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  declare is added with --add-gates, and a lane added on this
                  call runs on the merged code as well.
   --round-reason why the round reopens what it does, one line; required with
-                 --reopen.
+                 --reopen. With --dismiss-approval it is the call the operator
+                 is asked to make, and it opens the posted verdict and the
+                 dismissal note.
   --dismiss-approval
                  the round took judgment the standing human approval did not
                  see: lift it. No approval given at or before the round counts
@@ -137,12 +149,13 @@ U
 warn() { echo "signoff: $*" >&2; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
-REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""
+REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
     --verdict)      VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
     --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
+    --needs-you)    NEEDS_YOU="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
@@ -164,6 +177,22 @@ if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
 fi
 if [ -n "$FINDINGS_FILE" ] && [ ! -r "$FINDINGS_FILE" ]; then
   warn "--findings-file '$FINDINGS_FILE' is not readable; nothing written"; exit 1
+fi
+# The decision rides the opening line, so it is one line. A "Needs you:" the
+# reviewer wrote into it is the line's own label, and a decision of none or
+# nothing is no decision.
+NEEDS_YOU=$(printf '%s' "$NEEDS_YOU" | tr '\000-\037' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+  "needs you:"*) NEEDS_YOU="${NEEDS_YOU:10}"; NEEDS_YOU="${NEEDS_YOU# }" ;;
+esac
+case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+  ''|none|none.|nothing|nothing.|n/a) NEEDS_YOU="" ;;
+  *[.!?]) : ;;
+  *) NEEDS_YOU="$NEEDS_YOU." ;;
+esac
+if [ -n "$NEEDS_YOU" ] && [ -n "$DISMISS_APPROVAL" ]; then
+  warn "--dismiss-approval asks the operator the call its --round-reason names, and the opening line names one decision; drop --needs-you. Nothing written"
+  exit 1
 fi
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -431,19 +460,42 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   exit 0
 fi
 
-# The artifact body. It always names the anchor and the exact commit judged,
-# so the posted comment is traceable back to the check it satisfied.
+# The artifact body. Its first line is the same for every check: the check and
+# its verdict, then the one decision this review needs from the operator, or
+# that nothing does, so a busy reader can stop there. It is also the summary a
+# request-changes verdict hands its rework child. Under it come the round's
+# account when a triage ruling rides this verdict, the reviewer's notes as the
+# trail, and the lines scripts read: the demo decision, and the trailer naming
+# the anchor and the exact commit judged, which traces the posted comment back
+# to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE" "${INDEX_FILE:-}"' EXIT
+TRAIL_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-trail.XXXXXX") || { rm -f "$BODY_FILE"; warn "mktemp failed"; exit 1; }
+trap 'rm -f "$BODY_FILE" "$TRAIL_FILE" "${INDEX_FILE:-}"' EXIT
 if [ -n "$NOTES_FILE" ]; then
-  cat "$NOTES_FILE" > "$BODY_FILE"
+  cat "$NOTES_FILE" > "$TRAIL_FILE"
 else
-  printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$BODY_FILE" 2>/dev/null
+  printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$TRAIL_FILE" 2>/dev/null
 fi
-[ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
-printf '\n' >> "$BODY_FILE"
-[ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL" >> "$BODY_FILE"
-printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
+# Set by apply_round_decision: the round's account, and what a ruling that lifts
+# the approval asks of the operator.
+ROUND_BODY=""; ROUND_ASK=""
+# A check's name as the opening word; a name of two letters is an acronym.
+check_label() { # <check-name>
+  if [ "${#1}" -le 2 ]; then printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
+  else printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"; fi
+}
+compose_artifact() {
+  local needs="Nothing needs you."
+  if [ -n "$ROUND_ASK" ]; then needs="$ROUND_ASK"
+  elif [ -n "$NEEDS_YOU" ]; then needs="Needs you: $NEEDS_YOU"; fi
+  {
+    printf '%s: %s. %s\n\n' "$(check_label "$CHECK_NAME")" "$VERDICT" "$needs"
+    [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
+    [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
+    [ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL"
+    printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID"
+  } > "$BODY_FILE"
+}
 
 # The commit a verdict bound to is recorded on the review bead first, and only
 # then does the artifact go where its findings are read. That record is the
@@ -460,6 +512,7 @@ printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" 
 # demo verdict's visual decision rides in the same write, so the record names
 # what the check decided as well as the commit it decided on.
 post_artifact() {
+  compose_artifact
   local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
   [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
@@ -793,27 +846,28 @@ $tok"
 # guard's `decide` (the lanes to run again, the dismissal), AFTER the widening so
 # a lane added on this call is reopened with the rest, and BEFORE the artifact
 # and the green stamp, so a ruling that did not land leaves the review open and
-# the round still owed. The artifact then opens with the round's account,
-# rendered from the anchor's record.
+# the round still owed. The artifact then carries the round's account under its
+# opening line, and a ruling that lifts the approval gives that line its ask,
+# both rendered from the anchor's record.
 apply_round_decision() {
   [ -n "$ROUND_HEAD" ] || return 0
-  local round_body rc args added
+  local round_body round_ask rc args added
   round_body=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-round.XXXXXX") || { warn "mktemp failed"; exit 2; }
+  round_ask=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-ask.XXXXXX") || { rm -f "$round_body"; warn "mktemp failed"; exit 2; }
   added=$(gate_tokens "$ADD_GATES" | paste -sd, -)
   args=(decide --anchor "$ANCHOR" --review-bead "$REVIEW_BEAD" --reopen "$REOPEN"
-        --reason "$ROUND_REASON" --body-out "$round_body")
+        --reason "$ROUND_REASON" --body-out "$round_body" --ask-out "$round_ask")
   [ -z "$added" ] || args+=(--add "$added")
   [ -z "$DISMISS_APPROVAL" ] || args+=(--dismiss-approval)
   "$BRING_CURRENT" "${args[@]}"; rc=$?
   case "$rc" in
     0) : ;;
-    1) rm -f "$round_body"; warn "the bring-current ruling was refused; nothing written, re-run this call with the ruling corrected"; exit 1 ;;
-    *) rm -f "$round_body"; warn "the bring-current ruling did not fully land on $ANCHOR; review left OPEN, and the same call retries it"; exit 2 ;;
+    1) rm -f "$round_body" "$round_ask"; warn "the bring-current ruling was refused; nothing written, re-run this call with the ruling corrected"; exit 1 ;;
+    *) rm -f "$round_body" "$round_ask"; warn "the bring-current ruling did not fully land on $ANCHOR; review left OPEN, and the same call retries it"; exit 2 ;;
   esac
-  if [ -s "$round_body" ]; then
-    { cat "$round_body"; printf '\n\n'; cat "$BODY_FILE"; } > "$round_body.all" && mv "$round_body.all" "$BODY_FILE"
-  fi
-  rm -f "$round_body"
+  ROUND_BODY=$(cat "$round_body")
+  ROUND_ASK=$(tr '\000-\037' ' ' < "$round_ask" | sed 's/  */ /g; s/^ //; s/ $//')
+  rm -f "$round_body" "$round_ask"
 }
 
 if [ "$VERDICT" = "approve" ]; then

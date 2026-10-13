@@ -82,21 +82,22 @@
 # lanes it reopens to bring_current_reopened, supersedes each reopened lane's
 # standing review so gate-ensure.sh dispatches it again, and, when triage rules
 # the approval no longer covers what would land, lifts it. The lift line is
-# drawn first: the round's time is stored as bring_current_lifted_at and read
-# back, and from then on the approval rule (review-verdict.sh) counts no
-# approval submitted at or before it, so the merge waits for a new approval
-# whether or not GitHub lets the dismissal land. Each approving account is then
-# re-requested and every approval it has standing at or before the line is
-# dismissed, the order pr-facts.sh uses when it clears a human review. An
-# account that approved twice before the round loses both approvals, because a
-# dismissed review drops out of the approval rule and the older approval would
-# count again. An approval submitted after the round saw the merged code, so it
-# stands, the same line lane-state.sh draws with bring_current_round_at. A later
-# round whose ruling keeps the approval leaves the line where it was. The signal
-# a person gets is the re-request, the dismissal note and the round section of
-# triage's posted verdict, all rendered from the stored record, and a write
-# GitHub refuses is noted on the anchor. A visit is filed only for a conflict
-# the worker could not resolve (bring-current-audit.sh ask).
+# drawn first: the round's time is stored as
+# bring_current_lifted_at and read back, and from then on the approval rule
+# (review-verdict.sh) counts no approval submitted at or before it, so the merge
+# waits for a new approval whether or not GitHub lets the dismissal land. Each
+# approving account is then re-requested and every approval it has standing at
+# or before the line is dismissed, the order pr-facts.sh uses when it clears a
+# human review. An account that approved twice before the round loses both
+# approvals, because a dismissed review drops out of the approval rule and the
+# older approval would count again. An approval submitted after the round saw
+# the merged code, so it stands, the same line lane-state.sh draws with
+# bring_current_round_at. A later round whose ruling keeps the approval leaves
+# the line where it was. The signal
+# a person gets is the re-request and the call the ruling names, which opens
+# triage's posted verdict and is the dismissal note; both render from the stored
+# record. A write GitHub refuses is noted on the anchor. A visit is filed only
+# for a conflict the worker could not resolve (bring-current-audit.sh ask).
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]
@@ -104,6 +105,7 @@
 #   bring-current-guard.sh classify --from <oid> --to <oid> --base <ref> [--scope merge-only|with-work]
 #   bring-current-guard.sh decide --anchor <id> --review-bead <id> --reopen <lanes|none>
 #       [--add <lanes>] [--dismiss-approval] --reason <text> [--body-out <file>]
+#       [--ask-out <file>]
 # guard: <id> is the bead being handed off and --to the pushed head (default
 # HEAD). The bead's bring_current_from, stamped where its resume began, marks
 # where the round started; --from, the origin head before the push, stands in
@@ -112,7 +114,9 @@
 # coverage: the guard's reading without its writes: each item and whether the
 # audit covers it. classify: prints none, clean, conflicted or unreadable, then
 # one evidence line per item. All three read the git repository of the working
-# directory.
+# directory. decide: --body-out receives the round's account and --ask-out the
+# call a lifting ruling asks of the operator (empty when the ruling keeps the
+# approval), both rendered from the record for the verdict signoff.sh posts.
 # Exit: 0 nothing owed, or the round recorded (and routed to triage, or the
 # guard's own ruling on it carried out) ·
 # 1 a read or a write failed, so nothing was handed off and the caller retries ·
@@ -152,7 +156,7 @@ usage() {
   echo "usage: $PROG guard --bead <id> [--to <oid>] [--from <oid>]" >&2
   echo "       $PROG coverage --bead <id> [--to <oid>] [--from <oid>]" >&2
   echo "       $PROG classify --from <oid> --to <oid> --base <ref> [--scope merge-only|with-work]" >&2
-  echo "       $PROG decide --anchor <id> --review-bead <id> --reopen <lanes|none> [--add <lanes>] [--dismiss-approval] --reason <text> [--body-out <file>]" >&2
+  echo "       $PROG decide --anchor <id> --review-bead <id> --reopen <lanes|none> [--add <lanes>] [--dismiss-approval] --reason <text> [--body-out <file>] [--ask-out <file>]" >&2
   exit 2
 }
 
@@ -877,7 +881,7 @@ APPROVALS
 # triage verdict. rc 0 recorded and carried out · 1 refused, nothing written ·
 # 2 a write did not land; the review stays open and the same call retries.
 cmd_decide() {
-  local anchor="" review="" reopen="" add="" dismiss="" reason="" body_out="" arow record decided tokens lane bad="" lanes_json add_json triage new reopened got
+  local anchor="" review="" reopen="" add="" dismiss="" reason="" body_out="" ask_out="" arow record decided tokens lane bad="" lanes_json add_json triage new reopened got
   while [ $# -gt 0 ]; do
     case "$1" in
       --anchor)           anchor="${2:-}"; shift 2 ;;
@@ -887,6 +891,7 @@ cmd_decide() {
       --dismiss-approval) dismiss=1; shift ;;
       --reason)           reason="${2:-}"; shift 2 ;;
       --body-out)         body_out="${2:-}"; shift 2 ;;
+      --ask-out)          ask_out="${2:-}"; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -953,6 +958,9 @@ cmd_decide() {
   fi
   if [ -n "$body_out" ]; then
     bca_render_record "$new" comment > "$body_out" || { echo "$PROG: the round's account could not be rendered; the review stays open and the same call retries" >&2; return 2; }
+  fi
+  if [ -n "$ask_out" ]; then
+    bca_render_record "$new" ask > "$ask_out" || { echo "$PROG: the ruling's ask could not be rendered; the review stays open and the same call retries" >&2; return 2; }
   fi
   echo "$PROG: triage's ruling on $anchor's bring-current round recorded: reopened $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing" else join(", ") end')$([ -n "$dismiss" ] && echo ", approval lifted")"
   return 0

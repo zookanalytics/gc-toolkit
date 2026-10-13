@@ -10,9 +10,10 @@
 # on the anchor beside its own diff evidence, and routes the round to triage, or
 # rules on it itself on an anchor that opts out of review.
 # Every message about the round is rendered here from that stored record: the
-# triage verdict posted on the PR, the note on a dismissed approval, and the
-# visit that asks for a decision the worker could not make. None is composed
-# from diff shapes alone.
+# round's account, collapsed in the triage verdict posted on the PR; the ask
+# that opens that verdict and the note on a dismissed approval when the ruling
+# lifts the approval; and the visit that asks for a decision the worker could
+# not make. None is composed from diff shapes alone.
 #
 # AN ENTRY. metadata.conflict_audit on the bead the worker holds is a JSON array
 # of entries, one per path:
@@ -37,10 +38,10 @@
 #   bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...]
 #       --collided <text> --question <text>
 #   bring-current-audit.sh show (--bead <id> | --anchor <id>)
-#   bring-current-audit.sh render --anchor <id> --as comment|dismissal
+#   bring-current-audit.sh render --anchor <id> --as comment|dismissal|ask
 # add records or replaces the entry for <file>. show prints the bead's entries,
 # or the anchor's stored record, as JSON. render prints a message composed from
-# the anchor's record.
+# the anchor's record; ask prints nothing when the ruling keeps the approval.
 # Sourced (BASH_SOURCE != $0), it defines its functions and runs nothing, for
 # bring-current-guard.sh.
 # Exit: 0 done · 1 a read or a write failed, or the input was refused, and
@@ -129,67 +130,89 @@ def unaccounted: . as $r
 def bare_line: "`\(.path)`, no entry from the worker. Git: \(.detail | sentence)";
 def judgment_first: (map(select(.rating == "judgment")) + map(select(.rating != "judgment")));
 def git_detail($p; $rd): [ .evidence[]? | select(.path == $p and (.round // "") == ($rd // "") and .covered == true) | .detail ] | .[0] // "";
+def first_sentence: oneline | . as $t | (($t | capture("^(?<s>.+?[.!?])(\\s|$)") | .s) // $t);
 def headline:
   (covered | map(select(.kind == "conflict")) | length) as $c
   | (covered | map(select(.kind != "conflict")) | length) as $b
-  | (entries | map(select(.rating == "judgment")) | map(.path)) as $jp
-  | (entries | map(select(.rating == "routine")) | length) as $r
-  | (unaccounted | length) as $u
   | "Merging \(.target // "the base") in (pushed head \(.head | short)) needed "
     + (if $c > 0 then count($c; "conflicted file"; "conflicted files") + " resolved by hand" else "no conflicted file resolved by hand" end)
-    + (if $b > 0 then ", and " + count($b; "edit"; "edits") + " beyond what git merges on its own" else "" end)
-    + ". The worker rated \($r) routine and \($jp | length) judgment"
-    + (if ($jp | length) > 0 then " (" + ($jp | map("`" + . + "`") | joinand) + ")" else "" end) + "."
-    + (if $u > 0 then " No entry from the worker covers " + count($u; "item"; "items")
-         + ", so only the evidence from git describes " + (if $u == 1 then "it" else "them" end) + "." else "" end);
+    + (if $b > 0 then ", and " + count($b; "edit"; "edits") + " beyond what git merges on its own" else "" end) + ".";
+def tally:
+  (entries | map(select(.rating == "judgment")) | length) as $j
+  | (entries | map(select(.rating != "judgment")) | length) as $o
+  | (unaccounted | length) as $u
+  | [ (if $j > 0 then "\($j) judgment" else empty end), (if $o > 0 then "\($o) routine" else empty end),
+      (if $u > 0 then "\($u) without an entry" else empty end) ]
+  | if length == 0 then "nothing accounted" else join(", ") end;
 def lanes: ((.triage.reopen // []) + (.triage.add // [])) | unique;
 def by_guard: (.triage.by? // "") == "guard";
 def cap: if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end;
-def decision:
+def summary:
+  "Bring-current round: " + tally + "; "
+  + (if .triage == null then "triage has not ruled on it yet"
+     else lanes as $l
+       | if ($l | length) == 0 then "nothing reopens"
+         else ($l | joinand) + (if ($l | length) == 1 then " re-checks" else " re-check" end) + " the merged code" end end)
+  + (if .triage.dismiss == true then "; approval lifted" else "" end);
+def ruling:
   if .triage == null then "Triage has not ruled on this round yet."
   else lanes as $l
-    | (if ($l | length) == 0 then "nothing reopens"
-       else ($l | joinand) + (if ($l | length) == 1 then " runs" else " run" end) + " again on the merged code" end)
-      + (if .triage.dismiss == true then ", and the approval given before the round no longer covers what would land, so the PR needs a fresh human review" else "" end)
-      + "."
+    | (if by_guard then "Ruling: " else "Triage: " end)
+      + (if ($l | length) == 0 then "nothing reopens"
+         else ($l | joinand) + (if ($l | length) == 1 then " runs" else " run" end) + " again on the merged code" end)
+      + (if .triage.dismiss == true then ", and the approval is lifted" else "" end) + "."
+      + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end)
   end;
+def ask:
+  if .triage.dismiss != true then ""
+  elif by_guard then
+    "Needs you: check what bringing this branch current with \(.target // "the base") changed by hand (pushed head \(.head | short))."
+    + (if (.triage.reason // "") != "" then " " + (.triage.reason | sentence | cap) else "" end)
+    + " Your approval is lifted until you have checked it."
+  else "Needs you: " + (.triage.reason | sentence) + " Your approval is lifted until you decide." end;
 def entry_line($g):
   "`\(.path)`, \(.rating). Collided: \(.collided | sentence) Decided: \(.resolution | sentence) Check: \(.check | sentence)"
   + (if $g != "" then " Git: \($g | sentence)" else "" end);
+def routine_line: "`\(.path)`, routine: \(.resolution | first_sentence | clip(200))";
 def generated: [ .evidence[]? | select(.kind == "generated") | .path ] | unique;
 '
 
-# Print a message composed from a record. <as> is comment (markdown, the
-# triage verdict's round section) or dismissal (one paragraph, the note on a
-# dismissed approval). A ruling the guard recorded itself (by: guard) is told
-# as the guard's: no triage verdict posted it, so neither form credits it to
-# triage or points at a triage comment.
+# Print a message composed from a record. <as> is one of:
+#   comment    the round's account, one collapsed block in the triage verdict:
+#              a summary line, then judgment entries in full and each routine
+#              entry on one line. Its shape does not depend on the ruling; only
+#              a ruling that lifts the approval says so.
+#   ask        what a ruling that lifts the approval needs from the operator,
+#              which opens the triage verdict; empty when the ruling keeps it.
+#   dismissal  one paragraph, the note on a dismissed approval: the same ask.
+# A ruling the guard recorded itself (by: guard) is told as the guard's: no
+# triage verdict posts it, so no form credits it to triage, and its dismissal
+# note carries the entries no triage comment does.
 bca_render_record() { # <record-json> <as>
   local rec="$1" as="$2"
   printf '%s' "$rec" | jq -r --arg as "$as" --argjson max "$BCA_MAX_NOTE_ENTRIES" "$BCA_RENDER_DEF"'
     . as $r
     | if $as == "comment" then
-        "**Bringing this branch current with \(.target // "the base")**\n\n"
-        + headline + "\n\n"
-        + (if by_guard then "**Ruling:** " else "**Triage:** " end) + decision
-        + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
-        + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
+        "<details>\n<summary>" + summary + "</summary>\n\n"
+        + headline + "\n\n" + ruling + "\n\n"
+        + ((entries | map(select(.rating == "judgment"))
+              | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
+           + (entries | map(select(.rating != "judgment")) | map("- " + routine_line))
            + (unaccounted | map("- " + bare_line)) | join("\n"))
         + (if (generated | length) > 0
            then "\n\nGenerated files the merge re-rendered, which need no entry: " + (generated | map("`" + . + "`") | joinand) + "."
            else "" end)
-      else
+        + "\n\n</details>"
+      elif $as == "ask" then ask
+      elif by_guard then
         (entries | judgment_first) as $e
-        | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) "
-          + (if by_guard then "changed code by hand that this approval did not see. " else "took judgment this approval did not see. " end)
-          + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" "))
-          + (if ($e | length) > $max then " And \(($e | length) - $max) more." else "" end)
-          + (unaccounted | if length > 0 then " No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end)
-          + (if (.triage.reason // "") == "" then ""
-             elif by_guard then " " + (.triage.reason | clip(300) | sentence | cap)
-             else " Triage: " + (.triage.reason | clip(300) | sentence) end)
-          + (if by_guard then "" else " The triage comment on this PR has the round in full." end)
-          + " Please review the change and approve again."
+        | [ ask,
+            (if ($e | length) > 0 then "Where to look: " + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" ")) else "" end),
+            (if ($e | length) > $max then "And \(($e | length) - $max) more." else "" end),
+            (unaccounted | if length > 0 then "No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end) ]
+        | map(select(. != "")) | join(" ")
+      else
+        [ ask, "The triage comment on this PR has the round in full." ] | map(select(. != "")) | join(" ")
       end' 2>/dev/null
 }
 
@@ -215,7 +238,7 @@ bca_usage() {
   echo "usage: bring-current-audit.sh add --bead <id> --path <file> --collided <text> --resolution <text> --check <text> --rating routine|judgment" >&2
   echo "       bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...] --collided <text> --question <text>" >&2
   echo "       bring-current-audit.sh show (--bead <id> | --anchor <id>)" >&2
-  echo "       bring-current-audit.sh render --anchor <id> --as comment|dismissal" >&2
+  echo "       bring-current-audit.sh render --anchor <id> --as comment|dismissal|ask" >&2
   exit 2
 }
 
@@ -348,13 +371,17 @@ bca_cmd_render() {
     esac
   done
   [ -n "$anchor" ] || bca_usage
-  case "$as" in comment|dismissal) : ;; *) bca_usage ;; esac
+  case "$as" in comment|dismissal|ask) : ;; *) bca_usage ;; esac
   row=$(bd_json show "$anchor")
   rec=$(bca_meta_json "$row" bring_current_record)
   [ -n "$rec" ] || { echo "bring-current-audit: $anchor carries no bring-current record" >&2; return 1; }
-  out=$(bca_render_record "$rec" "$as")
-  [ -n "$out" ] || { echo "bring-current-audit: the record on $anchor could not be rendered" >&2; return 1; }
-  printf '%s\n' "$out"
+  # An empty ask is a ruling that keeps the approval, so only jq's own status
+  # tells it from a record that would not render.
+  if ! out=$(bca_render_record "$rec" "$as") || { [ -z "$out" ] && [ "$as" != ask ]; }; then
+    echo "bring-current-audit: the record on $anchor could not be rendered" >&2
+    return 1
+  fi
+  [ -z "$out" ] || printf '%s\n' "$out"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

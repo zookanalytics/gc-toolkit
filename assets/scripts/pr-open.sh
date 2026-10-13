@@ -648,6 +648,8 @@ GATES
   fi
 
   # Replay the recorded verdict as a COMMENT — the city never approves (#185).
+  # It opens with the verdict's own first line, as every review comment does,
+  # and the comment-only note closes it.
   REVIEW_ID=$(bd_anchor_children "$id" closed,open,in_progress \
     | jq -r '[ .[] | select(((.metadata.task_kind // "") | tostring) == "review") ]
              | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
@@ -656,7 +658,7 @@ GATES
     | jq -r '.[0].notes // ""' 2>/dev/null)
   if [ -n "$VERDICT" ]; then
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
-      --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
+      --body "$(printf '%s\n\nPre-open signoff (comment-only — not an approval).' "$VERDICT")" >/dev/null 2>&1 || true
   else
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
