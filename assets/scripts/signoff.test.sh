@@ -1247,6 +1247,49 @@ eq "$rc" 2 "a ruling that did not land exits 2"
 eq "$(status rv-tri)" "in_progress" "…leaving the review open for the retry"
 eq "$(meta tk-anc "check.triage")" "<absent>" "…and no marker stamped"
 
+echo "# a ruling this review recorded but did not carry out is carried out by its retry"
+# decide records the ruling on the round before it reopens a lane or dismisses an
+# approval, so a ruling that did not fully land leaves the round ruled by this
+# same review. The decide stub writes no record, so each case stamps the one the
+# first call's decide left behind.
+ROUND_HALF=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted",
+  triage: {review: "rv-tri", reopen: ["correctness"], add: [], dismiss: true, reason: "the merged default changes behaviour", at: "2026-10-12T00:00:00Z"}}')
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$(STUB_BC_RC=2 "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 2 "the first call's ruling did not fully land: exit 2"
+anchor_meta "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 0 "the same call, retried, exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…calling the guard's decide again, which carries out the recorded ruling"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+has "$(head -1 "$STUB_GH_BODY")" "ROUND ACCOUNT" "…and the posted verdict opens with the round"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+eq "$(status rv-tri)" "closed" "…and the review closed"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a retry without the ruling flags exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…passing decide the ruling the round records"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+has "$(head -1 "$STUB_GH_BODY")" "ROUND ACCOUNT" "…and the posted verdict opens with the round"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$(printf '%s' "$ROUND_HALF" | jq -c '.triage.reopen = [] | .triage.dismiss = false')"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a recorded ruling that reopens nothing is retried too"
+has "$(cat "$STUB_BC_LOG")" "--reopen none --reason" "…passed to decide as none"
+hasnt "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…and with no dismissal"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "nothing to reopen" 2>&1); rc=$?
+eq "$rc" 1 "a retry whose flags state another ruling exits 1"
+has "$out" "already ruled on the bring-current round" "…saying the round carries this review's ruling"
+has "$out" "reopen correctness, dismiss the approval" "…naming the ruling recorded"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a retry that drops the recorded dismissal exits 1 too"
+out=$("$SUT" --review-bead rv-tri --verdict approve --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "…and so does one that names a reason and no lanes"
+
 echo "# the ruling flags are refused where no round awaits them, and on any other check"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"; : > "$STUB_BC_LOG"
 out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
