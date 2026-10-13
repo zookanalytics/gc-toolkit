@@ -798,7 +798,9 @@ its bead, while its `gc.gate_visit` names a closed visit the sweep never
 re-offers. So `dismiss` does
 not silently pass a subject that still carries an open linked gate. It surfaces
 each one, with the gate id, the bead it blocks, and its headline, and exits 5
-until the caller decides it. `--resolve-gate <gate> --ruling "<decision>"` closes
+until the caller decides it. A linked gate counts in any status short of closed,
+the set `gate-visit-sweep` reads gates in, so a gate an operator deferred or
+pinned holds the dismiss too. `--resolve-gate <gate> --ruling "<decision>"` closes
 the gate on the ruling and stamps that ruling as the gate's board sentence, the
 way a sign-off records one. `--leave-gate <gate>` re-asks it, clearing
 `gc.gate_visit` so the sweep offers a fresh visit. A gate on the visit being

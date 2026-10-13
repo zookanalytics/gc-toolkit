@@ -108,15 +108,17 @@ that stamp. So when the visit closes without a decision, the gate stays open,
 keeps blocking the bead, and has no conversation left to ask for one. The
 no-open-visit clause cannot see this case, because the visit is already closed.
 
-The clause lists every open, in-progress or blocked bead carrying
-`gc.demand_for`, with `--include-gates`, since a plain `gc bd list` hides gates.
-It keeps the unassigned ones that name this bead, because an assigned gate is a
-person's task and not a decision a visit carries. A kept gate is an orphan when
-its `gc.gate_visit` names a visit that is neither open nor in progress: closed,
-missing, or unreadable. A gate with no `gc.gate_visit` is not an orphan, since
-the sweep will offer it a visit. Neither is a gate stamped `skip`, the
-operator's suppression, or `filed`, the sweep's stamp for a visit it filed
-without learning its id.
+The clause lists every bead carrying `gc.demand_for` in any status short of
+closed: open, in progress, blocked, deferred, hooked or pinned. That is the set
+`gate-visit-sweep` reads gates in, so a gate an operator deferred or pinned
+counts the same as an open one. The list passes `--include-gates`, since a
+plain `gc bd list` hides gates. It keeps the unassigned ones that name this
+bead, because an assigned gate is a person's task and not a decision a visit
+carries. A kept gate is an orphan when its `gc.gate_visit` names a visit that
+is neither open nor in progress: closed, missing, or unreadable. A gate with no
+`gc.gate_visit` is not an orphan, since the sweep will offer it a visit.
+Neither is a gate stamped `skip`, the operator's suppression, or `filed`, the
+sweep's stamp for a visit it filed without learning its id.
 
 The refusal names the two ways to clear an orphan. Re-ask it with
 `gc bd update <gate> --unset-metadata gc.gate_visit`, so the sweep offers a fresh

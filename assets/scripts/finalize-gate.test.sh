@@ -372,5 +372,19 @@ out=$(STUB_SHOW_NOTICE=alpha "$SUT" check A36c 2>/dev/null); rc=$?
 eq "$rc" 1 "orphan gate whose closed visit reads behind a gc bd: notice: exit 1"
 has "$out" "orphan gate G36c" "the hold behind a notice is the orphan clause's, naming the gate"
 
+# 37. The gate list reads every status short of closed, the set gate-visit-sweep
+# reads gates in. An orphan that is deferred, blocked, hooked or pinned is as
+# stranded as an open one and still refuses. A closed gate is settled, so it
+# never does.
+for st in in_progress blocked deferred hooked pinned; do
+  store "[$(work A37 open), $(gate G37 "$st" A37 V37C), $(visit V37C closed)]"; : > "$STUB_DEPS"
+  out=$("$SUT" check A37 2>/dev/null); rc=$?
+  eq "$rc" 1 "orphan gate in status $st: exit 1"
+  has "$out" "orphan gate G37" "orphan gate in status $st: names the gate"
+done
+store "[$(work A37c open), $(gate G37c closed A37c V37cC), $(visit V37cC closed)]"; : > "$STUB_DEPS"
+out=$("$SUT" check A37c 2>/dev/null); rc=$?
+eq "$rc" 0 "a closed gate whose visit closed is settled, not an orphan: exit 0"
+
 echo "----- finalize-gate: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

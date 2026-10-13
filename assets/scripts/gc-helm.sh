@@ -143,9 +143,10 @@ GC_HELM_DONE_WINDOW (default 7d).
 Idempotent: a subject with no open visit has no sitting to end and says so.
 
 A sitting that holds files a human gate, so ending it is a decision about that
-gate. dismiss lists every open, unassigned gate linked to the subject's sittings
+gate. dismiss lists every unassigned gate linked to the subject's sittings
 (each visit's gc.hold_demand, and every demand whose gc.demand_for is the
-subject) and exits 5, closing nothing, until each one is decided. Per gate,
+subject) in any status short of closed, so a deferred or pinned gate is listed
+too. It exits 5, closing nothing, until each one is decided. Per gate,
 --resolve-gate <gate> --ruling "..." resolves it on the ruling and stamps the
 ruling as its board sentence, and --leave-gate <gate> leaves it open: a gate on
 a visit being closed has its question re-stated as a demand on the subject (on
@@ -2321,11 +2322,15 @@ cmd_dismiss() {
         # demand it filed), and the gc.demand_for==subject convention signoff and
         # the sweep share. --include-gates is load-bearing: a gate is hidden from a
         # plain `bd list`. Unassigned only — an assigned gate is a person's task.
+        # The status set is every live one, the set gate-visit-sweep reads gates
+        # in, so a gate an operator deferred or pinned is still owed a decision
+        # here. A narrower read would miss such a gate and close the visit it
+        # names, leaving it stamped with a closed visit the sweep never re-offers.
         gate_hold_demands=$(printf '%s' "$visits_json" | jq -r --arg vids "$(printf '%s' "$visits" | tr '\n' ' ')" '
             ($vids | split(" ") | map(select(length > 0))) as $v
             | [ .[]? | (.id // "") as $i | select(($v | index($i)) != null) | .metadata["gc.hold_demand"] // empty ]
             | .[]' 2>/dev/null | sort -u | tr '\n' ' ')
-        gates_raw=$(gc bd list --include-gates --has-metadata-key gc.demand_for --status=open,in_progress --json --limit=0 2>/dev/null | scrub)
+        gates_raw=$(gc bd list --include-gates --has-metadata-key gc.demand_for --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit=0 2>/dev/null | scrub)
         if ! printf '%s' "$gates_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
             # Fail closed: an unreadable gate listing is not proof the subject has
             # no open gate, and closing the sitting could orphan one it cannot rule

@@ -240,23 +240,26 @@ clause_epic_ruling_recorded() {
 }
 
 # clause_no_orphan_gate <bead-id> — prints a one-line refusal reason and returns 1
-# when the bead carries an ORPHAN gate: an open, unassigned human gate naming this
-# bead as the work it holds (gc.demand_for), whose gc.gate_visit points at a visit
-# that is no longer open. That is the shape a dismiss-without-a-decision leaves —
-# the gate stays open and still blocks its bead, but gate-visit-sweep is idempotent
-# on gc.gate_visit and never re-offers a stamped gate, so no conversation is left to
-# re-ask the decision. clause_no_open_visit catches the live-visit case; this clause
-# catches the dead-visit one it cannot see. A gate whose gc.gate_visit is unset (the
-# sweep will offer a visit) or `skip` (deliberate operator suppression) is not an
+# when the bead carries an ORPHAN gate: an unassigned human gate in any status
+# short of closed, naming this bead as the work it holds (gc.demand_for), whose
+# gc.gate_visit points at a visit that is no longer open. That is the shape a
+# dismiss-without-a-decision leaves — the gate stays open and still blocks its
+# bead, but gate-visit-sweep is idempotent on gc.gate_visit and never re-offers a
+# stamped gate, so no conversation is left to re-ask the decision.
+# clause_no_open_visit catches the live-visit case; this clause catches the
+# dead-visit one it cannot see. A gate whose gc.gate_visit is unset (the sweep
+# will offer a visit) or `skip` (deliberate operator suppression) is not an
 # orphan. The gate lookup is the gc.demand_for convention signoff and the sweep
 # share; --include-gates is load-bearing (a gate is hidden from a plain list).
 clause_no_orphan_gate() {
     _fgo_bead="$1"
     # bd_list reads the whole set (--limit 0), strips the notice and the C0 bytes,
     # and returns non-zero on an unreadable or non-array answer, so its own guard
-    # is the fail-closed path.
+    # is the fail-closed path. The status set is every live one, the set
+    # gate-visit-sweep reads gates in: a gate an operator deferred or pinned is as
+    # owed as an open one, and as stranded once its visit closes.
     _fgo_raw=$(bd_list --include-gates --has-metadata-key gc.demand_for \
-        --status open,in_progress,blocked) || {
+        --status open,in_progress,blocked,deferred,hooked,pinned) || {
         echo "orphan-gate probe unreadable ('gc bd list' failed) — refusing finalize on $_fgo_bead (fail-closed)"
         return 1
     }

@@ -2567,6 +2567,65 @@ grep -Eq '^bd close v-REL' "$TMP/closes" \
   && ok "(DISMISS-LEAVE-OPEN-MERGE) …and the visit is then closed" \
   || bad "(DISMISS-LEAVE-OPEN-MERGE) the visit was not closed (closes: $(cat "$TMP/closes"))"
 
+# ── a linked gate counts in every status short of closed ─────────────────────
+# gate-visit-sweep reads gates in every live status, so a gate that is deferred,
+# blocked, hooked or pinned is still owed a decision, and the sweep never
+# re-offers one whose gc.gate_visit names a visit. A dismiss that listed
+# only open and in_progress gates would close that visit and strand such a gate.
+# A-LIVE's sitting carries one gate in each live status that read would miss, and
+# none it would see: g-LVIS is its own visit demand, deferred and linked only
+# through gc.hold_demand, and the rest gate the subject. g-LDONE is closed, so it
+# is settled and not listed.
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"v-LIVE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-LIVE","gc.hold_demand":"g-LVIS"}},
+  {"id":"g-LVIS","status":"deferred","assignee":"","issue_type":"gate","await_type":"human","title":"which way do we land it?","metadata":{"gc.demand_for":"v-LIVE","gc.gate_visit":"v-LIVE"}},
+  {"id":"g-LBLK","status":"blocked","assignee":"","issue_type":"gate","await_type":"human","title":"does it need a migration?","metadata":{"gc.demand_for":"A-LIVE","gc.gate_visit":"v-LIVE"}},
+  {"id":"g-LHOOK","status":"hooked","assignee":"","issue_type":"gate","await_type":"human","title":"who reviews the schema?","metadata":{"gc.demand_for":"A-LIVE","gc.gate_visit":"v-LIVE"}},
+  {"id":"g-LPIN","status":"pinned","assignee":"","issue_type":"gate","await_type":"human","title":"does it ship this week?","metadata":{"gc.demand_for":"A-LIVE","gc.gate_visit":"v-LIVE"}},
+  {"id":"g-LDONE","status":"closed","assignee":"","issue_type":"gate","await_type":"human","title":"already ruled","metadata":{"gc.demand_for":"A-LIVE","gc.gate_visit":"v-LIVE"}}
+]
+JSON
+export FAKE_STEPS_JSON="$TMP/live.json"
+
+# (DISMISS-GATE-LIVE) a dismiss with no decision holds on every live linked gate,
+# whatever its status, and lists no closed one.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+LVRC=0; LVOUT="$(sh "$SCRIPT" dismiss A-LIVE 2>&1)" || LVRC=$?
+eq "$LVRC" "5" "(DISMISS-GATE-LIVE) a linked gate that is not open still holds the dismiss (exit 5)"
+for _lg in g-LVIS g-LBLK g-LHOOK g-LPIN; do
+    has "$LVOUT" "gate $_lg " "(DISMISS-GATE-LIVE) …listing $_lg in its live status"
+done
+case "$LVOUT" in
+    *g-LDONE*) bad "(DISMISS-GATE-LIVE) a closed gate was listed as owed (got: $LVOUT)" ;;
+    *) ok "(DISMISS-GATE-LIVE) …and not the closed gate" ;;
+esac
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-GATE-LIVE) …closing nothing"
+
+# (DISMISS-GATE-LIVE-JSON) --json lists exactly the live gates.
+LVJ="$(sh "$SCRIPT" dismiss A-LIVE --json 2>/dev/null || true)"
+if printf '%s' "$LVJ" | jq -e '.held_for_gate_decision == true
+        and ([.gates[].id] == ["g-LBLK","g-LHOOK","g-LPIN","g-LVIS"])' >/dev/null 2>&1; then
+    ok "(DISMISS-GATE-LIVE-JSON) --json holds for the decision and lists every live gate and no closed one"
+else
+    bad "(DISMISS-GATE-LIVE-JSON) wrong held-for-decision object (got: $LVJ)"
+fi
+
+# (DISMISS-GATE-LIVE-RELEASE) --release resolves each live gate on the reason,
+# leaves the closed gate alone, and closes the visit.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+LVRRC=0; sh "$SCRIPT" dismiss A-LIVE --release --reason "nothing owed" >/dev/null 2>&1 || LVRRC=$?
+eq "$LVRRC" "0" "(DISMISS-GATE-LIVE-RELEASE) --release completes (exit 0)"
+for _lg in g-LVIS g-LBLK g-LHOOK g-LPIN; do
+    grep -Fxq "bd gate resolve $_lg --reason nothing owed" "$TMP/gates" \
+      && ok "(DISMISS-GATE-LIVE-RELEASE) $_lg is resolved on the reason" \
+      || bad "(DISMISS-GATE-LIVE-RELEASE) $_lg was not resolved on the reason (gates: $(cat "$TMP/gates"))"
+done
+eq "$(grep -c 'g-LDONE' "$TMP/gates" || true)" "0" "(DISMISS-GATE-LIVE-RELEASE) …the closed gate is not touched"
+grep -Eq '^bd close v-LIVE' "$TMP/closes" \
+  && ok "(DISMISS-GATE-LIVE-RELEASE) …and the visit is then closed" \
+  || bad "(DISMISS-GATE-LIVE-RELEASE) the visit was not closed (closes: $(cat "$TMP/closes"))"
+
 : > "$TMP/settled"; : > "$TMP/gates"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
