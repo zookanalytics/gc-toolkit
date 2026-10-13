@@ -1080,9 +1080,12 @@ run tk-sub --stand-down
 eq "$RC" "2" "(SDARGS) a stand-down with no reaction bead is refused"
 eq "$LOG" "" "(SDARGS) …before anything is read or written"
 has "needs --reaction-bead" "$ERR" "(SDARGS) …naming the bead it would close"
-run tk-sub --stand-down --reaction-bead "$R" --disposition actionable --reason "r" --takeaway "t"
+# A whole actionable call, --route included: without GC_RIG the actionable arm
+# refuses an unqualified route, so a call missing it would be refused there.
+run tk-sub --stand-down --reaction-bead "$R" --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(SDARGS) a stand-down carrying an exit's flags is refused"
 eq "$LOG" "" "(SDARGS) …and nothing was read or written"
+has "--stand-down takes --reaction-bead only" "$ERR" "(SDARGS) …naming the one flag it takes"
 run tk-sub --stand-down --reaction-bead tk-sub
 eq "$RC" "2" "(SDARGS) the reaction bead cannot be the subject itself"
 
