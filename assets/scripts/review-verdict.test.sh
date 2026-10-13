@@ -13,7 +13,8 @@
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
 # A reader with a private copy drifts silently: the merge gate and the arm that
 # brings a branch current would then disagree about which PRs are approved. The
-# behavioral half lives beside each reader (merge.test.sh, pr-facts.test.sh).
+# behavioral half lives beside each reader (pr-facts.test.sh), and
+# merge.test.sh holds gctk merge's own statement of the rule to this one.
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -78,8 +79,7 @@ eq "$(withdrawn "$STANDING")" '[{"veto":"human3","approver":""},{"veto":"","appr
    "(PRED) dismissing the standing approvals leaves no approver, and none comes back once the later CHANGES_REQUESTED is dismissed"
 
 echo "# every reader sources the one definition"
-READERS="assets/scripts/merge.sh
-assets/scripts/pr-facts.sh
+READERS="assets/scripts/pr-facts.sh
 assets/scripts/bring-current-guard.sh
 assets/scripts/approval-withdraw.sh"
 for r in $READERS; do

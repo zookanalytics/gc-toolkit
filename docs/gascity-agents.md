@@ -1406,10 +1406,19 @@ recipe does — *exact first, then last segment, live wins*:
    against a rig-qualified assignee, and a pool worker's rig-qualified
    alias against a bare assignee.
 3. **A collision resolves toward life.** Baring the prefixes can collapse
-   two cities' sessions onto one identity, so any candidate that is not
-   `closed`/`archived` wins; only when *every* candidate is dead does the
-   retry report a dead state. The retry can therefore turn `absent` into
-   a live state but can never manufacture an orphan.
+   two cities' sessions onto one identity, so any candidate outside the
+   dead states (`archived`, `closed`, `failed-create`) wins; only when
+   *every* candidate is dead does the retry report a dead state. The retry
+   can therefore turn `absent` into a live state but can never manufacture
+   an orphan.
+
+The map the lookup reads holds to the same rule. Two listed sessions can
+carry one key: a pool slot's agent name outlives each occupant, and when a
+named session's create fails, gascity hands its alias to the session that
+replaces it. `gc session list` puts the newest session first, so a map that
+let the later entry win would give such a key to its dead predecessor. In
+the map a dead state never replaces a live one, so a shared key reads as
+its live holder's state.
 
 A step-2 hit means a live session, not an orphan. The lookup ships in
 `formulas/mol-witness-patrol.toml` between the `liveness-lookup` markers,

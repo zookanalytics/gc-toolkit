@@ -13,14 +13,16 @@
 # it returns only when none does, and the script's own shell answers instead.
 # GCTK_BIN=none forces that shell. GCTK_FALLBACK forces it for the subcommands
 # it names (space- or comma-separated) and leaves the binary serving every
-# other call. A suite drives merge.sh's shell that way, because that shell
-# records every landing through lifecycle.sh, which needs the binary.
+# other call, so a suite can test one port's shell while lifecycle.sh, which
+# has no shell, still reaches the binary. No script calls gctk_resolve: every
+# script that hands a call over is only the exec. It is the call for a port
+# that lands with its script kept as the fallback.
 #
-# gctk_require is for a script that is only the exec (lifecycle.sh). It execs
-# the binary the same chain resolves. When there is none, it names what is
-# missing and exits 1, so it never returns. GCTK_BIN=none names no binary and is
-# refused like a missing one. GCTK_FALLBACK is not read, because there is no
-# shell to fall back to.
+# gctk_require is for a script that is only the exec (lifecycle.sh,
+# merge.sh). It execs the binary the same chain resolves. When there is none,
+# it names what is missing and exits 1, so it never returns. GCTK_BIN=none
+# names no binary and is refused like a missing one. GCTK_FALLBACK is not read,
+# because there is no shell to fall back to.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
