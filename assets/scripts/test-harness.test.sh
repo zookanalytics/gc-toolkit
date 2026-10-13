@@ -271,6 +271,13 @@ mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
+# A copy of deferred-dispatch.sh without hold-lib.sh beside it exits before any
+# verb runs.
+mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
+[ -f "$TMP/sut-dd/hold-lib.sh" ] && ok "mk_sut_dir copies hold-lib.sh beside the SUT" || bad "mk_sut_dir left hold-lib.sh out"
+out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
+eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
+hasnt "$out" "cannot source hold-lib.sh" "a copied deferred-dispatch.sh sources hold-lib.sh from its private dir"
 
 # The partial-read knobs model a store error that still printed an array: a
 # matching list, or any dep probe, prints [] and exits 1.
