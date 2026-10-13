@@ -141,7 +141,8 @@ case "${1:-}" in
     # refuses only invalid JSON and stores any other document as given. The stub
     # also refuses a document that is not an object: it holds no key a
     # --metadata-field query can match, so a caller that sends one fails here.
-    # --deps <type:id> rides the insert too, as an edge row from the new bead.
+    # --deps <type:id> rides the insert too, as an edge row from the new bead,
+    # except blocks:<id>, which bd turns around: <id> depends on the new bead.
     cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -164,7 +165,12 @@ case "${1:-}" in
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
-    for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
+    for d in $cdeps; do
+      case "$d" in
+        blocks:*) printf '%s|fix-%s|blocks\n' "${d#blocks:}" "$n" >> "$DEPS" ;;
+        *) printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS" ;;
+      esac
+    done
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -1001,19 +1007,22 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 eq "$(grep -c 'tk-anc|vp-open|blocks' "$STUB_DEPS")" "1" "exactly one validation-pass edge holds the anchor — no duplicate accrued"
 eq "$(meta vp-open reviewed_oid)" "$OID_OLD" "the reused pass keeps the head it opened at — a validator mid-rule is not moved"
 
-echo "# request-changes adopts a same-title unstamped orphan instead of minting a twin"
-# A prior attempt that created the bead but never stamped its shape leaves an
-# orphan the lane probe cannot see; it is adopted by exact title and stamped
-# into shape rather than twinned into a second anchor blocker.
-reset "$ANCHOR_PR" ',{"id":"vp-orphan","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+echo "# the validation pass is filed whole: its shape and its blocks edge ride the create"
+# A create whose reply is lost has then still landed where the lane probe finds
+# it, so the retry reuses it (the reuse case above) rather than minting a twin.
+reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes exits 0"
-has "$out" "adopting unstamped validation-pass orphan vp-orphan" "the unstamped orphan is adopted by title"
-hasnt "$(cat "$STUB_CREATED")" "Validate" "no twin pass is minted"
-eq "$(meta vp-orphan task_kind)" "validation" "the adopted orphan is stamped into shape"
-eq "$(meta vp-orphan check_name)" "correctness" "…with the lane"
-eq "$(meta vp-orphan anchor_bead)" "tk-anc" "…and the anchor"
-has "$(cat "$STUB_DEPS")" "tk-anc|vp-orphan|blocks" "…and it is hung on the anchor"
+VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
+VPC=$(grep "^bd create Validate PR#42" "$STUB_GC_LOG")
+has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'"}' \
+  "the pass's shape rides its create"
+has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
+has "$VPC" "--deps related:tk-anc" "…and the membership edge onto it"
+eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")|$(grep -c "^$VP|tk-anc|blocks\$" "$STUB_DEPS")" "1|1|0" \
+  "…both landing with the pass, each the way bd orients it"
+hasnt "$(grep "^bd dep $VP" "$STUB_GC_LOG")" "--blocks" "…so the blocks edge the create carried holds the anchor, with no second write"
+hasnt "$(grep "^bd update $VP" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a different lane's open pass is not reused — one pass per lane"
 reset "$ANCHOR_PR" ',{"id":"vp-arch","status":"open","assignee":"","metadata":{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"arch","reviewed_oid":"'"$OID_HEAD"'"},"notes":""}'
@@ -1026,12 +1035,30 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 echo "# a validation pass whose shape does not read back is exit 2, review left open"
 reset "$ANCHOR_PR"
 # The pass is the second bead created (after the rework child fix-1); dropping
-# its task_kind models a shaping write that half-landed and the validator path
-# could never see, so the verdict must not close past it.
+# its task_kind models a create that half-landed and the validator path could
+# never see, so bd_create closes it and the verdict must not close past it.
 out=$(STUB_DROP_KEYS="fix-2:task_kind" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "a pass missing its task_kind exits 2"
-has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+has "$out" "fix-2 did not read back carrying task_kind, so no reader could find it; closed it" "…the pass no probe could find is closed"
+has "$out" "could not open a validation pass for lane correctness" "…and no pass is reported opened"
+eq "$(status fix-2)|$(meta fix-2 gc.outcome)" "closed|abandoned" "…closed as abandoned, so its edge holds nothing"
 eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
+reset "$ANCHOR_PR"
+# Short only of its pin, the pass is one the lane probe finds, so it is kept
+# and the shape gate holds the verdict until the pin reads back.
+out=$(STUB_DROP_KEYS="fix-2:reviewed_oid" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a pass missing its reviewed_oid exits 2"
+has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+eq "$(status fix-2)|$(status rv-1)" "open|in_progress" "…and the pass and the review are left open for a retry"
+
+echo "# a pass an earlier two-write create left without its shape is closed before a fresh one is filed"
+reset "$ANCHOR_PR" ',{"id":"vp-orph","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+printf 'tk-anc|vp-orph|blocks\n' >> "$STUB_DEPS"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+eq "$(status vp-orph)|$(meta vp-orph gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .status ] | join(",")' "$STUB_STORE")" "open" \
+  "…and one whole pass is filed in its place"
 
 echo "# pre-open request-changes opens a branch-titled validation pass"
 reset "$ANCHOR_PRE"
