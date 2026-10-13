@@ -215,8 +215,19 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'; fi ;;
+    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]')
+    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" --arg or "$outcome_reason" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc,"gc.outcome_reason":$or}}]'); fi
+    # The placement marker intake writes, and a parent-child parent: the release's
+    # pour-stamp read-back judges both through placement.sh. FAKE_PLACEMENT and
+    # FAKE_PARENT hold them, and an empty file leaves the key off the row, as on
+    # every bead intake never held.
+    pl="$(cat "${FAKE_PLACEMENT:-/dev/null}" 2>/dev/null || true)"
+    pa="$(cat "${FAKE_PARENT:-/dev/null}" 2>/dev/null || true)"
+    if [ -n "$pl$pa" ]; then
+      row=$(printf '%s' "$row" | jq --arg pl "$pl" --arg pa "$pa" \
+        '(if $pl != "" then .[0].metadata.placement = $pl else . end) | (if $pa != "" then .[0].parent = $pa else . end)')
+    fi
+    printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
@@ -363,7 +374,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_TAKEAWAY="$TMP/takeaway" \
-       FAKE_EXEC="$TMP/exec" \
+       FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
@@ -449,10 +460,9 @@ grep -q 'gc.proactive_reaction' <<< "$A" \
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
-# ends that pour, so the stamp is retired in the same write. No arm or reconcile
-# guard reads this stamp (reconcile keys on its own gc.dispatch_when_ready_slung
-# marker), so it is only cosmetic provenance — a release drops it best-effort so a
-# parked or re-routed bead does not linger advertising a finished pour's pool.
+# ends that pour, so the stamp is retired in the same write, and a parked or
+# re-routed bead does not linger advertising a finished pour's pool. The stamp's
+# read-back is covered with the EXEC cases below.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 # The unassign takes the departing executor's identity with it: a gc.session_name
@@ -1145,16 +1155,24 @@ grep -q "released to $POOL" "$TMP/rout" \
   || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
 # ── takeaway --release: the pour stamp read-back ──────────────────────────────
-# gc.execution_routed_to is the field the release clears best-effort: a first
-# reaction was slung to a pool, the pour stamped it, and a release ends that
-# pour. No arm or reconcile guard reads this stamp (reconcile keys on its own
-# gc.dispatch_when_ready_slung marker), so it gates no re-dispatch — it is only
-# cosmetic provenance. The clear rides the multi-pair release write; a pair
+# gc.execution_routed_to is the stamp a pour leaves naming the pool it dispatched
+# a bead to, and a release ends that pour, so the release clears it. No arm or
+# reconcile guard reads the stamp (reconcile keys on its own
+# gc.dispatch_when_ready_slung marker), but placement.sh reads it as a live pour,
+# which places a bead. The clear rides the multi-pair release write; a pair
 # silently dropped there leaves the stamp standing, so the release retries a lone
-# unset and, if that also misses, WARNS and stands rather than failing. Covered:
-#   (EXECOK)   a clear that reads back empty is verified once, no repair, no word
-#   (EXECFIX)  a clear dropped from the multi-pair write is retried and reported
-#   (EXECWARN) a clear that will not land warns and the release still stands
+# unset. If that also misses, the release fails where the stamp is all that keeps
+# a bead held for placement out of the queue, and elsewhere warns and stands.
+# Covered:
+#   (EXECOK)      a clear that reads back empty is verified once, no repair, no word
+#   (EXECFIX)     a clear dropped from the multi-pair write is retried and reported
+#   (EXECWARN)    a clear that will not land on a bead routed to a pool warns, and
+#                 the release still stands
+#   (EXECHELD)    a clear that will not land on a bead held for placement fails
+#                 the verb, because gc-helm.sh unplaced would not list the bead
+#   (EXECHELDFIX) the same held bead, its clear carried by the lone repair, exits 0
+#   (EXECPLACED)  a marked bead its parent places: the stamp hides nothing from
+#                 the queue, so the miss warns
 STAMP="gc-toolkit/gc-toolkit.proactive"
 
 # (EXECOK) the clear lands: the release's own unset is the only one written, and
@@ -1188,11 +1206,11 @@ grep -q 'execution-stamp repair landed' "$TMP/xerr" \
 eq "$XFRC" "0" "(EXECFIX) …and a repaired stamp is not a verb failure"
 eq "$(cat "$TMP/exec")" "" "(EXECFIX) …the bead ends with the pour stamp cleared"
 
-# (EXECWARN) the store that will not take the clear at all. The stamp is cosmetic
-# provenance — no arm or reconcile guard reads it — so a surviving stamp WARNS and
-# the release still stands (exit 0). Failing here would exit 4 into
-# first-reaction-dispose's die before its --then-route arm, skipping the arm over
-# a harmless stamp.
+# (EXECWARN) the store that will not take the clear at all, on a bead the release
+# routes to a pool and that nothing holds for placement. No reader misreads the
+# stamp there, so it WARNS and the release still stands (exit 0). Failing here
+# would exit 4 into first-reaction-dispose's die before its --then-route arm,
+# skipping the arm over a stamp nothing misreads.
 : > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
 XDRC=0
 FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
@@ -1210,16 +1228,74 @@ grep -q 'takeaway set on' "$TMP/xout" \
 grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/updates" \
   && ok "(EXECWARN) …the headline write is kept" \
   || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
-: > "$TMP/exec"
+
+# (EXECHELD) a first reaction's held exit: the bead carries placement=pending, the
+# release gives it no route, and the store will not take the clear. The stamp is
+# then all that places the bead, so gc-helm.sh unplaced would not list it, and the
+# release fails rather than report a hold the queue cannot see. The headline and
+# the release are kept, so the by-hand repair finishes it.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
+printf 'pending' > "$TMP/placement"; : > "$TMP/parent"
+XHRC=0
+FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "held for placement" --by proactive --release --no-wait \
+  >"$TMP/xout" 2>"$TMP/xerr" || XHRC=$?
+eq "$XHRC" "4" "(EXECHELD) a pour stamp left on a bead held for placement fails the release"
+grep -q "A-PARKED is held for placement but still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
+  && ok "(EXECHELD) …and the failure names the hold and the stamp left standing" \
+  || bad "(EXECHELD) the failure does not name the hold and the stamp (stderr: $(cat "$TMP/xerr"))"
+grep -q 'gc-helm.sh unplaced does not list A-PARKED' "$TMP/xerr" \
+  && ok "(EXECHELD) …says the placement queue cannot see the bead" \
+  || bad "(EXECHELD) the failure does not say what the stamp hides (stderr: $(cat "$TMP/xerr"))"
+grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
+  && ok "(EXECHELD) …and carries the by-hand repair" \
+  || bad "(EXECHELD) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
+grep -q 'takeaway set on' "$TMP/xout" \
+  && bad "(EXECHELD) a failed release still printed its success line (stdout: $(cat "$TMP/xout"))" \
+  || ok "(EXECHELD) …and prints no success line"
+grep -q -- '--set-metadata gc.takeaway=held for placement' "$TMP/updates" \
+  && ok "(EXECHELD) …the headline write is kept" \
+  || bad "(EXECHELD) the headline write was lost: $(cat "$TMP/updates")"
+
+# (EXECHELDFIX) the same held bead, its clear dropped only from the multi-pair
+# write: the lone repair carries it, so the queue lists the bead and the release
+# exits 0.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
+printf 'pending' > "$TMP/placement"; : > "$TMP/parent"
+XHFRC=0
+FAKE_EXEC_DROP=multi sh "$SCRIPT" takeaway A-PARKED "held for placement" --by proactive --release --no-wait \
+  >/dev/null 2>"$TMP/xerr" || XHFRC=$?
+eq "$XHFRC" "0" "(EXECHELDFIX) a held bead whose stamp the repair clears exits 0"
+grep -q 'execution-stamp repair landed' "$TMP/xerr" \
+  && ok "(EXECHELDFIX) …and the repair says so" \
+  || bad "(EXECHELDFIX) the repair did not report landing (stderr: $(cat "$TMP/xerr"))"
+eq "$(cat "$TMP/exec")" "" "(EXECHELDFIX) …the bead ends with the pour stamp cleared"
+
+# (EXECPLACED) the marker outlived a placement: the bead has a parent, which
+# places it whatever its stamp says. The stamp hides nothing from the queue, so a
+# clear that will not land warns, as it does on any other bead.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
+printf 'pending' > "$TMP/placement"; printf 'tk-epic' > "$TMP/parent"
+XPRC=0
+FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "placed under its epic" --by proactive --release --no-wait \
+  >"$TMP/xout" 2>"$TMP/xerr" || XPRC=$?
+eq "$XPRC" "0" "(EXECPLACED) a stamp on a bead its parent places does not fail the release"
+grep -q 'A-PARKED is not held for placement' "$TMP/xerr" \
+  && ok "(EXECPLACED) …and the warning says the bead is not held" \
+  || bad "(EXECPLACED) the warning does not say why the stamp hides nothing (stderr: $(cat "$TMP/xerr"))"
+grep -q 'takeaway set on' "$TMP/xout" \
+  && ok "(EXECPLACED) …and the release stands" \
+  || bad "(EXECPLACED) the release was not reported (stdout: $(cat "$TMP/xout"))"
+: > "$TMP/exec"; : > "$TMP/placement"; : > "$TMP/parent"
 
 # ── takeaway --release: the executor-identity read-back ───────────────────────
 # The unassign takes the departing executor's identity with it, so the release
 # clears gc.session_name and gc.session_id via --unset-metadata. Both have
 # readers: a surviving gc.session_name is the residue doctor/executor-identity-
 # residue reports on the next route, and a surviving gc.session_id lets orphan
-# recovery resolve a dead owner for a bead nobody holds. So — unlike the cosmetic
-# pour stamp — each is read back, a lone unset retried, and a persistent miss is a
-# verb failure, the way the route and completion proof are. orphan-dispose.sh
+# recovery resolve a dead owner for a bead nobody holds. So each is read back, a
+# lone unset retried, and a persistent miss is a verb failure on any bead, the way
+# the route and completion proof are, where the pour stamp fails the verb only on a
+# bead held for placement. orphan-dispose.sh
 # verifies the same pair after its own release. Covered:
 #   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
 #   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried

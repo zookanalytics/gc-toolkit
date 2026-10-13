@@ -60,6 +60,12 @@ No held bead is ever readable without its marker. The witness and the
 distiller write it in the create, and the first reaction writes it and reads
 it back before the release.
 
+A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
+a pour leaves, after the pour's workflow has ended. The queue reads that stamp
+as a live pour, so the release that holds the bead clears it. When the stamp
+survives on a held bead, `gc-helm.sh takeaway` fails the release, and the first
+reaction stops without recording its disposition, so a re-run finishes the hold.
+
 ## The emergency check
 
 The first reaction claims an emergency with `--emergency`, on the actionable

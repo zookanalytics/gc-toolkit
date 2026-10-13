@@ -17,8 +17,9 @@
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route, or a takeaway headline or disposition, that will not stamp / an
-# unplaced list missing a store that did not answer),
+# a --route, or a takeaway headline or disposition, that will not stamp / a
+# pour stamp a release leaves on a bead held for placement / an unplaced list
+# missing a store that did not answer),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own visit instead of
@@ -185,6 +186,19 @@ assignee_now() {
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
         | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
+}
+
+# stamp_hides_placement — given a `bd show --json` answer on stdin whose row
+# carries gc.execution_routed_to, print 1 when that stamp is all that keeps the
+# bead out of the placement queue (placement.sh's awaiting_placement holds for
+# the row without it) and 0 when it is not. An answer that is not a row prints 1,
+# because nothing then shows the stamp hides nothing.
+stamp_hides_placement() {
+    shp_v=$(jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
+        if type == "array" and length > 0
+        then (.[0] | del(.metadata["gc.execution_routed_to"]) | if awaiting_placement then "1" else "0" end)
+        else "1" end' 2>/dev/null) || shp_v=1
+    case "$shp_v" in 0) printf '0' ;; *) printf '1' ;; esac
 }
 
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
@@ -1189,8 +1203,10 @@ cmd_takeaway() {
     # execution provenance, not a live dispatch path: deferred-dispatch's reconcile
     # keys idempotency on its own gc.dispatch_when_ready_slung marker, and arm
     # refuses on a live route (gc.routed_to) or that marker, so neither reads
-    # gc.execution_routed_to. A release drops it best-effort, so a finished pour's
-    # provenance does not linger on a bead the pour no longer drives.
+    # gc.execution_routed_to. The placement queue does read it: placement.sh counts
+    # it as a live pour, which places a bead, so a finished pour's stamp left on a
+    # bead held for placement keeps that bead out of the queue. The release drops
+    # it, and its read-back below fails the verb when that is the stamp's effect.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
     # identity the last executor stamped goes with the old assignee:
@@ -1307,26 +1323,35 @@ cmd_takeaway() {
             echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
         fi
     fi
-    # The pour stamp is cleared best-effort: gc.execution_routed_to names the pool
-    # the pour dispatched this bead to, and a release ends that pour. No arm or
-    # reconcile guard reads it (reconcile keys on its own
-    # gc.dispatch_when_ready_slung marker), so a surviving stamp gates no
-    # re-dispatch — it is only cosmetic provenance. Clear it, retry a lone unset,
-    # and if it still survives, WARN and let the release stand rather than fail the
-    # verb: first-reaction-dispose's --then-route arm runs right after this release,
-    # and failing here on a harmless stamp would skip the arm entirely.
-    exec_missed=""
+    # The pour stamp is read back too: gc.execution_routed_to names the pool the
+    # pour dispatched this bead to, and a release ends that pour. Clear it, retry a
+    # lone unset, and if it still survives, ask placement.sh whether the stamp is
+    # all that keeps the bead out of the placement queue. On a bead held for
+    # placement it is, because the queue reads the stamp as a live pour, so that
+    # miss fails the verb below. On any other bead no reader misreads the stamp: no
+    # arm or reconcile guard reads it (reconcile keys on its own
+    # gc.dispatch_when_ready_slung marker). That miss warns and the release stands,
+    # because first-reaction-dispose's --then-route arm runs right after this
+    # release, and a failure here would skip the arm.
+    exec_missed=""; exec_hides=""
     if [ -n "$release_park" ]; then
         exec_got=$(meta_now "$bead" gc.execution_routed_to)
         if [ -n "$exec_got" ]; then
             echo "$PROG: takeaway: gc.execution_routed_to on $bead read back as '$exec_got', expected empty — repairing" >&2
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
             gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.execution_routed_to >/dev/null 2>&1 || true
-            exec_got=$(meta_now "$bead" gc.execution_routed_to)
+            # One read answers both questions, whether the stamp survived and
+            # whether it hides a bead held for placement, so the two answers
+            # cannot come from different states of the bead.
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            exec_row=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub) || exec_row=""
+            exec_got=$(printf '%s' "$exec_row" \
+                | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.execution_routed_to"] // "") else "" end' 2>/dev/null) || exec_got=""
             if [ -z "$exec_got" ]; then
                 echo "$PROG: takeaway: the execution-stamp repair landed on $bead" >&2
             else
                 exec_missed=1
+                exec_hides=$(printf '%s' "$exec_row" | stamp_hides_placement)
             fi
         fi
     fi
@@ -1405,8 +1430,8 @@ cmd_takeaway() {
     if [ -n "$settled_missed" ]; then
         exit 4
     fi
-    # A surviving session pin is exit-4 like the route above, not a
-    # warn like the cosmetic pour stamp below: both have readers. A caller reading
+    # A surviving session pin is exit-4 like the route above, on any bead: both
+    # pins have readers wherever they are left. A caller reading
     # a zero exit as "released, identity cleared" would route the bead onward — the
     # exact next step that turns a surviving gc.session_name into the residue
     # doctor/executor-identity-residue reports. The release and edges are kept and
@@ -1419,12 +1444,17 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead still carries gc.session_id='$sid_got' after release — a stale orphan-recovery pin, so the runtime resolves a dead owner for a bead nobody holds. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_id" >&2
         exit 4
     fi
-    # A surviving pour stamp is cosmetic — no arm or reconcile guard reads it — so
-    # it WARNS and the release stands. Failing here would exit 4 into
-    # first-reaction-dispose's die before its --then-route arm, skipping the arm
-    # over a harmless stamp.
+    # A surviving pour stamp fails the verb where it hides a bead held for
+    # placement: placement.sh reads it as a live pour, so gc-helm.sh unplaced does
+    # not list the bead and the placement sitting is never shown it. On any other
+    # bead the stamp WARNS and the release stands, for the --then-route arm that
+    # runs next.
     if [ -n "$exec_missed" ]; then
-        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — cosmetic provenance a finished pour left; no arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
+        if [ "$exec_hides" = 1 ]; then
+            echo "$PROG: takeaway: $bead is held for placement but still carries gc.execution_routed_to='$exec_got' after release. placement.sh reads that stamp as a live pour, so gc-helm.sh unplaced does not list $bead and the placement sitting is never shown it. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
+            exit 4
+        fi
+        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — provenance a finished pour left. No arm or reconcile guard reads it (deferred-dispatch keys on gc.dispatch_when_ready_slung), and $bead is not held for placement, where the queue would read it as a live pour, so the release stands. Clear it by hand if you want it gone: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
     fi
     # A route asked for on a closed anchor is refused the same way a route that
     # would not stamp is: the useful writes stand, and the exit is non-zero so

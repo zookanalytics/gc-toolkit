@@ -164,13 +164,23 @@ if [ "${1:-}" = demand ]; then
   printf 'demand %s blocks %s (by proactive): %s\n' "${FAKE_GATE_ID:-tk-gate1}" "$2" "$3"
   exit 0
 fi
-# Model gc-helm.sh takeaway --release retiring the pour stamp as provenance. The
-# shared-state file stands in for gc.execution_routed_to; a run that does not opt
-# in (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm no longer depends on
-# this clear — a plain arm lands whether or not the stamp is set — so the clear
-# is hygiene the release owes, not a precondition for the dispatch.
+# Model gc-helm.sh takeaway --release retiring the pour stamp. The shared-state
+# file stands in for gc.execution_routed_to; a run that does not opt in
+# (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm does not depend on this
+# clear: a plain arm lands whether or not the stamp is set. FAKE_HELM_KEEPS_STAMP
+# models a clear that does not land. gc-helm.sh then fails the release (exit 4)
+# when the stamp is all that places the bead. That is a bead intake marked
+# placement=pending, released with no route or assignee. Everywhere else it warns
+# and exits 0.
 case " $* " in
-  *" --release "*) [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ] && : > "$FAKE_EXEC_ROUTED_FILE" ;;
+  *" --release "*)
+    if [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ]; then
+      if [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ]; then
+        : > "$FAKE_EXEC_ROUTED_FILE"
+      elif [ "$(cat "$FAKE_STATE.placement" 2>/dev/null)" = pending ]; then
+        case " $* " in *" --route "*|*" --assign "*) ;; *) exit 4 ;; esac
+      fi
+    fi ;;
 esac
 exit 0
 HELM
@@ -516,7 +526,8 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
 
 # Control: a release that leaves the pour stamp set still lets the plain arm land.
-# The coupled surface is gc-helm.sh takeaway --release: it WARNS on a surviving
+# The coupled surface is gc-helm.sh takeaway --release: on a bead nothing holds
+# for placement, here a member its parent places, it WARNS on a surviving
 # gc.execution_routed_to and returns 0 rather than failing, because no arm or
 # reconcile guard reads that stamp. The stub returns 0 with the stamp still set to
 # model exactly that path, so this control exercises the real release, not a state
@@ -531,10 +542,10 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 unset FAKE_HELM_KEEPS_STAMP
 
 # Contract: the arm is downstream of a release that SUCCEEDED. A genuine release
-# failure — not a cosmetic surviving stamp, but gc-helm exiting non-zero because a
-# write it owed did not land — dies before the arm, so a bead whose disposition
-# only half-wrote is never armed to auto-resume from that state, and no landed
-# proof or closed R says otherwise.
+# failure — not a surviving stamp gc-helm only warns on, but gc-helm exiting
+# non-zero because a write it owed did not land — dies before the arm, so a bead
+# whose disposition only half-wrote is never armed to auto-resume from that
+# state, and no landed proof or closed R says otherwise.
 export FAKE_HELM_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
@@ -1205,6 +1216,8 @@ unset FAKE_HELM_FAILS
 #                  and a blocks edge is not
 #   (INTAKEANCHOR) PR-finishing work (anchor_bead) is routed
 #   (INTAKEMARK)   a marker that does not land stops the exit before the release
+#   (INTAKESTAMP)  a pour stamp the release cannot clear from a held subject
+#                  stops the exit before its landed proof
 #   (INTAKEBLK)    an unplaced blocked subject's edge lands and nothing is armed
 #   (INTAKEDRY)    a dry run names the hold and writes nothing
 #   (INTAKEUNREAD) an unreadable subject proves no membership, so it is held
@@ -1254,6 +1267,29 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(INTAKEMARK) a marker that lands on the retry lets the exit through"
 has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKEMARK) …and the bead is released"
 unset FAKE_DROP_PLACEMENT
+
+# (INTAKESTAMP) a held subject still carries a dead pour's stamp, and the release
+# cannot clear it. gc-helm.sh fails the release, because placement.sh reads the
+# stamp as a live pour and the queue would not list the bead. The exit stops
+# there, before its landed proof, so the reaction is not recorded done over a hold
+# the sitting cannot see, and R stays open for a re-run.
+export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed" FAKE_HELM_KEEPS_STAMP=1
+printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "4" "(INTAKESTAMP) a held subject whose pour stamp survives the release fails the exit"
+has "HELM takeaway tk-sub t --by proactive --release --no-wait" "$LOG" "(INTAKESTAMP) …at the release"
+has "gc-helm.sh takeaway failed on tk-sub" "$ERR" "(INTAKESTAMP) …naming the release that failed"
+hasnt "gc.reacted_by" "$LOG" "(INTAKESTAMP) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(INTAKESTAMP) …and the reaction bead open for a re-run"
+# Control: the same stamp on a member is no hold, so the release warns and exits
+# 0, and the reaction lands.
+printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(INTAKESTAMP) the same stamp on a member does not fail the exit"
+has "gc.reacted_by" "$LOG" "(INTAKESTAMP) …and the landed proof is stamped"
+unset FAKE_EXEC_ROUTED_FILE FAKE_HELM_KEEPS_STAMP
 
 export FAKE_SHOW_JSON="$UNPLACED" FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "waits on the migration" --takeaway "held: migration first" \
