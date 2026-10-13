@@ -12,8 +12,10 @@
 # (hold-lib.sh: an arm a park holds, on its epic or two levels up, or whose epic
 # waits on a task, is not owed; a demand gate on the epic holds nothing; a park
 # released just now dates the window; an arm in flight is held by its own
-# blockers alone; an unreadable ancestor or a failed walk leaves the arm NOT
-# checked, naming what could not be read), the
+# blockers alone; a pinned own blocker holds nothing, as a closed one does,
+# while one in progress, blocked, deferred or hooked still holds; an unreadable
+# ancestor or a failed walk leaves the arm NOT checked, naming what could not be
+# read), the
 # suspended-rig skip, and the quiet path (no armed beads). The check reads
 # dependencies in bulk: one `bd dep list` for the whole candidate set (edge
 # records) then one `bd list --id` for the blockers' statuses — so a store costs
@@ -188,6 +190,9 @@ e_pc()  { printf '{"issue_id":"%s","depends_on_id":"%s","type":"parent-child"}' 
 blockers_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blockers.json"; }
 b_closed() { printf '{"id":"%s","status":"closed","closed_at":"%s"}' "$1" "$2"; }
 b_open()   { printf '{"id":"%s","status":"open"}' "$1"; }
+# A blocker at status $2. bd keeps a closed_at only on a closed bead, so it has
+# none.
+b_status() { printf '{"id":"%s","status":"%s"}' "$1" "$2"; }
 # A closed GATE blocker — bd list hides it unless --include-gates is passed, so
 # this exercises the include flags the status lookup must carry.
 b_closed_gate() { printf '{"id":"%s","status":"closed","closed_at":"%s","issue_type":"gate"}' "$1" "$2"; }
@@ -513,6 +518,33 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm with no blocker of its own whose ancestor cannot be read warns (exit 1)"
 has "$OUT" "could not read [epic-ghost]" "the unread ancestor is named though no blocker of the arm has closed"
 hasnt "$OUT" "owed but not firing" "an unread hold is NOT reported as owed"
+clear_stores
+
+# --- 23. OWED: a pinned own blocker holds nothing, as a closed one does
+#          (hold-lib.sh's hold_done, which reconcile slings on), so an arm behind
+#          it alone is owed. A pinned blocker has no close, so the window runs
+#          from the arm's armed_at --------------------------------------------
+armed_store alpha "$(aedged p-1 "" pin-0)"
+edges_store alpha "$(e_blk p-1 pin-0)"
+blockers_store alpha "$(b_status pin-0 pinned)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose only own blocker is pinned is owed (exit 1)"
+has "$OUT" "alpha bead p-1" "it is reported as owed"
+armed_store alpha "$(aedged p-1 "" pin-0 | jq -c --arg t "$RECENT" '.metadata["gc.dispatch_when_ready_armed_at"] = $t')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the same arm armed just now is within cadence, not owed"
+hasnt "$OUT" "alpha bead p-1" "…so it is not reported"
+clear_stores
+
+# --- 24. HELD: a blocker in progress, blocked, deferred or hooked still holds
+#          its arm; only a closed or a pinned one releases it. The listing rows
+#          carry no edges, so the join alone reads these blockers --------------
+armed_store alpha "$(aarmed s-1)" "$(aarmed s-2)" "$(aarmed s-3)" "$(aarmed s-4)"
+edges_store alpha "$(e_blk s-1 x-1)" "$(e_blk s-2 x-2)" "$(e_blk s-3 x-3)" "$(e_blk s-4 x-4)"
+blockers_store alpha "$(b_status x-1 in_progress)" "$(b_status x-2 blocked)" "$(b_status x-3 deferred)" "$(b_status x-4 hooked)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "arms whose blockers are in progress, blocked, deferred or hooked are held, not owed (exit 0)"
+hasnt "$OUT" "owed but not firing" "none of them is reported"
 clear_stores
 
 # --- the owed window is the deferred-dispatch order's cadence window ----------

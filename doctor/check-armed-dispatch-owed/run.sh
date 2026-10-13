@@ -274,7 +274,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$edges" ] || edges='[]'
 
     # Resolve the blockers' statuses in one more listing: every distinct blocker
-    # id, read with --all so closed blockers (the dispatch-releasing ones) are
+    # id, read with --all so a blocker that releases the arm, closed or pinned, is
     # included and --brief to drop free-form text the join does not read. A blocks
     # edge can name a blocker of ANY type, and a gate/infra/template blocker is
     # common (a graduation gate blocking a convoy child, for one); bd list hides
@@ -295,21 +295,26 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$blockers" ] || blockers='[]'
     fi
 
-    # Join per candidate: count its still-open blockers, and take the latest
-    # blocker close (ISO-8601 UTC sorts chronologically) as the owed-since. jq
-    # does the set join; the age arithmetic below stays in bash, so the dual
-    # GNU/BSD date parse and the "unparseable timestamp -> skip" fallback are
-    # unchanged from the per-bead version. jq emits one line per candidate, so an
-    # empty result with candidates present is a jq failure — fail closed.
+    # Join per candidate: count the blockers that still hold it, and take the
+    # latest blocker close (ISO-8601 UTC sorts chronologically) as the
+    # owed-since. Whether a blocker still holds is hold-lib.sh's hold_done, the
+    # test reconcile slings on, so a closed or a pinned blocker holds nothing.
+    # bd keeps a close time only on a closed bead, so a pinned blocker adds no
+    # time to the owed-since; with no close here or on an ancestor, the arm is
+    # judged from its armed_at. jq does the set join; the age arithmetic below
+    # stays in bash, so the dual GNU/BSD date parse and the "unparseable
+    # timestamp -> skip" fallback are unchanged from the per-bead version. jq
+    # emits one line per candidate, so an empty result with candidates present
+    # is a jq failure — fail closed.
     cand_json=$(printf '%s\n' "${cand_ids[@]}" | jq -R . | jq -sc .)
-    joined=$(jq -rn --argjson edges "$edges" --argjson blockers "$blockers" --argjson cands "$cand_json" '
+    joined=$(jq -rn --argjson edges "$edges" --argjson blockers "$blockers" --argjson cands "$cand_json" "$HOLD_JQ"'
         ($blockers | map({key: .id, value: .}) | from_entries) as $bmap
         | $cands[] | . as $cid
         | [ $edges[] | select(.issue_id == $cid) | .depends_on_id ] as $blks
         | [ $blks[] | select($bmap[.] == null) ] as $missing
         | if ($missing | length) > 0 then "unchecked\t\($cid)\t\($missing | join(" "))"
           else
-            ([ $blks[] | select($bmap[.].status != "closed") ] | length) as $open_blk
+            ([ $blks[] | select($bmap[.] | hold_done | not) ] | length) as $open_blk
             | ([ $blks[] | $bmap[.].closed_at | select(. != "") ] | max) as $latest
             | "ready\t\($cid)\t\($open_blk)\t\($latest // "")"
           end' 2>/dev/null)
@@ -331,7 +336,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     done <<< "$joined"
     [ "${#free_ids[@]}" -gt 0 ] || continue
 
-    # An arm whose own blockers have all closed is owed only when nothing holds
+    # An arm whose own blockers have all cleared is owed only when nothing holds
     # it, by the predicate reconcile slings on. The walk reads the arms'
     # ancestors a generation at a time and then their blockers once, from this
     # one listing's edges, so it costs the store a few reads, and only for arms
@@ -357,7 +362,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")' "$hold_dir/seed.json" 2>/dev/null)
     fi
     if [ -z "$hold_rows" ]; then
-        warnings+=("$label: could not read what holds ${#free_ids[@]} armed bead(s) whose own blockers have closed in $rig_path/.beads — they were NOT checked")
+        warnings+=("$label: could not read what holds ${#free_ids[@]} armed bead(s) whose own blockers have cleared in $rig_path/.beads — they were NOT checked")
         continue
     fi
 
