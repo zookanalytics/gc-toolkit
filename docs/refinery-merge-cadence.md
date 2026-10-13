@@ -454,8 +454,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    those only the ones naming the comment when any do. It says Fixed when the
    comment's must-fix finding closed with that rework. It never names the PR
    head for being the head, since the head can be a merge of the base. A
-   finding ruled needs-you keeps its comment awaiting a person, and its owed
-   reply is the answer, leading with the question mark. A declined or deferred
+   finding ruled needs-you keeps its comment awaiting a person while it is
+   open, and its owed reply is the answer, leading with the question mark. A
+   declined or deferred
    finding's owed reply is its comment's answer too. That reply leads with the
    ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
    the PR tells a fix from a pushback, and the comment trades EYES for
@@ -465,7 +466,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A review
+   accept or overrule, as a needs-you finding's does until they rule. A
+   needs-you finding closes once the visit holding its question, followed
+   through any fold, has closed carrying the operator's ruling and no fix unit
+   on its lane, nor a ruling's rework child, is in flight, and its comment then
+   resolves through its batch's bead like any other. A visit closed moot,
+   benign, dismissed or cut short carries no ruling and releases nothing. A review
    body or a Conversation comment has no thread, so a Conversation comment of
    the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves

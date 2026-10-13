@@ -310,15 +310,28 @@ The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. Only a fix's thread is
+the operator can judge — files a visit and stays open. A comment whose question
+an open visit on the anchor's feedback already carries is `needs-you` on that
+visit: the rework minted for its batch may have put the question to the operator
+before the validator ran, and `finding.sh` refuses every other ruling of the
+finding while such a visit tracks or holds that rework. Only a fix's thread is
 resolved behind its answer: the thread of a declined or deferred finding stays
 open for the operator to accept or overrule. A `CHANGES_REQUESTED`
-that is feedback is auto-dismissed once every finding it raised has closed, and
+that is feedback is auto-dismissed once every finding it raised has closed and
+every answer one of them owes its raiser (a decline's reason, a deferral's
+follow-up, a `needs-you` finding's visit) is on the PR, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
-review open until the operator rules its visit while the others let it clear.
-The review the operator reads on the PR therefore always matches what is still
-owed.
+review open until the operator rules the visit holding its question and the work
+the ruling calls for lands, while the others let it clear. The ruling is
+recorded on the visit (`gc.ruling`), and a fold hands the question on to the
+visit it folds into (`gc.folded_into`), so a visit closed moot, benign,
+dismissed or cut short releases nothing. Such a finding stays open until its
+anchor closes, and the review it holds stays changes-requested until the
+operator's own approval replaces it. A sitting cut short is one such close: its
+wait moves to the subject, and the later sitting that rules on it closes a visit
+of its own, which the finding does not follow. The review the operator reads on
+the PR therefore always matches what is still owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
