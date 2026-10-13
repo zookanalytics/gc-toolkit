@@ -83,10 +83,11 @@ when the output path is not covered by an LFS filter.
 ## One-call capture and the rig-demo mol
 
 `assets/scripts/rig-demo-capture.sh` runs the three steps above (resolve the
-engine, lint, capture) as one call. It exits non-zero when anything stops the
-capture, including a run that leaves no MP4 behind. It carries no bead or
-routing logic, so a shell and a formula step drive it the same way. Its
-`--help` lists every flag:
+engine, lint, capture) as one call. It exits 1 when anything stops the capture,
+including a run that leaves no MP4 behind, and 3 when it recorded a clip in
+which at least one step failed its proof. Its last line names the clip and says
+whether it is narrated. It carries no bead or routing logic, so a shell and a
+formula step drive it the same way. Its `--help` lists every flag:
 
 ```bash
 assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \
@@ -99,7 +100,8 @@ scenario into a script (a ready one, or one written from a bead with
 closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour must set exactly one app target
 (`serve_dir`, `serve_cmd`, or `base_url`), because nothing in the toolkit maps
-a rig to its app.
+a rig to its app. The `demo` review check makes the call inside the review
+instead of pouring the mol (`skills/review-demo/SKILL.md`).
 
 ## Capture — you drive over Playwright MCP
 
