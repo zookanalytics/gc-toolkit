@@ -184,7 +184,7 @@ RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # --- 1. OWED: open arm, own blocks closed long ago, nothing holds it ---------
 armed_store alpha "$(aarmed a-1)"
 edges_store alpha "$(e_pc a-1 epic)" "$(e_blk a-1 b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic "" "")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an owed-but-not-firing arm warns (exit 1)"
 has "$OUT" "owed but not firing" "the headline names the defect"
