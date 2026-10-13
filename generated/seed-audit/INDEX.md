@@ -75,7 +75,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,187 | 1,546 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
+| [`mol-review`](formulas/mol-review.md) | `city` | 2,899 | 724 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
 | [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,545 | 1,136 |
