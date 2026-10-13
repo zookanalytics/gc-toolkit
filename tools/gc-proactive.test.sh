@@ -35,6 +35,14 @@
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
 #   (STEP-KEEP)  …while a raw input, and a bead whose gc.step_ref is empty, stay candidates
 #   (STEP-SWEEP) a scan --sling sweep reacts to raw input and never to a step bead
+# A bead that waits for placement (assets/scripts/placement.sh) is the placement
+# sitting's next move, and the witness and the distiller file theirs with no
+# takeaway, so the marker is all that sets them apart from raw input:
+#   (PLACEMENT-DROP)  scan_precision_filter drops a bead in the placement queue
+#   (PLACEMENT-KEEP)  …while a raw input, and a marked bead something placed
+#                     since, stay candidates
+#   (PLACEMENT-SWEEP) a scan --sling sweep reacts to raw input and never to a
+#                     bead in the queue
 # A failed read is not an empty ready set, and a page the filter cannot build is
 # not an empty page, so the scan fails on either rather than report no candidates:
 #   (READ-FAILCLOSED) a gc bd ready read that fails, in each shape a failed read
@@ -252,6 +260,45 @@ has "$OUT" "would file a reaction bead tracking tk-raw" "(STEP-SWEEP) the sweep 
 hasnt "$OUT" "tk-step-validate" "(STEP-SWEEP) …and none at the mol-validate step"
 hasnt "$OUT" "tk-step-reaction" "(STEP-SWEEP) …nor at the mol-first-reaction step"
 hasnt "$OUT" "tk-step-finalize" "(STEP-SWEEP) …nor at the control step"
+
+# --- a bead in the placement queue is not a scan candidate -------------------
+# tk-held-bug is the bug the witness's bug-file block files, and tk-held-proposal
+# a prompt-update the feedback distiller files: each is marked placement=pending
+# in its create, unrouted, and carries no takeaway. tk-placed-pour carries the
+# marker too, but a pour has placed it since (gc.execution_routed_to), so it is
+# not in the queue. Each passes every other clause, so placement.sh's
+# awaiting_placement is all that sets the first two apart from tk-raw.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-raw", "issue_type":"task", "description":"a raw input bead", "title":"raw input", "metadata":{}},
+  {"id":"tk-held-bug", "issue_type":"bug", "description":"a pack defect the witness filed", "title":"pack defect",
+   "metadata":{"placement":"pending"}},
+  {"id":"tk-held-proposal", "issue_type":"task", "description":"a rule the distiller proposes", "title":"prompt update",
+   "metadata":{"placement":"pending","task_kind":"prompt-update","target":"main","merge_strategy":"mr"}},
+  {"id":"tk-placed-pour", "issue_type":"task", "description":"a held bead a pour placed since", "title":"placed by a pour",
+   "metadata":{"placement":"pending","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}
+]
+JSON
+
+echo "# scan_precision_filter drops a bead in the placement queue, keeps raw input"
+IDS="$(bash "$SCRIPT" scan --json 2>/dev/null | jq -r '.[].id' | sort | tr '\n' ' ')"
+has "$IDS" "tk-raw" "(PLACEMENT-KEEP) a raw input beside the held beads is still a candidate"
+has "$IDS" "tk-placed-pour" "(PLACEMENT-KEEP) …and so is a marked bead something has placed since"
+hasnt "$IDS" "tk-held-bug" "(PLACEMENT-DROP) a bug the witness holds for placement is not a scan candidate"
+hasnt "$IDS" "tk-held-proposal" "(PLACEMENT-DROP) …nor a proposal the distiller holds for placement"
+
+# The store holds every bead the scan read, so the sling's subject gate finds
+# each one the sweep reaches.
+jq 'map({key: .id, value: {metadata: .metadata}}) | from_entries' "$TMP/scan.json" > "$TMP/beads.json"
+
+echo "# a scan --sling sweep reacts to raw input and never to a bead in the placement queue"
+set +e
+OUT="$(bash "$SCRIPT" scan --sling 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(PLACEMENT-SWEEP) the sweep exits 0"
+has "$OUT" "would file a reaction bead tracking tk-raw" "(PLACEMENT-SWEEP) the sweep files a first reaction at the raw input"
+hasnt "$OUT" "tk-held-bug" "(PLACEMENT-SWEEP) …and none at the witness's held bug"
+hasnt "$OUT" "tk-held-proposal" "(PLACEMENT-SWEEP) …nor at the distiller's held proposal"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
