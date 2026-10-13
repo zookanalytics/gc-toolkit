@@ -3,9 +3,11 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,8 +17,8 @@ import (
 // The behaviour of `gctk lifecycle` against a bead store is covered by
 // assets/scripts/lifecycle.test.sh, which drives this binary through the same
 // stub harness as the script it replaces — that suite is the acceptance bar.
-// What is here is what that suite cannot reach: the argument grammar, and the
-// machine dump the drift assertion reads.
+// What is here is what that suite cannot reach: the argument grammar, the
+// machine dump the drift assertion reads, and how a landing's git calls stop.
 
 func TestKVSplitsOnTheFirstEquals(t *testing.T) {
 	// The shell's ${v%%=*} / ${v#*=} pair. A URL value carries more '=' signs
@@ -271,32 +273,63 @@ func TestTakeawayCapIsMeasuredInCodepoints(t *testing.T) {
 	}
 }
 
-func TestGitInReturnsAtItsBoundWhileAChildOfGitHoldsItsOutput(t *testing.T) {
-	// The landing fetch reaches origin through ssh, and the timeout kills only
-	// git. An ssh that outlives it still holds the stdout and stderr git handed
-	// it, so a wait that reads them through a pipe lasts as long as the ssh does,
-	// and a remote that does not answer stalls the merged record past its bound.
+// fakeGit puts an executable `git` running script at the front of PATH for the
+// test, in a fresh directory it returns. Every process the script starts leads
+// or joins git's own group, and the cleanup kills whatever of that group is
+// still running.
+func fakeGit(t *testing.T, script string) string {
+	t.Helper()
 	dir := t.TempDir()
-	pidFile := filepath.Join(dir, "child.pid")
-	fake := "#!/bin/sh\nsleep 10 &\necho $! > '" + pidFile + "'\nsleep 10\n"
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(fake), 0o755); err != nil {
+	body := "#!/bin/sh\necho $$ > '" + filepath.Join(dir, "git.pid") + "'\n" + script
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Cleanup(func() {
-		b, err := os.ReadFile(pidFile)
-		if err != nil {
-			return
-		}
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
-			if p, err := os.FindProcess(pid); err == nil {
-				_ = p.Kill()
-			}
+		if pid := readPid(filepath.Join(dir, "git.pid")); pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	})
-	restore := landingFetchTimeout
-	landingFetchTimeout = time.Second
-	defer func() { landingFetchTimeout = restore }()
+	return dir
+}
+
+func readPid(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return pid
+}
+
+// appears reports whether path exists within d.
+func appears(path string, d time.Duration) bool {
+	for deadline := time.Now().Add(d); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+	}
+}
+
+// shortBounds sets the call bound and the stop grace for one test.
+func shortBounds(t *testing.T, bound, grace time.Duration) {
+	t.Helper()
+	b, g := landingFetchTimeout, landingStopGrace
+	landingFetchTimeout, landingStopGrace = bound, grace
+	t.Cleanup(func() { landingFetchTimeout, landingStopGrace = b, g })
+}
+
+func TestGitInReturnsAtItsBoundWhileAChildOfGitHoldsItsOutput(t *testing.T) {
+	// The landing fetch reaches origin through ssh. A child of git that outlives
+	// the stop still holds the stdout and stderr git handed it, so a wait that
+	// reads them through a pipe lasts as long as that child does, and a remote
+	// that does not answer stalls the merged record past its bound. This child
+	// ignores SIGTERM, so it outlives the stop.
+	dir := fakeGit(t, "(trap '' TERM; exec sleep 10) &\nsleep 10\n")
+	shortBounds(t, time.Second, 30*time.Second)
 
 	start := time.Now()
 	rc := gitIn(dir, "fetch", "origin")
@@ -304,6 +337,90 @@ func TestGitInReturnsAtItsBoundWhileAChildOfGitHoldsItsOutput(t *testing.T) {
 		t.Errorf("gitIn returned after %s, past its %s bound, because git's child still held its output", elapsed.Round(time.Millisecond), landingFetchTimeout)
 	}
 	if rc == 0 {
-		t.Errorf("a git killed at its bound reported exit status 0")
+		t.Errorf("a git stopped at its bound reported exit status 0")
+	}
+}
+
+func TestGitInStopsGitsGroupWithSIGTERMAtItsBound(t *testing.T) {
+	// A fetch stopped at its bound may hold lock files in the rig checkout. git
+	// removes them in its SIGTERM handler, which a SIGKILL never runs, so each
+	// process here records the SIGTERM it handles, the way git's handler would
+	// remove its locks. The child stands for the ssh that carries the fetch: it
+	// is in git's group, and a signal sent to git alone would not reach it.
+	marks := t.TempDir()
+	gitTerm, childTerm := filepath.Join(marks, "git.term"), filepath.Join(marks, "child.term")
+	dir := fakeGit(t, "sh -c 'trap \"touch "+childTerm+"; exit 143\" TERM; sleep 30 & wait $!' &\n"+
+		"trap 'touch "+gitTerm+"; exit 143' TERM\nsleep 30 &\nwait $!\n")
+	shortBounds(t, time.Second, 30*time.Second)
+
+	start := time.Now()
+	rc := gitIn(dir, "fetch", "origin")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("gitIn returned after %s: git did not exit on the stop at its %s bound", elapsed.Round(time.Millisecond), landingFetchTimeout)
+	}
+	if rc == 0 {
+		t.Errorf("a git stopped at its bound reported exit status 0")
+	}
+	if !appears(gitTerm, 5*time.Second) {
+		t.Errorf("git was stopped without a SIGTERM it could handle, so a fetch would leave its lock files behind")
+	}
+	if !appears(childTerm, 5*time.Second) {
+		t.Errorf("git's child got no SIGTERM, so the ssh carrying a fetch would outlive the stop")
+	}
+}
+
+func TestGitInKillsAGitThatOutlivesItsStopGrace(t *testing.T) {
+	// A git that does not exit on SIGTERM is killed once the grace is spent, so
+	// the call still ends.
+	dir := fakeGit(t, "trap '' TERM\nsleep 30\n")
+	shortBounds(t, time.Second, time.Second)
+
+	start := time.Now()
+	rc := gitIn(dir, "fetch", "origin")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("gitIn returned after %s, past its %s bound and %s grace", elapsed.Round(time.Millisecond), landingFetchTimeout, landingStopGrace)
+	}
+	if rc == 0 {
+		t.Errorf("a git killed after its grace reported exit status 0")
+	}
+}
+
+func TestGitInPassesAStopSignalOnToGitsGroup(t *testing.T) {
+	// git leads its own group, so the SIGTERM the order runner sends this
+	// process's group on a pass that outlives its timeout does not reach it. The
+	// call passes it on, then exits with the status a SIGTERM gives.
+	marks := t.TempDir()
+	gitTerm := filepath.Join(marks, "git.term")
+	dir := fakeGit(t, "trap 'touch "+gitTerm+"; exit 143' TERM\nsleep 30 &\nwait $!\n")
+	shortBounds(t, 30*time.Second, 30*time.Second)
+	exited := make(chan int, 1)
+	restore := exitProcess
+	exitProcess = func(code int) { exited <- code }
+	t.Cleanup(func() { exitProcess = restore })
+	// The test's own relay, so a call that does not take the signal fails this
+	// test rather than ending the test binary.
+	held := make(chan os.Signal, 1)
+	signal.Notify(held, syscall.SIGTERM)
+	t.Cleanup(func() { signal.Stop(held) })
+
+	rc := make(chan int, 1)
+	go func() { rc <- gitIn(dir, "fetch", "origin") }()
+	if !appears(filepath.Join(dir, "git.pid"), 5*time.Second) {
+		t.Fatal("the fake git never started")
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exited:
+		if code != 128+int(syscall.SIGTERM) {
+			t.Errorf("a relayed SIGTERM exited %d, want %d", code, 128+int(syscall.SIGTERM))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("gitIn did not exit on the SIGTERM this process received")
+	}
+	<-rc
+	if !appears(gitTerm, 5*time.Second) {
+		t.Errorf("the SIGTERM this process received never reached git's group")
 	}
 }

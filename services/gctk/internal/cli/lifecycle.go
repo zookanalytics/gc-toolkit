@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -226,18 +228,77 @@ func validBranch(name string) bool {
 	return err == nil && strings.TrimSuffix(string(out), "\n") == name
 }
 
+// landingStopGrace is how long a git call stopped at its bound has to exit
+// before it is killed outright. A variable so a test can shorten it.
+var landingStopGrace = 5 * time.Second
+
+// exitProcess ends this process. A variable so a test can watch the exit a
+// relayed signal makes instead of taking it.
+var exitProcess = os.Exit
+
 // gitIn runs one git command in dir, bounded by landingFetchTimeout, and
 // returns its exit status. GIT_TERMINAL_PROMPT=0 makes a remote that asks for
 // credentials fail the call instead of waiting on a terminal nobody is at.
-// git's output goes to the null device, never to a pipe. The fetch reaches
-// origin through ssh and the timeout kills only git, so a pipe would hold the
-// wait open for as long as that ssh holds its end.
+// git's output goes to the null device, never to a pipe, so nothing that
+// outlives git can hold the wait open.
+//
+// git leads a process group of its own, and every stop is a SIGTERM to that
+// group. A fetch holds lock files in the rig checkout, such as
+// refs/remotes/origin/<branch>.lock. git removes them on SIGTERM and cannot on
+// SIGKILL, and a lock left behind fails every later fetch in that checkout
+// until a person deletes it. The ssh that carries the fetch is git's child and
+// keeps running after a signal sent to git alone, so the group is what stops
+// both. A git still running landingStopGrace after the stop is killed outright.
+//
+// Its own group also puts git out of reach of a signal sent to this process's
+// group, which is how the order runner stops a pass that outlives its timeout
+// and how a terminal delivers Ctrl-C. So a SIGTERM or SIGINT that arrives during
+// the call is passed on to git's group, and this process then exits with the
+// status that signal gives, writing nothing more. A signal this process
+// inherited as ignored stays ignored.
 func gitIn(dir string, args ...string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), landingFetchTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return gcbd.ExitCode(cmd.Run())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = landingStopGrace
+
+	stop := make(chan os.Signal, 1)
+	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		if !signal.Ignored(s) {
+			signal.Notify(stop, s)
+		}
+	}
+	var got os.Signal
+	rc := 0
+	if err := cmd.Start(); err != nil {
+		rc = gcbd.ExitCode(err)
+	} else {
+		waited := make(chan error, 1)
+		go func() { waited <- cmd.Wait() }()
+		select {
+		case err := <-waited:
+			rc = gcbd.ExitCode(err)
+		case got = <-stop:
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		}
+	}
+	// A signal that arrived as git finished is still this process's to take.
+	signal.Stop(stop)
+	if got == nil {
+		select {
+		case got = <-stop:
+		default:
+		}
+	}
+	if got != nil {
+		code := 128 + int(got.(syscall.Signal))
+		exitProcess(code)
+		return code
+	}
+	return rc
 }
 
 // squeezeSpace collapses every run of POSIX whitespace to one space and trims
