@@ -19,7 +19,7 @@
 # person has a subtree of one.
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
-# to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-helm-build.sh),
+# to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-build.sh),
 # falling back to PATH. An absent binary and an unreadable board each get their
 # own line; neither is ever rendered as an empty board.
 #
@@ -67,7 +67,7 @@ for cand in \
 done
 [ -n "$HELM_SVC" ] || HELM_SVC="$(command -v helm-svc 2>/dev/null || true)"
 if [ -z "$HELM_SVC" ]; then
-    gcmux display-message -d 6000 "Helm: helm-svc binary not found (build it: assets/scripts/gc-helm-build.sh)"
+    gcmux display-message -d 6000 "Helm: helm-svc binary not found (build it: assets/scripts/gc-build.sh helm)"
     exit 0
 fi
 
