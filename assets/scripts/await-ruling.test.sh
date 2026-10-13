@@ -16,10 +16,14 @@
 #     cleared (the arm refuses a routed bead);
 #   * re-running converges: an edge and an arm already in place count as landed
 #     and no second edge is written;
+#   * the pool outlives the route clear: the update that clears the route keys
+#     records it as resling_target, so after an arm that is refused or whose
+#     write fails, a re-run with no --target arms to the same pool;
 #   * fail-closed: an unreadable bead, a non-open bead, no visit, a refused edge,
 #     a refused route clear, a refused arm, no pool to re-sling to;
 #   * a closed work bead needs no wait and exits 0;
-#   * usage errors.
+#   * usage errors;
+#   * every metadata key the script writes is registered in lifecycle.toml.
 #
 # No live city, Dolt, network, or beads: a tmpdir, a `gc` stub over a JSON store
 # and an edge file, and the scripts themselves.
@@ -49,7 +53,8 @@ mkdir -p "$TMP/bin"
 # the beads <id> depends on, each with dependency_type and status. `bd dep add`
 # records an edge unless $FAKE_DEP_FAIL is set. `bd update` applies
 # --set-metadata, --unset-metadata and --append-notes; it refuses when the id is
-# in $FAKE_UPD_FAIL.
+# in $FAKE_UPD_FAIL, and refuses the arm's write (one that sets
+# gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
@@ -98,6 +103,11 @@ case "$verb" in
   update)
     id="${1:-}"; shift || true
     case " ${FAKE_UPD_FAIL:-} " in *" $id "*) echo "bd: cannot update $id (stub)" >&2; exit 1 ;; esac
+    if [ -n "${FAKE_ARM_WRITE_FAIL:-}" ]; then
+      for x in "$@"; do
+        case "$x" in gc.dispatch_when_ready=*) echo "bd: store fault writing $id (stub)" >&2; exit 1 ;; esac
+      done
+    fi
     tmp="$S.n"; cp "$S" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -208,12 +218,44 @@ reset
 OUT=$(FAKE_UPD_FAIL=tk-work "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 1 "a refused route clear: exit 1"
 has "$OUT" "could not clear the route keys" "a refused route clear: said"
+eq "$(meta tk-work gc.execution_routed_to)" "$POOL" "a refused route clear: the pour's pool stamp is untouched"
 
+# A refused arm after the route clear: the pool is kept on the bead, so the
+# re-run after the refusal lifts arms with no --target.
 reset
 jq -c 'map(if .id == "tk-work" then .metadata["gc.dispatch_when_ready_slung"] = "slung@2026-10-12T00:00:00Z" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
 run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 1 "an arm deferred-dispatch refuses (a prior sling not yet retired): exit 1"
 has "$OUT" "the re-sling was not armed" "a refused arm: said, with deferred-dispatch's reason"
+eq "$(blocks_rows)" 1 "a refused arm: the edge onto the visit stays"
+eq "$(meta tk-work gc.execution_routed_to)" "" "a refused arm: the route keys are cleared"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused arm: nothing is armed"
+eq "$(meta tk-work resling_target)" "$POOL" "a refused arm: the pool the cleared route named is kept as resling_target"
+eq "$(grep -F -- '--set-metadata gc.execution_routed_to= ' "$GC_LOG" | grep -cF -- "--set-metadata resling_target=$POOL" | tr -d ' ')" 1 \
+  "a refused arm: resling_target is written by the update that clears the route keys"
+# The reconcile order lifts this refusal itself: it retires a proven marker by
+# disarming the bead.
+"$HERE/deferred-dispatch.sh" disarm tk-work --reason "the reconcile order retires a proven marker" >/dev/null 2>&1
+eq "$(meta tk-work gc.dispatch_when_ready_slung)" "<absent>" "the refusal lifted: the marker is retired"
+run tk-work --key "$KEY" --formula mol-polecat-work
+eq "$RC" 0 "the refusal lifted: a re-run without --target exits 0"
+eq "$(blocks_rows)" 1 "the refusal lifted: still one edge"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "the refusal lifted: armed to the pool the cleared route named"
+eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "the refusal lifted: the arm pours mol-polecat-work"
+
+# An arm whose write fails after the route clear: the pool the first run was
+# given is kept, so a re-run without --target arms to it.
+reset
+OUT=$(FAKE_ARM_WRITE_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work --target gc-toolkit/gc-toolkit.polecat-codex 2>&1); RC=$?
+eq "$RC" 1 "an arm whose write fails: exit 1"
+has "$OUT" "a re-run arms it to gc-toolkit/gc-toolkit.polecat-codex" "an arm whose write fails: says where a re-run arms it"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "an arm whose write fails: nothing is armed"
+eq "$(meta tk-work resling_target)" "gc-toolkit/gc-toolkit.polecat-codex" "an arm whose write fails: the --target pool is kept as resling_target"
+run tk-work --key "$KEY" --formula mol-polecat-work
+eq "$RC" 0 "after an arm whose write failed: a re-run without --target exits 0"
+eq "$(blocks_rows)" 1 "after an arm whose write failed: still one edge"
+eq "$(meta tk-work gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat-codex" "after an arm whose write failed: armed to the pool the first run was given"
+eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "after an arm whose write failed: the arm pours mol-polecat-work"
 
 reset
 jq -c 'map(if .id == "tk-work" then (.metadata |= del(.["gc.execution_routed_to"])) else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
@@ -240,6 +282,14 @@ for args in "--key $KEY --formula mol-polecat-work" "tk-work --formula mol-polec
   run $args
   eq "$RC" 2 "usage refused: $args"
 done
+
+# ── 7. every metadata key the script writes is registered ────────────────────
+REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$HERE/../../lifecycle/lifecycle.toml" \
+  | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
+WRITTEN=$(grep -oE -- '--set-metadata "?[A-Za-z_][A-Za-z0-9_.]*=' "$SCRIPT" | sed -E 's/^--set-metadata "?//; s/=$//' | sort -u)
+has "$WRITTEN" "resling_target" "the extraction reads the script's writes"
+UNREGISTERED=$(printf '%s\n' "$WRITTEN" | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
+eq "$UNREGISTERED" "" "every metadata key await-ruling.sh writes is registered in lifecycle.toml"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"

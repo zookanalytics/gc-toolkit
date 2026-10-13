@@ -1351,7 +1351,7 @@ keys = [
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
   "gc.dispatch_when_ready_fail_count",
   "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
-  "gc.deferred_assignee",
+  "gc.deferred_assignee", "resling_target",
 ]
 # gc.dispatch_when_ready — the sling target (agent or pool); its PRESENCE means
 #   armed, and its value is what deferred-dispatch.sh slings to. Cleared with
@@ -1378,7 +1378,16 @@ keys = [
 #   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
 #   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready
 #   guard clears them (to "") alongside the live route when it de-routes a bead
-#   that reached a polecat while blocked.
+#   that reached a polecat while blocked, and await-ruling.sh clears them the
+#   same way before it arms a declined run's re-sling.
+# resling_target — the pool a declined run's work re-slings to. await-ruling.sh
+#   writes it in the update that clears the work bead's route keys before the
+#   arm, because from that clear until the arm lands nothing else on the bead
+#   names the pool. Its own pool lookup reads it last, after the route keys and
+#   gc.dispatch_when_ready, so a re-run after an arm that was refused or failed
+#   still finds the pool with no --target. Absent means no ruling wait has
+#   cleared the bead's routes. Never cleared; the next wait overwrites it. A
+#   rig-qualified pool identity (<rig>/<agent>).
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the
@@ -1424,8 +1433,8 @@ keys = [
 # step semantics belong to the Gas City runtime, not to pack transitions. The
 # pack does write some of these as decisions — gc.routed_to is a routing stamp
 # (lifecycle.sh --route, stamp-don't-sling), gc.execution_routed_to is cleared by
-# mol-polecat-work's blocked-work guard, and gc.outcome is stamped by many pack
-# components — but their meaning is the runtime's.
+# mol-polecat-work's blocked-work guard and by await-ruling.sh, and gc.outcome
+# is stamped by many pack components — but their meaning is the runtime's.
 [metadata.runtime_owned]
 keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",

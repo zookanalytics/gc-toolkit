@@ -22,15 +22,19 @@
 #     proceed closes the work bead first, and a closed bead's arm retires
 #     without a sling.
 # The pool is --target, else the work bead's gc.execution_routed_to (the pool
-# its last pour ran on), else its gc.routed_to, else the target of an arm an
-# earlier run of this script recorded. The arm needs the bead open and unrouted,
-# so the route keys a pour leaves behind are cleared first.
+# its last pour ran on), else its gc.routed_to, else the target of an arm
+# already recorded, else resling_target. The arm refuses a routed bead, so the
+# route keys a pour leaves behind are cleared before it, and the update that
+# clears them records the pool as resling_target. One update lands whole or not
+# at all, so whatever stops a run after the clear, the pool is still on the
+# bead for the next run, and nothing has to be rolled back.
 #
-# Both writes are read back. An edge or an arm that did not land exits 1, and
-# the caller does not cancel its run: a cancelled run with no recorded wait
-# leaves the work bead open, unrouted and unarmed, which nothing re-offers.
-# Re-running converges: an edge already in place and an arm already recorded
-# count as landed.
+# The edge and the arm are read back. Either one not landing exits 1, and the
+# caller does not cancel its run: a cancelled run with no recorded wait leaves
+# the work bead open, unrouted and unarmed, which nothing re-offers.
+# Re-running converges, with or without --target: an edge already in place and
+# an arm already recorded count as landed, and after an arm that did not land,
+# the re-run arms to the pool the earlier run recorded.
 #
 # Callers: the decline arms of mol-polecat-work that wait for a person.
 # exit: 0 the work bead waits on the visit and is armed, or is closed and needs
@@ -57,7 +61,8 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
   --formula    the formula the re-sling pours, e.g. mol-polecat-work (required)
   --subject    the bead the visit was filed on; default the work bead
   --target     the pool to re-sling to; default the bead's
-               gc.execution_routed_to, else its gc.routed_to
+               gc.execution_routed_to, else its gc.routed_to, else the pool
+               an earlier run armed or recorded as resling_target
   --dry-run    resolve and report; write nothing
 
 exit: 0 waiting and armed, or the bead is closed · 1 the wait did not land · 2 usage
@@ -145,13 +150,13 @@ fi
 if [ -z "$TARGET" ]; then
   TARGET=$(printf '%s' "$WORK_JSON" | jq -r '
     .[0].metadata as $m
-    | [ $m["gc.execution_routed_to"], $m["gc.routed_to"], $m["gc.dispatch_when_ready"] ]
+    | [ $m["gc.execution_routed_to"], $m["gc.routed_to"], $m["gc.dispatch_when_ready"], $m["resling_target"] ]
     | map(select(. != null and . != "")) | .[0] // empty' 2>/dev/null)
 fi
 case "$TARGET" in
   */*) ;;
   *)
-    echo "$PROG: no rig-qualified pool to re-sling $WORK to (gc.execution_routed_to and gc.routed_to read '${TARGET}'); pass --target. No wait was recorded." >&2
+    echo "$PROG: no rig-qualified pool to re-sling $WORK to (gc.execution_routed_to, gc.routed_to, gc.dispatch_when_ready and resling_target gave '${TARGET}'); pass --target. No wait was recorded." >&2
     exit 1 ;;
 esac
 
@@ -175,16 +180,19 @@ if ! blocks_on_visit; then
 fi
 
 # A pour retires gc.routed_to onto gc.execution_routed_to, and the arm refuses a
-# routed bead, so the route keys are cleared before it.
+# routed bead, so the route keys are cleared before it. From the clear until the
+# arm lands, nothing else on the bead names the pool, so the same update records
+# it as resling_target: a run whose arm is refused, or that stops before the
+# arm, leaves the next run a pool to arm to.
 if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" \
     --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" \
-    --set-metadata gc.deferred_assignee="" </dev/null >/dev/null 2>&1; then
+    --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" </dev/null >/dev/null 2>&1; then
   echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on visit $VISIT unarmed" >&2
   exit 1
 fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
     --reason "waits on the ruling in visit $VISIT ($KEY)" 2>&1); then
-  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT" >&2
+  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on visit $VISIT unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1
 fi
 ARMED=$(bd_json show "$WORK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
