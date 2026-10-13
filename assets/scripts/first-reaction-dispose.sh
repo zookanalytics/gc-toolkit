@@ -446,7 +446,33 @@ subject_parent() {
 # checkout, an origin or a GitHub answer that could not be read, and it confirms
 # nothing, so a check that cannot run leaves the claim unconfirmed. A gate broken
 # in a way main's own checks do not show cannot be confirmed here either.
+#
+# Every GitHub read is bounded (gh_bounded), so a stalled connection cannot hold
+# the reaction, and its pool slot, with R leased; a read that runs out of time
+# is unknown. The check runs and the commit statuses are read across all their
+# pages, so a failure past the first page still confirms.
 MAIN_RED_WHY=""
+GH_TIMEOUT="${GC_FIRST_REACTION_GH_TIMEOUT:-20}"
+case "$GH_TIMEOUT" in ''|*[!0-9]*) GH_TIMEOUT=20 ;; esac
+if command -v timeout >/dev/null 2>&1; then GH_TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then GH_TIMEOUT_BIN=gtimeout
+else GH_TIMEOUT_BIN=""
+fi
+gh_bounded() {
+    if [ -n "$GH_TIMEOUT_BIN" ] && [ "$GH_TIMEOUT" -gt 0 ]; then
+        "$GH_TIMEOUT_BIN" "$GH_TIMEOUT" gh "$@" </dev/null
+    else
+        gh "$@" </dev/null
+    fi
+}
+# gh_unanswered <what> <rc> — MAIN_RED_WHY for a GitHub read that failed.
+gh_unanswered() {
+    if [ "$2" -eq 124 ]; then
+        MAIN_RED_WHY="GitHub did not answer for $1 within ${GH_TIMEOUT}s"
+    else
+        MAIN_RED_WHY="GitHub did not answer for $1 (gh exit $2)"
+    fi
+}
 main_red() {
     MAIN_RED_WHY=""
     command -v gh >/dev/null 2>&1 \
@@ -463,11 +489,24 @@ main_red() {
     case "$_slug" in */*/*|/*|*/) _slug="" ;; */*) : ;; *) _slug="" ;; esac
     [ -n "$_slug" ] \
         || { MAIN_RED_WHY="the origin of $RIG_PATH (${_url:-none}) is not a GitHub repository"; return 2; }
-    _branch=$(gh api "repos/$_slug" 2>/dev/null | scrub | jq -r 'if type == "object" then (.default_branch // "") else "" end' 2>/dev/null || printf '')
+    _rc=0; _repo=$(gh_bounded api "repos/$_slug" 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the default branch of $_slug" "$_rc"; return 2; }
+    _branch=$(printf '%s' "$_repo" | scrub | jq -r 'if type == "object" then (.default_branch // "") else "" end' 2>/dev/null || printf '')
     [ -n "$_branch" ] \
         || { MAIN_RED_WHY="GitHub did not name the default branch of $_slug"; return 2; }
-    _runs=$(gh api "repos/$_slug/commits/$_branch/check-runs?per_page=100" 2>/dev/null | scrub)
-    _status=$(gh api "repos/$_slug/commits/$_branch/status" 2>/dev/null | scrub)
+    # --paginate prints one JSON object per page; jq -s merges their arrays. A
+    # read that stopped partway is never merged, because its exit is checked
+    # first.
+    _rc=0; _runs=$(gh_bounded api "repos/$_slug/commits/$_branch/check-runs?per_page=100" --paginate 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the check runs on $_branch of $_slug" "$_rc"; return 2; }
+    _rc=0; _status=$(gh_bounded api "repos/$_slug/commits/$_branch/status?per_page=100" --paginate 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the commit statuses on $_branch of $_slug" "$_rc"; return 2; }
+    _runs=$(printf '%s' "$_runs" | scrub | jq -cs '
+        if length > 0 and all(.[]; type == "object" and (.check_runs | type) == "array")
+        then {check_runs: [.[].check_runs[]]} else null end' 2>/dev/null)
+    _status=$(printf '%s' "$_status" | scrub | jq -cs '
+        if length > 0 and all(.[]; type == "object" and (.statuses | type) == "array")
+        then {sha: .[0].sha, statuses: [.[].statuses[]]} else null end' 2>/dev/null)
     _shape=$(jq -rn --argjson r "${_runs:-null}" --argjson s "${_status:-null}" '
         if (($r | type) == "object" and ($r.check_runs | type) == "array"
             and ($s | type) == "object" and ($s.statuses | type) == "array") then "ok" else "unknown" end' 2>/dev/null || printf 'unknown')

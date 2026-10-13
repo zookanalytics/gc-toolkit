@@ -221,7 +221,10 @@ chmod +x "$TMP/deferred"
 # main's checks from GitHub. FAKE_ORIGIN_URL is the origin the checkout names
 # (unset: no origin). FAKE_GH picks GitHub's answer: red (a failing check run),
 # status-red (only a legacy commit status fails), green (passing, cancelled and
-# still-running runs, none red), down (gh answers nothing).
+# still-running runs, none red), down (gh answers nothing), hang (gh stalls on
+# the check runs until something kills it). red-page2 and status-red-page2 put
+# the failure on a second page, which gh prints only under --paginate, as one
+# more JSON object after the first page's.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
 case "$*" in
   *"remote get-url origin"*) [ -n "${FAKE_ORIGIN_URL:-}" ] || exit 2; printf '%s\n' "$FAKE_ORIGIN_URL" ;;
@@ -231,16 +234,24 @@ GIT
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 printf 'GH %s\n' "$*" >> "$FAKE_LOG"
 [ "${FAKE_GH:-}" = down ] && exit 1
+PAGINATE=""; case " $* " in *" --paginate "*) PAGINATE=1 ;; esac
+GREEN_RUNS='{"total_count":3,"check_runs":[{"name":"lint","status":"completed","conclusion":"success","head_sha":"abcdef1234567890"},{"name":"test-linux","status":"completed","conclusion":"cancelled","head_sha":"abcdef1234567890"},{"name":"test-macos","status":"in_progress","conclusion":null,"head_sha":"abcdef1234567890"}]}'
+GREEN_STATUS='{"state":"success","sha":"abcdef1234567890","statuses":[]}'
 case "${2:-}" in
   repos/*/check-runs*)
     case "${FAKE_GH:-}" in
+      hang) exec sleep 30 ;;
       red) printf '%s\n' '{"total_count":2,"check_runs":[{"name":"lint","status":"completed","conclusion":"success","head_sha":"abcdef1234567890"},{"name":"test-macos","status":"completed","conclusion":"failure","head_sha":"abcdef1234567890"}]}' ;;
-      *)   printf '%s\n' '{"total_count":3,"check_runs":[{"name":"lint","status":"completed","conclusion":"success","head_sha":"abcdef1234567890"},{"name":"test-linux","status":"completed","conclusion":"cancelled","head_sha":"abcdef1234567890"},{"name":"test-macos","status":"in_progress","conclusion":null,"head_sha":"abcdef1234567890"}]}' ;;
+      red-page2) printf '%s\n' "$GREEN_RUNS"
+                 [ -z "$PAGINATE" ] || printf '%s\n' '{"total_count":4,"check_runs":[{"name":"test-e2e","status":"completed","conclusion":"timed_out","head_sha":"abcdef1234567890"}]}' ;;
+      *)   printf '%s\n' "$GREEN_RUNS" ;;
     esac ;;
-  repos/*/status)
+  repos/*/status*)
     case "${FAKE_GH:-}" in
       status-red) printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/legacy","state":"failure"}]}' ;;
-      *)          printf '%s\n' '{"state":"success","sha":"abcdef1234567890","statuses":[]}' ;;
+      status-red-page2) printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/docs","state":"success"}]}'
+                        [ -z "$PAGINATE" ] || printf '%s\n' '{"state":"failure","sha":"abcdef1234567890","statuses":[{"context":"ci/legacy","state":"error"}]}' ;;
+      *)          printf '%s\n' "$GREEN_STATUS" ;;
     esac ;;
   repos/*) printf '%s\n' '{"default_branch":"main"}' ;;
   *) exit 1 ;;
@@ -1324,6 +1335,10 @@ unset FAKE_SHOW_JSON
 #   (EMERGNO)     a green main confirms nothing, so the bead is held, and the
 #                 note says what the check found
 #   (EMERGDOWN)   a check that cannot run confirms nothing
+#   (EMERGPAGE)   a failure past the first page of check runs or commit
+#                 statuses confirms it, because both are read across every page
+#   (EMERGSLOW)   a GitHub that stalls is cut off at the bound and confirms
+#                 nothing, so the exit lands rather than hold its pool slot
 #   (EMERGPRIO)   a P0 that does not land stops the exit before the route
 #   (EMERGBLK)    an emergency's then-route arms at P0
 #   (EMERGARGS)   --emergency rides only a pool route
@@ -1368,7 +1383,7 @@ export FAKE_GH=down FAKE_SHOW_JSON="$UNPLACED"
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
 eq "$RC" "0" "(EMERGDOWN) a GitHub that does not answer leaves the exit landing"
 has "placement=pending" "$LOG" "(EMERGDOWN) …held, because an unread check confirms nothing"
-has "GitHub did not name the default branch of zook/repo" "$LOG" "(EMERGDOWN) …and the note says so"
+has "GitHub did not answer for the default branch of zook/repo (gh exit 1)" "$LOG" "(EMERGDOWN) …and the note says so"
 export FAKE_GH=red
 unset FAKE_ORIGIN_URL
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
@@ -1376,6 +1391,29 @@ has "placement=pending" "$LOG" "(EMERGDOWN) a checkout with no origin confirms n
 has "is not a GitHub repository" "$LOG" "(EMERGDOWN) …and the note names why"
 hasnt "GH " "$LOG" "(EMERGDOWN) …and GitHub is not asked about a repository nobody named"
 export FAKE_ORIGIN_URL="https://github.com/zook/repo"
+
+export FAKE_GH=red-page2
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+has "GH api repos/zook/repo/commits/main/check-runs?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the check runs are read across every page"
+has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing run on the second page confirms the emergency"
+has "test-e2e (timed_out)" "$LOG" "(EMERGPAGE) …named in the note"
+export FAKE_GH=status-red-page2
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+has "GH api repos/zook/repo/commits/main/status?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the commit statuses are read across every page"
+has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing status on the second page confirms the emergency"
+has "ci/legacy (error)" "$LOG" "(EMERGPAGE) …named in the note"
+
+export FAKE_GH=hang GC_FIRST_REACTION_GH_TIMEOUT=1
+SLOW_T0=$SECONDS
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+SLOW_DT=$((SECONDS - SLOW_T0))
+eq "$RC" "0" "(EMERGSLOW) a GitHub that stalls leaves the exit landing"
+[ "$SLOW_DT" -lt 15 ] && ok "(EMERGSLOW) …cut off at the bound rather than held for the stall (${SLOW_DT}s)" \
+    || bad "(EMERGSLOW) …cut off at the bound rather than held for the stall (took ${SLOW_DT}s)"
+has "placement=pending" "$LOG" "(EMERGSLOW) …held, because a read that ran out of time confirms nothing"
+has "GitHub did not answer for the check runs on main of zook/repo within 1s" "$LOG" "(EMERGSLOW) …and the note says the read timed out"
+unset GC_FIRST_REACTION_GH_TIMEOUT
+export FAKE_GH=red
 
 export FAKE_DROP_PRIORITY=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
