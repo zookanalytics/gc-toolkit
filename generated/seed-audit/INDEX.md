@@ -36,18 +36,18 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,999 | 1,499 |
 | [`codex`](agents/codex.md) | 5,999 | 1,499 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,347 | 1,336 |
-| [`converse-codex`](agents/converse-codex.md) | 37,527 | 9,381 |
-| [`converse-fable`](agents/converse-fable.md) | 37,527 | 9,381 |
-| [`converse-opus`](agents/converse-opus.md) | 37,527 | 9,381 |
+| [`converse-codex`](agents/converse-codex.md) | 37,675 | 9,418 |
+| [`converse-fable`](agents/converse-fable.md) | 37,675 | 9,418 |
+| [`converse-opus`](agents/converse-opus.md) | 37,675 | 9,418 |
 | [`deacon`](agents/deacon.md) | 16,313 | 4,078 |
 | [`demo`](agents/demo.md) | 1,778 | 444 |
 | [`bd.dog`](agents/bd.dog.md) | 2,359 | 589 |
 | [`gc-toolkit.dog`](agents/gc-toolkit.dog.md) | 3,295 | 823 |
 | [`gemini`](agents/gemini.md) | 5,999 | 1,499 |
 | [`keeper`](agents/keeper.md) | 24,472 | 6,118 |
-| [`mechanik`](agents/mechanik.md) | 35,781 | 8,945 |
-| [`polecat`](agents/polecat.md) | 28,839 | 7,209 |
-| [`polecat-codex`](agents/polecat-codex.md) | 28,869 | 7,217 |
+| [`mechanik`](agents/mechanik.md) | 35,929 | 8,982 |
+| [`polecat`](agents/polecat.md) | 28,987 | 7,246 |
+| [`polecat-codex`](agents/polecat-codex.md) | 29,017 | 7,254 |
 | [`proactive`](agents/proactive.md) | 23,481 | 5,870 |
 | [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
 | [`witness`](agents/witness.md) | 19,204 | 4,801 |
@@ -74,11 +74,11 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,143 | 1,535 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,172 | 1,543 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
-| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,448 | 1,112 |
+| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,545 | 1,136 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |

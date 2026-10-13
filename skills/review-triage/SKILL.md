@@ -136,14 +136,16 @@ reopens:
   merged code needs a fresh look in that lane. A check the anchor does not yet
   declare is added the usual way, with `--add-gates`, and it runs on the merged
   code too.
-- **The approval is dismissed** (`--dismiss-approval`). The resolution took
+- **The approval is lifted** (`--dismiss-approval`). The resolution took
   material judgment: an inferred intent, a choice between two live designs, or
-  something new the approver never saw. The operator then re-reviews, prompted
-  by a visit that carries the round's account.
+  something new the approver never saw. No approval given at or before the
+  round counts toward the merge from then on, and the operator is asked to
+  review again; the dismissal note and your posted verdict carry the round's
+  account, and a new approval lands the PR.
 
-Lanes and dismissal combine. Say why in `--round-reason`, one line a person can
-act on; it heads the visit and the dismissal note when there is one. The
-ruling rides the one verdict call:
+Lanes and the lift combine. Say why in `--round-reason`, one line a person can
+act on; it heads the dismissal note when there is one. The ruling rides the
+one verdict call:
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
@@ -151,10 +153,12 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
 ```
 
 `signoff.sh` hands the ruling to the guard, which records it in the anchor's
-record, sends each reopened lane back to unreviewed, and files the visit before
-it dismisses the approval. The verdict it posts opens with the round's account
-and your ruling, both rendered from the record, so the PR says what collided,
-what was decided, and what reopened.
+record and sends each reopened lane back to unreviewed. On a lift it first
+stores the round's time on the anchor as `bring_current_lifted_at`, the line the
+approval rule reads, then re-requests each approver and dismisses the approvals
+the line covers. The verdict it posts opens with the round's account and your
+ruling, both rendered from the record, so the PR says what collided, what was
+decided, and what reopened.
 
 ## The index gap
 
@@ -164,8 +168,12 @@ above. Filing is recording, not proposing: the distiller judges it and a
 reviewed PR writes the index.
 
 ```bash
+OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
+  '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
-  -t task -l learning -l observation -d "## Statement
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <what a reviewer could not classify the diff against>
 
 ## Quote
@@ -175,12 +183,6 @@ Triage on $ANCHOR at $REVIEWED_OID.
 <draft — explicitly non-binding>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-gc bd update "$OBS" --set-metadata task_kind=observation \
-  --set-metadata obs.category=review-index-gap \
-  --set-metadata "obs.scope=repo:${GC_RIG:-unknown}" \
-  --set-metadata obs.source=self --set-metadata obs.directive=standing \
-  --set-metadata "obs.provenance=bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
-  --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --status=closed
 ```
 
 ## What triage never does

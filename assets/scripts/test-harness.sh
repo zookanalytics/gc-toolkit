@@ -143,17 +143,21 @@ mk_sut_dir() { # <dir> <file>...
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
   # gc.work_outcome stamp every visit closer (visit-close.sh among them) sources
-  # by sibling path. Copy all five beside the SUT so those calls resolve in the
-  # private dir; cp keeps pr-post.sh's executable bit. They sit beside this
-  # harness, so they are found whatever the SUT's own directory is.
+  # by sibling path. visit-identity.sh, the one definition of what a visit covers,
+  # is sourced by sibling path too (finding.sh among its readers). Copy each of
+  # them beside the SUT so those calls resolve in the private dir; cp keeps
+  # pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
+  # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/visit-identity.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, and review-dismissal.sh, what a
-  # dismissal retires, are sourced by sibling path the same way.
+  # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
+  # retires, and hold-lib.sh, the one definition of a hold, which
+  # deferred-dispatch.sh sources, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
+  [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
   return 0
 }
 
@@ -257,6 +261,17 @@ case "$sub" in
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
+# Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
+# child A parent-childs parent B). Dependency orientation per type:
+# blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
+# depends_on=B).
+#
+# Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
+# type. Re-adding a pair with the type it already carries is a no-op that
+# exits 0; asking for any other type is refused with exit 1 and writes
+# nothing. The reversed pair is a different pair. Every edge writer (`dep`,
+# and `create --deps`) stores through dep_put, so no write through the stub
+# leaves two edges on one pair, a state bd refuses to create.
 dep_have() { # <A> <TYPE> <B>: print the type already on the pair row "A|TYPE|B" would take
   local issue="$1" on="$3"
   [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
@@ -453,10 +468,13 @@ case "$verb" in
     # list leaves the bead at the default open. STUB_CREATE_FAIL refuses the
     # create outright. STUB_CREATE_GARBAGE lets it land and answers with a
     # reply no JSON reader parses, the shape of a create whose id is lost.
-    # --deps <type:id,...> rides the create the way real bd's does: `T:id`
-    # makes the new bead depend on id by a T edge, `blocks:id` makes the new
-    # bead block id, and a target that does not resolve refuses the whole
-    # create with nothing written.
+    # --deps lands its edges with the bead, read the way bd reads them: a bare
+    # id, depends-on:<id> and blocked-by:<id> make the new bead depend on <id>
+    # (a blocks edge from <id>), blocks:<id> makes <id> depend on the new bead,
+    # and any other <type>:<id> makes the new bead depend on <id> with that type.
+    # A target that does not resolve refuses the whole create with nothing
+    # written. STUB_DEP_FAIL naming the minted id lands the bead without its
+    # edges, as it refuses a `dep` write from that id.
     title="${1:-}"; shift || true
     body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
     while [ $# -gt 0 ]; do
@@ -501,6 +519,7 @@ case "$verb" in
     nid="${out##*$'\n'}"
     tmp="${S%/*}/.gc-stub.$$"
     printf '%s\n' "${out%$'\n'*}" > "$tmp" && mv "$tmp" "$S"
+    case " ${STUB_DEP_FAIL:-} " in *" $nid "*) cdeps="" ;; esac
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
       ctyp="${cdep%%:*}"; ctgt="${cdep#*:}"
       [ "$ctyp" != "$cdep" ] || ctyp="blocked-by"
@@ -536,19 +555,8 @@ case "$verb" in
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
-    # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
-    # child A parent-childs parent B). Dependency orientation per type:
-    # blocks -> (issue=B, depends_on=A); every other type -> (issue=A,
-    # depends_on=B). Queries honor --direction (down = follow the id's own
-    # dependency rows; up = rows depending on the id) and -t/--type.
-    #
-    # Real bd keeps ONE dependency per (issue, depends_on) pair, whatever its
-    # type. Re-adding a pair with the type it already carries is a no-op that
-    # exits 0; asking for any other type is refused with exit 1 and writes
-    # nothing. The reversed pair is a different pair. Every edge writer, the
-    # ones below and create's --deps, stores through dep_put, so no write
-    # through the stub leaves two edges on one pair, a state bd refuses to
-    # create.
+    # Queries honor --direction (down = follow the id's own dependency rows; up
+    # = rows depending on the id) and -t/--type. Writes store through dep_put.
     case "${1:-}" in
       list)
         # Each dep-read knob below takes 1 for every dep read, or a text that
