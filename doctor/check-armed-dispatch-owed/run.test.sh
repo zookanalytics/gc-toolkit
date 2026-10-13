@@ -3,24 +3,24 @@
 # city, Dolt, or network. Covers: the OWED finding (open arm whose own blocks
 # edges closed long ago but that never dispatched), the STRANDED finding (armed
 # at a non-open status), the narrowing exemptions (still waiting on its own open
-# blocker; dispatchable only recently, within the reconcile window; mid-dispatch
-# via a slung marker; delivered via merge_result; closed; assigned; capped at the
-# configured sling-failure cap, which reconcile has already escalated), the
-# fail-closed probes (a batch dep read that fails outright, a candidate the batch
-# dep read drops as unresolvable, unreadable blocker listing, unreadable armed
-# listing, unreadable rig list, an unresolvable blocker), the hold
-# (hold-lib.sh: an arm a park holds, on its epic or two levels up, or whose epic
-# waits on a task, is not owed; a demand gate on the epic holds nothing; a park
-# released just now dates the window; an arm in flight is held by its own
-# blockers alone; a pinned own blocker holds nothing, as a closed one does,
-# while one in progress, blocked, deferred or hooked still holds; an ancestor,
-# or a blocker on an ancestor, the store does not return holds nothing; a failed
-# walk leaves the arm NOT checked, naming what could not be read), the
-# suspended-rig skip, and the quiet path (no armed beads). The check reads
-# dependencies in bulk: one `bd dep list` for the whole candidate set (edge
-# records) then one `bd list --id` for the blockers' statuses — so a store costs
-# a fixed number of queries, not one per armed bead. The batch-once case asserts
-# that mechanism directly, not just its behavior.
+# blocker; dispatchable only recently, within the reconcile window; armed only
+# recently, after its blockers closed; mid-dispatch via a slung marker;
+# delivered via merge_result; closed; assigned; capped at the configured
+# sling-failure cap, which reconcile has already escalated), the fail-closed
+# probes (unreadable blocker listing, unreadable armed listing, unreadable rig
+# list, an unresolvable blocker of the arm's own), the hold (hold-lib.sh: an arm
+# a park holds, on its epic or two levels up, or whose epic waits on a task, is
+# not owed; a demand gate on the epic holds nothing; a park released just now
+# dates the window, and one released before the arm was armed does not; an arm
+# in flight is held by its own blockers alone; a pinned own blocker holds
+# nothing, as a closed one does, while one in progress, blocked, deferred or
+# hooked still holds; an ancestor, or a blocker on an ancestor, the store does
+# not return holds nothing; a failed walk leaves the arms NOT checked), the
+# suspended-rig skip, and the quiet path (no armed beads). Each arm's own edges
+# come from its row in the armed listing, and the hold walk reads the rest a
+# generation at a time and every blocker once, so a store costs a fixed number
+# of queries and no dependency read. The batch-once case asserts that mechanism
+# directly, not just its behavior.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -49,30 +49,23 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-# The stub models exactly the three reads the check makes, and the failure shapes
-# the real bd shows for each:
+# The stub models the two reads the check makes, and the failure shapes the real
+# bd shows for each:
 #   * `bd list --has-metadata-key ...`  → the armed listing (per-rig fixture).
-#   * `bd dep list <id...> --json`       → TWO shapes by id count, both at rc=0:
-#      two or more ids give a FLAT array of edge records ({issue_id,
-#      depends_on_id, type}); a LONE id gives the annotated dependency beads
-#      ({id, dependency_type}, the subject implicit). An id in BD_FAIL_DEP is one
-#      bd cannot resolve: it is DROPPED with a per-id "(skipped)" warning on
-#      stderr and rc STAYS 0 — one bad id does not poison the batch. A
-#      fully-resolvable read is silent on stderr.
-#      BD_HARDFAIL_DEP names a store whose whole dep read fails outright (rc!=0),
-#      the shape a broken db or a timeout shows.
+#      Like real bd's, each row carries its own dependency edges ({issue_id,
+#      depends_on_id, type}), taken from the store's edge fixture. A fixture row
+#      that sets its own `dependencies` keeps them.
 #   * `bd list --id <csv> --all ...`     → the named beads, DROPPING ids with no
-#      row (real --id is silent about a miss): the blockers the join resolves,
-#      and the ancestors and their blockers the hold walk reads.
-#      BD_FAIL_BLOCKERS fails every such read in a store, BD_FAIL_IDS only a read
-#      naming one of its ids.
-# DEP_CALLS, when set, gets one line per `bd dep list` invocation, so a test can
-# assert the read happens once per store rather than once per bead.
+#      row (real --id is silent about a miss): the ancestors and blockers the
+#      hold walk reads. BD_FAIL_BLOCKERS fails every such read in a store,
+#      BD_FAIL_IDS only a read naming one of its ids.
+# `bd dep list` is no read the check makes, so the stub fails it. DEP_CALLS and
+# ID_CALLS, when set, get one line per `bd dep` and per `bd list --id` call, so a
+# case can assert what the check read.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 sub="$1"; shift
-is_dep_list=""; [ "$sub" = "dep" ] && [ "${1:-}" = "list" ] && { is_dep_list=1; shift; }
-db=""; id_csv=""; dep_ids=(); prev=""; inc_gates=false; inc_infra=false; inc_templates=false
+db=""; id_csv=""; prev=""; inc_gates=false; inc_infra=false; inc_templates=false
 valueflag() { case "$1" in --db|--id|--limit|--actor|--type|--direction|--database|--max-rows|--offset) return 0;; *) return 1;; esac; }
 for a in "$@"; do
   if valueflag "$prev"; then
@@ -83,8 +76,6 @@ for a in "$@"; do
     --include-gates) inc_gates=true ;;
     --include-infra) inc_infra=true ;;
     --include-templates) inc_templates=true ;;
-    -*) : ;;
-    *) [ -n "$is_dep_list" ] && dep_ids+=("$a") ;;
   esac
   prev="$a"
 done
@@ -96,6 +87,7 @@ case "$sub" in
       for fid in ${BD_FAIL_IDS:-}; do
         case ",$id_csv," in *",$fid,"*) exit 3 ;; esac
       done
+      [ -n "${ID_CALLS:-}" ] && echo "$name $id_csv" >> "$ID_CALLS"
       f="$STORES/$name.blockers.json"
       if [ -f "$f" ]; then
         # Model bd's default hiding: a gate/infra/template blocker is returned
@@ -112,36 +104,15 @@ case "$sub" in
       else printf '[]'; fi
     else
       [ "$name" = "${BD_FAIL_LIST:-}" ] && exit 3
-      f="$STORES/$name.armed.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
+      f="$STORES/$name.armed.json"; e="$STORES/$name.edges.json"
+      if [ ! -f "$f" ]; then printf '[]'
+      elif [ -f "$e" ]; then
+        jq -c --slurpfile e "$e" 'map(. as $b | if has("dependencies") then . else .dependencies = [ $e[0][] | select(.issue_id == $b.id) ] end)' "$f"
+      else cat "$f"; fi
     fi ;;
   dep)
-    [ -n "$is_dep_list" ] || { printf '[]'; exit 0; }
-    [ "${#dep_ids[@]}" -gt 0 ] || { printf '[]'; exit 0; }
-    [ -n "${DEP_CALLS:-}" ] && echo "$name ${dep_ids[*]}" >> "$DEP_CALLS"
-    # A whole-store hard failure (broken db, timeout): rc!=0, no array.
-    [ "$name" = "${BD_HARDFAIL_DEP:-}" ] && exit 3
-    # Real bd resolves each requested id on its own: one it cannot find is DROPPED
-    # from the result with a "(skipped)" warning on stderr and rc=0, never a
-    # poisoned batch. An id in BD_FAIL_DEP models exactly that dropped id.
-    kept=()
-    for did in "${dep_ids[@]}"; do
-      case " ${BD_FAIL_DEP:-} " in
-        *" $did "*) printf 'warning: resolving %s: no issue found matching "%s" (skipped)\n' "$did" "$did" >&2 ;;
-        *) kept+=("$did") ;;
-      esac
-    done
-    f="$STORES/$name.edges.json"
-    if [ -f "$f" ] && [ "${#kept[@]}" -gt 0 ]; then
-      if [ "${#dep_ids[@]}" -eq 1 ]; then
-        # A LONE id: real bd returns the annotated dependency beads
-        # ({id, dependency_type}, subject implicit), not the flat edge array.
-        jq -c --arg only "${dep_ids[0]}" '[ .[] | select(.issue_id == $only) | {id: .depends_on_id, dependency_type: .type} ]' "$f"
-      else
-        # Two or more ids: the flat edge array across all requested ids.
-        want=$(printf '%s\n' "${kept[@]}" | jq -R . | jq -sc .)
-        jq -c --argjson want "$want" '[ .[] | select(.issue_id as $s | $want | index($s)) ]' "$f"
-      fi
-    else printf '[]'; fi ;;
+    [ -n "${DEP_CALLS:-}" ] && echo "$name $*" >> "$DEP_CALLS"
+    echo "stub bd: bd dep is no read the check makes" >&2; exit 3 ;;
   *) printf '[]'; exit 0 ;;
 esac
 BD
@@ -178,9 +149,9 @@ aedged() {
                        + [ $b | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "blocks"} ] )}'
 }
 
-# Edge fixtures — the flat array a batch `bd dep list` returns for the store
-# (issue_id blocked-by depends_on_id). A parent-child edge is included in one
-# case to prove the check filters to `blocks` only.
+# Edge fixtures — the store's edges as the armed listing's rows carry them
+# (issue_id blocked-by depends_on_id), served on each armed row whose fixture
+# sets no `dependencies` of its own.
 edges_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.edges.json"; }
 e_blk() { printf '{"issue_id":"%s","depends_on_id":"%s","type":"blocks"}' "$1" "$2"; }
 e_pc()  { printf '{"issue_id":"%s","depends_on_id":"%s","type":"parent-child"}' "$1" "$2"; }
@@ -236,18 +207,6 @@ blockers_store alpha "$(b_open b-0)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an arm with an open own blocker is correctly waiting (exit 0)"
 has "$OUT" "OK:" "the quiet headline is printed"
-clear_stores
-
-# --- 3b. SINGLE-ID SHAPE: a lone candidate's blockers arrive in bd's single-id
-#          dep-list shape ({id, dependency_type}), not the batch flat-edge array.
-#          Parsing that as the flat array drops the edge, so a candidate still
-#          waiting on an open blocker reads as zero-blocker and owed. --------------
-armed_store alpha "$(aarmed a-3b)"
-edges_store alpha "$(e_blk a-3b b-0)"
-blockers_store alpha "$(b_open b-0)"
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a lone candidate waiting on an open blocker is exempt (single-id dep shape parsed)"
-hasnt "$OUT" "owed but not firing" "the single-id shape is not misread as a zero-blocker owed arm"
 clear_stores
 
 # --- 4. EXEMPT: dispatchable only recently (within the reconcile window) -----
@@ -320,60 +279,24 @@ eq "$RC" "0" "with the cap lowered to 2, a 2-failure arm is capped and exempt"
 hasnt "$OUT" "alpha bead a-7e" "the configured-cap override matches deferred-dispatch.sh"
 clear_stores
 
-# --- 8. FAIL CLOSED: the batch dep read fails outright (rc!=0) ---------------
-armed_store alpha "$(aarmed a-8)"
-edges_store alpha "$(e_blk a-8 b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_HARDFAIL_DEP=alpha run_check); RC=$?
-eq "$RC" "1" "a batch dep read that fails outright warns rather than passing (exit 1)"
-has "$OUT" "could not batch-read dependency edges" "the store-not-checked reason is named"
-hasnt "$OUT" "owed but not firing" "a failed dep read is NOT reported as a firm finding"
-clear_stores
-
-# --- 8a. FAIL CLOSED: a candidate the batch dep read cannot resolve ----------
-#          bd drops it (rc=0, "(skipped)" on stderr), so its edges never arrive.
-#          Without inspecting that stderr, its old armed_at reads as a firm owed
-#          finding rather than "NOT checked" — the fail-closed hole this fixes.
-armed_store alpha "$(aarmed a-8a)"
-edges_store alpha "$(e_blk a-8a b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_FAIL_DEP=a-8a run_check); RC=$?
-eq "$RC" "1" "a candidate the dep read dropped as unresolvable warns rather than passing (exit 1)"
-has "$OUT" "did not resolve every" "the store-not-checked reason names the incomplete read"
-hasnt "$OUT" "owed but not firing" "a dropped (skipped) candidate is NOT reported as a firm owed finding"
-clear_stores
-
-# --- 8f. FAIL CLOSED, whole store: one dropped candidate among healthy ones --
-#          A dropped id makes the batch read incomplete, so the store is NOT
-#          checked as a whole — a co-resident owed arm is not reported off a read
-#          that missed one of its candidates. The next pass re-reads.
-armed_store alpha "$(aarmed a-8f1)" "$(aarmed a-8f2)"
-edges_store alpha "$(e_blk a-8f2 b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")"
-OUT=$(BD_FAIL_DEP=a-8f1 run_check); RC=$?
-eq "$RC" "1" "a dropped candidate fails the whole store closed (exit 1)"
-has "$OUT" "did not resolve every" "the store-not-checked reason is named"
-hasnt "$OUT" "alpha bead a-8f2" "a co-resident owed arm is NOT reported off an incomplete read"
-clear_stores
-
 # --- 8b. FAIL CLOSED: the blocker-status read is unreadable ------------------
 armed_store alpha "$(aarmed a-8b)"
 edges_store alpha "$(e_blk a-8b b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(BD_FAIL_BLOCKERS=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable blocker listing warns (exit 1)"
-has "$OUT" "could not read blocker statuses" "the blocker-listing failure is named"
+has "$OUT" "could not read what holds 1 armed bead(s)" "the blocker-listing failure is named"
 hasnt "$OUT" "owed but not firing" "an unresolved blocker set is NOT a firm finding"
 clear_stores
 
-# --- 8c. FAIL CLOSED: a blocker edge points at a bead with no readable row ----
-#          (the batch listing silently drops it; the candidate is NOT checked)
+# --- 8c. FAIL CLOSED: a blocker of the arm's own points at a bead with no row --
+#          (the listing silently drops it; the candidate is NOT checked)
 armed_store alpha "$(aarmed a-8c)"
 edges_store alpha "$(e_blk a-8c ghost)"
 blockers_store alpha "$(b_closed other "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a candidate with an unresolvable blocker warns (exit 1)"
-has "$OUT" "could not resolve its blocker" "the unresolved-blocker reason is named"
+has "$OUT" "alpha bead a-8c: could not read [ghost]" "the unresolved blocker is named"
 hasnt "$OUT" "owed but not firing" "an unresolved blocker is NOT reported as owed"
 clear_stores
 
@@ -386,7 +309,7 @@ blockers_store alpha "$(b_closed_gate g-0 "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm blocked only by a long-closed GATE is owed and flagged"
 has "$OUT" "alpha bead a-8d" "the gate-blocked owed arm is reported (its gate blocker resolved)"
-hasnt "$OUT" "could not resolve" "a gate blocker is resolved, not dropped as unreadable"
+hasnt "$OUT" "could not read" "a gate blocker is resolved, not dropped as unreadable"
 clear_stores
 
 # --- 9. FAIL CLOSED: unreadable armed listing --------------------------------
@@ -415,20 +338,23 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a store with no armed beads passes"
 has "$OUT" "OK:" "the quiet headline is printed"
 
-# --- 13. BATCH ONCE: three owed candidates cost ONE dep read, not three ------
-#          This asserts the mechanism the fix exists for — the per-bead N+1 is
-#          gone — not merely that three findings come back.
+# --- 13. BATCH ONCE: three owed candidates cost ONE blocker read, not three --
+#          This asserts the mechanism, not merely that three findings come back:
+#          the edges come off the listing's rows, so the store makes no
+#          dependency read, and the walk reads the three blockers at once.
 armed_store alpha "$(aarmed m-1)" "$(aarmed m-2)" "$(aarmed m-3)"
 edges_store alpha "$(e_blk m-1 x-1)" "$(e_blk m-2 x-2)" "$(e_blk m-3 x-3)"
 blockers_store alpha "$(b_closed x-1 "$OLD")" "$(b_closed x-2 "$OLD")" "$(b_closed x-3 "$OLD")"
-DEPLOG="$TMP/depcalls"; rm -f "$DEPLOG"
-OUT=$(DEP_CALLS="$DEPLOG" run_check); RC=$?
+DEPLOG="$TMP/depcalls"; IDLOG="$TMP/idcalls"; rm -f "$DEPLOG" "$IDLOG"
+OUT=$(DEP_CALLS="$DEPLOG" ID_CALLS="$IDLOG" run_check); RC=$?
 eq "$RC" "1" "three owed candidates warn (exit 1)"
 has "$OUT" "alpha bead m-1" "the first owed candidate is reported"
 has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 DEPN=$( [ -f "$DEPLOG" ] && wc -l < "$DEPLOG" | tr -d ' ' || echo 0 )
-eq "$DEPN" "1" "the store's dependency edges are read in ONE batch, not one call per bead"
+eq "$DEPN" "0" "the store makes no dependency read: each arm's edges come off its listing row"
+IDN=$( [ -f "$IDLOG" ] && wc -l < "$IDLOG" | tr -d ' ' || echo 0 )
+eq "$IDN" "1" "the three arms' blockers are read in ONE call, not one call per bead"
 clear_stores
 
 # --- 14. HELD: an arm whose own blocker closed long ago, under a parked epic,
@@ -539,14 +465,49 @@ hasnt "$OUT" "alpha bead p-1" "…so it is not reported"
 clear_stores
 
 # --- 24. HELD: a blocker in progress, blocked, deferred or hooked still holds
-#          its arm; only a closed or a pinned one releases it. The listing rows
-#          carry no edges, so the join alone reads these blockers --------------
+#          its arm; only a closed or a pinned one releases it ------------------
 armed_store alpha "$(aarmed s-1)" "$(aarmed s-2)" "$(aarmed s-3)" "$(aarmed s-4)"
 edges_store alpha "$(e_blk s-1 x-1)" "$(e_blk s-2 x-2)" "$(e_blk s-3 x-3)" "$(e_blk s-4 x-4)"
 blockers_store alpha "$(b_status x-1 in_progress)" "$(b_status x-2 blocked)" "$(b_status x-3 deferred)" "$(b_status x-4 hooked)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "arms whose blockers are in progress, blocked, deferred or hooked are held, not owed (exit 0)"
 hasnt "$OUT" "owed but not firing" "none of them is reported"
+clear_stores
+
+# --- 25. ARMED AFTER THE RELEASE: the epic's park closed long before the arm
+#          was armed, so the window runs from the arm's armed_at, and an arm
+#          armed just now is not owed. Armed long ago, the same arm is --------
+armed_store alpha "$(aedged r-1 epic-1 "" | jq -c --arg t "$RECENT" '.metadata["gc.dispatch_when_ready_armed_at"] = $t')"
+blockers_store alpha "$(b_epic epic-1 "" park-1)" "$(b_closed_gate park-1 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm armed just now under an epic whose park closed long ago is not owed"
+hasnt "$OUT" "alpha bead r-1" "…so it is not reported"
+armed_store alpha "$(aedged r-1 epic-1 "")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the same arm armed long ago is owed (exit 1)"
+has "$OUT" "alpha bead r-1" "…and reported"
+clear_stores
+
+# --- 26. ARMED AFTER THE RELEASE: the arm's own blocker closed long before it
+#          was armed, so an arm armed just now is not owed ----------------------
+armed_store alpha "$(aedged r-2 "" b-0 | jq -c --arg t "$RECENT" '.metadata["gc.dispatch_when_ready_armed_at"] = $t')"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm armed just now whose own blocker closed long ago is not owed"
+hasnt "$OUT" "alpha bead r-2" "…so it is not reported"
+clear_stores
+
+# --- 27. an armed_at that does not parse: the window runs from the release
+#          alone, and with no release either the arm cannot be aged ----------
+armed_store alpha "$(aedged u-1 "" b-0 | jq -c '.metadata["gc.dispatch_when_ready_armed_at"] = "not a time"')"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose armed_at does not parse is judged from its release (exit 1)"
+has "$OUT" "alpha bead u-1" "…and reported"
+armed_store alpha "$(aedged u-1 "" "" | jq -c '.metadata["gc.dispatch_when_ready_armed_at"] = "not a time"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "with no release either, the arm cannot be aged and is skipped"
+hasnt "$OUT" "alpha bead u-1" "…so it is not reported"
 clear_stores
 
 # --- the owed window is the deferred-dispatch order's cadence window ----------
