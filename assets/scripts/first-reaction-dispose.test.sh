@@ -1326,14 +1326,17 @@ hasnt "HELM takeaway" "$LOG" "(INTAKEUNREAD) …so it is never routed on an unre
 unset FAKE_SHOW_JSON
 
 # ── Intake's emergency: checked, not asserted ────────────────────────────────
-# --emergency claims a red main or a broken gate. The claim admits a bead at P0
-# only when the head of main carries a failing check, read from GitHub through
-# the subject's own rig checkout.
+# --emergency <check> claims a red main or a broken gate, naming the check whose
+# failure it is about. The claim admits a bead at P0 only when that check is
+# failing on the head of main, read from GitHub through the subject's own rig
+# checkout.
 #   (EMERG)       a confirmed emergency is written P0, read back, then routed
 #   (EMERGSTATUS) a failing commit status confirms it as a failing check run does
 #   (EMERGMEMBER) an emergency outranks membership: a member is routed at P0
 #   (EMERGNO)     a green main confirms nothing, so the bead is held, and the
 #                 note says what the check found
+#   (EMERGOTHER)  another check failing on main confirms nothing, and neither
+#                 does a check main does not carry; the note names what fails
 #   (EMERGDOWN)   a check that cannot run confirms nothing
 #   (EMERGPAGE)   a failure past the first page of check runs or commit
 #                 statuses confirms it, because both are read across every page
@@ -1341,12 +1344,12 @@ unset FAKE_SHOW_JSON
 #                 nothing, so the exit lands rather than hold its pool slot
 #   (EMERGPRIO)   a P0 that does not land stops the exit before the route
 #   (EMERGBLK)    an emergency's then-route arms at P0
-#   (EMERGARGS)   --emergency rides only a pool route
+#   (EMERGARGS)   --emergency rides only a pool route, and names a check
 mkdir -p "$TMP/rig/.beads"
 export FAKE_RIG_PATH="$TMP/rig" FAKE_ORIGIN_URL="git@github.com:zook/repo.git"
 export FAKE_SHOW_JSON="$UNPLACED" FAKE_GH=red
 run tk-sub --disposition actionable --reason "test-macos fails on main" --takeaway "fix red main" \
-    --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+    --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "0" "(EMERG) a confirmed emergency's actionable exit succeeds"
 has "GH api repos/zook/repo/commits/main/check-runs" "$LOG" "(EMERG) the claim is checked against main's own checks"
 has "UPDATE bd update tk-sub --priority 0 --append-notes ## Intake (first reaction" "$LOG" "(EMERG) …P0 is written"
@@ -1357,55 +1360,73 @@ has "main of zook/repo at abcdef123456 is red: test-macos (failure)" "$LOG" "(EM
 has "disposed as actionable (gc-toolkit/gc-toolkit.polecat at P0)" "$OUT" "(EMERG) …and the run says P0"
 
 export FAKE_GH=status-red
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency ci/legacy --reaction-bead "$R"
 has "--priority 0" "$LOG" "(EMERGSTATUS) a failing commit status confirms an emergency"
 has "ci/legacy (failure)" "$LOG" "(EMERGSTATUS) …named in the note"
 
 export FAKE_GH=red FAKE_SHOW_JSON="$DEFAULT_SHOW"
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 has "--priority 0" "$LOG" "(EMERGMEMBER) a member claimed as a confirmed emergency is written P0"
 has "--release --route gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGMEMBER) …and routed"
 
 export FAKE_GH=green FAKE_SHOW_JSON="$UNPLACED"
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "0" "(EMERGNO) an unconfirmed emergency's exit still lands"
 has "placement=pending" "$LOG" "(EMERGNO) …held for placement"
 hasnt "--priority" "$LOG" "(EMERGNO) …at the priority it was filed at"
 hasnt "--route" "$LOG" "(EMERGNO) …and unrouted"
-has "--emergency was not confirmed: main of zook/repo at abcdef123456 has no failing check" "$LOG" \
+has "--emergency was not confirmed: test-macos is not failing on main of zook/repo at abcdef123456" "$LOG" \
     "(EMERGNO) the note says what the check found"
+hasnt "other checks failing" "$LOG" "(EMERGNO) …and names no other failing check, because none fails"
 export FAKE_GH=green FAKE_SHOW_JSON="$DEFAULT_SHOW"
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 has "--release --route gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGNO) an unconfirmed emergency on a member still routes as a member"
 hasnt "--priority" "$LOG" "(EMERGNO) …at its own priority"
 
+# Main is red on test-macos. A claim naming a check that passes there, or one
+# main does not carry, says nothing about this bead, so it is held.
+export FAKE_GH=red FAKE_SHOW_JSON="$UNPLACED"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency lint --reaction-bead "$R"
+eq "$RC" "0" "(EMERGOTHER) a claim on a passing check, while another check fails, still lands"
+has "placement=pending" "$LOG" "(EMERGOTHER) …held for placement"
+hasnt "--priority" "$LOG" "(EMERGOTHER) …at the priority it was filed at"
+hasnt "--route" "$LOG" "(EMERGOTHER) …and unrouted"
+has "--emergency was not confirmed: lint is not failing on main of zook/repo at abcdef123456; other checks failing there: test-macos (failure)" "$LOG" \
+    "(EMERGOTHER) the note names the claimed check and the check that does fail"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-windows --reaction-bead "$R"
+has "placement=pending" "$LOG" "(EMERGOTHER) a claim on a check main does not carry is held"
+has "main of zook/repo at abcdef123456 has no check named test-windows; other checks failing there: test-macos (failure)" "$LOG" \
+    "(EMERGOTHER) …and the note says no check by that name runs there"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency=test-macos --reaction-bead "$R"
+has "--priority 0" "$LOG" "(EMERGOTHER) --emergency=<check> names the check the same way"
+
 export FAKE_GH=down FAKE_SHOW_JSON="$UNPLACED"
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "0" "(EMERGDOWN) a GitHub that does not answer leaves the exit landing"
 has "placement=pending" "$LOG" "(EMERGDOWN) …held, because an unread check confirms nothing"
 has "GitHub did not answer for the default branch of zook/repo (gh exit 1)" "$LOG" "(EMERGDOWN) …and the note says so"
 export FAKE_GH=red
 unset FAKE_ORIGIN_URL
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 has "placement=pending" "$LOG" "(EMERGDOWN) a checkout with no origin confirms nothing"
 has "is not a GitHub repository" "$LOG" "(EMERGDOWN) …and the note names why"
 hasnt "GH " "$LOG" "(EMERGDOWN) …and GitHub is not asked about a repository nobody named"
 export FAKE_ORIGIN_URL="https://github.com/zook/repo"
 
 export FAKE_GH=red-page2
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-e2e --reaction-bead "$R"
 has "GH api repos/zook/repo/commits/main/check-runs?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the check runs are read across every page"
 has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing run on the second page confirms the emergency"
 has "test-e2e (timed_out)" "$LOG" "(EMERGPAGE) …named in the note"
 export FAKE_GH=status-red-page2
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency ci/legacy --reaction-bead "$R"
 has "GH api repos/zook/repo/commits/main/status?per_page=100 --paginate" "$LOG" "(EMERGPAGE) the commit statuses are read across every page"
 has "--priority 0" "$LOG" "(EMERGPAGE) …so a failing status on the second page confirms the emergency"
 has "ci/legacy (error)" "$LOG" "(EMERGPAGE) …named in the note"
 
 export FAKE_GH=hang GC_FIRST_REACTION_GH_TIMEOUT=1
 SLOW_T0=$SECONDS
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 SLOW_DT=$((SECONDS - SLOW_T0))
 eq "$RC" "0" "(EMERGSLOW) a GitHub that stalls leaves the exit landing"
 [ "$SLOW_DT" -lt 15 ] && ok "(EMERGSLOW) …cut off at the bound rather than held for the stall (${SLOW_DT}s)" \
@@ -1416,7 +1437,7 @@ unset GC_FIRST_REACTION_GH_TIMEOUT
 export FAKE_GH=red
 
 export FAKE_DROP_PRIORITY=1
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "4" "(EMERGPRIO) a P0 that does not land stops the exit"
 has "priority P0 did not land" "$ERR" "(EMERGPRIO) …naming the write that missed"
 hasnt "HELM takeaway" "$LOG" "(EMERGPRIO) …before the route, so it is never claimable at the wrong priority"
@@ -1424,22 +1445,32 @@ unset FAKE_DROP_PRIORITY
 
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
-    --then-route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+    --then-route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "0" "(EMERGBLK) a blocked emergency's exit succeeds"
 before '--priority 0' '^DEFERRED arm' "(EMERGBLK) …P0 written before the arm"
 has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGBLK) …and the dispatch armed"
 has "disposed as blocked (tk-blk1; armed at P0)" "$OUT" "(EMERGBLK) …and the run says the arm is at P0"
 unset FAKE_DEPS_JSON
 
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --emergency
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --emergency test-macos
 eq "$RC" "2" "(EMERGARGS) --emergency beside --assign is refused"
 eq "$LOG" "" "(EMERGARGS) …and nothing was written"
-run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --emergency
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --emergency test-macos
 eq "$RC" "2" "(EMERGARGS) --emergency on a blocked exit that arms nothing is refused"
-run tk-sub --disposition close --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency
+run tk-sub --disposition close --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos
 eq "$RC" "2" "(EMERGARGS) close refuses --emergency"
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --emergency
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --emergency test-macos
 eq "$RC" "2" "(EMERGARGS) ruling refuses --emergency"
+eq "$LOG" "" "(EMERGARGS) …and nothing was written"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R" --emergency
+eq "$RC" "2" "(EMERGARGS) --emergency that names no check is refused"
+has "needs the name of the check that fails on main" "$ERR" "(EMERGARGS) …saying what it needs"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is one followed by another flag instead of a check"
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency= --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is an empty --emergency="
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency "  " --reaction-bead "$R"
+eq "$RC" "2" "(EMERGARGS) …and so is a blank check name"
 eq "$LOG" "" "(EMERGARGS) …and nothing was written"
 unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
 

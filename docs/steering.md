@@ -68,19 +68,26 @@ reaction stops without recording its disposition, so a re-run finishes the hold.
 
 ## The emergency check
 
-The first reaction claims an emergency with `--emergency`, on the actionable
-exit or on the blocked exit with `--then-route`. The claim is checked against
-the head of the default branch of the subject's repository, read from GitHub
-through the rig checkout's origin. A check run there that concluded `failure`,
-`timed_out` or `startup_failure`, or a commit status of `failure` or `error`,
-confirms it. A run still going, or one cancelled by a newer push, does not.
+The first reaction claims an emergency with `--emergency <check>`, on the
+actionable exit or on the blocked exit with `--then-route`. The claim names the
+check on main whose failure the bead is about: a check run's name or a commit
+status's context. It is checked against the head of the default branch of the
+subject's repository, read from GitHub through the rig checkout's origin. A
+check run by that name that concluded `failure`, `timed_out` or
+`startup_failure`, or a commit status with that context of `failure` or
+`error`, confirms it. A run still going, or one cancelled by a newer push, does
+not. Another check failing on main confirms nothing, so a flaky or unrelated red
+check cannot carry a routine bead past placement at P0. Every check run and
+commit status on the head is read, across all their pages. Each GitHub read is
+bounded in time, and a read that does not answer confirms nothing.
 
 A confirmed emergency is written P0, the priority is read back, and then the
 bead is routed or armed. A claim the check does not confirm, including one the
 check cannot run, is held for placement like any other bead, and the note it
-leaves on the bead says what the check found. A broken gate counts when it shows
-as a failing check on main. A latent hazard, a doctor finding marked blocking,
-or a failure on one PR's branch does not.
+leaves on the bead says what the check found, naming any other check that fails
+there. A broken gate counts when it shows as a failing check on main. A latent
+hazard, a doctor finding marked blocking, or a failure on one PR's branch does
+not.
 
 ## The placement sitting's queue
 

@@ -35,8 +35,8 @@
 # Intake holds findings for placement (docs/steering.md). The actionable exit's
 # pool route and the blocked exit's --then-route reach a pool only for a bead
 # that may enter one: a member of an epic (it has a parent), PR-finishing work
-# (it carries anchor_bead), or an emergency that --emergency claims and main's
-# own checks confirm, which is routed at P0. Any other bead is marked
+# (it carries anchor_bead), or an emergency whose failing check --emergency
+# names and main's own checks confirm, which is routed at P0. Any other bead is marked
 # placement=pending and left unrouted, for the operator's placement sitting
 # (gc-helm.sh unplaced lists it). A named agent's own work (--assign,
 # --then-assign) is not pool work, so the rule does not read it.
@@ -90,12 +90,12 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   first-reaction-dispose.sh <bead> --disposition actionable --reason "<why>" --takeaway "<headline>"
-                            [--route <rig>/<agent> [--emergency] | --assign <named-agent>]
+                            [--route <rig>/<agent> [--emergency <check>] | --assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition recommend --reason "<why>" --takeaway "<recommendation; why discuss>"
                             --recommended-formula <mol> [--visit <visit-bead-id>]
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
-                            [--then-route <rig>/<agent> [--emergency] | --then-assign <named-agent>]
+                            [--then-route <rig>/<agent> [--emergency <check>] | --then-assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
@@ -129,10 +129,12 @@ Usage:
   or a confirmed emergency reaches a pool. Any other bead is marked
   placement=pending and left unrouted, with no arm, for the operator's
   placement sitting.
-  --emergency (actionable, or blocked with --then-route) claims the bead is a
-  red main or a broken gate. The claim is checked, not taken: the head of the
-  default branch of the subject's repository must carry a failing check run or
-  commit status (gh). A confirmed emergency is routed, or armed, at P0. An
+  --emergency <check> (actionable, or blocked with --then-route) claims the
+  bead is a red main or a broken gate, and names the check on main whose
+  failure it is about: a check run's name or a commit status's context. The
+  claim is checked, not taken: on the head of the default branch of the
+  subject's repository, that check must be failing (gh). Another check failing
+  there confirms nothing. A confirmed emergency is routed, or armed, at P0. An
   unconfirmed one is held for placement like any other bead, and its note says
   what the check found.
   --assign (actionable) releases the bead to a named agent instead of a pool:
@@ -162,7 +164,7 @@ EOF
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
-ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""
+ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
 WAITING=""          # space-separated bead ids
 
@@ -184,7 +186,9 @@ while [ $# -gt 0 ]; do
         --assign=*) ASSIGN="${1#--assign=}"; shift ;;
         --then-assign)   shift; [ $# -gt 0 ] || usage_die "--then-assign needs a named-agent identity"; THEN_ASSIGN="$1"; shift ;;
         --then-assign=*) THEN_ASSIGN="${1#--then-assign=}"; shift ;;
-        --emergency) EMERGENCY=1; shift ;;
+        --emergency)   shift; case "${1:--}" in -*) usage_die "--emergency needs the name of the check that fails on main" ;; esac
+                       EMERGENCY="$1"; EMERGENCY_SET=1; shift ;;
+        --emergency=*) EMERGENCY="${1#--emergency=}"; EMERGENCY_SET=1; shift ;;
         --waiting-on)   shift; [ $# -gt 0 ] || usage_die "--waiting-on needs a bead id"; WAITING="$WAITING $1"; shift ;;
         --waiting-on=*) WAITING="$WAITING ${1#--waiting-on=}"; shift ;;
         --blocker)   shift; [ $# -gt 0 ] || usage_die "--blocker needs a title"; BLOCKER_TITLE="$1"; shift ;;
@@ -218,6 +222,14 @@ esac
 [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
 [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
 [ "$REACTION_BEAD" != "$BEAD" ] || usage_die "--reaction-bead $REACTION_BEAD is the subject itself; R tracks S, it is not S"
+# An emergency is confirmed only by the check it names, so a claim that names
+# none is refused rather than read as no claim.
+if [ -n "$EMERGENCY_SET" ]; then
+    case "$EMERGENCY" in
+        *[![:space:]]*) : ;;
+        *) usage_die "--emergency needs the name of the check that fails on main: a check run's name or a commit status's context" ;;
+    esac
+fi
 
 # One store. `bd dep add` naming a bead in another rig's store answers "✓
 # Added dependency" and holds nothing (component-model I1), so a cross-store
@@ -438,14 +450,18 @@ subject_parent() {
         else "" end' 2>/dev/null || printf ''
 }
 
-# main_red — is the default branch of the subject's repository red right now?
-# Red is a check run on its head that concluded failure, timed_out or
-# startup_failure, or a commit status of failure or error. A run that is still
-# going, or one cancelled by a newer push, is not red. Sets MAIN_RED_WHY to the
-# evidence either way and returns 0 red, 1 not red, 2 unknown. Unknown covers a
-# checkout, an origin or a GitHub answer that could not be read, and it confirms
-# nothing, so a check that cannot run leaves the claim unconfirmed. A gate broken
-# in a way main's own checks do not show cannot be confirmed here either.
+# main_red <check> — is <check> failing on the default branch of the subject's
+# repository right now? <check> is the name of a check run or the context of a
+# commit status. Failing is a check run on the head that concluded failure,
+# timed_out or startup_failure, or a commit status of failure or error. A run
+# that is still going, or one cancelled by a newer push, is not failing. Only
+# the named check confirms: another check failing on main says nothing about
+# this bead, so it confirms nothing, and the note names it. Sets MAIN_RED_WHY to
+# the evidence either way and returns 0 failing, 1 not failing, 2 unknown.
+# Unknown covers a checkout, an origin or a GitHub answer that could not be
+# read, and it confirms nothing, so a check that cannot run leaves the claim
+# unconfirmed. A gate broken in a way main's own checks do not show cannot be
+# confirmed here either.
 #
 # Every GitHub read is bounded (gh_bounded), so a stalled connection cannot hold
 # the reaction, and its pool slot, with R leased; a read that runs out of time
@@ -514,16 +530,33 @@ main_red() {
         || { MAIN_RED_WHY="GitHub did not answer for the checks on $_branch of $_slug"; return 2; }
     _sha=$(jq -rn --argjson r "$_runs" --argjson s "$_status" \
         '($s.sha // $r.check_runs[0].head_sha // "") | tostring | .[0:12]' 2>/dev/null || printf '')
-    _red=$(jq -rn --argjson r "$_runs" --argjson s "$_status" '
-        [ $r.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")
-          | "\(.name) (\(.conclusion))" ]
-        + [ $s.statuses[] | select(.state == "failure" or .state == "error") | "\(.context) (\(.state))" ]
-        | unique | join(", ")' 2>/dev/null || printf '')
-    if [ -n "$_red" ]; then
-        MAIN_RED_WHY="$_branch of $_slug${_sha:+ at $_sha} is red: $_red"
+    _head="$_branch of $_slug${_sha:+ at $_sha}"
+    # One line, three fields: whether the head carries a check by the claimed
+    # name (1 or 0), that check's failing entries, and every other failing one.
+    _verdict=$(jq -rn --argjson r "$_runs" --argjson s "$_status" --arg c "$1" '
+        def shown: "\(.name) (\(.state))" | gsub("[[:cntrl:]]"; " ");
+        [ ($r.check_runs[] | {name: ((.name // "") | tostring), state: ((.conclusion // "") | tostring),
+                              red: (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")}),
+          ($s.statuses[] | {name: ((.context // "") | tostring), state: ((.state // "") | tostring),
+                            red: (.state == "failure" or .state == "error")}) ] as $all
+        | [ (if ($all | any(.name == $c)) then "1" else "0" end),
+            ($all | map(select(.red and .name == $c) | shown) | unique | join(", ")),
+            ($all | map(select(.red and .name != $c) | shown) | unique | join(", ")) ]
+        | join("\u001f")' 2>/dev/null) \
+        || { MAIN_RED_WHY="the checks on $_head could not be read"; return 2; }
+    IFS=$(printf '\037') read -r _present _named _others <<EOF
+$_verdict
+EOF
+    if [ -n "$_named" ]; then
+        MAIN_RED_WHY="$_head is red: $_named"
         return 0
     fi
-    MAIN_RED_WHY="$_branch of $_slug${_sha:+ at $_sha} has no failing check"
+    if [ "$_present" = 1 ]; then
+        MAIN_RED_WHY="$1 is not failing on $_head"
+    else
+        MAIN_RED_WHY="$_head has no check named $1"
+    fi
+    [ -z "$_others" ] || MAIN_RED_WHY="$MAIN_RED_WHY; other checks failing there: $_others"
     return 1
 }
 
@@ -531,7 +564,7 @@ ADMIT=""         # member | pr-finishing | emergency; empty holds the bead for p
 ADMIT_WHY=""; HOLD_WHY=""
 if [ -n "$POOL_TARGET" ]; then
     if [ -n "$EMERGENCY" ]; then
-        if main_red; then
+        if main_red "$EMERGENCY"; then
             ADMIT=emergency; ADMIT_WHY="$MAIN_RED_WHY"
         else
             HOLD_WHY="--emergency was not confirmed: $MAIN_RED_WHY"

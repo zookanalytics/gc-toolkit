@@ -154,11 +154,13 @@ fi
    operator's move at the sitting.
 
    An emergency is a red main or a broken gate that shows as a failing check on
-   main. Pass `--emergency` for one and the exit reads main's checks itself: it
-   routes the bead at P0 only when it finds a failing check there, and otherwise
-   holds it for placement with a note saying what it found. A latent hazard, a
-   doctor finding marked blocking, or a failure on one PR's branch is not an
-   emergency.
+   main. Pass `--emergency <check>` for one, naming the check on main whose
+   failure this bead is about: a check run's name or a commit status's context,
+   exactly as GitHub shows it. The exit reads main's checks itself. It routes
+   the bead at P0 only when that check is failing there, and otherwise holds it
+   for placement with a note saying what it found. Another check failing on main
+   confirms nothing for this bead. A latent hazard, a doctor finding marked
+   blocking, or a failure on one PR's branch is not an emergency.
 
    `gc.origin=operator` does not decide the exit. An operator capture is triaged
    on its merits like any other bead: when its action is clear and reversible it
@@ -198,8 +200,8 @@ fi
    # member of an epic is held for placement instead of routed.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work and not a question>" --takeaway "<headline>"
    # An emergency, a red main or a broken gate: the exit checks main's checks and
-   # routes at P0 only when one is failing.
-   "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency
+   # routes at P0 only when the check it names is failing.
+   "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign makes it the
    # subject's assignee, the address the agent's own hook matches, since a named
    # agent never reads gc.routed_to. A town-repo edit takes gc-toolkit.mechanik.
