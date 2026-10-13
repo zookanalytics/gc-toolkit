@@ -34,7 +34,9 @@
 # the PR found, and no sentence points at a reply or thread: the answer is in
 # the entry itself. A review body has no thread to carry a decline's or a
 # deferral's full reply, so its entry carries that reply too, and the comment is
-# what delivers it.
+# what delivers it, as it delivers the mark that records the body answered. A
+# review stays live, and gets its comment, while a finding is open, its
+# changes-requested block stands, or the comment owes it an answer or a mark.
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
 # defs to a jq program. No comment or string inside the program may carry an
@@ -215,7 +217,8 @@ REVIEW_ANSWER_DEF='
                         elif ((($rv.state // "") | tostring) == "DISMISSED") and all($fs[]; .open | not) then "plain"
                         else "" end),
             live: (any($fs[]; .open) or ((($rv.state // "") | tostring) == "CHANGES_REQUESTED")
-                   or any($fs[]; ra_owes_reply and (.posted | not))) });
+                   or any($fs[]; ra_owes_reply and (.posted | not))
+                   or ((($v.marks // []) | length) > 0)) });
   def ra_count($n; $word): "\($n) \($word)" + (if $n == 1 then "" else "s" end);
   # The count line: how many points the review raised and how far they are.
   def ra_heading:

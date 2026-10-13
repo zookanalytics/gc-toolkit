@@ -6082,6 +6082,26 @@ threads 605 "$(lreview 605 6006 DISMISSED '' 6601)"
 out=$(run)
 eq "$(lcount 605 6006)" "0" "no living answer for a review with nothing left to answer"
 
+echo "# a review body its batch answers after every finding closed still gets its answer, in a living answer"
+# The findings closed at ruling (a summary ruled restates, a comment that asked
+# for nothing), so nothing holds the review open. Once the batch's fix unit
+# lands, the body is answered, and the living answer is what carries that mark.
+store "[$(anchor LA7 606 "$(lmeta rework:KL7 6701 6007)"), $(fixunit KL7 open),
+  $(lfind LH0 LA7 6007 6007 restates closed 'Summary: one point, inline.' '{"finding.fix_unit":"KL7"}'),
+  $(lfind LH1 LA7 6701 6007 declined closed 'Nice cleanup.' '{"finding.fix_unit":"KL7"}')]"
+printf '%s' "$(prview 606 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_606.json"
+threads 606 "$(lreview 606 6007 COMMENTED 'Summary: one point, inline.' 6701)"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lcount 606 6007)" "0" "nothing is owed while the batch is in flight, so no living answer yet"
+bmut KL7 '.status = "closed"'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lcount 606 6007)" "1" "once the batch lands, the living answer is posted"
+has "$(lanswer 606 6007)" "<!-- gc-writeback-mark:resolved r6007 -->" "…carrying the mark that records the body answered"
+eq "$(thumbed 606 RV-606),$(reacted 606 RV-606)" "true,false" "…so the body trades its pickup EYES for THUMBS_UP"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_606.json")" "1" "…and no check-mark ack is posted beside it"
+
 fi # part living
 
 # ==== part pacing: the paced walks, their visit order, and the posture basis ====
