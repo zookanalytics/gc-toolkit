@@ -49,7 +49,7 @@ covers that dimension.
 | [`polecat`](agents/polecat.md) | 28,898 | 7,224 |
 | [`polecat-codex`](agents/polecat-codex.md) | 28,928 | 7,232 |
 | [`proactive`](agents/proactive.md) | 23,481 | 5,870 |
-| [`refinery`](agents/refinery.md) | 13,730 | 3,432 |
+| [`refinery`](agents/refinery.md) | 14,007 | 3,501 |
 | [`witness`](agents/witness.md) | 19,204 | 4,801 |
 
 ## Formula recipes
@@ -74,7 +74,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,172 | 1,543 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,187 | 1,546 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
