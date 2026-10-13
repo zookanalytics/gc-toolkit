@@ -235,18 +235,20 @@ REVIEW_ANSWER_DEF='
                      { key: "done", title: "Done", one: "done", many: "done" } ];
   def ra_same: ascii_downcase | gsub("[^\\p{L}\\p{N}]+"; "");
   # One point as a list entry. A sentence that only repeats the label is left
-  # out, and so is a reference the sentence already names.
+  # out, and so is a reference the sentence already names. A sentence, a carried
+  # reply and the fix notes are clipped, so no comment outgrows what GitHub
+  # takes and fails on every pass.
   def ra_entry:
     (.label | if test("[.?!…]$") then . else . + "." end) as $l
     | ((.ref // "") | tostring) as $ref
-    | ((.sentence // "") | ra_squash) as $s
+    | ((.sentence // "") | ra_squash | ra_cut(1500)) as $s
     | (if ($s | ra_same) == (.label | ra_same) then "" else $s end) as $say
     | "- **" + (if (.url // "") != "" then "[" + $l + "](" + .url + ")" else $l end) + "**"
       + (if $say != "" then " " + $say else "" end)
       + (if $ref == "" or (($say | contains($ref)) and ($ref | startswith("{{") | not)) then ""
          elif ($ref | startswith("{{")) then $ref
          else " (" + $ref + ")" end)
-      + (if (.extra // "") != "" then "\n" + ([ .extra | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
+      + (if (.extra // "") != "" then "\n" + ([ .extra | ra_cut(4000) | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
   # The comment body, ending with the write-back marker, the mark lines the plan
   # owes it and the review key it is found again by. The writer appends the
   # digest line. $marker is the write-back reply marker.
@@ -272,7 +274,7 @@ REVIEW_ANSWER_DEF='
          (if ($m.notes | length) > 0 then
             "<details>\n<summary>Notes from the fix</summary>\n\n"
             + ([ $m.notes[] | (if ($m.notes | length) > 1 then "**" + .by + "**\n\n" else "" end)
-                 + (.text | gsub("</details>"; "&lt;/details&gt;")) ] | join("\n\n"))
+                 + (.text | ra_cut(12000) | gsub("</details>"; "&lt;/details&gt;")) ] | join("\n\n"))
             + "\n\n</details>"
           else empty end) ]
        | join("\n\n"))

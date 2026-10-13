@@ -139,6 +139,12 @@ has "$P" "### Your review: 3 points, picked up; the ruling is in progress" "(REN
 hasnt "$P" "Not ruled yet" "(RENDER) …and no entry repeats it"
 hasnt "$P" "in progress." "(RENDER) …nor adds a count line"
 
+BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",head:"",self:false,dismissed:"",
+  points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
+  visits:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
+[ "$BIG" -lt 15000 ] && ok "(RENDER) a long sentence and long notes are clipped, so the comment stays postable ($BIG characters)" \
+  || bad "(RENDER) a long sentence and long notes are clipped, so the comment stays postable (got $BIG characters)"
+
 echo "# (MODEL)"
 ROWS='[
  {"id":"B","status":"closed","title":"finding[human]: s","description":"Locus: PR review\n\nSummary of the inline points.\n\nRaised by human:op reviewing anchor A.",
