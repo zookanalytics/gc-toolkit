@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # converse-hold.test.sh — the step-5 hold mechanism (assets/scripts/converse-hold.sh):
 # the decision's length budget (the headline cap less the "holding — " prefix,
-# checked before any write), the takeaway on the GATED bead (visit for a PR anchor,
-# subject otherwise, so the hold marker sits beside its edge) and its gate, the
-# demand gate, the gc.hold_demand stamp-and-readback gate, the --hold-merge opt-in
-# (a second demand on the anchor, failing closed), and the held lifecycle
-# transition. The gates fail CLOSED: unless the headline and the demand land and
-# the stamp reads back off the visit, the script exits non-zero and the caller
-# must not post the framing. This suite drives the shipped script against stubs
-# whose takeaway, demand, stamp, gate-visit and merge-demand outcomes are dialed
-# independently. The stub writer enforces the shipped gc-helm.sh's cap, and the
-# shipped writer's own length gate is run on the budget's boundary. A positive
-# control proves the read-back closes a real regression rather than pinning a
-# line the old shape already caught.
+# checked before any write), the visit read gate (a visit that cannot be read
+# stops the hold before any write), the takeaway on the GATED bead (visit for a
+# PR anchor, subject otherwise, so the hold marker sits beside its edge) and its
+# gate, the demand gate, the gc.hold_demand stamp-and-readback gate, the
+# --hold-merge opt-in (a second demand on the anchor, failing closed), and the
+# held lifecycle transition. The gates fail CLOSED: unless the visit is read,
+# the headline and the demand land and the stamp reads back off the visit, the
+# script exits non-zero and the caller must not post the framing. This suite
+# drives the shipped script against stubs whose visit read, takeaway, demand,
+# stamp, gate-visit and merge-demand outcomes are dialed independently. The
+# stub writer enforces the shipped gc-helm.sh's cap, and the shipped writer's
+# own length gate is run on the budget's boundary. A positive control proves the
+# read-back closes a real regression rather than pinning a line the old shape
+# already caught.
 #
 # Hermetic: stubs gc, gc-helm.sh and lifecycle.sh, and runs the shipped
 # gc-helm.sh only against the stub gc; reads the repo only; no city, no network.
@@ -67,22 +69,35 @@ PREFIX="holding — "
 BUDGET=$((CAP - $(printf '%s' "$PREFIX" | jq -Rsr 'length')))
 
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
-# the visit with whatever the stamp has persisted; `bd update`
-# persists the stamped id unless STAMP_PERSIST=0, overridable by STAMP_VALUE for
-# the landed-wrong case, and exits STAMP_RC. Anything else exits 2 so a script
-# that grows a third call fails here rather than reaching the live store.
+# the visit with whatever the stamp has persisted, or STUB_SHOW_OUT in its place
+# when that is set (empty for no answer at all), and exits STUB_SHOW_RC. Its
+# first STUB_SHOW_FAILS reads answer nothing and exit 1, a store that recovers
+# between the hold's reads. `bd update` persists the stamped id unless
+# STAMP_PERSIST=0, overridable by STAMP_VALUE for the landed-wrong case, and
+# exits STAMP_RC. Anything else exits 2 so a script that grows a third call
+# fails here rather than reaching the live store.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
-        hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-        jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
-            --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
-            '[{id:"v-x", metadata:(({"task_kind":"visit"}
-                + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
-                + (if $tp == "" then {} else {"escalation_key":$tp} end)
-                + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
-              + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]' ;;
+        if [ "${STUB_SHOW_FAILS:-0}" -gt 0 ]; then
+            n=0; [ -r "$PERSIST.reads" ] && n="$(cat "$PERSIST.reads")"
+            printf '%s' "$((n + 1))" >"$PERSIST.reads"
+            [ "$n" -lt "$STUB_SHOW_FAILS" ] && exit 1
+        fi
+        if [ -n "${STUB_SHOW_OUT+x}" ]; then
+            printf '%s' "$STUB_SHOW_OUT"
+        else
+            hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
+            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
+                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
+                '[{id:"v-x", metadata:(({"task_kind":"visit"}
+                    + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
+                    + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                    + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
+                  + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]'
+        fi
+        exit "${STUB_SHOW_RC:-0}" ;;
     update)
         [ -n "${HLOG:-}" ] && printf 'gc %s\n' "$*" >>"$HLOG"
         # The gc.hold_demand write on the visit is the stamp gate under test; the
@@ -164,14 +179,14 @@ stub_helm "$CITY/rigs/gc-toolkit" CITY
 stub_helm "$CAPLESS" CAPLESS nocap
 
 # run_need <need> [VAR=val ...] — run converse-hold.sh "<need>" from a non-git
-# cwd with the owning-rig pack on GC_RIG_ROOT, resetting the persist file and
-# call log first. Trailing VAR=val pairs override any default (env: last
-# assignment wins), so a case dials STAMP_RC/STAMP_PERSIST/STUB_DEMAND_RC/
-# GC_RIG_ROOT/… inline. run [VAR=val ...] is run_need "need X".
+# cwd with the owning-rig pack on GC_RIG_ROOT, resetting the persist file, the
+# stub's read count and the call log first. Trailing VAR=val pairs override any
+# default (env: last assignment wins), so a case dials STAMP_RC/STAMP_PERSIST/
+# STUB_DEMAND_RC/GC_RIG_ROOT/… inline. run [VAR=val ...] is run_need "need X".
 OUT=""; RC=0
 run_need() {
     local need="$1"; shift
-    rm -f "$PERSIST" "$HLOG"; : >"$HLOG"
+    rm -f "$PERSIST" "$PERSIST.reads" "$HLOG"; : >"$HLOG"
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
@@ -181,7 +196,7 @@ run_need() {
 run() { run_need "need X" "$@"; }
 # Like run, but passes the --hold-merge opt-in flag to the script.
 run_hold_merge() {
-    rm -f "$PERSIST" "$HLOG"; : >"$HLOG"
+    rm -f "$PERSIST" "$PERSIST.reads" "$HLOG"; : >"$HLOG"
     OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" \
         GC_RIG_ROOT="$PACK" GC_CITY_PATH="$CITY" \
         GIT_CEILING_DIRECTORIES="$TMPD" PERSIST="$PERSIST" HLOG="$HLOG" \
@@ -227,6 +242,45 @@ run_need "$(rep x $((BUDGET - 2)))   y"
 is "the budget counts the collapsed text, so a run of spaces costs one" "$(verdict)" "held"
 run_need "   "
 is "a decision that is only whitespace is refused as usage" "$RC" "2"
+is "…before any write" "$(calls)" ""
+
+echo "── the visit read gate: a visit that cannot be read stops the hold before any write ──"
+# The visit's escalation_key is the topic every demand carries. A failed read
+# taken as an empty answer files the demand with no topic, and a topic-less
+# demand matches whatever demand already sits on the gated bead, a sibling
+# sitting's on a shared subject. So a read counts only when it exits 0 with the
+# visit's own row, and anything else exits 1 having written nothing. The lead
+# case fails one read and lets the store answer after it, so the stamp's
+# read-back finds the stamp and nothing later in the hold refuses in its place.
+run STUB_TOPIC=finding-b STUB_SHOW_FAILS=1
+is "a visit read that fails refuses the hold (exit 1)" "$RC" "1"
+has "…and says the visit could not be read" "VISIT UNREADABLE: v-x could not be read" "$OUT"
+hasnt "…and files no demand, so none goes out without the topic" "demand item-x" "$(calls)"
+hasnt "…and writes no holding headline" "takeaway" "$(calls)"
+is "…and writes nothing at all" "$(calls)" ""
+is "…so no hold_demand is stamped" "$(cat "$PERSIST" 2>/dev/null || echo '<none>')" "<none>"
+run STUB_TOPIC=finding-b STUB_SHOW_RC=1 STUB_SHOW_OUT=
+is "a store that does not answer at all refuses the hold too" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_TOPIC=finding-b STUB_SHOW_RC=1
+is "a read that exits non-zero refuses even when it printed the visit (the exit is the signal)" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT="Error: search count issues: invalid connection"
+is "a zero-exit read whose answer does not parse refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT="[]"
+is "a zero-exit read that answers with no row refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_OUT='[{"id":"v-other","metadata":{"escalation_key":"finding-a"}}]'
+is "a read that answers with another bead's row refuses" "$RC" "1"
+is "…before any write" "$(calls)" ""
+run STUB_SHOW_RC=1 STUB_SHOW_OUT='{"error":"no issues found matching the provided IDs"}'
+is "a visit the store says does not exist refuses the hold (exit 1)" "$RC" "1"
+has "…and says it does not exist" "NO SUCH VISIT: v-x does not exist" "$OUT"
+is "…before any write" "$(calls)" ""
+run SUBJECT= STUB_SHOW_RC=1 STUB_SHOW_OUT=
+is "with no SUBJECT, a visit that cannot be read refuses as unreadable (exit 1)" "$RC" "1"
+hasnt "…not as a visit that names no subject" "no subject" "$OUT"
 is "…before any write" "$(calls)" ""
 
 echo "── the takeaway gate: a headline the writer refuses stops the hold ──"
