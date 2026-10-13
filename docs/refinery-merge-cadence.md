@@ -133,12 +133,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
    that the merge result keeps `generated/seed-audit` current, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
-   --match-head-commit <validated oid>`, then close + record via one
-   `lifecycle.sh` call. The posture it validates is the value **pr-facts
-   recorded on the anchor**, never a fresh read of GitHub. The open-visit clause
-   is the finalize gate: an open visit tracking the anchor holds its merge
-   (`docs/finalize-gate.md`), re-asserted in the terminal re-read because a visit
-   filed mid-pass does not move the head.
+   --match-head-commit <validated oid>`, then close + record in one lifecycle
+   transition, which `gctk merge` runs in-process. The posture it validates is
+   the value **pr-facts recorded on the anchor**, never a fresh read of GitHub.
+   The open-visit clause is the finalize gate: an open visit tracking the anchor
+   holds its merge (`docs/finalize-gate.md`), re-asserted in the terminal re-read
+   because a visit filed mid-pass does not move the head.
 
    GitHub computes a PR's mergeability lazily. The first read after the PR's
    base moves answers `UNKNOWN` and starts the computation, which finishes in a
