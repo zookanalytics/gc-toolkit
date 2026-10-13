@@ -210,7 +210,7 @@ REVIEW_SELECT="task_kind,check_name,anchor_bead"
 # answer; the caller holds the dispatch.
 inflight_review() { # <anchor-id> <check>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" '
     [ .[]
       | select(((.metadata.task_kind // "") | tostring) == "review")
@@ -244,7 +244,7 @@ inflight_review() { # <anchor-id> <check>
 # here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
     [ .[]
       | (.metadata // {}) as $m
@@ -291,7 +291,7 @@ open_rework_child() { # <anchor-id>
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r '
     .[] | select(((.metadata.task_kind // "") | tostring) == "validation") | .id' 2>/dev/null
 }
@@ -802,7 +802,7 @@ STRAY
   # already derives each lane as green (settled) or short of green; these two
   # flags keep that answer instead of discarding it at the end of the iteration.
   #
-  # The cap's wedge — shared with merge.sh's is_held arm — is evaluated once
+  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
   # HERE, per anchor, not inside the per-check loop: the park sits on the
   # anchor's own merge_hold, not on any one lane, so a fully green capped
   # anchor (one check hand-greened, or all of them) must still record the

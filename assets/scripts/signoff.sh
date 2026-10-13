@@ -539,13 +539,13 @@ close_review() {
 ensure_validation_pass() {
   local rows vpass vtitle vctx vbody vident vmeta vfix vblk
   # The lane probe selects a pass by the VALIDATION_SELECT keys (bd-lib.sh).
-  if ! rows=$(bd_list --metadata-field anchor_bead="$ANCHOR" \
-       --metadata-field task_kind=validation --metadata-field check_name="$CHECK_NAME" \
-       --status="$LIVE_STATUSES"); then
+  if ! rows=$(bd_anchor_children "$ANCHOR" "$LIVE_STATUSES"); then
     warn "validation-pass probe for lane $CHECK_NAME on $ANCHOR is unreadable; review left open for a retry"
     exit 2
   fi
-  vpass=$(printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null)
+  vpass=$(printf '%s' "$rows" | jq -r --arg l "$CHECK_NAME" '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation")
+          | select(((.metadata.check_name // "") | tostring) == $l) | .id ] | .[0] // empty' 2>/dev/null)
   if [ -n "$POST_OPEN" ]; then
     vtitle="Validate PR#$PR_NUMBER $CHECK_NAME review @ $REVIEWED_OID"
     vctx="a $CHECK_NAME review batch on PR#$PR_NUMBER at $REVIEWED_OID"
@@ -589,6 +589,13 @@ ensure_validation_pass() {
   # it opened at rather than a validator mid-rule being moved under it.
   vmeta=$(bd_json show "$vpass")
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
+  # A pass about to take anchor_bead is joined to the anchor first (a fresh one
+  # carries the edge from its create, an adopted orphan does not), so the stamp
+  # never lands on a pass the anchor's closed-children read cannot reach.
+  if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
+    warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
+    exit 2
+  fi
   vfix=()
   [ "$(row_meta "$vmeta" task_kind)" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
   [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")

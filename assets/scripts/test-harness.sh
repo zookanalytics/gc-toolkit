@@ -18,9 +18,10 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
-# Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh.
-# lifecycle.sh execs `gctk lifecycle` and has no other implementation, so such a
-# suite needs a binary, and the one it needs is built from the tree under test.
+# Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh or
+# merge.sh. Each execs its gctk subcommand and has no other implementation, so
+# such a suite needs a binary, and the one it needs is built from the tree under
+# test.
 # Call this BEFORE harness_init: the stub git harness_init puts on PATH answers
 # nothing, and the build must not read a fixture. -buildvcs=false keeps the
 # toolchain off git entirely; no assertion reads the binary's version.
@@ -32,11 +33,11 @@ harness_build_gctk() {
   local mod
   mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
   if ! command -v go >/dev/null 2>&1; then
-    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh had nothing to exec in this suite"
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh and merge.sh had nothing to exec in this suite"
   elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
     GCTK_BUILT="$TMP/gctk"
   else
-    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh and merge.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
   fi
 }
 
@@ -58,10 +59,9 @@ harness_init() {
   # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
-  # binary at all: lifecycle.sh refuses under GCTK_BIN=none, and
+  # binary at all: lifecycle.sh and merge.sh refuse under GCTK_BIN=none, and
   # pr-status-label.sh derives nothing. No port's shell is forced either: a
-  # suite that tests one sets GCTK_FALLBACK after harness_init, the way
-  # merge.test.sh's shell arm does.
+  # suite that tests one sets GCTK_FALLBACK after harness_init.
   export GCTK_BIN="${GCTK_BUILT:-none}"
   unset GCTK_FALLBACK
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
@@ -73,6 +73,7 @@ harness_init() {
   export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
+  export STUB_KV="$TMP/kv.txt"
   export STUB_GC_LOG="$TMP/gc.log"
   export STUB_GH_LOG="$TMP/gh.log"
   export STUB_GH_DIR="$GH_DIR"
@@ -87,7 +88,8 @@ harness_init() {
   # real read can carry. Unset leaves the JSON clean.
   export STUB_SHOW_NOTICE=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
-  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
+  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
+  export STUB_SHOW_NOT_FOUND_ERROR=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
@@ -101,7 +103,7 @@ harness_init() {
   export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
   # The `close` verb's ownership check (see its handler). Off = any actor closes.
   export STUB_ENFORCE_CLOSE_OWNER=""
-  echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
+  echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_KV"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
   chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
@@ -266,12 +268,17 @@ verb="${1:-}"; shift || true
 # nothing. The reversed pair is a different pair. Every edge writer (`dep`,
 # and `create --deps`) stores through dep_put, so no write through the stub
 # leaves two edges on one pair, a state bd refuses to create.
+dep_have() { # <A> <TYPE> <B>: print the type already on the pair row "A|TYPE|B" would take
+  local issue="$1" on="$3"
+  [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
+  awk -F'|' -v i="$issue" -v d="$on" '
+    { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
+      if (ri == i && rd == d) { print $2; exit } }' "$D"
+}
 dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
   local issue="$1" on="$3" have
   [ "$2" = "blocks" ] && { issue="$3"; on="$1"; }
-  have=$(awk -F'|' -v i="$issue" -v d="$on" '
-    { if ($2 == "blocks") { ri=$3; rd=$1 } else { ri=$1; rd=$3 }
-      if (ri == i && rd == d) { print $2; exit } }' "$D")
+  have=$(dep_have "$1" "$2" "$3")
   if [ -z "$have" ]; then
     printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$D"
   elif [ "$have" != "$2" ]; then
@@ -289,6 +296,11 @@ case "$verb" in
       "$STUB_SHOW_HOOK" "$id" || true
     fi
     [ -n "${STUB_SHOW_NOTICE:-}" ] && printf 'gc bd: answering from the rig "%s" store\n' "$STUB_SHOW_NOTICE"
+    # STUB_SHOW_NOT_FOUND_ERROR answers an id the store does not hold the way
+    # real bd does: an error object on stdout at exit 1. Unset, it answers [].
+    if [ -n "${STUB_SHOW_NOT_FOUND_ERROR:-}" ] && ! jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1; then
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1
+    fi
     jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
     ;;
   list)
@@ -456,8 +468,9 @@ case "$verb" in
     # id, depends-on:<id> and blocked-by:<id> make the new bead depend on <id>
     # (a blocks edge from <id>), blocks:<id> makes <id> depend on the new bead,
     # and any other <type>:<id> makes the new bead depend on <id> with that type.
-    # STUB_DEP_FAIL naming the minted id lands the bead without its edges, as it
-    # refuses a `dep` write from that id.
+    # A target that does not resolve refuses the whole create with nothing
+    # written. STUB_DEP_FAIL naming the minted id lands the bead without its
+    # edges, as it refuses a `dep` write from that id.
     title="${1:-}"; shift || true
     body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
     while [ $# -gt 0 ]; do
@@ -494,21 +507,24 @@ case "$verb" in
       | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]),
         $id' "$S" 2>/dev/null) \
       || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
+    for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
+      ctgt="${cdep#*:}"
+      jq -e --arg id "$ctgt" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1 \
+        || { echo "Error: validation failed: create: dependency target does not exist: issue $ctgt not found" >&2; exit 1; }
+    done
     nid="${out##*$'\n'}"
     tmp="${S%/*}/.gc-stub.$$"
     printf '%s\n' "${out%$'\n'*}" > "$tmp" && mv "$tmp" "$S"
     case " ${STUB_DEP_FAIL:-} " in *" $nid "*) cdeps="" ;; esac
-    old_ifs="$IFS"; IFS=','
-    for spec in $cdeps; do
-      [ -n "$spec" ] || continue
-      case "$spec" in
-        blocks:*) dep_put "$nid" blocks "${spec#blocks:}" ;;
-        depends-on:*|blocked-by:*) dep_put "${spec#*:}" blocks "$nid" ;;
-        *:*) dep_put "$nid" "${spec%%:*}" "${spec#*:}" ;;
-        *) dep_put "$spec" blocks "$nid" ;;
+    for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
+      ctyp="${cdep%%:*}"; ctgt="${cdep#*:}"
+      [ "$ctyp" != "$cdep" ] || ctyp="blocked-by"
+      case "$ctyp" in
+        blocks) dep_put "$nid" blocks "$ctgt" ;;
+        blocked-by|depends-on) dep_put "$ctgt" blocks "$nid" ;;
+        *) dep_put "$nid" "$ctyp" "$ctgt" ;;
       esac
     done
-    IFS="$old_ifs"
     if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else printf '{"id":"%s"}\n' "$nid"; fi
     ;;
   close)
@@ -539,13 +555,28 @@ case "$verb" in
     # = rows depending on the id) and -t/--type. Writes store through dep_put.
     case "${1:-}" in
       list)
-        [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
+        # Each dep-read knob below takes 1 for every dep read, or a text that
+        # limits it to the reads whose argv carries that text (--direction=down
+        # for the blocker reads, leaving an anchor's children read alone).
+        dep_knob() { [ -n "$1" ] && { [ "$1" = 1 ] || case " $2 " in *"$1"*) true ;; *) false ;; esac; }; }
+        # STUB_DEP_GARBAGE: the probe answers bytes that are not JSON.
+        dep_knob "${STUB_DEP_GARBAGE:-}" "$*" && { echo "not-json"; exit 0; }
         # STUB_DEP_PARTIAL: the probe prints `[]` and exits 1, a failed read
         # that still printed an array.
-        [ -n "${STUB_DEP_PARTIAL:-}" ] && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
+        dep_knob "${STUB_DEP_PARTIAL:-}" "$*" && { echo '[]'; echo "gc bd dep: simulated store error" >&2; exit 1; }
         # STUB_DEP_TRAILING: the probe prints its answer, then a line that is
         # not JSON, and exits 0 — unreadable bytes after the array.
-        id="${2:-}"; shift 2 || true
+        dep_trailing=""; dep_knob "${STUB_DEP_TRAILING:-}" "$*" && dep_trailing=1
+        #
+        # One id or many. Each row is the far-end bead with the edge's
+        # dependency_type added, the single-id shape real bd returns, which it
+        # also returns for many ids read --direction=up; many ids read down
+        # answer raw edge records {issue_id, depends_on_id, type}. Real bd
+        # answers an id it cannot resolve with an error object at exit 1, and
+        # with many ids that error is the whole answer.
+        shift || true
+        qids=()
+        while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do qids+=("$1"); shift; done
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
           case "$1" in
@@ -557,25 +588,63 @@ case "$verb" in
           esac
           shift || true
         done
-        ids=$(awk -F'|' -v id="$id" -v dir="$dir" -v t="$dtyp" '
-          {
-            a=$1; ty=$2; b=$3
-            if (t != "" && ty != t) next
-            if (ty == "blocks") { issue=b; dep=a } else { issue=a; dep=b }
-            if (dir == "down")    { if (issue == id) print dep }
-            else if (dir == "up") { if (dep == id) print issue }
-            else                  { if (b == id) print a }   # legacy: who names me
-          }' "$D")
-        jq -c --arg ids "$ids" '($ids | split("\n")) as $want
-          | [ .[] | select(.id as $b | ($want | index($b))) ]' "$S" || exit $?
-        [ -z "${STUB_DEP_TRAILING:-}" ] || echo 'gc bd dep: simulated trailing output'
+        for q in ${qids[@]+"${qids[@]}"}; do
+          jq -e --arg id "$q" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1 \
+            || { printf '{"error":"not found: issue %s","schema_version":1}\n' "$q"; exit 1; }
+        done
+        rows=$(for q in ${qids[@]+"${qids[@]}"}; do
+          awk -F'|' -v id="$q" -v dir="$dir" -v t="$dtyp" '
+            {
+              a=$1; ty=$2; b=$3
+              if (t != "" && ty != t) next
+              if (ty == "blocks") { issue=b; dep=a } else { issue=a; dep=b }
+              if (dir == "down")    { if (issue == id) print dep "|" ty "|" issue "|" dep }
+              else if (dir == "up") { if (dep == id) print issue "|" ty "|" issue "|" dep }
+              else                  { if (b == id) print a "|" ty "|" issue "|" dep }   # legacy: who names me
+            }' "$D"
+        done)
+        if [ "${#qids[@]}" -gt 1 ] && [ "$dir" = "down" ]; then
+          jq -c --arg rows "$rows" '[ $rows | split("\n")[] | select(. != "") | split("|")
+            | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]' -n || exit $?
+        else
+          jq -c --arg rows "$rows" '
+            [ $rows | split("\n")[] | select(. != "") | split("|") | {id: .[0], t: .[1]} ] as $want
+            | [ .[] | . as $b | $want[] | select(.id == $b.id) | ($b + {dependency_type: .t}) ]' "$S" || exit $?
+        fi
+        [ -z "$dep_trailing" ] || echo 'gc bd dep: simulated trailing output'
         ;;
       add)
+        # --file <path|->: newline-delimited {"from","to","type"} edges. Real bd
+        # commits the batch in one transaction, so one refused pair writes none.
+        if [ "${2:-}" = "--file" ] || [ "${2#--file=}" != "${2:-}" ]; then
+          src="${3:-}"; [ "${2#--file=}" != "${2:-}" ] && src="${2#--file=}"
+          if [ "$src" = "-" ]; then lines=$(cat); else lines=$(cat "$src"); fi
+          batch=$(printf '%s\n' "$lines" | jq -r 'select(type == "object")
+            | [ (.from // .issue_id // ""), (.type // "blocks"), (.to // .depends_on_id // "") ] | join("|")' 2>/dev/null) \
+            || { echo "Error: invalid JSONL in --file" >&2; exit 1; }
+          while IFS='|' read -r fa ft fb; do
+            [ -n "$fa" ] || continue
+            case " ${STUB_DEP_ADD_FAIL:-} " in *" $fa "*) echo "Error: add deps: simulated refusal for $fa" >&2; exit 1 ;; esac
+            if [ "$ft" = "blocks" ]; then have=$(dep_have "$fb" "$ft" "$fa"); else have=$(dep_have "$fa" "$ft" "$fb"); fi
+            if [ -n "$have" ] && [ "$have" != "$ft" ]; then
+              echo "Error: add deps: dependency $fa -> $fb already exists with type \"$have\" (requested \"$ft\")" >&2
+              exit 1
+            fi
+          done <<< "$batch"
+          while IFS='|' read -r fa ft fb; do
+            [ -n "$fa" ] || continue
+            if [ "$ft" = "blocks" ]; then dep_put "$fb" "$ft" "$fa" || exit 1; else dep_put "$fa" "$ft" "$fb" || exit 1; fi
+          done <<< "$batch"
+          exit 0
+        fi
         a="${2:-}"; b="${3:-}"; ty="parent-child"; shift 3 || true
         while [ $# -gt 0 ]; do
           case "$1" in --type=*) ty="${1#--type=}" ;; --type) shift; ty="${1:-}" ;; esac
           shift || true
         done
+        # STUB_DEP_ADD_FAIL="id id2" — refuse a dep add whose source is named, by
+        # itself or inside a --file batch (which then writes none of its edges).
+        case " ${STUB_DEP_ADD_FAIL:-} " in *" $a "*) echo "Error: simulated refusal for $a" >&2; exit 1 ;; esac
         # Real bd reads `dep add <blocked> <blocker> --type blocks` with the
         # SECOND operand as the blocker — `dep add Y X` is the documented
         # equivalent of `dep X --blocks Y`. Stored rows are blocker-first
@@ -605,6 +674,35 @@ case "$verb" in
         [ "${1:-}" = "--blocks" ] && { dep_put "$src" blocks "${2:-}" || exit 1; } ;;
     esac
     ;;
+  kv)
+    # gc bd kv get|set|clear over STUB_KV, one key=value line each. `get --json`
+    # answers {found, key, value} and exits 1 for an unset key, the shape real
+    # bd prints. A --db pin anywhere is ignored. STUB_KV_FAIL fails every kv
+    # call with no answer.
+    [ -n "${STUB_KV_FAIL:-}" ] && { echo "gc: simulated kv failure" >&2; exit 1; }
+    K="${STUB_KV:?}"; kverb=""; kargs=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --db) shift ;;
+        --db=*|--json) : ;;
+        *) if [ -z "$kverb" ]; then kverb="$1"; else kargs+=("$1"); fi ;;
+      esac
+      shift || true
+    done
+    key="${kargs[0]:-}"
+    case "$kverb" in
+      get)
+        if kval=$(awk -v k="$key" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); f = 1 } END { exit !f }' "$K"); then
+          jq -nc --arg k "$key" --arg v "$kval" '{found: true, key: $k, schema_version: 1, value: $v}'
+        else
+          jq -nc --arg k "$key" '{found: false, key: $k, schema_version: 1, value: ""}'; exit 1
+        fi ;;
+      set|clear)
+        awk -v k="$key" 'index($0, k "=") != 1' "$K" > "$K.tmp"
+        [ "$kverb" = clear ] || printf '%s=%s\n' "$key" "${kargs[1]:-}" >> "$K.tmp"
+        mv "$K.tmp" "$K" ;;
+      *) echo "gc bd stub: unsupported 'kv $kverb'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;
 esac
 STUB

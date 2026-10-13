@@ -287,7 +287,11 @@ while IFS= read -r row; do
         elif ((($x.assignee // "") | tostring) != "") then "ok"
         elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
         else "restamp" end' 2>/dev/null)
-    if [ "$dneed" = "restamp" ]; then
+    if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
+      # The join lands before the marker, so a marker never stands on a child
+      # the anchor's closed-children read cannot reach.
+      echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
+    elif [ "$dneed" = "restamp" ]; then
       # `gc bd update` returns 0 without writing (the claim guard is one such
       # path), so the exit code cannot prove the marker landed. Read both keys
       # back and re-stamp once, claiming it only when it persists; the next pass
