@@ -9,12 +9,14 @@
 # fail-closed probes (a row whose edges were read short, unreadable blocker
 # listing, unreadable or non-array armed listing, unreadable rig list, an
 # unresolvable blocker, a scan that cannot report, no scratch directory), the
-# suspended-rig skip, and the quiet path (no armed beads). A store costs two
+# stderr each failed read reports, the suspended-rig skip, and the quiet path
+# (no armed beads). A store costs two
 # reads: one armed listing, whose rows carry each bead's own dependency edges,
 # then one `bd list --id` for the blockers' statuses, with no dependency read
-# and nothing per armed bead. The stores are scanned at once and reported in
-# rig order, and the rig and order registries are read at once. The cases that
-# assert those mechanisms assert them directly, not just the findings.
+# and nothing per armed bead. The stores are scanned at once, no more of them
+# than the fan-out cap, and reported in rig order, and the rig and order
+# registries are read at once. The cases that assert those mechanisms assert
+# them directly, not just the findings.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -57,10 +59,14 @@ reg_barrier() {
   done
 }
 case "$1 $2" in
-  "rig list") reg_barrier rigs; rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  "rig list") reg_barrier rigs; rc="${RIGS_RC:-0}"
+    [ "$rc" -eq 0 ] || { [ -n "${RIGS_ERR:-}" ] && printf '%s\n' "$RIGS_ERR" >&2; exit "$rc"; }
+    cat "$RIGS_JSON" ;;
   # The order registry, for the cadence window. With no ORDERS_JSON it answers
-  # nothing, the shape of a registry that did not read.
-  "order list") reg_barrier orders; [ -n "${ORDERS_JSON:-}" ] && cat "$ORDERS_JSON"; exit 0 ;;
+  # nothing, the shape of a registry that did not read, and ORDERS_ERR is what
+  # it says on stderr.
+  "order list") reg_barrier orders; [ -n "${ORDERS_ERR:-}" ] && printf '%s\n' "$ORDERS_ERR" >&2
+    [ -n "${ORDERS_JSON:-}" ] && cat "$ORDERS_JSON"; exit 0 ;;
   "bd "*)     shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -81,7 +87,9 @@ GC
 # BD_BARRIER_N make each read wait until N have started (failing after 20s),
 # BD_SLOW_STORE and BD_SLOW_SECS slow one store, BD_REAP_SCAN_AT removes the
 # check's scratch from under it as a scratch reaper would, and BD_DONE gets the
-# store's name once its listing has answered.
+# store's name once its listing has answered. With INFLIGHT set, each listing
+# marks its store in flight for a second and appends how many stores were then
+# in flight to INFLIGHT.peaks. A failed read prints BD_ERR on stderr when set.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 sub="$1"; shift
@@ -100,6 +108,7 @@ for a in "$@"; do
   prev="$a"
 done
 name=$(basename "$(dirname "$db")")
+bd_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 read="$sub"
 if [ "$sub" = "list" ]; then
   if [ -n "$id_csv" ]; then read="list-id"; else read="list-armed"; fi
@@ -107,7 +116,7 @@ fi
 [ -n "${CALL_LOG:-}" ] && printf '%s %s %s\n' "$name" "$read" "$*" >> "$CALL_LOG"
 case "$read" in
   list-id)
-    [ "$name" = "${BD_FAIL_BLOCKERS:-}" ] && exit 3
+    [ "$name" = "${BD_FAIL_BLOCKERS:-}" ] && bd_die
     f="$STORES/$name.blockers.json"
     if [ -f "$f" ]; then
       # Model bd's default hiding: a gate/infra/template blocker is returned
@@ -123,6 +132,10 @@ case "$read" in
                       else true end ) ]' "$f"
     else printf '[]'; fi ;;
   list-armed)
+    if [ -n "${INFLIGHT:-}" ]; then
+      mkdir "$INFLIGHT/$name"; ls "$INFLIGHT" | wc -l | tr -d ' ' >> "$INFLIGHT.peaks"
+      sleep 1; rmdir "$INFLIGHT/$name"
+    fi
     if [ -n "${BD_BARRIER_DIR:-}" ]; then
       : > "$BD_BARRIER_DIR/$name"
       waited=0
@@ -133,7 +146,7 @@ case "$read" in
     fi
     [ "$name" = "${BD_SLOW_STORE:-}" ] && sleep "$BD_SLOW_SECS"
     [ "$name" = "${BD_REAP_SCAN_AT:-}" ] && rm -rf "${TMPDIR:?}"/gctk-check-armed-dispatch-owed.*
-    [ "$name" = "${BD_FAIL_LIST:-}" ] && exit 3
+    [ "$name" = "${BD_FAIL_LIST:-}" ] && bd_die
     if [ "$name" = "${BD_BLANK_LIST:-}" ]; then
       printf '  '
     else
@@ -525,6 +538,42 @@ mkdir -p "$TMP/regbar"
 OUT=$(ORDERS_JSON="$TMP/orders-busy.json" REG_BARRIER="$TMP/regbar" run_check); RC=$?
 eq "$RC" "0" "rig and order reads that each wait for the other both answer"
 hasnt "$OUT" "did not read" "the order registry read beside the rig list sets the window"
+clear_stores
+
+# --- 20. a failed read says why: each warning carries the probe's stderr -----
+armed_store alpha "$(aarmed s-1)"
+edges_store alpha "$(e_blk s-1 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(BD_FAIL_LIST=alpha BD_ERR="dolt: database is locked" run_check); RC=$?
+eq "$RC" "1" "a failed armed listing warns (exit 1)"
+has "$OUT" "alpha: could not list armed beads in $TMP/alpha/.beads (rc=3) — this store was NOT checked; \`gc bd list\` stderr: dolt: database is locked" "the listing warning carries \`gc bd list\` stderr"
+OUT=$(BD_FAIL_BLOCKERS=alpha BD_ERR="dolt: query timed out" run_check); RC=$?
+has "$OUT" "could not read blocker statuses for 1 armed bead(s) in $TMP/alpha/.beads (rc=3) — this store was NOT checked; \`gc bd list\` stderr: dolt: query timed out" "the blocker-read warning carries its stderr"
+OUT=$(RIGS_RC=2 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
+eq "$RC" "1" "a failed rig list warns (exit 1)"
+has "$OUT" "\`gc rig list\` stderr: rig registry: permission denied" "the rig-list detail carries its stderr"
+OUT=$(ORDERS_ERR="order registry: socket unavailable" run_check); RC=$?
+has "$OUT" "minimum floor, not one trip of the dispatch rotation; \`gc order list\` stderr: order registry: socket unavailable" "an unread order registry's note carries its stderr"
+OUT=$(BD_FAIL_LIST=alpha run_check); RC=$?
+eq "$RC" "1" "a failed listing with no stderr still warns"
+hasnt "$OUT" "stderr:" "a read that wrote no stderr adds no stderr clause"
+clear_stores
+
+# --- 21. the stores scan through the fan-out cap ------------------------------
+# With a cap of one, each store's listing runs alone, and every store is still
+# scanned and reported. Case 14 is the control: under the default cap the same
+# listings run at once.
+rigs_of alpha beta gamma
+for s in alpha beta gamma; do
+    armed_store "$s" "$(aarmed "c-$s")"; edges_store "$s" "$(e_blk "c-$s" "b-$s")"; blockers_store "$s" "$(b_closed "b-$s" "$OLD")"
+done
+mkdir -p "$TMP/inflight"; rm -f "$TMP/inflight.peaks"
+OUT=$(RIGS_JSON="$TMP/rigs-multi.json" INFLIGHT="$TMP/inflight" GC_DOCTOR_FANOUT=1 run_check); RC=$?
+eq "$(sort -n "$TMP/inflight.peaks" | tail -1)" "1" "with GC_DOCTOR_FANOUT=1 no two stores' listings were in flight at once"
+eq "$(grep -c . "$TMP/inflight.peaks")" "3" "and every store was listed"
+eq "$RC" "1" "an owed arm in each store warns"
+for s in alpha beta gamma; do has "$OUT" "$s bead c-$s: armed and" "the owed arm in $s is reported"; done
+hasnt "$OUT" "NOT checked" "no store is left unchecked by the cap"
 clear_stores
 
 echo "── every run removes its scratch ──"

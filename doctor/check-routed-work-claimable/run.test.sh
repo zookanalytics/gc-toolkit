@@ -6,8 +6,9 @@
 # legitimate wait / parent shape / dependency shape / excluded type), and
 # every fail-closed probe — including that a failing probe surfaces its
 # stderr, not just its rc. Also the cost shape the doctor budget rests on: slim
-# listings, batched re-reads, stores and their listings read at once, a report
-# merged in rig order, and a scan that cannot report counted as NOT checked.
+# listings, batched re-reads, stores and their listings read at once, no more
+# stores at once than the fan-out cap, a report merged in rig order, and a scan
+# that cannot report counted as NOT checked.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -57,6 +58,13 @@ for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")
 bd_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 [ "$name" = "${BD_FAIL_STORE:-}" ] && bd_die
+# With INFLIGHT set, each store's open-bead listing marks the store in flight
+# for a second and appends how many stores were then in flight to
+# INFLIGHT.peaks.
+if [ "$sub" = list ] && [ -n "${INFLIGHT:-}" ]; then
+  mkdir "$INFLIGHT/$name"; ls "$INFLIGHT" | wc -l | tr -d ' ' >> "$INFLIGHT.peaks"
+  sleep 1; rmdir "$INFLIGHT/$name"
+fi
 # BD_SLOW names the stores whose listings (list, ready, blocked) each take
 # BD_SLOW_SECS, "all" for every store. BD_BLANK names <store>:<subcommand>
 # reads that answer whitespace at rc 0.
@@ -67,7 +75,7 @@ esac
 case "$sub" in
   # BD_REAP_SCAN_AT names a store whose listing removes the check's scan
   # scratch from under it, as a scratch reaper would.
-  list)    [ "$name" = "${BD_REAP_SCAN_AT:-}" ] && rm -rf "${TMPDIR:?}"/gctk-check-routed-work-claimable-scan.*
+  list)    [ "$name" = "${BD_REAP_SCAN_AT:-}" ] && rm -rf "${TMPDIR:?}"/gctk-check-routed-work-claimable.*
            f="$STORES/$name.json" ;;
   # A healthy store offers every open bead, so `ready` serves the `list`
   # fixture unless a case overrides it, and `blocked` is empty unless one does.
@@ -567,6 +575,22 @@ OUT=$(BD_BLANK=alpha:ready run_check); RC=$?
 eq "$RC" "1" "a whitespace ready queue warns instead of flagging the candidates"
 has "$OUT" "the \`bd ready\`/\`bd blocked\` listings from $TMP/alpha/.beads could not be parsed" "the warning names the unparsable queue"
 hasnt "$OUT" "no pool offers it" "no candidate is flagged from an unread queue"
+clear_stores
+
+# --- 20. the stores scan through the fan-out cap ------------------------------
+# With a cap of one, each store is scanned alone, and every store is still
+# scanned and reported. Case 15 is the control: under the default cap the same
+# listings overlap.
+store alpha "$(routed c-1 pack.polecat)"
+store beta "$(routed c-2 pack.polecat)"
+mkdir -p "$TMP/inflight"; rm -f "$TMP/inflight.peaks"
+OUT=$(INFLIGHT="$TMP/inflight" GC_DOCTOR_FANOUT=1 run_check); RC=$?
+eq "$(sort -n "$TMP/inflight.peaks" | tail -1)" "1" "with GC_DOCTOR_FANOUT=1 no two stores' listings were in flight at once"
+eq "$(grep -c . "$TMP/inflight.peaks")" "3" "and every store was listed"
+eq "$RC" "2" "a finding in each of two stores is an ERROR"
+has "$OUT" "alpha bead c-1" "the finding in alpha is reported"
+has "$OUT" "beta bead c-2" "the finding in beta is reported"
+hasnt "$OUT" "NOT checked" "no store is left unchecked by the cap"
 clear_stores
 
 echo

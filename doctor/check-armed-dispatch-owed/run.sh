@@ -36,12 +36,13 @@
 # Cost. The whole check shares one doctor budget, and on a loaded host every gc
 # probe takes seconds however little it reads. So the check overlaps its probes
 # instead of chaining them. The rig and order registries are read at once, and
-# each store is then scanned by its own background job, so the check costs the
-# rig list plus its slowest store rather than the sum of every store. A store's
-# scan makes at most two reads, one after the other: its armed beads, then the
-# blockers their `blocks` edges name. The armed listing carries each bead's own
-# dependency edges, so no store makes a dependency read. A read lands in a file,
-# since a background job cannot hand its parent a variable.
+# each store is then scanned by its own background job, as many at a time as
+# the fan-out cap allows. While the city has no more stores than the cap, the
+# check costs the rig list plus its slowest store rather than the sum of every
+# store. A store's scan makes at most two reads, one after the other: its armed
+# beads, then the blockers their `blocks` edges name. The armed listing carries
+# each bead's own dependency edges, so no store makes a dependency read. A read
+# lands in a file, since a background job cannot hand its parent a variable.
 
 set -u
 
@@ -118,23 +119,76 @@ iso_to_epoch() {
     date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || printf ''
 }
 
-# The scratch every probe reads into. The descriptor held open on a file inside
-# it keeps the tree held for the whole run, because the host's scratch reaper
-# removes any gctk-* tree that no process holds open.
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-armed-dispatch-owed.XXXXXX" 2>/dev/null) || WORK=""
-trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-if [ -z "$WORK" ] || ! { exec 9>"$WORK/.hold"; } 2>/dev/null; then
+# >>> doctor-parallel-reads
+# A check that overlaps its probes runs each one as a background job, and a job
+# cannot hand its parent a variable, so every read lands in a file under one
+# scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
+# it when the check exits. It holds a file in the tree open on fd 9, because the
+# host's scratch reaper removes any gctk-* tree that no process holds open. It
+# returns non-zero when the tree cannot be made or held, and then nothing can be
+# read.
+reads_init() {
+    WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
+    trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+    { exec 9>"$WORK/.hold"; } 2>/dev/null
+}
+# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
+# <file> and its stderr in <file>.err, and returns the probe's own exit status.
+# err_of <file> prints the first non-blank line of that stderr, with control
+# characters stripped and cut to 200 characters, so the warning for a failed
+# read names why it failed and not only its rc.
+read_to() {
+    local f="$1"; shift
+    run_bounded "$@" 2>"$f.err" | scrub >"$f"
+    return "${PIPESTATUS[0]}"
+}
+err_of() {
+    [ -s "$1.err" ] || return 0
+    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# fanout <command...> starts <command> as a background job once fewer than
+# FANOUT_CAP of the jobs fanout started are still running, so a check scans at
+# most that many stores at once however many rigs the city lists. FANOUT_PID is
+# the job it started. fanout_wait <pid> waits for one of those jobs and returns
+# its exit status, which the cap keeps for a job it has already waited for. The
+# cap waits only for fanout's own jobs, because a bare `wait -n` also returns
+# for the check's other background reads, and the count of running jobs would
+# drift. When `wait -n` reports no job, the cap waits for the oldest one, so
+# each wait frees a slot. GC_DOCTOR_FANOUT overrides the cap, in jobs.
+FANOUT_CAP="${GC_DOCTOR_FANOUT:-8}"
+case "$FANOUT_CAP" in ''|*[!0-9]*) FANOUT_CAP=8 ;; esac
+[ "$FANOUT_CAP" -ge 1 ] 2>/dev/null || FANOUT_CAP=8
+fanout_live=(); declare -A fanout_rc=()
+fanout_reaped() {
+    local p keep=()
+    fanout_rc["$1"]="$2"
+    for p in ${fanout_live[@]+"${fanout_live[@]}"}; do [ "$p" = "$1" ] || keep+=("$p"); done
+    fanout_live=(${keep[@]+"${keep[@]}"})
+}
+fanout() {
+    local pid rc
+    while [ "${#fanout_live[@]}" -ge "$FANOUT_CAP" ]; do
+        pid=""; wait -n -p pid "${fanout_live[@]}"; rc=$?
+        if [ -z "$pid" ]; then pid="${fanout_live[0]}"; wait "$pid"; rc=$?; fi
+        fanout_reaped "$pid" "$rc"
+    done
+    "$@" &
+    FANOUT_PID=$!
+    fanout_live+=("$FANOUT_PID")
+}
+fanout_wait() {
+    local rc
+    if [ -n "${fanout_rc[$1]+set}" ]; then return "${fanout_rc[$1]}"; fi
+    wait "$1"; rc=$?
+    fanout_reaped "$1" "$rc"
+    return "$rc"
+}
+# <<< doctor-parallel-reads
+if ! reads_init check-armed-dispatch-owed; then
     echo "cannot determine whether owed deferred dispatches are firing"
     detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every probe reads into; no store was checked."
     exit 1
 fi
-# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
-# <file>, and returns the probe's own exit status.
-read_to() {
-    local f="$1"; shift
-    run_bounded "$@" 2>/dev/null | scrub >"$f"
-    return "${PIPESTATUS[0]}"
-}
 # one_array <file> succeeds when <file> holds exactly one JSON array. Whitespace,
 # an error object or two documents is an unread probe, never an empty answer.
 one_array() { jq -e -s 'length == 1 and (.[0] | type) == "array"' "$1" >/dev/null 2>&1; }
@@ -151,6 +205,8 @@ scopes=$(jq -r '.rigs[]? | select((.path // "") != "")
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether owed deferred dispatches are firing"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    rigs_err=$(err_of "$WORK/rigs.json")
+    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
     exit 1
 fi
 
@@ -162,7 +218,7 @@ fi
 scan_store() {
     local rig_name="$1" rig_path="$2"
     local label="${rig_name:-<city>}" listing="$3.armed.json" blk_file="$3.blockers.json"
-    local rc brc classified kind cid f3 f4 cand_json rows blocker_ids blockers joined since since_epoch
+    local rc brc err classified kind cid f3 f4 cand_json rows blocker_ids blockers joined since since_epoch
     local -a cand_ids=()
     local -A armed_at_of=()
     # Every armed bead in this store, all statuses (a stranded arm is non-open).
@@ -170,7 +226,8 @@ scan_store() {
     # dependency edges the scan reads.
     read_to "$listing" gc bd list --db "$rig_path/.beads" --has-metadata-key "$K_ARM" --all --json --limit 0 --brief; rc=$?
     if [ "$rc" -ne 0 ] || ! one_array "$listing"; then
-        warnings+=("$label: could not list armed beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+        err=$(err_of "$listing")
+        warnings+=("$label: could not list armed beads in $rig_path/.beads (rc=$rc) — this store was NOT checked${err:+; \`gc bd list\` stderr: $err}")
         return
     fi
     # Classify every armed bead from this one listing. A stranded arm (armed at a
@@ -256,7 +313,8 @@ scan_store() {
     if [ -n "$blocker_ids" ]; then
         read_to "$blk_file" gc bd list --db "$rig_path/.beads" --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0; brc=$?
         if [ "$brc" -ne 0 ] || ! one_array "$blk_file"; then
-            warnings+=("$label: could not read blocker statuses for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$brc) — this store was NOT checked")
+            err=$(err_of "$blk_file")
+            warnings+=("$label: could not read blocker statuses for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$brc) — this store was NOT checked${err:+; \`gc bd list\` stderr: $err}")
             return
         fi
         blockers=$(jq -c '[ .[]? | {id, status, closed_at: (.closed_at // "")} ]' "$blk_file" 2>/dev/null)
@@ -324,17 +382,17 @@ scan_job() {
     } >"$3.part" && mv "$3.part" "$3.msg"
 }
 
-# Every unsuspended store's scan starts here, and they all run at once. A
-# suspended rig's store is cold; querying it would auto-start an orphan Dolt
-# server, so it is skipped the way the sibling store checks skip it.
+# Every unsuspended store's scan starts here, as many at once as the fan-out cap
+# allows. A suspended rig's store is cold; querying it would auto-start an
+# orphan Dolt server, so it is skipped the way the sibling store checks skip it.
 now=$(now_epoch)
 scan_pids=(); n=0
 while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     n=$((n + 1))
     [ "$suspended" = "true" ] && continue
-    scan_job "$rig_name" "$rig_path" "$WORK/$n" </dev/null >/dev/null 2>&1 &
-    scan_pids+=("$!")
+    fanout scan_job "$rig_name" "$rig_path" "$WORK/$n" </dev/null >/dev/null 2>&1
+    scan_pids+=("$FANOUT_PID")
 done <<< "$scopes"
 
 # A ready arm is slung on the deferred-dispatch order's next pass, so an arm
@@ -345,16 +403,16 @@ done <<< "$scopes"
 city_root="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 dd_secs=$(cadence_order_interval "${GC_PACK_DIR:-.}/orders/deferred-dispatch.toml")
 wait "$orders_pid"
-orders_json=$(cat "$WORK/orders.json" 2>/dev/null)
+orders_json=$(cat "$WORK/orders.json" 2>/dev/null); orders_err=$(err_of "$WORK/orders.json")
 if [ -n "$(cadence_clock_registrations "$orders_json")" ]; then
     owed_floor=$(cadence_floor "$orders_json" "${city_root:+$city_root/city.toml}")
 else
     owed_floor="$CADENCE_FLOOR_MIN"
-    notes+=("the order registry (\`gc order list --json\`) did not read, so the owed window uses the ${CADENCE_FLOOR_MIN}s minimum floor, not one trip of the dispatch rotation")
+    notes+=("the order registry (\`gc order list --json\`) did not read, so the owed window uses the ${CADENCE_FLOOR_MIN}s minimum floor, not one trip of the dispatch rotation${orders_err:+; \`gc order list\` stderr: $orders_err}")
 fi
 OWED_WINDOW_SECONDS=$(cadence_window "${dd_secs:-0}" "$owed_floor")
 
-for pid in ${scan_pids[@]+"${scan_pids[@]}"}; do wait "$pid"; done
+for pid in ${scan_pids[@]+"${scan_pids[@]}"}; do fanout_wait "$pid"; done
 
 # The scans' reports, merged in rig order however the jobs interleaved, so one
 # state of the stores always produces the same report. An owed entry is a

@@ -13,11 +13,13 @@
 #
 # Cost. The whole check shares one doctor budget, and on a loaded host every
 # `gc bd list` takes seconds however few rows it returns. So the stores are read
-# at once, each by its own background job, and the check costs one rig list plus
-# its slowest store rather than the sum of every store. Each read asks only for
-# what the check judges: --status closed and --metadata-field task_kind=visit
-# select the closed visits, and --brief omits their free text. A job's listing
-# lands in a file, since a background job cannot hand its parent a variable.
+# at once, each by its own background job, as many at a time as the fan-out cap
+# allows. While the city has no more stores than the cap, the check costs one
+# rig list plus its slowest store rather than the sum of every store. Each read
+# asks only for what the check judges: --status closed and --metadata-field
+# task_kind=visit select the closed visits, and --brief omits their free text.
+# A job's listing lands in a file, since a background job cannot hand its
+# parent a variable.
 
 set -u
 
@@ -80,23 +82,76 @@ detail_capped() { # <cap> <item...> — at most <cap> items, then the rest as a 
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# The scratch every store read lands in. The descriptor held open on a file
-# inside it keeps the tree held for the whole run, because the host's scratch
-# reaper removes any gctk-* tree that no process holds open.
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-visit-outcome-recorded.XXXXXX" 2>/dev/null) || WORK=""
-trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-if [ -z "$WORK" ] || ! { exec 9>"$WORK/.hold"; } 2>/dev/null; then
+# >>> doctor-parallel-reads
+# A check that overlaps its probes runs each one as a background job, and a job
+# cannot hand its parent a variable, so every read lands in a file under one
+# scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
+# it when the check exits. It holds a file in the tree open on fd 9, because the
+# host's scratch reaper removes any gctk-* tree that no process holds open. It
+# returns non-zero when the tree cannot be made or held, and then nothing can be
+# read.
+reads_init() {
+    WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
+    trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+    { exec 9>"$WORK/.hold"; } 2>/dev/null
+}
+# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
+# <file> and its stderr in <file>.err, and returns the probe's own exit status.
+# err_of <file> prints the first non-blank line of that stderr, with control
+# characters stripped and cut to 200 characters, so the warning for a failed
+# read names why it failed and not only its rc.
+read_to() {
+    local f="$1"; shift
+    run_bounded "$@" 2>"$f.err" | scrub >"$f"
+    return "${PIPESTATUS[0]}"
+}
+err_of() {
+    [ -s "$1.err" ] || return 0
+    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# fanout <command...> starts <command> as a background job once fewer than
+# FANOUT_CAP of the jobs fanout started are still running, so a check scans at
+# most that many stores at once however many rigs the city lists. FANOUT_PID is
+# the job it started. fanout_wait <pid> waits for one of those jobs and returns
+# its exit status, which the cap keeps for a job it has already waited for. The
+# cap waits only for fanout's own jobs, because a bare `wait -n` also returns
+# for the check's other background reads, and the count of running jobs would
+# drift. When `wait -n` reports no job, the cap waits for the oldest one, so
+# each wait frees a slot. GC_DOCTOR_FANOUT overrides the cap, in jobs.
+FANOUT_CAP="${GC_DOCTOR_FANOUT:-8}"
+case "$FANOUT_CAP" in ''|*[!0-9]*) FANOUT_CAP=8 ;; esac
+[ "$FANOUT_CAP" -ge 1 ] 2>/dev/null || FANOUT_CAP=8
+fanout_live=(); declare -A fanout_rc=()
+fanout_reaped() {
+    local p keep=()
+    fanout_rc["$1"]="$2"
+    for p in ${fanout_live[@]+"${fanout_live[@]}"}; do [ "$p" = "$1" ] || keep+=("$p"); done
+    fanout_live=(${keep[@]+"${keep[@]}"})
+}
+fanout() {
+    local pid rc
+    while [ "${#fanout_live[@]}" -ge "$FANOUT_CAP" ]; do
+        pid=""; wait -n -p pid "${fanout_live[@]}"; rc=$?
+        if [ -z "$pid" ]; then pid="${fanout_live[0]}"; wait "$pid"; rc=$?; fi
+        fanout_reaped "$pid" "$rc"
+    done
+    "$@" &
+    FANOUT_PID=$!
+    fanout_live+=("$FANOUT_PID")
+}
+fanout_wait() {
+    local rc
+    if [ -n "${fanout_rc[$1]+set}" ]; then return "${fanout_rc[$1]}"; fi
+    wait "$1"; rc=$?
+    fanout_reaped "$1" "$rc"
+    return "$rc"
+}
+# <<< doctor-parallel-reads
+if ! reads_init check-visit-outcome-recorded; then
     echo "cannot determine whether every closed visit records an outcome"
     detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every store read lands in; no store was checked."
     exit 1
 fi
-# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
-# <file>, and returns the probe's own exit status.
-read_to() {
-    local f="$1"; shift
-    run_bounded "$@" 2>/dev/null | scrub >"$f"
-    return "${PIPESTATUS[0]}"
-}
 
 # `gc rig list` names the stores this check scans, and it can fail transiently:
 # a momentary Dolt or lock blip returns a non-zero rc that a later call clears.
@@ -108,18 +163,20 @@ RIGS_MAX_ATTEMPTS=3
 rigs_attempt=0
 while : ; do
     rigs_attempt=$((rigs_attempt + 1))
-    rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+    read_to "$WORK/rigs.json" gc rig list --json; rigs_rc=$?
     [ "$rigs_rc" -eq 0 ] && break
     [ "$rigs_attempt" -ge "$RIGS_MAX_ATTEMPTS" ] && break
     budget_spent && break
     sleep 1
 done
-scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
+scopes=$(jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
-    | join("\u001f")' 2>/dev/null)
+    | join("\u001f")' "$WORK/rigs.json" 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether every closed visit records an outcome"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
+    rigs_err=$(err_of "$WORK/rigs.json")
+    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
     exit 1
 fi
 
@@ -136,10 +193,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    read_to "$WORK/$n.json" gc bd list --db "$rig_path/.beads" --all --status closed \
+    fanout read_to "$WORK/$n.json" gc bd list --db "$rig_path/.beads" --all --status closed \
         --metadata-field task_kind=visit --include-gates --include-infra --include-templates \
-        --json --limit 0 --brief </dev/null >/dev/null 2>&1 &
-    pids[n]=$!; labels[n]="$label"; paths[n]="$rig_path"
+        --json --limit 0 --brief </dev/null >/dev/null 2>&1
+    pids[n]=$FANOUT_PID; labels[n]="$label"; paths[n]="$rig_path"
     n=$((n + 1))
 done <<< "$scopes"
 
@@ -148,10 +205,11 @@ done <<< "$scopes"
 checked=0; i=0
 while [ "$i" -lt "$n" ]; do
     label="${labels[i]}"; rig_path="${paths[i]}"; listing="$WORK/$i.json"
-    wait "${pids[i]}"; rc=$?
+    fanout_wait "${pids[i]}"; rc=$?
     i=$((i + 1))
     if [ "$rc" -ne 0 ] || [ ! -s "$listing" ]; then
-        warnings+=("$label: could not list closed visits in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+        err=$(err_of "$listing")
+        warnings+=("$label: could not list closed visits in $rig_path/.beads (rc=$rc) — this store was NOT checked${err:+; \`gc bd list\` stderr: $err}")
         continue
     fi
     rows=$(jq -r -s '
