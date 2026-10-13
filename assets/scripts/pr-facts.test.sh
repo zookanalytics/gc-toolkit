@@ -987,6 +987,20 @@ has "$out" "PR#232 conflicts but no external approval stands" "a dismissed appro
 has "$out" "PR#233 conflicts but no external approval stands" "…nor does the city's own approval"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted for either"
 
+echo "# …an approval a bring-current ruling lifted releases nothing, by the rule merge.sh lands on"
+# GitHub may have refused its dismissal, so it still reads APPROVED; the
+# anchor's lift line is what sets it aside. One given after the line releases
+# the merge-in.
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+printf '%s' "$(prview 239 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_239.json"
+approve 239
+out=$(run)
+has "$out" "PR#239 conflicts but no external approval stands; no merge-in filed" "an approval at or before the lift line files no merge-in"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted"
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+out=$(run)
+has "$out" "filed merge-mode rework" "an approval after the lift line releases the merge-in"
+
 echo "# …reviews that do not read, or an unresolved acting login, prove no approval: nothing is filed until a pass reads one"
 store "[$(anchor NA5 234)]"
 printf '%s' "$(prview 234 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_234.json"
@@ -1798,6 +1812,22 @@ printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
 out=$(run)
 eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
+
+echo "# …an approval the anchor's lift line set aside is owed again, by the rule the merge lands on"
+# GitHub refused its dismissal, so the PR still reads APPROVED. The merge counts
+# no approval at or before the line, so the posture must not say approved, or
+# the board would show a PR the merge holds as one it lets through.
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+printf '%s' "$(prview 240 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_240.json"
+approve 240; echo '[]' > "$GH_DIR/comments_240.json"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "review_required@sha-240" "an approval given at the lift line records review_required"
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "approved@sha-240" "an approval given after the line records approved"
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20"')]"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "review_required@sha-240" "a line that is not an instant lets no approval count, as in the merge"
 
 echo "# COMMENTED is representable, and it routes to work"
 # The fixture: inline comments that were neither approval nor
@@ -5924,6 +5954,23 @@ out=$(run_basis)
 eq "$(pf_views)" "301" "…as a candidate the next pass confirms, since another arm read the PR otherwise"
 out=$(run_basis)
 eq "$(pf_views)" "" "…after which it is kept again"
+
+echo "# posture basis: a lift line drawn on the anchor reads the PR again"
+# A dismissal GitHub refused moves nothing on the PR, so the line is part of the
+# basis, or the approved posture it set aside would be kept past it.
+store "[$(anchor PL1 241 "$UTCUT")]"
+printf '%s' "$(prview 241 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_241.json"
+approve 241
+open_prs "$(open_node 241 CLEAN APPROVED '.reviews = {totalCount: 1, nodes: [{databaseId: 880241}]}')"
+rm -f "$BASIS"
+run_basis >/dev/null; run_basis >/dev/null
+out=$(run_basis)
+eq "$(pf_views)" "" "an approved posture is kept once its basis is confirmed"
+eq "$(meta_pinned PL1 pr_posture)" "approved@sha-241" "…as approved"
+bmut PL1 '.metadata.bring_current_lifted_at = "2026-08-20T01:00:00Z"'
+out=$(run_basis)
+eq "$(pf_views)" "241" "a lift line drawn with nothing moved on the PR reads it again"
+eq "$(meta_pinned PL1 pr_posture)" "review_required@sha-241" "…and records the approval it set aside as owed"
 
 echo "# posture basis: a derivation is kept only once the next pass derives it again"
 # The batched read shows a review on PB6 that the review list does not return
