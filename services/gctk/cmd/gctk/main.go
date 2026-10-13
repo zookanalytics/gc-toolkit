@@ -70,9 +70,10 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 }
 
-// sourceRev is the identity gc-gctk-build.sh stamps at link time: the tree
+// sourceRev is the identity `gc-build.sh gctk` stamps at link time: the tree
 // hash of services/gctk at the commit it built from (`git rev-parse HEAD:./`),
-// the same value it records as binary_rev. -X main.sourceRev=<hash>.
+// the identity gctk-resolve.sh and doctor/check-cadence-live compare against
+// the checkout. -X main.sourceRev=<hash>.
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what
