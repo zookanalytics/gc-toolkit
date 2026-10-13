@@ -987,6 +987,20 @@ has "$out" "PR#232 conflicts but no external approval stands" "a dismissed appro
 has "$out" "PR#233 conflicts but no external approval stands" "…nor does the city's own approval"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted for either"
 
+echo "# …an approval a bring-current ruling lifted releases nothing, by the rule merge.sh lands on"
+# GitHub may have refused its dismissal, so it still reads APPROVED; the
+# anchor's lift line is what sets it aside. One given after the line releases
+# the merge-in.
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+printf '%s' "$(prview 239 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_239.json"
+approve 239
+out=$(run)
+has "$out" "PR#239 conflicts but no external approval stands; no merge-in filed" "an approval at or before the lift line files no merge-in"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no child is minted"
+store "[$(anchor NA8 239 ',"bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+out=$(run)
+has "$out" "filed merge-mode rework" "an approval after the lift line releases the merge-in"
+
 echo "# …reviews that do not read, or an unresolved acting login, prove no approval: nothing is filed until a pass reads one"
 store "[$(anchor NA5 234)]"
 printf '%s' "$(prview 234 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_234.json"
@@ -1798,6 +1812,22 @@ printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
 out=$(run)
 eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
+
+echo "# …an approval the anchor's lift line set aside is owed again, by the rule the merge lands on"
+# GitHub refused its dismissal, so the PR still reads APPROVED. The merge counts
+# no approval at or before the line, so the posture must not say approved, or
+# the board would show a PR the merge holds as one it lets through.
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+printf '%s' "$(prview 240 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_240.json"
+approve 240; echo '[]' > "$GH_DIR/comments_240.json"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "review_required@sha-240" "an approval given at the lift line records review_required"
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "approved@sha-240" "an approval given after the line records approved"
+store "[$(anchor S2 240 ',"bring_current_lifted_at":"2026-08-20"')]"
+out=$(run)
+eq "$(meta_pinned S2 pr_posture)" "review_required@sha-240" "a line that is not an instant lets no approval count, as in the merge"
 
 echo "# COMMENTED is representable, and it routes to work"
 # The fixture: inline comments that were neither approval nor
@@ -5450,6 +5480,28 @@ out=$(run)
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding deliberately holds the review changes-requested"
 hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested until the operator rules the visit"
 
+echo "# …and once its visit is ruled and the work answering it lands, the needs-you finding closes and the review clears"
+# finding.sh close-answered closes a needs-you finding only on a ruled visit, and
+# records that visit as finding.ruling_visit in the same write.
+store "[$(anchor HRY 391 "$(wb_meta rework:HRCY)"), $(child HRCY closed), $(rfind HFY HRY 591 needs-you | jq -c '.metadata["finding.ruling_visit"] = "tk-vHRY"')]"
+printf '%s' "$(prview 391 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_391.json"
+threads 391 "$(hreview 391 591 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/391/reviews/591/dismissals" "a review whose needs-you finding has closed on a ruling is dismissed"
+has "$(cat "$STUB_GH_LOG")" "HFY: settled by the ruling on visit tk-vHRY" "…and the dismiss message names the visit whose ruling settled it"
+
+echo "# …but a needs-you finding closed with no ruling recorded leaves its review standing"
+# A visit closed moot, benign, dismissed or cut short carries no ruling, so no
+# close of the finding it held can claim one.
+store "[$(anchor HRZ 392 "$(wb_meta rework:HRCZ)"), $(child HRCZ closed), $(rfind HFZ HRZ 592 needs-you)]"
+printf '%s' "$(prview 392 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_392.json"
+threads 392 "$(hreview 392 592 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding closed with no ruling visit leaves the review changes-requested"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and its author is not re-requested"
+
 echo "# …a review already DISMISSED is left alone — its state is the idempotency"
 store "[$(anchor HR3 142 "$(wb_meta rework:HRC3)"), $(child HRC3 closed), $(rfind HF5 HR3 557 declined)]"
 printf '%s' "$(prview 142 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_142.json"
@@ -5542,6 +5594,53 @@ threads 148 "$(hreview 148 563 CHANGES_REQUESTED)"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "deferred to a follow-up, named in its thread" "…the dismiss message names the deferral"
+
+# ---- a needs-you finding's owed reply gates its review's dismissal the same way --
+# A needs-you finding owes its raiser the visit's id. close-answered closes it on
+# the operator's ruling whether or not that answer ever reached the PR, so a
+# ruling alone does not answer the raiser: the review waits for the reply, as it
+# does for a decline's or a deferral's. An inline comment's answer is a reply in
+# its thread, and a review body's is a Conversation comment linking the review.
+rfindneedsyou() { # id anchor review_id comment_id [reply_posted]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","title":"finding[human]: %s","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"needs-you","finding.source":"human:johnzook","finding.review_id":"%s","finding.comment_id":"%s","finding.visit":"tk-vny","finding.ruling_visit":"tk-vny","finding.reply":"This comment needs your decision — opened visit tk-vny. The review stays changes-requested until you rule it and the work your ruling calls for lands."%s}}' \
+    "$1" "$1" "$2" "$3" "$4" "${5:+,\"finding.reply_posted\":\"$5\"}"
+}
+
+echo "# a needs-you finding its ruling closed holds its review's dismissal while its thread reply fails to post"
+store "[$(anchor HRN1 393 "$(wb_meta rework:HRCN1)"), $(child HRCN1 closed), $(rfindneedsyou HFN1 HRN1 593 100)]"
+printf '%s' "$(prview 393 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_393.json"
+threads 393 "$(jq -cn --argjson r "$(hreview 393 593 CHANGES_REQUESTED)" --argjson t "$(one_thread 393)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(STUB_REPLY_RC=1 run)
+has "$out" "could not post the owed reply for HFN1" "the visit's answer fails to post into the raiser's thread"
+eq "$(meta HFN1 finding.reply_posted)" "<absent>" "…so the finding is not marked answered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered needs-you reply holds the review's dismissal, though its visit was ruled"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
+
+echo "# …and the pass that delivers that reply dismisses the review, naming the ruling"
+store "[$(anchor HRN2 394 "$(wb_meta rework:HRCN2)"), $(child HRCN2 closed), $(rfindneedsyou HFN2 HRN2 594 100)]"
+printf '%s' "$(prview 394 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_394.json"
+threads 394 "$(jq -cn --argjson r "$(hreview 394 594 CHANGES_REQUESTED)" --argjson t "$(one_thread 394)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(treply 394 T-394)" "opened visit tk-vny" "the visit's answer is posted into the raiser's thread"
+eq "$(meta HFN2 finding.reply_posted)" "1" "…and the finding is marked answered"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/394/reviews/594/dismissals" "…so the same pass dismisses the review"
+has "$(cat "$STUB_GH_LOG")" "HFN2: settled by the ruling on visit tk-vny" "…naming the visit whose ruling settled it"
+
+echo "# a review body's needs-you finding holds the dismissal while its Conversation answer fails to post"
+store "[$(anchor HRN3 395 "$(wb_rmeta rework:HRCN3 595)"), $(child HRCN3 closed), $(rfindneedsyou HFN3 HRN3 595 595)]"
+printf '%s' "$(prview 395 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_395.json"
+threads 395 "$(hreview 395 595 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_COMMENT_RC=1 run)
+has "$out" "could not post the owed reply for HFN3" "a review body's answer goes to the Conversation tab, where the post fails"
+eq "$(meta HFN3 finding.reply_posted)" "<absent>" "…so the finding is not marked answered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and the review it answers is not dismissed"
+out=$(run)
+has "$(jq -r '[ .issue_comments[]? | .body ] | join(" ")' "$GH_DIR/threads_395.json")" "opened visit tk-vny" "the next pass posts the answer on the Conversation tab"
+eq "$(meta HFN3 finding.reply_posted)" "1" "…marks the finding answered"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/395/reviews/595/dismissals" "…and dismisses the review"
 
 # ---- --route-comments-only: route operator feedback early in the pass ----------
 # --posture-only stamps commented/changes_requested on the pre-merge tick, and
@@ -5924,6 +6023,23 @@ out=$(run_basis)
 eq "$(pf_views)" "301" "…as a candidate the next pass confirms, since another arm read the PR otherwise"
 out=$(run_basis)
 eq "$(pf_views)" "" "…after which it is kept again"
+
+echo "# posture basis: a lift line drawn on the anchor reads the PR again"
+# A dismissal GitHub refused moves nothing on the PR, so the line is part of the
+# basis, or the approved posture it set aside would be kept past it.
+store "[$(anchor PL1 241 "$UTCUT")]"
+printf '%s' "$(prview 241 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_241.json"
+approve 241
+open_prs "$(open_node 241 CLEAN APPROVED '.reviews = {totalCount: 1, nodes: [{databaseId: 880241}]}')"
+rm -f "$BASIS"
+run_basis >/dev/null; run_basis >/dev/null
+out=$(run_basis)
+eq "$(pf_views)" "" "an approved posture is kept once its basis is confirmed"
+eq "$(meta_pinned PL1 pr_posture)" "approved@sha-241" "…as approved"
+bmut PL1 '.metadata.bring_current_lifted_at = "2026-08-20T01:00:00Z"'
+out=$(run_basis)
+eq "$(pf_views)" "241" "a lift line drawn with nothing moved on the PR reads it again"
+eq "$(meta_pinned PL1 pr_posture)" "review_required@sha-241" "…and records the approval it set aside as owed"
 
 echo "# posture basis: a derivation is kept only once the next pass derives it again"
 # The batched read shows a review on PB6 that the review list does not return

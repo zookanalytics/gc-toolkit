@@ -37,6 +37,8 @@
 # arm runs (lifecycle/lifecycle.toml [posture]): pr_posture (dated) and pr_merge_state
 # pinned to the live head, written only when the value changes, so merge.sh can
 # answer "is a human waiting on this?" off the bead instead of re-deriving it.
+# An approval the anchor's lift line (bring_current_lifted_at) set aside records
+# review_required, because the merge no longer counts it (review-verdict.sh).
 # --posture-only exits non-zero when any anchor is left without a current
 # posture and nothing standing already holds it: the caller holds merge.sh for
 # that pass rather than let it validate against a fact from an earlier tick.
@@ -121,10 +123,14 @@
 # the block) and re-requests its author, per-review via finding.review_id so one
 # reviewer clears independently of another. A needs-you finding is the exception
 # that holds the review open on purpose: it stays open until the operator rules
-# its visit, so the review it belongs to is never auto-dismissed meanwhile. The
-# confidence is the validator's, carried by the finding's closure, never a commit
-# oid, so a later push does not reopen it. A dismissal is not an approval: the
-# merge still gates on an explicit one.
+# the visit holding its question and no fix unit on its lane, nor a ruling's
+# rework child, is still in flight (finding.sh close-answered), so the review it
+# belongs to is never auto-dismissed meanwhile. Its dismissal names the visit
+# whose ruling released it, and, like a decline's or a deferral's, waits until
+# the finding's owed reply is on the PR. The confidence is the validator's,
+# carried by the finding's closure, never a commit oid, so a later push does not
+# reopen it. A dismissal is not an approval: the merge still gates on an
+# explicit one.
 # The sweep also carries each machine-lane finding ruled worth fixing (must-fix
 # or deferred) to the PR, where the merge is decided: a file-level review
 # comment when the finding's locus begins with a file the diff touches, a
@@ -480,6 +486,19 @@ WB_RESOLVED_REACTION="THUMBS_UP"
 WB_MARKER="<!-- gc-writeback -->"
 WB_GLYPH_RESOLVED="✅"
 WB_GLYPH_AWAITING="❓"
+# The findings that owe their raiser an answer on the PR: a human finding ruled
+# declined, deferred or needs-you that carries finding.reply. The reply arm posts
+# each one's answer and stamps finding.reply_posted once the answer is on the PR,
+# and the review dismissal waits for that stamp on each one. Both read this one
+# definition, so a review is never dismissed while an answer the reply arm owes
+# is still undelivered.
+WB_OWED_REPLY_DEF='
+  def owes_reply:
+    ((.metadata["finding.disposition"] // "") | tostring) as $d
+    | (((.metadata.task_kind // "") | tostring) == "finding")
+      and (((.metadata["finding.lane"] // "") | tostring) == "human")
+      and ($d == "declined" or $d == "deferred" or $d == "needs-you")
+      and (((.metadata["finding.reply"] // "") | tostring) != "");'
 # A ruled machine finding the city posts to the PR carries
 # `<!-- gc-finding:<id> -->`, and the answer it posts once the finding closes
 # carries `<!-- gc-finding:<id>:answered -->`. An answer that leaves its thread
@@ -645,9 +664,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
-# The approval rule the merge lands on, REVIEW_VERDICT_DEF; the conflict arm
-# brings only an approved PR current. gctk merge states the rule natively, and
-# merge.test.sh holds the two to one verdict.
+# The approval rule the merge lands on, REVIEW_VERDICT_DEF: the posture arm
+# records an approval the anchor's lift line set aside as review_required, and
+# the conflict arm brings only an approved PR current. gctk merge states the
+# rule natively, and merge.test.sh holds the two to one verdict.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 # Which inline comments a dismissal retires, REVIEW_DISMISSAL_DEF; the comment
@@ -1351,15 +1371,15 @@ pace_start "$CURSOR" "$DEADLINE"
 
 # --- the posture basis: what each anchor's posture was last derived from -------
 # The posture is derived from the PR's head, review decision, reviews and
-# comments, the anchor's watermarks and provenance cutover, the acting login,
-# and this script, and from nothing else while no unengaged-thread candidate is
-# in play. The basis joins those facts as the batched read gives them, and
-# --seen keeps it beside the posture it produced. An anchor whose basis reads the
-# same this pass, and whose bead still carries that posture at the read's head,
-# keeps the posture without the per-PR reads. A posture of `commented` keeps no
-# basis, because a routing or a visit can release it with nothing on the PR
-# moving. A visit that keeps or earns no basis records "-", which matches
-# nothing, so the next pass reads that anchor whole.
+# comments, the anchor's watermarks, provenance cutover and lift line, the
+# acting login, and this script, and from nothing else while no unengaged-thread
+# candidate is in play. The basis joins those facts as the batched read gives
+# them, and --seen keeps it beside the posture it produced. An anchor whose
+# basis reads the same this pass, and whose bead still carries that posture at
+# the read's head, keeps the posture without the per-PR reads. A posture of
+# `commented` keeps no basis, because a routing or a visit can release it with
+# nothing on the PR moving. A visit that keeps or earns no basis records "-",
+# which matches nothing, so the next pass reads that anchor whole.
 # The batched read and the per-PR reads are separate requests, and GitHub can
 # answer one of them from a moment ahead of the other, so one derivation can
 # read lists older than the basis it would be kept under. A derivation therefore
@@ -1489,12 +1509,12 @@ while IFS= read -r tagged; do
   # the case below accepts, so a candidate keeps nothing.
   SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0; MARKS_UNRECORDED=0; b_seen=""
   if [ "$POSTURE_ONLY" = 1 ] && [ -n "${OPEN_PR[$num]-}" ]; then
-    IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_have <<< "$(printf '%s' "$row" | jq -r '
+    IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_lifted b_have <<< "$(printf '%s' "$row" | jq -r '
       (.metadata // {}) as $m
       | [ $m.pr_provenance_since, $m.pr_review_watermark, $m.pr_comment_watermark,
-          $m.pr_issue_comment_watermark, $m.pr_posture ]
+          $m.pr_issue_comment_watermark, $m.bring_current_lifted_at, $m.pr_posture ]
       | map((. // "") | tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)"
-    PFP="$PF_CODE_FP|$SELF_LOGIN|$b_since|$b_rwm|$b_cwm|$b_iwm|${OPEN_UPD[$num]-}|${OPEN_ACT[$num]-}"
+    PFP="$PF_CODE_FP|$SELF_LOGIN|$b_since|$b_rwm|$b_cwm|$b_iwm|$b_lifted|${OPEN_UPD[$num]-}|${OPEN_ACT[$num]-}"
     b_seen=$(pace_seen_get "$id")
     SHORT_P="${b_seen%%#*}"
     if [ -n "$b_since" ] && [ -n "$SELF_LOGIN" ] && [ "${b_seen#*#}" = "$PFP" ]; then
@@ -1836,7 +1856,7 @@ MP_EOF
   # separator (never valid inside these values) and split on the same, so an
   # empty field keeps its slot instead of collapsing the way a tab or
   # default-IFS split would.
-  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m < <(
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted < <(
     printf '%s' "$row" | jq -r '[
         (.metadata.pr_comment_watermark // ""),
         (.metadata.pr_review_watermark // ""),
@@ -1847,7 +1867,8 @@ MP_EOF
         (.metadata.pr_review_batch // ""),
         (.metadata.pr_issue_comment_batch // ""),
         (.metadata.pr_posture // ""),
-        (.metadata.pr_merge_state // "")
+        (.metadata.pr_merge_state // ""),
+        (.metadata.bring_current_lifted_at // "")
       ] | map(tostring) | join("\u001f")')
   # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
   # key minus its instant), have_cv just the value. The derivation reads the
@@ -2021,7 +2042,22 @@ MP_EOF
         # be current and let merge.sh through on a fact we do not have; leave the
         # posture uncurrent so --posture-only holds the merge, and retry next pass.
         echo "$PROG: $id — PR#$num unengaged-thread read did not answer; posture not recorded (retry next pass)" >&2
-      elif [ "$rd" = "APPROVED" ]; then posture="approved"
+      elif [ "$rd" = "APPROVED" ]; then
+        # The merge counts no approval given at or before the anchor's lift line
+        # (review-verdict.sh), and GitHub still reads APPROVED over an approval
+        # whose dismissal it refused. Such an approval is owed again, so the
+        # posture says review_required and the board asks for it. A rule that
+        # does not read records nothing, as the thread read above does.
+        lift_read=stands
+        if [ -n "$lifted" ]; then
+          lift_read=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg lifted "$lifted" "$REVIEW_VERDICT_DEF"'
+            review_verdict($self; $lifted) | if .lifted != "" then "lifted" else "stands" end' 2>/dev/null)
+        fi
+        case "$lift_read" in
+          stands) posture="approved" ;;
+          lifted) posture="review_required" ;;
+          *) echo "$PROG: $id — PR#$num the approval rule did not read against the lift line $lifted; posture not recorded (retry next pass)" >&2 ;;
+        esac
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
@@ -2356,7 +2392,9 @@ REAP_EOF
       # >>> conflict-arm-approval-gate
       # The merge-in is filed only for an approved PR: a standing APPROVED review
       # from an account other than the city's and no standing CHANGES_REQUESTED,
-      # by the rule review-verdict.sh defines, the one the merge lands on.
+      # by the rule review-verdict.sh defines, the one the merge lands on, so an
+      # approval a bring-current ruling lifted (the anchor's
+      # bring_current_lifted_at) is none here either.
       # Each bring-current costs a polecat round and a fresh CI run, and it goes
       # stale again whenever main moves, while a PR nobody approved cannot land
       # however current its branch is. So its conflict waits for the approval,
@@ -2366,8 +2404,9 @@ REAP_EOF
       # retries.
       approval=""
       if [ -n "$SELF_LOGIN" ] && [ -n "$revs_raw" ]; then
-        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" "$REVIEW_VERDICT_DEF"'
-          review_verdict($self)
+        lifted=$(printf '%s' "$row" | jq -r '(.metadata.bring_current_lifted_at // "") | tostring' 2>/dev/null)
+        approval=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg lifted "$lifted" "$REVIEW_VERDICT_DEF"'
+          review_verdict($self; $lifted)
           | if .veto != "" then "veto:" + .veto elif .approver != "" then "approved" else "none" end' 2>/dev/null)
       fi
       case "$approval" in
@@ -4403,19 +4442,18 @@ WB_SWAPS
   # waits for it. A stamped finding whose comment is not on this PR has nothing
   # to read its answer back against, so its stamp stands. Only a pass that read
   # the threads cleanly acts, the same $wplan_ok gate the plan above turns on.
-  # Reads live + closed, because a needs-you finding owes its reply while still
-  # open.
+  # The findings it answers are owes_reply's (WB_OWED_REPLY_DEF), the set the
+  # review dismissal below waits on. Reads live + closed, because a needs-you
+  # finding owes its reply while still open, and any finding still owes one after
+  # it closes until the answer is delivered.
   if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
-    wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" '
+    wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" "$WB_OWED_REPLY_DEF"'
         def norm: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
         .[0] as $v
         | .[1][]?
-        | select(((.metadata.task_kind // "") | tostring) == "finding")
-        | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+        | select(owes_reply)
         | ((.metadata["finding.disposition"] // "") | tostring) as $disp
-        | select($disp == "declined" or $disp == "deferred" or $disp == "needs-you")
         | ((.metadata["finding.reply"] // "") | tostring) as $reply
-        | select($reply != "")
         | .id as $id
         | ((.metadata["finding.comment_id"] // "") | tostring) as $cid
         | ((.metadata["finding.review_id"] // "") | tostring) as $rid
@@ -4488,8 +4526,9 @@ WB_DECLINES
   # It stands until someone clears it, and the person who reads the PR reads that
   # signal, so a review answered in full but left standing tells them the opposite
   # of the truth. Once every finding one review raised has closed — a must-fix
-  # fixed and landed, or a decline or deferral whose answer the arm above posted
-  # — that review is answered, so dismiss it (clearing CHANGES_REQUESTED) and
+  # fixed and landed, a decline or deferral whose answer the arm above posted, or
+  # a needs-you finding the operator's ruling released, its answer posted the same
+  # way — that review is answered, so dismiss it (clearing CHANGES_REQUESTED) and
   # re-request its author, putting the reviewer back in their review-requested
   # queue to judge the result, including the declined and deferred threads left
   # open for them. The dismissal says what each finding came to. Per-review,
@@ -4503,33 +4542,40 @@ WB_DECLINES
   if [ -n "$disp" ] && [ "$wplan_ok" = 1 ]; then
     # Every finding on this anchor that names a review, open and closed, grouped by
     # that review. A review is answered when every one of its findings is closed and
-    # every declined or deferred finding has had its owed reply posted
-    # (finding.reply_posted=1). Such a finding closes when the validator rules it,
-    # which is before the reply arm above delivers that answer, so closure alone does
-    # not mean answered. A needs-you or still-unvalidated finding is open, so its
-    # review is not yet clear — a needs-you finding deliberately holds the review
-    # changes-requested until the operator rules its visit.
+    # every one that owes its raiser an answer (owes_reply, the set the reply arm
+    # above posts) has had it posted (finding.reply_posted=1). A finding can close
+    # before that arm delivers its answer: a decline or deferral closes as the
+    # validator rules it, and a needs-you finding as close-answered reads its
+    # visit's ruling, whether or not its answer ever reached the thread. So closure
+    # alone does not mean answered. A still-unvalidated finding is open, so its
+    # review is not yet clear, and a needs-you finding deliberately holds the review
+    # changes-requested until the operator rules its visit and the work their
+    # ruling calls for lands. A closed needs-you finding counts as answered only
+    # when it records the visit whose ruling released it (finding.ruling_visit,
+    # stamped by finding.sh close-answered), and the dismissal names that visit.
+    # One closed without it was settled by no ruling, so its review stands.
     if wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
-      wrev_ready=$(printf '%s' "$wrf" | jq -rc '
+      wrev_ready=$(printf '%s' "$wrf" | jq -rc "$WB_OWED_REPLY_DEF"'
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
                 | select(((.metadata["finding.review_id"] // "") | tostring) != "")
                 | { rid: ((.metadata["finding.review_id"]) | tostring),
                     open: (((.status // "") | tostring) != "closed"),
                     disp: ((.metadata["finding.disposition"] // "") | tostring),
-                    lane: ((.metadata["finding.lane"] // "") | tostring),
-                    reply: ((.metadata["finding.reply"] // "") | tostring),
+                    owed: owes_reply,
                     reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
+                    ruling: ((.metadata["finding.ruling_visit"] // "") | tostring),
                     title: ((.title // "") | tostring) } ]
           | group_by(.rid)
           | [ .[] | { rid: .[0].rid,
                       ready: (all(.[];
                                   (.open == false)
-                                  and (( .lane == "human" and (.disp == "declined" or .disp == "deferred")
-                                         and .reply != "" and .reply_posted != "1" ) | not))),
+                                  and (( .owed and .reply_posted != "1" ) | not)
+                                  and (( .disp == "needs-you" and .ruling == "" ) | not))),
                       lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
                                  + (if .disp == "declined" then "declined; the reason is in its thread"
                                     elif .disp == "deferred" then "deferred to a follow-up, named in its thread"
                                     elif .disp == "must-fix" then "fixed"
+                                    elif .disp == "needs-you" then "settled by the ruling on visit " + .ruling
                                     else "resolved" end) ] } ]
           | .[] | select(.ready) | @base64' 2>/dev/null)
       while IFS= read -r wrr; do
