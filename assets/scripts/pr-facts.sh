@@ -121,9 +121,10 @@
 # the block) and re-requests its author, per-review via finding.review_id so one
 # reviewer clears independently of another. A needs-you finding is the exception
 # that holds the review open on purpose: it stays open until the operator rules
-# its visit and no fix unit on its lane, nor a ruling's rework child, is still in
-# flight (finding.sh close-answered), so the review it belongs to is never
-# auto-dismissed meanwhile. The confidence is the validator's, carried by the
+# the visit holding its question and no fix unit on its lane, nor a ruling's
+# rework child, is still in flight (finding.sh close-answered), so the review it
+# belongs to is never auto-dismissed meanwhile, and its dismissal names the visit
+# whose ruling released it. The confidence is the validator's, carried by the
 # finding's closure, never a commit oid, so a later push does not reopen it. A
 # dismissal is not an approval: the merge still gates on an explicit one.
 # The sweep also carries each machine-lane finding ruled worth fixing (must-fix
@@ -4523,7 +4524,10 @@ WB_DECLINES
     # not mean answered. A needs-you or still-unvalidated finding is open, so its
     # review is not yet clear — a needs-you finding deliberately holds the review
     # changes-requested until the operator rules its visit and the work their
-    # ruling calls for lands.
+    # ruling calls for lands. A closed needs-you finding counts as answered only
+    # when it records the visit whose ruling released it (finding.ruling_visit,
+    # stamped by finding.sh close-answered), and the dismissal names that visit.
+    # One closed without it was settled by no ruling, so its review stands.
     if wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
       wrev_ready=$(printf '%s' "$wrf" | jq -rc '
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -4534,18 +4538,20 @@ WB_DECLINES
                     lane: ((.metadata["finding.lane"] // "") | tostring),
                     reply: ((.metadata["finding.reply"] // "") | tostring),
                     reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
+                    ruling: ((.metadata["finding.ruling_visit"] // "") | tostring),
                     title: ((.title // "") | tostring) } ]
           | group_by(.rid)
           | [ .[] | { rid: .[0].rid,
                       ready: (all(.[];
                                   (.open == false)
                                   and (( .lane == "human" and (.disp == "declined" or .disp == "deferred")
-                                         and .reply != "" and .reply_posted != "1" ) | not))),
+                                         and .reply != "" and .reply_posted != "1" ) | not)
+                                  and (( .disp == "needs-you" and .ruling == "" ) | not))),
                       lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
                                  + (if .disp == "declined" then "declined; the reason is in its thread"
                                     elif .disp == "deferred" then "deferred to a follow-up, named in its thread"
                                     elif .disp == "must-fix" then "fixed"
-                                    elif .disp == "needs-you" then "settled by the ruling on its visit"
+                                    elif .disp == "needs-you" then "settled by the ruling on visit " + .ruling
                                     else "resolved" end) ] } ]
           | .[] | select(.ready) | @base64' 2>/dev/null)
       while IFS= read -r wrr; do

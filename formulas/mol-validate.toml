@@ -228,8 +228,9 @@ operator holds that decision. A decline or a deferral would overrule it, and the
 finding's close would let pr-facts.sh dismiss their review while they decide;
 must-fix would settle it as "keep the change and fix it". `needs-you --visit`
 leaves the finding open and the review changes-requested, files no second visit,
-and posts the visit's id to the raiser's thread. Once the visit closes and the
-work the ruling calls for has landed, the finding closes on its own:
+and posts the visit's id to the raiser's thread. Once the operator has ruled
+that visit, or the one a fold hands it to, and the work the ruling calls for has
+landed, the finding closes on its own:
 ```bash
 "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --visit <V> --reason "<the question visit <V> already carries>"
 ```
@@ -309,13 +310,14 @@ dependency edge by hand:
   routed to the operator), records its id as the reply the raiser's PR thread
   receives, and leaves the finding OPEN. An open finding holds the review
   changes-requested until the operator rules the visit, so the decision is visible
-  — a visit plus a PR comment — never a silent park. Once the visit has closed
-  and no fix unit on the finding's lane, nor a ruling's rework child, is in
-  flight, gate-ensure's `finding.sh close-answered` closes the finding. Reserve
-  it for what you cannot judge: a comment you can weigh is must-fix or declined,
-  and one you can defer is deferred. A question an open visit already carries is
-  `needs-you --visit` on that visit, as the first paragraph says, never a second
-  visit.
+  — a visit plus a PR comment — never a silent park. Once the operator has ruled
+  the visit, or the one a fold hands it to, and no fix unit on the finding's
+  lane, nor a ruling's rework child, is in flight, gate-ensure's `finding.sh
+  close-answered` closes the finding. A visit closed with no ruling releases
+  nothing. Reserve it for what you cannot judge: a comment you can weigh is
+  must-fix or declined, and one you can defer is deferred. A question an open
+  visit already carries is `needs-you --visit` on that visit, as the first
+  paragraph says, never a second visit.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```

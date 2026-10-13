@@ -28,6 +28,9 @@
 #   finding.visit        the open visit that carries a needs-you finding's decision:
 #                        one the ruling filed, or one already open on the anchor's
 #                        feedback that the ruling named
+#   finding.ruling_visit the visit whose recorded ruling released a needs-you
+#                        finding: its finding.visit, or the visit a fold handed
+#                        the question on to (close-answered)
 #   finding.fix_unit     the rework child dispatched with the batch that raised it
 #                        (`upsert --fix-unit`, from pr-facts.sh for a human batch);
 #                        a later batch re-raising the finding records its own child
@@ -44,8 +47,9 @@
 #   declined   closed, no edge            not an objection: closed with the reason
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
-#                                         holds the review until the visit closes and
-#                                         no fix unit on its lane, nor a ruling's
+#                                         holds the review until the operator rules
+#                                         that visit, or the one a fold handed it to,
+#                                         and no fix unit on its lane, nor a ruling's
 #                                         rework child, is in flight; then closed
 #                                         (close-answered)
 #
@@ -113,10 +117,10 @@
 # pr-open.sh (open-must-fix holds a publish while the city has ruled the diff must
 # change), and gate-ensure, the sole owner of stage-3 resolution (fix-in-flight
 # names the fix unit quiescence holds on; close-answered releases a must-fix
-# finding once that fix unit lands, and a needs-you finding once its visit closes
-# with none in flight; close-unvalidated resolves a green lane's still-unvalidated
-# findings as moot; shed-orphaned resolves them when the anchor closes before a
-# pass revisits it).
+# finding once that fix unit lands, and a needs-you finding once the operator has
+# ruled the visit holding its question, with none in flight; close-unvalidated
+# resolves a green lane's still-unvalidated findings as moot; shed-orphaned
+# resolves them when the anchor closes before a pass revisits it).
 # Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
 # store would not read. set-disposition exits 1 on a usage error, 2 when a read or
 # write fails, and 3 when an open visit already carries the finding's question.
@@ -1033,6 +1037,40 @@ cmd_shed_orphaned() {
   bd_cache_clear
 }
 
+# The visit whose recorded ruling answers the question <visit> carried, printed,
+# or nothing (exit 1) while no ruling answers it. Only the operator's ruling
+# answers a needs-you finding's question, and converse-signoff.sh records it on
+# the visit as gc.ruling when a sitting signs off --ruled yes. A visit also closes
+# without one: moot, benign, dismissed by the operator, or a sitting cut short,
+# and none of those answers the question. A fold hands the question on to the
+# visit that now holds it: visit-close.sh records that holder on the folded visit
+# as gc.folded_into, and bead-rehome.sh records a re-homed visit's successor as
+# gc.superseded_by. The question is followed through each hand-off to the visit
+# holding it now, which answers only once it has closed carrying a ruling of its
+# own. An open visit, a close with no ruling and no successor, a successor that is
+# not a visit, a row that will not read, and a hand-off back to a visit already
+# passed all answer nothing, so the finding keeps holding its review.
+ruled_visit() { # <visit-id>
+  local v="$1" seen=" " row
+  while [ -n "$v" ]; do
+    case "$seen" in *" $v "*) return 1 ;; esac
+    seen="$seen$v "
+    row=$(bd_json show "$v")
+    printf '%s' "$row" | jq -e --arg v "$v" '
+      type == "array" and ((.[0].id // "") == $v)
+      and (((.[0].metadata.task_kind // "") | tostring) == "visit")
+      and (((.[0].status // "") | tostring | ascii_downcase) == "closed")' >/dev/null 2>&1 || return 1
+    if printf '%s' "$row" | jq -e '((.[0].metadata["gc.ruling"] // "") | tostring | test("[^[:space:]]"))' >/dev/null 2>&1; then
+      printf '%s\n' "$v"
+      return 0
+    fi
+    v=$(printf '%s' "$row" | jq -r '.[0].metadata as $m
+      | [ ($m["gc.folded_into"] // ""), ($m["gc.superseded_by"] // "") ]
+      | map(tostring | select(. != "")) | .[0] // empty' 2>/dev/null)
+  done
+  return 1
+}
+
 # A must-fix finding is closed once every fix unit answering it has landed. The
 # fix unit blocks the finding (wire-fix-unit), and bd refuses to close a blocked
 # issue, so the finding is closeable exactly when all its blockers have closed —
@@ -1050,17 +1088,21 @@ cmd_shed_orphaned() {
 # the lane's fix unit census shows one landed and none still live, the same fact
 # the edge would have carried.
 #
-# A needs-you finding is closed once its visit (finding.visit) has closed and no
+# A needs-you finding is closed once the operator has ruled the visit holding its
+# question (ruled_visit: its finding.visit, followed through every fold) and no
 # fix unit answers it any more: nothing blocks it, none on its lane is live, and
 # no ruling's rework child is live on the anchor. A ruling's child
 # (converse-rework.sh, source_ruling_bead) answers no lane, but it is the work an
 # operator's ruling calls for, and a ruling rules the whole diff, so a needs-you
 # finding on any lane waits for it. The operator has then ruled, and the work
-# their ruling calls for is on the branch, or the ruling called for none. Until
-# then the finding holds its review changes-requested. Review dispatch is held
-# meanwhile too: by fix-in-flight while a fix unit on its lane is live, and by
-# gate-ensure's open_rework_child while a ruling's child is. A visit, blocker
-# list, census or rework read that will not answer leaves it open.
+# their ruling calls for is on the branch, or the ruling called for none. The
+# close records the ruled visit as finding.ruling_visit, which pr-facts.sh's
+# review dismissal names. Until then the finding holds its review
+# changes-requested, and a visit that closed without a ruling (moot, benign,
+# dismissed, cut short) never releases it. Review dispatch is held meanwhile too:
+# by fix-in-flight while a fix unit on its lane is live, and by gate-ensure's
+# open_rework_child while a ruling's child is. A visit, blocker list, census or
+# rework read that will not answer leaves it open.
 cmd_close_answered() {
   local anchor="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -1069,7 +1111,7 @@ cmd_close_answered() {
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
-  local rows ids nyids id note cnote blk n_all n_live flane census c_live c_landed nyvisit vst
+  local rows ids nyids id note cnote blk n_all n_live flane census c_live c_landed nyvisit ruled
   rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -1118,8 +1160,7 @@ cmd_close_answered() {
   for id in $nyids; do
     nyvisit=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.visit"] // "") | tostring' 2>/dev/null)
     [ -n "$nyvisit" ] || continue
-    vst=$(bd_json show "$nyvisit" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
-    [ "$vst" = closed ] || continue
+    ruled=$(ruled_visit "$nyvisit") || continue
     blk=$(bd_json dep list "$id" --direction=down -t blocks)
     printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
       || { warn "could not read blockers of finding $id; leaving it open"; continue; }
@@ -1132,10 +1173,14 @@ cmd_close_answered() {
     printf '%s' "$rows" | jq -e 'all(.[]; ((.metadata.task_kind // "") | tostring) != "rework"
                                          or ((.metadata.source_ruling_bead // "") | tostring) == "")' >/dev/null 2>&1 \
       || continue
-    cnote="resolved: its visit $nyvisit closed, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+    if [ "$ruled" = "$nyvisit" ]; then
+      cnote="resolved: the operator ruled its visit $nyvisit, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+    else
+      cnote="resolved: its question moved from visit $nyvisit to visit $ruled, the operator ruled that visit, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+    fi
     [ -n "$reason" ] && cnote="$cnote ($reason)"
-    gc bd update "$id" --status=closed --append-notes "$cnote" >/dev/null 2>&1 \
-      || warn "could not close needs-you finding $id after its visit $nyvisit closed"
+    gc bd update "$id" --status=closed --set-metadata "finding.ruling_visit=$ruled" --append-notes "$cnote" >/dev/null 2>&1 \
+      || warn "could not close needs-you finding $id after the operator ruled visit $ruled"
   done
   # Closed findings leave the LIVE set; drop the per-pass bd_list cache so the
   # same-pass re-read (gate-ensure recomputes quiescence right after) does not

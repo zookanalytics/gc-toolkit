@@ -80,7 +80,7 @@ formulas/mol-rig-demo.toml
 formulas/mol-validate-close.toml
 3f7e3d2c56886b55115b7b57b26b0fc123e7e8e9c9a45b4cc0ff5395922b95c4
 formulas/mol-validate.toml
-56b8a2f72d14c24ed10982016a003a161ce40391aab6274168e05f53797f3719
+c3e67623ba44f0a0175e3f6cfcd10d2f6a2d49b9296e7413a0faa59bde592d31
 formulas/mol-visit.toml
 70aabd4af31952d91b74ce9c81cd897b39c7e3e98d3d22fb7b11b1219c17544d
 formulas/mol-witness-patrol.toml

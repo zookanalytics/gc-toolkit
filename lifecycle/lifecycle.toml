@@ -781,7 +781,8 @@ keys = [
   # closes it with the reason, no edge.
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
-  # human review changes-requested until the visit closes and no fix unit on its
+  # human review changes-requested until the operator rules the visit holding
+  # its question (gc.ruling on it, following any fold) and no fix unit on its
   # lane, nor a ruling's rework child, is in flight, when finding.sh
   # close-answered closes it.
   "finding.disposition",
@@ -827,10 +828,18 @@ keys = [
   # The visit that carries a needs-you finding's decision, set by finding.sh as
   # the ruling runs: one it filed, or one already open on the anchor's feedback
   # that the ruling named. The finding stays open and the visit id is posted to
-  # the raiser's thread; once the visit closes and no fix unit on the finding's
-  # lane, nor a ruling's rework child, is in flight, close-answered closes the
-  # finding.
+  # the raiser's thread. close-answered follows it through any fold to the visit
+  # holding the question, and closes the finding once that visit has closed
+  # carrying the operator's ruling (gc.ruling) and no fix unit on the finding's
+  # lane, nor a ruling's rework child, is in flight. A visit closed with no
+  # ruling releases nothing.
   "finding.visit",
+  # The visit whose recorded ruling released a needs-you finding, stamped by
+  # finding.sh close-answered in the write that closes it: finding.visit itself,
+  # or the visit a fold handed its question on to. pr-facts.sh's review dismissal
+  # names it, and counts a closed needs-you finding as answered only when it is
+  # set. Absent on an open finding and on one closed any other way. A bead id.
+  "finding.ruling_visit",
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
   # human findings by their originating review, so once every finding one review
@@ -1164,6 +1173,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
+  "gc.ruling", "gc.folded_into",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1231,6 +1241,20 @@ keys = [
 #   converse-claim.sh's stranded-finish recovery do. Absent or empty leaves that
 #   line out of the closed reminder. Never cleared. Freeform text, rendered as
 #   one line.
+# gc.ruling — on a VISIT, the operator's ruling in its sitting, the one line
+#   converse-signoff.sh --ruled yes resolves the sitting's demands with. Stamped
+#   and read back before the visit closes; a --ruled no sign-off clears one an
+#   earlier run left, and stops when either write does not read back. finding.sh
+#   close-answered reads it: a needs-you finding is released only by a closed
+#   visit carrying one, because a visit closed moot, benign, dismissed or cut
+#   short answers nothing. Absent means nobody ruled in that sitting. Freeform
+#   text.
+# gc.folded_into — on a VISIT closed `folded`, the visit it folded into, which now
+#   carries its question. visit-close.sh requires --into on every fold and stamps
+#   it with the outcome pair, read back before the close. finding.sh
+#   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
+#   a re-homed visit, to the visit whose ruling answers the question. Never
+#   cleared. A bead id in the folded visit's own store.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by

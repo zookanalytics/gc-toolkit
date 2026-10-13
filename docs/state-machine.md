@@ -310,9 +310,12 @@ open for the operator to accept or overrule. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
-review open until its visit closes and the work the ruling calls for lands,
-while the others let it clear. The review the operator reads on the PR
-therefore always matches what is still owed.
+review open until the operator rules the visit holding its question and the work
+the ruling calls for lands, while the others let it clear. The ruling is
+recorded on the visit (`gc.ruling`), and a fold hands the question on to the
+visit it folds into (`gc.folded_into`), so a visit closed moot, benign,
+dismissed or cut short releases nothing. The review the operator reads on the
+PR therefore always matches what is still owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins

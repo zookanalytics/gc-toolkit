@@ -841,23 +841,30 @@ eq "$(meta "$FW1" 'finding.disposition')" "declined" "…as the ruling the valid
 has "$(notes "$FW1")" "past open visit(s) visW" "…and the finding's notes record the visit it was ruled past"
 
 # ---------------------------------------------------------------------------
-# The release: a needs-you finding closes once its visit has closed and no fix
-# unit on its lane, nor a ruling's rework child, is in flight. While a fix unit
-# on its lane is, fix-in-flight names it so quiescence holds reviews off a diff
-# the ruling may still change.
+# The release: a needs-you finding closes once the operator has ruled the visit
+# holding its question and no fix unit on its lane, nor a ruling's rework child,
+# is in flight. converse-signoff.sh records the ruling on the visit as
+# gc.ruling. While a fix unit on its lane is in flight, fix-in-flight names it so
+# quiescence holds reviews off a diff the ruling may still change.
 # ---------------------------------------------------------------------------
+# set_visit <id> <jq-update> — rewrite one visit row in the store.
+set_visit() {
+  jq -c --arg id "$1" "map(if .id == \$id then $2 else . end)" "$STUB_STORE" > "$STUB_STORE.n" \
+    && mv "$STUB_STORE.n" "$STUB_STORE"
+}
 out=$("$SUT" fix-in-flight --anchor tk-ancV); rc=$?
 eq "$rc" "0" "fix-in-flight holds while the held rework answers the needs-you finding's lane"
 has "$out" "rwV blocked" "…naming that rework"
 "$SUT" close-answered --anchor tk-ancV
 eq "$(bstatus "$FV1")" "open" "close-answered leaves a needs-you finding open while its visit is open"
-jq -c 'map(if .id == "visV" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+set_visit visV '.status = "closed" | .metadata["gc.outcome"] = "resolved" | .metadata["gc.ruling"] = "drop the sweep and fix the cause"'
 "$SUT" close-answered --anchor tk-ancV
-eq "$(bstatus "$FV1")" "open" "…and once the visit closes, while the rework its ruling released is still in flight"
+eq "$(bstatus "$FV1")" "open" "…and once the operator has ruled it, while the rework the ruling released is still in flight"
 gc bd update rwV --status=closed >/dev/null
 "$SUT" close-answered --anchor tk-ancV
 eq "$(bstatus "$FV1")" "closed" "…and closes it once the rework has landed too"
-has "$(notes "$FV1")" "its visit visV closed" "…recording why"
+has "$(notes "$FV1")" "the operator ruled its visit visV" "…recording the ruling that released it"
+eq "$(meta "$FV1" 'finding.ruling_visit')" "visV" "…and naming the ruled visit for the review dismissal"
 # A needs-you finding with nothing answering it waits on a person and holds no
 # merge, so it never reads as an unanswered demand.
 : > "$STUB_DEPS"
@@ -868,9 +875,11 @@ FN=$(human_finding tk-ancN "docs/n.md" "which audience is this for?" 60)
 eq "$rc" "0" "needs-you --visit adopts a visit on the anchor itself"
 out=$("$SUT" fix-in-flight --anchor tk-ancN); rc=$?
 eq "$rc/$out" "1/" "fix-in-flight reports a needs-you finding with no fix unit as neither in flight nor unanswered"
-jq -c 'map(if .id == "visN" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+set_visit visN '.status = "closed" | .metadata["gc.ruling"] = "the operator audience"'
+STUB_SHOW_FAIL=1 "$SUT" close-answered --anchor tk-ancN >/dev/null 2>&1
+eq "$(bstatus "$FN")" "open" "a ruled visit whose row will not read releases nothing"
 "$SUT" close-answered --anchor tk-ancN
-eq "$(bstatus "$FN")" "closed" "close-answered closes it once its visit closes, with no fix unit to wait on"
+eq "$(bstatus "$FN")" "closed" "close-answered closes it once its visit is ruled, with no fix unit to wait on"
 # A ruling's rework child (converse-rework.sh) answers no lane, but when the
 # operator's ruling on the visit calls for a change, that child is the work the
 # needs-you finding waits on: the finding, and so its review, stay open until it
@@ -880,16 +889,72 @@ store '[{"id":"tk-ancU","status":"open","assignee":"","title":"ancU","notes":"",
         {"id":"visU","status":"open","assignee":"","title":"visit: tk-ancU","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancU"}}]'
 FU=$(human_finding tk-ancU "docs/u.md" "drop this section or keep it?" 62)
 "$SUT" set-disposition --finding "$FU" --anchor tk-ancU --disposition needs-you --visit visU >/dev/null
-jq -c 'map(if .id == "visU" then .status = "closed" else . end)
+jq -c 'map(if .id == "visU" then .status = "closed" | .metadata["gc.ruling"] = "drop the section" else . end)
        + [{"id":"rlU","status":"in_progress","assignee":"","title":"Rework PR#12: apply operator ruling","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancU","source_ruling_bead":"visU"}}]' \
   "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 gc bd dep rlU --blocks tk-ancU >/dev/null
 "$SUT" close-answered --anchor tk-ancU
-eq "$(bstatus "$FU")" "open" "a needs-you finding stays open after its visit closes while the ruling's rework child is in flight"
+eq "$(bstatus "$FU")" "open" "a needs-you finding stays open after its visit is ruled while the ruling's rework child is in flight"
 gc bd update rlU --status=closed >/dev/null
 "$SUT" close-answered --anchor tk-ancU
 eq "$(bstatus "$FU")" "closed" "…and closes once that child has landed"
 has "$(notes "$FU")" "nor a ruling's rework child" "…recording that it waited on the ruling's child too"
+
+# A visit can close with no ruling: closed moot or benign by a sitting that put
+# nothing to the operator, dismissed by the operator from the board, cut short
+# by a sitting whose question outlived it, or folded with no holder recorded.
+# None of those answers the question, so each leaves the finding open and its
+# review changes-requested, however long nothing is in flight.
+for how in moot benign dismissed cut-short folded; do
+  : > "$STUB_DEPS"
+  store '[{"id":"tk-ancO","status":"open","assignee":"","title":"ancO","notes":"","metadata":{"merge_result":"pull_request"}},
+          {"id":"visO","status":"open","assignee":"","title":"visit: tk-ancO","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancO"}}]'
+  FO=$(human_finding tk-ancO "docs/o.md" "is this the right audience?" 63)
+  "$SUT" set-disposition --finding "$FO" --anchor tk-ancO --disposition needs-you --visit visO >/dev/null
+  set_visit visO ".status = \"closed\" | .metadata[\"gc.outcome\"] = \"$how\""
+  "$SUT" close-answered --anchor tk-ancO
+  eq "$(bstatus "$FO")" "open" "a visit closed $how carries no ruling, so the needs-you finding stays open"
+  eq "$(meta "$FO" 'finding.ruling_visit')" "<absent>" "…and records no ruling visit"
+done
+
+# A fold hands the question on: visit-close.sh records the holder as
+# gc.folded_into, and bead-rehome.sh records a re-homed visit's successor as
+# gc.superseded_by. close-answered follows either to the visit holding the
+# question, which releases the finding only once it is ruled.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancF2","status":"open","assignee":"","title":"ancF2","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visF1","status":"open","assignee":"","title":"visit: tk-ancF2","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}},
+        {"id":"visF2","status":"open","assignee":"","title":"visit: tk-ancF2 (holder)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}},
+        {"id":"visF3","status":"open","assignee":"","title":"visit: tk-ancF2 (re-homed)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}}]'
+FF2=$(human_finding tk-ancF2 "docs/f.md" "keep this flag or drop it?" 64)
+"$SUT" set-disposition --finding "$FF2" --anchor tk-ancF2 --disposition needs-you --visit visF1 >/dev/null
+set_visit visF1 '.status = "closed" | .metadata["gc.outcome"] = "folded" | .metadata["gc.folded_into"] = "visF2"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "open" "a finding whose visit folded into one still open stays open"
+set_visit visF2 '.status = "closed" | .metadata["gc.outcome"] = "not-needed" | .metadata["gc.superseded_by"] = "visF3"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "open" "…and when that holder was re-homed to a visit still open"
+set_visit visF3 '.status = "closed" | .metadata["gc.ruling"] = "drop the flag"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "closed" "…and closes once the visit now holding the question is ruled"
+eq "$(meta "$FF2" 'finding.ruling_visit')" "visF3" "…recording that visit as the one whose ruling released it"
+has "$(notes "$FF2")" "moved from visit visF1 to visit visF3" "…and noting where its question moved"
+# A hand-off that ends at a bead that is not a visit, or that comes back to a
+# visit already passed, reaches no ruling, so the finding stays open.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancG","status":"open","assignee":"","title":"ancG","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visG1","status":"open","assignee":"","title":"visit: tk-ancG","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancG"}},
+        {"id":"visG2","status":"open","assignee":"","title":"visit: tk-ancG (loop)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancG"}},
+        {"id":"bugG","status":"closed","assignee":"","title":"a bug carrying it forward","notes":"","metadata":{"gc.ruling":"not a visit"}}]'
+FG=$(human_finding tk-ancG "docs/g.md" "which name do we ship?" 65)
+"$SUT" set-disposition --finding "$FG" --anchor tk-ancG --disposition needs-you --visit visG1 >/dev/null
+set_visit visG1 '.status = "closed" | .metadata["gc.superseded_by"] = "bugG"'
+"$SUT" close-answered --anchor tk-ancG
+eq "$(bstatus "$FG")" "open" "a hand-off to a bead that is not a visit releases nothing"
+set_visit visG1 '.metadata["gc.superseded_by"] = "" | .metadata["gc.folded_into"] = "visG2"'
+set_visit visG2 '.status = "closed" | .metadata["gc.folded_into"] = "visG1"'
+"$SUT" close-answered --anchor tk-ancG
+eq "$(bstatus "$FG")" "open" "…and neither does a fold that comes back to a visit already passed"
 
 # shed-orphaned: a needs-you finding on an anchor that has closed is moot; its
 # visit is the operator's and stays.

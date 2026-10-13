@@ -5333,13 +5333,26 @@ hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding deliberately holds 
 hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested until the operator rules the visit"
 
 echo "# …and once its visit is ruled and the work answering it lands, the needs-you finding closes and the review clears"
-store "[$(anchor HRY 391 "$(wb_meta rework:HRCY)"), $(child HRCY closed), $(rfind HFY HRY 591 needs-you)]"
+# finding.sh close-answered closes a needs-you finding only on a ruled visit, and
+# records that visit as finding.ruling_visit in the same write.
+store "[$(anchor HRY 391 "$(wb_meta rework:HRCY)"), $(child HRCY closed), $(rfind HFY HRY 591 needs-you | jq -c '.metadata["finding.ruling_visit"] = "tk-vHRY"')]"
 printf '%s' "$(prview 391 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_391.json"
 threads 391 "$(hreview 391 591 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(run)
-has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/391/reviews/591/dismissals" "a review whose needs-you finding has closed is dismissed"
-has "$(cat "$STUB_GH_LOG")" "settled by the ruling on its visit" "…and the dismiss message names the ruling that settled it"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/391/reviews/591/dismissals" "a review whose needs-you finding has closed on a ruling is dismissed"
+has "$(cat "$STUB_GH_LOG")" "HFY: settled by the ruling on visit tk-vHRY" "…and the dismiss message names the visit whose ruling settled it"
+
+echo "# …but a needs-you finding closed with no ruling recorded leaves its review standing"
+# A visit closed moot, benign, dismissed or cut short carries no ruling, so no
+# close of the finding it held can claim one.
+store "[$(anchor HRZ 392 "$(wb_meta rework:HRCZ)"), $(child HRCZ closed), $(rfind HFZ HRZ 592 needs-you)]"
+printf '%s' "$(prview 392 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_392.json"
+threads 392 "$(hreview 392 592 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a needs-you finding closed with no ruling visit leaves the review changes-requested"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and its author is not re-requested"
 
 echo "# …a review already DISMISSED is left alone — its state is the idempotency"
 store "[$(anchor HR3 142 "$(wb_meta rework:HRC3)"), $(child HRC3 closed), $(rfind HF5 HR3 557 declined)]"
