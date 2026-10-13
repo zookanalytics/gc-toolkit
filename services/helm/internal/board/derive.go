@@ -1158,7 +1158,10 @@ func prMachine(a Anchor, blockers []Blocker) string {
 // — so the only satisfied state is an approval GitHub reflects; every other
 // posture still owes one. It reads the posture pr-facts.sh records off the review
 // decision it already fetches, and the mapping is TOTAL over the posture's value
-// set, because a partial one leaves the rest to be invented.
+// set, because a partial one leaves the rest to be invented. An approval given
+// at or before the anchor's bring_current_lifted_at no longer counts toward the
+// merge, so pr-facts.sh records it as review_required even while GitHub still
+// shows it, and it reads required here.
 //
 //	approved                                             -> met
 //	review_required, changes_requested, commented, none  -> required

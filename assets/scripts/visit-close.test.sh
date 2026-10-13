@@ -38,6 +38,7 @@ mkdir -p "$BIN"
 #   FAIL_STAMP  any update exits 0 but records nothing (the silent drop)
 #   FAIL_XFER   an update carrying pr_number exits 0 but records nothing (the
 #               fold hold-transfer's silent drop)
+#   FAIL_FOLDINTO  an update drops gc.folded_into and records its other keys
 #   FAIL_CLOSE  the close logs but the status never becomes closed
 #   RECLOSE_REFUSED  a close of a bead already closed exits 1 (bd answers it
 #               as a no-op success; this knob covers a store that refuses it)
@@ -67,7 +68,9 @@ case "$sub" in
         for a in "$@"; do
             if [ "$prev" = "--set-metadata" ]; then
                 k="${a%%=*}"; v="${a#*=}"
-                t=$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+                if [ "$k" != gc.folded_into ] || [ -z "${FAIL_FOLDINTO:-}" ]; then
+                    t=$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+                fi
             fi
             prev="$a"
         done ;;
@@ -352,6 +355,44 @@ RC=0
 is "a fold with no pr_number exits 0" "$RC" "0"
 hasnt "no pr_number is written when there is no hold to move" 'pr_number=' "$LOG"
 has "the folded visit still closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── fold: every fold names its holder; one with none is refused before any write (exit 5) ──"
+# The holder is where the folded visit's question goes, so a fold with no --into
+# is refused even when the visit holds no merge.
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --outcome folded --reason "folded" >/dev/null 2>&1 ) || RC=$?
+is "a fold with no --into exits 5" "$RC" "5"
+hasnt "nothing is written" 'update' "$LOG"
+hasnt "nothing is closed" 'close v-x' "$LOG"
+
+echo "── fold: the holder is recorded on the folded visit as gc.folded_into ──"
+# A reader waiting on the folded visit's question (finding.sh close-answered)
+# follows gc.folded_into to the visit now holding it.
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --into v-hold \
+    --outcome folded --reason "folded into v-hold" ) || RC=$?
+is "the fold exits 0" "$RC" "0"
+is "the folded visit records its holder" "$(meta_of v-x gc.folded_into)" "v-hold"
+has "…in the write that stamps the outcome" \
+    'update v-x --set-metadata gc.outcome=folded --set-metadata gc.outcome_reason=folded into v-hold --set-metadata gc.folded_into=v-hold' "$LOG"
+is "…before the close" "$(grep -m1 -e 'gc.folded_into=' -e '^close ' "$LOG" | cut -d' ' -f1)" "update"
+
+echo "── fold: a holder that does not read back refuses the close (exit 3) ──"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_FOLDINTO=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a dropped gc.folded_into exits 3" "$RC" "3"
+hasnt "the folded visit is NOT closed without its holder" 'close v-x' "$LOG"
+
+echo "── a close that is not a fold records no holder ──"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into v-hold --outcome moot --reason "premise died" ) || RC=$?
+is "a moot close given --into exits 0" "$RC" "0"
+hasnt "…and stamps no gc.folded_into" 'gc.folded_into' "$LOG"
 
 echo "── a non-fold close of a merge-holding visit does not require --into ──"
 reset

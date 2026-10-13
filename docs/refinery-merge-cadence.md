@@ -71,10 +71,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    request and times out on about a hundred at once, so the read pages 25 PRs at
    a time. The arm keeps, in `pr-posture.seen` in the pass state dir, the facts
    each posture was last derived from: those PR facts with the anchor's
-   watermarks, its provenance cutover, the acting login, and a checksum of the
-   script and of the city's own-post definition. An anchor whose facts all read
-   the same, and whose bead still carries that posture at that head, keeps it
-   with no per-PR read, and its merge state is recorded from the batched read.
+   watermarks, its provenance cutover, its lift line (`bring_current_lifted_at`),
+   the acting login, and a checksum of the script and of the city's own-post
+   definition. An anchor whose facts all read the same, and whose bead still
+   carries that posture at that head, keeps it with no per-PR read, and its
+   merge state is recorded from the batched read.
    Any other anchor is read whole, as every anchor is when the batched read
    fails. A `commented` posture keeps no basis, because a routing or a visit can
    release it with nothing on the PR moving, and neither does a posture an
@@ -388,8 +389,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    approved PR only, by the approval rule merge.sh lands on; the child's
    handoff runs `bring-current-guard.sh`, which refuses it until the worker's
    audit covers every conflict and, when the round conflicted, reopens triage
-   to rule on what it reopens and whether the approval stands, or rules closed
-   itself on an anchor that declares no triage lane
+   to rule on what it reopens and whether the approval stands, adding triage
+   to an anchor whose `check_set` declares no triage lane, or, on the `none`
+   or `off` opt-out, lifting the approval itself; a ruling that lifts the
+   approval draws `bring_current_lifted_at`, before which no approval counts,
+   and files no visit
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
@@ -450,8 +454,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    those only the ones naming the comment when any do. It says Fixed when the
    comment's must-fix finding closed with that rework. It never names the PR
    head for being the head, since the head can be a merge of the base. A
-   finding ruled needs-you keeps its comment awaiting a person, and its owed
-   reply is the answer, leading with the question mark. A declined or deferred
+   finding ruled needs-you keeps its comment awaiting a person while it is
+   open, and its owed reply is the answer, leading with the question mark. A
+   declined or deferred
    finding's owed reply is its comment's answer too. That reply leads with the
    ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
    the PR tells a fix from a pushback, and the comment trades EYES for
@@ -461,7 +466,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A review
+   accept or overrule, as a needs-you finding's does until they rule. A
+   needs-you finding closes once the visit holding its question, followed
+   through any fold, has closed carrying the operator's ruling and no fix unit
+   on its lane, nor a ruling's rework child, is in flight, and its comment then
+   resolves through its batch's bead like any other. A visit closed moot,
+   benign, dismissed or cut short carries no ruling and releases nothing. A review
    body or a Conversation comment has no thread, so a Conversation comment of
    the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves

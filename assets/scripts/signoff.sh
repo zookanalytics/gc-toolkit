@@ -128,7 +128,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  --reopen.
   --dismiss-approval
                  the round took judgment the standing human approval did not
-                 see: dismiss it, filing the re-ask visit first.
+                 see: lift it. No approval given at or before the round counts
+                 toward the merge from then on, and each approver is asked to
+                 review again.
 U
 }
 
