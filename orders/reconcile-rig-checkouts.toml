@@ -1,7 +1,8 @@
 # reconcile-rig-checkouts — keep the live rigs/* checkouts advanced to origin.
 # A directory-imported pack runs from the working tree, so a merged PR is not
-# live until the checkout syncs. Fast-forward only (`git merge --ff-only`
-# cannot clobber work); divergence is escalated for a human, never forced.
+# live until the checkout syncs. It fast-forwards with `git merge --ff-only`,
+# heals a refusal only when it can prove nothing is lost, and escalates the rest
+# for a human (assets/scripts/reconcile-rig-checkouts.sh).
 [order]
 description = "Fast-forward live rigs/* checkouts to origin; escalate divergence"
 trigger = "cooldown"

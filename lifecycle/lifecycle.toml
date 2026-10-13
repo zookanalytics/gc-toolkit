@@ -132,7 +132,7 @@ writer = "assets/scripts/pr-open.sh"
 [[transition]]
 from = "pre_open_gate"
 to = "unanchored"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rejection back to the pool, or a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "pull_request"
@@ -152,7 +152,7 @@ writer = "assets/scripts/pr-facts.sh"
 [[transition]]
 from = "pull_request"
 to = "unanchored"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rejection back to the pool, or a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "abandoned"

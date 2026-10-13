@@ -114,7 +114,7 @@ func TestAStoppedBuildOrderIsVisible(t *testing.T) {
 }
 
 func TestGatherCarriesTheProbeOutcomeIntoTheRow(t *testing.T) {
-	// The record gc-helm-build.sh writes when a rebuild succeeds and its probe
+	// The record gc-build.sh writes for helm when a rebuild succeeds and its probe
 	// fails: rc 0, matching revisions, nothing pending. Only probe_status
 	// separates it from a healthy component, so the decode has to keep it.
 	root := city(t, map[string]string{
@@ -184,7 +184,7 @@ func TestGatherOnARecordWrittenBeforeBehindMainExisted(t *testing.T) {
 }
 
 // A service may declare a state root one level deeper than .gc/services/<name>
-// (a pack that groups its services), and gc-helm-build.sh writes wherever
+// (a pack that groups its services), and gc-build.sh writes wherever
 // `gc service list` reports. The reader must see that depth too, or the
 // component silently vanishes from the board.
 func TestGatherReadsAStateRootNestedOneLevelDeeper(t *testing.T) {

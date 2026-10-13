@@ -74,11 +74,11 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 3,230 | 807 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,907 | 1,226 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,780 | 695 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,143 | 1,535 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 6,172 | 1,543 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,913 | 728 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` | 3,078 | 769 |
-| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,448 | 1,112 |
+| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` | 4,545 | 1,136 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,840 | 1,210 |
 | [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 9,182 | 2,295 |
