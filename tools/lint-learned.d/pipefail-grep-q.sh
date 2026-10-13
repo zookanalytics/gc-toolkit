@@ -9,7 +9,8 @@
 # marker-fenced snippets in TOML/MD (they run under the extracting suite's
 # shell options). Comment lines are skipped — the shape is quoted in prose.
 # No exception list: an empty-payload probe is still written `< /dev/null`.
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -22,8 +23,16 @@ FIX="fix: grep -q PAT <<< \"\$VAR\" | grep -q PAT < <(cmd) | grep -q PAT < /dev/
 found=0
 
 is_comment() { # whole-line comments only; `cmd  # note` is code
-    case "$(printf '%s' "$1" | tr -d '[:space:]')" in '#'*) return 0 ;; esac
+    local trimmed="${1#"${1%%[![:space:]]*}"}"
+    case "$trimmed" in '#'*) return 0 ;; esac
     return 1
+}
+
+# cannot_scan <file> <tool> — a tool that failed on a file left it unscanned,
+# and reporting nothing would pass it as clean, so the run ends in an error.
+cannot_scan() {
+    echo "pipefail-grep-q: $2 failed on $1 — detector cannot scan it" >&2
+    exit 2
 }
 
 for f in "$@"; do
@@ -31,24 +40,34 @@ for f in "$@"; do
     case "$f" in */lint-learned.d/* | */lint-learned.sh | */base-snapshots/*) continue ;; esac
     case "$f" in
         *.sh)
-            grep -qE "$SETS_PIPEFAIL" "$f" 2>/dev/null || continue
+            # grep exits 1 when nothing matches, and past 1 when it could not
+            # read the file.
+            grep -qE "$SETS_PIPEFAIL" "$f" 2>/dev/null; rc=$?
+            [ "$rc" -eq 1 ] && continue
+            [ "$rc" -eq 0 ] || cannot_scan "$f" grep
+            hits="$(grep -nE "$QUIET_PIPE" "$f" 2>/dev/null)"; rc=$?
+            [ "$rc" -le 1 ] || cannot_scan "$f" grep
             while IFS= read -r hit; do
+                [ -n "$hit" ] || continue
                 no="${hit%%:*}"; body="${hit#*:}"
                 is_comment "$body" && continue
                 echo "$f:$no: pipeline feeds \`grep -q\` under \`set -o pipefail\` — a successful match can be reported as a failure; $FIX"
                 found=1
-            done < <(grep -nE "$QUIET_PIPE" "$f" 2>/dev/null)
+            done <<< "$hits"
             ;;
         *.toml | *.md)
             # Marker-fenced snippets are lifted verbatim by a test and run
             # under that test's shell options, so the defect travels with them.
-            block="$(awk '/#[[:space:]]*>>>[[:space:]]/{inb=1} inb{print FNR": "$0} /#[[:space:]]*<<<[[:space:]]/{inb=0}' "$f" 2>/dev/null)"
+            block="$(awk '/#[[:space:]]*>>>[[:space:]]/{inb=1} inb{print FNR": "$0} /#[[:space:]]*<<<[[:space:]]/{inb=0}' "$f" 2>/dev/null)" \
+                || cannot_scan "$f" awk
             [ -n "$block" ] || continue
             while IFS= read -r line; do
                 no="${line%%: *}"; body="${line#*: }"
                 is_comment "$body" && continue
                 case "$body" in *[!A-Za-z0-9]grep* | grep*) ;; *) continue ;; esac
-                if grep -qE "$QUIET_PIPE" <<< "$body" 2>/dev/null; then
+                grep -qE "$QUIET_PIPE" <<< "$body" 2>/dev/null; rc=$?
+                [ "$rc" -le 1 ] || cannot_scan "$f" grep
+                if [ "$rc" -eq 0 ]; then
                     echo "$f:$no: extracted snippet pipes into \`grep -q\` and inherits the extracting suite's pipefail; $FIX"
                     found=1
                 fi
