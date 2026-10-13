@@ -805,8 +805,8 @@ has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "child blocks the anchor"
 has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child stays open and unblocked"
 hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, not the reverse"
 has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the summary"
-has "$(meta fix-1 rejection_reason)" "Correctness: request-changes. Nothing needs you." "…which is the verdict's opening line"
-eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Nothing needs you." "the posted verdict opens with that line"
+eq "$(meta fix-1 rejection_reason)" "signoff requested changes: Correctness: request-changes." "…which is the opening line's check and verdict, without the half that speaks to the operator"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Nothing needs you." "the posted verdict opens with the whole line"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
 
@@ -1174,6 +1174,14 @@ hasnt "$(cat "$STUB_FINDING_LOG")" "upsert" "no findings are filed when no --fin
 FIX2=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
 has "$(meta "$FIX2" rejection_reason)" "signoff requested changes:" "rejection_reason keeps its one-line prose summary"
 hasnt "$(meta "$FIX2" rejection_reason)" "finding(s) this bead blocks" "…and names no findings when none were filed"
+
+echo "# a decision for the operator opens the posted verdict and never reaches the rework child's reason"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --needs-you "decide whether the retry default belongs in this PR" 2>&1); rc=$?
+eq "$rc" 0 "request-changes with --needs-you exits 0"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Needs you: decide whether the retry default belongs in this PR." "the posted verdict opens with the decision"
+FIX3=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
+eq "$(meta "$FIX3" rejection_reason)" "signoff requested changes: Correctness: request-changes." "the rework child's reason is the check and verdict alone, since the worker that reads it is not the operator"
 
 # --- a malformed findings file never costs the rework dispatch ------------------
 echo "# a malformed findings file is best-effort"

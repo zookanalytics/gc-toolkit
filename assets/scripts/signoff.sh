@@ -463,8 +463,7 @@ fi
 
 # The artifact body. Its first line is the same for every check: the check and
 # its verdict, then the one decision this review needs from the operator, or
-# that nothing does, so a busy reader can stop there. It is also the summary a
-# request-changes verdict hands its rework child. Under it come the round's
+# that nothing does, so a busy reader can stop there. Under it come the round's
 # account when a triage ruling rides this verdict, the reviewer's notes as the
 # trail, and the lines scripts read: the demo decision, and the trailer naming
 # the anchor and the exact commit judged, which traces the posted comment back
@@ -485,12 +484,17 @@ check_label() { # <check-name>
   if [ "${#1}" -le 2 ]; then printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
   else printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"; fi
 }
+# The opening line's first half: the check and its verdict. A request-changes
+# verdict hands this half alone to its rework child as the summary, because the
+# second half speaks to the operator and the child's reader is the worker that
+# fixes it.
+verdict_head() { printf '%s: %s.' "$(check_label "$CHECK_NAME")" "$VERDICT"; }
 compose_artifact() {
   local needs="Nothing needs you."
   if [ -n "$ROUND_ASK" ]; then needs="$ROUND_ASK"
   elif [ -n "$NEEDS_YOU" ]; then needs="Needs you: $NEEDS_YOU"; fi
   {
-    printf '%s: %s. %s\n\n' "$(check_label "$CHECK_NAME")" "$VERDICT" "$needs"
+    printf '%s %s\n\n' "$(verdict_head)" "$needs"
     [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
     [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
     [ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL"
@@ -948,7 +952,7 @@ if [ -z "$FIX_TARGET" ]; then
   warn "no landing target resolves for the rework child (anchor merged_target/target, review_base all empty); review left open"
   exit 2
 fi
-REASON_HEAD=$(head -n 1 "$BODY_FILE" | cut -c1-200)
+REASON_HEAD=$(verdict_head)
 # The objections are filed as findings beside this child; the rejection_reason
 # carries the one-line summary and points the resumed worker at the beads, rather
 # than being the whole record.
