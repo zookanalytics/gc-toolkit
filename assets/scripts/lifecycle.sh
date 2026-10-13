@@ -30,7 +30,8 @@
 # satisfies the guard.
 # reopen: repair a bead closed while merge_result is a NON-closed state — set
 # status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
-# Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol.
+# Callers: pr-open.sh, pr-facts.sh, mol-refinery-patrol. gctk merge runs the
+# same writer in-process.
 # Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage, or no
 # gctk binary to run; 2 post-write verification mismatch (or unreadable bead).
 # CAVEAT (docs/gascity-routing-model.md row 46): clearing an assignee on a bead
