@@ -218,6 +218,13 @@ BEGIN {
 MSG_HEAD='holds a bead filed by the `bd create` at line'
 MSG_TAIL='with no --metadata, and this write stamps its metadata second. A bead whose stamp fails, or whose create id never comes back, carries nothing a reader selects it by, and the next run files a twin; fix: carry the keys on the create (`--metadata`, or bd_create in assets/scripts/bd-lib.sh) (learned rule: create-then-stamp)'
 
+# cannot_scan <file> <tool> — a tool that failed on a file left it unscanned,
+# and reporting nothing would pass it as clean, so the run ends in an error.
+cannot_scan() {
+    echo "create-then-stamp: $2 failed on $1 — detector cannot scan it" >&2
+    exit 2
+}
+
 found=0
 for f in "$@"; do
     [ -f "$f" ] || continue
@@ -227,13 +234,16 @@ for f in "$@"; do
         *.toml | *.md) mode='fenced' ;;
         *) continue ;;
     esac
-    # One cheap read decides whether the file is worth a scan at all.
-    grep -Eq -- '--set-metadata' "$f" 2>/dev/null || continue
-    grep -Eq -- '((gc_bd|(^|[^[:alnum:]_.-])bd)[[:space:]]+create|(^|[^[:alnum:]_.-])bd_create_child)([^[:alnum:]_-]|$)' "$f" 2>/dev/null || continue
-    hits="$(awk -v mode="$mode" "$SCAN_AWK" "$f")" || {
-        echo "create-then-stamp: awk failed on $f — detector cannot scan it" >&2
-        exit 2
-    }
+    # Two cheap reads decide whether the file is worth a scan at all. Exit 1 is
+    # a file with no stamp, or no create; anything past it is a file grep could
+    # not read, which a skip would pass unscanned.
+    grep -Eq -- '--set-metadata' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    [ "$rc" -eq 0 ] || cannot_scan "$f" grep
+    grep -Eq -- '((gc_bd|(^|[^[:alnum:]_.-])bd)[[:space:]]+create|(^|[^[:alnum:]_.-])bd_create_child)([^[:alnum:]_-]|$)' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    [ "$rc" -eq 0 ] || cannot_scan "$f" grep
+    hits="$(awk -v mode="$mode" "$SCAN_AWK" "$f")" || cannot_scan "$f" awk
     while IFS=$'\t' read -r no var made; do
         [ -n "$no" ] || continue
         echo "$f:$no: \`\$$var\` $MSG_HEAD $made $MSG_TAIL"

@@ -2479,7 +2479,7 @@ ct_locs() { printf '%s\n' "$1" | grep -oE '^[^: ]+:[0-9]+:' | sort -u; }
 plantct() {
     sed -e 's/@BD@/bd/g' -e 's/@MKT@/mktemp/g' -e 's/@J@/bd_json/g' -e 's/@CTL@/[:cntrl:]/g' \
         -e 's/@GH@/gh/g' -e 's/@NOTES@/--notes/g' -e 's#@OR@#//#g' \
-        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' > "$CT/tree/$1"
+        -e 's/@PF@/pipefail/g' -e 's/@GQ@/grep -q/g' -e 's/@SM@/--set-metadata/g' > "$CT/tree/$1"
 }
 plantct x.sh <<'FIX'
 #!/usr/bin/env bash
@@ -2493,6 +2493,8 @@ x=$(printf '%s' "$J" | tr -d '@CTL@')
 gc @BD@ update "$ID" @NOTES@ "x"
 @BD@ close "$GC_BEAD_ID"
 ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')
+Y=$(gc @BD@ create "t" --json | jq -r '.id')
+gc @BD@ update "$Y" @SM@ k=v
 FIX
 plantct formulas/x.toml <<'FIX'
 [[steps]]
