@@ -83,6 +83,16 @@ exec "$FARM/awk" "\$@"
 STUB
 chmod +x "$BROKEN/awk"
 
+# A git whose history reads fail, on PATH only for the case that asks for it:
+# it fails every `git log` and passes every other call to the real git.
+NOLOG="$TMPD/nolog"; mkdir -p "$NOLOG"
+cat >"$NOLOG/git" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" log "*) echo "broken git log" >&2; exit 128 ;; esac
+exec "$FARM/git" "\$@"
+STUB
+chmod +x "$NOLOG/git"
+
 # --- the fixture repository ------------------------------------------------
 REPO="$TMPD/repo"; mkdir -p "$REPO"
 g() { git -C "$REPO" -c commit.gpgsign=false -c user.name=fixture -c user.email=fixture@example.com -c core.hooksPath=/dev/null "$@"; }
@@ -113,7 +123,10 @@ put zz/icons/list.txt 'icons'
 for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
   put "zz/icons/i$i.png" "png:icon$i"
 done
-g add -A && g commit -q -m base
+# Each commit a delivery's comment names carries its own author date, so the
+# comment's date shows which commit it was read from.
+g add -A && GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' g commit -q -m base
+BASE_SHORT=$(g rev-parse --short HEAD)
 
 # The change: edits a source file, adds a screenshot, deletes a visual, and adds
 # doc lines that name visuals in every form the scan reads or must ignore.
@@ -130,13 +143,31 @@ See named/target.png.
 An old copy sits at named/only-bak.png.bak, and ghost.png is gone.
 An escape: ../../escape.png
 MD
-g add -A && g commit -q -m feature
+g add -A && GIT_AUTHOR_DATE='2026-02-03T04:05:06Z' g commit -q -m feature
 FEATURE=$(g rev-parse HEAD)
 SHORT=$(g rev-parse --short HEAD)
 
 g checkout -q -b feature2
 put docs/img/flow.svg '<svg>later</svg>'
-g add -A && g commit -q -m later
+g add -A && GIT_AUTHOR_DATE='2026-03-04T05:06:07Z' g commit -q -m later
+LATER_SHORT=$(g rev-parse --short HEAD)
+
+# A change that moves one visual and copies another, editing neither.
+g checkout -q -b moved main
+mkdir -p "$REPO/moved" "$REPO/copies"
+g mv named/target.png moved/target.png
+cp "$REPO/logo.png" "$REPO/copies/logo.png"
+g add -A && GIT_AUTHOR_DATE='2026-04-05T06:07:08Z' g commit -q -m moved
+MOVED=$(g rev-parse HEAD)
+
+# A visual whose name is also a glob that matches a second, later visual.
+g checkout -q -b globbed main
+put 'glob/a[1].png' 'png:literal'
+g add -A && GIT_AUTHOR_DATE='2026-05-06T07:08:09Z' g commit -q -m glob-literal
+GLOB_SHORT=$(g rev-parse --short HEAD)
+put glob/a1.png 'png:match'
+g add -A && GIT_AUTHOR_DATE='2026-06-07T08:09:10Z' g commit -q -m glob-match
+GLOBBED=$(g rev-parse HEAD)
 
 g checkout -q -b far main
 put deep1/deep2/deep3/deep4/code.txt 'code, edited'
@@ -158,17 +189,18 @@ LONG=$(g rev-parse HEAD)
 g checkout -q feature
 
 GHLOG="$TMPD/gh.log"
-# run [STUB_DESC=..] [STUB_SHOW_FAIL=1] [GH_STUB_FAIL=1] [RANK_FAIL=1] -- <sut args...>
+# run [STUB_DESC=..] [STUB_SHOW_FAIL=1] [GH_STUB_FAIL=1] [RANK_FAIL=1] [LOG_FAIL=1] -- <sut args...>
 # Combined stdout and stderr are returned. Each call starts with an empty gh
 # log, an empty capture dir and an empty TMPDIR.
 run() {
-  local desc="" showfail="" ghfail="" rankfail=""
+  local desc="" showfail="" ghfail="" rankfail="" logfail=""
   while [ $# -gt 0 ]; do
     case "$1" in
       STUB_DESC=*)      desc="${1#*=}" ;;
       STUB_SHOW_FAIL=*) showfail="${1#*=}" ;;
       GH_STUB_FAIL=*)   ghfail="${1#*=}" ;;
       RANK_FAIL=*)      rankfail="${1#*=}" ;;
+      LOG_FAIL=*)       logfail="${1#*=}" ;;
       --) shift; break ;;
       *) break ;;
     esac
@@ -176,7 +208,7 @@ run() {
   done
   : >"$GHLOG"; rm -rf "${CAPTURE:?}"/* "${RUNTMP:?}"/*
   ( cd "$REPO" && env -i \
-      PATH="${rankfail:+$BROKEN:}$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" TMPDIR="$RUNTMP" \
+      PATH="${rankfail:+$BROKEN:}${logfail:+$NOLOG:}$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" TMPDIR="$RUNTMP" \
       GHLOG="$GHLOG" CAPTURE="$CAPTURE" STUB_DESC="$desc" STUB_SHOW_FAIL="$showfail" \
       GH_STUB_FAIL="$ghfail" \
       bash "$SUT" "$@" 2>&1 )
@@ -276,74 +308,110 @@ eq "$leftover" "" "candidates leaves nothing in TMPDIR"
 
 echo "# deliver attaches the visual as the commit stores it, through demo-deliver.sh"
 printf 'uncommitted edit' >"$REPO/docs/img/flow.svg"
-out="$(run -- deliver --path docs/img/flow.svg --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/img/flow.svg --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 0 "deliver exits 0"
 GH="$(cat "$GHLOG")"
 has "pr comment 77" "$GH" "it comments on the subject's PR"
 has "--repo github.com/acme/widgets" "$GH" "the post is pinned to our origin"
 has "--attach $RUNTMP/" "$GH" "the attachment is a file written for this delivery"
-has "The committed visual \`docs/img/flow.svg\` as of $SHORT" "$GH" "the default body names the path and the commit"
 has "<!-- gc:city -->" "$GH" "the post carries the city's mark, so it went through pr-post.sh"
 ok "the attachment keeps the file's name" "[ -f '$CAPTURE/flow.svg' ]"
 eq "$(cat "$CAPTURE/flow.svg" 2>/dev/null)" "$(blob "$FEATURE" docs/img/flow.svg)" "the bytes are the reviewed commit's, not the working tree's edit"
-has "delivered docs/img/flow.svg as of $SHORT" "$out" "it reports the delivery"
-eq "$(ls -A "$RUNTMP")" "" "the written file is removed after delivery"
+has "delivered docs/img/flow.svg to the PR of tk-sub" "$out" "it reports the delivery"
+eq "$(ls -A "$RUNTMP")" "" "the written files are removed after delivery"
 g checkout -q -- docs/img/flow.svg
 
+echo "# the comment dates the visual by the commit that last changed it, not by the reviewed commit"
+has "The committed visual \`docs/img/flow.svg\`, attached so it renders inline. This PR does not change it. It was last changed in $BASE_SHORT on 2026-01-02." "$GH" "a visual the change leaves alone says so, with the base commit that last changed it"
+hasnt "in $SHORT" "$GH" "…and the reviewed commit is not given as its last change"
+has "to the PR of tk-sub. This PR does not change it. It was last changed in $BASE_SHORT on 2026-01-02." "$out" "the report says where it came from too"
+
+echo "# what the change does to the visual decides what the comment says"
+out="$(run -- deliver --path specs/tk-1/screenshots/after.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
+eq "$rc" 0 "a visual the change adds delivers"
+has "This PR adds it. It was last changed in $SHORT on 2026-02-03." "$(cat "$GHLOG")" "an added visual says so, with the commit that added it"
+out="$(run -- deliver --path docs/img/flow.svg --base main --oid feature2 --subject tk-sub)"; rc=$?
+eq "$rc" 0 "a visual the change edits delivers"
+has "This PR edits it. It was last changed in $LATER_SHORT on 2026-03-04." "$(cat "$GHLOG")" "an edited visual says so, with the commit that edited it"
+out="$(run -- deliver --path moved/target.png --base main --oid "$MOVED" --subject tk-sub)"; rc=$?
+eq "$rc" 0 "a moved visual delivers"
+has "This PR moves it from \`named/target.png\` without changing its content. It was last changed in $BASE_SHORT on 2026-01-02." "$(cat "$GHLOG")" "a moved visual predates the change, and the comment says so"
+out="$(run -- deliver --path copies/logo.png --base main --oid "$MOVED" --subject tk-sub)"; rc=$?
+eq "$rc" 0 "a copied visual delivers"
+has "This PR copies it from \`logo.png\` without changing its content. It was last changed in $BASE_SHORT on 2026-01-02." "$(cat "$GHLOG")" "a copied visual predates the change, and the comment says so"
+
+echo "# a name that is also a glob names only itself"
+out="$(run -- deliver --path 'glob/a[1].png' --base main --oid "$GLOBBED" --subject tk-sub)"; rc=$?
+eq "$rc" 0 "a name with glob characters delivers"
+has "This PR adds it. It was last changed in $GLOB_SHORT on 2026-05-06." "$(cat "$GHLOG")" "its last change is its own commit, not the later one that added the glob/a1.png it matches"
+eq "$(cat "$CAPTURE/a[1].png" 2>/dev/null)" "png:literal" "…and the bytes are its own"
+
 echo "# the bytes come from --oid, not from a later commit"
-out="$(run -- deliver --path docs/img/flow.svg --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/img/flow.svg --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$(cat "$CAPTURE/flow.svg" 2>/dev/null)" "<svg>base</svg>" "an older --oid delivers its own version"
-out="$(run -- deliver --path docs/img/flow.svg --oid feature2 --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/img/flow.svg --base main --oid feature2 --subject tk-sub)"; rc=$?
 eq "$(cat "$CAPTURE/flow.svg" 2>/dev/null)" "<svg>later</svg>" "a later --oid delivers the later version"
 
 echo "# a leading ./ is accepted"
-out="$(run -- deliver --path ./docs/shots/Shot.PNG --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path ./docs/shots/Shot.PNG --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 0 "./ path delivers"
 ok "the upper-case visual is attached" "[ -f '$CAPTURE/Shot.PNG' ]"
 
 echo "# a '#' in the name is not handed to gh, which reads it as alt text"
-out="$(run -- deliver --path 'named/hash#1.png' --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path 'named/hash#1.png' --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 0 "a name with '#' delivers"
 ok "the attached name has no '#'" "[ -f '$CAPTURE/hash_1.png' ]"
 eq "$(cat "$CAPTURE/hash_1.png" 2>/dev/null)" "png:hash" "…and carries the committed bytes"
 
-echo "# --body overrides the default"
-out="$(run -- deliver --path logo.png --oid "$FEATURE" --subject tk-sub --body "the new logo")"; rc=$?
+echo "# --body leads the comment, and where the visual came from still follows"
+out="$(run -- deliver --path logo.png --base main --oid "$FEATURE" --subject tk-sub --body "the new logo")"; rc=$?
 eq "$rc" 0 "a custom body delivers"
-GH="$(cat "$GHLOG")"
-has "the new logo" "$GH" "the custom body is used"
-hasnt "The committed visual" "$GH" "the default is not"
+has "the new logo
+
+The committed visual \`logo.png\`, attached so it renders inline. This PR does not change it. It was last changed in $BASE_SHORT on 2026-01-02." "$(cat "$GHLOG")" "the custom body comes first, then where the visual came from"
+
+echo "# a delivery that cannot say where the visual came from posts nothing"
+out="$(run LOG_FAIL=1 -- deliver --path docs/img/flow.svg --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
+eq "$rc" 1 "a history read that fails exits 1"
+has "cannot find the commit that last changed 'docs/img/flow.svg'" "$out" "it says why"
+eq "$(cat "$GHLOG")" "" "nothing is posted"
+eq "$(ls -A "$RUNTMP")" "" "nothing is left in TMPDIR"
 
 echo "# refusals post nothing"
-out="$(run -- deliver --path docs/flow.md --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/flow.md --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a file GitHub does not show inline is refused"
 has "is not an image or video" "$out" "it says why"
 eq "$(cat "$GHLOG")" "" "nothing is posted for it"
-out="$(run -- deliver --path docs/img/old.gif --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/img/old.gif --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a visual the commit no longer has is refused"
 has "is not a file at $FEATURE" "$out" "it says the file is not at the commit"
-out="$(run -- deliver --path docs/img --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/img --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a directory is refused"
-out="$(run -- deliver --path lfs/pointer.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path lfs/pointer.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a Git LFS pointer is refused"
 has "Git LFS" "$out" "it names Git LFS"
 eq "$(cat "$GHLOG")" "" "nothing is posted for the pointer"
-out="$(run -- deliver --path docs/link.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path docs/link.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a symlink is refused"
 has "is a symlink" "$out" "it says the path is a symlink"
-out="$(run -- deliver --path ../escape.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path ../escape.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a path outside the root is refused"
 has "must be a path from the repository root" "$out" "it says the path must be root-relative"
-out="$(run -- deliver --path /logo.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --path /logo.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "an absolute path is refused"
 eq "$(cat "$GHLOG")" "" "nothing is posted for a bad path"
-out="$(run -- deliver --path logo.png --oid "$FEATURE")"; rc=$?
+out="$(run -- deliver --path logo.png --base no-such-branch --oid "$FEATURE" --subject tk-sub)"; rc=$?
+eq "$rc" 1 "a base that does not resolve exits 1"
+eq "$(cat "$GHLOG")" "" "nothing is posted for it"
+out="$(run -- deliver --path logo.png --base main --oid "$FEATURE")"; rc=$?
 eq "$rc" 2 "a missing --subject is a usage error"
-out="$(run -- deliver --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run -- deliver --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 2 "a missing --path is a usage error"
+out="$(run -- deliver --path logo.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+eq "$rc" 2 "a missing --base is a usage error"
 
 echo "# a failed attach is demo-deliver.sh's failure, passed through"
-out="$(run GH_STUB_FAIL=1 -- deliver --path logo.png --oid "$FEATURE" --subject tk-sub)"; rc=$?
+out="$(run GH_STUB_FAIL=1 -- deliver --path logo.png --base main --oid "$FEATURE" --subject tk-sub)"; rc=$?
 eq "$rc" 1 "a gh failure exits 1"
 hasnt "delivered logo.png" "$out" "no delivery is reported"
 eq "$(ls -A "$RUNTMP")" "" "the written file is removed after a failed delivery too"

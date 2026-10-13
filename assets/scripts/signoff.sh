@@ -84,7 +84,7 @@ usage() {
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>] [--add-gates <checks>]
-                  [--visual <decision>]
+                  [--visual <decision> [--visual-fallback-from <modality>]]
                   [--reopen <lanes>|none --round-reason <text> [--dismiss-approval]]
 
   --review-bead  the dispatched review bead this verdict answers (required)
@@ -116,7 +116,16 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  screenshot or video). Required on every demo verdict and
                  refused on any other check's; none records with approve only.
                  Stamped on the review bead as visual=<decision> and named on
-                 the posted artifact's `Visual:` line.
+                 the posted artifact's `Visual:` line, where repo-artifact
+                 reads `author-committed`: a committed visual is what an
+                 author recorded, not a capture of the reviewed commit.
+  --visual-fallback-from
+                 the modality that fits when --visual names a cheaper one
+                 delivered in its place because the fitting one could not be
+                 produced: screenshot or video, costlier than --visual.
+                 Stamped as visual_fallback_from and named on the `Visual:`
+                 line as `fallback from <modality>`. A demo verdict without it
+                 clears the stamp.
   --reopen       triage's ruling on a bring-current round that conflicted:
                  the lanes the anchor declares that run again on the merged
                  code, or none. Required on a triage approve while the anchor's
@@ -139,7 +148,7 @@ U
 warn() { echo "signoff: $*" >&2; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
-REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""
+VISUAL_FALLBACK=""; REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
@@ -149,6 +158,7 @@ while [ $# -gt 0 ]; do
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --visual-fallback-from) VISUAL_FALLBACK="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reopen)       REOPEN="${2:-}";          shift 2 || { usage; exit 1; } ;;
     --round-reason) ROUND_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --dismiss-approval) DISMISS_APPROVAL=1;   shift ;;
@@ -253,7 +263,15 @@ fi
 # refused rather than recorded without the decision it exists to make, and no
 # other check records one. none is approve-only: a check that found no visual
 # needed has nothing to block on. Refused before a marker is touched.
+#
+# --visual-fallback-from records that the visual delivered stands in for the
+# modality that fits, which could not be produced here. A fallback is cheaper
+# than what it stands in for, and the modalities rank by cost: repo-artifact,
+# then screenshot, then video. So the flag names a modality costlier than
+# --visual, and --visual none, which delivers nothing, takes none.
 VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+VISUAL_FALLBACK=$(printf '%s' "$VISUAL_FALLBACK" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+modality_cost() { case "$1" in repo-artifact) echo 1 ;; screenshot) echo 2 ;; video) echo 3 ;; *) echo 0 ;; esac; }
 if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
   case "$VISUAL" in
     none|repo-artifact|screenshot|video) ;;
@@ -264,7 +282,21 @@ if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
     warn "--visual none records that the change needs no visual, which leaves the '$VISUAL_GATE' check nothing to block on; it records with --verdict approve only. Nothing written"
     exit 1
   fi
-elif [ -n "$VISUAL" ]; then
+  if [ -n "$VISUAL_FALLBACK" ]; then
+    case "$VISUAL_FALLBACK" in
+      screenshot|video) ;;
+      *) warn "--visual-fallback-from must be screenshot or video, the modality that fits (got '$VISUAL_FALLBACK'); nothing written"; exit 1 ;;
+    esac
+    if [ "$VISUAL" = none ]; then
+      warn "--visual-fallback-from names the modality a delivered visual stands in for, and --visual none delivers no visual; nothing written"
+      exit 1
+    fi
+    if [ "$(modality_cost "$VISUAL")" -ge "$(modality_cost "$VISUAL_FALLBACK")" ]; then
+      warn "a fallback is cheaper than the modality it stands in for, so '$VISUAL' cannot be a fallback from '$VISUAL_FALLBACK'; nothing written"
+      exit 1
+    fi
+  fi
+elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
   warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
   exit 1
 fi
@@ -470,7 +502,15 @@ else
 fi
 [ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
 printf '\n' >> "$BODY_FILE"
-[ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL" >> "$BODY_FILE"
+# The Visual line says what the visual is, not only its modality: a
+# repo-artifact is what an author committed, not a capture of the reviewed
+# commit, and a fallback names the modality that fits.
+if [ -n "$VISUAL" ]; then
+  VISUAL_NOTE=""
+  [ "$VISUAL" != repo-artifact ] || VISUAL_NOTE="author-committed"
+  [ -z "$VISUAL_FALLBACK" ] || VISUAL_NOTE="${VISUAL_NOTE:+$VISUAL_NOTE; }fallback from $VISUAL_FALLBACK"
+  printf 'Visual: %s%s\n' "$VISUAL" "${VISUAL_NOTE:+ ($VISUAL_NOTE)}" >> "$BODY_FILE"
+fi
 printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
 
 # The commit a verdict bound to is recorded on the review bead first, and only
@@ -486,10 +526,19 @@ printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" 
 # is part of the same ledger. Because the record is written first, a store that
 # will not take it costs a re-run instead of a marker nothing accounts for. A
 # demo verdict's visual decision rides in the same write, so the record names
-# what the check decided as well as the commit it decided on.
+# what the check decided as well as the commit it decided on. So does its
+# fallback, which the write clears when this verdict names none, because a
+# retried verdict must not keep an earlier attempt's.
 post_artifact() {
   local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
-  [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
+  if [ -n "$VISUAL" ]; then
+    rec+=(--set-metadata "visual=$VISUAL")
+    if [ -n "$VISUAL_FALLBACK" ]; then
+      rec+=(--set-metadata "visual_fallback_from=$VISUAL_FALLBACK")
+    else
+      rec+=(--unset-metadata visual_fallback_from)
+    fi
+  fi
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
   local row got
   row=$(bd_json show "$REVIEW_BEAD")
@@ -501,6 +550,11 @@ post_artifact() {
   got=$(row_meta "$row" visual)
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
     warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" visual_fallback_from)
+  if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL_FALLBACK" ]; then
+    warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted and no marker stamped, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then
