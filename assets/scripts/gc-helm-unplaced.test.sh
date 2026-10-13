@@ -15,10 +15,11 @@
 #              bead; an empty queue says so
 #   (READ)     the verb reads the marker with the live statuses and writes
 #              nothing
-#   (COLD)     a suspended rig's store is not read, and the skip is named
+#   (COLD)     a suspended rig's store is not read, and the skip is named, on
+#              stderr and in --json's skipped, with the run still exiting 0
 #   (PARTIAL)  a store that does not answer, or whose read fails after printing
-#              rows, is named and fails the run with 4 after the rows that were
-#              read
+#              rows, is named, on stderr and in --json's unread, and fails the
+#              run with 4 after the rows that were read
 #   (ARGS)     an unknown argument is refused
 # Driven over a stubbed `gc` on PATH: no live city, Dolt or network.
 set -u
@@ -95,8 +96,9 @@ run() { : > "$FAKE_CALLS"; RC=0; OUT=$(sh "$SCRIPT" unplaced "$@" 2>"$TMP/err") 
 echo "# the queue, as rows"
 run --json
 eq "$RC" "0" "(QUEUE) unplaced --json succeeds"
-printf '%s' "$OUT" | jq -e 'type == "array"' >/dev/null 2>&1 && ok "(QUEUE) …and prints a JSON array" || bad "(QUEUE) …and prints a JSON array ($OUT)"
-IDS=$(printf '%s' "$OUT" | jq -r '[.[].id] | join(" ")' 2>/dev/null)
+printf '%s' "$OUT" | jq -e 'type == "object" and (.beads | type) == "array" and (.skipped | type) == "array" and (.unread | type) == "array"' >/dev/null 2>&1 \
+    && ok "(QUEUE) …and prints one JSON object: beads, skipped and unread" || bad "(QUEUE) …and prints one JSON object: beads, skipped and unread ($OUT)"
+IDS=$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)
 eq "$IDS" "tk-a9 sl-b1 tk-a1 tk-a10" "(ORDER) the waiting beads, priority first and then oldest, from every store that answers"
 for id in tk-a2 tk-a3; do hasnot " $IDS " " $id " "(PLACED) $id has a parent, so it is placed"; done
 hasnot " $IDS " " tk-a4 " "(PLACED) a route places a bead"
@@ -105,10 +107,10 @@ hasnot " $IDS " " tk-a6 " "(PLACED) an assignee places a bead"
 hasnot " $IDS " " tk-a7 " "(PLACED) a live pour places a bead"
 hasnot " $IDS " " tk-a8 " "(PLACED) a marker that is not pending is not in the queue"
 has " $IDS " " tk-a10 " "(BLOCKED) a bead that also waits on a blocker is in the queue"
-eq "$(printf '%s' "$OUT" | jq -r '.[] | select(.id == "sl-b1") | .rig' 2>/dev/null)" "signal-loom" "(QUEUE) each row names its rig"
-eq "$(printf '%s' "$OUT" | jq -r '.[] | select(.id == "tk-a1") | .takeaway' 2>/dev/null)" "ready to build once placed" \
+eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "sl-b1") | .rig' 2>/dev/null)" "signal-loom" "(QUEUE) each row names its rig"
+eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "tk-a1") | .takeaway' 2>/dev/null)" "ready to build once placed" \
    "(QUEUE) …and carries the reaction's takeaway"
-eq "$(printf '%s' "$OUT" | jq -r '.[] | select(.id == "tk-a9") | [.type, .priority, .status, .created_at] | map(tostring) | join(" ")' 2>/dev/null)" \
+eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "tk-a9") | [.type, .priority, .status, .created_at] | map(tostring) | join(" ")' 2>/dev/null)" \
    "task 1 open 2026-10-12T09:00:00Z" "(QUEUE) …and its type, priority, status and age"
 
 echo "# what it reads, and what it does not"
@@ -119,6 +121,8 @@ hasnot "$CALLS" "bd create" "(READ) …and files nothing"
 hasnot "$CALLS" "$TMP/cold/.beads" "(COLD) a suspended rig's store is not read"
 hasnot " $IDS " " su-c1 " "(COLD) …so its bead is not listed"
 has "$ERR" "rig shutupandlisten is suspended" "(COLD) …and the skip is named"
+eq "$(printf '%s' "$OUT" | jq -c '.skipped' 2>/dev/null)" '["shutupandlisten"]' "(COLD) …and a --json caller reads it in skipped"
+eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '[]' "(COLD) …while unread stays empty, because every store it read answered"
 hasnot "$CALLS" "$TMP/nostore" "(READ) a rig with no store is not asked"
 
 echo "# the plain form"
@@ -136,7 +140,9 @@ FAKE_DOWN=beta run --json
 eq "$RC" "4" "(PARTIAL) a store that does not answer fails the run"
 has "$ERR" "signal-loom" "(PARTIAL) …naming the rig"
 has "$ERR" "this list is partial" "(PARTIAL) …and saying the list is partial"
-eq "$(printf '%s' "$OUT" | jq -r '[.[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10" "(PARTIAL) …after printing the rows it could read"
+eq "$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10" "(PARTIAL) …after printing the rows it could read"
+eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '["signal-loom"]' "(PARTIAL) …and a --json caller reads the rig in unread"
+has "$ERR" "this list is partial; unread: signal-loom" "(PARTIAL) …and stderr names it too"
 FAKE_FAIL_AFTER=beta run --json
 eq "$RC" "4" "(PARTIAL) a read that prints its rows and then fails has not answered"
 has "$ERR" "signal-loom" "(PARTIAL) …so its rig is named"

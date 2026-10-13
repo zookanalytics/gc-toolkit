@@ -53,7 +53,7 @@ Usage:
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
-  gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints the rows for a caller. Read-only, files nothing; exits 4 after the list when a store did not answer
+  gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
 The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
@@ -1788,7 +1788,10 @@ cmd_resolve() {
 # in the order bd offers ready work, priority then age. A suspended rig's store
 # is skipped and named, because reading it would start its Dolt server. A store
 # that does not answer is named on stderr and the verb exits 4 after printing
-# the rest, so a partial queue never reads as the whole one.
+# the rest, so a partial queue never reads as the whole one. --json prints one
+# object: the rows as beads, the suspended rigs it skipped, and the rigs whose
+# store did not answer. A skip exits 0, because a suspended rig is the
+# operator's choice and not a failure, so a caller learns of it from skipped.
 UNPLACED_ROW_JQ='
   select(awaiting_placement)
   | {id, rig: $rig, title: (.title // ""), type: (.issue_type // ""),
@@ -1804,7 +1807,8 @@ cmd_unplaced() {
         esac
     done
     enumerate_rigs
-    up_lines=""; up_unread=""
+    # up_skipped and up_unread hold one rig per line.
+    up_lines=""; up_unread=""; up_skipped=""
     up_scopes=$(printf '%s' "$RIGS" | jq -r '.[] | select((.path // "") != "")
         | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null || true)
     up_us=$(printf '\037')
@@ -1813,6 +1817,8 @@ cmd_unplaced() {
         [ -d "$up_path/.beads" ] || continue
         if [ "$up_susp" = "true" ]; then
             echo "$PROG: unplaced: rig ${up_name:-$up_path} is suspended, so its store was not read; any bead waiting there is not listed" >&2
+            up_skipped="$up_skipped${up_name:-$up_path}
+"
             continue
         fi
         # bd's own exit status, not scrub's: a read that prints an array and then
@@ -1823,12 +1829,14 @@ cmd_unplaced() {
         up_raw=$(printf '%s' "$up_raw" | scrub)
         if [ "$up_rc" -ne 0 ] || ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
             echo "$PROG: unplaced: the store of rig ${up_name:-$up_path} ($up_path/.beads) did not answer, so its beads are missing from this list" >&2
-            up_unread="$up_unread ${up_name:-$up_path}"
+            up_unread="$up_unread${up_name:-$up_path}
+"
             continue
         fi
         up_rig_lines=$(printf '%s' "$up_raw" | jq -c --arg rig "$up_name" "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[] | '"$UNPLACED_ROW_JQ" 2>/dev/null) || {
             echo "$PROG: unplaced: the beads of rig ${up_name:-$up_path} could not be read as rows, so they are missing from this list" >&2
-            up_unread="$up_unread ${up_name:-$up_path}"
+            up_unread="$up_unread${up_name:-$up_path}
+"
             continue
         }
         [ -n "$up_rig_lines" ] && up_lines="$up_lines$up_rig_lines
@@ -1838,7 +1846,10 @@ $up_scopes
 EOF
     up_rows=$(printf '%s' "$up_lines" | jq -cs 'sort_by(.priority, .created_at, .id)' 2>/dev/null) || up_rows='[]'
     if [ -n "$up_json" ]; then
-        printf '%s\n' "$up_rows"
+        printf '%s' "$up_rows" | jq -c --arg skipped "$up_skipped" --arg unread "$up_unread" '
+            def rigs: split("\n") | map(select(. != ""));
+            {beads: ., skipped: ($skipped | rigs), unread: ($unread | rigs)}' \
+            || { echo "$PROG: unplaced: the queue could not be printed as JSON" >&2; exit 4; }
     else
         up_n=$(printf '%s' "$up_rows" | jq 'length' 2>/dev/null || echo 0)
         if [ "$up_n" -eq 0 ]; then
@@ -1851,7 +1862,7 @@ EOF
         fi
     fi
     if [ -n "$up_unread" ]; then
-        echo "$PROG: unplaced: this list is partial; unread:$up_unread" >&2
+        echo "$PROG: unplaced: this list is partial; unread: $(printf '%s' "$up_unread" | tr '\n' ' ' | sed 's/ $//')" >&2
         exit 4
     fi
     return 0

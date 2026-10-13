@@ -91,10 +91,14 @@ not.
 
 ## The placement sitting's queue
 
-`gc-helm.sh unplaced` lists the queue, and `--json` prints it for a caller. It
-reads every rig store the city has, skips a suspended rig's store and says so,
-and orders the beads by priority, then age. It writes nothing. When a store
-does not answer, it names that store and exits 4 after printing the rest.
+`gc-helm.sh unplaced` lists the queue. It reads every rig store the city has,
+skips a suspended rig's store and says so, and orders the beads by priority,
+then age. It writes nothing. When a store does not answer, it names that store
+and exits 4 after printing the rest. A skipped rig leaves the exit at 0,
+because a suspended rig is the operator's choice. `--json` prints one object
+for a caller: the queue as `beads`, the suspended rigs it skipped as `skipped`,
+and the rigs whose store did not answer as `unread`, so a caller can tell a
+partial queue from the whole one.
 
 `assets/scripts/placement.sh` is the one definition of a bead in the queue: it
 carries `placement=pending`, and nothing has placed it since. A parent, a route,
