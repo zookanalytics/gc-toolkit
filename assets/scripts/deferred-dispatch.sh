@@ -130,7 +130,7 @@ elif [ -n "${GC_RIG_ROOT:-}" ]; then ROOT_TAIL="${GC_RIG_ROOT%/}"; RIG_KEY="$(st
 else RIG_KEY=_unscoped; fi
 STATE_DIR="${DEFERRED_DISPATCH_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/deferred-dispatch}/$RIG_KEY"
 # A holder older than this is not a slow pass, because the order's timeout would
-# have killed it: something the pass started still owns the descriptor, and
+# have killed it: the pass holding the descriptor outlived its timeout, and
 # nothing is dispatching. It sits above the order's timeout, so a pass that is
 # still running never reads as a wedged one.
 LOCK_STALL_SECS="${DEFERRED_DISPATCH_LOCK_STALL_SECS:-900}"
