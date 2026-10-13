@@ -1274,6 +1274,54 @@ eq "$rc" 2 "a ruling that did not land exits 2"
 eq "$(status rv-tri)" "in_progress" "…leaving the review open for the retry"
 eq "$(meta tk-anc "check.triage")" "<absent>" "…and no marker stamped"
 
+echo "# a ruling this review recorded but did not carry out is carried out by its retry"
+# decide records the ruling on the round before it reopens a lane or dismisses an
+# approval, so a ruling that did not fully land leaves the round ruled by this
+# same review. The decide stub writes no record, so each case stamps the one the
+# first call's decide left behind.
+ROUND_HALF=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted",
+  triage: {review: "rv-tri", reopen: ["correctness"], add: [], dismiss: true, reason: "the merged default changes behaviour", at: "2026-10-12T00:00:00Z"}}')
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$(STUB_BC_RC=2 "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 2 "the first call's ruling did not fully land: exit 2"
+anchor_meta "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 0 "the same call, retried, exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…calling the guard's decide again, which carries out the recorded ruling"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+has "$(head -1 "$STUB_GH_BODY")" "ROUND ACCOUNT" "…and the posted verdict opens with the round"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+eq "$(status rv-tri)" "closed" "…and the review closed"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a retry without the ruling flags exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…passing decide the ruling the round records"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+has "$(head -1 "$STUB_GH_BODY")" "ROUND ACCOUNT" "…and the posted verdict opens with the round"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$(printf '%s' "$ROUND_HALF" | jq -c '.triage.reopen = [] | .triage.dismiss = false')"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a recorded ruling that reopens nothing is retried too"
+has "$(cat "$STUB_BC_LOG")" "--reopen none --reason" "…passed to decide as none"
+hasnt "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…and with no dismissal"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "nothing to reopen" 2>&1); rc=$?
+eq "$rc" 1 "a retry whose flags state another ruling exits 1"
+has "$out" "already ruled on the bring-current round" "…saying the round carries this review's ruling"
+has "$out" "reopen correctness, dismiss the approval" "…naming the ruling recorded"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a retry that drops the recorded dismissal exits 1 too"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "…and so does one that names a reason and no lanes"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling too"
+eq "$(cat "$STUB_BC_LOG")" "" "…neither calling the guard"
+
 echo "# the ruling flags are refused where no round awaits them, and on any other check"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"; : > "$STUB_BC_LOG"
 out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
@@ -1384,6 +1432,86 @@ out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "a correctness verdict needs no --visual"
 hasnt "$(cat "$STUB_GH_BODY")" "Visual:" "…and its artifact carries no Visual line"
 eq "$(meta rv-1 visual)" "<absent>" "…and its review bead no visual stamp"
+
+echo "# a repo-artifact is named author-committed on the Visual line"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual repo-artifact exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed)" "the posted line says the visual was committed, not captured"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and names no fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the stamp stays the bare modality"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "no fallback is stamped"
+
+echo "# a delivered fallback names the modality that fits"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from ' Video ' 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed; fallback from video)" "the posted line names the provenance and the fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the delivered modality is stamped as visual"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and the modality that fits as visual_fallback_from, lowercase"
+eq "$(meta tk-anc check.demo)" "green" "the demo lane reads green"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual screenshot --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 0 "a demo request-changes carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: screenshot (fallback from video)" "a captured fallback names only the fallback"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and stamps it"
+
+echo "# pre-open, the fallback reaches the notes the PR replays"
+reset "$ANCHOR_PRE" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from screenshot 2>&1); rc=$?
+eq "$rc" 0 "a pre-open demo approve with a fallback exits 0"
+has "$(notes rv-demo)" "Visual: repo-artifact (author-committed; fallback from screenshot)" "the pre-open notes carry the whole line"
+
+echo "# a verdict without a fallback clears one an earlier attempt stamped"
+DEMO_STALE='{"id":"rv-demo","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"demo","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat","visual":"repo-artifact","visual_fallback_from":"video"},"notes":"demo body: the board reads better seen"}'
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "the retried verdict exits 0"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "the earlier fallback is cleared"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and the posted line names none"
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+printf 'rv-demo visual_fallback_from\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+
+echo "# a fallback is read back before anything is posted"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$(STUB_DROP_KEYS="rv-demo:visual_fallback_from" "$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 2 "a fallback that did not read back exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# a fallback that is not cheaper than what it stands in for is refused, nothing written"
+for pair in "video screenshot" "screenshot screenshot"; do
+  set -- $pair
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual "$1" --visual-fallback-from "$2" 2>&1); rc=$?
+  eq "$rc" 1 "--visual $1 with --visual-fallback-from $2 exits 1"
+  has "$out" "a fallback is cheaper than the modality it stands in for" "…naming the cost rule"
+  eq "$(meta rv-demo visual)" "<absent>" "…with no decision stamped"
+  eq "$(cat "$STUB_GH_BODY")" "" "…and nothing posted"
+done
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual none --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a fallback beside --visual none exits 1"
+has "$out" "--visual none delivers no visual" "the refusal says none delivers nothing"
+eq "$(meta rv-demo visual)" "<absent>" "no decision is stamped"
+for bad in repo-artifact gif; do
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from "$bad" 2>&1); rc=$?
+  eq "$rc" 1 "--visual-fallback-from $bad exits 1"
+  has "$out" "--visual-fallback-from must be screenshot or video" "…naming the values a fallback can stand in for"
+done
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a correctness verdict carrying --visual-fallback-from exits 1"
+has "$out" "only the 'demo' check records a visual decision" "the refusal names the owning check"
+eq "$(meta rv-1 visual_fallback_from)" "<absent>" "no fallback is stamped"
 
 echo "# the decision is read back before anything is posted"
 reset "$ANCHOR_PR" ",$DEMO"
