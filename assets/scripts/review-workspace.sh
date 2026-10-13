@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # review-workspace.sh — one review's directory on disk, and its reclaim.
 #
-# A review runs the suites at its pinned commit in a detached worktree. The
-# worktree belongs to the review, not to the shell that made it: a reviewer
-# works across many shells, so a teardown bound to one of them either fires
-# before the later shells run or is never installed, and each checkout left
-# behind counts against the per-uid tmpfs quota (docs/scratch-reclaim.md).
+# A review reads its pinned commit in a detached worktree, and runs there any
+# suite its check calls for. The worktree belongs to the review, not to the
+# shell that made it: a reviewer works across many shells, so a teardown bound
+# to one of them either fires before the later shells run or is never
+# installed, and each checkout left behind counts against the per-uid tmpfs
+# quota (docs/scratch-reclaim.md).
 #
 # So a review's workspace is a directory named for its review bead, and any
 # shell rebuilds the path from the bead id alone:
