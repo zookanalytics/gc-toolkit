@@ -11,11 +11,14 @@
 # Sourced (never executed) by the readers that ask whether a bead is in the
 # sitting's queue: gc-helm.sh unplaced, which lists the queue; the liveness
 # classifier (liveness-classify.sh), which names the wait so the sweep does not
-# report it as an unnamed one; the doctor check check-blocked-work-armed,
-# which owes such a bead no arm; and the proactive scan (tools/gc-proactive.sh),
-# which files no first reaction for it. One definition, no copies: a placed
-# shape added here is read by every one of them at once, and placement.test.sh
-# fails when a reader stops sourcing this file or tests the marker itself.
+# report it as an unnamed one; the claim-time re-check of a sweep visit
+# (liveness-recheck.sh), which names it so a visit filed before intake held the
+# bead does not keep it on that visit's agenda; the doctor check
+# check-blocked-work-armed, which owes such a bead no arm; and the proactive
+# scan (tools/gc-proactive.sh), which files no first reaction for it. One
+# definition, no copies: a placed shape added here is read by every one of them
+# at once, and placement.test.sh fails when a reader stops sourcing this file or
+# tests the marker itself.
 #
 # Usage follows the in-variable jq convention (dispatch-path.sh). The predicate
 # asks has_dispatch_path, so prepend $DISPATCH_PATH_JQ first, e.g.

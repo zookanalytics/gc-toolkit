@@ -1132,7 +1132,7 @@ keys = ["placement"]
 #   and by mol-feedback-distiller.toml, in the create of each prompt-update and
 #   engineering bead. Read through assets/scripts/placement.sh, whose
 #   awaiting_placement is the queue gc-helm.sh unplaced lists, the named wait
-#   liveness-classify.sh gives the bead, the exemption
+#   liveness-classify.sh and liveness-recheck.sh give the bead, the exemption
 #   doctor/check-blocked-work-armed reads, and the beads the proactive scan
 #   (tools/gc-proactive.sh) files no first reaction for. A parent, a route, an
 #   arm, an assignee or a live pour places a bead whatever the marker says, so a

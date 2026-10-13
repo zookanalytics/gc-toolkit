@@ -107,6 +107,9 @@ was cleared. The same definition serves the queue's other readers:
 
 - the liveness sweep names such a bead's wait, so it does not report the bead as
   an unnamed wait;
+- the claim-time re-check of a sweep visit (`liveness-recheck.sh`) names the
+  same wait, so a visit filed before intake held the bead does not put it on
+  that sitting's agenda as well;
 - `doctor/check-blocked-work-armed` owes such a bead no arm, because its
   dispatch is the route the sitting gives it;
 - the proactive scan files no first reaction for such a bead, because its next
