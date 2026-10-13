@@ -9,6 +9,14 @@
 # GitHub's user-attachments and posts it inline in a comment on the subject's
 # PR.
 #
+# A committed visual shows what an author recorded, not a run of the reviewed
+# commit, so the comment says where it came from. It says what the change does
+# to the file: adds it, edits it, moves or copies it without changing its
+# content, or leaves it unchanged. It also names the commit that last changed
+# the file's content, and that commit's date. A visual whose content the base
+# already held predates the change, whichever reason found it, and the comment
+# says so.
+#
 # `candidates` is the search. A visual is a file of an image or video type
 # GitHub accepts as an attachment (the extensions in VISUAL_EXTS below, in any
 # case). Each visual present at the reviewed commit is listed once, under the
@@ -26,7 +34,7 @@
 #
 # Usage:
 #   demo-repo-artifact.sh candidates --base <ref> --oid <commit> [--anchor <bead>] [--repo <dir>]
-#   demo-repo-artifact.sh deliver --path <path> --oid <commit> --subject <bead> [--body <text>] [--repo <dir>]
+#   demo-repo-artifact.sh deliver --path <path> --base <ref> --oid <commit> --subject <bead> [--body <text>] [--repo <dir>]
 #
 #   --base     the ref the change is reviewed against. The diff runs from its
 #              merge base with --oid, the three-dot diff a review reads.
@@ -36,15 +44,18 @@
 #              directory).
 #   --path     the visual to deliver, as a path from the repository root.
 #   --subject  the bead whose PR receives it, passed to demo-deliver.sh.
-#   --body     the comment text. By default it names the path and the commit.
+#   --body     text that leads the comment. The comment always names the path
+#              and says where the visual came from.
 #
 #   candidates prints one line per visual, "<reason><TAB><path>": changed
-#   first, then named, then near.
+#   first, then named, then near. deliver prints the delivery and where the
+#   visual came from.
 #
 # Exit: candidates: 0 listed, 3 no visual at the commit is changed, named or
 #   near. deliver: 0 delivered, otherwise demo-deliver.sh's exit. Both: 2 bad
 #   arguments, 1 anything else that stopped them, such as a commit that does not
-#   resolve or a path that is not a committed visual.
+#   resolve, a path that is not a committed visual, or a visual whose last change
+#   cannot be found.
 set -uo pipefail
 
 PROG=demo-repo-artifact
@@ -240,11 +251,55 @@ cmd_candidates() {
   esac
 }
 
+# The commit that last changed <path> as of <commit>, as "<short> on <date>",
+# the date being the author's. Pathspecs are literal, so a name holding a glob
+# character or a leading colon matches only itself.
+last_change() {
+  local line
+  line=$(git -C "$REPO" --literal-pathspecs log -1 --no-show-signature --date=short \
+    --format='%h on %ad' "$1" -- "$2" 2>/dev/null) || return 1
+  [ -n "$line" ] || return 1
+  printf '%s' "$line"
+}
+
+# Where a visual came from, in two sentences: what the change from <merge base>
+# to <commit> does to <path>, whose content at <commit> is <blob>, and the
+# commit that last changed that content. Content the merge base already held,
+# at any path, predates the change. Fails when a read fails or no last change
+# is found, so no comment goes out without them.
+provenance() {
+  local c="$1" mb="$2" path="$3" blob="$4" entry type prior="" from what last
+  entry=$(git -C "$REPO" --literal-pathspecs ls-tree --full-tree "$mb" -- "$path" 2>/dev/null) || return 1
+  type=${entry#* }; type=${type%% *}
+  if [ "$type" = blob ]; then prior=${entry#* * }; prior=${prior%%"$TAB"*}; fi
+  if [ "$prior" = "$blob" ]; then
+    what="This PR does not change it."
+    last=$(last_change "$c" "$path") || return 1
+  else
+    git -C "$REPO" -c core.quotePath=false ls-tree -r --full-tree "$mb" >"$TMPD/base-tree" 2>/dev/null || return 1
+    from=$(awk -F "$TAB" -v b="$blob" '{ split($1, f, " "); if (f[3] == b) { print $2; exit } }' "$TMPD/base-tree")
+    if [ -n "$from" ]; then
+      if git -C "$REPO" cat-file -e "$c:$from" 2>/dev/null; then
+        what="This PR copies it from \`$from\` without changing its content."
+      else
+        what="This PR moves it from \`$from\` without changing its content."
+      fi
+      last=$(last_change "$mb" "$from") || return 1
+    else
+      what="This PR adds it."
+      [ -z "$prior" ] || what="This PR edits it."
+      last=$(last_change "$c" "$path") || return 1
+    fi
+  fi
+  printf '%s It was last changed in %s.' "$what" "$last"
+}
+
 cmd_deliver() {
-  local path="" oid="" subject="" body=""
+  local path="" base="" oid="" subject="" body=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --path)    need_value "$1" $#; shift; path="$1" ;;
+      --base)    need_value "$1" $#; shift; base="$1" ;;
       --oid)     need_value "$1" $#; shift; oid="$1" ;;
       --subject) need_value "$1" $#; shift; subject="$1" ;;
       --body)    need_value "$1" $#; shift; body="$1" ;;
@@ -255,6 +310,7 @@ cmd_deliver() {
     shift
   done
   [ -n "$path" ] || usage_err "--path is required"
+  [ -n "$base" ] || usage_err "--base is required"
   [ -n "$oid" ] || usage_err "--oid is required"
   [ -n "$subject" ] || usage_err "--subject is required"
   path=${path#./}
@@ -264,17 +320,20 @@ cmd_deliver() {
   is_visual "$path" || fail "'$path' is not an image or video of a type GitHub accepts as an attachment ($VISUAL_EXTS)"
   [ -x "$DELIVER" ] || fail "demo-deliver.sh not found beside this script"
 
-  local c entry mode type
+  local c b mb entry mode type blob
   c=$(resolve_commit --oid "$oid") || exit 1
-  entry=$(git -C "$REPO" ls-tree --full-tree "$c" -- "$path" 2>/dev/null)
+  b=$(resolve_commit --base "$base") || exit 1
+  mb=$(git -C "$REPO" merge-base "$b" "$c" 2>/dev/null) || fail "'$base' and '$oid' share no merge base"
+  entry=$(git -C "$REPO" --literal-pathspecs ls-tree --full-tree "$c" -- "$path" 2>/dev/null)
   mode=${entry%% *}; type=${entry#* }; type=${type%% *}
   [ -n "$entry" ] && [ "$type" = blob ] || fail "'$path' is not a file at $oid"
   [ "$mode" != 120000 ] || fail "'$path' is a symlink at $oid, not the visual itself"
+  blob=${entry#* * }; blob=${blob%%"$TAB"*}
 
   TMPD=$(mktemp -d "${TMPDIR:-/tmp}/demo-repo-artifact.XXXXXX") || fail "cannot make a temp dir"
   trap 'rm -rf "$TMPD"' EXIT
   # gh reads what follows a '#' in an attachment path as the image's alt text.
-  local name file lead short
+  local name file lead prov label
   name=$(printf '%s' "${path##*/}" | tr '#' '_')
   file="$TMPD/$name"
   git -C "$REPO" cat-file blob "$c:$path" >"$file" 2>/dev/null || fail "cannot read '$path' at $oid"
@@ -284,11 +343,13 @@ cmd_deliver() {
       fail "'$path' is stored in Git LFS: the commit holds a pointer to it, not the file" ;;
   esac
 
-  short=$(git -C "$REPO" rev-parse --short "$c")
-  [ -n "$body" ] || body="The committed visual \`$path\` as of $short, attached so it renders inline."
+  prov=$(provenance "$c" "$mb" "$path" "$blob") \
+    || fail "cannot find the commit that last changed '$path' as of $oid, so the comment could not say where the visual came from; nothing was posted"
+  label="The committed visual \`$path\`, attached so it renders inline. $prov"
+  if [ -n "$body" ]; then body=$(printf '%s\n\n%s' "$body" "$label"); else body=$label; fi
   "$DELIVER" --file "$file" --subject "$subject" --body "$body"
   local rc=$?
-  [ "$rc" -eq 0 ] && echo "$PROG: delivered $path as of $short to the PR of $subject"
+  [ "$rc" -eq 0 ] && echo "$PROG: delivered $path to the PR of $subject. $prov"
   exit "$rc"
 }
 

@@ -118,11 +118,14 @@ reports whether the `gh` it needs is present.
   Deliver the one you pick:
 
   ```bash
-  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --oid "$REVIEWED_OID" --subject <anchor>
+  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --base "origin/$BASE" --oid "$REVIEWED_OID" --subject <anchor>
   ```
 
   It attaches the file as the reviewed commit stores it, through
-  `demo-deliver.sh`.
+  `demo-deliver.sh`. The comment says where the visual came from: whether this
+  change adds, edits, moves or copies it, or leaves it unchanged, and the commit
+  that last changed it. The delivery's last line says the same, and the verdict
+  body repeats it.
 - `screenshot`: this pack has no production path for it. Record the modality
   you picked and approve with the note that it fits and was not delivered.
 
@@ -172,7 +175,9 @@ the posted comment.
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
 and where the visual was delivered, or what stopped it. A delivered video's
-sentence also says whether the clip is narrated or silent.
+sentence also says whether the clip is narrated or silent. A delivered
+repo-artifact's sentence also says where the visual came from, as its delivery
+comment does.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
