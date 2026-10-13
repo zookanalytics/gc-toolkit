@@ -5,7 +5,7 @@
 # so closing on it writes against the wrong bead; the store is authoritative.
 #
 #   step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>]
-#                 [--root <id>] [--dry-run]
+#                 [--root <id>] [--convoy <id>] [--dry-run]
 #
 # The assignee does not name a molecule. A pool agent wears one assignee for
 # every run it has ever made, so (assignee, gc.step_ref) matches the same step
@@ -16,20 +16,27 @@
 #
 # Deriving that molecule from the assignee borrows the same non-unique pair, so
 # it settles nothing by itself: this chain's own bead may be one the finalizer
-# stripped, sitting in a molecule the assignee never mentions. Where `--root` or
-# the gc.session_id stamp names the molecule independently, the close proceeds;
-# where only the assignee does and another live bead for this step could equally
-# be ours, it is refused rather than guessed.
+# stripped, sitting in a molecule the assignee never mentions. Where `--root`,
+# `--convoy` or the gc.session_id stamp names the molecule independently, the
+# close proceeds; where only the assignee does and another live bead for this
+# step could equally be ours, it is refused rather than guessed.
 #
-# --bead is a HINT (e.g. `.bead_id` from `gc hook --claim --json`): used only if
-# it verifies as this session's bead for this step inside the molecule being
-# executed. It never establishes which molecule that is: a hint scoped by a root
-# it supplied itself is scoped by nothing, so pass --root when no other source
-# names one. A graph.v2 step executes at status `open` (the graph pre-assigns
-# it, so the claim advances nothing); in_progress is resolved first, open only
-# when that tier is empty. Ambiguity is refused — a stalled step is visible, a
-# wrong close corrupts two workflows.
-# Callers: formula done arms (mol-feedback-*), mol-polecat-work submit.
+# A formula step names its molecule with `--convoy {{convoy_id}}`. The pour
+# renders the input convoy into the step text, and the live workflow root poured
+# over that convoy is the molecule. A forced re-pour over the same convoy
+# replaces that root with a fresh one, so the convoy's root is taken only once
+# this session holds or held a bead in it, and a shell still running the
+# replaced molecule never closes the fresh one's steps.
+#
+# --bead is a HINT (e.g. the `.bead_id` in the claim that handed out the step):
+# used only if it verifies as this session's bead for this step inside the
+# molecule being executed. It never establishes which molecule that is: a hint
+# scoped by a root it supplied itself is scoped by nothing, so pass --root or
+# --convoy when no other source names one. A graph.v2 step executes at status
+# `open` (the graph pre-assigns it, so the claim advances nothing); in_progress
+# is resolved first, open only when that tier is empty. Ambiguity is refused — a
+# stalled step is visible, a wrong close corrupts two workflows.
+# Callers: the step-close blocks in formulas/*.toml.
 # exit: 0 closed (or already closed) · 2 refused, nothing written
 set -uo pipefail
 
@@ -44,19 +51,25 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'USAGE'
 usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>]
-                     [--root <id>] [--dry-run]
+                     [--root <id>] [--convoy <id>] [--dry-run]
 
   --step     the step's `gc.step_ref`, e.g. mol-feedback-distiller.load-and-gate
              (required — it is half of the identity that makes the close safe)
   --outcome  value for metadata gc.outcome, default "pass"
-  --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
-             HINT: used only if it verifies as this session's bead for --step
-             inside the molecule being executed, and never to establish which
-             molecule that is — with none established it is ignored, and
-             --root is how a caller supplies one. A stale hint is reported and
-             ignored, never obeyed.
-  --root     the molecule's root bead, e.g. `.root_bead_id` from that same
-             claim. Skips the derivation; the other half of the unique pair.
+  --bead     candidate id, e.g. `.bead_id` in the claim that handed out the
+             step. A HINT: used only if it verifies as this session's bead for
+             --step inside the molecule being executed, and never to establish
+             which molecule that is — with none established it is ignored, and
+             --root or --convoy is how a caller supplies one. A stale hint is
+             reported and ignored, never obeyed.
+  --root     the molecule's root bead: the gc.root_bead_id on the step bead
+             being executed, also `.root_bead_id` in the claim that handed it
+             out. Skips the derivation; the other half of the unique pair.
+  --convoy   the molecule's input convoy, `{{convoy_id}}` in a formula step.
+             Names the molecule as the live workflow root poured over that
+             convoy, once this session holds or held a bead in it; otherwise
+             the molecule is derived as if --convoy were absent. --root wins
+             when both are given.
   --dry-run  resolve and report; write nothing.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
@@ -78,14 +91,14 @@ require_value() {
     exit 2
   fi
   case "$2" in
-    --step|--outcome|--bead|--root|--dry-run|-h|--help)
+    --step|--outcome|--bead|--root|--convoy|--dry-run|-h|--help)
       echo "step-close: $1 requires a value, but the next argument is the option '$2'" >&2
       usage
       exit 2 ;;
   esac
 }
 
-STEP=""; OUTCOME="pass"; HINT=""; ROOT=""; DRY_RUN=0
+STEP=""; OUTCOME="pass"; HINT=""; ROOT=""; CONVOY=""; DRY_RUN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -93,6 +106,7 @@ while [ $# -gt 0 ]; do
     --outcome) require_value "$@"; OUTCOME="$2"; shift 2 ;;
     --bead)    require_value "$@"; HINT="$2";    shift 2 ;;
     --root)    require_value "$@"; ROOT="$2";    shift 2 ;;
+    --convoy)  require_value "$@"; CONVOY="$2";  shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 2 ;;
     *)         echo "step-close: unknown argument '$1'" >&2; usage; exit 2 ;;
@@ -123,6 +137,14 @@ case "$ROOT" in
     echo "step-close: --root must contain only [A-Za-z0-9._-] (got '$ROOT')" >&2
     exit 2 ;;
 esac
+case "$CONVOY" in
+  '{{'*'}}')
+    echo "step-close: --convoy was passed unsubstituted ('$CONVOY') — the pour did not render it; pass --root, or close by explicit id" >&2
+    exit 2 ;;
+  *[!A-Za-z0-9._-]*)
+    echo "step-close: --convoy must contain only [A-Za-z0-9._-] (got '$CONVOY')" >&2
+    exit 2 ;;
+esac
 
 # A raw control byte in a note makes jq read the whole payload as "no such
 # bead".
@@ -137,6 +159,11 @@ if [ -z "$IDENTITIES" ]; then
   echo "step-close: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset) — cannot prove ownership of any bead, refusing to close" >&2
   exit 2
 fi
+
+# What every refusal over an unnamed molecule tells the caller to do. The claim
+# that handed out the step printed its root, but running `gc hook --claim` again
+# to read it claims new work on a pool worker.
+NAME_THE_MOLECULE="Pass --root <the gc.root_bead_id on the step bead this shell is executing>, or --convoy <the input convoy the formula step names>, to name the molecule. Do not run \`gc hook --claim\` to look it up: on a pool worker that claims new work."
 
 # Does <id> verify as this session's bead for this step? Echoes its status on a
 # match. `index` is exact element equality — `inside`/`contains` match
@@ -171,6 +198,57 @@ count() { printf '%s\n' "$1" | awk 'NF' | wc -l | tr -d ' '; }
 # formula, and only a same-formula bead says anything about this one.
 FORMULA="${STEP%%.*}"
 
+# The molecule's rows, read at most once a run and only once $ROOT is fixed: the
+# live ones (open, in_progress, blocked) for every scoped answer below, and the
+# closed ones only for an answer that needs them. Each read sets globals, so
+# call it at the top level, never inside a $(...).
+MOL_LIVE=""; MOL_LIVE_READ=0; MOL_CLOSED=""; MOL_CLOSED_READ=0
+read_live() {
+  [ "$MOL_LIVE_READ" = 1 ] && return 0
+  MOL_LIVE=$(bd_json list --metadata-field "gc.root_bead_id=$ROOT" --status=open,in_progress,blocked --limit=0)
+  MOL_LIVE_READ=1
+}
+read_closed() {
+  [ "$MOL_CLOSED_READ" = 1 ] && return 0
+  MOL_CLOSED=$(bd_json list --metadata-field "gc.root_bead_id=$ROOT" --status=closed --limit=0)
+  MOL_CLOSED_READ=1
+}
+forget_molecule() { ROOT=""; MOL_LIVE=""; MOL_LIVE_READ=0; MOL_CLOSED=""; MOL_CLOSED_READ=0; }
+
+# Does this session hold, or did it hold, a bead among <rows>? The gc.session_id
+# stamp a claim leaves decides when a bead carries one: an agent alias is shared
+# by every session of that agent, so an assignee says nothing against another
+# session's stamp. An unstamped bead is this session's when its assignee is one
+# of this session's identities.
+holds_in() { # <rows json>
+  printf '%s' "$1" | jq -e --arg ids "$IDENTITIES" --arg sid "${GC_SESSION_ID:-}" '
+    ($ids | split("\n") | map(select(. != ""))) as $me
+    | if type == "array" then
+        any(.[]; . as $b
+                 | ($b.metadata["gc.session_id"] // "") as $stamp
+                 | if $stamp != "" then ($sid != "" and $stamp == $sid)
+                   else (($me | index($b.assignee // "")) != null) end)
+      else false end
+  ' >/dev/null 2>&1
+}
+
+# The live workflow root poured over --convoy, empty unless exactly one answers.
+# A root carries gc.kind=workflow or gc.formula_contract=graph.v2, gascity's own
+# test for one. Where several live roots share the convoy, the one of this
+# step's formula is taken if it stands alone.
+convoy_root() {
+  bd_json list --metadata-field "gc.input_convoy_id=$CONVOY" --status=open,in_progress,blocked --limit=0 \
+    | jq -r --arg f "$FORMULA" '
+        if type == "array" then
+          [ .[] | select(((.metadata["gc.kind"] // "") | tostring | ascii_downcase) == "workflow"
+                         or ((.metadata["gc.formula_contract"] // "") | tostring | ascii_downcase) == "graph.v2") ] as $roots
+          | (if ($roots | length) == 1 then $roots
+             else [ $roots[] | select((.metadata["gc.formula_name"] // "") == $f) ] end) as $pick
+          | if ($pick | length) == 1 then ($pick[0].id // empty) else empty end
+        else empty end
+      ' 2>/dev/null
+}
+
 # gc.root_bead_id of <id>, empty when the bead is unreadable or carries none.
 root_of() {
   [ -n "${1:-}" ] || return 0
@@ -196,6 +274,13 @@ roots_from() { # <bd list args...>
 # is most to least trustworthy: the session stamp a claim leaves on the step it
 # hands out, this step's own live bead, then any live bead of this formula.
 #
+# The stamp is read from open and in_progress rows first. The step this shell
+# is executing is one of them, and a read that leaves closed rows out stays
+# cheap where one that includes them scans the store. One root there answers
+# even when closed rows name earlier molecules this session finished, and two
+# there leave the stamp no answer. Blocked and closed rows are read only when no
+# open or in_progress row carries the stamp, as on a re-run over a closed chain.
+#
 # The source is half the answer. `session` names the molecule independently of
 # the assignee; `assignee` names it with the same non-unique pair the scoping
 # exists to replace, and a root only that pair vouches for cannot authorize a
@@ -209,9 +294,12 @@ roots_from() { # <bd list args...>
 derive_root() {
   local found ident json this_step="" same_formula=""
   if [ -n "${GC_SESSION_ID:-}" ]; then
-    found=$(roots_from --metadata-field "gc.session_id=$GC_SESSION_ID" \
-                       --status=open,in_progress,blocked,closed)
-    [ "$(count "$found")" = "1" ] && { printf 'session %s' "$found"; return 0; }
+    found=$(roots_from --metadata-field "gc.session_id=$GC_SESSION_ID" --status=open,in_progress)
+    case "$(count "$found")" in
+      1) printf 'session %s' "$found"; return 0 ;;
+      0) found=$(roots_from --metadata-field "gc.session_id=$GC_SESSION_ID" --status=blocked,closed)
+         [ "$(count "$found")" = "1" ] && { printf 'session %s' "$found"; return 0; } ;;
+    esac
   fi
   while IFS= read -r ident; do
     [ -n "$ident" ] || continue
@@ -243,16 +331,18 @@ $(printf '%s' "$json" | jq -r --arg f "$FORMULA." '
 # so a bead the finalizer stripped of its assignee is still resolved as ours,
 # while one another session holds is not — by its assignee, or, when it is
 # unassigned, by a gc.session_id stamp naming a session other than this one.
-# With no molecule the (assignee, step_ref) pair is all there is, which is what
-# it has always been.
+# The molecule's beads come from the rows read_live loaded, so the tiers cost
+# one read between them. With no molecule the (assignee, step_ref) pair is all
+# there is, which is what it has always been.
 discover() {
   local want_status="$1" ident json
   if [ -n "$ROOT" ]; then
-    bd_json list --metadata-field "gc.root_bead_id=$ROOT" --status="$want_status" --limit=0 \
-      | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" --arg sid "${GC_SESSION_ID:-}" '
+    printf '%s' "$MOL_LIVE" \
+      | jq -r --arg step "$STEP" --arg want "$want_status" --arg ids "$IDENTITIES" --arg sid "${GC_SESSION_ID:-}" '
           ($ids | split("\n") | map(select(. != ""))) as $me
           | if type == "array" then
               .[] | . as $b
+                  | select(($b.status // "") == $want)
                   | select(($b.metadata["gc.step_ref"] // "") == $step)
                   | select((($me | index($b.assignee // "")) != null)
                            or ((($b.assignee // "") == "")
@@ -276,16 +366,23 @@ discover() {
 
 # This step's bead in the molecule at <status-list>, whoever holds it, as
 # "<id> <status> <assignee>". Ownership is not asked: within one molecule the
-# step_ref names one bead, and who holds it is the answer, not the filter.
+# step_ref names one bead, and who holds it is the answer, not the filter. It
+# answers from the rows already loaded, so a caller asking about closed rows
+# runs read_closed first.
 molecule_rows() { # <status-list>
+  local rows
   [ -n "$ROOT" ] || return 0
-  bd_json list --metadata-field "gc.root_bead_id=$ROOT" --status="$1" --limit=0 \
-    | jq -r --arg step "$STEP" '
-        if type == "array" then
-          .[] | select((.metadata["gc.step_ref"] // "") == $step)
-              | "\(.id) \(.status // "?") \(.assignee // "")"
-        else empty end
+  for rows in "$MOL_LIVE" "$MOL_CLOSED"; do
+    printf '%s' "$rows" | jq -r --arg step "$STEP" --arg st "$1" '
+        ($st | split(",")) as $want
+        | if type == "array" then
+            .[] | . as $b
+                | select(($b.metadata["gc.step_ref"] // "") == $step)
+                | select(($want | index($b.status // "")) != null)
+                | "\($b.id) \($b.status // "?") \($b.assignee // "")"
+          else empty end
       ' 2>/dev/null
+  done
 }
 
 # Live beads for this step, outside <root>, that this shell could itself be
@@ -310,21 +407,21 @@ unproven_rivals() { # <root the close would act in>
 }
 
 # A close may rest on the molecule only when something other than the assignee
-# named it. `--root` and the gc.session_id stamp are such sources; the assignee
-# is not — one pool assignee covers every molecule the agent has ever run, so
-# the root it names is this chain's only if no other live bead for this step
-# could equally be ours. When one could, the answer is a guess, and this refuses
-# it: a stalled step is visible and the finalizer still reaches it, while a
-# close in another chain is silent and takes a step out of a workflow nobody was
-# running.
+# named it. `--root`, `--convoy` and the gc.session_id stamp are such sources;
+# the assignee is not — one pool assignee covers every molecule the agent has
+# ever run, so the root it names is this chain's only if no other live bead for
+# this step could equally be ours. When one could, the answer is a guess, and
+# this refuses it: a stalled step is visible and the finalizer still reaches it,
+# while a close in another chain is silent and takes a step out of a workflow
+# nobody was running.
 guard_unproven() { # <root the arm would act in> <what it would act on>
   local acting="$1" subject="$2" rival
-  case "$ROOT_SOURCE" in flag|session) return 0 ;; esac
+  case "$ROOT_SOURCE" in flag|convoy|session) return 0 ;; esac
   rival=$(unproven_rivals "$acting")
   [ -n "$rival" ] || return 0
   echo "step-close: FATAL — refusing to act on $subject for step '$STEP': nothing but this session's assignee names molecule ${acting:-<none>}, and that assignee covers every molecule this agent has ever run." >&2
   echo "step-close:   Live for this step and equally ours: $(printf '%s' "$rival" | tr '\n' ' ')" >&2
-  echo "step-close:   Pass --root <root bead id> (\`.root_bead_id\` from \`gc hook --claim --json\`) to name the molecule this shell is executing." >&2
+  echo "step-close:   $NAME_THE_MOLECULE" >&2
   echo "step-close:   The step bead is still UNCLOSED and will be re-offered until it is closed." >&2
   exit 2
 }
@@ -353,17 +450,35 @@ warn_env_mismatch() {
 }
 
 # The molecule scopes every resolution below, so it is established first. A
-# caller-supplied --root is taken as given; deriving it costs one listing.
+# caller-supplied --root is taken as given. A --convoy root is taken once this
+# session's hand is found in it, from the rows the resolution reads anyway; one
+# without it is the root a re-pour put in place of this shell's molecule. Only
+# when neither names the molecule is it derived.
 ROOT_SOURCE=""
 if [ -n "$ROOT" ]; then
   ROOT_SOURCE=flag
-else
+elif [ -n "$CONVOY" ]; then
+  ROOT=$(convoy_root)
+  if [ -z "$ROOT" ]; then
+    echo "step-close: NOTE — --convoy $CONVOY names no single live workflow root; deriving the molecule instead" >&2
+  else
+    read_live
+    if holds_in "$MOL_LIVE" || { read_closed; holds_in "$MOL_CLOSED"; }; then
+      ROOT_SOURCE=convoy
+    else
+      echo "step-close: NOTE — molecule $ROOT, the live root over --convoy $CONVOY, has no bead this session holds or held, so it is not the molecule this shell is executing (a re-pour over the convoy replaces its root); deriving the molecule instead" >&2
+      forget_molecule
+    fi
+  fi
+fi
+if [ -z "$ROOT_SOURCE" ]; then
   DERIVED=$(derive_root)
   case "$DERIVED" in
     *' '*) ROOT_SOURCE="${DERIVED%% *}"; ROOT="${DERIVED#* }" ;;
     *)     ROOT_SOURCE=""; ROOT="" ;;
   esac
 fi
+[ -n "$ROOT" ] && read_live
 
 TIER=in_progress
 FOUND=$(discover in_progress | sort -u)
@@ -388,7 +503,7 @@ HINT_STATUS=""
 if [ -z "$ROOT" ]; then
   case "$HINT_STATUS" in
     in_progress|open|closed)
-      echo "step-close: NOTE — --bead $HINT carries this session's assignee and $STEP at status '$HINT_STATUS', but no molecule is established, and that pair matches another molecule's bead for this same step too. Pass --root (\`.root_bead_id\` from \`gc hook --claim --json\`) to act on the hint; resolving from the store instead." >&2
+      echo "step-close: NOTE — --bead $HINT carries this session's assignee and $STEP at status '$HINT_STATUS', but no molecule is established, and that pair matches another molecule's bead for this same step too, so the hint is acted on only inside a named molecule. $NAME_THE_MOLECULE Resolving from the store instead." >&2
       HINT=""; HINT_STATUS="" ;;
   esac
 fi
@@ -445,6 +560,7 @@ fi
 #    this one — and a chain that closed nothing reads, line for line, exactly
 #    like one that worked.
 if [ -n "$ROOT" ]; then
+  read_closed
   ALREADY=$(molecule_rows closed | awk 'NF {print $1}' | sort -u | head -n 1)
   if [ -n "$ALREADY" ]; then
     guard_unproven "$ROOT" "$ALREADY"
@@ -455,7 +571,7 @@ else
   STRAY=$(discover closed | sort -u | head -n 1)
   if [ -n "$STRAY" ]; then
     echo "step-close: FATAL — $STRAY ($STEP) is closed under one of this session's identities, but it belongs to molecule $(root_of "$STRAY"), and this shell could not establish which molecule it is executing." >&2
-    echo "step-close:   Reporting it as already closed would be a pass for a bead this shell never ran. Pass --root <root bead id> (\`.root_bead_id\` from \`gc hook --claim --json\`), or close this session's bead by explicit id." >&2
+    echo "step-close:   Reporting it as already closed would be a pass for a bead this shell never ran. $NAME_THE_MOLECULE Or close this session's bead by explicit id." >&2
     echo "step-close:   The step bead is still UNCLOSED and will be re-offered until it is closed." >&2
     exit 2
   fi
@@ -477,7 +593,8 @@ esac
 # the close — name that, it has a different fix than a stale environment.
 echo "step-close: FATAL — cannot identify this session's bead for step '$STEP'." >&2
 echo "step-close:   identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')" >&2
-echo "step-close:   molecule: ${ROOT:-<not established: no --root, no gc.session_id match, no live bead of this formula>}" >&2
+echo "step-close:   molecule: ${ROOT:-<not established: no --root, no --convoy root holding a bead of this session, no gc.session_id match, no live bead of this formula>}" >&2
+[ -n "$ROOT" ] && read_closed
 HELD=$(molecule_rows open,in_progress,blocked,closed)
 [ -n "$HELD" ] && echo "step-close:   this molecule's bead for the step: $HELD — an assignee that is not this session's means a second worker holds the chain, which is a different problem from a stale environment." >&2
 if [ -n "$ENV_STATUS" ]; then

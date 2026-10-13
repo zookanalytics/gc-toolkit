@@ -36,6 +36,9 @@ mkdir -p "$TMP/bin" "$TMP/show"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
+# READ_LOG records every list, dep, kv and show read, so a case can see the
+# sweep's --db pin reach them.
+case "$sub" in "bd list"|"bd dep"|"bd kv"|"bd show") [ -n "${READ_LOG:-}" ] && printf '%s\n' "$args" >> "$READ_LOG" ;; esac
 case "$sub" in
   "bd ready")
     [ -n "${GC_READY_FAIL:-}" ] && exit 1
@@ -44,11 +47,14 @@ case "$sub" in
     case "$args" in
       *anchor_bead=*)
         # The edge-less wedge's lane fix-unit census: reworks for an anchor,
-        # served from $SHOW_DIR/reworks-<anchor>.json (default []).
-        aid=""
-        for a in "$@"; do case "$a" in anchor_bead=*) aid="${a#anchor_bead=}"; break ;; esac; done
+        # served from $SHOW_DIR/reworks-<anchor>.json (default []), the rows in
+        # the statuses the read asks for.
+        aid=""; st=""
+        for a in "$@"; do case "$a" in anchor_bead=*) aid="${a#anchor_bead=}" ;; --status=*) st="${a#--status=}" ;; esac; done
         f="$SHOW_DIR/reworks-$aid.json"
-        if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+        if [ -f "$f" ]; then
+          jq -c --arg st "$st" '[ .[] | . as $r | select($st == "" or ((($st | split(",")) | index($r.status // "open")) != null)) ]' "$f"
+        else printf '[]\n'; fi
         exit 0 ;;
       *--status=closed*)
         # Model the server-side --metadata-field KEY=VALUE narrow: the store
@@ -77,7 +83,12 @@ case "$sub" in
       *) printf '[]\n'; exit 0 ;;
     esac ;;
   "bd show")
-    id="$3"
+    # The id is the first operand after show; a --db pin may come before it.
+    id=""; skip=0
+    for a in "${@:3}"; do
+      if [ "$skip" = 1 ]; then skip=0; continue; fi
+      case "$a" in --db) skip=1 ;; --*) : ;; *) [ -n "$id" ] || id="$a" ;; esac
+    done
     case " ${GC_SHOW_FAIL:-} " in *" $id "*) exit 1 ;; esac
     f="$SHOW_DIR/$id.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
@@ -94,6 +105,11 @@ case "$sub" in
     f="$SHOW_DIR/dep-$depid.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
     exit 0 ;;
+  "bd kv")
+    # The store's anchor-edges mark: set when KV_JOINED is, unset otherwise
+    # (bd's {"found": false} answer at exit 1).
+    if [ -n "${KV_JOINED:-}" ]; then printf '{"found":true,"key":"anchor_edges.joined","value":"2026-10-11T00:00:00Z"}\n'; exit 0; fi
+    printf '{"found":false,"key":"anchor_edges.joined","value":""}\n'; exit 1 ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$GC_CALLS"
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
@@ -637,6 +653,34 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── a store marked joined reads the landed fix unit through the anchor's edge ──"
+# There the census takes its live fix units by anchor_bead and its closed ones
+# from the anchor's dependents (bd-lib.sh's anchor graph): the landed fix is a
+# related dependent of the anchor, and no live fix unit is left.
+printf '[]\n' > "$TMP/show/reworks-we-anchor.json"
+printf '%s\n' '[{"id":"we-fix","status":"closed","dependency_type":"related","metadata":{"task_kind":"rework","anchor_bead":"we-anchor","source_review_bead":"we-rev"}}]' > "$TMP/show/dep-we-anchor.json"
+KV_JOINED=1 run_sweep
+grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "marked: an edge-less finding whose lane fix landed escalates, the fix read through the anchor's edge" \
+    || bad "marked: edge-read wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+run_sweep
+grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "unmarked: a fix unit only the edge reaches escalated" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "unmarked: the census reads by anchor_bead alone, so a fix unit only the edge reaches is not counted"
+: > "$TMP/reads.log"
+KV_JOINED=1 LIVENESS_SWEEP_DB="$TMP/pin.db" READ_LOG="$TMP/reads.log" run_sweep
+grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "pinned: the marked-store wedge still escalates under a --db pin" \
+    || bad "pinned: wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+for want in "bd kv --db $TMP/pin.db get anchor_edges.joined" \
+            "bd list --db $TMP/pin.db --metadata-field anchor_bead=we-anchor" \
+            "bd dep --db $TMP/pin.db list we-anchor --direction=up"; do
+    grep -qF -- "$want" "$TMP/reads.log" \
+        && ok "pinned: the census read '${want}…' carries the pin" \
+        || bad "pinned: the census read carries the pin" "missing '$want' in: $(grep -F 'we-anchor\|kv' "$TMP/reads.log")"
+done
+rm -f "$TMP/show/dep-we-anchor.json"
 
 echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
 # A ruling's rework child carries no source_review_bead, like a human batch's, but
