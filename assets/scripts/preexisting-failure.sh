@@ -27,11 +27,24 @@
 # title match can take an unrelated bug for the tracker. A bug that carries no
 # stamp is no key's tracker.
 #
-# Exit: 0 the store answered: `find` prints the tracker's id, or nothing when
-# there is none, and `file` prints the id of the tracker it filed or found, with
-# a warning when the new tracker could not be read back to confirm its stamp ·
-# 1 the store could not be read or written, or the new tracker read back with
-# its stamp missing or wrong, which is never "none" · 2 usage
+# A tracker can close while its failure is still red. bead-rehome.sh closes a
+# folded, re-homed or duplicate tracker with gc.superseded_by naming the bead
+# that carries its work now, such as a batch that clears a set of lint
+# trackers, and that bead carries no stamp of its own. So when no live tracker
+# holds the key, the most recently closed one decides, because its close is
+# the latest word on the failure. Its pointer is followed through every bead
+# that closed onward the same way, and a live bead at the end of the chain is
+# the key's filing. The chain ends with no filing at a bead that closed with no
+# pointer, because the failure was fixed there. It also ends at a not-needed
+# close, whose pointer names the evidence for that ruling rather than a bead
+# that carries the failure. A red seen after either is new, and it is filed.
+#
+# Exit: 0 the store answered: `find` prints the id of the bead that tracks the
+# key, or nothing when none does, and `file` prints the id of the tracker it
+# filed or the bead it found, with a warning when the new tracker could not be
+# read back to confirm its stamp · 1 the store could not be read or written, or
+# the new tracker read back with its stamp missing or wrong, which is never
+# "none" · 2 usage
 set -uo pipefail
 
 PROG="preexisting-failure"
@@ -39,9 +52,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Every status a live tracker can hold, in one comma list, because a repeated
 # --status keeps only its last value. A red persists while someone fixes it, so
-# its tracker is usually in_progress, or blocked under a hold. Closed is left
-# out: a red that outlives a landed fix is new information.
+# its tracker is usually in_progress, or blocked under a hold. A closed tracker
+# counts only through the live bead its failure moved to (tracked_by): a red
+# that outlives a landed fix is new information.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+
+# The most pointers a gc.superseded_by chain is followed through. A real chain
+# is a fold or two long, so a longer one is a fault in the pointers, and it is
+# read as naming no bead that carries the failure rather than walked further.
+CHAIN_MAX=20
 
 # `bd create` refuses a title over 500 bytes. The key is never cut; a summary
 # is cut at a word boundary so the whole title stays within this many
@@ -75,13 +94,15 @@ usage: preexisting-failure.sh key --test <test function>
           package or build target. --lint takes the linter or learned rule and
           the repo-relative path of the file it flagged. A trailing
           :<line>[:<col>] on a path is dropped.
-  find    prints the id of the live tracker stamped with the key, or nothing
-          when there is none. --closed-after reads the trackers closed since
-          that date instead of the live ones.
+  find    prints the id of the bead that tracks the key, or nothing when none
+          does. That bead is the live tracker stamped with the key. When there
+          is none, it is the live bead that the most recently closed tracker's
+          gc.superseded_by chain reaches. --closed-after reads the trackers
+          closed since that date instead, and follows no chain.
   file    files the key's tracker and prints its id: a P1 bug titled
           `Pre-existing failure: <key>`, with --message as its body and the
-          key stamped as failure_key. When a live tracker already holds the
-          key it files nothing and prints that tracker's id instead.
+          key stamped as failure_key. When a bead already tracks the key, as
+          find reads it, it files nothing and prints that bead's id instead.
           --summary appends a few words to the title after the key.
 U
 }
@@ -214,8 +235,75 @@ read_stamp() {
       else error("unread") end' 2>/dev/null
 }
 
+# tracked_by <key> — the bead that tracks the key, set in the caller's shell so
+# that both answers reach it: FILING is that bead's id, or empty when none
+# tracks the key, and FILING_VIA is the closed tracker whose gc.superseded_by
+# chain reached FILING, or empty when FILING is the key's own live tracker.
+# Non-zero when the store could not be read, which the caller must treat as
+# "unknown", never as "untracked".
+#
+# The chain is read as bead-rehome.sh writes it. A not-needed close carries the
+# reason `not needed, per <successor> in <store>`, as its close reason, or, when
+# the pointer was added after an earlier close, in a `Disposition recorded
+# <time>: <reason>.` note. A pointer to a bead the store does not hold ends the
+# chain the way a fixed tracker does, because no bead carries the failure.
+tracked_by() {
+  local key="$1" rows tracker id prev="" out step hops=0 seen=" "
+  FILING=""; FILING_VIA=""
+  FILING=$(find_tracker "$key" "$LIVE_STATUSES") || return 1
+  [ -z "$FILING" ] || return 0
+  rows=$(bd_list --status=closed --metadata-field "failure_key=$key") || return 1
+  tracker=$(printf '%s' "$rows" | jq -r --arg k "$key" '
+      [ .[] | select((((.metadata // {}).failure_key // "") | tostring) == $k
+                     and ((.status // "") | tostring) == "closed") ]
+      | sort_by([((.closed_at // "") | tostring), ((.id // "") | tostring)])
+      | (last // {}) | .id // empty' 2>/dev/null) || return 1
+  id="$tracker"
+  while [ -n "$id" ]; do
+    case "$seen" in
+      *" $id "*)
+        warn "the gc.superseded_by chain from $tracker loops back to $id, so it names no bead that carries '$key'"
+        return 0 ;;
+    esac
+    if [ "$hops" -gt "$CHAIN_MAX" ]; then
+      warn "the gc.superseded_by chain from $tracker runs past $CHAIN_MAX pointers without reaching a live bead, so it is read as naming none that carries '$key'"
+      return 0
+    fi
+    seen="$seen$id "
+    # The answer decides, not the exit status. bd answers an id that names no
+    # bead with an error object at exit 1, and a store it could not reach with
+    # another error or with nothing.
+    out=$(bd_json show "$id")
+    step=$(printf '%s' "$out" | jq -r --arg id "$id" --arg live "$LIVE_STATUSES" '
+        if type == "array" and length > 0 and ((.[0].id // "") | tostring) == $id then
+          .[0] as $b
+          | ((($b.metadata // {})["gc.superseded_by"] // "") | tostring) as $p
+          | if ($live | split(",") | any(. == (($b.status // "") | tostring))) then "live"
+            elif $p == "" then "fixed"
+            elif ((($b.close_reason // "") | tostring) | startswith("not needed, per " + $p + " "))
+              or ((($b.notes // "") | tostring) | contains(": not needed, per " + $p + " in "))
+            then "ruled"
+            else "next " + $p end
+        elif type == "object" and ((.error // "") | tostring | ascii_downcase | contains("no issues found")) then "missing"
+        else error("unread") end' 2>/dev/null) || return 1
+    case "$step" in
+      live)
+        FILING="$id"
+        [ "$id" = "$tracker" ] || FILING_VIA="$tracker"
+        return 0 ;;
+      fixed|ruled) return 0 ;;
+      missing)
+        [ -z "$prev" ] || warn "$prev names $id in gc.superseded_by, but the store holds no such bead, so the chain from $tracker names no bead that carries '$key'"
+        return 0 ;;
+      "next "*) prev="$id"; id="${step#next }"; hops=$((hops + 1)) ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
 find_cmd() {
-  local key="${1:-}" after="" id st
+  local key="${1:-}" after="" id
   [ $# -gt 0 ] && shift
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -224,15 +312,20 @@ find_cmd() {
     esac
   done
   valid_key "$key" || { warn "'$key' is not a key this script derives; derive it with \`$PROG.sh key\`"; exit 2; }
-  st="$LIVE_STATUSES"
   if [ -n "$after" ]; then
     [[ "$after" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]] || { warn "--closed-after takes a date, YYYY-MM-DD (got '$after')"; exit 2; }
-    st="closed"
+    id=$(find_tracker "$key" closed "$after") || {
+      warn "the lookup for '$key' could not read the store; that is not proof the tracker is missing"
+      exit 1
+    }
+  else
+    tracked_by "$key" || {
+      warn "the lookup for '$key' could not read the store; that is not proof the tracker is missing"
+      exit 1
+    }
+    id="$FILING"
+    [ -z "$FILING_VIA" ] || warn "no live tracker holds '$key'; its closed tracker $FILING_VIA moved the failure to $id, which is live, so $id is its filing"
   fi
-  id=$(find_tracker "$key" "$st" "$after") || {
-    warn "the lookup for '$key' could not read the store; that is not proof the tracker is missing"
-    exit 1
-  }
   [ -z "$id" ] || printf '%s\n' "$id"
   exit 0
 }
@@ -259,13 +352,20 @@ file_cmd() {
   esac
 
   # The caller's lookup and this create are not one transaction, so a gate that
-  # filed the key in between is found here rather than filed beside.
-  id=$(find_tracker "$key" "$LIVE_STATUSES") || {
+  # filed the key in between is found here rather than filed beside. The lookup
+  # is the one find makes, so the live bead a fold moved the tracker to is found
+  # here too.
+  tracked_by "$key" || {
     warn "the lookup for '$key' could not read the store; filing nothing, since an unread store is not proof the tracker is missing"
     exit 1
   }
+  id="$FILING"
   if [ -n "$id" ]; then
-    warn "'$key' is already tracked as $id; filed nothing"
+    if [ -n "$FILING_VIA" ]; then
+      warn "'$key' is tracked by $id, the live bead its closed tracker $FILING_VIA moved the failure to; filed nothing"
+    else
+      warn "'$key' is already tracked as $id; filed nothing"
+    fi
     printf '%s\n' "$id"
     exit 0
   fi
