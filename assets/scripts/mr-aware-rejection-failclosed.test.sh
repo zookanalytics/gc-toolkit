@@ -12,8 +12,9 @@
 #   3. A repool that stops short but leaves an armed dispatch or a visit (exit 2)
 #      ends the arm as a landed one does. One that recorded nothing (exit 1 or
 #      3) ends the turn.
-#   4. After the repool the block reads the bead once, shape-validated, for the
-#      branch decision: an unreadable bead ends the turn with the branch kept.
+#   4. The block reads no bead of its own. rejection-repool.sh prints the row it
+#      read, and the branch decision reads that; a repool that could read no
+#      row keeps the branch.
 #   5. The rejection KEEPS the branch unless the bead is direct-mode with
 #      nothing PR-shaped on it. In mr mode the PR is opened later by the
 #      cadence's pr-open, so "no PR on the bead yet" is not evidence that
@@ -72,15 +73,17 @@ case "$(cat "$TMP/backslash-control")" in
 esac
 
 # --- Stubs. ---------------------------------------------------------------------
-# gc: bd show answers $FAKE_META (or nothing when FAKE_BD_FAILS=1); drain-ack
-# and any bd update are recorded. rejection-repool.sh: records its argv, one
-# argument per field, and exits $FAKE_REPOOL_RC; it lives under a fake rig root
-# so the block's candidate resolution finds it.
+# gc: drain-ack and any bd show or bd update are recorded, and bd show answers
+# $FAKE_META, so a block that reads the bead itself is caught rather than
+# served. rejection-repool.sh: records its argv, one argument per field, prints
+# the row it read ($FAKE_META, or nothing when FAKE_NO_ROW=1) on stdout, and
+# exits $FAKE_REPOOL_RC; it lives under a fake rig root so the block's candidate
+# resolution finds it.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
-  "bd show") [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 1
+  "bd show") printf 'SHOW|%s\n' "$3" >> "$FAKE_LOG"
              printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update") shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
 esac
@@ -90,22 +93,24 @@ GC
 printf 'REPOOL' >> "$FAKE_LOG"
 for a in "$@"; do printf '|%s' "$a" >> "$FAKE_LOG"; done
 printf '\n' >> "$FAKE_LOG"
+[ "${FAKE_NO_ROW:-0}" = "1" ] || printf '[{"id":"%s","metadata":%s}]\n' "$1" "${FAKE_META:-{\}}"
 exit "${FAKE_REPOOL_RC:-0}"
 REPOOL
 chmod +x "$TMP/bin/gc" "$TMP/rig/assets/scripts/rejection-repool.sh"
 export PATH="$TMP/bin:$PATH"
 
 # run <block#> <meta-json|-> [rig-root] [repool-rc] [shell] -> "<rc>|<log>"
+# A meta of "-" is a repool that read no row.
 run() {
   : > "$TMP/log"
-  local rc=0 fails=0 meta="$2"
-  [ "$meta" = "-" ] && { fails=1; meta='{}'; }
+  local rc=0 norow=0 meta="$2"
+  [ "$meta" = "-" ] && { norow=1; meta='{}'; }
   # cwd = $TMP (not a git repo) so the block's `git rev-parse --show-toplevel`
   # fallback cannot resolve the real repo and shadow the stub repool.
   ( cd "$TMP" && \
     WORK=tk-work REJECT_REASON="conflict with main; resume by merge" \
     GC_RIG_ROOT="${3-$TMP/rig}" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_REPOOL_RC="${4:-0}" FAKE_LOG="$TMP/log" \
+    FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${4:-0}" FAKE_LOG="$TMP/log" \
     "${5:-bash}" "$TMP/run-$1.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -114,10 +119,13 @@ CALL="REPOOL|tk-work|--pool|gc-toolkit.polecat|--reason|conflict with main; resu
 for i in 1 2; do
   echo "── block $i ──"
 
-  # (1) The repool is one call to rejection-repool.sh, and the bead is read
-  #     once after it for the branch decision.
+  # (1) The repool is one call to rejection-repool.sh, and the block reads no
+  #     bead after it: the stub gc logs any bd show.
   eq "$(run "$i" '{}')" "0|$CALL" \
      "block $i: one rejection-repool.sh call with the pool and the whole reason"
+  grep -q '"id":"tk-work"' "$TMP/out" \
+    && bad "block $i: the row the repool prints is captured, not echoed" \
+    || ok "block $i: the row the repool prints is captured, not echoed"
 
   # (2) Missing rejection-repool.sh: repool nothing by hand, end the turn.
   eq "$(run "$i" '{}' "$TMP/nowhere")" "1|DRAIN;" \
@@ -133,9 +141,10 @@ for i in 1 2; do
   eq "$(run "$i" '{}' "$TMP/rig" 1)" "1|${CALL}DRAIN;" \
      "block $i: repool exit 1 (usage) -> drain"
 
-  # (5) An unreadable bead after the repool ends the turn; the repool stands.
-  eq "$(run "$i" -)" "1|${CALL}DRAIN;" \
-     "block $i: unreadable bead after the repool -> drain, branch decision skipped"
+  # (5) A repool that could read no row files a visit and exits 2. The arm ends
+  #     as a landed one does, with no read of its own.
+  eq "$(run "$i" - "$TMP/rig" 2)" "0|$CALL" \
+     "block $i: no row from the repool (exit 2) -> the arm ends normally, no bd show"
 
   # (6) The block never writes the bead itself — rejection-repool.sh is the writer.
   run "$i" '{}' >/dev/null
@@ -150,6 +159,10 @@ if command -v zsh >/dev/null 2>&1; then
   echo "── zsh ──"
   eq "$(run 1 '{}' "$TMP/rig" 0 zsh)" "0|$CALL" \
      "zsh: the same one call, with the reason as one word"
+  # The block captures the row and reads the exit status off the assignment, so
+  # zsh has to hand back the script's status there too.
+  eq "$(run 1 '{}' "$TMP/rig" 3 zsh)" "1|${CALL}DRAIN;" \
+     "zsh: the status read off the capture is the repool's (exit 3 -> drain)"
 else
   echo "skip - zsh not installed; the zsh run of the block is not exercised"
 fi
@@ -204,20 +217,22 @@ exit 1
 GIT
 chmod +x "$TMP/bin/git"
 
-# The decision reads $BEAD_JSON from the repool block above it — the same shell,
-# one read — so the whole arm is what gets executed here, not the tail alone.
-# arm <meta-json|-> [default_merge_strategy] -> "<rc>|<deletes>"
+# The decision reads $BEAD_JSON, the row the repool block above it captured in
+# the same shell, so the whole arm is what gets executed here, not the tail
+# alone.
+# arm <meta-json|-> [default_merge_strategy] [repool-rc] -> "<rc>|<deletes>"
+# A meta of "-" is a repool that read no row.
 arm() {
   : > "$TMP/log"
-  local rc=0 fails=0 meta="$1"
-  [ "$meta" = "-" ] && { fails=1; meta='{}'; }
+  local rc=0 norow=0 meta="$1"
+  [ "$meta" = "-" ] && { norow=1; meta='{}'; }
   cat "$TMP/block-2.sh" "$TMP/branch-keep.sh" \
     | sed -e "s|{{binding_prefix}}|gc-toolkit.|g" \
           -e "s|{{default_merge_strategy}}|${2:-mr}|g" > "$TMP/run-arm.sh"
   ( cd "$TMP" && \
     WORK=tk-work REJECT_REASON="section 15e fixture clock" GC_RIG="" \
     GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
-    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_LOG="$TMP/log" \
+    FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${3:-0}" FAKE_LOG="$TMP/log" \
     bash "$TMP/run-arm.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(grep '^DELETE|' "$TMP/log" | tr '\n' ';')"
 }
@@ -243,8 +258,18 @@ eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"pr_number\":7}")" "0|" \
    "(11) direct + pr_number -> branch kept"
 eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}")" "0|" \
    "(12) direct + existing_pr -> branch kept"
-eq "$(arm -)" "1|" \
-   "(13) unreadable bead -> arm exits before the decision, branch kept"
+eq "$(arm - mr 2)" "0|" \
+   "(13) no row from the repool -> branch kept"
+grep -q 'could not read the bead' "$TMP/out" \
+  && ok "(13b) the kept branch names the unread row as its reason" \
+  || bad "(13b) the kept branch names the unread row as its reason"
+eq "$(arm - direct 2)" "0|" \
+   "(13c) no row from the repool, rig default direct -> still no delete"
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}" mr 2)" "0|DELETE|polecat/tk-work;" \
+   "(13d) a repool that stopped short (exit 2) still decides from the row it read"
+grep -q '^SHOW|' "$TMP/log" \
+  && bad "(13e) the decision reads no bead of its own" "found a gc bd show" \
+  || ok "(13e) the decision reads no bead of its own"
 # The mode comes from the formula's own var, so a rig that ships direct still
 # gets the direct-mode cleanup.
 eq "$(arm "{$BR}" direct)" "0|DELETE|polecat/tk-work;" \

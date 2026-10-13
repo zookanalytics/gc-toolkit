@@ -50,9 +50,11 @@ stateDiagram-v2
     filed --> routed: gc sling / deferred-dispatch.sh
     routed --> claimed: gc hook --claim (runtime)
     claimed --> routed: witness patrol — dead session
+    state "poured (gc.execution_routed_to)" as poured
   }
 
   claimed --> handed_off: mol-polecat-work submit (one atomic bd update)
+  poured --> handed_off: the pour's mol-polecat-work submit
   handed_off --> pre_open_gate: mol-refinery-patrol merge-push (lifecycle.sh)
   handed_off --> pull_request: merge-push, post-open path (lifecycle.sh)
   handed_off --> merged: merge-push, direct strategy (lifecycle.sh)
@@ -60,7 +62,7 @@ stateDiagram-v2
   pull_request --> merged: merge.sh
   merged --> [*]
 
-  handed_off --> routed: mol-refinery-patrol — rejection_reason, then a fresh pour
+  handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
   handed_off --> refused_false_completion: mol-refinery-patrol — no commits
@@ -79,8 +81,11 @@ stateDiagram-v2
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
-(branch recorded, assignee = refinery, `merge_result` still absent); the
-anchored states are the `merge_result` values. `merged` is the only state with
+(branch recorded, assignee = refinery, `merge_result` still absent). `poured`
+is an unanchored bead a `mol-polecat-work` workflow is driving: it carries no
+assignee and no `gc.routed_to`, only the pour's `gc.execution_routed_to`, which
+no queue reads (`assets/scripts/dispatch-path.sh`). The anchored states are the
+`merge_result` values. `merged` is the only state with
 `status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
 `merged_sha`, the landing the state names; the human states stay open, routed
 to human.
@@ -143,7 +148,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
-| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written, then a fresh `mol-polecat-work` pour dispatches the rebuild |
+| handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
+| poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
 | held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
@@ -664,8 +670,8 @@ review's result set.
   `mol-polecat-work` pour dispatches the rebuild. It is a pour, not a route on
   the bead, because the bead is a member of its epic and bd's blocked flag
   cascades down parent-child edges, while a poured workflow's root has no
-  parent, so a hold on the epic leaves the rebuild running. Back to `routed`;
-  the next claimant starts from the recorded reason.
+  parent, so a hold on the epic leaves the rebuild running. The bead rests
+  `poured`, and the polecat running the pour starts from the recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh` and clears the
   check marker, returning the lane to `unreviewed`, so gate-ensure re-arms the

@@ -7,6 +7,11 @@
 # from the rebase step's conflict arm and the handle-failures step's
 # branch-caused arm. Both run `gc workflow reopen-source` first, which leaves
 # the bead open with no assignee, out of the refinery's queue.
+# Stdout is one line: the bead's row as read before any write (the scrubbed
+# `gc bd show --json` array), which the handle-failures arm's branch decision
+# reads instead of a read of its own. Of the fields that decision reads, the
+# release writes only existing_pr, and only from a pr_url the decision already
+# counts. Stdout is empty when the bead could not be read.
 #
 # A pour, because the work bead is a member of its epic and bd's blocked flag
 # cascades down parent-child edges: a bead routed back to the pool is withheld
@@ -26,15 +31,22 @@
 #      the rebuild resumes the branch by the reason it reads. It also lands
 #      before the pool route is proved: the bead is out of the refinery's queue
 #      either way, and whatever later finishes the repool finds the reason on it.
-#   2. The pool route is proved (pool-route.sh).
+#   2. The pool route is proved (pool-route.sh) and must be rig-qualified. A
+#      polecat pool is rig-scoped, so its pour stamps the rig-qualified
+#      identity, and a bare name, which pool-route.sh returns unverified when
+#      GC_RIG is unset and the live agent set cannot be read, never reads back.
 #   3. `gc sling <route> <bead> --on mol-polecat-work`, proved by
 #      gc.execution_routed_to reading back as the route. Step 1 cleared it, so
 #      only this pour can have written it.
 # A pour that does not read back may still have started, so the writer never
 # stamps a bare route: a partial pour plus a pool claim double-dispatches the
-# work. It arms a deferred dispatch instead, whose reconcile pass retries the
-# pour and files a visit once the retries reach their cap. Every other way the
-# repool stops short files a visit that names what finishes it.
+# work. When gc sling itself failed, the writer arms a deferred dispatch, whose
+# reconcile pass retries the pour and files a visit once the retries reach their
+# cap. When gc sling exited 0, the pour launched and only its stamp, or the read
+# of it, is missing. That reconcile keys its retry on its own marker and on
+# merge_result, never on gc.execution_routed_to, so a retry would pour the work
+# a second time. That stop files a visit instead, like every other way the
+# repool stops short, and each visit names what finishes the repool.
 # Exit: 0 the pour is proved · 1 usage, nothing done · 2 the repool stopped
 #   short, and an armed dispatch or a visit carries the bead · 3 the repool
 #   stopped short and nothing could be recorded
@@ -89,9 +101,15 @@ ROW=$(bd_json show "$WORK")
 printf '%s' "$ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || stop_short "it could not be read (gc bd show returned no bead)" \
        "re-run assets/scripts/rejection-repool.sh on it with the rejection reason this visit names once its store answers"
+printf '%s\n' "$ROW"
 PR_URL=$(row_meta "$ROW" pr_url)
 SETS=(--set "rejection_reason=$REASON")
 [ -n "$PR_URL" ] && SETS+=(--set "existing_pr=$PR_URL")
+# The route clear is explicit because unanchored is not a detached state, and
+# lifecycle.sh clears a route unasked only on entry to one. reopen-source keeps
+# the route the bead carried, or writes its gc.run_target over it. A pool route
+# left there lets the pool claim the bead beside the pour, and
+# deferred-dispatch.sh refuses to arm a bead that carries any route.
 "$LIFECYCLE" transition "$WORK" --to unanchored --assignee "" --route "" \
   --unset gc.execution_routed_to "${SETS[@]}" >&2
 LC_RC=$?
@@ -102,6 +120,11 @@ LC_RC=$?
 ROUTE=$("$POOL_ROUTE" "$POOL_NAME") \
   || stop_short "no live pool claims '$POOL_NAME'" \
        "dispatch the rebuild to a polecat pool that does: gc sling <pool> $WORK --on $WORK_FORMULA"
+case "$ROUTE" in
+  */*) ;;
+  *) stop_short "the only route pool-route.sh could name is the bare '$ROUTE', which addresses no rig's pool, so no pour to it could be proved" \
+       "dispatch the rebuild to the rig-qualified pool: gc sling <rig>/$POOL_NAME $WORK --on $WORK_FORMULA" ;;
+esac
 
 gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$WORK" --on "$WORK_FORMULA" >&2
 SLING_RC=$?
@@ -109,10 +132,13 @@ if [ "$(row_meta "$(bd_json show "$WORK")" gc.execution_routed_to)" = "$ROUTE" ]
   warn "repooled $WORK: $WORK_FORMULA poured for $ROUTE"
   exit 0
 fi
+[ "$SLING_RC" != 0 ] \
+  || stop_short "gc.execution_routed_to did not read back as $ROUTE after gc sling exited 0, so the pour may be running, and no retry was armed because one could pour the work twice" \
+       "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: gc sling $ROUTE $WORK --on $WORK_FORMULA"
 if "$DEFERRED" arm "$WORK" --target "$ROUTE" --sling-arg --on --sling-arg "$WORK_FORMULA" \
-     --reason "refinery rejection: the rebuild's pour did not read back (gc sling exit $SLING_RC)" >&2; then
-  warn "$WORK: the $WORK_FORMULA pour did not read back gc.execution_routed_to=$ROUTE (gc sling exit $SLING_RC); armed a deferred dispatch, whose reconcile pass retries the pour"
+     --reason "refinery rejection: the rebuild's gc sling failed (exit $SLING_RC)" >&2; then
+  warn "$WORK: gc sling exited $SLING_RC and its $WORK_FORMULA pour did not read back; armed a deferred dispatch, whose reconcile pass retries the pour"
   exit 2
 fi
-stop_short "its $WORK_FORMULA pour did not read back (gc sling exit $SLING_RC) and the deferred dispatch did not arm" \
+stop_short "its gc sling failed (exit $SLING_RC) and the deferred dispatch did not arm" \
   "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: gc sling $ROUTE $WORK --on $WORK_FORMULA"
