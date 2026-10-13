@@ -21,6 +21,8 @@
 #
 # No live city, Dolt, or network: the blocks are extracted verbatim from the
 # formulas and run against a fake `gc` and stub scripts.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

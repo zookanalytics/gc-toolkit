@@ -1379,11 +1379,11 @@ keys = [
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
 #   bead it finds otherwise unrouted, so the pool re-offers stranded work. No
-#   pack script writes or reads it. Absent or empty means unrouted. A route value, per the ROUTE rule in the preamble. A formula
-#   step can also declare it in its step metadata: gascity's sling routes a
-#   poured step by its assignee, else by this key, which is how
-#   mol-review-quorum-signoff sends each lane to its provider's pool
-#   ([metadata.review_quorum]).
+#   pack script writes or reads it. Absent or empty means unrouted. A route
+#   value, per the ROUTE rule in the preamble. A formula step can also declare
+#   it in its step metadata: gascity's sling routes a poured step by its
+#   assignee, else by this key, which is how mol-review-quorum-signoff sends
+#   each lane to its provider's pool ([metadata.review_quorum]).
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
 #   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
@@ -1408,8 +1408,8 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `no-op`
-#   from duplicate-sweep.sh on a rework twin it
-#   disposes, first-reaction-dispose.sh on the reaction bead it closes,
+#   from duplicate-sweep.sh on a rework twin it disposes,
+#   first-reaction-dispose.sh on the reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every visit close, the
 #   observation-filing recipes, and converse by hand. duplicate-sweep.sh reads it
 #   to confirm a no-op duplicate is disposable, bead-rehome.sh to confirm a no-op

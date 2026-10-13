@@ -1314,8 +1314,9 @@ about:
   open blocker it clears the pour's delivery keys, arms that same
   `deferred-dispatch` re-dispatch to the pool the pour was executing on, and
   cancels the run through gascity — so the work re-slings itself when the
-  blocker closes instead of being built early. Routing or arming blocked work is still the
-  clean path; the guard only catches the sling that should not have happened.
+  blocker closes instead of being built early. Routing or arming blocked work
+  is still the clean path; the guard only catches the sling that should not
+  have happened.
 - **A canonical `hold:` label** — `hold:mayor` or `hold:external`,
   written by `bd set-state <bead> hold=mayor|external` (which removes any
   existing `hold:*` label, adds the new one, and records an event bead).
