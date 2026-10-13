@@ -3,9 +3,13 @@
 # and firing. Per orders/*.toml (name, interval, scope; scope defaults to rig
 # in the loader): a registration exists — per importing rig for scope="rig"
 # (importing = the rig has ANY of this pack's orders registered), once
-# otherwise — and the order fired within max(3×interval, 15m). `--limit 0` on
-# the history read is LOAD-BEARING: any positive limit returns city-store rows
-# only under a RIG column, so the answer looks city-wide and is not.
+# otherwise — and the order fired within its cadence window, max(3×interval,
+# floor). The floor is one trip of the order dispatch rotation, derived from the
+# live registry and the city's dispatch budget by assets/scripts/order-cadence.sh,
+# because the supervisor fires a short-interval order once per trip, not once per
+# interval. `--limit 0` on the history read is LOAD-BEARING: any positive limit
+# returns city-store rows only under a RIG column, so the answer looks city-wide
+# and is not.
 # Condition-triggered orders (no interval) get the registration arm alone.
 # `gc order list` omits orders disabled in city.toml (an `[[orders.overrides]]`
 # `enabled = false`, or an `[orders] skip` entry), so the registration arm reads
@@ -13,16 +17,25 @@
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
 # its own error rather than being buried beside an intended disable.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
-# the one this checkout describes: lifecycle.sh execs it and has no other
-# implementation, and orders that fire on schedule can still be running logic
-# several commits old.
+# the one this checkout describes: lifecycle.sh and merge.sh exec it and have
+# no other implementation, and orders that fire on schedule can still be
+# running logic several commits old.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
 set -u
 
 dir="${GC_PACK_DIR:-.}"
-FLOOR=900   # 15m — dispatchers fire cooldown orders slower than declared
+
+# The cadence window, from the one definition shared with
+# check-armed-dispatch-owed. Unsourceable, the check cannot tell a stopped order
+# from a slow rotation, so it warns.
+# shellcheck source=../../assets/scripts/order-cadence.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/order-cadence.sh" || {
+    echo "cadence liveness undetermined (I10) — cannot load the cadence window definition"
+    printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so no order's window can be computed."
+    exit 1
+}
 
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -156,6 +169,13 @@ is_disabled() {
         $1 == n && ($2 == "*" || $2 == r) { hit = 1 } END { exit hit ? 0 : 1 }'
 }
 
+# The floor every window below takes: one trip of the dispatch rotation over the
+# registry read above, at the budget city.toml sets.
+clock_regs=$(cadence_clock_registrations "$orders_json")
+dispatch_budget=$(cadence_budget "${city_root:+$city_root/city.toml}")
+FLOOR=$(cadence_floor_of "$clock_regs" "$dispatch_budget")
+notes+=("cadence floor ${FLOOR}s: ${clock_regs:-0} clock-driven registration(s) at ${dispatch_budget} per dispatch pass, ${CADENCE_PASS_SPACING}s per pass, never below ${CADENCE_FLOOR_MIN}s")
+
 while IFS=$'\t' read -r name secs scope; do
     [ -n "$name" ] || continue
     # Rig-bound registrations by name; a city registration has rig == "" and
@@ -190,12 +210,12 @@ while IFS=$'\t' read -r name secs scope; do
         fi
     fi
 
-    # Arm 2 — fired within max(3×interval, 15m). Condition orders opt out.
+    # Arm 2 — fired within max(3×interval, floor). Condition orders opt out.
     if [ "$secs" = "-" ] || [ -z "$secs" ]; then
         notes+=("$name: no interval declared (condition-triggered) — registration checked, cadence not time-bound")
         continue
     fi
-    window=$(( secs * 3 )); [ "$window" -lt "$FLOOR" ] && window=$FLOOR
+    window=$(cadence_window "$secs" "$FLOOR")
     hist=$(run_bounded gc order history "$name" --since "${window}s" --limit 0 --json 2>/dev/null)
     if ! printf '%s' "$hist" | jq -e '(.entries | type) == "array"' >/dev/null 2>&1; then
         warnings+=("$name: could not read run history (\`gc order history $name --since ${window}s --limit 0 --json\`) — the liveness arm did not run for this order")
@@ -210,12 +230,12 @@ while IFS=$'\t' read -r name secs scope; do
                 continue
             fi
             printf '%s\n' "$fresh" | grep -qxF "$rig" \
-                || errors+=("$name: registered on rig $rig but has NOT fired there in the last ${window}s (3×interval, floor 15m) — that rig's pass is stopped. A city started within the window clears on the next tick; otherwise the controller is not dispatching this order.")
+                || errors+=("$name: registered on rig $rig but has NOT fired there in the last ${window}s (the larger of 3×interval and one trip of the dispatch rotation, ${FLOOR}s) — that rig's pass is stopped. A city started within the window clears on the next tick; otherwise the controller is not dispatching this order.")
         done <<< "$reg_rigs"
     else
         entry_count=$(printf '%s' "$hist" | jq -r '[.entries[]?] | length' 2>/dev/null)
         if [ "${reg_count:-0}" -gt 0 ] 2>/dev/null && [ "${entry_count:-0}" -eq 0 ] 2>/dev/null; then
-            errors+=("$name: registered but has NOT fired in the last ${window}s (3×interval, floor 15m) — the pass is stopped. A city started within the window clears on the next tick; otherwise the controller is not dispatching this order.")
+            errors+=("$name: registered but has NOT fired in the last ${window}s (the larger of 3×interval and one trip of the dispatch rotation, ${FLOOR}s) — the pass is stopped. A city started within the window clears on the next tick; otherwise the controller is not dispatching this order.")
         fi
     fi
 done <<< "$order_rows"
@@ -233,9 +253,9 @@ done <<< "$order_rows"
 # design and the state self-heals on the next tick; what an operator needs is to
 # see it, and the board's PACK row is where a persistent one shows up.
 #
-# A MISSING binary is an error, like an order that never runs: lifecycle.sh has
-# nothing else to exec, so every lifecycle transition is refused until the
-# gctk-build order publishes one.
+# A MISSING binary is an error, like an order that never runs: lifecycle.sh and
+# merge.sh have nothing else to exec, so every lifecycle transition and every
+# merge pass is refused until the gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -254,7 +274,7 @@ tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
 elif [ ! -x "$gctk_bin" ]; then
-    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh execs it and has no other implementation, so every lifecycle transition is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and merge.sh exec it and have no other implementation, so every lifecycle transition and every merge pass is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
 else

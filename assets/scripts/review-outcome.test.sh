@@ -71,7 +71,7 @@ eq "$N0" "0" "…and reports zero retired"
 # ---------------------------------------------------------------------------
 RC_ANCHOR='{"id":"tk-rcanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"91"}}'
 RC_REVIEW='{"id":"tk-rcrev","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-rcanc","reviewed_oid":"305c7b69","signoff_verdict":"request-changes","gc.outcome":"recorded"}}'
-store "[$RC_ANCHOR, $RC_REVIEW]"
+store "$(jq -c --argjson a "$RC_ANCHOR" --argjson r "$RC_REVIEW" '. + [$a, $r]' "$STUB_STORE")"
 if green tk-rcanc codex; then bad "a request-changes-only lane derived green"; else ok "a request-changes-only lane is not green (setup)"; fi
 NRC=$("$SUT" supersede-lane --anchor tk-rcanc --lane codex --reason "validator ordered a fresh whole-diff look at the unmoved head")
 eq "$NRC" "1" "supersede-lane retires the standing request-changes verdict (was a silent no-op)"
@@ -82,7 +82,7 @@ has "$(notes tk-rcrev)" "validator ordered a fresh whole-diff look" "the superse
 # back-lane after supersede: a superseded backing does not block a fresh one.
 # ---------------------------------------------------------------------------
 ID3=$("$SUT" back-lane --anchor tk-anc --lane correctness --oid abcd1234)
-if [ "$ID3" != "$ID" ]; then ok "re-converging after a supersede files a fresh backing"; else bad "back-lane returned the superseded bead"; fi
+if [ -n "$ID3" ] && [ "$ID3" != "$ID" ]; then ok "re-converging after a supersede files a fresh backing"; else bad "back-lane returned the superseded bead or nothing (got '$ID3')"; fi
 if green tk-anc correctness; then ok "the fresh backing greens the lane again"; else bad "the fresh backing did not green the lane"; fi
 
 # ---------------------------------------------------------------------------

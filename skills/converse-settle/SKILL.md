@@ -45,8 +45,8 @@ and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
-subject is parked for a person. It exits non-zero when it stopped before
-writing the trace, and then you must NOT sign off:
+subject is parked for a person. It exits non-zero when it stopped short of
+discharging the hold, and then you must NOT sign off:
 ```bash
 if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
      --visit "$VISIT" --subject "$SUBJECT" \
@@ -58,11 +58,16 @@ if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
 then
   : # the trace ran — fix any write it reports failed, then post the sign-off below
 else
-  # NOT signed off, and no trace was written. Do NOT post the sign-off or close
-  # the visit. Repair what it printed and re-run, or raise it in the thread.
+  # NOT signed off: a read failed, a demand did not close, the rework did not
+  # file, or the wait did not re-state, so the hold may still stand. Do NOT post
+  # the sign-off or close the visit. Repair what it printed and re-run, or raise
+  # it in the thread.
   exit 1
 fi
 ```
+Re-running it is safe. What it wrote before it stopped is written again the
+same way, and a demand it did not discharge is still there for the re-run to
+find.
 **Set `--ruled` from what this sitting actually settled.** The gate
 starts shut, so `--ruled no` re-states the wait rather than dropping it;
 `--ruled yes` resolves it and releases a `held` subject. A demand a named
