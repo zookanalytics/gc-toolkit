@@ -54,6 +54,9 @@
 #   exceeded  1     wait: the job ran past --limit and has been stopped
 #   running   3     status: the job is running. wait: still running after
 #                   --max seconds; wait again
+#   running   1     stop, or wait past --limit: the job's process group
+#                   survived TERM and KILL, so it is still running; detail=
+#                   says so
 #   stopped   0     stop: the job was running and has been killed
 #   none      2     no job was started in <dir>
 #   busy      2     start: <dir> holds a job that is still running
@@ -363,8 +366,13 @@ cmd_wait() {
     classify
     [ "$STATE" = running ] || finish "$tail_n"
     if [ -n "$limit" ] && [ "$(elapsed)" -ge "$limit" ]; then
-      kill_job "limit:${limit}s"
-      report exceeded "limit=$limit" "elapsed=$(elapsed)" "dir=$DIR" "log=$DIR/log"
+      if kill_job "limit:${limit}s"; then
+        report exceeded "limit=$limit" "elapsed=$(elapsed)" "dir=$DIR" "log=$DIR/log"
+        show_tail "$tail_n"
+        exit 1
+      fi
+      report running "pid=$(read_num "$DIR/pid")" "limit=$limit" "elapsed=$(elapsed)" \
+        "detail=the job ran past its limit, and its process group survived TERM and KILL" "dir=$DIR" "log=$DIR/log"
       show_tail "$tail_n"
       exit 1
     fi

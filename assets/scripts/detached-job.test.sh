@@ -4,9 +4,10 @@
 # in a session of its own and reports a launch that did not happen; every wait
 # ends — on the command's exit code, on a wrapper that died without one, on
 # --max, or on --limit — so no caller is ever left waiting on a result that
-# cannot arrive; and a running job is told from another process by a start that
+# cannot arrive; a stop or a limit whose kill does not take reports the job
+# still running; and a running job is told from another process by a start that
 # no caller's TZ or locale changes. Real processes, no stubs except the detacher
-# fakes the launch-failure cases need.
+# fakes the launch-failure cases need and the kill that swallows signals.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -135,6 +136,30 @@ eq "$(field "$OUT" state)" exceeded "it reports state=exceeded"
 group_gone "$PID" && ok "the job past its limit is killed" || bad "the job past its limit is killed" "group $PID survived"
 OUT=$("$JOB" status "$TMP/e")
 eq "$(field "$OUT" cause)" limit:2s "status afterwards names the limit"
+
+echo "── a job whose group survives TERM and KILL is reported still running ──"
+# BASH_ENV puts a kill ahead of the builtin in the script under test. It
+# swallows every signal sent to the job's group and reports the group still
+# there, which is how a group that survives TERM and KILL looks from outside.
+cat > "$TMP/survivor.env" <<'ENV'
+kill() {
+  case " $* " in
+    *" -- -$SURVIVOR "*) return 0 ;;
+  esac
+  builtin kill "$@"
+}
+ENV
+"$JOB" start "$TMP/n" -- bash -c 'sleep 50; true' >/dev/null
+PID=$(cat "$TMP/n/pid")
+OUT=$(SURVIVOR="$PID" BASH_ENV="$TMP/survivor.env" "$JOB" wait "$TMP/n" --limit 1 --max 30); RC=$?
+eq "$RC/$(field "$OUT" state)" 1/running "wait past --limit reports state=running, exit 1"
+has "$OUT" "survived TERM and KILL" "it says the kill did not take"
+kill -0 "$PID" 2>/dev/null && ok "the job is still running" || bad "the job is still running" "wrapper $PID is gone"
+OUT=$(SURVIVOR="$PID" BASH_ENV="$TMP/survivor.env" "$JOB" stop "$TMP/n"); RC=$?
+eq "$RC/$(field "$OUT" state)" 1/running "stop reports state=running, exit 1"
+OUT=$("$JOB" stop "$TMP/n"); RC=$?
+eq "$RC/$(field "$OUT" state)" 0/stopped "a stop whose signals arrive stops it"
+group_gone "$PID" && ok "its whole group is gone" || bad "its whole group is gone" "group $PID survived"
 
 echo "── a caller in another TZ or locale still reads the job as running ──"
 TZ=UTC LANG=C "$JOB" start "$TMP/l" -- sleep 46 >/dev/null

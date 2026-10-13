@@ -491,6 +491,12 @@ Read the result off the report and the job's log (`$GATE/log`):
 - `state=done rc=0`: every check passed and the log ends `GATE PASSED`.
 - `state=done rc=1`: the log's `GATE FAILED:` line names each failed check
   with its exit code, and the log above it holds their output.
+- `state=running` from a wait that exits 1: the gate ran past the limit and
+  its process group survived TERM and KILL, so it still runs in the prep
+  worktree. Never start another gate beside it. Escalate with key
+  `refinery-gate-unstoppable`, naming the bead and the gate's pid, and leave
+  the work with the refinery: `gc runtime drain-ack` and end the cycle
+  without a rejection.
 - anything else (`state=died`, `state=exceeded`, or any other `rc`): the gate
   stopped short of a verdict, ended by a signal, a restart, the limit, or a
   missing prep worktree, which says nothing about the branch. Start it once
