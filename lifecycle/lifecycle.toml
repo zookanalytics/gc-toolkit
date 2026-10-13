@@ -602,15 +602,17 @@ keys = [
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
 #   a session that re-runs the handoff after the push still reads the whole
 #   round. Absent, the guard starts from the origin head it read before the push,
-#   and refuses a hand-off that pushed nothing past it. Never cleared; the next
-#   resume overwrites it. An oid.
+#   and refuses a hand-off that pushed nothing past it until the worker stamps
+#   it, with bring_current_scope beside it. Never cleared; the next resume
+#   overwrites it. An oid.
 # bring_current_scope — whether bringing the branch current is the resumed
 #   bead's whole job: merge-only for a conflict or stale-base rejection, else
-#   with-work. Written by the resume block beside bring_current_from. On a
-#   merge-only bead the guard counts a commit of the bead's own as an edit
-#   beyond the merge, which owes an audit entry. Absent reads as with-work;
-#   absent beside a bring_current_from stamp, it marks a resume step that asks
-#   for no audit, so the round owes no entries.
+#   with-work. Written by the resume block beside bring_current_from, and as
+#   with-work by a worker whose hand-off the guard refused for recording no
+#   start. On a merge-only bead the guard counts a commit of the bead's own as
+#   an edit beyond the merge, which owes an audit entry. Absent reads as
+#   with-work; absent beside a bring_current_from stamp, it marks a resume
+#   step that asks for no audit, so the round owes no entries.
 # conflict_audit — the worker's audit of the round, on the bead it holds: a
 #   JSON array of {path, collided, resolution, check, rating}, one per item the
 #   guard names, rating routine or judgment. Written by bring-current-audit.sh

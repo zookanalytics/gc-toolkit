@@ -121,9 +121,11 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  the lanes the anchor declares that run again on the merged
                  code, or none. Required on a triage approve while the anchor's
                  bring_current_record holds a conflicted round triage has not
-                 ruled on, and refused otherwise. A check the anchor does not
-                 declare is added with --add-gates, and a lane added on this
-                 call runs on the merged code as well.
+                 ruled on. A check the anchor does not declare is added with
+                 --add-gates, and a lane added on this call runs on the merged
+                 code as well. On a round this review already ruled on, the
+                 verdict's retry carries out the recorded ruling, with these
+                 flags dropped or stating that ruling. Refused anywhere else.
   --round-reason why the round reopens what it does, one line; required with
                  --reopen.
   --dismiss-approval
@@ -279,21 +281,47 @@ fi
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
 
-# A bring-current round that conflicted and that triage has not ruled on. The
-# guard filed it on the anchor and reopened the triage lane, so a triage verdict
-# on this anchor is that ruling as well as its classification, and it is not
-# recorded without one.
-ROUND_HEAD=""
+# A bring-current round that conflicted and awaits this triage verdict's ruling.
+# The guard filed it on the anchor and reopened the triage lane, so a triage
+# verdict on this anchor is that ruling as well as its classification, and it is
+# not recorded without one. decide records a ruling on the round before it
+# reopens a lane or dismisses an approval, so a round this same review already
+# ruled on may hold a ruling that was never carried out: its retry runs decide
+# again, which carries out what was recorded. A round another review ruled on
+# owes this verdict nothing.
+ROUND_HEAD=""; ROUND_RULING=""
 if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
-  ROUND_HEAD=$(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].metadata.bring_current_record // null)
+  ROUND=$(printf '%s' "$ANCHOR_ROW" | jq -c --arg rv "$REVIEW_BEAD" '(.[0].metadata.bring_current_record // null)
     | if type == "string" then (fromjson? // null) else . end
-    | if type == "object" and .class == "conflicted" and .triage == null then (.head // "") else "" end' 2>/dev/null)
+    | if type == "object" and .class == "conflicted"
+         and (.triage == null or ((.triage | type) == "object" and (.triage.review // "") == $rv))
+      then {head: (.head // ""), ruling: .triage} else empty end' 2>/dev/null)
+  ROUND_HEAD=$(printf '%s' "$ROUND" | jq -r '.head // ""' 2>/dev/null)
+  ROUND_RULING=$(printf '%s' "$ROUND" | jq -c '.ruling // empty' 2>/dev/null)
 fi
 if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
     || { warn "--reopen, --round-reason and --dismiss-approval carry triage's ruling on a bring-current round, which only a triage approve records; nothing written"; exit 1; }
   [ -n "$ROUND_HEAD" ] \
     || { warn "no bring-current round on $ANCHOR awaits triage's ruling; drop --reopen, --round-reason and --dismiss-approval. Nothing written"; exit 1; }
+fi
+# The lanes a --reopen names, as decide reads them: none, or the lanes sorted and
+# comma-joined.
+round_lanes() { if [ "$1" = "none" ]; then echo none; else gate_tokens "$1" | LC_ALL=C sort -u | paste -sd, -; fi; }
+if [ -n "$ROUND_HEAD" ] && [ -n "$ROUND_RULING" ] && [ "$VERDICT" = "approve" ]; then
+  # This review's ruling is already recorded, and a retry carries it out as
+  # recorded. A call that states a different one is refused rather than replaced
+  # unseen, since the posted account of the round renders the recorded ruling.
+  RULED_LANES=$(printf '%s' "$ROUND_RULING" | jq -r '[ .reopen[]? | tostring | ascii_downcase ] | unique | if length == 0 then "none" else join(",") end' 2>/dev/null)
+  RULED_DISMISS=$(printf '%s' "$ROUND_RULING" | jq -r 'if .dismiss == true then "1" else "" end' 2>/dev/null)
+  if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ] \
+     && { [ "$(round_lanes "$REOPEN")" != "$RULED_LANES" ] || [ "$DISMISS_APPROVAL" != "$RULED_DISMISS" ]; }; then
+    warn "$REVIEW_BEAD already ruled on the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR (reopen $RULED_LANES$([ -n "$RULED_DISMISS" ] && echo ", dismiss the approval")), and a recorded ruling is carried out as recorded: re-run with that ruling, or with no --reopen, --round-reason or --dismiss-approval. Nothing written"
+    exit 1
+  fi
+  REOPEN="$RULED_LANES"; DISMISS_APPROVAL="$RULED_DISMISS"
+  RULED_REASON=$(printf '%s' "$ROUND_RULING" | jq -r '.reason // ""' 2>/dev/null)
+  [ -z "$RULED_REASON" ] || ROUND_REASON="$RULED_REASON"
 fi
 if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
   if [ -z "$REOPEN" ] || [ -z "$(printf '%s' "$ROUND_REASON" | tr -d '[:space:]')" ]; then
