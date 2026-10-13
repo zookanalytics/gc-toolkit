@@ -1285,10 +1285,15 @@ has "$out" "reopen correctness, dismiss the approval" "…naming the ruling reco
 eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
 eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
 eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
 out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
 eq "$rc" 1 "a retry that drops the recorded dismissal exits 1 too"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
 out=$("$SUT" --review-bead rv-tri --verdict approve --round-reason "x" 2>&1); rc=$?
 eq "$rc" 1 "…and so does one that names a reason and no lanes"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling too"
+eq "$(cat "$STUB_BC_LOG")" "" "…neither calling the guard"
 
 echo "# the ruling flags are refused where no round awaits them, and on any other check"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"; : > "$STUB_BC_LOG"
