@@ -6,8 +6,9 @@
 # pins the writer's own contract: exactly one provenance, the required work-order
 # flags, the refusals that come before any write, the stdout result line its
 # callers parse, a provenance key that matches only its own children on its own
-# anchor, one read of an edge that already stands, and every metadata key it
-# writes registered in lifecycle.toml.
+# anchor, a child joined to its anchor before anchor_bead lands on it, one read
+# of an edge that already stands, and every metadata key it writes registered in
+# lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,15 +71,20 @@ case "${1:-}" in
     mv "$tmp" "$STORE"; echo "updated $id" ;;
   create)
     shift; title="$1"; shift
-    cmeta='{}'
+    # --deps <type:id> rides the insert, as an edge row from the new bead.
+    cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
-      case "$1" in --metadata) shift; cmeta="${1:-}" ;; esac
+      case "$1" in
+        --metadata) shift; cmeta="${1:-}" ;;
+        --deps) shift; cdeps="$cdeps ${1:-}" ;;
+      esac
       shift || true
     done
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-rc.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
     printf '{"id":"fix-%s"}\n' "$n" ;;
   dep)
     shift
@@ -93,7 +99,7 @@ case "${1:-}" in
         out="["; first=1
         while IFS='|' read -r f t ty; do
           [ -n "$f" ] || continue
-          [ "$ty" = "$typ" ] || continue
+          [ -z "$typ" ] || [ "$ty" = "$typ" ] || continue
           other=""
           [ "$dir" = "down" ] && [ "$f" = "$id" ] && other="$t"
           [ "$dir" = "up" ] && [ "$t" = "$id" ] && other="$f"
@@ -103,6 +109,16 @@ case "${1:-}" in
           out="$out$row"; first=0
         done < "$DEPS"
         printf '%s]\n' "$out" ;;
+      add)
+        # `dep add A B --type T` is "A depends on B". STUB_DEP_ADD_FAIL refuses
+        # it, as bd refuses a second type on a pair that already carries one.
+        [ -z "${STUB_DEP_ADD_FAIL:-}" ] || { echo "Error: dependency refused" >&2; exit 1; }
+        a="${2:-}"; b="${3:-}"; ty=""; shift 3 || true
+        while [ $# -gt 0 ]; do
+          case "$1" in --type=*) ty="${1#--type=}" ;; --type|-t) shift; ty="${1:-}" ;; esac
+          shift || true
+        done
+        printf '%s|%s|%s\n' "$a" "$b" "$ty" >> "$DEPS"; echo "dep added" ;;
       *)
         # `dep S --blocks D` is "D depends on S".
         src="${1:-}"; shift || true
@@ -260,6 +276,41 @@ RES=$("$SUT" "${WORK[@]}" --review-bead rv-1 2>/dev/null); RC=$?
 eq "$RES" "fix-1 $ROUTE filed" "a filed child is dispatched"
 eq "$(grep -c '^bd dep fix-1 --blocks anc-1' "$STUB_GC_LOG")" "1" "…once its edge is written"
 eq "$(grep -c '^bd dep list anc-1 ' "$STUB_GC_LOG")" "2" "…and read back after the write"
+
+echo "# --- the membership edge: born joined, or joined before the stamp ---"
+# A store marked joined reads an anchor's closed children through the child's
+# edge onto it (bd-lib.sh's anchor graph), so the edge stands before anchor_bead
+# lands on the child.
+reset
+RES=$("$SUT" "${WORK[@]}" --review-bead rv-1 2>/dev/null)
+eq "$RES" "fix-1 $ROUTE filed" "a filed child is dispatched"
+eq "$(grep -c '^fix-1|anc-1|related$' "$STUB_DEPS")" "1" "…joined to the anchor by a related edge"
+eq "$(grep -c '^bd create .* --deps related:anc-1' "$STUB_GC_LOG")" "1" "…that rides its create"
+eq "$(grep -c '^bd dep add fix-1 ' "$STUB_GC_LOG")" "0" "…so no separate join is written"
+UNJOINED='{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"source_ruling_bead":"vis-1"}}'
+reset "$UNJOINED"
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null)
+eq "$RES" "c1 $ROUTE adopted" "an adopted child that predates the edge is dispatched"
+eq "$(grep -c '^c1|anc-1|related$' "$STUB_DEPS")" "1" "…once it is joined to the anchor"
+JOIN_AT=$(grep -n '^bd dep add c1 anc-1 ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+STAMP_AT=$(grep -n '^bd update c1 ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$JOIN_AT" ] && [ -n "$STAMP_AT" ] && [ "$JOIN_AT" -lt "$STAMP_AT" ]; then
+  ok "…and the join lands before the work order stamps anchor_bead"
+else
+  bad "…and the join lands before the work order stamps anchor_bead (join at log line '${JOIN_AT:-none}', stamp at '${STAMP_AT:-none}')"
+fi
+reset "$UNJOINED"
+OUT=$(STUB_DEP_ADD_FAIL=1 "$SUT" "${WORK[@]}" --ruling-bead vis-1 2>&1); RC=$?
+eq "$RC" "2" "an adopted child bd will not join is refused"
+has "$OUT" "could not be joined to anchor anc-1" "…naming the anchor"
+eq "$(writes)" "0" "…and is neither stamped nor dispatched"
+eq "$(meta c1 anchor_bead)" "" "…so anchor_bead never lands on it"
+# bd keeps one edge per ordered pair, so a pair that already carries another
+# type refuses a related edge, and that edge is the child's membership edge.
+reset "$UNJOINED"
+printf 'c1|anc-1|tracks\n' > "$STUB_DEPS"
+RES=$(STUB_DEP_ADD_FAIL=1 "$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null)
+eq "$RES" "c1 $ROUTE adopted" "an adopted child already on the pair by another type counts as joined"
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account

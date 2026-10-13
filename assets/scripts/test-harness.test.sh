@@ -570,5 +570,85 @@ out=$(PATH="$PYT/tools"; tomllib_python); rc=$?
 eq "$rc" "1" "tomllib_python: with no Python at all, it returns 1"
 eq "$out" "tomllib needs Python 3.11 or newer, and PATH has no python3" "…and says there is none"
 
+# The dep stub's reads and writes, as real bd answers them: a row is the far-end
+# bead plus the edge's dependency_type; many ids read up answer bead rows and
+# many ids read down answer edge records; an id that does not resolve is an error
+# object at exit 1; a --file batch commits whole or not at all; and a create's
+# --deps rides the create, refusing it whole when a target does not resolve.
+store '[{"id":"tk-a","status":"open","metadata":{}},{"id":"tk-b","status":"open","metadata":{}},
+        {"id":"tk-c1","status":"open","metadata":{"anchor_bead":"tk-a"}},{"id":"tk-c2","status":"closed","metadata":{"anchor_bead":"tk-b"}}]'
+printf '%s\n' 'tk-c1|related|tk-a' 'tk-c2|related|tk-b' 'tk-c1|blocks|tk-a' > "$STUB_DEPS"
+out=$(gc bd dep list tk-a --direction=up --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | [.id, .dependency_type] ]')" '[["tk-c1","related"]]' "dep list up: the dependents, each with its edge's dependency_type"
+out=$(gc bd dep list tk-a --direction=down --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | [.id, .dependency_type] ]')" '[["tk-c1","blocks"]]' "dep list down: the dependencies, each with its type"
+out=$(gc bd dep list tk-a tk-b --direction=up --json)
+eq "$(printf '%s' "$out" | jq -c '[ .[] | .id ] | sort')" '["tk-c1","tk-c2"]' "dep list up, many ids: every id's dependents as bead rows"
+out=$(gc bd dep list tk-a tk-b --direction=down --json)
+eq "$(printf '%s' "$out" | jq -c '.[0] | keys')" '["depends_on_id","issue_id","type"]' "dep list down, many ids: edge records"
+out=$(gc bd dep list tk-gone --direction=up --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r 'type')" "1:object" "dep list: an id that does not resolve is an error object at exit 1"
+out=$(gc bd dep list tk-a tk-gone --direction=up --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r 'type')" "1:object" "…and with many ids the error is the whole answer"
+for knob in STUB_DEP_GARBAGE STUB_DEP_PARTIAL STUB_DEP_TRAILING; do
+  out=$(env "$knob=--direction=down" gc bd dep list tk-a --direction=up --json 2>/dev/null); rc=$?
+  eq "$rc:$(printf '%s' "$out" | jq -c '[ .[].id ]' 2>/dev/null)" '0:["tk-c1"]' "$knob=<text>: a dep read whose argv lacks the text answers normally"
+done
+out=$(STUB_DEP_GARBAGE="--direction=down" gc bd dep list tk-a --direction=down --json)
+eq "$out" "not-json" "STUB_DEP_GARBAGE=<text>: a matching read answers garbage"
+out=$(STUB_DEP_PARTIAL="--direction=down" gc bd dep list tk-a --direction=down --json 2>/dev/null); rc=$?
+eq "$out|$rc" "[]|1" "STUB_DEP_PARTIAL=<text>: a matching read prints [] and exits 1"
+out=$(STUB_DEP_TRAILING="--direction=down" gc bd dep list tk-a --direction=down --json 2>/dev/null)
+eq "$(printf '%s\n' "$out" | tail -1)" "gc bd dep: simulated trailing output" "STUB_DEP_TRAILING=<text>: a matching read carries the tail"
+printf '%s\n' '{"from":"tk-c2","to":"tk-a","type":"related"}' '{"from":"tk-c1","to":"tk-a","type":"tracks"}' \
+  | gc bd dep add --file - 2>/dev/null; rc=$?
+eq "$rc" "1" "dep add --file: a batch with a refused pair exits 1"
+eq "$(grep -c 'tk-c2|related|tk-a' "$STUB_DEPS")" "0" "…and writes none of its edges"
+printf '%s\n' '{"from":"tk-c2","to":"tk-a","type":"related"}' '{"from":"tk-c1","to":"tk-a","type":"related"}' \
+  | gc bd dep add --file -; rc=$?
+eq "$rc:$(grep -c 'tk-c2|related|tk-a' "$STUB_DEPS"):$(grep -c 'tk-c1|related|tk-a' "$STUB_DEPS")" "0:1:1" \
+  "dep add --file: a clean batch lands, a same-type pair staying one edge"
+nid=$(gc bd create "born joined" --deps "related:tk-a" --json | jq -r '.id')
+eq "$(grep -c "$nid|related|tk-a" "$STUB_DEPS")" "1" "create --deps related:X: the new bead depends on X by that edge"
+nid=$(gc bd create "gate" --deps "blocks:tk-a" --json | jq -r '.id')
+eq "$(grep -c "$nid|blocks|tk-a" "$STUB_DEPS")" "1" "create --deps blocks:X: the new bead blocks X"
+nid=$(gc bd create "waits" --deps "tk-b" --json | jq -r '.id')
+eq "$(grep -c "tk-b|blocks|$nid" "$STUB_DEPS")" "1" "create --deps X: the new bead is blocked by X"
+before=$(jq 'length' "$STUB_STORE")
+gc bd create "orphan" --deps "related:tk-gone" --json >/dev/null 2>&1; rc=$?
+eq "$rc:$(jq 'length' "$STUB_STORE")" "1:$before" "create --deps with a target that does not resolve is refused whole"
+# STUB_DEP_ADD_FAIL refuses a dep add whose source it names, alone or inside a
+# --file batch, which then writes none of its edges.
+out=$(STUB_DEP_ADD_FAIL=tk-b gc bd dep add tk-b tk-a --type related 2>&1); rc=$?
+eq "$rc" "1" "STUB_DEP_ADD_FAIL: a named source's dep add is refused"
+has "$out" "simulated refusal for tk-b" "…with a reason on stderr"
+eq "$(grep -c 'tk-b|related|tk-a' "$STUB_DEPS")" "0" "…and writes no edge"
+printf '%s\n' '{"from":"tk-c1","to":"tk-b","type":"related"}' '{"from":"tk-b","to":"tk-a","type":"related"}' \
+  | STUB_DEP_ADD_FAIL=tk-b gc bd dep add --file - 2>/dev/null; rc=$?
+eq "$rc:$(grep -c 'tk-c1|related|tk-b' "$STUB_DEPS")" "1:0" "STUB_DEP_ADD_FAIL: a --file batch naming the source is refused whole"
+
+# The kv store, as real bd answers it: get --json is {found, key, value}, at exit
+# 1 for an unset key; set and clear write one key=value line each; a --db pin is
+# accepted anywhere; STUB_KV_FAIL fails every kv call with no answer.
+out=$(gc bd kv get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '1:[false,""]' "kv get: an unset key answers found=false at exit 1"
+gc bd kv set some.key "a value"
+out=$(gc bd kv --db /x get some.key --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -c '[.found, .value]')" '0:[true,"a value"]' "kv set then get: found, with the value, through a --db pin"
+gc bd kv set some.key2 other
+gc bd kv set some.key replaced
+eq "$(grep -c '^some\.key=' "$STUB_KV"):$(gc bd kv get some.key --json | jq -r '.value')" "1:replaced" "kv set replaces the key's one line"
+gc bd kv clear some.key
+eq "$(gc bd kv get some.key --json | jq -r '.found'):$(gc bd kv get some.key2 --json | jq -r '.value')" "false:other" "kv clear drops only that key"
+out=$(STUB_KV_FAIL=1 gc bd kv get some.key2 --json 2>/dev/null); rc=$?
+eq "$rc:$out" "1:" "STUB_KV_FAIL: a kv call fails with no answer"
+out=$(gc bd show tk-gone --json); rc=$?
+eq "$rc:$out" "0:[]" "show of an id the store does not hold answers [] by default"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-gone --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.error')" "1:no issues found matching the provided IDs" \
+  "STUB_SHOW_NOT_FOUND_ERROR: it answers bd's error object at exit 1"
+out=$(STUB_SHOW_NOT_FOUND_ERROR=1 gc bd show tk-a --json); rc=$?
+eq "$rc:$(printf '%s' "$out" | jq -r '.[0].id')" "0:tk-a" "…and a held id still answers its row"
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
