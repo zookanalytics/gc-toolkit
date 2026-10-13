@@ -22,10 +22,10 @@
 #     never be written.
 #
 # The command runs under a wrapper that leads the job's process group. The
-# wrapper records its pid, then the command's exit code LAST, by rename, so a
-# reader never sees a result for a command still running. A wrapper ended by a
-# signal records which one in <dir>/cause, signals the rest of the job's group,
-# and writes no exit code.
+# wrapper records its start and its pid, then the command's exit code LAST, by
+# rename, so a reader never sees a result for a command still running. A
+# wrapper ended by a signal records which one in <dir>/cause, signals the rest
+# of the job's group, and writes no exit code.
 #
 # Usage:
 #   detached-job.sh start <dir> [--] <command> [args...]
@@ -67,6 +67,8 @@
 #      DETACHED_JOB_STOP_GRACE  seconds between TERM and KILL (default 10)
 #      DETACHED_JOB_DETACHER    perl or python3, to force one (default: the
 #                               first of them on PATH)
+#      DETACHED_JOB_PROC        where a process's stat file is read from
+#                               (default /proc)
 set -uo pipefail
 
 PROG=detached-job
@@ -108,10 +110,22 @@ read_num() {
   printf '%s' "$v"
 }
 
-# A process's start time, blanks collapsed. A pid the kernel reused belongs to
-# a process that started later, so this is what tells our wrapper from it.
-lstart_of() {
-  ps -o lstart= -p "$1" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//'
+# A process's start, in a form that stays the same for as long as the process
+# runs. Where /proc/<pid>/stat exists, that is its starttime field (field 22,
+# clock ticks after boot), read after the last ") " because the command name
+# before it can hold spaces and parentheses. Elsewhere it is ps's start time
+# rendered in the C locale and UTC. Linux renders ps's start time from the wall
+# clock, so a clock step moves it, and the caller's TZ and LANG change its text.
+# A pid the kernel reused belongs to a process that started later, so this is
+# what tells our wrapper from it. The wrapper records its own start with this
+# function, which start writes into run.sh, so the record and the check take the
+# same form. It is POSIX sh, because the wrapper runs under sh.
+start_id() {
+  if [ -r "${DETACHED_JOB_PROC:-/proc}/$1/stat" ]; then
+    sed -n 's/^.*) //p' "${DETACHED_JOB_PROC:-/proc}/$1/stat" 2>/dev/null | cut -d' ' -f20
+  else
+    LC_ALL=C TZ=UTC ps -o lstart= -p "$1" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//'
+  fi
 }
 
 # The wrapper is alive: its pid answers, is not a zombie, and started when the
@@ -123,9 +137,9 @@ alive() {
   stat=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
   case "$stat" in Z*) return 1 ;; esac
   want=""
-  [ -f "$DIR/lstart" ] && want=$(tr -s '[:space:]' ' ' < "$DIR/lstart" | sed 's/^ //;s/ $//')
+  [ -f "$DIR/start_id" ] && want=$(cat "$DIR/start_id" 2>/dev/null)
   if [ -n "$want" ]; then
-    got=$(lstart_of "$pid")
+    got=$(start_id "$pid")
     [ -z "$got" ] || [ "$got" = "$want" ] || return 1
   fi
   return 0
@@ -259,18 +273,22 @@ os.execvp(sys.argv[1], sys.argv[1:])') ;;
 
   # Clear the previous job's record: only the files this script writes.
   rm -rf "$DIR/claim"
-  rm -f "$DIR/pid" "$DIR/pid.tmp" "$DIR/lstart" "$DIR/rc" "$DIR/rc.tmp" \
+  rm -f "$DIR/pid" "$DIR/pid.tmp" "$DIR/start_id" "$DIR/rc" "$DIR/rc.tmp" \
     "$DIR/cause" "$DIR/cause.tmp" "$DIR/stopped_by" "$DIR/finished_at" \
     "$DIR/started_at" "$DIR/cancelled" "$DIR/command" "$DIR/run.sh" "$DIR/log"
 
   # The wrapper and start race for one atomic mkdir of <dir>/claim. The wrapper
   # that wins runs the command; a start that wins cancels a launch it gave up
   # on, so a wrapper that wakes late can never run a job start reported failed.
-  cat > "$DIR/run.sh" <<'WRAPPER'
+  # The wrapper records its start before its pid, so a reader that finds the
+  # pid finds the start beside it.
+  {
+    declare -f start_id
+    cat <<'WRAPPER'
 dir=$1
 shift
 mkdir "$dir/claim" 2>/dev/null || exit 0
-ps -o lstart= -p $$ > "$dir/lstart" 2>/dev/null
+start_id $$ > "$dir/start_id"
 printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
 _died() {
   trap '' HUP INT TERM
@@ -288,6 +306,7 @@ rc=$?
 date +%s > "$dir/finished_at"
 printf '%s\n' "$rc" > "$dir/rc.tmp" && mv -f "$dir/rc.tmp" "$dir/rc"
 WRAPPER
+  } > "$DIR/run.sh"
   printf '%q ' "$@" > "$DIR/command"
   printf '\n' >> "$DIR/command"
   now > "$DIR/started_at"

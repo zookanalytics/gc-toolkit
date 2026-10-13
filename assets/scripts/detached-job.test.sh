@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # detached-job.test.sh — the detached runner a long gate goes through. Proves
-# the two properties the refinery's run-tests step rests on: start puts the
-# command in a session of its own and reports a launch that did not happen,
-# and every wait ends — on the command's exit code, on a wrapper that died
-# without one, on --max, or on --limit — so no caller is ever left waiting on
-# a result that cannot arrive. Real processes, no stubs except the detacher
+# the properties the refinery's run-tests step rests on: start puts the command
+# in a session of its own and reports a launch that did not happen; every wait
+# ends — on the command's exit code, on a wrapper that died without one, on
+# --max, or on --limit — so no caller is ever left waiting on a result that
+# cannot arrive; and a running job is told from another process by a start that
+# no caller's TZ or locale changes. Real processes, no stubs except the detacher
 # fakes the launch-failure cases need.
 set -uo pipefail
 
@@ -134,6 +135,46 @@ eq "$(field "$OUT" state)" exceeded "it reports state=exceeded"
 group_gone "$PID" && ok "the job past its limit is killed" || bad "the job past its limit is killed" "group $PID survived"
 OUT=$("$JOB" status "$TMP/e")
 eq "$(field "$OUT" cause)" limit:2s "status afterwards names the limit"
+
+echo "── a caller in another TZ or locale still reads the job as running ──"
+TZ=UTC LANG=C "$JOB" start "$TMP/l" -- sleep 46 >/dev/null
+PID=$(cat "$TMP/l/pid")
+# Control: the two zones render this process's start differently, so a record
+# kept as the starting caller's text would read the running job as gone below.
+[ "$(TZ=UTC ps -o lstart= -p "$PID")" != "$(TZ=XYZ-13:45 ps -o lstart= -p "$PID")" ] \
+  && ok "control: another TZ renders the start time differently" \
+  || bad "control: another TZ renders the start time differently" "the same text in both zones"
+OUT=$(TZ=XYZ-13:45 LANG=fr_FR.UTF-8 "$JOB" status "$TMP/l" 2>/dev/null); RC=$?
+eq "$RC/$(field "$OUT" state)" 3/running "status from another TZ and locale reads the job as running"
+OUT=$(TZ=XYZ-13:45 LANG=fr_FR.UTF-8 "$JOB" stop "$TMP/l" 2>/dev/null); RC=$?
+eq "$RC/$(field "$OUT" state)" 0/stopped "stop from another TZ and locale stops it"
+group_gone "$PID" && ok "its whole group is gone" || bad "its whole group is gone" "group $PID survived"
+
+echo "── a pid held by a process other than the job's wrapper reads as gone ──"
+sleep 48 &
+OTHER=$!
+sleep 1
+"$JOB" start "$TMP/m" -- sleep 49 >/dev/null
+PID=$(cat "$TMP/m/pid")
+# As if the kernel had handed the wrapper's pid to a process that started at
+# another time.
+printf '%s\n' "$OTHER" > "$TMP/m/pid"
+OUT=$("$JOB" status "$TMP/m"); RC=$?
+eq "$RC/$(field "$OUT" state)" 1/died "status reads the job as gone"
+"$JOB" stop "$TMP/m" >/dev/null
+kill -0 "$OTHER" 2>/dev/null && ok "stop leaves the other process alone" || bad "stop leaves the other process alone" "pid $OTHER is gone"
+kill "$OTHER" 2>/dev/null
+printf '%s\n' "$PID" > "$TMP/m/pid"
+"$JOB" stop "$TMP/m" >/dev/null
+
+echo "── where /proc exists, the start is the stat file's starttime field ──"
+mkdir -p "$TMP/proc/4242"
+printf '%s\n' '4242 (a) b (c) d) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1234567 89 18446744073709551615' \
+  > "$TMP/proc/4242/stat"
+sed -n '/^start_id() {$/,/^}$/p' "$JOB" > "$TMP/start_id.sh"
+[ -s "$TMP/start_id.sh" ] && ok "start_id extracted" || bad "start_id extracted" "no definition in $JOB"
+eq "$(. "$TMP/start_id.sh"; DETACHED_JOB_PROC="$TMP/proc" start_id 4242)" 987654 \
+  "field 22, read past a command name that holds spaces and parentheses"
 
 echo "── extra descriptors are not inherited, so a caller's pipe is not held open ──"
 T0=$(date +%s)
