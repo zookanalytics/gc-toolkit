@@ -36,9 +36,10 @@
 # file where the remote has a directory, or a nested repository where the remote
 # has a path, while an untracked copy of a file the remote adds, inside an
 # untracked directory, goes and the checkout heals; (p) the reset refuses rather
-# than deletes untracked content the guard's listing misses, including a name
-# only case separates from the remote's on a file system that ignores case;
-# (q) the set-aside never touches a file behind an untracked symlink, and leaves
+# than deletes or overwrites untracked content the guard's listing misses,
+# including a name only case separates from the remote's on a file system that
+# ignores case, and the escalation carries each error git gave with the paths
+# git named; (q) the set-aside never touches a file behind an untracked symlink, and leaves
 # an untracked file in a directory the fast-forward deletes where it is; (r) an
 # ignored file counts as untracked content in the way: the fast-forward and the
 # set-aside's retry refuse rather than overwrite one, the set-aside escalates
@@ -649,12 +650,14 @@ eq "$(git -C "$TMP/psi" status --porcelain)" "?? docs/notes" "the copied path is
 eq "$(esc_count psi)" "0" "an untracked copy of a file the remote adds is not escalated"
 
 # omega: the guard's untracked listing comes back empty, so it sees nothing in
-# the way of the remote's file new. The reset's git checkout checks the working
-# tree itself and refuses rather than delete the directory new/. A git shim on
-# PATH empties `git ls-files` and passes every other subcommand to real git.
+# the way of the remote's files new and two.txt. The reset's git checkout checks
+# the working tree itself and refuses rather than delete the directory new/ or
+# overwrite the untracked two.txt. git gives a separate error for each, and the
+# escalation carries both with the paths they name. A git shim on PATH empties
+# `git ls-files` and passes every other subcommand to real git.
 churned_rig omega
-echo theirs > "$TMP/omega.src/new"; push_churn omega
-mkdir "$TMP/omega/new"; echo mine > "$TMP/omega/new/keep"
+echo theirs > "$TMP/omega.src/new"; echo theirs > "$TMP/omega.src/two.txt"; push_churn omega
+mkdir "$TMP/omega/new"; echo mine > "$TMP/omega/new/keep"; echo mine > "$TMP/omega/two.txt"
 OMEGA_LOCAL="$(git -C "$TMP/omega" rev-parse HEAD)"
 rigs_json omega
 : > "$TMP/escalations"
@@ -668,9 +671,18 @@ rm -f "$TMP/bin/git"
 eq "$(cat "$TMP/omega/new/keep" 2>/dev/null)" "mine" "untracked content the guard's listing misses is not deleted by the reset"
 eq "$(git -C "$TMP/omega" rev-parse HEAD)" "$OMEGA_LOCAL" "a reset git refuses leaves the checkout where it was"
 eq "$(esc_count omega)" "1" "a reset git refuses escalates"
+eq "$(cat "$TMP/omega/two.txt" 2>/dev/null)" "mine" "an untracked file the guard's listing misses is not overwritten by the reset"
 body_has omega '^git checkout --no-overwrite-ignore --no-track -B main origin/main refused: ' \
   && ok "the escalation says git refused the reset" \
   || bad "the escalation says git refused the reset (got '$(body_for omega)')"
+body_has omega 'error: Updating the following directories would lose untracked files in them:$' \
+  && body_has omega 'error: The following untracked working tree files would be overwritten by checkout:$' \
+  && body_has omega '^  new$' && body_has omega '^  two\.txt$' \
+  && ok "the escalation carries each error git refused the reset with, and each path it named" \
+  || bad "the escalation carries each error git refused the reset with, and each path it named (got '$(body_for omega)')"
+body_has omega '^(Please |Aborting$)' \
+  && bad "the escalation leaves out git's advice on switching branches (got '$(body_for omega)')" \
+  || ok "the escalation leaves out git's advice on switching branches"
 
 # casefold: an untracked Readme where the remote adds README. On a file system
 # that ignores case they are one file, which the guard's listing does not

@@ -84,9 +84,10 @@
 # ignored file. It also refuses rather than discards a staged change on a path
 # it moves, and keeps one on a path it does not. An untracked collision the
 # checks above cannot see, such as a name that differs only in case on a file
-# system that ignores case, therefore escalates instead of losing content, and
-# the report names what the heal had staged and removed. Every other untracked
-# file stays, and the divergence bead closes.
+# system that ignores case, therefore escalates instead of losing content. The
+# report carries each error git gave, with the paths git named, and what the
+# heal had staged and removed. Every other untracked file stays, and the
+# divergence bead closes.
 #
 # When the reset heal stops, its escalation names what stopped it, a line for
 # each finding. It also names what the heal would have staged or removed itself,
@@ -400,8 +401,9 @@ set_aside_and_advance() {
 # that does not hold leaves the checkout untouched, and the report has a line for
 # each thing the checks found against the reset. upstream_report then names what
 # the heal would have staged or removed before resetting, which a reset by hand
-# must clear too. When git refuses the reset itself, blocking_report says so and
-# names what the heal had already staged and removed.
+# must clear too. When git refuses the reset itself, blocking_report says so,
+# carries each error git gave with the paths git named, and names what the heal
+# had already staged and removed.
 reset_and_advance() {
     local path="$1" remote="$2" branch="$3"
     local cherry_out merges status_out in_way_out changed kind p line err acted=""
@@ -481,7 +483,10 @@ reset_and_advance() {
     # its status, so a failing hook would report a refusal after the branch had
     # moved. --no-track leaves the branch's upstream config as it is.
     if ! err=$(git -c core.hooksPath=/dev/null -C "$path" checkout -q --no-overwrite-ignore --no-track -B "$branch" "$remote" 2>&1); then
-        blocking_report="git checkout --no-overwrite-ignore --no-track -B $branch $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
+        # git gives an error for each kind of blocker and names each path under
+        # its error on a tab-indented line. Its advice lines are about switching
+        # branches, so the report leaves them out.
+        blocking_report="git checkout --no-overwrite-ignore --no-track -B $branch $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | awk '/^(Please |Aborting$|hint: )/ || NF == 0 { next } { sub(/^\t/, "  "); print }')"
         return 1
     fi
 }
