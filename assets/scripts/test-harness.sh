@@ -150,10 +150,12 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, and review-dismissal.sh, what a
-  # dismissal retires, are sourced by sibling path the same way.
+  # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
+  # retires, and hold-lib.sh, the one definition of a hold, which
+  # deferred-dispatch.sh sources, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
+  [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
   return 0
 }
 

@@ -2,31 +2,39 @@
 # doctor/check-armed-dispatch-owed — an owed deferred dispatch is firing or
 # surfaced. A bead armed with gc.dispatch_when_ready is slung by the
 # deferred-dispatch reconcile order (orders/deferred-dispatch.toml, a 5m cooldown)
-# once bd would let it dispatch. `arm` refuses a non-open bead and reconcile
-# retires a closed or already-delivered one, so a healthy arm is short-lived:
-# it waits on its own `blocks` blockers, then dispatches within a cadence of
-# the last one closing.
+# once nothing holds it. `arm` refuses a non-open bead and reconcile retires a
+# closed or already-delivered one, so a healthy arm is short-lived: it waits
+# while something holds it, then dispatches within a cadence of being armed or
+# of the last hold releasing, whichever is later.
 #
 # Two ways a dispatch stops firing SILENTLY, neither caught elsewhere:
-#   * OWED-BUT-NOT-FIRING — the bead is open, its own `blocks` edges have all
-#     closed, and it is not mid-dispatch, yet it has stayed armed well past the
-#     reconcile cadence. Either the order is not running (check-cadence-live/I10
-#     is the direct cause there, but a single owed arm makes the effect concrete)
-#     or the dispatch is stuck. The is_blocked flag cascades DOWN parent-child
-#     edges, so an armed epic child whose own blockers have closed is held out of
-#     `bd list --ready` by its container's hold and appears in `bd blocked` under
-#     the ANCESTOR's id, not its own — which is why check-blocked-work-armed
-#     (unarmed blocked work, keyed on the bead's own blocked state) cannot see it.
+#   * OWED-BUT-NOT-FIRING — the bead is open, nothing holds it, and it is not
+#     mid-dispatch, yet it has stayed armed well past the reconcile cadence.
+#     Either the order is not running (check-cadence-live/I10 is the direct cause
+#     there, but a single owed arm makes the effect concrete) or the dispatch is
+#     stuck. A hold is the one reconcile slings on, assets/scripts/hold-lib.sh's:
+#     an open `blocks` blocker on the bead or on a parent-child ancestor, a
+#     demand gate on an ancestor aside. So an arm a park holds, by an edge of its
+#     own or its epic's, is not owed: a park leaves the arm intact and its status
+#     open, and the arm fires when the park releases. A bead in flight (a branch,
+#     a merge_result or a rejection_reason) is held by its own blockers alone, so
+#     its arm is owed under a parked epic, where reconcile slings it.
+#     check-blocked-work-armed asks blocked work for a dispatch path and nothing
+#     more, and an arm is one, so an arm that never fires is this check's to see.
+#     `bd blocked` lists a bead its parent's hold reaches under the bead's own
+#     id, naming the parent as its blocker, and that check skips it for the arm
+#     alone.
 #   * STRANDED — the bead is armed at a non-open status, which `bd list --ready`
 #     never answers, so no blocker closing will ever dispatch it (a bead armed
-#     while open, then held). reconcile prints this to its own log every pass, but
-#     nothing surfaces it to a person.
+#     while open, then set to another status). reconcile prints this to its own
+#     log every pass, but nothing surfaces it to a person. A hold does not excuse
+#     it: releasing the hold would not dispatch it either.
 #
 # A capped arm (gc.dispatch_when_ready_fail_count at its cap) is NOT flagged: the
 # reconcile pass already escalates it, so it is not silent.
 #
 # The remedy the finding names is a look at `deferred-dispatch.sh list` (which
-# marks each arm waiting / dispatchable / stranded) and, if the dispatch is no
+# marks each arm held / dispatchable / stranded) and, if the dispatch is no
 # longer wanted, `deferred-dispatch.sh disarm`.
 #
 # Read-only. Exit 0=OK 1=Warning. stdout: first line = message, then
@@ -43,6 +51,14 @@ set -u
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/order-cadence.sh" || {
     echo "cannot determine whether owed deferred dispatches are firing"
     printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so the window an owed arm is judged by cannot be computed."
+    exit 1
+}
+# The one definition of a hold, which reconcile also reads. Unsourceable, a held
+# arm cannot be told from an owed one, so the check warns.
+# shellcheck source=../../assets/scripts/hold-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/hold-lib.sh" || {
+    echo "cannot determine whether owed deferred dispatches are firing"
+    printf '  - %s\n' "assets/scripts/hold-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
     exit 1
 }
 
@@ -124,11 +140,15 @@ else
 fi
 OWED_WINDOW_SECONDS=$(cadence_window "${dd_secs:-0}" "$owed_floor")
 
-# Captured stderr from the batch dependency read below. bd drops an id it cannot
-# resolve with a "(skipped)" warning on this stream and rc=0, so the file's
-# contents are how we tell a complete read from one that missed a candidate.
-dep_stderr=$(mktemp "${TMPDIR:-/tmp}/gctk-armed-dispatch-deperr.XXXXXX" 2>/dev/null) || dep_stderr="${TMPDIR:-/tmp}/gctk-armed-dispatch-deperr.$$"
-trap 'rm -f "$dep_stderr"' EXIT
+# The hold walk's seed and graph, rewritten for each store.
+hold_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-armed-dispatch-hold.XXXXXX" 2>/dev/null) \
+    || { hold_dir="${TMPDIR:-/tmp}/gctk-armed-dispatch-hold.$$"; mkdir -p "$hold_dir"; }
+trap 'rm -rf "$hold_dir"' EXIT
+# The hold walk's reader (hold-lib.sh): the named beads in the store being
+# scanned, at every status and of every class a listing hides by default, since
+# a blocker can be a gate and an ancestor can be closed.
+hold_db=""
+hold_read() { run_bounded gc bd list --db "$hold_db" --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null; }
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
@@ -162,8 +182,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # already escalated it), assigned (reconcile will not sling over a holder) —
     # need no further read. deferred-dispatch.sh's `list` classifies CAPPED ahead
     # of stranded and dispatchable, so the cap test precedes the status test here
-    # too. Only an open, unassigned, live arm is a CANDIDATE whose own blockers
-    # decide whether a dispatch is owed.
+    # too. Only an open, unassigned, live arm is a CANDIDATE whose blockers, on
+    # it and on its ancestors, decide whether a dispatch is owed.
     classified=$(printf '%s' "$raw" | scrub | jq -r \
         --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" \
         --argjson cap "$MAX_SLING_FAILURES" '
@@ -189,129 +209,71 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     [ -n "$classified" ] || continue
 
-    # A stranded arm is a finding now; a candidate is collected for the bulk dep
-    # read below, keeping its armed_at as the fallback owed-since.
+    # A stranded arm is a finding now; a candidate is collected for the hold walk
+    # below, keeping its armed_at, the earliest its dispatch can be owed.
     cand_ids=(); armed_at_of=()
     while IFS=$'\t' read -r kind cid f3; do
         [ -n "$cid" ] || continue
         case "$kind" in
             stranded)   # f3 is the stranding status
-                findings+=("$label bead $cid: armed for dispatch at status=$f3, which \`bd list --ready\` never answers — no blocker closing can dispatch it. Clear the hold or disarm: deferred-dispatch.sh disarm $cid") ;;
-            candidate)  # f3 is armed_at, the fallback owed-since
+                findings+=("$label bead $cid: armed for dispatch at status=$f3, which \`bd list --ready\` never answers — no blocker closing can dispatch it. Return it to open, or disarm: deferred-dispatch.sh disarm $cid") ;;
+            candidate)  # f3 is armed_at
                 cand_ids+=("$cid"); armed_at_of["$cid"]="$f3" ;;
         esac
     done <<< "$classified"
     [ "${#cand_ids[@]}" -gt 0 ] || continue
 
-    # ONE dependency read for the whole candidate set. `bd dep list` takes many
-    # ids in a single call, so the store costs one query instead of one per
-    # candidate — the per-bead call summed past the doctor budget at scale. The
-    # default `down` direction makes each edge candidate blocked-by blocker; the
-    # extraction below reads that off whichever shape bd returns for the id count.
-    edges_raw=$(run_bounded gc bd dep list "${cand_ids[@]}" --db "$rig_path/.beads" --json 2>"$dep_stderr"); erc=$?
-    if [ "$erc" -ne 0 ] || ! printf '%s' "$edges_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        warnings+=("$label: could not batch-read dependency edges for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$erc) — this store was NOT checked")
-        continue
-    fi
-    # bd resolves each requested id independently: one it cannot find is DROPPED
-    # from the array with rc=0 and a per-id "(skipped)" warning on stderr — it
-    # does not poison the batch. A dropped candidate would reach the join below
-    # with no edges, indistinguishable from a candidate that genuinely has no
-    # blockers, so an old armed_at would read as a firm owed finding instead of
-    # "NOT checked". A read that resolves every requested id is silent (under
-    # --db there is no rig-resolution preface), so any stderr means at least one
-    # candidate's blockers went unread and the edge set is incomplete — degrade
-    # the whole store to not-checked, as the sibling read failures above do.
-    if [ -s "$dep_stderr" ]; then
-        warnings+=("$label: batch dependency read did not resolve every one of ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (\`bd dep list\` warned: $(tr '[:cntrl:]' ' ' < "$dep_stderr")) — this store was NOT checked")
-        continue
-    fi
-    # `bd dep list` returns one of two shapes, and the join below reads only the
-    # first: two or more ids give a flat edge array ({issue_id, depends_on_id,
-    # type}), a lone id gives the annotated dependency beads instead ({id,
-    # dependency_type}, the subject implicit). A store with a single candidate —
-    # the common case — hits the single-id shape, so both are normalized to
-    # {issue_id, depends_on_id} here. Reading the single-id beads with the flat
-    # selector drops every edge, and a candidate still waiting on an open blocker
-    # then reads as zero-blocker and owed — the same false finding the stderr
-    # guard above prevents for a dropped id. A non-empty result in neither shape
-    # is an unread probe: fail closed like the sibling reads.
-    edges_scrubbed=$(printf '%s' "$edges_raw" | scrub)
-    shape=$(printf '%s' "$edges_scrubbed" | jq -r '
-        if   length == 0                      then "empty"
-        elif all(.[]; has("issue_id"))        then "flat"
-        elif all(.[]; has("dependency_type")) then "beads"
-        else                                       "unknown" end' 2>/dev/null)
-    case "$shape" in
-        empty|flat) edges=$(printf '%s' "$edges_scrubbed" | jq -c '[ .[]? | select(.type == "blocks") | {issue_id, depends_on_id} ]' 2>/dev/null) ;;
-        beads)      edges=$(printf '%s' "$edges_scrubbed" | jq -c --arg only "${cand_ids[0]}" '[ .[]? | select(.dependency_type == "blocks") | {issue_id: $only, depends_on_id: .id} ]' 2>/dev/null) ;;
-        *)          warnings+=("$label: could not recognize the \`bd dep list\` output shape for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — this store was NOT checked"); continue ;;
-    esac
-    [ -n "$edges" ] || edges='[]'
-
-    # Resolve the blockers' statuses in one more listing: every distinct blocker
-    # id, read with --all so closed blockers (the dispatch-releasing ones) are
-    # included and --brief to drop free-form text the join does not read. A blocks
-    # edge can name a blocker of ANY type, and a gate/infra/template blocker is
-    # common (a graduation gate blocking a convoy child, for one); bd list hides
-    # those classes unless asked, and a hidden blocker would drop from the result
-    # and read as unresolved, so all three include flags are passed. --id silently
-    # drops an id with no row, so a blocker still absent from the result is treated
-    # as unresolved below (its candidate is NOT checked), never as closed — an
-    # unread blocker must not read as a released one.
-    blocker_ids=$(printf '%s' "$edges" | jq -r '[ .[].depends_on_id ] | unique | join(",")' 2>/dev/null)
-    blockers='[]'
-    if [ -n "$blocker_ids" ]; then
-        blk_raw=$(run_bounded gc bd list --db "$rig_path/.beads" --id "$blocker_ids" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null); brc=$?
-        if [ "$brc" -ne 0 ] || ! printf '%s' "$blk_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            warnings+=("$label: could not read blocker statuses for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads (rc=$brc) — this store was NOT checked")
-            continue
-        fi
-        blockers=$(printf '%s' "$blk_raw" | scrub | jq -c '[ .[]? | {id, status, closed_at: (.closed_at // "")} ]' 2>/dev/null)
-        [ -n "$blockers" ] || blockers='[]'
-    fi
-
-    # Join per candidate: count its still-open blockers, and take the latest
-    # blocker close (ISO-8601 UTC sorts chronologically) as the owed-since. jq
-    # does the set join; the age arithmetic below stays in bash, so the dual
-    # GNU/BSD date parse and the "unparseable timestamp -> skip" fallback are
-    # unchanged from the per-bead version. jq emits one line per candidate, so an
-    # empty result with candidates present is a jq failure — fail closed.
+    # A candidate is owed only when nothing holds it, by the predicate reconcile
+    # slings on, and that predicate answers for the candidate's own blockers as
+    # well as its ancestors'. The walk takes each candidate's own edges from its
+    # row in this listing, then reads the ancestors a generation at a time and
+    # every blocker once, so the store costs those few reads however many
+    # candidates it holds. A candidate held by a blocker the walk read is not
+    # owed. One whose only holds could not be read is NOT checked: an unread hold
+    # is no released one, and no owed dispatch either.
+    hold_db="$rig_path/.beads"
     cand_json=$(printf '%s\n' "${cand_ids[@]}" | jq -R . | jq -sc .)
-    joined=$(jq -rn --argjson edges "$edges" --argjson blockers "$blockers" --argjson cands "$cand_json" '
-        ($blockers | map({key: .id, value: .}) | from_entries) as $bmap
-        | $cands[] | . as $cid
-        | [ $edges[] | select(.issue_id == $cid) | .depends_on_id ] as $blks
-        | [ $blks[] | select($bmap[.] == null) ] as $missing
-        | if ($missing | length) > 0 then "unchecked\t\($cid)\t\($missing | join(" "))"
-          else
-            ([ $blks[] | select($bmap[.].status != "closed") ] | length) as $open_blk
-            | ([ $blks[] | $bmap[.].closed_at | select(. != "") ] | max) as $latest
-            | "ready\t\($cid)\t\($open_blk)\t\($latest // "")"
-          end' 2>/dev/null)
-    if [ -z "$joined" ]; then
-        warnings+=("$label: could not evaluate blocker join for ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — this store was NOT checked")
+    # The rows join on the unit separator, not a tab: `read` folds a run of tabs
+    # into one, so an empty release time would hand the unread ids its field.
+    hold_rows=""
+    if printf '%s' "$raw" | scrub | jq -c --argjson c "$cand_json" '[ .[]? | select(.id as $i | $c | index($i)) ]' > "$hold_dir/seed.json" 2>/dev/null \
+       && hold_graph hold_read "$hold_dir/seed.json" "$hold_dir/graph.json"; then
+        hold_rows=$(jq -r --slurpfile g "$hold_dir/graph.json" "$HOLD_JQ"'
+            .[] | hold_holds($g[0]) as $h
+            | [ (.id | tostring),
+                (if any($h[]; .unread | not) then "held" elif ($h | length) > 0 then "unread" else "free" end),
+                (hold_released_at($g[0]) // ""),
+                ([ $h[] | select(.unread) | .by ] | join(" ")) ]
+            | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")' "$hold_dir/seed.json" 2>/dev/null)
+    fi
+    if [ -z "$hold_rows" ]; then
+        warnings+=("$label: could not read what holds ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — they were NOT checked")
         continue
     fi
 
-    while IFS=$'\t' read -r kind cid f3 f4; do
+    while IFS=$'\037' read -r cid hold released unread_ids; do
         [ -n "$cid" ] || continue
-        if [ "$kind" = "unchecked" ]; then            # f3 lists the unreadable blocker ids
-            warnings+=("$label bead $cid: could not resolve its blocker(s) [$f3] in $rig_path/.beads — NOT checked")
-            continue
+        case "$hold" in
+            held) continue ;;                         # a park or a prerequisite holds it: not owed
+            unread) warnings+=("$label bead $cid: could not read [$unread_ids], which may hold it, in $rig_path/.beads — NOT checked"); continue ;;
+        esac
+        # Owed since the later of when it was armed and when the last hold on it
+        # released (hold_released_at), so a hold that released before the arm
+        # was recorded does not age it. An arm whose armed_at does not parse is
+        # judged from the release alone.
+        since_epoch=$(iso_to_epoch "${armed_at_of[$cid]}")
+        released_epoch=$(iso_to_epoch "$released")
+        if [ -n "$released_epoch" ] && { [ -z "$since_epoch" ] || [ "$released_epoch" -gt "$since_epoch" ]; }; then
+            since_epoch="$released_epoch"
         fi
-        # kind == ready: f3 = still-open blocker count, f4 = latest blocker close
-        [ "$f3" -eq 0 ] || continue                   # still waiting on its own open blocker: correct
-        since="$f4"; [ -n "$since" ] || since="${armed_at_of[$cid]}"
-        since_epoch=$(iso_to_epoch "$since")
         # Cannot bound the age: skip rather than cry wolf — the next sweep sees a
         # readable timestamp, and a real stall persists to be caught then.
         [ -n "$since_epoch" ] || continue
         age=$(( now - since_epoch ))
         if [ "$age" -ge "$OWED_WINDOW_SECONDS" ]; then
-            findings+=("$label bead $cid: armed and its own \`blocks\` edges have all been closed for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch reconcile order slings a ready arm on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid")
+            findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch reconcile order slings an arm nothing holds on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid")
         fi
-    done <<< "$joined"
+    done <<< "$hold_rows"
 done <<< "$scopes"
 
 if budget_spent; then
@@ -329,6 +291,6 @@ if [ "${#findings[@]}" -ne 0 ] || [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every armed deferred dispatch is waiting on its own blocker, mid-dispatch, or firing within cadence"
+echo "OK: every armed deferred dispatch is held by a blocker, mid-dispatch, or firing within cadence"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
