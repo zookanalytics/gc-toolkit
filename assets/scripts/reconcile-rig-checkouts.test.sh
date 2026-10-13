@@ -39,7 +39,14 @@
 # than deletes untracked content the guard's listing misses, including a name
 # only case separates from the remote's on a file system that ignores case;
 # (q) the set-aside never touches a file behind an untracked symlink, and leaves
-# an untracked file in a directory the fast-forward deletes where it is.
+# an untracked file in a directory the fast-forward deletes where it is; (r) an
+# ignored file counts as untracked content in the way: the fast-forward and the
+# set-aside's retry refuse rather than overwrite one, the set-aside escalates
+# one untouched and names it as ignored, an ignored copy of the incoming bytes
+# goes and the checkout advances, the reset heal refuses one before touching
+# anything and removes an ignored copy, and the reset refuses rather than
+# overwrites one the guard's listing misses, including a name only case
+# separates from the remote's on a file system that ignores case.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +68,8 @@ commit() { echo "$2" > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm "$
 open_count() { awk -F'|' -v k="$1" '$2==k && $3=="open"' "$TMP/ledger" 2>/dev/null | wc -l | tr -d ' '; }
 # id of the OPEN reconcile bead for a rig key (empty if none).
 bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/ledger" 2>/dev/null; }
+# description of the OPEN reconcile bead for a rig key (empty if none).
+body_for()   { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger.$id.body" 2>/dev/null; }
 # escalate.sh calls recorded for a rig key, and the subject/pool of the first/last.
 esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
 esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
@@ -107,10 +116,16 @@ case "$1" in
         [ -n "$id" ] && printf '[{"id":"%s"}]\n' "$id" || printf '[]\n' ;;
       create)
         n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"
-        printf '%s||open\n' "$id" >> "$FAKE_LEDGER"; printf '{"id":"%s"}\n' "$id" ;;
+        printf '%s||open\n' "$id" >> "$FAKE_LEDGER"
+        while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
+        printf '{"id":"%s"}\n' "$id" ;;
       update)
         id="$1"; shift; key=""
-        while [ $# -gt 0 ]; do [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"; shift; done
+        while [ $# -gt 0 ]; do
+          [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
+          [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
+          shift
+        done
         [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
       close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
@@ -590,9 +605,9 @@ eq "$(git -C "$TMP/psi" status --porcelain)" "?? docs/notes" "the copied path is
 eq "$(esc_count psi)" "0" "an untracked copy of a file the remote adds is not escalated"
 
 # omega: the guard's untracked listing comes back empty, so it sees nothing in
-# the way of the remote's file new. git reset --keep checks the working tree
-# itself and refuses rather than delete the directory new/. A git shim on PATH
-# empties `git ls-files` and passes every other subcommand to real git.
+# the way of the remote's file new. The reset's git checkout checks the working
+# tree itself and refuses rather than delete the directory new/. A git shim on
+# PATH empties `git ls-files` and passes every other subcommand to real git.
 churned_rig omega
 echo theirs > "$TMP/omega.src/new"; push_churn omega
 mkdir "$TMP/omega/new"; echo mine > "$TMP/omega/new/keep"
@@ -612,9 +627,9 @@ eq "$(esc_count omega)" "1" "a reset git refuses escalates"
 
 # casefold: an untracked Readme where the remote adds README. On a file system
 # that ignores case they are one file, which the guard's listing does not
-# match, and git reset --keep refuses rather than overwrite it; where case
-# matters they are two files and the reset heals. Either way Readme keeps its
-# bytes.
+# match, and the reset's git checkout refuses rather than overwrite it; where
+# case matters they are two files and the reset heals. Either way Readme keeps
+# its bytes.
 churned_rig casefold
 echo theirs > "$TMP/casefold.src/README"; push_churn casefold
 echo mine > "$TMP/casefold/Readme"
@@ -790,6 +805,155 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/gone" rev-parse HEAD)" "$GONE_REMOTE" "an untracked file in a directory the fast-forward deletes does not block the set-aside"
 eq "$(cat "$TMP/gone/gone/u" 2>/dev/null)" "mine" "the untracked file in the deleted directory stays"
 eq "$(esc_count gone)" "0" "an untracked file in a directory the fast-forward deletes is not escalated"
+
+# ===========================================================================
+# Ignored files. A rig ignores machine-local state, such as its bd config and
+# credentials, so an ignored file in the way of what a move writes counts like
+# any other untracked content. Each checkout below ignores its paths through
+# its own .git/info/exclude, as a machine-local rule does, and the remote starts
+# tracking one of them. git merge --ff-only and git reset --keep would both
+# overwrite such a file.
+# ===========================================================================
+ignore_local() { printf '%s\n' "$2" >> "$TMP/$1/.git/info/exclude"; }
+behind_adds() { # name path content -> the remote's b3 adds <path> holding <content>
+  printf '%s\n' "$3" > "$TMP/$1.src/$2"
+  git -C "$TMP/$1.src" add -- "$2"; git -C "$TMP/$1.src" commit -qm b3
+  git -C "$TMP/$1.src" push -q "$TMP/$1.git" main
+  git -C "$TMP/$1" fetch -q origin
+}
+empty_ls_files() { # a git shim on PATH that empties `git ls-files`
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<GITSHIM
+for a in "\$@"; do [ "\$a" = "ls-files" ] && exit 0; done
+exec "$REAL_GIT" "\$@"
+GITSHIM
+  chmod +x "$TMP/bin/git"
+}
+
+# ignored: the fast-forward adds local.cfg, which the checkout holds as an
+# ignored file with other content. The fast-forward refuses, and the set-aside
+# escalates with the file untouched, naming it as ignored, since git status
+# does not list it.
+behind_rig ignored
+behind_adds ignored local.cfg theirs
+ignore_local ignored local.cfg; echo mine > "$TMP/ignored/local.cfg"
+IGNORED_HEAD="$(git -C "$TMP/ignored" rev-parse HEAD)"
+rigs_json ignored
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/ignored" rev-parse HEAD)" "$IGNORED_HEAD" "an ignored file on a path the fast-forward adds blocks it"
+eq "$(cat "$TMP/ignored/local.cfg")" "mine" "the ignored file in the fast-forward's way is left untouched"
+eq "$(esc_count ignored)" "1" "an ignored file in the fast-forward's way escalates"
+grep -q 'ignored and in the way: local.cfg' <<< "$(body_for ignored)" \
+  && ok "the escalation names the blocking file as ignored" || bad "the escalation names the blocking file as ignored (got '$(body_for ignored)')"
+
+# ignoreddir: the fast-forward adds a file named cache where the checkout holds
+# an ignored directory cache/, which writing the file would delete.
+behind_rig ignoreddir
+behind_adds ignoreddir cache theirs
+ignore_local ignoreddir cache/; mkdir "$TMP/ignoreddir/cache"; echo mine > "$TMP/ignoreddir/cache/keep"
+IGNOREDDIR_HEAD="$(git -C "$TMP/ignoreddir" rev-parse HEAD)"
+rigs_json ignoreddir
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/ignoreddir" rev-parse HEAD)" "$IGNOREDDIR_HEAD" "an ignored directory where the fast-forward adds a file blocks it"
+eq "$(cat "$TMP/ignoreddir/cache/keep" 2>/dev/null)" "mine" "the ignored directory's file is left untouched"
+eq "$(esc_count ignoreddir)" "1" "an ignored directory in the fast-forward's way escalates"
+
+# ignoredcopy: the ignored local.cfg already holds the bytes the fast-forward
+# adds, so it goes and the checkout advances. An ignored file the fast-forward
+# does not write, state/db, stays.
+behind_rig ignoredcopy
+behind_adds ignoredcopy local.cfg theirs
+ignore_local ignoredcopy local.cfg; echo theirs > "$TMP/ignoredcopy/local.cfg"
+ignore_local ignoredcopy state/; mkdir "$TMP/ignoredcopy/state"; echo keep > "$TMP/ignoredcopy/state/db"
+IGNOREDCOPY_REMOTE="$(git -C "$TMP/ignoredcopy.git" rev-parse main)"
+rigs_json ignoredcopy
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/ignoredcopy" rev-parse HEAD)" "$IGNOREDCOPY_REMOTE" "an ignored copy of the content the fast-forward adds goes, and the checkout advances"
+eq "$(git -C "$TMP/ignoredcopy" status --porcelain)" "" "the ignored copy's path is tracked after the fast-forward"
+eq "$(cat "$TMP/ignoredcopy/state/db" 2>/dev/null)" "keep" "an ignored file the fast-forward does not write stays"
+eq "$(esc_count ignoredcopy)" "0" "an ignored copy of the content the fast-forward adds is not escalated"
+
+# ignoredretry: a stray staged f.txt blocks the fast-forward, and the remote
+# also adds local.cfg, which the checkout holds as an ignored file with other
+# content. With the untracked listing emptied, the set-aside pins and restores
+# f.txt and retries, and the retry refuses rather than overwrite local.cfg.
+behind_rig ignoredretry
+behind_adds ignoredretry local.cfg theirs
+printf 'stray-staged\n' > "$TMP/ignoredretry/f.txt"; git -C "$TMP/ignoredretry" add f.txt
+echo base > "$TMP/ignoredretry/f.txt"                            # working copy back to HEAD: MM f.txt
+ignore_local ignoredretry local.cfg; echo mine > "$TMP/ignoredretry/local.cfg"
+IGNOREDRETRY_HEAD="$(git -C "$TMP/ignoredretry" rev-parse HEAD)"
+rigs_json ignoredretry
+: > "$TMP/escalations"
+empty_ls_files
+bash "$SCRIPT" >/dev/null
+rm -f "$TMP/bin/git"
+eq "$(git -C "$TMP/ignoredretry" rev-parse HEAD)" "$IGNOREDRETRY_HEAD" "the set-aside's retry refuses an ignored file the listing misses"
+eq "$(cat "$TMP/ignoredretry/local.cfg")" "mine" "the ignored file the retry would overwrite is left untouched"
+IGNOREDRETRY_REF="$(set_aside_refs ignoredretry)"
+eq "$(git -C "$TMP/ignoredretry" show "${IGNOREDRETRY_REF:-refs/gc-toolkit/absent}^2:f.txt" 2>/dev/null)" "stray-staged" "the refused retry leaves the staged copy pinned"
+eq "$(esc_count ignoredretry)" "1" "a refused retry escalates"
+
+# churnignored: the remote's rewritten history adds local.cfg, which the
+# checkout holds as an ignored file with other content. The reset heal refuses
+# before anything moves.
+churned_rig churnignored
+echo theirs > "$TMP/churnignored.src/local.cfg"; echo same > "$TMP/churnignored.src/same.txt"; push_churn churnignored
+ignore_local churnignored local.cfg; echo mine > "$TMP/churnignored/local.cfg"; echo same > "$TMP/churnignored/same.txt"
+CHURNIGNORED_LOCAL="$(git -C "$TMP/churnignored" rev-parse HEAD)"
+rigs_json churnignored
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/churnignored" rev-parse HEAD)" "$CHURNIGNORED_LOCAL" "an ignored file on a path the remote adds blocks the reset heal"
+eq "$(cat "$TMP/churnignored/local.cfg")" "mine" "the ignored file in the reset's way is left untouched"
+refused_untouched churnignored "an ignored file on a path the remote adds"
+
+# churnignoredcopy: the ignored local.cfg already holds the remote's bytes, so
+# it goes and the checkout heals. An ignored file the remote does not track,
+# state/db, stays.
+churned_rig churnignoredcopy
+echo theirs > "$TMP/churnignoredcopy.src/local.cfg"; push_churn churnignoredcopy
+ignore_local churnignoredcopy local.cfg; echo theirs > "$TMP/churnignoredcopy/local.cfg"
+ignore_local churnignoredcopy state/; mkdir "$TMP/churnignoredcopy/state"; echo keep > "$TMP/churnignoredcopy/state/db"
+CHURNIGNOREDCOPY_REMOTE="$(git -C "$TMP/churnignoredcopy.git" rev-parse main)"
+rigs_json churnignoredcopy
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/churnignoredcopy" rev-parse HEAD)" "$CHURNIGNOREDCOPY_REMOTE" "an ignored copy of a file the remote adds does not block the reset heal"
+eq "$(git -C "$TMP/churnignoredcopy" status --porcelain)" "" "the ignored copy's path is tracked after the reset"
+eq "$(cat "$TMP/churnignoredcopy/state/db" 2>/dev/null)" "keep" "an ignored file the remote does not track survives the reset"
+eq "$(esc_count churnignoredcopy)" "0" "an ignored copy of a file the remote adds is not escalated"
+
+# churnignoredunlisted: the guard's listing comes back empty, so it sees nothing
+# in the way of the remote's local.cfg. The reset's git checkout runs with
+# --no-overwrite-ignore and refuses rather than overwrite the ignored file.
+churned_rig churnignoredunlisted
+echo theirs > "$TMP/churnignoredunlisted.src/local.cfg"; push_churn churnignoredunlisted
+ignore_local churnignoredunlisted local.cfg; echo mine > "$TMP/churnignoredunlisted/local.cfg"
+CHURNIGNOREDUNLISTED_LOCAL="$(git -C "$TMP/churnignoredunlisted" rev-parse HEAD)"
+rigs_json churnignoredunlisted
+: > "$TMP/escalations"
+empty_ls_files
+bash "$SCRIPT" >/dev/null
+rm -f "$TMP/bin/git"
+eq "$(cat "$TMP/churnignoredunlisted/local.cfg")" "mine" "an ignored file the guard's listing misses is not overwritten by the reset"
+eq "$(git -C "$TMP/churnignoredunlisted" rev-parse HEAD)" "$CHURNIGNOREDUNLISTED_LOCAL" "a reset that would overwrite an ignored file leaves the checkout where it was"
+eq "$(esc_count churnignoredunlisted)" "1" "a reset that would overwrite an ignored file escalates"
+
+# churnignoredcase: an ignored Readme.cfg where the remote adds README.cfg. On a
+# file system that ignores case they are one file, which the guard's listing
+# does not match, and the reset's git checkout refuses rather than overwrite it;
+# where case matters they are two files and the reset heals. Either way
+# Readme.cfg keeps its bytes.
+churned_rig churnignoredcase
+echo theirs > "$TMP/churnignoredcase.src/README.cfg"; push_churn churnignoredcase
+ignore_local churnignoredcase Readme.cfg; echo mine > "$TMP/churnignoredcase/Readme.cfg"
+rigs_json churnignoredcase
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(cat "$TMP/churnignoredcase/Readme.cfg" 2>/dev/null)" "mine" "an ignored file only case separates from a file the remote adds keeps its bytes"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

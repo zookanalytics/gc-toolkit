@@ -4,11 +4,13 @@
 # The live rigs/* checkouts are what the runtime executes (pack
 # source = "rigs/<rig>"); the refinery merges PRs via its own clone, so a
 # merged PR is NOT live until the checkout syncs. For each rig this does
-# `git fetch origin && git merge --ff-only origin/<default>`.
+# `git fetch origin && git merge --ff-only --no-overwrite-ignore origin/<default>`.
 #
 # --ff-only advances only on a clean fast-forward, keeps a dirty file the
-# incoming commits do not touch, and refuses, mutating nothing, on a divergence
-# or on a local change to a path the incoming commits rewrite. A refusal on a
+# incoming commits do not touch, and refuses, mutating nothing, on a divergence,
+# on a local change to a path the incoming commits rewrite, or on untracked
+# content in the way of what they write. --no-overwrite-ignore makes that
+# include an ignored file, which git otherwise overwrites. A refusal on a
 # checkout that is only behind gets the set-aside heal, and one on a diverged
 # checkout gets the reset heal. Each acts only on what it can prove loses
 # nothing, and what neither heals escalates.
@@ -40,8 +42,9 @@
 # under a directory it replaces with a file. A regular file that already holds
 # the bytes written on its own path is removed before the retry, because the
 # fast-forward writes the same content back; anything else escalates. git's own
-# listing says what is untracked, so an ignored file, which git overwrites,
-# never counts, and nothing behind a symlink is touched.
+# listing says what is untracked, and nothing behind a symlink is touched. An
+# ignored file counts like any other: a rig ignores machine-local state, such as
+# its bd config and credentials, so being ignored proves nothing expendable.
 # A staged change needs no proof of its own: a directory-imported pack runs from
 # the working tree, so the index holds nothing the runtime executes. Before a
 # tracked path moves, `git stash create` pins the staged and working-tree state
@@ -73,13 +76,15 @@
 #     fast-forward above, except a regular file that already holds the remote's
 #     bytes on its own path.
 # It then removes those copies, stages each dirty path whose index still holds
-# HEAD, and runs git reset --keep to the remote. That leaves the checkout where
-# reset --hard would, but git refuses, rather than deletes, anything untracked
-# in its way. An untracked collision the checks above cannot see, such as a
-# name that differs only in case on a file system that ignores case, therefore
-# escalates instead of losing content, and the report names what the heal had
-# staged and removed. reset --keep still resets every index entry, so staged
-# content stays the guard's to prove. Every other untracked file stays, and the
+# HEAD, and runs `git checkout --no-overwrite-ignore -B <default> <remote>`,
+# which moves the branch to the remote as a reset does. git refuses, rather
+# than overwrites or deletes, anything untracked in its way, an ignored file
+# included, where git reset --keep would overwrite the ignored file. It also
+# refuses rather than discards a staged change on a path it moves, and keeps one
+# on a path it does not. An untracked collision the checks above cannot see,
+# such as a name that differs only in case on a file system that ignores case,
+# therefore escalates instead of losing content, and the report names what the
+# heal had staged and removed. Every other untracked file stays, and the
 # divergence bead closes.
 #
 # Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
@@ -192,8 +197,9 @@ in_list() {
     return 1
 }
 
-# Prints each unignored untracked entry of the checkout at $1 that writing a
-# tree would overwrite or delete, as "same<TAB><path>" or "other<TAB><path>".
+# Prints each untracked entry of the checkout at $1, ignored or not, that
+# writing a tree would overwrite or delete, as "same<TAB><path>" or
+# "other<TAB><path>".
 # The tree written is all of $2, as a reset writes it, or with $3 only what $2
 # changes from $3, as a fast-forward from $3 writes it. An entry is in the way
 # when a file is written on its path or on a directory above it, or when a
@@ -211,7 +217,8 @@ untracked_in_way() {
     else
         written=$(git -C "$path" -c core.quotepath=false ls-tree -r -t --full-tree "$to" 2>/dev/null) || return 1
     fi
-    untracked=$(git -C "$path" -c core.quotepath=false ls-files --others --exclude-standard 2>/dev/null) || return 1
+    # No exclude rules, so the listing holds the ignored files too.
+    untracked=$(git -C "$path" -c core.quotepath=false ls-files --others 2>/dev/null) || return 1
     [ -n "$untracked" ] || return 0
     while IFS=$'\t' read -r kind blob p; do
         if [ "$kind" = file ] && [ -f "$path/$p" ] && [ ! -L "$path/$p" ] \
@@ -300,6 +307,9 @@ set_aside_and_advance() {
         in_list "$p" ${dirty_paths[@]+"${dirty_paths[@]}"} && continue
         if [ "$kind" = same ]; then
             in_way+=("$p")
+        elif git -C "$path" check-ignore -q -- "$p" 2>/dev/null; then
+            blocking_report+="ignored and in the way: $p (git status does not list it, the fast-forward would write over or remove it, and it is no copy of what $remote holds there)"$'\n'
+            unsafe=1
         else
             blocking_report+="untracked in the way: $p (the fast-forward would write over or remove it, and it is no copy of what $remote holds there)"$'\n'
             unsafe=1
@@ -357,18 +367,19 @@ set_aside_and_advance() {
         blocking_report="could not remove the untracked $stuck${moved:+ after $moved}"
         return 1
     fi
-    if ! git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
+    if ! git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
         blocking_report="the fast-forward still refused after $moved"
         return 1
     fi
 }
 
-# The diverged-checkout heal (see the header). On success the checkout sits on
-# the remote. A check that does not hold leaves the checkout untouched and
-# blocking_report empty. When git refuses the reset itself, blocking_report
-# says so and names what the heal had already staged and removed.
+# The diverged-checkout heal (see the header). On success the branch $3, which
+# HEAD is on, sits on the remote. A check that does not hold leaves the checkout
+# untouched and blocking_report empty. When git refuses the reset itself,
+# blocking_report says so and names what the heal had already staged and
+# removed.
 reset_and_advance() {
-    local path="$1" remote="$2"
+    local path="$1" remote="$2" branch="$3"
     local cherry_out merges status_out in_way_out changed kind p err acted="" unique_local=0
     local -a stage=() same=()
     blocking_report=""
@@ -387,7 +398,7 @@ reset_and_advance() {
         # remote (the regenerated-to-upstream case). Index: safe when it equals
         # the remote, or equals HEAD — committed content, proven upstream by the
         # cherry check above — and then the working tree is staged over it,
-        # since reset --keep refuses an unstaged change on a path it moves.
+        # since the checkout refuses an unstaged change on a path it moves.
         # Content staged but never committed (differs from both HEAD and the
         # remote) has no way back, even when an upstream-matching worktree copy
         # hides it from a diff against remote.
@@ -420,8 +431,8 @@ reset_and_advance() {
         fi
         acted="${acted:+$acted, }removed the untracked $p, a copy of $remote's"
     done
-    if ! err=$(git -C "$path" reset -q --keep "$remote" 2>&1); then
-        blocking_report="git reset --keep $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
+    if ! err=$(git -C "$path" checkout -q --no-overwrite-ignore -B "$branch" "$remote" 2>&1); then
+        blocking_report="git checkout --no-overwrite-ignore -B $branch $remote refused${acted:+ after the heal $acted}: $(printf '%s\n' "$err" | head -n 1)"
         return 1
     fi
 }
@@ -447,7 +458,7 @@ while IFS=$'\t' read -r name path; do
     parked=""
     [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
 
-    if [ -z "$parked" ] && git -C "$path" merge --ff-only "$remote" >/dev/null 2>&1; then
+    if [ -z "$parked" ] && git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
         # Advanced or already up to date: clear any lingering escalation.
         advanced=$((advanced + 1))
         resolve_subject "$name" "rigs/$name fast-forwarded cleanly to $remote"
@@ -476,9 +487,9 @@ while IFS=$'\t' read -r name path; do
     # divergence, an unreadable status, a local merge, untracked content in the
     # way — falls through to the escalation path untouched.
     if [ -z "$parked" ] && [ -z "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
-       && reset_and_advance "$path" "$remote"; then
+       && reset_and_advance "$path" "$remote" "$default_branch"; then
         healed=$((healed + 1))
-        resolve_subject "$name" "rigs/$name auto-healed: already-upstream, reset --keep to $remote"
+        resolve_subject "$name" "rigs/$name auto-healed: already-upstream, reset to $remote"
         continue
     fi
 
