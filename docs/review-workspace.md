@@ -5,8 +5,9 @@ description: Where a review keeps its worktree and scratch on disk, and when tha
 
 # Review workspace
 
-A review runs the suites at its pinned commit in a detached worktree, and the
-reviewer may also write logs, probe output, or a second worktree at the base.
+A review reads its pinned commit in a detached worktree and runs there any
+suite its check calls for. The reviewer may also write logs, probe output, or a
+second worktree at the base.
 All of it lives in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it
