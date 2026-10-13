@@ -34,6 +34,14 @@
 # lifecycle.sh) are SEARCHED for on the candidate roots, never assumed, because
 # $GC_RIG_ROOT is the rig that imported this agent and may hold no assets/.
 #
+# The visit is read before the first write, and a visit that cannot be read
+# stops the hold (exit 1). The visit's escalation_key is the topic every demand
+# this hold files carries. A read that fails is not a visit with no topic. Taken
+# as one, the demand is filed without a topic, and a demand with no topic
+# matches any demand already on the gated bead. On a subject that sibling
+# sittings share, it can refresh another sitting's demand in place and
+# overwrite the question that sitting is holding.
+#
 # Inputs:
 #   $1           the one decision or input needed, ≤130 chars. The takeaway
 #                reads "holding — <this>" and the demand reads "<this>".
@@ -49,10 +57,10 @@
 #   SUBJECT      its continuation group, which the hold writes to (environment);
 #                when empty, the subject the visit records (its tracks edge,
 #                else its gc.continuation_group stamp)
-# Exit: 0 the hold is real and stamped — post the framing; 1 a gate failed —
-# do NOT post the framing, raise the failure in the thread; 2 usage, a decision
-# too long for the headline, or no writer or subject to write to — nothing was
-# written, do NOT post the framing.
+# Exit: 0 the hold is real and stamped — post the framing; 1 the visit could not
+# be read or a gate failed — do NOT post the framing, raise the failure in the
+# thread; 2 usage, a decision too long for the headline, or no writer or subject
+# to write to — nothing was written, do NOT post the framing.
 set -u
 
 # >>> control-char-scrub
@@ -62,6 +70,24 @@ set -u
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# show_one <id> — print `gc bd show <id> --json`, scrubbed, when it reads as an
+# array whose first row is <id>. Returns 3 when the store answers that <id> does
+# not exist, and 1 on any other failure. The exit status is read on its own: a
+# pipeline answers with its last command's, and scrub succeeds whatever gc did.
+# gc exits non-zero on a missing id but still prints its not-found object, so
+# the output is classified before the status is trusted.
+show_one() {
+  local raw rc
+  raw=$(gc bd show "$1" --json); rc=$?
+  raw=$(printf '%s' "$raw" | scrub)
+  if [ "$rc" -eq 0 ] && printf '%s' "$raw" | jq -e --arg id "$1" 'type == "array" and ((.[0].id // "") == $id)' >/dev/null 2>&1; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  printf '%s' "$raw" | jq -e 'type == "object" and ((.error // "") | test("no issues found"))' >/dev/null 2>&1 && return 3
+  return 1
+}
 
 # The one definition of what subject a visit covers (its tracks edge, the
 # gc.continuation_group stamp as fallback), shared with converse-fold.sh and the
@@ -125,7 +151,21 @@ if [ -n "$CAP" ]; then
 fi
 # <<< hold-headline-length-gate
 
-V=$(gc bd show "$VISIT" --json | scrub)
+# >>> hold-visit-read-gate
+# The visit names the subject and this sitting's topic, so a visit that cannot
+# be read stops the hold here, before anything is written. Read as empty, it
+# would leave the topic empty and every demand below without it.
+V=$(show_one "$VISIT"); VRC=$?
+case "$VRC" in
+  0) ;;
+  3) echo "NO SUCH VISIT: $VISIT does not exist in the store gc bd answers from, so this run wrote nothing. Do NOT post the framing."
+     echo "Check that \$VISIT names this sitting's visit, then re-run this block. If it does, raise it in the thread, and do not describe the subject as held."
+     exit 1 ;;
+  *) echo "VISIT UNREADABLE: $VISIT could not be read, and its escalation_key is the topic that keeps this sitting's demand its own, so this run wrote nothing. Do NOT post the framing."
+     echo "Re-run this block once the store answers. If the visit cannot be read, that failure is what the operator needs to hear: raise it in the thread, and do not describe the subject as held."
+     exit 1 ;;
+esac
+# <<< hold-visit-read-gate
 # Every write below lands on the subject or the visit. Step 1 resolves SUBJECT,
 # and the visit records it twice, as its tracks edge and as its
 # gc.continuation_group stamp, so an empty one is recovered here the way
