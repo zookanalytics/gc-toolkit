@@ -2650,11 +2650,15 @@ $live_url — head $head_oid${CSRC:+, review $CSRC}
 Answer every item below with a fix, or with the reason you made none. Each
 item is a finding on $id that names this bead as its fix unit
 (finding.fix_unit), and the city keeps one living comment per review on the PR
-that shows how each point was answered. For each finding you answer, record one
-sentence, in your own words, that starts by saying how you answered it compared
-with what was asked. \"Fixed as you suggested\", \"You asked for a decision, and
-the fix chose ...\" and \"Fixed more widely than you suggested: ...\" are examples,
-not a template:
+that shows how each point was answered. This lists them, each titled with the
+opening of the comment it carries:
+
+    gc bd list --metadata-field finding.fix_unit=<this bead> --all
+
+For each finding you answer, record one sentence, in your own words, that starts
+by saying how you answered it compared with what was asked. \"Fixed as you
+suggested\", \"You asked for a decision, and the fix chose ...\" and \"Fixed more
+widely than you suggested: ...\" are examples, not a template:
 
     $FINDING answer --finding <finding> --answer \"<sentence>\" [--flag]
 

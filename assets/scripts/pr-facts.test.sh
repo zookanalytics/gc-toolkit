@@ -3314,6 +3314,7 @@ has "$(desc "$PV1C")" "Bound the re-read per pass." "the child carries the inlin
 # there.
 has "$(desc "$PV1C")" "post it through $SD/pr-post.sh" "…and tells the fixer to reply through pr-post.sh, by its resolved path"
 has "$(desc "$PV1C")" "$SD/finding.sh answer --finding <finding>" "…and to record each answer through finding.sh, by its resolved path"
+has "$(desc "$PV1C")" "gc bd list --metadata-field finding.fix_unit=<this bead> --all" "…naming the listing that finds the findings it answers"
 has "$(meta "$PV1C" rejection_reason)" "with $SD/finding.sh answer" "…as its rejection_reason does"
 hasnt "$(desc "$PV1C")" "through assets/scripts/pr-post.sh" "…never by a pack-relative path"
 hasnt "$(desc "$PV1C")" "assets/scripts/finding.sh" "…for either helper"
