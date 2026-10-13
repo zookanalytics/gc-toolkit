@@ -1094,9 +1094,9 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 WORK_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
 # >>> self-review-withdrawn-work
 if [ "$(printf '%s' "$WORK_JSON" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
-  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { SC="$c/assets/scripts/run-cancel.sh"; break; }; done
+  CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
   ITER_REF=$(gc bd show "$CLAIMED_ITER_BEAD" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].metadata["gc.step_ref"] // empty) else empty end' 2>/dev/null)
-  if [ -n "$SC" ] && [ -n "$ITER_REF" ] && "$SC" --step "$ITER_REF" --bead "$CLAIMED_ITER_BEAD" --reason "work bead $WORK_BEAD_ID was closed while its run was mid-flight"; then
+  if [ -n "$CANCEL" ] && [ -n "$ITER_REF" ] && "$CANCEL" --step "$ITER_REF" --bead "$CLAIMED_ITER_BEAD" --reason "work bead $WORK_BEAD_ID was closed while its run was mid-flight"; then
     gc runtime drain-ack
   else
     echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
@@ -1234,8 +1234,8 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-withdrawn-work
 if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
-  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { SC="$c/assets/scripts/run-cancel.sh"; break; }; done
-  if [ -n "$SC" ] && "$SC" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID was closed while its run was mid-flight"; then
+  CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
+  if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID was closed while its run was mid-flight"; then
     gc runtime drain-ack
   else
     echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2

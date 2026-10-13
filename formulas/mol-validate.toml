@@ -101,8 +101,8 @@ fi
 # A pass closed before its run reached this step was withdrawn by whoever closed
 # it, so the run ends with no visit and nothing is ruled.
 if [ "$(gc bd show "$VALIDATION_PASS" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
-  SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { SC="$c/assets/scripts/run-cancel.sh"; break; }; done
-  if [ -n "$SC" ] && "$SC" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS was closed before its run ruled it"; then
+  CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
+  if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS was closed before its run ruled it"; then
     gc runtime drain-ack
   else
     echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
