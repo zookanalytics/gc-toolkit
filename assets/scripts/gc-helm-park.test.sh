@@ -18,11 +18,13 @@
 #     a gate carrying metadata) is not, and the park files a gate of its own.
 #   - refused with nothing written: text over the 140-character cap, both forms
 #     at once, neither form, --body beside --waiting-on, a bead in flight
-#     (branch, merge_result, rejection_reason, or a workflow past load-context),
-#     a closed bead, and a demand gate, closed bead, another store's bead, the
-#     bead itself or one of its own parts as the bead to wait on. The demand
-#     gate's refusal names the text form.
-#   - a workflow still at load-context is not in flight, so its bead parks.
+#     (claimed, in_progress or hooked; branch, merge_result, rejection_reason;
+#     or a workflow past load-context), a closed bead, and a demand gate,
+#     closed bead, another store's bead, the bead itself or one of its own parts
+#     as the bead to wait on. The demand gate's refusal names the text form.
+#   - a workflow still at load-context is not in flight, so its bead parks. A
+#     claimed bead is in flight even when a workflow poured for it still waits
+#     at load-context: a pour never claims its bead, so the claim is a run.
 #   - an edge that never reads back fails the verb (exit 4) with the repair; a
 #     create whose answer is lost is recovered from the edge it was born with.
 #   - the summary names what the park holds and what it leaves running.
@@ -55,20 +57,21 @@ fi
 mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-sl/.beads"
 
 # --- gc stub ------------------------------------------------------------------
-# The store is a JSON array of rows {id, status, issue_type, title, description,
-# metadata, deps:[{on, type}]}; a row's deps are the edges it carries, so a
-# parent-child edge sits on the child and a blocks edge on the bead that waits.
-# Every call's argv is logged to $STUB_CALLS.
+# The store is a JSON array of rows {id, status, assignee, issue_type, title,
+# description, metadata, deps:[{on, type}]}; a row's deps are the edges it
+# carries, so a parent-child edge sits on the child and a blocks edge on the
+# bead that waits. Every call's argv is logged to $STUB_CALLS.
 #   rig list         two rigs: tk at $STUB_RIG_TK and sl at $STUB_RIG_SL, each
 #                    with a .beads dir, so the verb pins every call with --db.
 #   bd show <id>     `bd show --json`: an array of one row whose dependencies are
 #                    the targets' rows {id, dependency_type, status, title,
 #                    issue_type}, plus metadata and await_type where the target
 #                    carries them, as bd prints them; an unknown id is bd's error
-#                    object, exit 1.
+#                    object, exit 1. The assignee is printed only when set.
 #   bd list          `bd list --json`: the rows whose status --status names,
 #                    gates only with --include-gates, each edge
-#                    {issue_id, depends_on_id, type}. STUB_LIST_FAIL fails it.
+#                    {issue_id, depends_on_id, type}, the assignee only when
+#                    set. STUB_LIST_FAIL fails it.
 #   bd create        `--type --title --description --deps blocks:<id> --json`:
 #                    lands the row and, in the same write, <id>'s blocks edge
 #                    onto it, then answers {"id": ...}. The id's prefix is the
@@ -120,7 +123,8 @@ case "$verb" in
           | {id, status, issue_type, title, description,
              metadata: (if (.metadata // {}) == {} then null else .metadata end),
              parent: ([ .deps[]? | select(.type == "parent-child") | .on ] | first // null),
-             dependencies: (if ($deps | length) == 0 then null else $deps end)} ]' "$S")
+             dependencies: (if ($deps | length) == 0 then null else $deps end)}
+            + (if (.assignee // "") == "" then {} else {assignee} end) ]' "$S")
     if [ "$out" = "[]" ]; then
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
       exit 1
@@ -143,7 +147,8 @@ case "$verb" in
         | select($g == 1 or .issue_type != "gate")
         | . as $r
         | {id, status, issue_type, title, metadata: (.metadata // {}),
-           dependencies: [ .deps[]? | {issue_id: $r.id, depends_on_id: .on, type} ]} ]' "$S" ;;
+           dependencies: [ .deps[]? | {issue_id: $r.id, depends_on_id: .on, type} ]}
+          + (if (.assignee // "") == "" then {} else {assignee} end) ]' "$S" ;;
   create)
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
     title=""; desc=""; typ="task"; deps=""
@@ -221,6 +226,7 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
 #     tk-epic.1      held
 #     tk-epic.2      in flight: it carries a branch
 #     tk-epic.3      armed
+#     tk-epic.4      in flight: claimed (in_progress) and worked with no branch
 #     tk-done        closed, so not part of what the park holds
 #     tk-feat        a feature, with members of its own:
 #       tk-feat.1    held, two levels down
@@ -231,6 +237,10 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
 #   tk-rej           in flight: a rejected handoff
 #   tk-wf            in flight only through its workflow tk-r3, past load-context
 #   tk-lc            not in flight: its workflow tk-r4 waits at load-context
+#   tk-claim         in flight: claimed (in_progress), no branch and no workflow
+#   tk-hook          in flight: hooked, with no assignee
+#   tk-dup           in flight: claimed, while a workflow tk-r5 poured for it
+#                    waits at load-context (a direct claim and a pour)
 #   tk-dg            a demand gate
 #   tk-pg            another park's gate
 #   tk-task          a task to wait on
@@ -243,6 +253,7 @@ reset_store() {
  {"id":"tk-epic.1","status":"open","issue_type":"task","title":"held member","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-epic.2","status":"open","issue_type":"task","title":"member on a branch","description":"","metadata":{"branch":"polecat/tk-epic.2"},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-epic.3","status":"open","issue_type":"task","title":"armed member","description":"","metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},"deps":[{"on":"tk-epic","type":"parent-child"}]},
+ {"id":"tk-epic.4","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.crew","issue_type":"task","title":"member worked inline","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-done","status":"closed","issue_type":"task","title":"closed member","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-feat","status":"open","issue_type":"feature","title":"a feature","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-feat.1","status":"open","issue_type":"task","title":"held two down","description":"","metadata":{},"deps":[{"on":"tk-feat","type":"parent-child"}]},
@@ -266,6 +277,12 @@ reset_store() {
  {"id":"tk-cv4","status":"open","issue_type":"convoy","title":"input convoy for tk-lc","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-lc","type":"tracks"}]},
  {"id":"tk-r4","status":"open","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv4"},"deps":[]},
  {"id":"tk-s4","status":"open","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r4","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r4","type":"tracks"}]},
+ {"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-abc12","issue_type":"task","title":"claimed, no branch yet","description":"","metadata":{},"deps":[]},
+ {"id":"tk-hook","status":"hooked","issue_type":"task","title":"on a hook","description":"","metadata":{},"deps":[]},
+ {"id":"tk-dup","status":"in_progress","assignee":"lx-wisp-def34","issue_type":"task","title":"claimed, and poured too","description":"","metadata":{},"deps":[]},
+ {"id":"tk-cv5","status":"open","issue_type":"convoy","title":"input convoy for tk-dup","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-dup","type":"tracks"}]},
+ {"id":"tk-r5","status":"in_progress","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv5"},"deps":[]},
+ {"id":"tk-s5","status":"open","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r5","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r5","type":"tracks"}]},
  {"id":"tk-dg","status":"open","issue_type":"gate","await_type":"human","title":"Rule on the loose task's scope","description":"","metadata":{"gc.demand_for":"tk-solo"},"deps":[]},
  {"id":"tk-pg","status":"open","issue_type":"gate","title":"Parked until the store answers in a second; close when it does","description":"","metadata":{},"deps":[]},
  {"id":"tk-task","status":"open","issue_type":"task","title":"Land the faster store","description":"","metadata":{},"deps":[]},
@@ -337,9 +354,10 @@ grep -q "^bd show tk-epic --db $STUB_RIG_TK/.beads --json" <<< "$(grep -A99 '^bd
 has "$OUT" "park $GATE holds tk-epic: $TEXT" "(TEXT) prints park <gate> holds <bead>"
 HELD="$(grep '^held, not started:' <<< "$OUT" || true)"
 for b in tk-epic tk-epic.1 tk-feat tk-feat.1; do has "$HELD" " $b" "(TEXT) holds $b"; done
-for b in tk-epic.2 tk-epic.3 tk-feat.2 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
+for b in tk-epic.2 tk-epic.3 tk-epic.4 tk-feat.2 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
 has "$OUT" "in flight, keeps running: " "(TEXT) names what stays in flight"
 has "$OUT" "tk-epic.2 (branch polecat/tk-epic.2)" "(TEXT) a member on a branch stays in flight"
+has "$OUT" "tk-epic.4 (in_progress under gc-toolkit/gc-toolkit.crew)" "(TEXT) a claimed member with no branch stays in flight, named with its claimant"
 has "$OUT" "tk-feat.3 (workflow tk-r2 past load-context)" "(TEXT) a member whose workflow passed load-context stays in flight, two levels down"
 has "$OUT" "armed, not held by this park: tk-epic.3" "(TEXT) an armed member is named as not held"
 has "$OUT" "poured before the park, not held by it: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named as not held"
@@ -461,6 +479,18 @@ run_park tk-wf "Parked for a reason"
 eq "$RC" "2" "(FLIGHT) a bead whose workflow passed load-context is refused (exit 2)"
 has "$ERR" "workflow tk-r3 past load-context" "(FLIGHT) the refusal names the workflow"
 nothing_written "(FLIGHT) workflow"
+run_park tk-claim "Parked for a reason"
+eq "$RC" "2" "(FLIGHT) a claimed bead with no branch and no workflow is refused (exit 2)"
+has "$ERR" "in flight (in_progress under lx-wisp-abc12)" "(FLIGHT) the refusal names the claim and its claimant"
+nothing_written "(FLIGHT) claimed"
+run_park tk-hook --waiting-on tk-task
+eq "$RC" "2" "(FLIGHT) a hooked bead is refused, in the --waiting-on form too"
+has "$ERR" "in flight (hooked)" "(FLIGHT) the refusal names the hook"
+nothing_written "(FLIGHT) hooked"
+run_park tk-dup "Parked for a reason"
+eq "$RC" "2" "(FLIGHT) a claimed bead is refused while a workflow poured for it waits at load-context"
+has "$ERR" "in flight (in_progress under lx-wisp-def34)" "(FLIGHT) the refusal names the claim, not the waiting workflow"
+nothing_written "(FLIGHT) claimed and poured"
 run_park tk-lc "Parked for a reason"
 eq "$RC" "0" "(FLIGHT) a bead whose workflow waits at load-context is not in flight, and parks"
 [ -n "$(edges_of tk-lc)" ] && ok "(FLIGHT) its edge landed" || bad "(FLIGHT) no edge on tk-lc"

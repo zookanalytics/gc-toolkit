@@ -137,11 +137,12 @@ park holds everything under a bead that has not started and leaves work in
 flight running (docs/steering.md). It gives the bead one `blocks` edge, onto
 the gate the text form files or onto the bead --waiting-on names, and reads the
 edge back. It prints `park <blocker> holds <bead>`, then what the park holds
-and what it leaves running. It refuses a bead in flight (one carrying branch,
-merge_result or rejection_reason, or with a workflow past load-context),
-because the bead's own edge would hold its merge, and it refuses a demand gate
-as the bead to wait on. Closing the gate releases the park; removing one
-bead's edge (gc bd dep remove <bead> <gate>) releases that bead alone.
+and what it leaves running. It refuses a bead in flight (one claimed,
+in_progress or hooked, one carrying branch, merge_result or rejection_reason,
+or one with a workflow past load-context), because the bead's own edge would
+hold its merge, and it refuses a demand gate as the bead to wait on. Closing
+the gate releases the park; removing one bead's edge (gc bd dep remove <bead>
+<gate>) releases that bead alone.
 
 dismiss is the operator's explicit "end this sitting". It closes the subject's
 open visit, which is what holds a converse sitting's pane up; converse-reap
@@ -1759,7 +1760,8 @@ cmd_demand() {
 # when, are the gate's creator and creation time.
 #
 # Refused before anything is written, besides the forms and the headline cap:
-# - a bead in flight: it carries branch, merge_result or rejection_reason, or a
+# - a bead in flight: someone has claimed it (in_progress or hooked, bd's claim
+#   statuses), it carries branch, merge_result or rejection_reason, or a
 #   workflow poured for it has passed load-context. Its own edge would be a
 #   live direct blocker: merge.sh holds an anchor's merge on any open blocker
 #   of its own, and bd refuses to close a bead that has one. Parking its parent
@@ -1775,10 +1777,15 @@ cmd_demand() {
 # PARK_SURVEY_JQ reads one listing of the bead's store, every bead not closed,
 # and sorts the bead (--arg b) and everything under it by what a park does to
 # each. A bead is under another through parent-child edges, any of its parents
-# counting. A workflow is found from its bead: its input convoy tracks the bead,
-# and its root names that convoy in gc.input_convoy_id. The workflow has passed
-# load-context once no step of the root whose gc.step_ref ends in
-# .load-context is still open, so a formula with no such step counts as started.
+# counting. A bead is in flight when its status is a claim (in_progress or
+# hooked), when it carries merge_result, rejection_reason or branch, or when a
+# workflow poured for it has passed load-context. The status alone does not
+# cover a workflow, because a pour promotes its own root to in_progress and
+# never claims the bead it was poured for. A workflow is found from its bead:
+# its input convoy tracks the bead, and its root names that convoy in
+# gc.input_convoy_id. The workflow has passed load-context once no step of the
+# root whose gc.step_ref ends in .load-context is still open, so a formula with
+# no such step counts as started.
 #   flight  in flight, with why; the park leaves it running.
 #   armed   under the bead, not in flight, and armed (gc.dispatch_when_ready).
 #   poured  under the bead, not in flight, with a workflow still at load-context.
@@ -1793,7 +1800,8 @@ PARK_SURVEY_JQ='
                   on: ((.depends_on_id // .id // "") | tostring)} ];
   def has_($x): any(.[]; . == $x);
   [ .[] | select(type == "object")
-    | {id: ((.id // "") | tostring), it: ((.issue_type // "") | tostring), m: meta, e: edges} ] as $all
+    | {id: ((.id // "") | tostring), it: ((.issue_type // "") | tostring),
+       st: ((.status // "") | tostring), a: ((.assignee // "") | tostring), m: meta, e: edges} ] as $all
   | def under($front; $acc):
       if ($front | length) == 0 then $acc
       else ([ $all[] | select(any(.e[]; .t == "parent-child" and (.on as $o | $front | has_($o)))) | .id ]
@@ -1806,19 +1814,22 @@ PARK_SURVEY_JQ='
   | [ $all[] | select(((.m["gc.step_ref"] // "") | tostring) | endswith(".load-context"))
       | ((.m["gc.root_bead_id"] // "") | tostring) ] as $at_lc
   | ($all | map({key: .id, value: .}) | from_entries) as $by
-  | def why($m):
-      if (($m.merge_result // "") | tostring) != "" then "merge_result=" + ($m.merge_result | tostring)
-      elif (($m.rejection_reason // "") | tostring) != "" then "rejection_reason set"
-      elif (($m.branch // "") | tostring) != "" then "branch " + ($m.branch | tostring)
-      else "" end;
+  | def why($r):
+      $r.m as $m
+      | if (($m.merge_result // "") | tostring) != "" then "merge_result=" + ($m.merge_result | tostring)
+        elif (($m.rejection_reason // "") | tostring) != "" then "rejection_reason set"
+        elif (($m.branch // "") | tostring) != "" then "branch " + ($m.branch | tostring)
+        elif $r.st == "in_progress" or $r.st == "hooked" then $r.st + (if $r.a != "" then " under " + $r.a else "" end)
+        else "" end;
     def workflows($id):
       [ $convoys[] | select(.tracked | has_($id)) | .c ] as $cs
       | [ $roots[] | select(.c as $c | $cs | has_($c)) | .r ];
     [ ([$b] + $sub)[] as $id
-      | (($by[$id] // {}).m // {}) as $m
+      | ($by[$id] // {st: "", a: "", m: {}}) as $r
+      | $r.m as $m
       | workflows($id) as $ws
       | {id: $id,
-         why: (why($m) as $w
+         why: (why($r) as $w
                | if $w != "" then $w
                  else ([ $ws[] | select(. as $x | $at_lc | has_($x) | not) ] | first // "") as $past
                       | if $past != "" then "workflow " + $past + " past load-context" else "" end end),
@@ -1917,7 +1928,7 @@ cmd_park() {
     _pk_raw=$(gc bd list ${db:+--db "$db"} --status=open,in_progress,blocked,deferred,hooked,pinned --brief --json --limit=0 2>/dev/null) || _pk_rc=$?
     survey=""
     if [ "$_pk_rc" -eq 0 ]; then
-        _pk_row=$(printf '%s' "$bead_row" | jq -c '{id, status, issue_type, metadata,
+        _pk_row=$(printf '%s' "$bead_row" | jq -c '{id, status, assignee, issue_type, metadata,
             dependencies: [ (.dependencies // [])[]? | select(type == "object") | {id, dependency_type} ]}' 2>/dev/null || printf '{}')
         survey=$(printf '%s' "$_pk_raw" | scrub | jq -c --arg b "$bead" --argjson row "$_pk_row" \
             "(if type == \"object\" and ((.issues // null) | type) == \"array\" then .issues else . end)

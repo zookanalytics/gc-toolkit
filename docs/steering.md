@@ -73,10 +73,20 @@ prints what the park holds and what it leaves running.
 
 ### In flight
 
-A bead is in flight once work on it has started. It carries `branch`,
-`merge_result` or `rejection_reason`, or a workflow poured for it has passed
-load-context. A park leaves work in flight running:
+A bead is in flight once work on it has started, which any of these shows:
 
+- someone has claimed it, so its status is `in_progress` or `hooked`, bd's
+  claim statuses;
+- it carries `branch`, `merge_result` or `rejection_reason`;
+- a workflow poured for it has passed load-context. A pour sets its own root
+  `in_progress` and never claims the bead it was poured for, so the bead's
+  status does not show that run.
+
+A park leaves work in flight running:
+
+- A claimed bead stays with whoever claimed it. `bd ready` never offers a
+  claimed bead, so the cascade, which works by keeping beads out of `bd ready`,
+  changes nothing for it.
 - A poured workflow is out of the cascade's reach. Its root has no parent, and
   its steps hang off the root by `tracks` edges, which bd does not cascade.
 - PR-finishing work, such as a review rework, a merge-in, a red-check fix or a
