@@ -35,8 +35,9 @@
 #
 #   <dir>         the job's record; start creates it. One job per dir: start
 #                 clears a finished job's record and refuses a running one.
-#   --max SECS    wait returns `running` after this long (default 540, inside
-#                 the ten-minute ceiling of one tool call)
+#   --max SECS    wait returns `running` after this long (default 480, which
+#                 leaves a ten-minute tool call room for a limit's kill grace
+#                 and the caller's own commands around the wait)
 #   --limit SECS  wait stops a job that has run this long since its start and
 #                 reports `exceeded` (default: no limit)
 #   --tail N      log lines printed after the report (default 20)
@@ -351,7 +352,7 @@ WRAPPER
 }
 
 cmd_wait() {
-  local max=540 limit="" tail_n=20
+  local max=480 limit="" tail_n=20
   while [ $# -gt 0 ]; do
     case "$1" in
       --max) num "${2:-}" || usage_error "--max needs a whole number of seconds"; max=$2; shift 2 ;;

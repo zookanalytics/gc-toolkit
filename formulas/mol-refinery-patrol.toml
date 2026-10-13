@@ -450,10 +450,10 @@ GATE
 
 Then wait for it in the FOREGROUND: run the block below as an ordinary tool
 call with a ten-minute timeout (`timeout: 600000` in Claude Code), never with
-`run_in_background`. Each wait returns within nine minutes. While it reports
-`state=running` (exit 3), run it again. Never end your turn while the gate
-runs: a gate that finishes while you sit idle wakes nothing, and the queue
-behind it waits. The wait stops a gate still running after two hours and
+`run_in_background`. Each wait returns within about eight minutes. While it
+reports `state=running` (exit 3), run it again. Never end your turn while the
+gate runs: a gate that finishes while you sit idle wakes nothing, and the
+queue behind it waits. The wait stops a gate still running after two hours and
 reports `state=exceeded`. A wait that reports the gate still running also
 appends a note to this patrol's wisp. check-refinery-patrol-live (I14) dates a
 patrol by its wisp's last write and calls it stalled once that is an hour old
