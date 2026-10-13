@@ -37,6 +37,8 @@
 # arm runs (lifecycle/lifecycle.toml [posture]): pr_posture (dated) and pr_merge_state
 # pinned to the live head, written only when the value changes, so merge.sh can
 # answer "is a human waiting on this?" off the bead instead of re-deriving it.
+# An approval the anchor's lift line (bring_current_lifted_at) set aside records
+# review_required, because the merge no longer counts it (review-verdict.sh).
 # --posture-only exits non-zero when any anchor is left without a current
 # posture and nothing standing already holds it: the caller holds merge.sh for
 # that pass rather than let it validate against a fact from an earlier tick.
@@ -645,9 +647,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
-# The approval rule the merge lands on, REVIEW_VERDICT_DEF; the conflict arm
-# brings only an approved PR current. gctk merge states the rule natively, and
-# merge.test.sh holds the two to one verdict.
+# The approval rule the merge lands on, REVIEW_VERDICT_DEF: the posture arm
+# records an approval the anchor's lift line set aside as review_required, and
+# the conflict arm brings only an approved PR current. gctk merge states the
+# rule natively, and merge.test.sh holds the two to one verdict.
 # shellcheck source=review-verdict.sh
 . "$_bd_lib_dir/review-verdict.sh" || { echo "cannot source review-verdict.sh beside this script" >&2; exit 1; }
 # Which inline comments a dismissal retires, REVIEW_DISMISSAL_DEF; the comment
@@ -1352,15 +1355,15 @@ pace_start "$CURSOR" "$DEADLINE"
 
 # --- the posture basis: what each anchor's posture was last derived from -------
 # The posture is derived from the PR's head, review decision, reviews and
-# comments, the anchor's watermarks and provenance cutover, the acting login,
-# and this script, and from nothing else while no unengaged-thread candidate is
-# in play. The basis joins those facts as the batched read gives them, and
-# --seen keeps it beside the posture it produced. An anchor whose basis reads the
-# same this pass, and whose bead still carries that posture at the read's head,
-# keeps the posture without the per-PR reads. A posture of `commented` keeps no
-# basis, because a routing or a visit can release it with nothing on the PR
-# moving. A visit that keeps or earns no basis records "-", which matches
-# nothing, so the next pass reads that anchor whole.
+# comments, the anchor's watermarks, provenance cutover and lift line, the
+# acting login, and this script, and from nothing else while no unengaged-thread
+# candidate is in play. The basis joins those facts as the batched read gives
+# them, and --seen keeps it beside the posture it produced. An anchor whose
+# basis reads the same this pass, and whose bead still carries that posture at
+# the read's head, keeps the posture without the per-PR reads. A posture of
+# `commented` keeps no basis, because a routing or a visit can release it with
+# nothing on the PR moving. A visit that keeps or earns no basis records "-",
+# which matches nothing, so the next pass reads that anchor whole.
 # The batched read and the per-PR reads are separate requests, and GitHub can
 # answer one of them from a moment ahead of the other, so one derivation can
 # read lists older than the basis it would be kept under. A derivation therefore
@@ -1490,12 +1493,12 @@ while IFS= read -r tagged; do
   # the case below accepts, so a candidate keeps nothing.
   SHORT=0; SHORT_P=""; PFP=""; UH_CANDIDATE=0; MARKS_UNRECORDED=0; b_seen=""
   if [ "$POSTURE_ONLY" = 1 ] && [ -n "${OPEN_PR[$num]-}" ]; then
-    IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_have <<< "$(printf '%s' "$row" | jq -r '
+    IFS=$'\x1f' read -r b_since b_rwm b_cwm b_iwm b_lifted b_have <<< "$(printf '%s' "$row" | jq -r '
       (.metadata // {}) as $m
       | [ $m.pr_provenance_since, $m.pr_review_watermark, $m.pr_comment_watermark,
-          $m.pr_issue_comment_watermark, $m.pr_posture ]
+          $m.pr_issue_comment_watermark, $m.bring_current_lifted_at, $m.pr_posture ]
       | map((. // "") | tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)"
-    PFP="$PF_CODE_FP|$SELF_LOGIN|$b_since|$b_rwm|$b_cwm|$b_iwm|${OPEN_UPD[$num]-}|${OPEN_ACT[$num]-}"
+    PFP="$PF_CODE_FP|$SELF_LOGIN|$b_since|$b_rwm|$b_cwm|$b_iwm|$b_lifted|${OPEN_UPD[$num]-}|${OPEN_ACT[$num]-}"
     b_seen=$(pace_seen_get "$id")
     SHORT_P="${b_seen%%#*}"
     if [ -n "$b_since" ] && [ -n "$SELF_LOGIN" ] && [ "${b_seen#*#}" = "$PFP" ]; then
@@ -1837,7 +1840,7 @@ MP_EOF
   # separator (never valid inside these values) and split on the same, so an
   # empty field keeps its slot instead of collapsing the way a tab or
   # default-IFS split would.
-  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m < <(
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted < <(
     printf '%s' "$row" | jq -r '[
         (.metadata.pr_comment_watermark // ""),
         (.metadata.pr_review_watermark // ""),
@@ -1848,7 +1851,8 @@ MP_EOF
         (.metadata.pr_review_batch // ""),
         (.metadata.pr_issue_comment_batch // ""),
         (.metadata.pr_posture // ""),
-        (.metadata.pr_merge_state // "")
+        (.metadata.pr_merge_state // ""),
+        (.metadata.bring_current_lifted_at // "")
       ] | map(tostring) | join("\u001f")')
   # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
   # key minus its instant), have_cv just the value. The derivation reads the
@@ -2022,7 +2026,22 @@ MP_EOF
         # be current and let merge.sh through on a fact we do not have; leave the
         # posture uncurrent so --posture-only holds the merge, and retry next pass.
         echo "$PROG: $id — PR#$num unengaged-thread read did not answer; posture not recorded (retry next pass)" >&2
-      elif [ "$rd" = "APPROVED" ]; then posture="approved"
+      elif [ "$rd" = "APPROVED" ]; then
+        # The merge counts no approval given at or before the anchor's lift line
+        # (review-verdict.sh), and GitHub still reads APPROVED over an approval
+        # whose dismissal it refused. Such an approval is owed again, so the
+        # posture says review_required and the board asks for it. A rule that
+        # does not read records nothing, as the thread read above does.
+        lift_read=stands
+        if [ -n "$lifted" ]; then
+          lift_read=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" --arg lifted "$lifted" "$REVIEW_VERDICT_DEF"'
+            review_verdict($self; $lifted) | if .lifted != "" then "lifted" else "stands" end' 2>/dev/null)
+        fi
+        case "$lift_read" in
+          stands) posture="approved" ;;
+          lifted) posture="review_required" ;;
+          *) echo "$PROG: $id — PR#$num the approval rule did not read against the lift line $lifted; posture not recorded (retry next pass)" >&2 ;;
+        esac
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi

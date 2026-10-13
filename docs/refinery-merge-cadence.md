@@ -71,10 +71,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    request and times out on about a hundred at once, so the read pages 25 PRs at
    a time. The arm keeps, in `pr-posture.seen` in the pass state dir, the facts
    each posture was last derived from: those PR facts with the anchor's
-   watermarks, its provenance cutover, the acting login, and a checksum of the
-   script and of the city's own-post definition. An anchor whose facts all read
-   the same, and whose bead still carries that posture at that head, keeps it
-   with no per-PR read, and its merge state is recorded from the batched read.
+   watermarks, its provenance cutover, its lift line (`bring_current_lifted_at`),
+   the acting login, and a checksum of the script and of the city's own-post
+   definition. An anchor whose facts all read the same, and whose bead still
+   carries that posture at that head, keeps it with no per-PR read, and its
+   merge state is recorded from the batched read.
    Any other anchor is read whole, as every anchor is when the batched read
    fails. A `commented` posture keeps no basis, because a routing or a visit can
    release it with nothing on the PR moving, and neither does a posture an

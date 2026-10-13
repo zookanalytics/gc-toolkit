@@ -405,8 +405,8 @@ The postures, in the precedence the derivation applies:
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
 | `commented` | an unanswered review comment sits above its watermark, and no veto stands | holds |
-| `approved` | GitHub reports `APPROVED` | none |
-| `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
+| `approved` | GitHub reports `APPROVED`, and an approval stands that the anchor's `bring_current_lifted_at` did not set aside | none |
+| `review_required` | GitHub reports `REVIEW_REQUIRED`, or reports `APPROVED` while every standing approval was given at or before `bring_current_lifted_at` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
 
 A comment outranks an approval on purpose: one reviewer's approval does not
