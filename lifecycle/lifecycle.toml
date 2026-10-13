@@ -1408,10 +1408,12 @@ keys = [
 #   fixed-upstream close.
 #   The runtime's work-record close gate reads the commit and the branch: a
 #   `shipped` close needs gc.work_commit reachable on gc.work_branch in the
-#   bead's checkout (warn-only by default). No pack script reads gc.work_branch,
-#   and the runtime's detached-handoff orphan sweep reads the bare branch defined
-#   in merge_identity, not this key. Absent means no such product was recorded.
-#   A path, a sha, a branch.
+#   rig's checkout (warn-only by default). The gate runs git in gc.work_dir when
+#   the bead records one, and the pack's worker checkouts are worktrees of the
+#   rig checkout, sharing its refs. No pack script reads gc.work_branch, and the
+#   runtime's detached-handoff orphan sweep reads the bare branch defined in
+#   merge_identity, not this key. Absent means no such product was recorded. A
+#   path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). Its meaning is the runtime's,
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task

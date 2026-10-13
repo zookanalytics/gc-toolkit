@@ -171,10 +171,12 @@ var landingFetchTimeout = 60 * time.Second
 // fetchLanding makes the commit a `merged` close records reachable where the
 // runtime's work-record gate looks for it. The gate runs inside the close's own
 // `gc bd update` and asks the rig's checkout whether gc.work_commit is an
-// ancestor of refs/remotes/origin/<gc.work_branch>. A merge GitHub performed is
-// on origin before that checkout has fetched it, whether merge.sh's squash made
-// it or pr-facts.sh found it already done, and the gate reads such a commit as
-// unreachable. Under GC_WORK_RECORD_ENFORCE it then refuses the close. So when
+// ancestor of refs/remotes/origin/<gc.work_branch>. It runs git in the bead's
+// gc.work_dir when the bead records one, and the pack's worker checkouts are
+// worktrees of the rig checkout, sharing its refs, so the fetch lands where the
+// gate reads either way. A merge GitHub performed is on origin before that
+// checkout has fetched it, whether merge.sh's squash made it or pr-facts.sh
+// found it already done, and the gate reads such a commit as unreachable. Under GC_WORK_RECORD_ENFORCE it then refuses the close. So when
 // the ref does not already hold the commit, the branch is fetched before the
 // write. The direct strategy fetches its target before it records, which leaves
 // nothing to fetch here.
