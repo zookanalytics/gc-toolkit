@@ -98,6 +98,39 @@ The `task_kind` **key** is registered in `lifecycle/lifecycle.toml`; its
 **values** are not a closed enum, and the live store carries kinds no pack code
 writes.
 
+### An anchor's children
+
+A bead that hangs off an anchor (a review, a rework child, a finding, a
+validation pass, a visit) names the anchor in `anchor_bead`, and that key is
+what makes it a child. The child also has an edge onto the anchor, its
+membership edge, and that edge can be of any type. bd keeps one edge per ordered
+pair and refuses a second type on it, so an edge the pair already carries is the
+membership edge. The pack joins a child whose pair has no edge with a `related`
+edge. A visit whose subject is the anchor is usually joined already, because
+`escalate.sh` puts a `tracks` edge from the visit onto its subject.
+
+The live children are read by `anchor_bead` over the live statuses. That read
+scans only the live beads, and it sees a child whatever filed it, edge or not.
+The closed children are read through the edge, one
+`gc bd dep list <anchor> --direction=up`, because a
+`--metadata-field anchor_bead=<id>` query that covers closed has no index to use
+and reads the whole closed ledger. That read takes every dependent whatever its
+edge type, so a visit joined by its `tracks` edge is read, and a dependent is a
+closed child when its `anchor_bead` names the anchor. A convoy tracking the
+anchor is therefore not one, and a bead moved to another anchor leaves the old
+one's set with its old edge still in place.
+
+The edge answers for the closed children only in a store marked joined.
+`tools/anchor-edges-backfill.sh` joins each anchor's children to it, and
+`--mark` records the store joined (`anchor_edges.joined` in `gc bd kv`) after a
+run that found no child missing its edge. A store without the mark reads its
+closed children by `anchor_bead` too. `assets/scripts/bd-lib.sh` holds the read
+(`bd_anchor_children`) and both writes. A child is created joined to its anchor,
+the edge riding the create (`bd_create_child`), and an existing bead is joined
+before `anchor_bead` is stamped on it (`bd_anchor_link`), so a marked store
+stays joined. `related` holds nothing: it gates neither `bd ready` nor a close,
+and the merge hold stays on the `blocks` edges read down from the anchor.
+
 ---
 
 ## 2. The lifecycle, as counts
@@ -335,6 +368,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | Component | Workflow | Why it sits there |
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
+| `assets/scripts/work-tree-holder.sh` | work | Tells load-context whether a live session is working the bead's tree, the one sign of a run in flight on a work bead the workflow never claims. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
@@ -354,12 +388,12 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
 | `assets/scripts/pace-lib.sh` | merge | The visit order and time budget of a cadence arm that walks the gating set: visit in id order after the anchor the last pass finished, wrapping, and start no new anchor past the arm's deadline. It also keeps each walk's seen marks, what it saw of each anchor at its last visit, so an arm can put first the anchors that changed since. The paced arms source it, and `gctk merge` carries the same rotation. |
 | `assets/scripts/merge.sh` | merge | Arm 2: the single writer of merged truth. |
-| `assets/scripts/review-verdict.sh` | merge | The approval rule as one jq definition: each outside account's latest approving or change-requesting review decides. `merge.sh` lands on it, `pr-facts.sh` brings only an approved PR's branch current by it, and `bring-current-guard.sh` and `approval-withdraw.sh` read from it the approvals they dismiss, every outside approval not yet dismissed: the guard on a ruling that a bring-current round outgrew them, the withdrawal on a validator ruling that a fresh whole-diff review is warranted. |
+| `assets/scripts/review-verdict.sh` | merge | The approval rule as one jq definition: each outside account's latest approving or change-requesting review decides. The merge lands on it, `pr-facts.sh` brings only an approved PR's branch current by it, and `bring-current-guard.sh` and `approval-withdraw.sh` read from it the approvals they dismiss, every outside approval not yet dismissed: the guard on a ruling that a bring-current round outgrew them, the withdrawal on a validator ruling that a fresh whole-diff review is warranted. `gctk merge` states the rule natively, and `merge.test.sh` holds the two to one verdict. |
 | `assets/scripts/review-dismissal.sh` | merge | What a review dismissal retires, as one jq definition: the inline comments a dismissed review carried stop counting as feedback. `pr-facts.sh` reads the comment space through it, and `approval-withdraw.sh` asks it which comments a dismissal would retire before they are routed. It also holds how the two approval dismissers, `approval-withdraw.sh` and `bring-current-guard.sh`, name the PR and the approvals they act on. |
 | `assets/scripts/bring-current-guard.sh` | merge | Holds a bring-current round to the worker's audit. Run at every handoff onto a branch that carries a review, it reads what the push merged in: a clean round (git's own merge) is recorded and lands quietly; a conflicted one is handed off only when the audit covers every item git did not produce on its own, or its resume asked for no audit, then stored on the anchor with the guard's diff evidence and routed to triage by reopening its lane. On an anchor whose `check_set` declares no triage lane it rules closed instead: every declared lane runs again, and an approval given before the round is dismissed. Its `decide`, run by `signoff.sh`, records triage's ruling and carries it out: the lanes that run again, and the dismissal of an approval the round outgrew, re-ask visit first. |
 | `assets/scripts/bring-current-audit.sh` | merge | The worker's account of a bring-current round and the words every message about it is composed from: `add` records one entry per conflicted file or edit beyond the merge (what collided, what was decided and why, what to check, a routine or judgment rating), `ask` files the visit for a conflict the worker cannot resolve without guessing, and its renderer composes triage's posted round section, the dismissal note and the re-ask visit from the anchor's record. |
 | `assets/scripts/approval-withdraw.sh` | merge | Keeps an approval from covering a change the validator ruled needs a fresh whole-diff review. `mol-validate` runs it on that ruling, before the supersede: it records the reviews on the validation pass, notes the judgment on the anchor once, and dismisses every outside approval not yet dismissed, which it reads from `review-verdict.sh`. |
-| `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
+| `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `gctk merge` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 5: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
 | `assets/scripts/branch-supersession.sh` | merge | Asked by arms 5 and 7 before they file a merge-in child. When the conflict comes from a landed change that deleted or rewrote the code the branch edits, it files the operator's `rework-base-supersession` decision instead. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
@@ -445,7 +479,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep, its precheck and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
 | `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan (visit) sources it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. |
 | `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh` and `signoff.sh` read its definition. |
-| `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, the refinery formula's default lint command. |
+| `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-helm-build.sh`), and merge sources it for the go vet in `tools/lint.sh`, which the gc-toolkit rig's lint command runs. |
 | `assets/scripts/branch-end.sh` | shared primitive | Ends a retired bead's branch on the git remote, the way delete-on-merge ends a landed one: keeps a branch a live bead still names, pins the tip (the PR's `refs/pull/<n>/head`, or an annotated `archive/<branch>@<short-sha>` tag read back on origin), then deletes it at that tip. `bead-rehome.sh` runs it after every disposition close, so it serves that writer's callers for the same reason: converse (visit), and `pr-facts.sh`, `duplicate-sweep.sh` and `scaffolding-sweep.sh` (merge). Its origin write is granted in [authority-map.md](authority-map.md). |
 | `assets/scripts/rework-child.sh` | shared primitive | The one writer of a review- or ruling-sourced rework child, the fix unit that blocks an anchor while a worker resumes its branch. Review (`signoff.sh`, on a request-changes verdict) and visit (`converse-rework.sh`, on an operator ruling) file through it for the same reason, each passing its provenance as the child's source key and deciding the work order. |
 

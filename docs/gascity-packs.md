@@ -147,12 +147,16 @@ observed writing to the wrong bead — or to none:
 | `$GC_BEAD_ID` | unset in the step-execution environment (tk-7w69a) | CLOSED — a guarded close short-circuits, the bead is never closed, and the graph re-offers the step forever at exit 0 |
 | `$GC_TRIGGER_BEAD_ID` | not refreshed by `gc hook --claim` (tk-niu2f), so it still names the session's spawn bead | OPEN — the close succeeds against *another live session's* in-progress step |
 
-Close through `assets/scripts/step-close.sh --step <formula>.<step-id>` instead.
-It resolves the target from the store by (`metadata."gc.root_bead_id"`,
+Close through
+`assets/scripts/step-close.sh --step <formula>.<step-id> --convoy {{convoy_id}}`
+instead. It resolves the target from the store by (`metadata."gc.root_bead_id"`,
 `metadata."gc.step_ref"`) — the molecule and the step. A pool agent wears one
 assignee across every run it makes, so only that pair names exactly one bead;
-the assignee corroborates the match and never identifies it alone. It refuses
-to write at all when it cannot prove which bead is yours. The pack's
+the assignee corroborates the match and never identifies it alone. `--convoy`
+names the molecule as the live workflow root poured over the formula's input
+convoy. A formula with no input convoy leaves it off, and the script derives
+the molecule, first from the `gc.session_id` stamp a claim leaves on the step.
+It refuses to write at all when it cannot prove which bead is yours. The pack's
 hardened detector `tools/lint-learned.d/step-close-env-id.sh` holds the
 line, flagging any step that closes a bead on an id read from the
 environment.

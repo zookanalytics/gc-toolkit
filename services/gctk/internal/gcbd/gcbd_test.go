@@ -186,9 +186,9 @@ func TestListDecodesArrayAndFailsClosed(t *testing.T) {
 		}
 	})
 
-	// bd_list's contract, which merge.sh reads every list through: a store
-	// error mid-query can print an empty or partial array and exit 1, and a
-	// caller that read it would merge on that partial view.
+	// bd_list's contract (bd-lib.sh), which List keeps: a store error
+	// mid-query can print an empty or partial array and exit 1, and a caller
+	// that read it would merge on that partial view.
 	t.Run("a non-zero exit fails closed whatever was printed", func(t *testing.T) {
 		writeGC(t, "echo '[]'\nexit 1\n")
 		if _, ok := New().List(); ok {
