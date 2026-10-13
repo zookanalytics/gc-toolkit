@@ -151,7 +151,7 @@ RUNNING_CITY="$TMP/running-city"
 mkdir -p "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts"
 cat > "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
 #!/usr/bin/env bash
-printf 'state=running\npid=4242\nelapsed=600\nwaited=540\ndir=%s\n' "$2"
+printf 'state=running\npid=4242\nelapsed=600\nwaited=480\ndir=%s\n' "$2"
 exit 3
 STUB
 chmod +x "$RUNNING_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh"
