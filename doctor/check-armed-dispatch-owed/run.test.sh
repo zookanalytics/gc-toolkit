@@ -13,9 +13,9 @@
 # waits on a task, is not owed; a demand gate on the epic holds nothing; a park
 # released just now dates the window; an arm in flight is held by its own
 # blockers alone; a pinned own blocker holds nothing, as a closed one does,
-# while one in progress, blocked, deferred or hooked still holds; an unreadable
-# ancestor or a failed walk leaves the arm NOT checked, naming what could not be
-# read), the
+# while one in progress, blocked, deferred or hooked still holds; an ancestor,
+# or a blocker on an ancestor, the store does not return holds nothing; a failed
+# walk leaves the arm NOT checked, naming what could not be read), the
 # suspended-rig skip, and the quiet path (no armed beads). The check reads
 # dependencies in bulk: one `bd dep list` for the whole candidate set (edge
 # records) then one `bd list --id` for the blockers' statuses — so a store costs
@@ -479,14 +479,15 @@ eq "$RC" "0" "an arm whose park was released just now is within cadence, not owe
 hasnt "$OUT" "alpha bead h-5" "it is not reported"
 clear_stores
 
-# --- 19. FAIL CLOSED: an ancestor that cannot be read is NOT checked -----------
+# --- 19. OWED: an ancestor the store does not return (a parent in another
+#          store, or one deleted) holds nothing, as bd's cascade passes no hold
+#          through a row the store does not hold, so the arm is owed -----------
 armed_store alpha "$(aedged h-6 epic-ghost b-0)"
-edges_store alpha "$(e_pc h-6 epic-ghost)" "$(e_blk h-6 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an arm whose ancestor cannot be read warns (exit 1)"
-has "$OUT" "could not read [epic-ghost]" "the unread ancestor is named"
-hasnt "$OUT" "owed but not firing" "an unread hold is NOT reported as owed"
+eq "$RC" "1" "an arm whose parent has no row is owed (exit 1)"
+has "$OUT" "alpha bead h-6: armed and nothing has held it" "it is reported as owed"
+hasnt "$OUT" "could not read" "the parent with no row is not reported as unread"
 clear_stores
 
 # --- 20. FAIL CLOSED: a hold walk whose read fails leaves the store's arms NOT
@@ -510,14 +511,15 @@ eq "$RC" "1" "an arm in flight under a parked epic is owed (exit 1)"
 has "$OUT" "alpha bead h-8" "it is reported as owed"
 clear_stores
 
-# --- 22. FAIL CLOSED: an arm with no blocker of its own, whose ancestor cannot
-#          be read, is NOT checked, and the warning names that ancestor --------
-armed_store alpha "$(aedged h-9 epic-ghost "")"
-edges_store alpha "$(e_pc h-9 epic-ghost)"
+# --- 22. OWED: a blocker the store does not return on an ancestor holds
+#          nothing, so an arm with no blocker of its own is owed from its
+#          armed_at ---------------------------------------------------------
+armed_store alpha "$(aedged h-9 epic-1 "")"
+blockers_store alpha "$(b_epic epic-1 "" gate-ghost)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an arm with no blocker of its own whose ancestor cannot be read warns (exit 1)"
-has "$OUT" "could not read [epic-ghost]" "the unread ancestor is named though no blocker of the arm has closed"
-hasnt "$OUT" "owed but not firing" "an unread hold is NOT reported as owed"
+eq "$RC" "1" "an arm whose epic's only blocker has no row is owed (exit 1)"
+has "$OUT" "alpha bead h-9: armed and nothing has held it" "it is reported as owed"
+hasnt "$OUT" "could not read" "the blocker with no row is not reported as unread"
 clear_stores
 
 # --- 23. OWED: a pinned own blocker holds nothing, as a closed one does

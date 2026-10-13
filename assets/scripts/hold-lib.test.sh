@@ -6,7 +6,8 @@
 #             nearest first, the release time, and the reads the walk makes
 #   (LABEL)   how a reader prints a hold: the blocker and its title, the
 #             ancestor whose edge it sits on, an unreadable blocker or ancestor,
-#             and how many more hold the bead; one blocker reached twice is one
+#             an absent ancestor named nowhere, and how many more hold the bead;
+#             one blocker reached twice is one
 #   (FLIGHT)  which keys put a bead in flight, and how a reader names the one
 #             that does
 #   (SHAPE)   a bead read by `bd show` gives the same edges as one read by a list
@@ -86,7 +87,7 @@ eq "$(ask 'hold_summary($g[0])')" "e-0 \"e-1's open prerequisite\"" "(LABEL) a h
 walk i-1
 eq "$(ask 'hold_summary($g[0])')" "ghost-i (unreadable)" "(LABEL) an unreadable blocker says so"
 walk j-1
-eq "$(ask 'hold_summary($g[0])')" "ancestor ghost-epic (unreadable)" "(LABEL) an unreadable ancestor says so"
+eq "$(ask 'hold_summary($g[0])')" "" "(LABEL) an ancestor the store does not return names no hold"
 walk f-1
 eq "$(ask 'hold_summary($g[0])')" "" "(LABEL) a bead nothing holds has an empty summary"
 two='{"id":"two-1","title":"Two holds","status":"open","dependencies":[{"issue_id":"two-1","depends_on_id":"e-0","type":"blocks"},{"issue_id":"two-1","depends_on_id":"epic-a","type":"parent-child"}]}'
@@ -148,6 +149,7 @@ jq -nc --argjson n "$deep" '
 STORE="$TMP/deep.json" walk deep-0
 eq "$(ask '[ hold_holds($g[0])[] | {by, unread} ] | tojson')" "[{\"by\":\"deep-$deep\",\"unread\":true}]" \
    "(FAIL) an ancestor past the cap is never read, so it holds the bead"
+eq "$(ask 'hold_summary($g[0])')" "ancestor deep-$deep (unreadable)" "(LABEL) an ancestor the walk never read says so"
 [ "$(reads)" -le $((HOLD_MAX_DEPTH + 1)) ] && ok "(FAIL) the walk stops reading at the cap ($(reads) reads)" \
     || bad "(FAIL) the walk stops reading at the cap ($(reads) reads)"
 
@@ -170,7 +172,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of one of the predicate's names. Specs and generated
 # renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_flight_why|hold_in_flight|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
+DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_flight_why|hold_in_flight|hold_absent|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

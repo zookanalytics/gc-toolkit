@@ -20,8 +20,20 @@
 # an ancestor leaves it running, so only a blocker on the bead itself holds it,
 # and an armed re-dispatch of work already begun fires under a parked epic.
 #
-# The predicate fails closed. An ancestor or a blocker the walk cannot read
-# holds the bead, marked unread so a reader can say so.
+# A read that fails fails the whole walk, and the caller then treats every bead
+# it was for as unread, never as free. A read that answers without an id it was
+# asked for says this store holds no such bead: one in another store, or one
+# deleted. What that means depends on where the edge sits.
+#   * A hold on an ancestor reaches the bead only through bd's cascade, which
+#     passes a hold down from an ancestor row this store holds. So an ancestor
+#     the store does not return, or a blocker it does not return on an
+#     ancestor, holds nothing and passes nothing down, as in bd.
+#   * A blocker on the bead itself is the bead's own sequencing. One the store
+#     does not return holds the bead, marked unread so a reader can say so: the
+#     walk cannot tell whether it is open, and a dispatch on a guess is what an
+#     arm exists to prevent.
+# An ancestor past HOLD_MAX_DEPTH is never asked for, so it holds the bead as
+# unread too.
 #
 # Readers: deferred-dispatch.sh slings an armed bead only when nothing holds it,
 # and its `list` and pass log name the blocker that does.
@@ -48,7 +60,7 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # How many generations of ancestors the walk reads. An ancestor past it is
-# never read, so it holds the bead as an unread one does.
+# never asked for, so it holds the bead as an unread one does.
 HOLD_MAX_DEPTH=16
 
 # shellcheck disable=SC2016,SC2034  # jq source, its $names are jq's; read by the scripts that source this file
@@ -77,12 +89,15 @@ HOLD_JQ='
        else "" end) | gsub("[[:cntrl:]]"; " ")
     else "" end;
   def hold_in_flight: hold_flight_why != "";
+  # An id the walk asked for and the store did not return. An id never asked
+  # for is not absent, only unread.
+  def hold_absent($g; $id): ($g | has($id)) and $g[$id] == null;
 
   # The beads whose blockers can hold this one, nearest first: the bead itself,
   # then each ancestor over $g (an object keyed by bead id, null for an id that
   # was asked for and not found), as {id, bead, ancestor}, where bead is null
-  # for an ancestor the walk could not read. A done ancestor ends its line of
-  # the walk, and a bead in flight has no ancestor to walk.
+  # for an ancestor the walk has no row for. A done ancestor, or one with no
+  # row, ends its line of the walk, and a bead in flight has no ancestor to walk.
   def hold_chain($g):
     def up($ids; $seen):
       if ($ids | length) == 0 then empty
@@ -109,15 +124,19 @@ HOLD_JQ='
 
   # What holds this bead over $g, nearest first, one entry per blocker:
   # {by, title, on, unread}. by is the blocker, on is the bead whose edge it
-  # sits on, and unread marks one the walk could not read. An unread ancestor
-  # is its own entry, with by and on both naming it.
+  # sits on, and unread marks one with no row: a blocker on the bead itself
+  # that the store did not return, or an ancestor past the depth cap, which is
+  # its own entry with by and on both naming it. An absent ancestor, and an
+  # absent blocker on an ancestor, hold nothing.
   def hold_holds($g):
     [ hold_chain($g) as $c
-      | if $c.bead == null then {by: $c.id, title: "", on: $c.id, unread: true}
+      | if $c.bead == null then
+          (if hold_absent($g; $c.id) then empty else {by: $c.id, title: "", on: $c.id, unread: true} end)
         elif $c.ancestor and ($c.bead | hold_done) then empty
         else
           ($c.bead | hold_blocker_ids[]) as $x | ($g[$x] // null) as $t
-          | if $t == null then {by: $x, title: "", on: $c.id, unread: true}
+          | if $t == null then
+              (if $c.ancestor and hold_absent($g; $x) then empty else {by: $x, title: "", on: $c.id, unread: true} end)
             elif ($t | hold_done) then empty
             elif $c.ancestor and ($t | hold_is_demand_gate) then empty
             else {by: $x, title: (($t.title // "") | tostring), on: $c.id, unread: false} end
@@ -163,7 +182,7 @@ HOLD_JQ='
 # caller's own store, at every status and of every class bd hides by default
 # (--all --include-gates --include-infra --include-templates), and exits
 # non-zero when the read fails. An id it does not return is recorded as null,
-# which the predicate reads as unread.
+# which the predicate reads as absent from the store.
 #
 # The ancestors the seed beads walk to are read first, one read per generation,
 # and then every blocker on the seed beads and those ancestors in one more read.

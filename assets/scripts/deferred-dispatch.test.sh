@@ -34,8 +34,9 @@
 #     an arm its own blocker holds is counted there, not named. One whose epic
 #     waits only on a demand gate is slung, and so is one in flight under a
 #     parked epic, which only an open blocker of its own holds. A held arm stays
-#     intact and fires once its hold releases, and an unreadable blocker or
-#     ancestor holds it;
+#     intact and fires once its hold releases. A blocker of its own the store
+#     does not return holds it, while an ancestor, or a blocker on an ancestor,
+#     the store does not return holds nothing;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -704,9 +705,9 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the still-blocked arm keeps 
 hasnt "$out" "HELD by" "an arm its own blocker holds gets no pass-log line, however its ancestors stand"
 has "$out" "1 held" "summary counts it as held"
 
-# Fail closed: a blocker or an ancestor that cannot be read holds the arm, never
-# slung on a guess. bd list --id silently drops an id with no row, so an unread
-# bead must not read as a released one.
+# Fail closed: a blocker of the bead's own that the store does not return holds
+# the arm, never slung on a guess. bd list --id silently drops an id with no
+# row, so an unread blocker must not read as a released one.
 echo "# an unresolvable own blocker fails closed (arm stays held)"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"b-0-missing","dependency_type":"blocks"}]}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
@@ -715,11 +716,31 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record whe
 has "$out" "1 held" "an unresolved blocker counts as held, not dispatched"
 out="$("$SUT" list 2>&1)"
 has "$out" "b-1 -> rig/pool [HELD by b-0-missing (unreadable)]" "list says the blocker could not be read"
-echo "# an unresolvable ancestor fails closed (arm stays held)"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"}]}]'
+
+# An ancestor the store does not return, a parent in another store or one
+# deleted, holds nothing, as bd's cascade passes no hold through a row the store
+# does not hold. Here a second parent waits on a demand gate, the wait that
+# keeps the arm out of bd --ready while nothing holds it.
+DEMAND_EPIC='{"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"}]},
+ {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","metadata":{"gc.demand_for":"epic"},"notes":""}'
+echo "# an ancestor the store does not return holds nothing"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"},{"id":"epic","dependency_type":"parent-child"}]},'"$DEMAND_EPIC"']'
+out="$("$SUT" list 2>&1)"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (nothing holds it" "list shows an arm whose parent has no row as dispatchable"
+hasnt "$out" "unreadable" "and names no unreadable ancestor"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "0" "an arm whose ancestor cannot be read is NOT slung"
-has "$out" "HELD by ancestor epic-missing (unreadable): b-1" "the pass log says the ancestor could not be read"
+eq "$rc" 0 "dispatching an arm whose parent has no row is a clean pass"
+eq "$(slings)" "1" "an arm whose parent has no row is slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
+hasnt "$out" "HELD by" "the pass log names no hold for it"
+
+echo "# a blocker the store does not return on an ancestor holds nothing"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
+ {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"},{"id":"gate-missing","dependency_type":"blocks"}]},
+ {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","metadata":{"gc.demand_for":"epic"},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "an arm whose epic's only other blocker has no row is slung"
+hasnt "$out" "HELD by" "the blocker with no row is named as no hold"
 echo "# a hold walk that cannot read fails the pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
 out="$(STUB_BD_LIST_ID_FAIL=1 "$SUT" reconcile 2>&1)"; rc=$?

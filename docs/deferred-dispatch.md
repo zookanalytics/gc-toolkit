@@ -149,8 +149,21 @@ gate on an ancestor does not count: it is the operator's pending decision
 (`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
 on the bead itself does count. Where `bd` decides the same question, the
 definition follows it: a closed or pinned blocker holds nothing, and a closed
-or pinned ancestor ends the walk. It fails closed, so a blocker or an
-ancestor the pass cannot read holds the bead.
+or pinned ancestor ends the walk.
+
+A read that fails fails the pass, so an unread hold never passes for none. A
+read that answers without an id it was asked for says this store holds no
+such bead: a bead in another store, or one deleted. bd's cascade passes a
+hold down only from an ancestor row the store holds, so an ancestor with no
+row, or a blocker with no row on an ancestor, holds nothing, as it holds
+nothing in `bd list --ready`. A blocker with no row on the bead itself holds
+it, marked unread, because it is the bead's own sequencing and the walk
+cannot tell whether it is open. The walk runs only where bd keeps the bead
+out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
+so a bead bd has no other reason to hold is ready and the pass slings it, as
+`arm` warns when it records the arm. An ancestor past the walk's depth cap
+(`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
+unread.
 
 A hold holds work that has not started. A bead whose work has started is in
 flight: it carries a `branch`, a `merge_result` or a `rejection_reason`. Only
@@ -174,8 +187,9 @@ A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
 dispatches the bead. `list` shows a held arm as `HELD by <blocker>
 "<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, so a
-parked arm says why it is parked and what releases it. A blocker or an
-ancestor the pass could not read shows as `(unreadable)`. The pass log names,
+parked arm says why it is parked and what releases it. A blocker of the
+bead's own that the store does not return shows as `(unreadable)`, and so
+does an ancestor past the depth cap. The pass log names,
 on every pass, each hold that sits on an ancestor once, followed by the arms
 it keeps. An arm its own blocker holds is counted in the summary without a
 line, because the output of a failing pass reaches its `order.failed` event

@@ -1,5 +1,5 @@
 {
-  "description": "Cases for the hold predicate (assets/scripts/hold-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges, and a bead whose metadata carries a branch, a merge_result or a rejection_reason is in flight. Each case names a bead and the holds the predicate finds on it, nearest first: by is the blocker, on is the bead whose edge it sits on, and unread marks one that could not be read. released_at is the latest close among the blockers that no longer hold it, or null. reads, where given, is how many reads the walk makes for that bead alone. Any copy of the predicate runs these cases.",
+  "description": "Cases for the hold predicate (assets/scripts/hold-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges, and a bead whose metadata carries a branch, a merge_result or a rejection_reason is in flight. Each case names a bead and the holds the predicate finds on it, nearest first: by is the blocker, on is the bead whose edge it sits on, and unread marks a blocker on the bead itself that the store does not return. An id the store does not return is absent: an absent ancestor, and an absent blocker on an ancestor, hold nothing. released_at is the latest close among the blockers that no longer hold it, or null. reads, where given, is how many reads the walk makes for that bead alone. Any copy of the predicate runs these cases.",
   "beads": [
     {"id": "park-1", "title": "Parked: the operator unparks the epic", "status": "open", "issue_type": "gate"},
     {"id": "epic-a", "title": "A parked epic", "status": "open", "issue_type": "epic",
@@ -54,6 +54,13 @@
 
     {"id": "j-1", "title": "A bead whose parent has no row", "status": "open", "issue_type": "task",
      "dependencies": [{"issue_id": "j-1", "depends_on_id": "ghost-epic", "type": "parent-child"}]},
+    {"id": "j-2", "title": "A bead with a parent that has no row and a parent that is parked", "status": "open", "issue_type": "task",
+     "dependencies": [{"issue_id": "j-2", "depends_on_id": "ghost-epic", "type": "parent-child"},
+                      {"issue_id": "j-2", "depends_on_id": "epic-a", "type": "parent-child"}]},
+    {"id": "epic-j", "title": "An epic whose only blocker has no row", "status": "open", "issue_type": "epic",
+     "dependencies": [{"issue_id": "epic-j", "depends_on_id": "ghost-gate", "type": "blocks"}]},
+    {"id": "j-3", "title": "A child of the epic whose blocker has no row", "status": "open", "issue_type": "task",
+     "dependencies": [{"issue_id": "j-3", "depends_on_id": "epic-j", "type": "parent-child"}]},
 
     {"id": "epic-k", "title": "An epic nothing holds", "status": "open", "issue_type": "epic"},
     {"id": "k-1", "title": "A bead with two parents, one parked", "status": "open", "issue_type": "task",
@@ -146,8 +153,12 @@
      "holds": [], "released_at": null},
     {"name": "a blocker that cannot be read holds the bead", "bead": "i-1",
      "holds": [{"by": "ghost-i", "on": "i-1", "unread": true}], "released_at": null},
-    {"name": "an ancestor that cannot be read holds the bead", "bead": "j-1",
-     "holds": [{"by": "ghost-epic", "on": "ghost-epic", "unread": true}], "released_at": null},
+    {"name": "an ancestor the store does not return holds nothing, as in bd", "bead": "j-1",
+     "holds": [], "released_at": null, "reads": 1},
+    {"name": "an ancestor the store does not return leaves a park on another parent holding", "bead": "j-2",
+     "holds": [{"by": "park-1", "on": "epic-a", "unread": false}], "released_at": null, "reads": 2},
+    {"name": "a blocker the store does not return on an ancestor holds nothing, as in bd", "bead": "j-3",
+     "holds": [], "released_at": null, "reads": 2},
     {"name": "one parked parent holds a bead with two parents", "bead": "k-1",
      "holds": [{"by": "park-1", "on": "epic-a", "unread": false}], "released_at": null},
     {"name": "a park beside a demand gate on the same epic still holds", "bead": "m-1",
