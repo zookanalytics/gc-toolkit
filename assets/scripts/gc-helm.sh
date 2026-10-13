@@ -1,14 +1,14 @@
 #!/bin/sh
-# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, engage,
-# react.
+# gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve and
+# unplaced.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
-# write verbs open, engage, react, takeaway, demand, dismiss, and the read-only
-# resolve and unplaced. open, engage and react take a <subject> (a bead id, a
-# PR number or URL, or a superseded id) and resolve it to the live bead that
-# owns the work by metadata and the graph, never a title; an unresolvable or
-# ambiguous reference is refused and nothing is filed.
+# write verbs open, engage, react, takeaway, demand, dismiss, accept, and the
+# read-only resolve and unplaced. open, engage and react take a <subject> (a
+# bead id, a PR number or URL, or a superseded id) and resolve it to the live
+# bead that owns the work by metadata and the graph, never a title; an
+# unresolvable or ambiguous reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -55,8 +55,8 @@ Usage:
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints the rows for a caller. Read-only, files nothing; exits 4 after the list when a store did not answer
 
-The board is `helm-svc board` (services/helm). This script carries only the
-write verbs. open, engage and react take the subject as a bead id, a PR number
+The board is `helm-svc board` (services/helm). This script renders no
+board. open, engage and react take the subject as a bead id, a PR number
 or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
 work by metadata and the graph — a PR number/URL to the anchor whose
 pr_number/pr_url records it, a closed+superseded id along gc.superseded_by to
@@ -4141,7 +4141,7 @@ case "${1:-}" in
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
-    board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
+    board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
     *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

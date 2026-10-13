@@ -6,13 +6,13 @@ Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
 board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
 the bash dies).
 
-> **The bash board is gone; the bash WRITE VERBS are what is left.**
+> **The bash board is gone; the bash verbs are what is left.**
 > `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
-> binary. `gc-helm.sh` no longer renders a board at all: it carries `open`,
-> `react`, `takeaway`, `demand` and `dismiss`, and `gc-helm.sh --json` exits 2
-> with `unknown verb`. Its own usage text points at `helm-svc board`. Retiring the
-> remaining verbs is a separate decision recorded under "Two helm boards, and
-> they diverge" in `docs/gascity-human-engagement.md`.
+> binary. `gc-helm.sh` no longer renders a board at all: it carries the write
+> and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
+> exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
+> Retiring the remaining verbs is a separate decision recorded under "Two helm
+> boards, and they diverge" in `docs/gascity-human-engagement.md`.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
