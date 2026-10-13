@@ -7,9 +7,10 @@
 # floor). The floor is one trip of the order dispatch rotation, derived from the
 # live registry and the city's dispatch budget by assets/scripts/order-cadence.sh,
 # because the supervisor fires a short-interval order once per trip, not once per
-# interval. `--limit 0` on the history read is LOAD-BEARING: any positive limit
-# returns city-store rows only under a RIG column, so the answer looks city-wide
-# and is not.
+# interval. One history read, naming no order, answers for every order, and each
+# order's runs inside its own window are cut from it. `--limit 0` on that read is
+# LOAD-BEARING: a positive limit keeps only the newest runs across every order,
+# so a slower order's last run falls off the end and the order reads as stopped.
 # Condition-triggered orders (no interval) get the registration arm alone.
 # `gc order list` omits orders disabled in city.toml (an `[[orders.overrides]]`
 # `enabled = false`, or an `[orders] skip` entry), so the registration arm reads
@@ -17,9 +18,9 @@
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
 # its own error rather than being buried beside an intended disable.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
-# the one this checkout describes: lifecycle.sh execs it and has no other
-# implementation, and orders that fire on schedule can still be running logic
-# several commits old.
+# the one this checkout describes: lifecycle.sh and merge.sh exec it and have
+# no other implementation, and orders that fire on schedule can still be
+# running logic several commits old.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -103,6 +104,30 @@ EOF
 done
 [ -n "$order_rows" ] || { echo "OK: orders/ is empty — this pack ships no cadence"; exit 0; }
 
+# The registry, the rig roster and the run history share nothing, so the three
+# reads are in flight at once. On a loaded host a gc call costs 5-15s of wall
+# time whatever it reads, so the check takes about one call's time, not three.
+# The roster and the history answer into files, and each is waited on before
+# it is read. Their stdio is redirected, so an early exit never holds the
+# doctor's pipe open behind it.
+probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/null) || {
+    echo "cadence liveness undetermined (I10) — cannot stage the registry, roster and history reads"
+    detail "mktemp -d failed (e.g. /tmp under disk pressure); nothing was read, so a stopped cadence would not be visible."
+    exit 1
+}
+trap 'rm -rf "$probe_dir"' EXIT
+# build-scratch-reap removes a gctk-* temp dir that no process holds open.
+exec 9>"$probe_dir/held"
+# Every retained run of every registration. The read carries no --since: gc
+# applies that bound only after fetching every retained run, so it would not
+# make the read cheaper, and without it the answer covers every order's window.
+# `now` anchors every window and is taken before the read is sent. The answer
+# holds no run newer than its fetch, so an anchor taken after the reads would cut
+# every window short by however long they took.
+now=$(budget_now)
+run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
+run_bounded gc rig list --json >"$probe_dir/rigs.json" 2>/dev/null & rigs_pid=$!
+
 orders_json=$(run_bounded gc order list --json 2>/dev/null)
 if ! printf '%s' "$orders_json" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
     echo "cadence liveness undetermined (I10) — cannot read the order registry"
@@ -118,7 +143,8 @@ pack_rigs=$(printf '%s' "$orders_json" | jq -r --arg names "$pack_names" '
     | unique | .[]' 2>/dev/null)
 
 suspended_rigs=""
-rigs_json=$(run_bounded gc rig list --json 2>/dev/null)
+wait "$rigs_pid"
+rigs_json=$(cat "$probe_dir/rigs.json" 2>/dev/null)
 if printf '%s' "$rigs_json" | jq -e '(.rigs | type) == "array"' >/dev/null 2>&1; then
     suspended_rigs=$(printf '%s' "$rigs_json" \
         | jq -r '.rigs[]? | select((.suspended // false) == true) | .name // empty' 2>/dev/null)
@@ -126,6 +152,22 @@ else
     warnings+=("could not read the rig roster (\`gc rig list --json\`) — a suspended rig cannot be told apart from a stalled one below")
 fi
 is_suspended() { [ -n "$suspended_rigs" ] && printf '%s\n' "$suspended_rigs" | grep -qxF "$1"; }
+
+# The run history every liveness arm below reads. It is read whole or not at
+# all: an entry that does not name its order and a parseable time would leave
+# that order's last run unjudgeable, and an unjudged run reads as a stopped
+# order.
+EP='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
+runs_file="$probe_dir/runs.json"
+runs_ok=0
+wait "$runs_pid"; runs_rc=$?
+if [ "$runs_rc" -eq 0 ] && jq -e "$EP"'(.entries | type) == "array"
+        and all(.entries[]; (.order | type) == "string" and ((.created_at | ep) | type) == "number")' \
+        "$runs_file" >/dev/null 2>&1; then
+    runs_ok=1
+else
+    warnings+=("could not read the order run history (\`gc order history --limit 0 --json\`) — the liveness arm did not run, so no order's last run was checked")
+fi
 
 # Orders disabled in city.toml are absent from `gc order list`, so the
 # registration arm would read a deliberate disable as a missing registration.
@@ -216,11 +258,13 @@ while IFS=$'\t' read -r name secs scope; do
         continue
     fi
     window=$(cadence_window "$secs" "$FLOOR")
-    hist=$(run_bounded gc order history "$name" --since "${window}s" --limit 0 --json 2>/dev/null)
-    if ! printf '%s' "$hist" | jq -e '(.entries | type) == "array"' >/dev/null 2>&1; then
-        warnings+=("$name: could not read run history (\`gc order history $name --since ${window}s --limit 0 --json\`) — the liveness arm did not run for this order")
+    [ "$runs_ok" -eq 1 ] || continue
+    # This order's runs inside its own window, cut from the one history read.
+    hist=$(jq -c --arg n "$name" --argjson since "$(( now - window ))" "$EP"'
+        {entries: [.entries[] | select(.order == $n and (.created_at | ep) >= $since)]}' "$runs_file" 2>/dev/null) || {
+        warnings+=("$name: could not cut its runs from the run history — the liveness arm did not run for this order")
         continue
-    fi
+    }
     fresh=$(printf '%s' "$hist" | jq -r '[.entries[]? | (.rig // "")] | unique | .[]' 2>/dev/null)
     if [ "$scope" = "rig" ]; then
         while read -r rig; do
@@ -253,9 +297,9 @@ done <<< "$order_rows"
 # design and the state self-heals on the next tick; what an operator needs is to
 # see it, and the board's PACK row is where a persistent one shows up.
 #
-# A MISSING binary is an error, like an order that never runs: lifecycle.sh has
-# nothing else to exec, so every lifecycle transition is refused until the
-# gctk-build order publishes one.
+# A MISSING binary is an error, like an order that never runs: lifecycle.sh and
+# merge.sh have nothing else to exec, so every lifecycle transition and every
+# merge pass is refused until the gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -274,7 +318,7 @@ tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
 elif [ ! -x "$gctk_bin" ]; then
-    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh execs it and has no other implementation, so every lifecycle transition is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and merge.sh exec it and have no other implementation, so every lifecycle transition and every merge pass is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
 else

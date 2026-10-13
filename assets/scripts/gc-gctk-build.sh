@@ -151,9 +151,10 @@ if [ "$need_build" -eq 0 ]; then
 fi
 
 # A build is owed and nothing can perform it: that is a failed build, recorded
-# like any other so the board's PACK row reports it. lifecycle.sh has nothing
-# but this binary to exec, so a city that never gets one refuses every
-# transition, and a city that has one keeps it — $BIN is not touched here.
+# like any other so the board's PACK row reports it. lifecycle.sh and merge.sh
+# have nothing but this binary to exec, so a city that never gets one refuses
+# every transition and every merge pass, and a city that has one keeps it —
+# $BIN is not touched here.
 if ! command -v "$GO" >/dev/null 2>&1; then
     echo "gc-gctk-build: BUILD FAILED — no Go toolchain ($GO) to build $MOD; set GC_GO_BIN. $BIN left unchanged" >&2
     write_status 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
@@ -201,9 +202,9 @@ trap 'exit 130' INT
 # the callers' -x test.
 #
 # The binary carries the revision it was built from (`gctk version`), stamped
-# as the same subtree identity this record uses, so lifecycle.sh and
-# doctor/check-cadence-live compare one identity against the checkout rather
-# than a commit hash against a tree hash. A build with no revision to stamp
+# as the same subtree identity this record uses, so doctor/check-cadence-live
+# and gctk-resolve.sh's skew guard compare one identity against the checkout
+# rather than a commit hash against a tree hash. A build with no revision to stamp
 # falls back to the toolchain's VCS stamp.
 LDFLAGS=""
 [ -z "$SOURCE_REV" ] || LDFLAGS="-X main.sourceRev=$SOURCE_REV"
