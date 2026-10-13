@@ -21,7 +21,8 @@
 # a command substitution keeps its code, so a call inside "$(bd_list ...)" is. A
 # definition `bd_json()` is not a call — the trailing class excludes `(`.
 #
-# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
+# Exit: 0 clean, 1 findings as `<file>:<line>: <message>`, 2 when a file cannot
+# be scanned.
 
 set -uo pipefail
 
@@ -119,8 +120,15 @@ for f in "$@"; do
         *.sh) ;;
         *) continue ;;
     esac
-    # One cheap read gates the line scan.
-    grep -Eq 'bd_json|bd_list' "$f" 2>/dev/null || continue
+    # One cheap read gates the line scan. Exit 1 is a file without either
+    # name; anything past it is a file grep could not read, which a skip would
+    # pass unscanned.
+    grep -Eq 'bd_json|bd_list' "$f" 2>/dev/null; rc=$?
+    [ "$rc" -eq 1 ] && continue
+    if [ "$rc" -ne 0 ]; then
+        echo "bd-helper-in-scope: grep failed on $f — detector cannot scan it" >&2
+        exit 2
+    fi
 
     # First pass: what is callable in this file. Sourcing the library defines
     # both; a local definition defines the one it names.
