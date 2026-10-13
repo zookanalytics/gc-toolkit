@@ -599,8 +599,8 @@ keys = [
 # bring_current_scope — whether bringing the branch current is the resumed
 #   bead's whole job: merge-only for a conflict or stale-base rejection, else
 #   with-work. Written by the resume block beside bring_current_from, and as
-#   with-work by the worker the guard's refusal asks where a hand-off's work
-#   began. On a merge-only bead the guard counts a commit of the bead's own as
+#   with-work by a worker whose hand-off the guard refused for recording no
+#   start. On a merge-only bead the guard counts a commit of the bead's own as
 #   an edit beyond the merge, which owes an audit entry. Absent reads as
 #   with-work; absent beside a bring_current_from stamp, it marks a resume
 #   step that asks for no audit, so the round owes no entries.
