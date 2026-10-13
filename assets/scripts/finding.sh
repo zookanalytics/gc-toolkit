@@ -9,7 +9,8 @@
 # [metadata.review_findings]):
 #
 #   task_kind            finding
-#   anchor_bead          the gating anchor
+#   anchor_bead          the gating anchor, which the finding also has its
+#                        membership edge onto (bd-lib.sh's anchor graph)
 #   finding.lane         the lane whose review raised it, or `human`
 #   finding.key          lane name + normalized locus + message; the dedup handle
 #   finding.disposition  unvalidated | must-fix | deferred | declined | needs-you
@@ -167,7 +168,7 @@ compute_key() {
 # tell "no such finding" from "could not ask".
 find_open_by_key() {
   local anchor="$1" key="$2" rows
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || return 2
+  rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") || return 2
   printf '%s' "$rows" | jq -r --arg k "$key" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.key"] // "") | tostring) == $k) ]
@@ -191,14 +192,14 @@ edge_exists() { # <blocker> blocks <blocked> ?  (reads the blocked's down-blocke
 # a machine finding one that carries it — and no lane's finding is wired to
 # another lane's child.
 #
-# Read by metadata (anchor_bead + task_kind=rework), not by the anchor's blocks
-# edges: the fix-unit->anchor edge is itself sometimes absent, so an edge walk
-# would miss the very landed fix unit the close-answered backstop must see. The
-# --status is explicit because a bare metadata-field query is open-only, and a
-# landed fix unit is closed. Non-zero rc = the ledger would not read.
+# Read as the anchor's children (anchor_bead + task_kind=rework), not by the
+# anchor's blocks edges: the fix-unit->anchor blocks edge is itself sometimes
+# absent, so a blocks walk would miss the very landed fix unit the
+# close-answered backstop must see. Every status is read, because a landed fix
+# unit is closed. Non-zero rc = the ledger would not read.
 _anchor_reworks() { # <anchor-id> <finding-lane>
   local rows
-  rows=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 2
+  rows=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 2
   # A ruling's rework child carries no source_review_bead either, but it answers
   # the ruling its source_ruling_bead names, not a finding, so no lane takes it.
   printf '%s' "$rows" | jq -r --arg lane "${2:-}" '
@@ -347,16 +348,18 @@ cmd_upsert() {
   title="finding[$lane]: $(printf '%s' "$msg" | tr '\n' ' ' | cut -c1-120)"
   desc=$(printf 'Locus: %s\n\n%s\n\nRaised by %s reviewing anchor %s.' "$locus" "$msg" "$source" "$anchor")
   # The identity rides the create, one insert, so a finding bead exists fully
-  # stamped or not at all. A bead stamped in a second write is left with no
-  # metadata when that write fails: no finding reader selects it, and with no
-  # finding.key the next pass's dedup misses it and files a stamped twin. The
-  # fix unit rides it too, so no ruling can find the finding without its record.
+  # stamped or not at all, and so does its edge onto the anchor
+  # (bd_create_child), which the anchor's closed-children read follows. A bead
+  # stamped in a second write is left with no metadata when that write fails: no
+  # finding reader selects it, and with no finding.key the next pass's dedup
+  # misses it and files a stamped twin. The fix unit rides it too, so no ruling
+  # can find the finding without its record.
   meta=$(jq -nc --arg ab "$anchor" --arg ln "$lane" --arg k "$key" --arg src "$source" --arg fu "$fix_unit" \
     '{task_kind: "finding", anchor_bead: $ab, "finding.lane": $ln, "finding.key": $k,
       "finding.disposition": "unvalidated", "finding.source": $src}
      + (if $fu == "" then {} else {"finding.fix_unit": $fu} end)' 2>/dev/null)
   [ -n "$meta" ] || { warn "could not build finding metadata for key $key on $anchor; nothing filed"; exit 2; }
-  id=$(gc bd create "$title" -t task -d "$desc" --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  id=$(bd_create_child "$anchor" "$title" -t task -d "$desc" --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   # A new finding changes this anchor's findings list; drop the per-pass bd_list
   # cache so a same-pass re-read sees it (pr-facts files a finding for a human
   # comment, then re-reads to wire its fix unit). No-op outside a reconcile pass.
@@ -480,10 +483,12 @@ cmd_set_disposition() {
       # Retract the blocks edge a prior must-fix ruling may have wired — merge.sh
       # reads blocks downward, so a survivor would keep a deferral holding the merge
       # it must release — and fail closed if it survives; strip inbound blocks so the
-      # close is not refused by a cross-wired fix unit.
+      # close is not refused by a cross-wired fix unit. The hold is the pair with the
+      # anchor depending on the finding, and only that pair is removed: the reverse
+      # pair is the finding's membership edge onto its anchor, which the
+      # anchor's closed-children read follows.
       if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
-          || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
       fi
       ! edge_exists "$finding" "$anchor" \
         || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
@@ -546,14 +551,14 @@ cmd_set_disposition() {
     declined)
       # No objection to answer: close it with the reason. A declined finding
       # holds nothing and nothing holds it, so drop BOTH sides before the close:
-      # its own must-fix hold on the anchor (finding --blocks anchor), and every
-      # blocker wired INTO it. The inbound strip is what the close depends on — a
-      # fix unit wired onto this finding (from an earlier must-fix ruling, or a
-      # dispatch that cross-wired before the validator ran) would make bd refuse
-      # the close with "cannot close blocked issue" and stall the whole triage.
+      # its own must-fix hold on the anchor (finding --blocks anchor, never the
+      # finding's membership edge), and every blocker wired INTO it. The inbound
+      # strip is what the close depends on — a fix unit wired onto this finding
+      # (from an earlier must-fix ruling, or a dispatch that cross-wired before
+      # the validator ran) would make bd refuse the close with "cannot close
+      # blocked issue" and stall the whole triage.
       if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
-          || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
       fi
       strip_inbound_blocks "$finding"
       # A declined HUMAN objection owes its raiser an answer on the PR: the
@@ -582,11 +587,11 @@ cmd_set_disposition() {
       # the human review, so the review holds the merge changes-requested until the
       # operator rules the visit; their ruling then re-dispositions this finding
       # (must-fix, declined, or deferred). needs-you holds nothing of its own, so
-      # retract any blocks edge a prior must-fix ruling hung and strip inbound
-      # blocks — the hold is the review, carried by this finding staying open.
+      # retract any blocks edge a prior must-fix ruling hung (the hold, never the
+      # finding's membership edge) and strip inbound blocks — the hold is the
+      # review, carried by this finding staying open.
       if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
-          || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
       fi
       strip_inbound_blocks "$finding"
       # One visit per finding, keyed on its id; escalate.sh dedups on the
@@ -658,7 +663,7 @@ cmd_open_must_fix() {
   esac; done
   [ -n "$anchor" ] || { warn "open-must-fix needs --anchor"; exit 1; }
   local rows ids
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") \
+  rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") \
     || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r --arg lane "$lane" '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -692,7 +697,7 @@ cmd_fix_in_flight() {
   esac; done
   [ -n "$anchor" ] || { warn "fix-in-flight needs --anchor"; exit 1; }
   local rows ids id blk n_all hit flane rw unanswered=""
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") \
+  rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") \
     || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -742,7 +747,7 @@ cmd_close_unvalidated() {
   # anchor at once, so a settled board reads the finding set once per pass, not
   # once per green lane.
   local rows pairs id flane note
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
+  rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   # A failed filter is NOT a clean lane. The jq exit status rides pipefail (set
   # above), so a parse error or a non-string disposition returns 2 here rather
   # than the empty list the early return below would read as nothing to resolve.
@@ -836,7 +841,7 @@ cmd_close_answered() {
   esac; done
   [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
   local rows ids id note cnote blk n_all n_live flane census c_live c_landed
-  rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
+  rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
           | select(((.metadata["finding.disposition"] // "") | tostring) == "must-fix") ]

@@ -98,6 +98,39 @@ The `task_kind` **key** is registered in `lifecycle/lifecycle.toml`; its
 **values** are not a closed enum, and the live store carries kinds no pack code
 writes.
 
+### An anchor's children
+
+A bead that hangs off an anchor (a review, a rework child, a finding, a
+validation pass, a visit) names the anchor in `anchor_bead`, and that key is
+what makes it a child. The child also has an edge onto the anchor, its
+membership edge, and that edge can be of any type. bd keeps one edge per ordered
+pair and refuses a second type on it, so an edge the pair already carries is the
+membership edge. The pack joins a child whose pair has no edge with a `related`
+edge. A visit whose subject is the anchor is usually joined already, because
+`escalate.sh` puts a `tracks` edge from the visit onto its subject.
+
+The live children are read by `anchor_bead` over the live statuses. That read
+scans only the live beads, and it sees a child whatever filed it, edge or not.
+The closed children are read through the edge, one
+`gc bd dep list <anchor> --direction=up`, because a
+`--metadata-field anchor_bead=<id>` query that covers closed has no index to use
+and reads the whole closed ledger. That read takes every dependent whatever its
+edge type, so a visit joined by its `tracks` edge is read, and a dependent is a
+closed child when its `anchor_bead` names the anchor. A convoy tracking the
+anchor is therefore not one, and a bead moved to another anchor leaves the old
+one's set with its old edge still in place.
+
+The edge answers for the closed children only in a store marked joined.
+`tools/anchor-edges-backfill.sh` joins each anchor's children to it, and
+`--mark` records the store joined (`anchor_edges.joined` in `gc bd kv`) after a
+run that found no child missing its edge. A store without the mark reads its
+closed children by `anchor_bead` too. `assets/scripts/bd-lib.sh` holds the read
+(`bd_anchor_children`) and both writes. A child is created joined to its anchor,
+the edge riding the create (`bd_create_child`), and an existing bead is joined
+before `anchor_bead` is stamped on it (`bd_anchor_link`), so a marked store
+stays joined. `related` holds nothing: it gates neither `bd ready` nor a close,
+and the merge hold stays on the `blocks` edges read down from the anchor.
+
 ---
 
 ## 2. The lifecycle, as counts

@@ -19,6 +19,10 @@
 #     create, so no run leaves a child its retry cannot find. A dedup query that
 #     does not answer files nothing, because an unreadable answer cannot be told
 #     from no child.
+#   - The child is joined to the anchor (bd-lib.sh's anchor graph) no later than
+#     anchor_bead lands on it. A created child's edge rides its create, and an
+#     adopted child is joined before the work order re-stamps anchor_bead. An
+#     adopted child that cannot be joined is neither stamped nor dispatched.
 #   - The work order and the child's blocks edge onto the anchor are written,
 #     then read back before dispatch. The edge is what holds the merge.
 #   - The child is slung with mol-polecat-work, and the dispatch is proved by
@@ -144,11 +148,18 @@ else
   IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg k "$SRC_KEY" --arg v "$SRC_BEAD" \
     '{task_kind: "rework", anchor_bead: $a} + {($k): $v}' 2>/dev/null)
   [ -n "$IDENTITY" ] || fail "could not build the rework child's identity metadata; nothing filed"
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$IDENTITY" --json 2>/dev/null \
+  FIX_BEAD=$(bd_create_child "$ANCHOR" "$TITLE" -t task --metadata "$IDENTITY" --json 2>/dev/null \
     | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   [ -n "$FIX_BEAD" ] \
     || fail "the rework child create returned no id; a retry adopts the child by $SRC_KEY=$SRC_BEAD if the create landed"
   STATE=filed
+fi
+
+# A filed child carries the edge from its create. An adopted one may predate the
+# edge, so it is joined before the stamp below, which then never lands on a child
+# the anchor's closed-children read cannot reach.
+if [ "$STATE" = adopted ] && ! bd_anchor_link "$ANCHOR" "$FIX_BEAD"; then
+  fail "rework child $FIX_BEAD could not be joined to anchor $ANCHOR; not stamped or dispatched, and a retry adopts it"
 fi
 
 # The stamped fields are the work order: branch and target say what to resume and

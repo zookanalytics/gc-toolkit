@@ -36,6 +36,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # $LIVENESS_CLASSIFY_JQ, which the classify block runs.
 # shellcheck source=liveness-classify.sh
 . "$HERE/liveness-classify.sh" || { echo "$PROG: cannot source liveness-classify.sh from $HERE" >&2; exit 1; }
+# The one definition of an anchor's children (bd-lib.sh's anchor graph), which
+# the landed-fix wedge census reads. Its reads go through _bd_call, redefined
+# below to carry this sweep's --db pin and per-call bound.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -131,6 +136,12 @@ bd_read() { # bd_read <outfile> <subcommand> <flags...>; both rc AND shape check
 bd_write() { # writes go unpinned through gc bd, honoring the same --db pin
     if [ -n "$DB" ]; then gc bd "$1" --db "$DB" "${@:2}"; else gc bd "$@"; fi
 }
+# bd-lib.sh's reads take bd_read's pin and bound. Its memo keys an entry by the
+# cwd and the arguments, never the pin, so the memo stays off in this sweep.
+_bd_call() {
+    if [ -n "$DB" ]; then bounded gc bd "$1" --db "$DB" "${@:2}"; else bounded gc bd "$@"; fi
+}
+unset GC_RECONCILE_BD_CACHE
 
 # --- census: fail-safe first — never classify on partial data ----------------
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
@@ -372,14 +383,16 @@ wedged_fix_escalations() {
             [ "${n_live:-1}" -eq 0 ] || continue
         else
             # No edge at all. The landed fix shows only in the lane's fix-unit
-            # census (anchor_bead + task_kind=rework), read by metadata because the
-            # fix-unit->anchor edge is itself sometimes absent. A fix unit LANDED
-            # with none still live is the wedge; a live fix unit (fix in flight) or
-            # no fix unit (unanswered objection) is not. --status carries closed
-            # because a landed fix unit is closed and a bare query is open-only.
+            # census (the anchor's task_kind=rework children), read as the anchor's
+            # children rather than its blocks edges because the fix-unit->anchor
+            # blocks edge is itself sometimes absent. A fix unit LANDED with none
+            # still live is the wedge; a live fix unit (fix in flight) or no fix
+            # unit (unanswered objection) is not. Every status is read because a
+            # landed fix unit is closed. The read is bd-lib.sh's, under this
+            # sweep's --db pin.
+            bd_anchor_children "$anchor" open,in_progress,blocked,deferred,hooked,pinned,closed > "$WEDGE_FU" || continue
             # A ruling's rework child answers its ruling, not a finding, so it
             # counts in no lane's census.
-            bd_read "$WEDGE_FU" list --metadata-field anchor_bead="$anchor" --status=open,in_progress,blocked,deferred,hooked,pinned,closed --limit=0 --json || continue
             census=$(jq -r --arg lane "$lane" '
               [ .[] | select((.metadata.task_kind // "") == "rework")
                     | select((.metadata.source_ruling_bead // "") == "")

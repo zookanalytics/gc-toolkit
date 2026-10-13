@@ -648,9 +648,9 @@ GATES
   fi
 
   # Replay the recorded verdict as a COMMENT — the city never approves (#185).
-  REVIEW_ID=$(bd_list --metadata-field task_kind=review --metadata-field anchor_bead="$id" \
-    --status=closed,open,in_progress \
-    | jq -r 'sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
+  REVIEW_ID=$(bd_anchor_children "$id" closed,open,in_progress \
+    | jq -r '[ .[] | select(((.metadata.task_kind // "") | tostring) == "review") ]
+             | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
   VERDICT=""
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
     | jq -r '.[0].notes // ""' 2>/dev/null)
