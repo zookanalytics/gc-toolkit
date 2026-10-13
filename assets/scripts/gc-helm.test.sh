@@ -1219,7 +1219,7 @@ grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/
 # residue reports on the next route, and a surviving gc.session_id lets orphan
 # recovery resolve a dead owner for a bead nobody holds. So — unlike the cosmetic
 # pour stamp — each is read back, a lone unset retried, and a persistent miss is a
-# verb failure, the way the route and completion proof are. orphan-dispose.sh
+# verb failure, the way the route is. orphan-dispose.sh
 # verifies the same pair after its own release. Covered:
 #   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
 #   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
