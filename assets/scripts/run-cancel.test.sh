@@ -232,6 +232,12 @@ eq "$RC" 0 "a foreign --bead is ignored and the store resolves this session's st
 has "$OUT" "NOTE: --bead tk-other is not this session's" "a foreign --bead is reported"
 has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "a foreign --bead: this session's root, not the hint's"
 
+reset
+run --step "$STEP" --bead "<the bead_id your gc hook --claim returned>" --reason r
+eq "$RC" 0 "a placeholder --bead is ignored and the store resolves this session's step"
+has "$OUT" "is not a bead id; resolving from the store" "a placeholder --bead is reported"
+has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "a placeholder --bead: this session's root"
+
 # ── 4. tiers: open, then blocked ─────────────────────────────────────────────
 reset
 jq -c 'map(if .id == "tk-lc" then .status = "blocked" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"

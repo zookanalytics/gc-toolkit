@@ -124,10 +124,17 @@ case "$STEP" in
     echo "$PROG: --step must contain only [A-Za-z0-9._-] (got '$STEP')" >&2
     exit 2 ;;
 esac
-case "$ROOT$HINT" in
+case "$ROOT" in
   *[!A-Za-z0-9._-]*)
-    echo "$PROG: --root and --bead must contain only [A-Za-z0-9._-] (got '$ROOT' '$HINT')" >&2
+    echo "$PROG: --root must contain only [A-Za-z0-9._-] (got '$ROOT')" >&2
     exit 2 ;;
+esac
+# --bead is only a hint, so one that names no bead, such as a placeholder left
+# unsubstituted, is reported and the store resolves the step instead.
+case "$HINT" in
+  *[!A-Za-z0-9._-]*)
+    echo "$PROG: NOTE: --bead '$HINT' is not a bead id; resolving from the store" >&2
+    HINT="" ;;
 esac
 if [ -z "$REASON" ]; then
   echo "$PROG: --reason is required; a run ended for no stated reason cannot be audited" >&2
