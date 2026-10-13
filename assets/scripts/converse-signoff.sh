@@ -9,13 +9,16 @@
 # is discharged. One question decides each discharge: did the decision this hold
 # waited on land here (--ruled yes) or not (--ruled no)?
 #   --ruled yes: the operator ruled in this thread. Each gate is RESOLVED (a
-#     pre-gate demand is closed on the same terms), and where the subject still
-#     reads `held` it is released back to the pool that owns it.
+#     pre-gate demand is closed on the same terms), where the subject still
+#     reads `held` it is released back to the pool that owns it, and the ruling
+#     is recorded on the visit as gc.ruling, which a review finding deferred to
+#     the visit waits for.
 #   --ruled no:  cut short, or the question outlived the sitting. The wait is
 #     consolidated onto the SUBJECT — a demand gating the VISIT is closed and
 #     re-stated there — so it outlives the visit's close, the liveness sweep
 #     (keyed on gc.demand_for=<subject>) re-offers the next sitting, and on a PR
-#     anchor the merge waits; a pre-PR subject stays `held`.
+#     anchor the merge waits; a pre-PR subject stays `held`. The visit carries no
+#     gc.ruling.
 # `held` follows this sitting's outcome, not the state read off the subject,
 # because the cut-short exit runs this discharge on a subject still waiting.
 #
@@ -56,7 +59,8 @@
 # Exit: 0 the trace is written and the hold discharged — the sign-off may
 #   proceed, once any write it reports as failed is repaired; 1 it stopped
 #   short because a read failed, --rework did not file, a demand did not close,
-#   or a cut-short wait did not re-state —
+#   a cut-short wait did not re-state, or the visit's gc.ruling did not read
+#   back as this sign-off left it —
 #   do NOT post the sign-off or close the visit; repair what it names and re-run,
 #   which repeats every write it made safely; 2 refused before any write: usage,
 #   no subject resolves, or a ruled sign-off on an open PR that answered neither
@@ -418,6 +422,30 @@ else
     "$HELM" takeaway "$VD" "cut short; wait moved to $SUBJECT" --by converse --no-wait \
       || echo "COULD NOT STAMP the moved-wait note on $VD — the board may still show its question"
   fi
+fi
+# The ruling is recorded on the VISIT as gc.ruling, because what waits on the
+# visit's question reads it there: a review finding deferred to this visit
+# (finding.sh needs-you) is released only by a visit that closed carrying one. A
+# visit also closes without a ruling (moot, benign, folded, dismissed, or cut
+# short here), and none of those answers the question it carried. A cut-short
+# sign-off clears a ruling an earlier run recorded on the same visit, so the visit
+# carries only this sitting's final word. Each write is read back, and one that
+# did not land stops the sign-off: a visit closed without its ruling never
+# releases the finding, and one closed with a stale ruling releases it on a
+# question nobody ruled.
+ruling_now() {
+  local row
+  row=$(show_one "$VISIT") || return 1
+  printf '%s' "$row" | jq -r '(.[0].metadata["gc.ruling"] // "") | tostring' 2>/dev/null
+}
+if [ "$RULED" = yes ]; then
+  gc bd update "$VISIT" --set-metadata "gc.ruling=$RULING" >/dev/null 2>&1 || true
+  GOT_RULING=$(ruling_now) && [ "$GOT_RULING" = "$RULING" ] \
+    || stopped "the ruling did not read back on $VISIT as gc.ruling, and a review finding deferred to this visit is released only by it; the hold is discharged, and a re-run records the ruling"
+elif [ -n "$(printf '%s' "$V" | jq -r '(.[0].metadata["gc.ruling"] // "") | tostring' 2>/dev/null)" ]; then
+  gc bd update "$VISIT" --unset-metadata gc.ruling >/dev/null 2>&1 || true
+  GOT_RULING=$(ruling_now) && [ -z "$GOT_RULING" ] \
+    || stopped "an earlier ruling on $VISIT (gc.ruling) did not clear, and this cut-short visit would close carrying it, releasing a review finding on a question nobody ruled"
 fi
 # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
 # runs this same block on a subject still waiting, so the release is keyed to
