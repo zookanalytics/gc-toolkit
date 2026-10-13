@@ -68,7 +68,7 @@ formulas/mol-feedback-distiller.toml
 formulas/mol-feedback-miner.toml
 3479365685a06839f76c3d0b57372c4f64163af52d8b2b489f31a2f5e99155af
 formulas/mol-polecat-work.toml
-cadb9c01ecf4f49cbce30ffc34d719bff9e65bd6266bc9323be889430f787035
+3cdf1a8a2687b5925aad50e872e7e1ce85a6a7d555a0f744ffd50440bedb091f
 formulas/mol-refinery-patrol.toml
 fb7afb893a879ba2d5b349afcc01df815205b66123d74b2db0500618ef5c7ce5
 formulas/mol-review-quorum-signoff.toml
@@ -84,7 +84,7 @@ fb7ac81822549f4257aec9ac09f4d1189480e051584f0e56c775401c1b0a62fd
 formulas/mol-visit.toml
 70aabd4af31952d91b74ce9c81cd897b39c7e3e98d3d22fb7b11b1219c17544d
 formulas/mol-witness-patrol.toml
-e0896acacc81f7bd06f6d656f774b38803e2c4e00f810e1a402987e3cc69785b
+3dafd300e1662121eef384195c942ae29a7d0134a1950c15a382ea77901fddf0
 pack.toml
 a31b75c5f58bc0f601df73790fa828c36f80f0b407339df439558d6cdf90a10a
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
