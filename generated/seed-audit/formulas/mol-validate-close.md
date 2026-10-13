@@ -10,10 +10,10 @@ the bead when it holds or escalates to the operator when it does not.
 1. **The subject arrives as the input convoy's single tracked member.** Each
    step re-derives it in its own shell (`gc convoy status {{convoy_id}}`), the
    way every graph.v2 worker does.
-2. **Validate before you close.** `gc.first_reaction_reason` is the reaction's
-   claim, not a verdict — re-derive it. Read the bead's universe and confirm the
-   thing it says is already fixed is fixed, or that the bead names nothing left
-   to do. A close is only as good as the check behind it.
+2. **Validate before you close.** The reaction's close brief is its claim, not
+   a verdict — re-derive it. Read the bead's universe and confirm the thing it
+   says is already fixed is fixed, or that the bead names nothing left to do. A
+   close is only as good as the check behind it.
 3. **Close only when fully confident; otherwise escalate.** Confident that there
    is nothing to do: close the subject with `gc.work_outcome=no-op` and a note
    recording what you checked. Any doubt — the premise does not hold, there is

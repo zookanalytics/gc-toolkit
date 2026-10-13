@@ -34,7 +34,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
 preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars) — keep
+patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -65,7 +65,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
+default = ""
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -319,29 +319,78 @@ id = "run-tests"
 title = "Run quality checks and tests"
 needs = ["rebase"]
 description = """
-**Config: run_tests = {{run_tests}}**
-
 The branch under test is staged in the prep worktree (the rebase step), so run
 every check THERE — the rig root's checkout is never touched. Resolve the same
-path and enter it first, then run each configured check in order, skipping
-empty ones:
+path, enter it, and run the rig's checks with the block below, as written.
+
+The checks are setup_command, typecheck_command, lint_command and
+build_command, then test_command when run_tests is "true". A rig sets them
+under its `[rigs.formula_vars]` in city.toml, and a value the rig sets wins
+over this formula's default, an empty one included. This wisp is poured
+root-only, so nothing renders those vars into this step, and a session that
+fills them in by hand can take either value. The block reads both from one
+`gc formula show --rig` call and runs the rig's value wherever the rig sets
+one, so every session runs the same checks. Never type a check in by hand.
 ```bash
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-cd "$PREP_WT"
-{{setup_command}}
-{{typecheck_command}}
-{{lint_command}}
-{{build_command}}
+cd "$PREP_WT" || { echo "cannot enter the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# >>> rig-check-commands
+# One read serves every check. An unreadable answer gives every check an empty
+# value, which is also what a rig with no checks gives, so the block runs
+# nothing and leaves the work with the refinery to retry.
+CHECKS_JSON=""
+[ -n "${GC_RIG:-}" ] && CHECKS_JSON=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json 2>/dev/null)
+if ! printf '%s' "$CHECKS_JSON" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1; then
+  echo "cannot read the check commands of rig '${GC_RIG:-}' (gc formula show --rig failed); running no checks and leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+# rig_default is the rig's own value and wins whenever it is present, so an
+# empty one turns that check off. Otherwise the formula default applies.
+check_value() {
+  printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
+}
+RUN_TESTS=$(check_value run_tests)
+CHECKS_RAN=0
+CHECKS_FAILED=""
+for CHECK in setup_command typecheck_command lint_command build_command test_command; do
+  if [ "$CHECK" = "test_command" ] && [ "$RUN_TESTS" != "true" ]; then
+    echo "run-tests: test_command skipped (run_tests=${RUN_TESTS})"
+    continue
+  fi
+  CHECK_CMD=$(check_value "$CHECK")
+  if [ -z "$CHECK_CMD" ]; then
+    echo "run-tests: ${CHECK} not set"
+    continue
+  fi
+  CHECKS_RAN=$((CHECKS_RAN + 1))
+  echo "run-tests: ${CHECK} = ${CHECK_CMD}"
+  if ( eval "$CHECK_CMD" ); then
+    echo "run-tests: ${CHECK} passed"
+  else
+    CHECK_RC=$?
+    echo "run-tests: ${CHECK} FAILED (exit ${CHECK_RC})"
+    CHECKS_FAILED="${CHECKS_FAILED} ${CHECK}"
+  fi
+done
+if [ "$CHECKS_RAN" -eq 0 ]; then
+  echo "run-tests: rig ${GC_RIG} sets no check commands"
+elif [ -n "$CHECKS_FAILED" ]; then
+  echo "run-tests: FAILED:${CHECKS_FAILED}"
+else
+  echo "run-tests: ${CHECKS_RAN} check(s) passed"
+fi
+# <<< rig-check-commands
 ```
-If run_tests = "true": `{{test_command}}` (in the same `$PREP_WT`). When the
-rig ships no commands at all, run the quality gates documented in the rig's
-CLAUDE.md instead — never silently skip the gates.
+When the block reports that the rig sets no check commands, run the quality
+gates documented in the rig's CLAUDE.md instead — never silently skip the
+gates.
 
-Track which checks ran and what failed. Close this step when all checks
-complete (pass or fail)."""
+The block prints each check's command and result, then a summary line. Close
+this step when all checks complete (pass or fail)."""
 
 [[steps]]
 id = "handle-failures"
