@@ -390,8 +390,11 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
 }
 
 # Unreadable is not empty: every enumeration read is checked and any failure
-# returns 1. The fourth column is what holds the bead, as hold-lib.sh prints it,
-# and is empty for a bead nothing holds. The fifth names the nearest hold again
+# returns 1. The columns join on the unit separator, which the scrub leaves in no
+# field, so a title comes back as it was stored: @tsv would write a backslash in
+# one as two, and `read` folds a run of tabs into one. The fourth column is what
+# holds the bead, as hold-lib.sh prints it, and is empty for a bead nothing
+# holds. The fifth names the nearest hold again
 # when every hold sits on an ancestor, so the pass can group the arms an
 # ancestor's blocker keeps, and is empty otherwise. A bd-ready bead needs no
 # walk, because bd reports nothing holding it, and a non-open one never
@@ -402,7 +405,7 @@ own_blocks_unresolved_ids() { # id -> "<blocker-id>[,<blocker-id>...]" on stdout
 # enumeration rather than let an unread hold pass for none. The snapshot is
 # cached to all_out so the list and reconcile loops read each bead's fields from
 # it instead of a `bd show` per bead.
-armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>\t<ancestor hold>" per bead; caches the snapshot to all_out
+armed_rows() { # rows_out all_out : "<id>\037<status>\037<bd_ready 0|1>\037<hold>\037<ancestor hold>" per bead; caches the snapshot to all_out
     local out="$1" all_out="$2" all ready_ids seed graph
     # --brief on both reads: this function and its cache consumers use only id,
     # status, assignee, metadata and dependency edges, all of which --brief
@@ -435,10 +438,10 @@ armed_rows() { # rows_out all_out : "<id>\t<status>\t<bd_ready 0|1>\t<hold>\t<an
         | (if (.id as $i | $ready | index($i)) then "1" else "0" end) as $r
         | ((.id // "") | tostring) as $self
         | (if $r == "0" and (.status // "") == "open" then hold_holds($g[0]) else [] end) as $h
-        | [ .id, (.status // ""), $r,
+        | [ (.id // ""), (.status // ""), $r,
             (if ($h | length) > 0 then hold_summary($g[0]) else "" end),
             (if ($h | length) > 0 and all($h[]; .on != $self) then ($h[0] | hold_label($self)) else "" end) ]
-        | @tsv' > "$out" 2>/dev/null || return 1
+        | map(tostring) | join("\u001f")' > "$out" 2>/dev/null || return 1
     return 0
 }
 
@@ -452,18 +455,26 @@ cmd_list() {
         esac
         shift || true
     done
+    # --json prints the armed beads as bd lists them and says nothing about what
+    # holds them, so it makes that one read and no hold walk. A read that fails
+    # or answers no array fails the verb, since an unreadable queue is not an
+    # empty one.
+    if [ "$as_json" = 1 ]; then
+        local listed
+        listed="$(bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null)" \
+            && printf '%s' "$listed" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 \
+            || { echo "$PROG: list: could not enumerate armed beads" >&2; return 1; }
+        printf '%s\n' "$listed"
+        return 0
+    fi
+
     local rows all_cache
     mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; rows="$REPLY"
     mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; all_cache="$REPLY"
     armed_rows "$rows" "$all_cache" || { echo "$PROG: list: could not enumerate armed beads" >&2; return 1; }
 
-    if [ "$as_json" = 1 ]; then
-        bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null
-        return 0
-    fi
-
     local n=0 id status ready hold via json target reason slung state mr fails flight
-    while IFS=$'\t' read -r id status ready hold via; do
+    while IFS=$'\037' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
         json="$(bead_from_cache "$all_cache" "$id")" || json=""
@@ -549,7 +560,7 @@ cmd_reconcile() {
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
     local id status ready hold via json target args_json assignee slung rc merge_result fails flight
-    while IFS=$'\t' read -r id status ready hold via; do
+    while IFS=$'\037' read -r id status ready hold via; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
 

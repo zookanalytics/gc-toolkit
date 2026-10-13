@@ -36,7 +36,9 @@
 #     parked epic, which only an open blocker of its own holds. A held arm stays
 #     intact and fires once its hold releases. A blocker of its own the store
 #     does not return holds it, while an ancestor, or a blocker on an ancestor,
-#     the store does not return holds nothing;
+#     the store does not return holds nothing. A backslash in a title prints
+#     as stored;
+#   * list --json prints the listing alone, with no hold walk;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -645,6 +647,22 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an arm whose epic waits on an open task is NOT slung"
 has "$out" 'HELD by t-1 "Land the prerequisite" on ancestor epic: b-1' "the pass log names the task the epic waits on"
 
+# A title is free text, so a backslash in one reaches list and the pass log as
+# it was stored, never escaped.
+echo "# a backslash in a blocker's title prints as stored"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","title":"fix C:\\path","assignee":"","metadata":{},"notes":""},
+ {"id":"b-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
+ {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"park","dependency_type":"blocks"}]},
+ {"id":"park","status":"open","issue_type":"gate","title":"Parked: see C:\\notes","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by b-0 "fix C:\path"]' "list prints a backslash in a blocker's title once"
+has "$out" 'b-2 -> rig/pool [HELD by park "Parked: see C:\notes" on ancestor epic]' "and in the title of a blocker on an ancestor"
+hasnt "$out" 'C:\\' "list doubles no backslash"
+out="$("$SUT" reconcile 2>&1)"
+has "$out" 'HELD by park "Parked: see C:\notes" on ancestor epic: b-2' "the pass log prints the backslash once"
+hasnt "$out" 'C:\\' "the pass log doubles no backslash"
+
 # The exception covers an ancestor only: a demand gate on the bead itself is the
 # decision about that bead, and it holds.
 echo "# reconcile holds an arm that waits on a demand gate of its own"
@@ -899,6 +917,9 @@ eq "$(slings)" "0" "an unreadable listing slings nothing"
 
 out="$(STUB_BD_LIST_FAIL=1 "$SUT" list 2>&1)"; rc=$?
 eq "$rc" 1 "list also fails loudly on an unreadable store"
+out="$(STUB_BD_LIST_FAIL=1 "$SUT" list --json 2>&1)"; rc=$?
+eq "$rc" 1 "list --json also fails loudly on an unreadable store"
+has "$out" "could not enumerate" "and says so"
 
 # --- the quiet path still passes ---------------------------------------------
 # Tightening the guard above must not strand the ordinary no-work case.
@@ -930,6 +951,20 @@ has "$out" "b-3 -> rig/pool [CLOSED" "list shows a closed arm"
 has "$out" "b-6 -> rig/pool [DELIVERED — merge_result=pull_request" "list flags an already-delivered arm (will retire, not sling)"
 has "$out" "b-7 -> rig/pool [CAPPED — 3 sling failures" "list flags a capped arm as needing a person"
 hasnt "$out" "b-4" "list shows only armed beads"
+
+# --json prints the armed beads as bd lists them, which says nothing about what
+# holds them, so it reads nothing else: no hold walk, and no failure of one.
+echo "# list --json makes one read and no hold walk"
+export STUB_BD_LOG="$TMP/bd-json.log"; : > "$STUB_BD_LOG"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
+out="$("$SUT" list --json 2>/dev/null)"; rc=$?
+eq "$rc" 0 "list --json exits 0"
+eq "$(printf '%s' "$out" | jq -r '[.[].id] | join(",")')" "b-1" "list --json prints the armed beads as bd lists them"
+eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "1" "list --json makes one read"
+eq "$(grep -c -e '--id' "$STUB_BD_LOG")" "0" "and walks no hold"
+out="$(STUB_BD_LIST_ID_FAIL=1 "$SUT" list --json 2>&1)"; rc=$?
+eq "$rc" 0 "a hold walk's read failing does not fail list --json"
+unset STUB_BD_LOG
 
 # A held bead and a gated bead are both "not ready", and conflating them is
 # what hides a dead arm: the gated one dispatches when its blocker closes, the
