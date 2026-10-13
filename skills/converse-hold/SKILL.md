@@ -102,23 +102,51 @@ conversation, put where the operator is already reading so that ending
 a sitting is not a separate errand. It never stands in for the
 decision above it, and offering it is not a request to use it.
 
+The hold above filed a gate, and `dismiss` will not close a sitting
+that still has an open gate until it is told what to do with that
+gate: given no decision, it exits 5 and closes nothing. So the line
+carries the decision, and the framing decides which one. When the
+framing asks no decision, what the operator owes is the close-out
+itself, and the line releases the gate:
+
 ```
-! <the resolved gc-helm.sh path> dismiss --reason "<why this is done>"
+! <the resolved gc-helm.sh path> dismiss --release --reason "<why this is done>"
 ```
+
+`--release` resolves every open gate linked to the sitting, with the
+reason as its ruling. That covers the conversation demand, and the
+anchor demand when this sitting passed `--hold-merge`, which lifts the
+merge hold the sitting took. It is refused without a reason. It never
+files rework, because releasing a gate changes nothing on the branch.
+A ruling that changes the branch is never a close-out: it goes through
+the step-7 sign-off with `--rework`.
+
+When a decision is still open, offer the keep-open form instead, so
+running the line never answers for the operator:
+
+```
+! <the resolved gc-helm.sh path> dismiss --leave-open
+```
+
+`--leave-open` ends the sitting and leaves every linked gate open. On a
+PR the conversation demand gates the visit, so its question moves onto
+the PR, the move a cut-short sign-off makes, and holds the merge until
+it is answered. Any other gate, the demand on a subject with no PR
+among them, is re-asked in a fresh visit.
 
 Write the resolved path, not the variable. The leading `!` is what
 runs the rest of the line, so the operator ends the sitting by typing
 one thing into the same prompt they are already reading — and a path
 that means nothing there is a command that does not run.
 `dismiss` needs no bead-id: it infers this sitting's subject from the
-session it runs in, which is what lets the bare line stand and the
-same act sit behind a keystroke. The verb closes every open visit on
-the subject and stamps the outcome the board reads for a finished
-sitting. It falls back to `--force` when the plain close is refused,
-which is what a hand-written `gc bd close <visit>` walks into: a held
-visit is assigned to the session holding it, and a session restarted
-mid-hold closes under a different identity string than the one on the
-bead. Then wait for operator input in this session.
+session it runs in, which is what lets the line stand without one. The
+verb closes every open visit on the subject and stamps the outcome the
+board reads for a finished sitting. It falls back to `--force` when the
+plain close is refused, which is what a hand-written
+`gc bd close <visit>` walks into: a held visit is assigned to the
+session holding it, and a session restarted mid-hold closes under a
+different identity string than the one on the bead. Then wait for
+operator input in this session.
 
 When the operator replies, record and sign off (steps 6–7, the
 `converse-settle` skill). If context runs low mid-hold before they do,

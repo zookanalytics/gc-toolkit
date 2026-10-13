@@ -324,7 +324,11 @@ Rules:
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's
   `gc-helm dismiss` — the close-out you put at the foot of every framing
-  (step 5); it infers this sitting's subject, so it needs no id. Your
+  (step 5); it infers this sitting's subject, so it needs no id. The
+  line carries the gate decision too, because a held sitting's own gate
+  makes a dismiss with no decision exit 5 and close nothing: offer
+  `--release --reason` when the framing asks no decision, and
+  `--leave-open` when one is still open. Your
   sign-off closes only when nothing important is still pending: a turn that
   hands the operator important information — a live decision, a routing
   answer, anything they may want to respond to — posts the hand-back and

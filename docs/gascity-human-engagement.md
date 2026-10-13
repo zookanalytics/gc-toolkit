@@ -621,7 +621,8 @@ with that question still open: a cut-short sign-off (`--ruled no`), or a
 `dismiss` that leaves the conversation's gate open. The conversation wait cannot
 ride the closing visit — a demand left on a closed visit is a gate
 `gate-visit-sweep` names on stderr forever and no return trip re-offers — so
-`converse-signoff.sh` and `gc-helm dismiss --leave-gate` both move it onto the
+`converse-signoff.sh` and `gc-helm dismiss --leave-gate` (or `--leave-open`,
+which leaves every linked gate) both move it onto the
 ANCHOR: the liveness sweep re-offers the next sitting from
 `gc.demand_for=<anchor>`, and the merge holds until the abandoned question is
 answered or the demand is resolved. The moved wait carries the sitting's topic,
@@ -776,7 +777,8 @@ pool's scale-down drop paths skip a manual session
 provider process (verified 2026-10-05). `gc-helm dismiss` is the release
 valve, and converse puts it at the foot of every framing it posts as a
 copyable line, so ending a sitting is a switch in the thread rather than an
-errand the operator has to remember.
+errand the operator has to remember. The line carries the gate decision the
+verb asks for, described below.
 It is the verb rather than a bare `gc bd close` because a held visit is
 assigned to the session holding it, and a session restarted mid-hold closes
 under a different identity string than the one on the bead: bd refuses that
@@ -813,7 +815,27 @@ is that person's task, and dismiss leaves it alone. A gate that still slips
 through, stranded by another path, is caught by finalize-gate's orphan-gate
 clause, which refuses to finalize the gated bead while the orphan stands.
 
-`prefix+X` ends a sitting the same way from the keyboard, whether or not
+`--release --reason "<why>"` and `--leave-open` make one decision for every
+linked gate, and name none. `--release` resolves each gate on the reason as its
+ruling, recorded the way `--resolve-gate` records one, and prints each gate it
+resolved. The reason is what makes it a ruling, so a `--release` without one, or
+with a blank one, is refused before it writes anything. The set it resolves is
+the set a dismiss with no decision holds on, so an opt-in `--hold-merge` demand
+on the anchor is released too, which lifts the merge hold the sitting took. It
+never files rework, because releasing a gate changes nothing on the branch. A
+ruling that changes the branch goes through the converse sign-off with
+`--rework`. Resolving a gate in dismiss never moves the subject's lifecycle
+state. A subject with no PR stays `held` after its gate resolves, and the board
+reads it as ruled: a row the operator closes or extends. Only the converse
+sign-off moves a subject out of `held`, onto the route it names. `--leave-open`
+leaves every linked gate open, the way `--leave-gate` does. Neither form
+combines with the per-gate flags. Converse's close-out line uses one of the two.
+When the framing asks no decision, what the operator owes is the close-out
+itself, and the line is `dismiss --release --reason "<why this is done>"`. When
+a decision is still open, the line is `dismiss --leave-open`, so running it
+never answers for the operator.
+
+`prefix+X` ends a sitting with the same verb from the keyboard, whether or not
 converse's copyable line is on screen. After a y/n confirm,
 `assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
 `gc session list`, refuses one that is not a converse sitting, and runs the

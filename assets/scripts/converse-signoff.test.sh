@@ -1571,9 +1571,18 @@ echo "── every framing hands over the switch that ends the sitting ──"
 # framing, and it has to be a command that RUNS: a held visit is assigned to
 # the session holding it, and a session restarted mid-hold closes under a
 # different identity string, which bd refuses outright. It needs no bead-id —
-# the subject is inferred from the session the command runs in — so the bare
-# line stands and the same act can sit behind a keystroke.
-have "the framing ends with a copyable close-out" 'dismiss --reason' "$SK_HOLD"
+# the subject is inferred from the session the command runs in — so the line
+# stands on its own. It carries the gate decision as well: every held sitting
+# has its own gate, and a dismiss that decides nothing exits 5 there and closes
+# nothing. So the line releases the gate when the framing asks no decision, and
+# leaves it open when a decision is still open, so running it never answers
+# for the operator.
+have "the framing ends with a copyable close-out that releases the gate when nothing is owed" \
+     'dismiss --release --reason' "$SK_HOLD"
+have "…and a keep-open close-out when a decision is still open" 'dismiss --leave-open' "$SK_HOLD"
+lacks "…and never the dismiss that decides nothing" 'dismiss --reason' "$SK_HOLD" \
+      "a dismiss with no gate decision exits 5 on every held sitting, so the close-out it offers would close nothing"
+have "the ending rule names both close-out forms" '`--leave-open` when one is still open' "$PROMPT"
 have "…written with the resolved path, not a variable the operator never set" \
      'Write the resolved path' "$SK_HOLD"
 have "…and the close-out needs no bead-id: it infers the sitting's subject" \
@@ -1601,6 +1610,12 @@ if dismiss_body | grep -q -- '--force'; then
 else
     bad "dismiss escalates past the holder's claim rather than asking the operator to" \
         "without the fallback the offered command fails on exactly the sittings a restart touched, which is the normal case for a long hold"
+fi
+if dismiss_body | grep -qF -- '--release)' && dismiss_body | grep -qF -- '--leave-open)'; then
+    ok "dismiss takes both close-out forms the framing offers"
+else
+    bad "dismiss takes both close-out forms the framing offers" \
+        "the offered line names a flag the verb refuses as unknown, so it closes nothing"
 fi
 
 # converse does not inject the shared fragment, but it must stay intact for
