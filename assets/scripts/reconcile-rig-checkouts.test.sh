@@ -50,11 +50,11 @@
 # heal runs the rig's post-checkout hook, so a failing one neither stops nor
 # escalates a heal, and the reset leaves the branch's upstream config as it is;
 # (t) a diverged rig's escalation names what stopped the reset heal, a line for
-# each finding, and hands a person steps to reset by hand that lose nothing: its
-# checkout refuses rather than overwrites an ignored file or a dirty path in its
-# way, and resets the checkout once the dirty path is restored and the named
-# file moved aside; no escalation tells a person to run git reset --hard or
-# --keep.
+# each finding, and hands a person steps to reset by hand that lose nothing once
+# real work is saved: its checkout refuses while any one listed item is still in
+# its way, an ignored file included, resets the checkout once each is cleared,
+# and does not refuse over a local commit; no escalation tells a person to run
+# git reset --hard or --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,6 +86,8 @@ esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print 
 msg_for()     { cat "$TMP/escalations.reconcile-diverged-$1.msg" 2>/dev/null; }
 # the checkout a diverged rig's subject bead hands a person on a line of its own.
 remedy_for()  { sed -n 's/^ *\(git -C [^ ]* checkout .*\)$/\1/p' <<< "$(body_for "$1")"; }
+# 0 when the checkout read into REMEDY from remedy_for runs, 1 when git refuses it.
+remedy_rc()   { if ${REMEDY[@]+"${REMEDY[@]}"} >/dev/null 2>&1; then echo 0; else echo 1; fi; }
 # 0 when the open reconcile bead for a rig key has a line matching an ERE.
 body_has()    { grep -q -E -- "$2" <<< "$(body_for "$1")"; }
 # escalate.sh --retract calls recorded for a rig key, and the subject of the first.
@@ -696,15 +698,25 @@ bash "$SCRIPT" >/dev/null
 body_has both '^local commit not upstream: [0-9a-f]+ both-local$' && body_has both '^untracked in the way: new\.txt ' \
   && ok "the escalation names every check that stopped the reset heal" \
   || bad "the escalation names every check that stopped the reset heal (got '$(body_for both)')"
+# A person who moves new.txt aside but skips step 1 loses the local commit from
+# the branch: the handed checkout does not refuse over one, which is why the
+# steps save real work first.
+BOTH_LOCAL="$(git -C "$TMP/both" rev-parse HEAD)"
+read -ra REMEDY <<< "$(remedy_for both)"
+mv "$TMP/both/new.txt" "$TMP/both-new.txt.saved" 2>/dev/null || true
+eq "$(remedy_rc)" "0" "the handed checkout does not refuse over a local commit that is not upstream"
+git -C "$TMP/both" merge-base --is-ancestor "$BOTH_LOCAL" HEAD 2>/dev/null \
+  && bad "the handed checkout moves the branch off a local commit, so only step 1 keeps it" \
+  || ok "the handed checkout moves the branch off a local commit, so only step 1 keeps it"
 
 # handed: the remote's rewritten history adds new.txt, same.txt and copy.cfg
 # and rewrites a/top. The checkout holds an untracked new.txt with other
 # content, which stops the reset heal. It also holds what the heal would have
 # cleared itself: an unstaged a/top already holding the remote's bytes, an
 # untracked copy of same.txt, and an ignored copy of copy.cfg. A person follows
-# the steps the escalation hands them. Each step they skip costs a refusal, and
-# the reset lands once every listed item is cleared. The next pass then closes
-# the bead.
+# the steps the escalation hands them. Leaving any one listed item in place
+# costs a refusal, and the reset lands once every listed item is cleared. The
+# next pass then closes the bead.
 churned_rig handed
 echo theirs > "$TMP/handed.src/new.txt"; echo same > "$TMP/handed.src/same.txt"; echo copy > "$TMP/handed.src/copy.cfg"
 echo top2 > "$TMP/handed.src/a/top"; push_churn handed
@@ -729,16 +741,23 @@ grep -qF -- "git -C $TMP/handed restore --source=HEAD --staged --worktree -- <pa
   && ok "the diverged escalation hands a person the restore for a dirty path already upstream" \
   || bad "the diverged escalation hands a person the restore for a dirty path already upstream (got '$(body_for handed)')"
 read -ra REMEDY <<< "$(remedy_for handed)"
-remedy_rc() { if ${REMEDY[@]+"${REMEDY[@]}"} >/dev/null 2>&1; then echo 0; else echo 1; fi; }
+# Each refusal below has one listed item left in the checkout's way, so that
+# item alone is what the checkout refuses.
 mv "$TMP/handed/new.txt" "$TMP/handed-new.txt.saved" 2>/dev/null || true
+mv "$TMP/handed/same.txt" "$TMP/handed-same.txt.saved" 2>/dev/null || true
+mv "$TMP/handed/copy.cfg" "$TMP/handed-copy.cfg.saved" 2>/dev/null || true
 eq "$(remedy_rc)" "1" "the handed checkout refuses while a dirty path it rewrites is not restored"
 eq "$(cat "$TMP/handed/a/top")" "top2" "a refused handed checkout leaves the dirty path as it was"
 git -C "$TMP/handed" restore --source=HEAD --staged --worktree -- a/top 2>/dev/null || true
+mv "$TMP/handed-same.txt.saved" "$TMP/handed/same.txt" 2>/dev/null || true
 eq "$(remedy_rc)" "1" "the handed checkout refuses while an untracked copy it writes over is in its way"
+rm -f "$TMP/handed/same.txt"
+mv "$TMP/handed-copy.cfg.saved" "$TMP/handed/copy.cfg" 2>/dev/null || true
+eq "$(remedy_rc)" "1" "the handed checkout refuses while an ignored copy it writes over is in its way"
 eq "$(cat "$TMP/handed/copy.cfg")" "copy" "a refused handed checkout leaves the ignored copy as it was"
-rm -f "$TMP/handed/same.txt" "$TMP/handed/copy.cfg"
+rm -f "$TMP/handed/copy.cfg"
 eq "$(remedy_rc)" "0" "the handed checkout runs once every listed item is cleared"
-eq "$(git -C "$TMP/handed" rev-parse HEAD)" "$HANDED_REMOTE" "the handed steps, followed in order, reset the checkout"
+eq "$(git -C "$TMP/handed" rev-parse HEAD)" "$HANDED_REMOTE" "the handed steps reset the checkout once each is done"
 eq "$(git -C "$TMP/handed" status --porcelain)" "" "the checkout is clean after the handed reset"
 bash "$SCRIPT" >/dev/null
 eq "$(open_count handed)" "0" "the pass after a person's reset closes the bead"

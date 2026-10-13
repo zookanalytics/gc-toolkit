@@ -95,8 +95,9 @@
 # real work elsewhere, restores each dirty path that is already upstream or a
 # stray write, and moves aside each untracked file in the way. Then
 # `git checkout --no-overwrite-ignore -B <default> <remote>` resets the
-# checkout. Like the heal's own checkout, it refuses rather than loses whatever
-# their judgment missed.
+# checkout. Like the heal's own checkout, it refuses rather than loses a local
+# change or an untracked file their judgment missed. A local commit does not
+# stop it, so saving real work comes first.
 #
 # Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
 # escalate every refusal instead.
@@ -571,7 +572,7 @@ while IFS=$'\t' read -r name path; do
         [ -n "$report" ] || report="not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off"
         upstream=""
         [ -z "$upstream_report" ] || upstream="$nl$nl## Already upstream, but in a reset's way$nl${upstream_report%"$nl"}"
-        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\n## The reset heal stopped\n%s%s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly). To reset the checkout by hand once you have judged each item\nabove:\n1. Save real work elsewhere, since the reset drops a local commit that is\n   not upstream.\n2. Restore each dirty path listed as already upstream, and each listed as\n   local-only content that you judge a stray write:\n     git -C %s restore --source=HEAD --staged --worktree -- <path>\n3. Move aside each untracked or ignored file named above. One already\n   upstream can be deleted instead.\n4. Reset:\n     %s\nThe reset keeps a local change on a path it does not rewrite, such as\nmachine-local config. It refuses, rather than overwrites or deletes, a local\nchange or an untracked file still in its way, an ignored file included, so a\nskipped step costs a refusal, not content. Carry machine-local config across\nby hand where the reset rewrites its path.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\n## The reset heal stopped\n%s%s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly). To reset the checkout by hand once you have judged each item\nabove:\n1. Save real work elsewhere, since the reset drops a local commit that is\n   not upstream.\n2. Restore each dirty path listed as already upstream, and each listed as\n   local-only content that you judge a stray write:\n     git -C %s restore --source=HEAD --staged --worktree -- <path>\n3. Move aside each untracked or ignored file named above. One already\n   upstream can be deleted instead.\n4. Reset:\n     %s\nThe reset keeps a local change on a path it does not rewrite, such as\nmachine-local config. It refuses, rather than overwrites or deletes, a local\nchange or an untracked file still in its way, an ignored file included, so\nskipping step 2 or 3 costs a refusal, not content. A local commit does not\nstop it, so only step 1 keeps one. Carry machine-local config across by hand\nwhere the reset rewrites its path.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
             "$name" "$remote" "$path" "$report" "$upstream" "$path" "$reset_cmd" \
             "$(git -C "$path" status --porcelain 2>/dev/null)" \
             "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
