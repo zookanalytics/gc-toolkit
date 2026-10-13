@@ -13,12 +13,14 @@
 #             whatever its status, an open child, and a convoy parent; a closed
 #             child and a bead waiting on this one are no mark; an unreadable
 #             list of dependents refuses
-#   (READERS) the until consumer and its doctor mirror source this file, apply
-#             $LIVE_WORK_JQ and ask both predicates
+#   (READERS) until-resolved.sh, through which the until consumer and its
+#             doctor mirror decide, sources this file, applies $LIVE_WORK_JQ
+#             and asks both predicates
 #   (NO-COPY) no other file in the pack defines these defs
 # A reader with a private copy drifts silently: it keeps the marks it copied and
-# misses every mark added later. The behavioral half lives beside each reader
-# (deferred-dispatch.test.sh, doctor/check-until-resolved-owed/run.test.sh).
+# misses every mark added later. The behavioral half lives beside the reader
+# and its callers (until-resolved.test.sh, deferred-dispatch.test.sh,
+# doctor/check-until-resolved-owed/run.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -112,8 +114,7 @@ done
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the definition in prose
 # but no longer calls it still fails.
-READERS="assets/scripts/deferred-dispatch.sh
-doctor/check-until-resolved-owed/run.sh"
+READERS="assets/scripts/until-resolved.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

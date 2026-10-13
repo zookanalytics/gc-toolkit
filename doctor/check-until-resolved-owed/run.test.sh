@@ -15,7 +15,10 @@
 # its edges, is reported as a decision for a person, never as the order not
 # firing, and an unreadable edge read leaves it unchecked); and the owed window,
 # the deferred-dispatch order's cadence window from assets/scripts/order-cadence.sh,
-# with its minimum floor when the order registry does not read.
+# with its minimum floor when the order registry does not read; the owed-since
+# moment, the latest of the until targets' closes, the until edges' creation and
+# the blocks blockers' closes; and the fresh read through until-resolved.sh, so
+# a bead whose edge was removed or that a new blocker holds is not reported.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -45,14 +48,19 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-# The stub models the two reads the check makes, and the failure shapes real bd
-# shows for each:
+# The stub models the reads the check makes, and the failure shapes real bd
+# shows for each. The check pins every read with a global `--db <store>` ahead
+# of the verb, and the store's name is the directory holding that .beads:
 #   * `bd list --brief --json` (no --id)  → the OPEN beads for this rig
 #     (<name>.open.json): each bead's status, assignee, and its own outgoing edges
-#     under `.dependencies` in the list-edge shape ({depends_on_id, type}).
-#     BD_FAIL_LIST names a store whose open listing fails outright.
+#     under `.dependencies` in the list-edge shape ({depends_on_id, type,
+#     created_at}). BD_FAIL_LIST names a store whose open listing fails outright.
 #   * `bd show <id> --json`               → the bead's row, from <name>.show.json
-#     when that file names it, else from the open listing.
+#     when that file names it, else from the open listing. Its edges are
+#     rendered in the show shape ({id, dependency_type, issue_type, status}),
+#     each target's status read from <name>.refs.json or the open listing, and
+#     an edge whose target has no row in either left out, as real bd leaves out
+#     a target in another store.
 #   * `bd dep list <id> --direction=up`   → the beads that depend on it, from
 #     <name>.up.json (an object of id → array), else []. BD_FAIL_UP names a store
 #     whose dependents read answers an error object.
@@ -64,8 +72,10 @@ GC
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
+db=""
+while [ "${1:-}" = "--db" ]; do db="${2:-}"; shift 2 || shift; done
 sub="$1"; shift
-db=""; id_csv=""; prev=""; inc_gates=false; inc_infra=false; inc_templates=false
+id_csv=""; prev=""; inc_gates=false; inc_infra=false; inc_templates=false
 valueflag() { case "$1" in --db|--id|--limit|--actor|--type|--direction|--database|--max-rows|--offset) return 0;; *) return 1;; esac; }
 for a in "$@"; do
   if valueflag "$prev"; then
@@ -107,7 +117,16 @@ case "$sub" in
     f="$STORES/$name.show.json"
     [ -f "$f" ] && jq -e --arg id "$sid" 'any(.[]; .id == $id)' "$f" >/dev/null 2>&1 || f="$STORES/$name.open.json"
     if [ -f "$f" ] && jq -e --arg id "$sid" 'any(.[]; .id == $id)' "$f" >/dev/null 2>&1; then
-      jq -c --arg id "$sid" '[ .[] | select(.id == $id) ]' "$f"
+      refs="$STORES/$name.refs.json"; [ -f "$refs" ] || refs=/dev/null
+      jq -c --arg id "$sid" --slurpfile refs "$refs" --slurpfile open "$STORES/$name.open.json" '
+        (($refs[0] // []) + ($open[0] // [])) as $known
+        | [ .[] | select(.id == $id)
+            | .dependencies = [ (.dependencies // [])[]
+                | if has("depends_on_id") then
+                    . as $e | ($known | map(select(.id == $e.depends_on_id)) | .[0]) as $t
+                    | select($t != null)
+                    | {id: $e.depends_on_id, dependency_type: $e.type, issue_type: ($t.issue_type // "task"), status: $t.status}
+                  else . end ] ]' "$f"
     else
       echo '{"error":"no issues found matching the provided IDs","schema_version":1}'
     fi ;;
@@ -140,6 +159,8 @@ o_until_blk() { printf '{"id":"%s","issue_type":"task","status":"open","assignee
 o_until_assigned() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"rig/rig.refinery","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2"; }
 o_until_status() { printf '{"id":"%s","issue_type":"task","status":"%s","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3"; }
 o_blocks_only() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"blocks"}]}' "$1" "$2"; }
+# A bead with one until edge that records when it was added.
+o_until_edged() { printf '{"id":"%s","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"%s","type":"until","created_at":"%s"}]}' "$1" "$2" "$3"; }
 # A bead with one until edge, a type and metadata of the caller's choosing.
 o_until_meta() { printf '{"id":"%s","issue_type":"%s","status":"open","assignee":"","metadata":%s,"dependencies":[{"depends_on_id":"%s","type":"until"}]}' "$1" "$2" "$3" "$4"; }
 
@@ -384,6 +405,60 @@ refs_store alpha "$(r_closed x-0 "$(ago 2000)")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "with no registry, a disposition owed for 2000s is owed"
 has "$OUT" "(> 1800s)" "…against the minimum window"
+clear_stores
+
+# --- 24. OWED SINCE: an edge added to a long-closed target starts the wait ----
+# A bead is owed from the moment its last condition held, so an `until` edge
+# added just now to a target closed long ago has been owed for no time at all.
+open_store alpha "$(o_until_edged e-1 x-0 "$RECENT")"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an until edge added just now to a long-closed target is inside the window (exit 0)"
+hasnt "$OUT" "alpha bead e-1" "…so it is not reported as long owed"
+open_store alpha "$(o_until_edged e-2 x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an until edge added long ago to a long-closed target is owed (exit 1)"
+has "$OUT" "alpha bead e-2" "…and reported"
+clear_stores
+
+# --- 25. OWED SINCE: a blocks blocker that closed just now starts the wait ------
+open_store alpha "$(o_until_blk e-3 x-0 y-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")" "$(r_closed y-0 "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead whose blocks blocker closed just now is inside the window, however old its until target's close"
+hasnt "$OUT" "alpha bead e-3" "…so it is not reported"
+refs_store alpha "$(r_closed x-0 "$OLD")" "$(r_closed y-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a bead whose blocks blocker closed long ago too is owed (exit 1)"
+has "$OUT" "alpha bead e-3" "…and reported"
+clear_stores
+
+# --- 26. FRESH READ: the doctor reports only what the pass would dispose -------
+# The listing finds the bead owed, but the fresh read the pass makes before a
+# close finds its until edge removed (the remedy this check names for keeping
+# it), or a blocks blocker added since. The pass leaves either one open, so
+# neither is a disposition the order failed to make.
+open_store alpha "$(o_until f-1 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+printf '%s' '[{"id":"f-1","issue_type":"task","status":"open","assignee":"","dependencies":[]}]' > "$TMP/stores/alpha.show.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an owed bead whose until edge is gone at the fresh read is not reported (exit 0)"
+hasnt "$OUT" "alpha bead f-1" "…so keeping a bead by removing its edge clears the finding"
+open_store alpha "$(o_until f-2 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")" "$(r_open y-9)"
+printf '%s' '[{"id":"f-2","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"x-0","type":"until"},{"depends_on_id":"y-9","type":"blocks"}]}]' > "$TMP/stores/alpha.show.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an owed bead a new open blocks blocker holds at the fresh read is not reported (exit 0)"
+hasnt "$OUT" "alpha bead f-2" "…as the pass would not dispose it"
+clear_stores
+
+# --- 27. FAIL CLOSED: a blocks blocker in another store leaves the bead unchecked
+open_store alpha "$(o_until_blk u-27 x-0 ghost-blk)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a candidate whose blocks blocker does not resolve warns (exit 1)"
+has "$OUT" "could not resolve its until target(s)/blocker(s) [ghost-blk]" "…naming the blocker it could not read"
+hasnt "$OUT" "owed but not firing" "…and is not reported as owed"
 clear_stores
 
 if grep -qE '^[[:space:]]*OWED_WINDOW_SECONDS=[0-9]' "$CHECK"; then

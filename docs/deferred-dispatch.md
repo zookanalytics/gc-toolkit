@@ -212,9 +212,18 @@ The pass acts only on an OPEN, UNASSIGNED bead: a non-`open` status is a
 deliberate hold and an assignee is a live worker, both left alone. It disposes
 only when EVERY `until` target has closed — a target still open, or one the
 status read cannot resolve, leaves the bead waiting, never disposed on a guess.
+A bead that one of its own `blocks` blockers still holds waits for that blocker
+as well, and so does one whose blocker the status read cannot resolve. `bd
+close` refuses a blocked bead, and `bead-rehome` stamps its pointer before that
+refusal, so a call there would leave a live bead pointing at a successor.
 ONLY `until` disposes: a `blocks` edge is never a dispose trigger, so the common
 sequencing edge ("land A before B", where B is still owed after A) is never
 auto-closed.
+
+Which beads are owed is decided in one place, `assets/scripts/until-resolved.sh`,
+which the pass and its doctor mirror both read. It makes one listing of the
+store, then one status read of every bead the candidates' edges name, and
+decides every candidate in one jq pass.
 
 Open and unassigned is not the same as idle. An anchor stays open and
 unassigned for as long as its PR is reviewed, and a bead slung to a pool stays
@@ -239,21 +248,52 @@ listing returns. The second is a fresh read of the bead and of what depends on
 it, made just before the close, because a sling or a claim can land
 mid-pass. That includes a sling the pass's own dispatch half made moments
 earlier. A bead with any mark is reported and left open, which is never a pass
-failure. A dispatch that lands after the fresh read meets a closed bead: no
+failure. The fresh read also confirms the bead is still owed: its `until` edge
+to the successor is still there, no `until` target has reopened, and no
+`blocks` blocker has opened. Removing the edge is how a person keeps a bead the
+pass would otherwise dispose, so a bead whose edge went after the listing is
+kept. A dispatch that lands after the fresh read meets a closed bead: no
 pool offers it, and `mol-polecat-work`'s load-context quiesces a pour over it.
 The guard runs before `bead-rehome` is called, because `bead-rehome` can stamp
 its successor pointer and still have the close refused. A pointer on an anchor
 reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that
 anchor's review scaffolding.
 
-When the close is held — an open visit tracking the bead, or another open
-blocker — `bead-rehome` records the successor pointer and refuses the close
-rather than forcing it, leaving an open, pointed, findable bead that a later
-pass retries once the hold clears. Enumeration is fail-closed the way the
-dispatch half is: an unreadable store leaves every until-gated bead for the next
-pass rather than reading "none owed". The same-store limit below holds for an
-`until` target as much as for a `blocks` blocker — one in another rig is not seen
-here.
+When the close is held, commonly by an open visit tracking the bead,
+`bead-rehome` records the successor pointer and refuses the close rather than
+forcing it, leaving an open, pointed, findable bead that a later pass retries
+once the hold clears. Enumeration is fail-closed the way the dispatch half is:
+an unreadable store leaves every until-gated bead for the next pass rather than
+reading "none owed". The same-store limit below holds for an `until` target as
+much as for a `blocks` blocker — one in another rig is not seen here.
+
+A pass pinned to a store, by the order's `GC_RIG_ROOT` or by `--db`, reads
+every bead from that store whatever its id prefix says. Left to itself,
+`bead-rehome` derives each bead's store from its id prefix, so the pass names
+its store instead, as the rig whose `.beads` it is, and `bead-rehome` closes
+there. A pinned store that no rig in `gc rig list` holds disposes nothing,
+because a close aimed by id prefix could land in another store. An unpinned
+pass leaves the store to `bead-rehome`, whose derivation by prefix is the
+routing an unpinned read of an id takes.
+
+A disposal costs a fresh read and a `bead-rehome` call, which makes several
+store reads and writes of its own, so a target with many `until` dependents
+could run a pass past the order's timeout. The timeout kills a pass mid-loop,
+before it prints its summary. So the until half starts a disposal only while
+one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
+left in the pass budget (`DEFERRED_DISPATCH_PASS_BUDGET_SECS`, 90s from the
+start of the pass, 0 for unpaced). The owed beads past that point wait,
+untouched, for the next pass, and the summary counts them as left for the next
+pass. The budget counts from the start of the pass, so the until half spends
+only what the dispatch half left, and with nothing left it does not list the
+store at all. The budget sits one allowance below the order's timeout, so the
+last disposal a pass starts can run for twice its allowance, and
+`deferred-dispatch.test.sh` holds the two defaults against the order's timeout.
+A dry run spends no budget.
+
+The two halves enumerate independently. A dispatch half that cannot read its
+armed set, or that stops short of it, still lets the until half run, and a
+failure in either fails the pass.
 
 The positive control in `deferred-dispatch.test.sh` and `check-cadence-live`
 (I10) cover this half too, because this is the same order on the same cadence.
@@ -262,11 +302,15 @@ The positive control in `deferred-dispatch.test.sh` and `check-cadence-live`
 bead whose `until` targets have all closed and that no open `blocks` blocker
 still holds, yet that has stayed undisposed past the reconcile window — the
 disposition silently not firing, surfaced before the bead drifts back into a
-triage sitting. It reads live work from the same `live-work.sh` definition, so
-a resolved bead the pass left open because it carries live work is reported
-separately, as a decision for a person. If the work is still wanted, the person
-removes the `until` edge. If the target's close made it moot, the work is
-retired and the bead disposed by ruling.
+triage sitting. It decides through the same `until-resolved.sh` and makes the
+same fresh read before it reports a bead, so it reports what the pass would do.
+It measures how long a bead has been owed from the moment it became owed: the
+latest of its `until` targets' closes, its `until` edges' creation, and its
+`blocks` blockers' closes. An edge added today to a target that closed last
+week is owed from today. A resolved bead the pass left open because it carries
+live work is reported separately, as a decision for a person. If the work is
+still wanted, the person removes the `until` edge. If the target's close made
+it moot, the work is retired and the bead disposed by ruling.
 
 ## What this does not do
 

@@ -20,13 +20,14 @@
 # an issue type outside the plain-work list refuses, and so does an unreadable
 # list of dependents.
 #
-# Sourced (never executed) by the until consumer in deferred-dispatch.sh, which
-# disposes a bead its `until` targets resolved and leaves every bead with a mark
-# alone, and by doctor/check-until-resolved-owed, which reports such a bead as a
-# decision for a person rather than as a disposal the order failed to make. One
-# definition, no copies: a mark added here is honoured by both at once, and
-# live-work.test.sh fails when either stops sourcing this file or a file
-# defines these keys of its own.
+# Sourced (never executed) by until-resolved.sh, through which the until
+# consumer in deferred-dispatch.sh and doctor/check-until-resolved-owed decide.
+# The consumer disposes a bead its `until` targets resolved and leaves every bead
+# with a mark alone, and the doctor check reports such a bead as a decision for
+# a person rather than as a disposal the order failed to make. One definition,
+# no copies: a mark added here is honoured by both at once, and
+# live-work.test.sh fails when until-resolved.sh stops sourcing this file or a
+# file defines these keys of its own.
 #
 # Usage follows the in-variable jq convention (standing-kinds.sh): prepend the
 # defs to a jq program, e.g.

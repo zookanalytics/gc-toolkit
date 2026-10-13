@@ -6,14 +6,18 @@
 # "X resolves me": once every `until` target of an open, unassigned bead has
 # closed, the same pass disposes that bead through bead-rehome, so its close
 # carries a successor pointer. A `blocks` dep never disposes, and neither does a
-# bead that carries live work (assets/scripts/live-work.sh). Exec, not a
-# formula: store reads plus one sling or bead-rehome call per owed bead need no
-# LLM. Rig-scoped: one pass per importing rig against its own store; the
-# runtime's open-tracking gate is the single-flight guard, so keep `timeout`
-# under the tracking sweep's stale-after (10m). Tune interval from city.toml
-# [[orders.overrides]].
+# bead that carries live work (assets/scripts/live-work.sh) or that its own open
+# `blocks` blocker still holds. Exec, not a formula: store reads plus one sling
+# or bead-rehome call per owed bead need no LLM. Rig-scoped: one pass per
+# importing rig against its own store; the runtime's open-tracking gate is the
+# single-flight guard, so keep `timeout` under the tracking sweep's stale-after
+# (10m). The script's pass budget (DEFERRED_DISPATCH_PASS_BUDGET_SECS) starts
+# no disposal it cannot finish before `timeout` and leaves the rest for the
+# next pass, so an override that lowers `timeout` has to lower that budget in
+# its env too; deferred-dispatch.test.sh holds the budget below this timeout.
+# Tune interval from city.toml [[orders.overrides]].
 [order]
-description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome every open, unassigned bead whose until targets have all closed and that carries no live work"
+description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome each open, unassigned bead whose until targets have all closed, that no open blocks blocker holds, and that carries no live work"
 trigger = "cooldown"
 interval = "5m"
 timeout = "120s"
