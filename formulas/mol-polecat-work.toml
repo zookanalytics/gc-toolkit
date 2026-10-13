@@ -878,7 +878,8 @@ tracker. It reads every live status: the existing report is usually already
 `in_progress` with someone fixing it. A tracker that a fold closed still
 answers. Its `gc.superseded_by` names the live bead that carries the failure
 now, such as a batch, and the lookup returns that bead, so 3c confirms on it.
-A lookup that errors is not an all-clear. Set `KEY_ARGS` to the form 3a picked. When the script is not found, or `key`
+A lookup that errors is not an all-clear.
+Set `KEY_ARGS` to the form 3a picked. When the script is not found, or `key`
 refuses that input, the block looks nothing up and tells
 `{{escalation_target}}` which of the two happened.
 
