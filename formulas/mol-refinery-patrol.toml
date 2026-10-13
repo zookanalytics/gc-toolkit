@@ -242,6 +242,22 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 git -C "$RIG_ROOT" fetch --prune origin
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+# A gate an interrupted iteration left running still runs in the prep worktree,
+# so it is stopped before the worktree is rebuilt under it. A gate that will not
+# stop leaves the work with the refinery. The launcher is found by path, as the
+# rig root is, never from cwd.
+GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
+JOB=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+[ -n "$JOB" ] || { echo "detached-job.sh not found, so a gate left running in $GATE cannot be stopped. NOT rebuilding the prep worktree; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+  printf '%s' "$STOP_OUT"; echo
+  echo "the gate left running in $GATE did not stop. NOT rebuilding the prep worktree under it; leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
 # Check the add result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
