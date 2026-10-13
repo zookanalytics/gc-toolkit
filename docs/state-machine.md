@@ -235,7 +235,7 @@ other account a veto. An approval stands across later pushes until it is
 dismissed, so it counts whatever commit it was given at. A dismissed review is
 dropped before each reviewer's latest review is taken, so it neither approves
 nor vetoes, and it does not hide its author's older approval. A small fix after
-an approval lands on it. An outside approval is dismissed in two cases: by
+an approval lands on it. An outside approval is dismissed by
 `bring-current-guard.sh` when the ruling on a conflicted
 [bring-current round](#bringing-a-branch-current) lifts it, and by
 `approval-withdraw.sh` when the validator rules a fresh whole-diff review
