@@ -19,6 +19,12 @@
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
+#   (EVIDENCE)  only the correctness check settles test evidence or runs a
+#               suite, and its review-test-evidence block counts the anchor's
+#               self-review stamp only on an exact match in a rig that
+#               declares a test command, in bash and in zsh; neither the
+#               frame nor any mol-review text every check reads runs or
+#               presumes a suite.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -96,6 +102,7 @@ hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides nee
 hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
 hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
 hasF "$TMP/demo.out" '--visual none|repo-artifact|screenshot|video' "(CHECK) demo names the verdict call that records its decision"
+hasF "$TMP/demo.out" '[--visual-fallback-from screenshot|video]' "(CHECK) …and the flag that records a fallback"
 notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an unrecordable demo is no longer a finding against the change"
 [ -r "$(cd "$HERE/../.." && pwd)/skills/review-demo/SKILL.md" ] \
   && ok "(CHECK) the demo method skill ships where the note points" \
@@ -116,6 +123,77 @@ bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
 RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
+
+echo "# test evidence: only the correctness check settles it or runs a suite"
+notF "$OUT" 'run the tests yourself' "(EVIDENCE) the frame does not tell every check to run the tests"
+hasF "$OUT" 'self_review_passed_sha' "(EVIDENCE) correctness reads the self-review stamp"
+hasF "$OUT" '# >>> review-test-evidence' "(EVIDENCE) correctness carries the evidence block"
+for c in tri demo pm arch undeclared; do
+  notF "$TMP/$c.out" 'review-test-evidence' "(EVIDENCE) $c carries no evidence block"
+  notF "$TMP/$c.out" 'hb bash -c' "(EVIDENCE) $c runs no suite"
+done
+# mol-review's review step is shared by every check, so it runs no suite itself
+# and leaves that to the check section.
+REVIEW_STEP="$TMP/review-step.txt"
+awk '/^id = "review"$/ {f = 1} f && /^\[\[steps\]\]$/ {exit} f' "$ROOT/formulas/mol-review.toml" > "$REVIEW_STEP"
+hasF "$REVIEW_STEP" 'title = "' "(EVIDENCE) the review step is found in formulas/mol-review.toml"
+notF "$REVIEW_STEP" 'run the tests' "(EVIDENCE) the shared review step neither promises nor runs the tests"
+notF "$REVIEW_STEP" 'Run the tests' "(EVIDENCE) the shared review step has no step that runs the tests"
+notF "$REVIEW_STEP" 'run the suites' "(EVIDENCE) the shared review step runs no suite"
+hasF "$REVIEW_STEP" 'The check section of the' "(EVIDENCE) the shared review step leaves test runs to the check section"
+# Every check also reads the formula's hard rules and its pin step.
+notF "$ROOT/formulas/mol-review.toml" 'run the tests yourself' "(EVIDENCE) mol-review's hard rules do not tell every check to run the tests"
+notF "$ROOT/formulas/mol-review.toml" 'the tests you' "(EVIDENCE) mol-review's pin step does not presume every check runs tests"
+
+# The block runs as written against a stub gc: bd show answers the anchor, and
+# formula show answers the rig's mol-polecat-work vars.
+awk '/^# >>> review-test-evidence$/ {f = 1} f {print} /^# <<< review-test-evidence$/ {f = 0}' "$OUT" > "$TMP/evidence.sh"
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_LOG"
+case "$1 $2" in
+  "bd show") [ "${STUB_BD_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "$STUB_ANCHOR_JSON" ;;
+  "formula show") [ "${STUB_FORMULA_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "$STUB_FORMULA_JSON" ;;
+  *) exit 1 ;;
+esac
+GC
+chmod +x "$TMP/bin/gc"
+OID=0123456789abcdef0123456789abcdef01234567
+DECLARES='{"ok":true,"vars":[{"name":"affected_tests_command","default":"","rig_default":"tools/run-tests.sh x"},{"name":"test_command","default":"","rig_default":null}]}'
+# A rig's own empty value wins over a formula default, the way the self-review renders it.
+DECLARES_NONE='{"ok":true,"vars":[{"name":"affected_tests_command","default":"","rig_default":null},{"name":"test_command","default":"make test","rig_default":""}]}'
+stamped() { printf '[{"id":"tk-a","metadata":{"self_review_passed_sha":"%s"}}]' "$1"; }
+# evidence <shell> <review-bead metadata> <anchor json> <formula json> [GC_RIG] : the block's verdict word
+evidence() {
+  : > "$TMP/stub.log"
+  ( PATH="$TMP/bin:$PATH" M="$2" REVIEWED_OID="$OID" GC_RIG="${5-gc-toolkit}" STUB_LOG="$TMP/stub.log" \
+      STUB_ANCHOR_JSON="$3" STUB_FORMULA_JSON="$4" "$1" "$TMP/evidence.sh" 2>/dev/null ) | sed -nE 's/^(test evidence|no test evidence).*/\1/p'
+}
+SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
+for sh in $SHELLS; do
+  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "test evidence" \
+     "(EVIDENCE) $sh: a stamp on the reviewed commit in a rig that declares a test command is evidence"
+  grep -qx -- 'formula show mol-polecat-work --rig=gc-toolkit --json' "$TMP/stub.log" \
+    && ok "(EVIDENCE) $sh: the rig's declared commands are read with --rig=<rig> as one word" \
+    || bad "(EVIDENCE) $sh: the formula read did not pass --rig=gc-toolkit (log: $(tr '\n' ';' < "$TMP/stub.log"))"
+  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES_NONE")" "no test evidence" \
+     "(EVIDENCE) $sh: a rig whose own values declare no test command gives no evidence"
+  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped fedcba9876543210fedcba9876543210fedcba98)" "$DECLARES")" "no test evidence" \
+     "(EVIDENCE) $sh: a stamp naming another commit is no evidence"
+  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "${OID:0:12}")" "$DECLARES")" "no test evidence" \
+     "(EVIDENCE) $sh: a short sha is no exact match, so no evidence"
+  eq "$(evidence "$sh" '{}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
+     "(EVIDENCE) $sh: a review bead with no anchor gives no evidence"
+  eq "$(STUB_BD_FAIL=1 evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
+     "(EVIDENCE) $sh: an unreadable anchor gives no evidence"
+  eq "$(STUB_FORMULA_FAIL=1 evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
+     "(EVIDENCE) $sh: unreadable rig commands give no evidence"
+  evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES" "" >/dev/null
+  grep -qx -- 'formula show mol-polecat-work --json' "$TMP/stub.log" \
+    && ok "(EVIDENCE) $sh: with GC_RIG unset the formula is read with no --rig" \
+    || bad "(EVIDENCE) $sh: with GC_RIG unset the formula read was not bare (log: $(tr '\n' ';' < "$TMP/stub.log"))"
+done
 
 echo "# both axes coexist: a quorum formula plus a named check emits both sections"
 bash "$SCRIPT" --formula mol-review-quorum-signoff --check-name triage > "$TMP/both.out" 2>/dev/null

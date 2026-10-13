@@ -16,8 +16,9 @@
 #     or HEAD when origin has none. bring_current_scope is merge-only for a
 #     "stale base at head" or "Conflicts with" rejection, and with-work for any
 #     other. The last round's conflict_audit and conflict_question are cleared;
-#   - it merges only once bring_current_from reads back from the bead, and when
-#     it does not, the block exits 1 having merged nothing;
+#   - it merges only once bring_current_from and bring_current_scope both read
+#     back from the bead, and when either does not, the block exits 1 having
+#     merged nothing;
 #   - it unsets rejection_reason;
 #   - with no rejection_reason it does nothing.
 #
@@ -82,7 +83,9 @@ bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block is val
 # `bd update <id>` applies each --set-metadata and --unset-metadata to it, so a
 # read-back sees what the block wrote. With DROP_WRITES set, an update exits 0
 # and changes nothing, which is how a write that never landed looks to the
-# block. The git wrapper copies the store to $AT_MERGE when a merge starts.
+# block; with DROP_KEY=<key> it applies every write but that key's, which is how
+# a write that half-landed looks. The git wrapper copies the store to $AT_MERGE
+# when a merge starts.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 export REAL_GIT CALLS="$TMP/calls.log" STORE="$TMP/store.json" AT_MERGE="$TMP/store-at-merge.json"
 cat > "$BIN/git" <<'SH'
@@ -107,8 +110,8 @@ case "$verb" in
         --unset-metadata) k="$2"; v=""; f='.metadata |= del(.[$k])' ;;
         *) shift; continue ;;
       esac
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" "map(if .id == \$id then $f else . end)" "$STORE" > "$STORE.new" \
-        && mv "$STORE.new" "$STORE"
+      [ "$k" = "${DROP_KEY:-}" ] || { jq -c --arg id "$id" --arg k "$k" --arg v "$v" "map(if .id == \$id then $f else . end)" "$STORE" > "$STORE.new" \
+        && mv "$STORE.new" "$STORE"; }
       shift 2
     done ;;
 esac
@@ -263,6 +266,17 @@ eq "$RC" "1" "(9) the block exits 1"
 eq "$(grep -c '^git merge' "$CALLS")" "0" "(9) git merge is not run"
 eq "$(g "$C" rev-parse HEAD)" "$W1" "(9) HEAD stays at the PR head"
 eq "$(grep -c -- '--unset-metadata rejection_reason' "$CALLS")" "0" "(9) rejection_reason is not cleared, so a re-run resumes the same rejection"
+
+echo "# a scope that does not read back stops the block too, though the start beside it landed"
+# The guard reads a start stamped with no scope beside it as a resume that asks
+# for no audit, so merging on the start alone would waive the round's entries.
+clone polecat/w1
+DROP_KEY=bring_current_scope run_block "$(bead polecat/w1 "$(jq -nc --arg r "$STALE" '{rejection_reason: $r}')")"
+eq "$RC" "1" "(10) the block exits 1"
+eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 <absent>" "(10) the start landed and the scope did not"
+eq "$(grep -c '^git merge' "$CALLS")" "0" "(10) git merge is not run"
+eq "$(g "$C" rev-parse HEAD)" "$W1" "(10) HEAD stays at the PR head"
+eq "$(grep -c -- '--unset-metadata rejection_reason' "$CALLS")" "0" "(10) rejection_reason is not cleared, so a re-run resumes the same rejection"
 
 echo
 echo "rejected-branch-resume-mode: $PASS passed, $FAIL failed"

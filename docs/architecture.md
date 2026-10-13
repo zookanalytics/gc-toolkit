@@ -82,7 +82,10 @@ performer; the full transition table with writers is
 1. **File.** Something — a formula step, an event, the operator — files a bead.
 2. **Route.** `gc sling` (or `deferred-dispatch.sh` when blockers must close
    first) routes it to a pool. Routed, unclaimed work is *demand*: the runtime
-   spawns a session to meet it, with no operator keystroke.
+   spawns a session to meet it, with no operator keystroke. New work is routed
+   only once it may enter a pool: a member of an epic, PR-finishing work, an
+   emergency, or the operator's own move. Other new work waits for the
+   operator's placement sitting first ([steering.md](steering.md)).
 3. **Claim.** A polecat claims via `gc hook --claim`; the runtime writes
    assignee and claim in one step.
 4. **Implement.** The polecat works in a per-bead worktree on a
@@ -142,9 +145,11 @@ The human surface is subject / visit / takeaway on native primitives
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger; `gc-helm.sh` keeps only the write verbs —
-  open, engage, react, takeaway, demand, dismiss. Everything works without the board: it spends no
-  state, so it can never be wrong for longer than one render.
+  per render from the ledger. `gc-helm.sh` carries the write verbs open,
+  engage, react, takeaway, demand, dismiss and accept, and the read-only verbs
+  resolve and unplaced. `gc-helm.sh unplaced` lists the placement sitting's
+  queue ([steering.md](steering.md)). Everything works without the board: it
+  spends no state, so it can never be wrong for longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before
 the operator arrives, the choice framed, every surface branded so the operator
