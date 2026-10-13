@@ -382,9 +382,15 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 [ -d "$PREP_WT" ] || { echo "cannot find the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-# A gate a previous session left running tests a prep worktree the rebase
-# step has since rebuilt, and reads the checks this block rewrites.
-"$JOB" stop "$GATE" >/dev/null
+# A gate a previous session left running reads the checks and the script this
+# block rewrites, so it is stopped first. One that survives the stop still
+# runs, so nothing is rewritten under it and the work stays with the refinery.
+if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+  printf '%s' "$STOP_OUT"; echo
+  echo "the gate a previous session left running in $GATE did not stop, so its checks are not rewritten under it; leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 rm -rf "${GATE:?}/checks"
 mkdir -p "$GATE/checks"
 # >>> rig-check-commands

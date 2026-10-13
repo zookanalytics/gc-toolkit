@@ -13,7 +13,9 @@
 #     patrol wisp, and one that finds it finished does not;
 #   - an empty check is skipped, and run_tests=false skips the test command;
 #   - a gate a previous session left running is stopped before the new one
-#     starts, and its checks do not carry into the new one;
+#     starts, and its checks do not carry into the new one; one that will not
+#     stop keeps its checks and script, no new gate starts, and the cycle
+#     drains;
 #   - a rig with no check commands starts no gate until a quality gate from
 #     its CLAUDE.md is added, and an added one runs only for such a rig;
 #   - a wait that cannot find its launcher exits 1, leaves the gate running,
@@ -207,6 +209,31 @@ eq "$(ls "$GATE/checks" | tr '\n' ' ')" "01-setup_command 02-lint_command 03-tes
 OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" rc)" 0/0 "the new gate's result is the one reported"
 case "$(cat "$GATE/log")" in *"== build_command"*) bad "the old gate's check does not run again" "build_command ran" ;; *) ok "the old gate's check does not run again" ;; esac
+
+echo "── a gate that will not stop: nothing is rewritten under it, and the cycle drains ──"
+# A launcher whose stop reports the gate still running, as detached-job.sh does
+# when the gate's process group survives TERM and KILL. It logs each call.
+STUCK_CITY="$TMP/stuck-city"
+mkdir -p "$STUCK_CITY/rigs/gc-toolkit/assets/scripts"
+cat > "$STUCK_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$STUB_JOB_LOG"
+[ "$1" = stop ] || exit 0
+printf "state=running\ndetail=the job's process group survived TERM and KILL\ndir=%s\n" "$2"
+exit 1
+STUB
+chmod +x "$STUCK_CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh"
+checks '' '' 'true' '' '' true
+GATE_SUM=$(cat "$GATE/gate.sh" "$GATE"/checks/* | cksum)
+: > "$STUB_GC_LOG"
+: > "$TMP/job.log"
+OUT=$(STUB_JOB_LOG="$TMP/job.log" run_block "$TMP/start.raw" "$STUCK_CITY" 2>&1); RC=$?
+eq "$RC" 1 "the start block exits 1"
+has "$OUT" "survived TERM and KILL" "it prints the launcher's report"
+has "$OUT" "did not stop, so its checks are not rewritten under it" "it says why it stopped"
+has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "it drains"
+eq "$(tr '\n' ' ' < "$TMP/job.log")" "stop " "no new gate is started"
+eq "$(cat "$GATE/gate.sh" "$GATE"/checks/* | cksum)" "$GATE_SUM" "the old gate's script and checks are not rewritten"
 
 echo "── a wait that cannot find its launcher leaves the gate running ──"
 checks '' '' 'sleep 45' '' '' true
