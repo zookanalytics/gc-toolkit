@@ -50,6 +50,11 @@
 # through signoff.sh, which runs `decide` here: lanes to run again, and whether
 # the human approval is lifted.
 #
+# A ruling the guard recorded in a round's record, marked by: guard where
+# triage's goes, is carried out again by a re-run of the same hand-off: the
+# lanes it names run again, and when it lifts the approval the lift line is
+# drawn and the approvals before it are dismissed, as DECIDE does below.
+#
 # EVIDENCE. Each conflicted file is replayed with git's own merge (diff3, so
 # each hunk shows what the merge base had there) and its resolution compared:
 # whether both sides only added lines and the resolution keeps the two
@@ -97,7 +102,8 @@
 # audit covers it. classify: prints none, clean, conflicted or unreadable, then
 # one evidence line per item. All three read the git repository of the working
 # directory.
-# Exit: 0 nothing owed, or the round recorded (and routed to triage) ·
+# Exit: 0 nothing owed, or the round recorded (and routed to triage, or its
+# recorded ruling carried out) ·
 # 1 a read or a write failed, so nothing was handed off and the caller retries ·
 # 2 usage · 3 the audit does not cover the round, or nothing records where it
 # began: the worker completes it and re-runs
@@ -630,7 +636,14 @@ cmd_guard() {
     return 0
   fi
 
-  # Triage's ruling is carried out by the verdict that recorded it.
+  # A ruling the guard recorded itself, marked by: guard, is carried out again
+  # by a re-run of the same hand-off, because the run that recorded it can stop
+  # before carrying it out. Triage's ruling is carried out by the verdict that
+  # recorded it.
+  if [ "$(printf '%s' "$triage_prev" | jq -r '.by? // ""' 2>/dev/null)" = "guard" ]; then
+    guard_ruling "$record" "$round_at"
+    return $?
+  fi
   if [ "$triage_prev" != "null" ]; then
     gc bd update "$ANCHOR" --set-metadata "bring_current_record=$record" >/dev/null 2>&1 || true
     got=$(bca_meta_json "$(bd_json show "$ANCHOR")" bring_current_record | jq -r '.head // ""' 2>/dev/null)
@@ -679,6 +692,49 @@ cmd_guard() {
   else
     echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")); the audit and evidence are recorded on $ANCHOR, and triage is reopened to decide what the round reopens"
   fi
+  return 0
+}
+
+# --- the guard's own ruling ------------------------------------------------------
+# Carry out a ruling the guard recorded itself, marked by: guard in the record
+# where triage's goes: the lanes it names run again, and when it lifts the
+# approval the lift line is drawn and the approvals before it are dismissed. The
+# record, the reopened lanes and the round's time are written and read back
+# before any lane loses its backing, and the approval is lifted last because
+# the lift reads the round's time. Every step can run again: supersede-lane
+# retires only what still stands, and the line never moves back. rc 0 carried
+# out · 1 a read or a write failed; nothing is handed off and the caller
+# retries.
+guard_ruling() { # <record-json carrying the ruling> <round-at, empty for a new round>
+  local record="$1" round_at="$2" ruling lanes_json dismiss reopened writes got lane
+  ruling=$(printf '%s' "$record" | jq -c 'if (.triage.by? // "") == "guard" then .triage else empty end' 2>/dev/null)
+  [ -n "$ruling" ] || { echo "$PROG: the round's record carries no ruling of the guard's; nothing is handed off and the caller retries" >&2; return 1; }
+  lanes_json=$(printf '%s' "$ruling" | jq -c '.reopen // []')
+  dismiss=$(printf '%s' "$ruling" | jq -r '.dismiss == true')
+  reopened=$(printf '%s\n%s' "$(bca_meta "$AROW" bring_current_reopened | tr ',' '\n')" "$(printf '%s' "$lanes_json" | jq -r '.[]')" \
+    | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d' | awk '!seen[$0]++' | paste -sd, -)
+  [ -n "$round_at" ] || round_at=$(now)
+  writes=(--set-metadata "bring_current_record=$record" --set-metadata "bring_current_round_at=$round_at")
+  [ -z "$reopened" ] || writes+=(--set-metadata "bring_current_reopened=$reopened")
+  gc bd update "$ANCHOR" "${writes[@]}" >/dev/null 2>&1 || true
+  got=$(bd_json show "$ANCHOR")
+  if [ "$(bca_meta_json "$got" bring_current_record | jq -r '(.head // "") + " " + (.triage.by? // "")' 2>/dev/null)" != "$TO guard" ] \
+     || [ "$(bca_meta "$got" bring_current_reopened)" != "$reopened" ] \
+     || [ "$(bca_meta "$got" bring_current_round_at)" != "$round_at" ]; then
+    echo "$PROG: the round's record and the guard's ruling did not read back on $ANCHOR; nothing is handed off and the caller retries" >&2
+    return 1
+  fi
+  for lane in $(printf '%s' "$lanes_json" | jq -r '.[]'); do
+    if ! "$REVIEW_OUTCOME" supersede-lane --anchor "$ANCHOR" --lane "$lane" \
+         --reason "bring-current round up to $(short "$TO") conflicted, and the guard's ruling on it runs this lane again" >/dev/null; then
+      echo "$PROG: lane $lane on $ANCHOR could not be reopened; nothing is handed off and the caller retries" >&2
+      return 1
+    fi
+  done
+  if [ "$dismiss" = "true" ]; then
+    dismiss_approvals "$ANCHOR" "$got" "$(bca_meta_json "$got" bring_current_record)" || return 1
+  fi
+  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")), and the guard's ruling on it is carried out: $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing reopens" else join(", ") + (if length == 1 then " runs" else " run" end) + " again on the merged code" end')$([ "$dismiss" = "true" ] && echo ", and the approval given before the round is lifted")"
   return 0
 }
 

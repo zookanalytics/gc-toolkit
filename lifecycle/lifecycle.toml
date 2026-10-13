@@ -620,10 +620,11 @@ keys = [
 # bring_current_record — the anchor's record of its latest bring-current round
 #   (bring-current-guard.sh guard): the head, the start, the target, the class
 #   (clean or conflicted), the guard's evidence per item, the worker's audit,
-#   and triage's ruling once made (bring-current-guard.sh decide, run by
-#   signoff.sh). A conflicted round no ruling covers yet is carried into the
-#   next round's record. Every message about a round renders from it. A JSON
-#   object, overwritten each round.
+#   and the round's ruling once made: triage's (bring-current-guard.sh decide,
+#   run by signoff.sh), or one the guard recorded itself, marked by=guard,
+#   which a re-run of the same hand-off carries out again. A conflicted round
+#   no ruling covers yet is carried into the next round's record. Every message
+#   about a round renders from it. A JSON object, overwritten each round.
 # bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
 #   triage, written by the guard, and the lanes triage's rulings reopened or
 #   added. lane-state.sh lets no GitHub approval submitted before
@@ -634,8 +635,9 @@ keys = [
 # bring_current_lifted_at — the round time of the latest conflicted round whose
 #   ruling lifted the human approval (UTC, YYYY-MM-DDTHH:MM:SSZ; the ruling's
 #   own time when the round recorded none). Written by bring-current-guard.sh
-#   decide once triage's ruling to lift the approval is recorded, and read back
-#   before any approval is dismissed; it never moves back. The approval rule
+#   once a ruling to lift the approval is recorded, by decide for triage's and
+#   by guard for one it recorded itself, and read back before any approval is
+#   dismissed; it never moves back. The approval rule
 #   counts no approval submitted at or before it: gctk merge's reviewVerdict
 #   at the merge's approval gate and in its visit order, whose terminal re-read
 #   holds a merge when the line moved after validation, and review-verdict.sh

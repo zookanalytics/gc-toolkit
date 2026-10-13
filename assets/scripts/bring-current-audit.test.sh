@@ -10,8 +10,9 @@
 # render: composes the comment and the dismissal note from the anchor's record
 #   (the headline counts, judgment entries first, each entry's collision,
 #   decision and check beside the guard's evidence for its own round, an item
-#   no entry covers beside its evidence alone, triage's ruling, the generated
-#   renders); refuses an anchor with no record, and any other form.
+#   no entry covers beside its evidence alone, triage's ruling, or the guard's
+#   own told as the guard's, the generated renders); refuses an anchor with no
+#   record, and any other form.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
 #   then the branch, then the bead itself; refuses an empty question; a visit
@@ -144,6 +145,19 @@ store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$CARRY" | jq -
 out=$("$SUT" render --anchor AN1 --as comment)
 has "$(printf '%s\n' "$out" | grep -F 'took main wording')" "Git: conflicted where the merge base had lines" "the earlier round's entry carries the earlier round's evidence"
 has "$(printf '%s\n' "$out" | grep -F 'Decided: kept both')" "Git: conflicted where both sides only added lines" "…and this round's entry carries this round's"
+
+echo "# render: a ruling the guard recorded itself is told as the guard's, not triage's"
+GREC=$(printf '%s' "$REC" | jq -c --arg why "no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed" \
+  '.triage = {by: "guard", reopen: ["correctness"], add: [], dismiss: true, reason: $why, at: "t"}')
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$GREC" | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as comment)
+has "$out" "**Ruling:** correctness runs again on the merged code, and the approval given before the round no longer covers what would land, so the PR needs a fresh human review. Why: no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed." "the comment carries the guard's ruling and its reason"
+hasnt "$out" "**Triage:**" "…crediting nothing to triage"
+out=$("$SUT" render --anchor AN1 --as dismissal)
+has "$out" "(pushed head 0123456789ab) changed code by hand that this approval did not see." "the dismissal note says what happened"
+has "$out" " No triage lane is declared on this anchor (check_set 'correctness')" "…and why, as a sentence of its own"
+hasnt "$out" "Triage:" "…crediting no ruling to triage"
+hasnt "$out" "triage comment" "…and pointing at no triage comment, since none is posted"
 
 echo "# render: an anchor with no record is refused"
 store "[$(anchorrow AN1)]"

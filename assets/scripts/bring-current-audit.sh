@@ -142,6 +142,8 @@ def headline:
     + (if $u > 0 then " No entry from the worker covers " + count($u; "item"; "items")
          + ", so only the evidence from git describes " + (if $u == 1 then "it" else "them" end) + "." else "" end);
 def lanes: ((.triage.reopen // []) + (.triage.add // [])) | unique;
+def by_guard: (.triage.by? // "") == "guard";
+def cap: if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end;
 def decision:
   if .triage == null then "Triage has not ruled on this round yet."
   else lanes as $l
@@ -158,7 +160,9 @@ def generated: [ .evidence[]? | select(.kind == "generated") | .path ] | unique;
 
 # Print a message composed from a record. <as> is comment (markdown, the
 # triage verdict's round section) or dismissal (one paragraph, the note on a
-# dismissed approval).
+# dismissed approval). A ruling the guard recorded itself (by: guard) is told
+# as the guard's: no triage verdict posted it, so neither form credits it to
+# triage or points at a triage comment.
 bca_render_record() { # <record-json> <as>
   local rec="$1" as="$2"
   printf '%s' "$rec" | jq -r --arg as "$as" --argjson max "$BCA_MAX_NOTE_ENTRIES" "$BCA_RENDER_DEF"'
@@ -166,7 +170,7 @@ bca_render_record() { # <record-json> <as>
     | if $as == "comment" then
         "**Bringing this branch current with \(.target // "the base")**\n\n"
         + headline + "\n\n"
-        + "**Triage:** " + decision
+        + (if by_guard then "**Ruling:** " else "**Triage:** " end) + decision
         + (if (.triage.reason // "") != "" then " Why: " + (.triage.reason | sentence) else "" end) + "\n\n"
         + ((entries | judgment_first | map(. as $e | ($r | git_detail($e.path; $e.round)) as $g | "- " + ($e | entry_line($g))))
            + (unaccounted | map("- " + bare_line)) | join("\n"))
@@ -176,13 +180,14 @@ bca_render_record() { # <record-json> <as>
       else
         (entries | judgment_first) as $e
         | "Bringing this branch current with \(.target // "the base") (pushed head \(.head | short)) "
-          + "took judgment this approval did not see. "
+          + (if by_guard then "changed code by hand that this approval did not see. " else "took judgment this approval did not see. " end)
           + ($e[:$max] | map("\(.path): \(.resolution | clip(160) | sentence)") | join(" "))
           + (if ($e | length) > $max then " And \(($e | length) - $max) more." else "" end)
           + (unaccounted | if length > 0 then " No entry from the worker covers " + (map(.path) | unique | .[:$max] | joinand) + "." else "" end)
           + (if (.triage.reason // "") == "" then ""
+             elif by_guard then " " + (.triage.reason | clip(300) | sentence | cap)
              else " Triage: " + (.triage.reason | clip(300) | sentence) end)
-          + " The triage comment on this PR has the round in full."
+          + (if by_guard then "" else " The triage comment on this PR has the round in full." end)
           + " Please review the change and approve again."
       end' 2>/dev/null
 }

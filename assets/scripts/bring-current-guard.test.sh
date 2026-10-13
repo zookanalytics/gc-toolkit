@@ -24,12 +24,16 @@
 #   or carries an incomplete entry is refused (exit 3) and writes nothing; a
 #   covered one stores the audit and evidence, reopens triage with the round's
 #   time, and supersedes the triage lane, reading GitHub not at all; a re-run is
-#   idempotent, and one after triage ruled reopens nothing; an anchor whose
-#   check_set declares no triage lane gains triage, with a note, and its round
-#   goes to triage like any other, reopening no other lane, lifting no approval
-#   and filing no visit; a re-run adds triage once; the none opt-out and a
-#   pre-open anchor gain it too; a check_set that does not read back hands
-#   nothing off; a merge-only bead owes entries for its own commits; a
+#   idempotent, and one after triage ruled reopens nothing; a re-run whose
+#   record carries the guard's own ruling carries it out: the lanes it names
+#   reopen and, when it lifts the approval, the line is drawn at the round's
+#   time and the approval before it dismissed with a note told as the guard's,
+#   filing no visit, while a lane that cannot be reopened lifts nothing; an
+#   anchor whose check_set declares no triage lane gains triage, with a note,
+#   and its round goes to triage like any other, reopening no other lane,
+#   lifting no approval and filing no visit; a re-run adds triage once; the none
+#   opt-out and a pre-open anchor gain it too; a check_set that does not read
+#   back hands nothing off; a merge-only bead owes entries for its own commits; a
 #   pre-open-rebase child and a re-queued anchor are guarded; an earlier round
 #   awaiting triage rides into the next record, and a re-run keeps where it
 #   began; no stamp and nothing pushed is refused; the resume stamp
@@ -458,6 +462,63 @@ eq "$rc" "0" "it exits 0"
 has "$out" "triage has ruled on it" "…saying the round is settled"
 eq "$(rec_of AN1 | jq -r '.triage.review')" "RV9" "the ruling stays in the record"
 eq "$(cat "$STUB_RO_LOG")" "" "…and nothing is reopened again"
+
+# An anchor whose record carries a ruling the guard recorded itself on MI3's
+# round: correctness runs again, and the approval is lifted unless the argument
+# is false. No lift line is drawn yet, as when the run that recorded the ruling
+# stopped before carrying it out.
+guard_ruled_anchor() { # [dismiss]
+  local why="no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed"
+  anchorrow AN1 ",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_reopened\":\"correctness\"" \
+    | jq -c --arg h "$MODIFY_H" --arg a "$A" --argjson d "${1:-true}" --arg why "$why" '
+        .metadata.check_set = "correctness"
+        | .metadata.bring_current_record = ({head: $h, from: $a, target: "main", bead: "MI3", class: "conflicted",
+            evidence: [], audit: [], triage: {by: "guard", reopen: ["correctness"], add: [], dismiss: $d,
+            reason: $why, at: "2026-10-01T00:00:05Z"}} | tojson)'
+}
+GR_CHILD=$(child MI3 "$(audit_meta "$(entry v.txt judgment)"),\"bring_current_from\":\"$A\"")
+
+echo "# guard: a re-run of a hand-off whose record carries the guard's own ruling carries it out"
+store "[$GR_CHILD, $(guard_ruled_anchor)]"
+reviews "$(approve human1 501),$(approve human2 502 APPROVED 2026-10-02T00:00:00Z)"
+fresh
+out=$(guard --bead MI3 --from "$MODIFY_H" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "it exits 0"
+has "$out" "the guard's ruling on it is carried out: correctness runs again on the merged code, and the approval given before the round is lifted" "…saying the recorded ruling is carried out"
+eq "$(rec_of AN1 | jq -c '.triage | {by, reopen, dismiss, at}')" '{"by":"guard","reopen":["correctness"],"dismiss":true,"at":"2026-10-01T00:00:05Z"}' "the ruling is kept as recorded"
+has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane correctness" "the lane it names runs again"
+hasnt "$(cat "$STUB_RO_LOG")" "--lane triage" "…and triage is neither reopened nor added"
+eq "$(meta AN1 check_set)" "correctness" "the check_set is left as it is"
+eq "$(meta AN1 bring_current_round_at)" "2026-10-01T00:00:00Z" "the round keeps its time"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "the lift line is drawn at the round's time"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "…and the one given after it stands"
+has "$(cat "$STUB_GH_LOG")" "changed code by hand that this approval did not see" "the dismissal note tells the ruling as the guard's"
+hasnt "$(cat "$STUB_GH_LOG")" "triage comment" "…and points at no triage comment, since none is posted"
+eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
+fresh
+out=$(guard --bead MI3 --from "$MODIFY_H" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "a second re-run exits 0"
+eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "…the line where it was"
+
+echo "# guard: a recorded guard ruling that keeps the approval reopens its lanes and draws no line"
+store "[$GR_CHILD, $(guard_ruled_anchor false)]"
+reviews "$(approve human1 501)"
+fresh
+out=$(guard --bead MI3 --from "$MODIFY_H" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "it exits 0"
+has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane correctness" "the lane it names runs again"
+eq "$(cat "$STUB_GH_LOG")" "" "GitHub is not read"
+eq "$(meta AN1 bring_current_lifted_at)" "<absent>" "…and no line is drawn"
+
+echo "# guard: a recorded guard ruling whose lane cannot be reopened hands nothing off and lifts nothing"
+store "[$GR_CHILD, $(guard_ruled_anchor)]"
+reviews "$(approve human1 501)"
+fresh
+out=$(STUB_RO_RC=2 guard --bead MI3 --from "$MODIFY_H" --to "$MODIFY_H"); rc=$?
+eq "$rc" "1" "a supersede that fails exits 1, so the hand-off retries"
+eq "$(meta AN1 bring_current_lifted_at)" "<absent>" "…drawing no line"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and dismissing nothing"
 
 echo "# guard: an anchor whose check_set declares no triage lane gains triage, and triage rules on its round"
 # The guard rules on no round. Triage is added to the check_set in the record's
