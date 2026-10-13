@@ -873,10 +873,13 @@ triage's posted verdict and the note on a dismissed approval render from the
 stored record with `bring-current-audit.sh`: a headline of what the round
 needed, then per entry what collided, what was decided and why, and what to
 check. An item no entry covers is listed with the guard's evidence alone. A
-lifted approval files no visit: the re-request, the dismissal note and the
-posted verdict are what a person reads. The one visit a round files is the
-question the worker could not resolve, rendered from its entries so far and
-its question.
+lifted approval files no visit: the re-request, the dismissal note and
+triage's posted verdict are what a person reads, and the PR's posture reads
+`review_required` until a new approval stands, so the board shows the approval
+as owed. A ruling the guard made itself posts no verdict, so its dismissal note
+tells it as the guard's and points at no triage comment. The one visit a round
+files is the question the worker could not resolve, rendered from its entries
+so far and its question.
 
 What no guard reaches: the refinery's own prepare merge, which aborts on any
 conflict and so only ever pushes git's own result; and a merge the worker ran
