@@ -123,10 +123,12 @@
 # that holds the review open on purpose: it stays open until the operator rules
 # the visit holding its question and no fix unit on its lane, nor a ruling's
 # rework child, is still in flight (finding.sh close-answered), so the review it
-# belongs to is never auto-dismissed meanwhile, and its dismissal names the visit
-# whose ruling released it. The confidence is the validator's, carried by the
-# finding's closure, never a commit oid, so a later push does not reopen it. A
-# dismissal is not an approval: the merge still gates on an explicit one.
+# belongs to is never auto-dismissed meanwhile. Its dismissal names the visit
+# whose ruling released it, and, like a decline's or a deferral's, waits until
+# the finding's owed reply is on the PR. The confidence is the validator's,
+# carried by the finding's closure, never a commit oid, so a later push does not
+# reopen it. A dismissal is not an approval: the merge still gates on an
+# explicit one.
 # The sweep also carries each machine-lane finding ruled worth fixing (must-fix
 # or deferred) to the PR, where the merge is decided: a file-level review
 # comment when the finding's locus begins with a file the diff touches, a
@@ -482,6 +484,19 @@ WB_RESOLVED_REACTION="THUMBS_UP"
 WB_MARKER="<!-- gc-writeback -->"
 WB_GLYPH_RESOLVED="✅"
 WB_GLYPH_AWAITING="❓"
+# The findings that owe their raiser an answer on the PR: a human finding ruled
+# declined, deferred or needs-you that carries finding.reply. The reply arm posts
+# each one's answer and stamps finding.reply_posted once the answer is on the PR,
+# and the review dismissal waits for that stamp on each one. Both read this one
+# definition, so a review is never dismissed while an answer the reply arm owes
+# is still undelivered.
+WB_OWED_REPLY_DEF='
+  def owes_reply:
+    ((.metadata["finding.disposition"] // "") | tostring) as $d
+    | (((.metadata.task_kind // "") | tostring) == "finding")
+      and (((.metadata["finding.lane"] // "") | tostring) == "human")
+      and ($d == "declined" or $d == "deferred" or $d == "needs-you")
+      and (((.metadata["finding.reply"] // "") | tostring) != "");'
 # A ruled machine finding the city posts to the PR carries
 # `<!-- gc-finding:<id> -->`, and the answer it posts once the finding closes
 # carries `<!-- gc-finding:<id>:answered -->`. An answer that leaves its thread
@@ -4418,19 +4433,18 @@ WB_SWAPS
   # waits for it. A stamped finding whose comment is not on this PR has nothing
   # to read its answer back against, so its stamp stands. Only a pass that read
   # the threads cleanly acts, the same $wplan_ok gate the plan above turns on.
-  # Reads live + closed, because a needs-you finding owes its reply while still
-  # open.
+  # The findings it answers are owes_reply's (WB_OWED_REPLY_DEF), the set the
+  # review dismissal below waits on. Reads live + closed, because a needs-you
+  # finding owes its reply while still open, and any finding still owes one after
+  # it closes until the answer is delivered.
   if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
-    wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" '
+    wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" "$WB_OWED_REPLY_DEF"'
         def norm: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
         .[0] as $v
         | .[1][]?
-        | select(((.metadata.task_kind // "") | tostring) == "finding")
-        | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+        | select(owes_reply)
         | ((.metadata["finding.disposition"] // "") | tostring) as $disp
-        | select($disp == "declined" or $disp == "deferred" or $disp == "needs-you")
         | ((.metadata["finding.reply"] // "") | tostring) as $reply
-        | select($reply != "")
         | .id as $id
         | ((.metadata["finding.comment_id"] // "") | tostring) as $cid
         | ((.metadata["finding.review_id"] // "") | tostring) as $rid
@@ -4503,8 +4517,9 @@ WB_DECLINES
   # It stands until someone clears it, and the person who reads the PR reads that
   # signal, so a review answered in full but left standing tells them the opposite
   # of the truth. Once every finding one review raised has closed — a must-fix
-  # fixed and landed, or a decline or deferral whose answer the arm above posted
-  # — that review is answered, so dismiss it (clearing CHANGES_REQUESTED) and
+  # fixed and landed, a decline or deferral whose answer the arm above posted, or
+  # a needs-you finding the operator's ruling released, its answer posted the same
+  # way — that review is answered, so dismiss it (clearing CHANGES_REQUESTED) and
   # re-request its author, putting the reviewer back in their review-requested
   # queue to judge the result, including the declined and deferred threads left
   # open for them. The dismissal says what each finding came to. Per-review,
@@ -4518,25 +4533,26 @@ WB_DECLINES
   if [ -n "$disp" ] && [ "$wplan_ok" = 1 ]; then
     # Every finding on this anchor that names a review, open and closed, grouped by
     # that review. A review is answered when every one of its findings is closed and
-    # every declined or deferred finding has had its owed reply posted
-    # (finding.reply_posted=1). Such a finding closes when the validator rules it,
-    # which is before the reply arm above delivers that answer, so closure alone does
-    # not mean answered. A needs-you or still-unvalidated finding is open, so its
-    # review is not yet clear — a needs-you finding deliberately holds the review
+    # every one that owes its raiser an answer (owes_reply, the set the reply arm
+    # above posts) has had it posted (finding.reply_posted=1). A finding can close
+    # before that arm delivers its answer: a decline or deferral closes as the
+    # validator rules it, and a needs-you finding as close-answered reads its
+    # visit's ruling, whether or not its answer ever reached the thread. So closure
+    # alone does not mean answered. A still-unvalidated finding is open, so its
+    # review is not yet clear, and a needs-you finding deliberately holds the review
     # changes-requested until the operator rules its visit and the work their
     # ruling calls for lands. A closed needs-you finding counts as answered only
     # when it records the visit whose ruling released it (finding.ruling_visit,
     # stamped by finding.sh close-answered), and the dismissal names that visit.
     # One closed without it was settled by no ruling, so its review stands.
     if wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
-      wrev_ready=$(printf '%s' "$wrf" | jq -rc '
+      wrev_ready=$(printf '%s' "$wrf" | jq -rc "$WB_OWED_REPLY_DEF"'
           [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
                 | select(((.metadata["finding.review_id"] // "") | tostring) != "")
                 | { rid: ((.metadata["finding.review_id"]) | tostring),
                     open: (((.status // "") | tostring) != "closed"),
                     disp: ((.metadata["finding.disposition"] // "") | tostring),
-                    lane: ((.metadata["finding.lane"] // "") | tostring),
-                    reply: ((.metadata["finding.reply"] // "") | tostring),
+                    owed: owes_reply,
                     reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
                     ruling: ((.metadata["finding.ruling_visit"] // "") | tostring),
                     title: ((.title // "") | tostring) } ]
@@ -4544,8 +4560,7 @@ WB_DECLINES
           | [ .[] | { rid: .[0].rid,
                       ready: (all(.[];
                                   (.open == false)
-                                  and (( .lane == "human" and (.disp == "declined" or .disp == "deferred")
-                                         and .reply != "" and .reply_posted != "1" ) | not)
+                                  and (( .owed and .reply_posted != "1" ) | not)
                                   and (( .disp == "needs-you" and .ruling == "" ) | not))),
                       lines: [ .[] | "- " + (.title | sub("^finding\\[[^]]*\\]: "; "")) + ": "
                                  + (if .disp == "declined" then "declined; the reason is in its thread"

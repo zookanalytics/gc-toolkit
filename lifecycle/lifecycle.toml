@@ -843,8 +843,9 @@ keys = [
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
   # human findings by their originating review, so once every finding one review
-  # raised has closed the write-back dismisses THAT review and re-requests its
-  # author — per-review, independent of other reviews on the same PR.
+  # raised has closed, and every answer one of them owes its raiser is on the PR
+  # (finding.reply_posted), the write-back dismisses THAT review and re-requests
+  # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to

@@ -5447,6 +5447,53 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "deferred to a follow-up, named in its thread" "…the dismiss message names the deferral"
 
+# ---- a needs-you finding's owed reply gates its review's dismissal the same way --
+# A needs-you finding owes its raiser the visit's id. close-answered closes it on
+# the operator's ruling whether or not that answer ever reached the PR, so a
+# ruling alone does not answer the raiser: the review waits for the reply, as it
+# does for a decline's or a deferral's. An inline comment's answer is a reply in
+# its thread, and a review body's is a Conversation comment linking the review.
+rfindneedsyou() { # id anchor review_id comment_id [reply_posted]
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","title":"finding[human]: %s","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"needs-you","finding.source":"human:johnzook","finding.review_id":"%s","finding.comment_id":"%s","finding.visit":"tk-vny","finding.ruling_visit":"tk-vny","finding.reply":"This comment needs your decision — opened visit tk-vny. The review stays changes-requested until you rule it and the work your ruling calls for lands."%s}}' \
+    "$1" "$1" "$2" "$3" "$4" "${5:+,\"finding.reply_posted\":\"$5\"}"
+}
+
+echo "# a needs-you finding its ruling closed holds its review's dismissal while its thread reply fails to post"
+store "[$(anchor HRN1 393 "$(wb_meta rework:HRCN1)"), $(child HRCN1 closed), $(rfindneedsyou HFN1 HRN1 593 100)]"
+printf '%s' "$(prview 393 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_393.json"
+threads 393 "$(jq -cn --argjson r "$(hreview 393 593 CHANGES_REQUESTED)" --argjson t "$(one_thread 393)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(STUB_REPLY_RC=1 run)
+has "$out" "could not post the owed reply for HFN1" "the visit's answer fails to post into the raiser's thread"
+eq "$(meta HFN1 finding.reply_posted)" "<absent>" "…so the finding is not marked answered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an undelivered needs-you reply holds the review's dismissal, though its visit was ruled"
+hasnt "$(cat "$STUB_GH_LOG")" "REREQUEST" "…and the author is not re-requested"
+
+echo "# …and the pass that delivers that reply dismisses the review, naming the ruling"
+store "[$(anchor HRN2 394 "$(wb_meta rework:HRCN2)"), $(child HRCN2 closed), $(rfindneedsyou HFN2 HRN2 594 100)]"
+printf '%s' "$(prview 394 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_394.json"
+threads 394 "$(jq -cn --argjson r "$(hreview 394 594 CHANGES_REQUESTED)" --argjson t "$(one_thread 394)" '{reviews: $r.reviews, threads: $t.threads}')"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(treply 394 T-394)" "opened visit tk-vny" "the visit's answer is posted into the raiser's thread"
+eq "$(meta HFN2 finding.reply_posted)" "1" "…and the finding is marked answered"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/394/reviews/594/dismissals" "…so the same pass dismisses the review"
+has "$(cat "$STUB_GH_LOG")" "HFN2: settled by the ruling on visit tk-vny" "…naming the visit whose ruling settled it"
+
+echo "# a review body's needs-you finding holds the dismissal while its Conversation answer fails to post"
+store "[$(anchor HRN3 395 "$(wb_rmeta rework:HRCN3 595)"), $(child HRCN3 closed), $(rfindneedsyou HFN3 HRN3 595 595)]"
+printf '%s' "$(prview 395 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_395.json"
+threads 395 "$(hreview 395 595 CHANGES_REQUESTED)"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_COMMENT_RC=1 run)
+has "$out" "could not post the owed reply for HFN3" "a review body's answer goes to the Conversation tab, where the post fails"
+eq "$(meta HFN3 finding.reply_posted)" "<absent>" "…so the finding is not marked answered"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and the review it answers is not dismissed"
+out=$(run)
+has "$(jq -r '[ .issue_comments[]? | .body ] | join(" ")' "$GH_DIR/threads_395.json")" "opened visit tk-vny" "the next pass posts the answer on the Conversation tab"
+eq "$(meta HFN3 finding.reply_posted)" "1" "…marks the finding answered"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/395/reviews/595/dismissals" "…and dismisses the review"
+
 # ---- --route-comments-only: route operator feedback early in the pass ----------
 # --posture-only stamps commented/changes_requested on the pre-merge tick, and
 # the full arm routes only at the pass TAIL. A pass the timeout killed in between

@@ -307,7 +307,9 @@ before the validator ran, and `finding.sh` refuses every other ruling of the
 finding while such a visit tracks or holds that rework. Only a fix's thread is
 resolved behind its answer: the thread of a declined or deferred finding stays
 open for the operator to accept or overrule. A `CHANGES_REQUESTED`
-that is feedback is auto-dismissed once every finding it raised has closed, and
+that is feedback is auto-dismissed once every finding it raised has closed and
+every answer one of them owes its raiser (a decline's reason, a deferral's
+follow-up, a `needs-you` finding's visit) is on the PR, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
 review open until the operator rules the visit holding its question and the work
