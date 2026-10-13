@@ -1019,8 +1019,9 @@ has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_n
   "the pass's shape rides its create"
 has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
 has "$VPC" "--deps related:tk-anc" "…and the membership edge onto it"
-eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")" "1|1" \
+eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")|$(grep -c "^$VP|tk-anc|blocks\$" "$STUB_DEPS")" "1|1|0" \
   "…both landing with the pass, each the way bd orients it"
+hasnt "$(grep "^bd dep $VP" "$STUB_GC_LOG")" "--blocks" "…so the blocks edge the create carried holds the anchor, with no second write"
 hasnt "$(grep "^bd update $VP" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a different lane's open pass is not reused — one pass per lane"
