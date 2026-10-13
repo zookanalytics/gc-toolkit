@@ -48,7 +48,7 @@ Usage:
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--resolve-gate <gate> --ruling "..." | --leave-gate <gate>]... [--by <who>] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted). An open linked human gate is NOT silently passed: dismiss surfaces each and exits 5 until every one is decided — --resolve-gate settles it on --ruling (recorded as a sign-off records it), --leave-gate re-asks it (a fresh visit); --json prints {subject,matched,closed,ok}, or {subject,ok:false,held_for_gate_decision,gates} when it holds for a gate decision
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--release | --leave-open | --resolve-gate <gate> --ruling "..." | --leave-gate <gate>]... [--by <who>] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted). An open linked human gate is NOT silently passed: dismiss surfaces each and exits 5 until every one is decided — --resolve-gate settles it on --ruling (recorded as a sign-off records it), --leave-gate re-asks it (a fresh visit). --release and --leave-open decide every linked gate in one go and take no gate id: --release settles each on --reason (required) as its ruling, --leave-open leaves each open as --leave-gate does. Neither combines with the per-gate flags. dismiss --release writes only the sitting's gates and visits, never the subject's route or assignee (parking an anchor is takeaway --release), and it files no rework; --json prints {subject,matched,closed,ok,resolved,left_open}, or {subject,ok:false,held_for_gate_decision,gates} when it holds for a gate decision
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
@@ -141,6 +141,23 @@ which exits 4. It writes nothing to the subject: the DONE band a closed anchor
 lands in carries no per-row state, so a row leaves only by ageing past
 GC_HELM_DONE_WINDOW (default 7d).
 Idempotent: a subject with no open visit has no sitting to end and says so.
+
+A sitting that holds files a human gate, so ending it is a decision about that
+gate. dismiss lists every open, unassigned gate linked to the subject's sittings
+(each visit's gc.hold_demand, and every demand whose gc.demand_for is the
+subject) and exits 5, closing nothing, until each one is decided. Per gate,
+--resolve-gate <gate> --ruling "..." resolves it on the ruling and stamps the
+ruling as its board sentence, and --leave-gate <gate> leaves it open: a gate on
+a visit being closed has its question re-stated as a demand on the subject (on
+a PR, that demand holds the merge), and any other gate is re-asked in a fresh
+visit. --release decides every linked gate the first way, with --reason as the
+ruling, and is refused with nothing written when --reason is missing or blank.
+--leave-open decides every linked gate the second way. dismiss --release writes
+only to the sitting's gates and visits. It writes no route, assignee or status
+to the subject, which is what takeaway --release does when it parks an anchor.
+It never files rework either: a ruling that changes a PR's branch goes through
+the converse sign-off (--rework). resolved and left_open in --json name the
+gates each decision was applied to.
 
 dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
 current sitting from session state: the one open visit assigned to this session
@@ -2124,14 +2141,23 @@ current_sitting_subject() {
 # offers a fresh visit; a gate on the visit itself has its wait moved onto the
 # subject, the move a cut-short sign-off makes). A gate's question is settled
 # only on a ruling, never as a byproduct of closing a conversation.
+#
+# --release and --leave-open are one decision applied to every linked gate, so
+# a one-line close-out can end a held sitting without naming gate ids. --release
+# resolves each gate on --reason as its ruling, so the reason is what makes it a
+# stated ruling rather than a tidy-up, and a --release without one is refused
+# before anything is read. --leave-open leaves each gate open.
 cmd_dismiss() {
     bead=""; dismiss_reason=""; dismiss_json=""
     resolve_gates=""; leave_gates=""; dismiss_ruling=""; dismiss_by=""
+    dismiss_release=""; dismiss_leave_open=""; gates_resolved=""; gates_left=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --release)    dismiss_release=1; shift ;;
+            --leave-open) dismiss_leave_open=1; shift ;;
             --resolve-gate=*) resolve_gates="$resolve_gates ${1#--resolve-gate=}"; shift ;;
             --resolve-gate)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --resolve-gate requires a gate id" >&2; exit 2; }
                               resolve_gates="$resolve_gates $1"; shift ;;
@@ -2150,6 +2176,18 @@ cmd_dismiss() {
             *) [ -z "$bead" ] || { echo "$PROG: dismiss takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
         esac
     done
+    if [ -n "$dismiss_release" ] && [ -n "$dismiss_leave_open" ]; then
+        echo "$PROG: dismiss: --release and --leave-open are opposite decisions; give one. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -n "$dismiss_release$dismiss_leave_open" ] && [ -n "$resolve_gates$leave_gates$dismiss_ruling" ]; then
+        echo "$PROG: dismiss: --release and --leave-open decide every linked gate at once, so they do not combine with --resolve-gate, --leave-gate or --ruling, which decide one gate at a time. Give one form. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -n "$dismiss_release" ] && [ -z "$(printf '%s' "$dismiss_reason" | tr -d '[:space:]')" ]; then
+        echo "$PROG: dismiss: --release needs --reason \"<why this is done>\": the reason is the ruling every linked gate resolves on. Nothing was written." >&2
+        exit 2
+    fi
     # In --json mode the one machine object is the only thing on stdout, so the
     # human progress lines print to stderr instead; otherwise they print as before.
     _dmsg() { if [ -n "$dismiss_json" ]; then echo "$@" >&2; else echo "$@"; fi; }
@@ -2307,6 +2345,13 @@ cmd_dismiss() {
 
         if [ -n "$gate_rows" ]; then
             gate_ids=$(printf '%s\n' "$gate_rows" | cut -f1)
+            # --release and --leave-open name no gate. Each applies its one decision
+            # to every gate listed here, the set a dismiss with no decision holds on.
+            if [ -n "$dismiss_release" ]; then
+                resolve_gates="$gate_ids"; dismiss_ruling="$dismiss_reason"
+            elif [ -n "$dismiss_leave_open" ]; then
+                leave_gates="$gate_ids"
+            fi
             # Every id the caller named must be one of this sitting's open linked gates.
             for _g in $resolve_gates $leave_gates; do
                 printf '%s\n' "$gate_ids" | grep -qxF "$_g" || {
@@ -2353,6 +2398,7 @@ cmd_dismiss() {
                     done
                     echo "  RESOLVE (settle it, recording the ruling):  $PROG dismiss $bead --resolve-gate <gate> --ruling \"<the decision>\""
                     echo "  LEAVE open  (re-ask it as a fresh visit):   $PROG dismiss $bead --leave-gate <gate>"
+                    echo "  Or decide every gate the same way:          $PROG dismiss $bead --release --reason \"<the decision>\"  |  $PROG dismiss $bead --leave-open"
                     echo "  Resolve only a ruling you hold; absent one, leave it open — never resolve a gate just to close a conversation."
                 } >&2
                 exit 5
@@ -2369,6 +2415,7 @@ cmd_dismiss() {
                 # closed on the same terms instead.
                 if gc bd gate resolve "$_g" --reason "$dismiss_ruling" >/dev/null 2>&1 \
                    || gc bd close "$_g" --reason "$dismiss_ruling" >/dev/null 2>&1; then
+                    gates_resolved="$gates_resolved $_g"
                     _dmsg "$PROG: dismiss: resolved gate $_g on the ruling: $dismiss_ruling"
                 else
                     echo "$PROG: dismiss: could not resolve gate $_g — it stays open and keeps blocking its bead. Resolve it by hand: gc bd gate resolve $_g --reason \"$dismiss_ruling\". Nothing was closed." >&2
@@ -2423,6 +2470,7 @@ cmd_dismiss() {
                        || gc bd close "$_g" --reason "dismissed; wait re-stated on $bead as $_moved" >/dev/null 2>&1; then
                         ( cmd_takeaway "$_g" "dismissed; wait moved to $bead" --by "${dismiss_by:-operator}" --no-wait ) >/dev/null 2>&1 \
                             || echo "$PROG: dismiss: moved gate $_g's wait onto $bead but could not stamp that as its board sentence; the board may still show its question. Run: $PROG takeaway $_g \"dismissed; wait moved to $bead\" --by ${dismiss_by:-operator} --no-wait" >&2
+                        gates_left="$gates_left $_g"
                         _dmsg "$PROG: dismiss: left gate $_g's question open — it gated the closing visit, so its wait moved onto $bead as demand $_moved, which the sweep re-asks in a fresh visit"
                     else
                         echo "$PROG: dismiss: re-stated gate $_g's wait on $bead as $_moved but could not close $_g, which still gates its visit. Nothing was closed. Close it by hand: gc bd gate resolve $_g --reason \"dismissed; wait re-stated on $bead\"" >&2
@@ -2433,6 +2481,7 @@ cmd_dismiss() {
                 # Re-ask: clear gc.gate_visit so gate-visit-sweep offers a fresh
                 # visit. The gate stays open — visibly still owed, not stranded.
                 if gc bd update "$_g" --unset-metadata gc.gate_visit >/dev/null 2>&1; then
+                    gates_left="$gates_left $_g"
                     _dmsg "$PROG: dismiss: left gate $_g open and re-asked it — the sweep will offer a fresh visit"
                 else
                     echo "$PROG: dismiss: could not re-ask gate $_g (clearing gc.gate_visit failed); it may stay stranded behind its closed visit. Re-ask by hand: gc bd update $_g --unset-metadata gc.gate_visit. Nothing was closed." >&2
@@ -2530,7 +2579,10 @@ cmd_dismiss() {
         # cache goes.
         bust_cache
         [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
-            '{subject: $s, matched: $m, closed: $c, ok: false}'
+            --arg r "$gates_resolved" --arg l "$gates_left" \
+            '{subject: $s, matched: $m, closed: $c, ok: false,
+              resolved: ($r | split(" ") | map(select(length > 0))),
+              left_open: ($l | split(" ") | map(select(length > 0)))}'
         echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each unfinished visit above says what it needs, and a re-run resumes from there." >&2
         exit 4
     fi
@@ -2538,7 +2590,10 @@ cmd_dismiss() {
     bust_cache
     if [ -n "$dismiss_json" ]; then
         jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
-            '{subject: $s, matched: $m, closed: $c, ok: true}'
+            --arg r "$gates_resolved" --arg l "$gates_left" \
+            '{subject: $s, matched: $m, closed: $c, ok: true,
+              resolved: ($r | split(" ") | map(select(length > 0))),
+              left_open: ($l | split(" ") | map(select(length > 0)))}'
     else
         [ "$closed_n" -eq 0 ] && [ -z "$resolve_gates$leave_gates" ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
     fi

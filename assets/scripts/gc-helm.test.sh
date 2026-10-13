@@ -2422,6 +2422,151 @@ grep -Eq '^bd update g-TOPB .*(--title|gc\.takeaway=)' "$TMP/updates" \
   && bad "(DISMISS-GATE-LEAVE-VISIT-TOPIC) the sibling sitting's demand was overwritten (updates: $(grep 'g-TOPB' "$TMP/updates" || true))" \
   || ok "(DISMISS-GATE-LEAVE-VISIT-TOPIC) …and the sibling sitting's question on the subject is left as it was"
 
+# ── --release and --leave-open: one decision for every linked gate ───────────
+# The converse close-out is one line the operator runs from the sitting, and
+# every held sitting carries its own demand gate, so a dismiss with no decision
+# exits 5 there. --release resolves every linked gate on --reason as its ruling;
+# --leave-open leaves every one open, the way --leave-gate does. A-REL is a held
+# sitting on a PR anchor that also took the opt-in merge hold: g-RVIS gates the
+# visit, and g-RMRG gates the anchor itself and so holds the merge.
+cat > "$TMP/released.json" <<'JSON'
+[
+  {"id":"v-REL","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-REL","gc.hold_demand":"g-RVIS"}},
+  {"id":"g-RVIS","status":"open","assignee":"","issue_type":"gate","await_type":"human","title":"which way do we land it?","metadata":{"gc.demand_for":"v-REL","gc.gate_visit":"v-REL"}},
+  {"id":"g-RMRG","status":"open","assignee":"","issue_type":"gate","await_type":"human","title":"which way do we land it?","metadata":{"gc.demand_for":"A-REL","gc.gate_visit":"v-REL"}}
+]
+JSON
+export FAKE_STEPS_JSON="$TMP/released.json"
+
+# (DISMISS-RELEASE-BARE) a dismiss that decides nothing still holds the sitting,
+# reason or not, and its listing names the one-go forms beside the per-gate ones.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+RBRC=0; RBOUT="$(sh "$SCRIPT" dismiss A-REL --reason "done" 2>&1)" || RBRC=$?
+eq "$RBRC" "5" "(DISMISS-RELEASE-BARE) dismiss --reason with no decision still holds a sitting with an open linked gate (exit 5)"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-RELEASE-BARE) …and closes nothing"
+has "$RBOUT" "dismiss A-REL --release --reason" "(DISMISS-RELEASE-BARE) …and its listing offers --release"
+has "$RBOUT" "dismiss A-REL --leave-open" "(DISMISS-RELEASE-BARE) …and --leave-open"
+
+# (DISMISS-RELEASE) --release resolves the visit's demand AND the anchor's merge
+# demand on the reason, stamps the reason as each one's board sentence, says so
+# for each gate, and only then closes the visit. A release changes nothing on the
+# branch, so it files no demand and no rework.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+RLRC=0
+RLOUT="$(sh "$SCRIPT" dismiss A-REL --release --reason "nothing owed; it lands as it is" 2>/dev/null)" || RLRC=$?
+eq "$RLRC" "0" "(DISMISS-RELEASE) --release lets the dismiss complete (exit 0)"
+grep -Fxq 'bd gate resolve g-RVIS --reason nothing owed; it lands as it is' "$TMP/gates" \
+  && ok "(DISMISS-RELEASE) the visit's demand is resolved on the reason" \
+  || bad "(DISMISS-RELEASE) the visit's demand was not resolved on the reason (gates: $(cat "$TMP/gates"))"
+grep -Fxq 'bd gate resolve g-RMRG --reason nothing owed; it lands as it is' "$TMP/gates" \
+  && ok "(DISMISS-RELEASE) …and so is the anchor's merge demand" \
+  || bad "(DISMISS-RELEASE) the anchor's merge demand was not resolved on the reason (gates: $(cat "$TMP/gates"))"
+grep -Eq '^bd update g-RVIS .*gc.takeaway=nothing owed; it lands as it is' "$TMP/updates" \
+  && grep -Eq '^bd update g-RMRG .*gc.takeaway=nothing owed; it lands as it is' "$TMP/updates" \
+  && ok "(DISMISS-RELEASE) …each with the reason stamped as its board sentence, as --resolve-gate stamps a ruling" \
+  || bad "(DISMISS-RELEASE) the reason was not stamped on both gates (updates: $(grep 'g-R' "$TMP/updates" || true))"
+has "$RLOUT" "resolved gate g-RVIS" "(DISMISS-RELEASE) …the run names the visit's demand it resolved"
+has "$RLOUT" "resolved gate g-RMRG" "(DISMISS-RELEASE) …and the merge demand it resolved"
+grep -Eq '^bd close v-REL' "$TMP/closes" \
+  && ok "(DISMISS-RELEASE) …and the visit is then closed" \
+  || bad "(DISMISS-RELEASE) the visit was not closed (closes: $(cat "$TMP/closes"))"
+grep -Eq '^bd update v-REL .*gc.outcome_reason=dismissed by the operator: nothing owed; it lands as it is' "$TMP/updates" \
+  && ok "(DISMISS-RELEASE) …with the reason recorded on the closed visit" \
+  || bad "(DISMISS-RELEASE) the visit's outcome reason lost the reason (updates: $(grep 'v-REL' "$TMP/updates" || true))"
+eq "$(grep -c 'gate create' "$TMP/gates" || true)" "0" "(DISMISS-RELEASE) …and no demand is filed, since a release moves no question"
+
+# (DISMISS-RELEASE-NOREASON) --release without a reason is refused before it
+# reads the store, so nothing is written. A blank reason is no reason.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"; : > "$TMP/lists"
+RNRC=0; sh "$SCRIPT" dismiss A-REL --release >/dev/null 2>"$TMP/rnerr" || RNRC=$?
+eq "$RNRC" "2" "(DISMISS-RELEASE-NOREASON) --release without --reason is refused (exit 2)"
+has "$(cat "$TMP/rnerr")" "--release needs --reason" "(DISMISS-RELEASE-NOREASON) …saying the reason is what it needs"
+RBLRC=0; sh "$SCRIPT" dismiss A-REL --release --reason "   " >/dev/null 2>&1 || RBLRC=$?
+eq "$RBLRC" "2" "(DISMISS-RELEASE-NOREASON) …and so is --release with a blank reason"
+eq "$(cat "$TMP/updates" "$TMP/closes" "$TMP/gates" "$TMP/lists" | grep -c . || true)" "0" \
+   "(DISMISS-RELEASE-NOREASON) …with nothing read or written"
+
+# (DISMISS-RELEASE-MIX) the one-go forms take no gate id, so they refuse the
+# per-gate flags, and each other, before anything is written.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+RMRC=0; sh "$SCRIPT" dismiss A-REL --release --reason "x" --resolve-gate g-RVIS --ruling "x" >/dev/null 2>&1 || RMRC=$?
+eq "$RMRC" "2" "(DISMISS-RELEASE-MIX) --release beside a per-gate decision is refused"
+RORC=0; sh "$SCRIPT" dismiss A-REL --release --leave-open --reason "x" >/dev/null 2>&1 || RORC=$?
+eq "$RORC" "2" "(DISMISS-RELEASE-MIX) …so is --release beside --leave-open"
+LGRC=0; sh "$SCRIPT" dismiss A-REL --leave-open --leave-gate g-RMRG >/dev/null 2>&1 || LGRC=$?
+eq "$LGRC" "2" "(DISMISS-RELEASE-MIX) …and --leave-open beside a per-gate decision"
+eq "$(cat "$TMP/updates" "$TMP/closes" "$TMP/gates" | grep -c . || true)" "0" \
+   "(DISMISS-RELEASE-MIX) …each writing nothing"
+
+# (DISMISS-RELEASE-JSON) --json is one machine object naming the gates resolved.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+RJRC=0
+RJOUT="$(sh "$SCRIPT" dismiss A-REL --release --reason "nothing owed" --json 2>"$TMP/rjerr")" || RJRC=$?
+eq "$RJRC" "0" "(DISMISS-RELEASE-JSON) --release --json completes (exit 0)"
+if printf '%s' "$RJOUT" | jq -e '.subject == "A-REL" and .ok == true and .closed == 1
+        and .resolved == ["g-RMRG","g-RVIS"] and .left_open == []' >/dev/null 2>&1; then
+    ok "(DISMISS-RELEASE-JSON) the object names both gates under resolved and none under left_open"
+else
+    bad "(DISMISS-RELEASE-JSON) wrong closed object (got: ${RJOUT:-<nothing>})"
+fi
+has "$(cat "$TMP/rjerr")" "resolved gate g-RVIS" "(DISMISS-RELEASE-JSON) …and the progress lines move to stderr"
+
+# (DISMISS-LEAVE-OPEN) on a PR-anchored held sitting, --leave-open moves the
+# visit gate's question onto the subject, first, then settles the visit gate as
+# moved and closes the visit. Nothing is resolved on a ruling.
+export FAKE_STEPS_JSON="$TMP/anchored.json"
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"; : > "$TMP/gate-edges"
+LORC=0
+FAKE_GATE_NEXTID=A-DEM3 FAKE_GATE_EDGES="$TMP/gate-edges" sh "$SCRIPT" dismiss A-ANCH --leave-open >/dev/null 2>&1 || LORC=$?
+eq "$LORC" "0" "(DISMISS-LEAVE-OPEN) --leave-open lets the dismiss complete (exit 0)"
+grep -Eq '^bd gate create .*--blocks A-ANCH .*--title which way do we land it\?' "$TMP/gates" \
+  && ok "(DISMISS-LEAVE-OPEN) the visit gate's question is re-stated as a demand gating the subject" \
+  || bad "(DISMISS-LEAVE-OPEN) the question was not moved onto the subject (gates: $(cat "$TMP/gates"))"
+LO_CREATE=$(grep -n '^bd gate create ' "$TMP/gates" | head -n 1 | cut -d: -f1 || true)
+LO_RESOLVE=$(grep -n '^bd gate resolve g-VIS --reason dismissed; wait re-stated on A-ANCH as A-DEM3' "$TMP/gates" | head -n 1 | cut -d: -f1 || true)
+if [ -n "$LO_CREATE" ] && [ -n "$LO_RESOLVE" ] && [ "$LO_CREATE" -lt "$LO_RESOLVE" ]; then
+    ok "(DISMISS-LEAVE-OPEN) …and the visit gate is settled as moved only after the re-state"
+else
+    bad "(DISMISS-LEAVE-OPEN) the visit gate was not settled as moved after the re-state (gates: $(cat "$TMP/gates"))"
+fi
+grep -Eq '^bd close v-ANCH' "$TMP/closes" \
+  && ok "(DISMISS-LEAVE-OPEN) …and the visit is then closed" \
+  || bad "(DISMISS-LEAVE-OPEN) the visit was not closed (closes: $(cat "$TMP/closes"))"
+
+# (DISMISS-LEAVE-OPEN-JSON) --json names the gate left open.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"; : > "$TMP/gate-edges"
+LOJOUT="$(FAKE_GATE_NEXTID=A-DEM3 FAKE_GATE_EDGES="$TMP/gate-edges" sh "$SCRIPT" dismiss A-ANCH --leave-open --json 2>/dev/null || true)"
+if printf '%s' "$LOJOUT" | jq -e '.subject == "A-ANCH" and .ok == true and .closed == 1
+        and .left_open == ["g-VIS"] and .resolved == []' >/dev/null 2>&1; then
+    ok "(DISMISS-LEAVE-OPEN-JSON) the object names the gate under left_open and none under resolved"
+else
+    bad "(DISMISS-LEAVE-OPEN-JSON) wrong closed object (got: ${LOJOUT:-<nothing>})"
+fi
+
+# (DISMISS-LEAVE-OPEN-MERGE) --leave-open on the sitting that took the merge hold
+# leaves the anchor's merge demand open. The visit gate's question is re-stated
+# onto that same demand, which is re-asked rather than resolved, so the PR stays
+# held. That is the difference from --release above.
+export FAKE_STEPS_JSON="$TMP/released.json"
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/gates"
+printf 'A-REL g-RMRG\n' > "$TMP/merge-edges"
+LMRC=0
+FAKE_GATE_EDGES="$TMP/merge-edges" sh "$SCRIPT" dismiss A-REL --leave-open >/dev/null 2>&1 || LMRC=$?
+eq "$LMRC" "0" "(DISMISS-LEAVE-OPEN-MERGE) --leave-open completes on a sitting that holds the merge (exit 0)"
+eq "$(grep -c '^bd gate resolve g-RMRG' "$TMP/gates" || true)" "0" "(DISMISS-LEAVE-OPEN-MERGE) the anchor's merge demand is not resolved"
+grep -Fq 'bd update g-RMRG --title which way do we land it?' "$TMP/updates" \
+  && ok "(DISMISS-LEAVE-OPEN-MERGE) …the visit gate's question is re-stated on it" \
+  || bad "(DISMISS-LEAVE-OPEN-MERGE) the question was not re-stated on the merge demand (updates: $(grep 'g-RMRG' "$TMP/updates" || true))"
+grep -Eq '^bd update g-RMRG --unset-metadata gc.gate_visit' "$TMP/updates" \
+  && ok "(DISMISS-LEAVE-OPEN-MERGE) …and it is re-asked in a fresh visit" \
+  || bad "(DISMISS-LEAVE-OPEN-MERGE) the merge demand was not re-asked (updates: $(grep 'g-RMRG' "$TMP/updates" || true))"
+grep -Fq 'bd gate resolve g-RVIS --reason dismissed; wait re-stated on A-REL as g-RMRG' "$TMP/gates" \
+  && ok "(DISMISS-LEAVE-OPEN-MERGE) …while the visit gate is settled as moved onto it" \
+  || bad "(DISMISS-LEAVE-OPEN-MERGE) the visit gate was not settled as moved (gates: $(cat "$TMP/gates"))"
+grep -Eq '^bd close v-REL' "$TMP/closes" \
+  && ok "(DISMISS-LEAVE-OPEN-MERGE) …and the visit is then closed" \
+  || bad "(DISMISS-LEAVE-OPEN-MERGE) the visit was not closed (closes: $(cat "$TMP/closes"))"
+
 : > "$TMP/settled"; : > "$TMP/gates"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 

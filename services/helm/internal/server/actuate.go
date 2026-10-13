@@ -518,9 +518,11 @@ type dismissGate struct {
 }
 
 // dismissToolJSON is the parse target for gc-helm.sh dismiss --json. One struct
-// reads both shapes: the closed result {subject, matched, closed, ok:true} and the
-// held result {subject, ok:false, held_for_gate_decision:true, gates:[…]}. Fields
-// absent from one shape stay zero-valued.
+// reads both shapes: the closed result {subject, matched, closed, ok:true,
+// resolved, left_open} and the held result {subject, ok:false,
+// held_for_gate_decision:true, gates:[…]}. Fields absent from one shape stay
+// zero-valued. resolved and left_open name the gates a decision was applied to;
+// this layer reports the outcome and the close count, so it does not read them.
 type dismissToolJSON struct {
 	Subject string `json:"subject"`
 	OK      bool   `json:"ok"`
