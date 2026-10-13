@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -149,19 +150,15 @@ func landingOf(sets []string, bead *gcbd.Bead) (commit, branch string) {
 	return commit, branch
 }
 
-// callerWrites reports whether this call sets or clears key itself.
-func callerWrites(sets, unsets []string, key string) bool {
+// callerWrite reports whether this call sets or clears key itself, and the
+// value it leaves there: the value it sets, or empty for a clear.
+func callerWrite(sets, unsets []string, key string) (value string, ok bool) {
 	for _, s := range sets {
-		if k, _ := kv(s); k == key {
-			return true
+		if k, v := kv(s); k == key {
+			return v, true
 		}
 	}
-	for _, u := range unsets {
-		if u == key {
-			return true
-		}
-	}
-	return false
+	return "", slices.Contains(unsets, key)
 }
 
 // landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
@@ -185,17 +182,11 @@ var landingFetchTimeout = 60 * time.Second
 // cannot make visible still records, and the gate judges it as it would have.
 // That case prints one line, because the gate's own warning goes to output the
 // writer discards on a successful update.
-func fetchLanding(id string, sets []string, stderr io.Writer) {
+//
+// commit and branch are the gc.work_commit and gc.work_branch the closing
+// update records, empty when it records none.
+func fetchLanding(id, commit, branch string, stderr io.Writer) {
 	root := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
-	var commit, branch string
-	for _, s := range sets {
-		switch k, v := kv(s); k {
-		case "gc.work_commit":
-			commit = v
-		case "gc.work_branch":
-			branch = v
-		}
-	}
 	if root == "" || !objectID.MatchString(commit) || branch == "" || strings.HasPrefix(branch, "-") {
 		return
 	}
@@ -680,20 +671,34 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// outcome is shipped, the commit is merged_sha, and the branch is
 	// merged_target, the branch that commit landed on. Deriving them here, at the
 	// one writer every landing passes through, means no caller can close a landed
-	// bead with an empty record. A key the caller sets or clears itself keeps the
-	// caller's value.
+	// bead with an empty record.
+	//
+	// The record is derived whole or not at all. The bead can already hold part
+	// of one: workspace-setup stamps gc.work_branch with the branch the work was
+	// cut on. A landing that names only one of the commit and the branch would
+	// pair it with whatever the bead holds for the other, such as the merge
+	// commit with the polecat branch, and the gate would read that pair as
+	// unreachable. The unverified:PR#<n> sentinel names no commit, and a bead
+	// that reaches merged without a merged_target names no branch, so both leave
+	// the record as it was. A key the caller sets or clears itself keeps the
+	// caller's value either way.
 	if o.to == "merged" {
 		commit, branch := landingOf(o.sets, bead)
+		whole := commit != "" && branch != ""
+		recorded := map[string]string{}
 		for _, w := range [][2]string{
 			{"gc.work_outcome", "shipped"},
 			{"gc.work_commit", commit},
 			{"gc.work_branch", branch},
 		} {
-			if w[1] != "" && !callerWrites(o.sets, o.unsets, w[0]) {
+			if v, own := callerWrite(o.sets, o.unsets, w[0]); own {
+				recorded[w[0]] = v
+			} else if whole {
 				o.sets = append(o.sets, w[0]+"="+w[1])
+				recorded[w[0]] = w[1]
 			}
 		}
-		fetchLanding(id, o.sets, stderr)
+		fetchLanding(id, recorded["gc.work_commit"], recorded["gc.work_branch"], stderr)
 	}
 
 	var updateArgs []string

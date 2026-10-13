@@ -87,8 +87,10 @@ to human.
 
 The write that enters `merged` also records what the landing shipped, which is
 the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
-`gc.work_commit` set to the `merged_sha` when that is a commit id, and
-`gc.work_branch` set to `merged_target`. The gate asks the rig's checkout
+`gc.work_commit` set to the `merged_sha`, and `gc.work_branch` set to
+`merged_target`. A landing that names no commit id, such as the
+`unverified:PR#<n>` sentinel, or no `merged_target` records none of the three,
+and the bead keeps the record it already had. The gate asks the rig's checkout
 whether that commit is on `origin/<merged_target>`. A squash GitHub made is not
 there until the checkout fetches it, so the transition fetches that branch
 first whenever the commit is missing from it.

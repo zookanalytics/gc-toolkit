@@ -818,14 +818,40 @@ out="$("$SUT" transition w-2 --to merged --close --set merged_sha=$SHA_A --set m
 eq "$rc" 0 "an unanchored -> merged close (direct strategy) exits 0"
 eq "$(meta w-2 gc.work_branch)" "release" "gc.work_branch follows the merged_target the call sets"
 
-# The unverified:PR#<n> sentinel names no commit, so none is recorded. The PR
-# still merged, so the outcome and the branch still are.
-store '[{"id":"w-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+# A landing that names only one of the commit and the branch writes none of the
+# record. The bead can already hold part of one, such as the branch
+# workspace-setup stamps, and half a new record beside half of that one pairs a
+# commit with a branch it is not on. The unverified:PR#<n> sentinel names no
+# commit, so the bead keeps the record it had.
+SHA_P=89abcdef0123456789abcdef0123456789abcdef
+store '[{"id":"w-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main","gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-3"}}]'
+: > "$STUB_GC_LOG"
 out="$("$SUT" transition w-3 --to merged --close --set 'merged_sha=unverified:PR#7' 2>&1)"; rc=$?
 eq "$rc" 0 "an unverified landing still records"
-eq "$(meta w-3 gc.work_outcome)" "shipped" "an unverified landing is still shipped"
-eq "$(meta w-3 gc.work_commit)" "<absent>" "the sentinel is not recorded as a commit"
-eq "$(meta w-3 gc.work_branch)" "main" "the branch is still recorded"
+eq "$(bstatus w-3)" "closed" "an unverified landing still closes"
+eq "$(meta w-3 gc.work_outcome)" "<absent>" "an unverified landing writes no gc.work_outcome"
+eq "$(meta w-3 gc.work_commit)" "$SHA_P" "the bead keeps its gc.work_commit, so the target branch is not paired with it"
+eq "$(meta w-3 gc.work_branch)" "polecat/w-3" "the bead keeps its gc.work_branch"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_" "the closing update carries no work-record key"
+
+# A landing with no merged_target names no branch, so the merge commit is not
+# paired with the polecat branch the bead still records.
+store '[{"id":"w-6","status":"open","assignee":"","notes":"","metadata":{"gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-6"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition w-6 --to merged --close --set merged_sha=$SHA_A 2>&1)"; rc=$?
+eq "$rc" 0 "an unanchored -> merged close with no merged_target exits 0"
+eq "$(meta w-6 gc.work_outcome)" "<absent>" "a landing that names no branch writes no gc.work_outcome"
+eq "$(meta w-6 gc.work_commit)" "$SHA_P" "the merge commit is not paired with the polecat branch"
+eq "$(meta w-6 gc.work_branch)" "polecat/w-6" "the bead keeps its gc.work_branch"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_" "the closing update carries no work-record key"
+
+# A key the caller sets itself is written even when the landing derives none.
+store '[{"id":"w-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+out="$("$SUT" transition w-7 --to merged --close --set 'merged_sha=unverified:PR#8' --set gc.work_commit=$SHA_A 2>&1)"; rc=$?
+eq "$rc" 0 "a partial landing whose caller sets gc.work_commit exits 0"
+eq "$(meta w-7 gc.work_commit)" "$SHA_A" "the caller's gc.work_commit is written"
+eq "$(meta w-7 gc.work_outcome)" "<absent>" "no gc.work_outcome is derived beside it"
+eq "$(meta w-7 gc.work_branch)" "<absent>" "no gc.work_branch is derived beside it"
 
 # A key the caller writes itself is the one written.
 store '[{"id":"w-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
@@ -909,6 +935,14 @@ store '[{"id":"f-2","status":"open","assignee":"","notes":"","metadata":{"merge_
 out="$(land f-2 "$LANDED")"; rc=$?
 eq "$rc" 0 "a merged close whose landing the checkout already holds exits 0"
 eq "$(grep -c '^git .* fetch ' "$STUB_GC_LOG" || true)" "0" "a landing the checkout already holds is not fetched"
+
+# A landing that records no work record leaves nothing to make reachable, so the
+# polecat branch the bead still names is not fetched.
+store '[{"id":"f-5","status":"open","assignee":"","notes":"","metadata":{"gc.work_branch":"polecat/f-5"}}]'
+: > "$STUB_GC_LOG"
+out="$(land f-5 "$LANDED")"; rc=$?
+eq "$rc" 0 "a merged close with no merged_target exits 0"
+eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "the polecat branch the bead still names is not fetched"
 
 # A landing the checkout cannot fetch still records, and the line it prints is
 # the only report of it: the gate's own warning stays in the update's output.

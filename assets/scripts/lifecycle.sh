@@ -17,8 +17,10 @@
 # --set merged_sha, the landing the state names; a bead that never had a PR is
 # no merge anchor and closes with a plain `gc bd close`. The same write records
 # the work the landing shipped: gc.work_outcome=shipped, gc.work_commit (the
-# merged_sha, when it is an object id) and gc.work_branch (merged_target), each
-# unless the call writes that key itself. When the commit is not yet on
+# merged_sha) and gc.work_branch (merged_target), each unless the call writes
+# that key itself. A landing whose merged_sha is no object id, or that names no
+# merged_target, records none of the three, and the bead keeps the record it
+# already had. When the commit is not yet on
 # origin/<branch> in $GC_RIG_ROOT, the branch is fetched there first, because
 # the runtime's work-record gate asks that checkout whether it is. A state's
 # declared routing rides in the same call unless --route is given: human states
