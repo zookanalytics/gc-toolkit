@@ -49,7 +49,9 @@ follows. `--body` is the gate's description. The gate carries no await type, no
 `gc.demand_for` and no hold marker, so no sweep closes or visits it. It is filed
 in the bead's own store, because bd resolves an edge only within one store, and
 it is born with the bead's edge in one write. Who parked the bead, and when, are
-the gate's creator and creation time.
+the gate's creator and creation time. Re-running the text form with the same
+text files no second gate. A `--body` on the re-run becomes that gate's
+description, which is how the detail of a park is corrected.
 
 `--waiting-on` parks the bead behind a bead that already exists and files no
 gate. Naming another park's gate parks one more bead for the same reason.

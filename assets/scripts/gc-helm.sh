@@ -137,12 +137,14 @@ park holds everything under a bead that has not started and leaves work in
 flight running (docs/steering.md). It gives the bead one `blocks` edge, onto
 the gate the text form files or onto the bead --waiting-on names, and reads the
 edge back. It prints `park <blocker> holds <bead>`, then what the park holds
-and what it leaves running. It refuses a bead in flight (one claimed,
-in_progress or hooked, one carrying branch, merge_result or rejection_reason,
-or one with a workflow past load-context), because the bead's own edge would
-hold its merge, and it refuses a demand gate as the bead to wait on. Closing
-the gate releases the park; removing one bead's edge (gc bd dep remove <bead>
-<gate>) releases that bead alone.
+and what it leaves running. Re-running the text form with the same text files
+no second gate, and a --body on the re-run becomes that gate's description. It
+refuses a bead in flight (one claimed, in_progress or hooked, one carrying
+branch, merge_result or rejection_reason, or one with a workflow past
+load-context), because the bead's own edge would hold its merge, and it
+refuses a demand gate as the bead to wait on. Closing the gate releases the
+park; removing one bead's edge (gc bd dep remove <bead> <gate>) releases that
+bead alone.
 
 dismiss is the operator's explicit "end this sitting". It closes the subject's
 open visit, which is what holds a converse sitting's pane up; converse-reap
@@ -1860,6 +1862,12 @@ park_open_gate_titled() {
         | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf ''
 }
 
+# park_gate_described <gate> <body> — 0 iff the gate's own row, read now, has
+# exactly <body> as its description. A row that will not read has none.
+park_gate_described() {
+    row_now "$1" | jq -e --arg d "$2" '(.description // "") == $d' >/dev/null 2>&1
+}
+
 cmd_park() {
     bead=""; text=""; body=""; body_set=""; wait_on=""; npos=0
     while [ $# -gt 0 ]; do
@@ -1987,7 +1995,20 @@ cmd_park() {
     else
         blocker=$(park_open_gate_titled "$bead_row" "$text")
         if [ -n "$blocker" ]; then
-            echo "$PROG: park: $bead already waits on the open gate $blocker under this text; no second gate filed" >&2
+            # A re-run that names a body is how the operator corrects the
+            # park's detail, so the gate it reuses takes that body, read back
+            # as the edge is. A re-run without one leaves the description.
+            _pk_note=""
+            if [ -n "$body_set" ] && ! park_gate_described "$blocker" "$body"; then
+                # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+                gc bd update "$blocker" --description="$body" ${db:+--db "$db"} >/dev/null 2>&1 || true
+                if ! park_gate_described "$blocker" "$body"; then
+                    echo "$PROG: park: $bead already waits on the open gate $blocker under this text, so the park holds, but the gate's description is not the --body this run names: the update did not read back. Apply it by hand: gc bd update $blocker --description \"<the --body text>\"${db:+ --db $db}" >&2
+                    exit 4
+                fi
+                _pk_note=", and its description is now the --body this run names"
+            fi
+            echo "$PROG: park: $bead already waits on the open gate $blocker under this text; no second gate filed$_pk_note" >&2
         else
             [ -n "$body_set" ] || body="Parks $bead: everything under it that has not started waits on this gate, and work already in flight finishes. Closing this gate releases it. To release one bead this gate holds, remove that bead's edge: gc bd dep remove <bead> <this gate>."
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields

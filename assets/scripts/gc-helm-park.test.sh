@@ -16,6 +16,8 @@
 #     shape that the bead already waits on under the same title is the park. A
 #     same-title gate of another kind (a demand gate, a gate with an await type,
 #     a gate carrying metadata) is not, and the park files a gate of its own.
+#     A --body on the re-run becomes the reused gate's description, read back;
+#     one that does not read back fails the verb.
 #   - refused with nothing written: text over the 140-character cap, both forms
 #     at once, neither form, --body beside --waiting-on, a bead in flight
 #     (claimed, in_progress or hooked; branch, merge_result, rejection_reason;
@@ -72,6 +74,9 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-sl/.beads"
 #                    gates only with --include-gates, each edge
 #                    {issue_id, depends_on_id, type}, the assignee only when
 #                    set. STUB_LIST_FAIL fails it.
+#   bd update <id>   `--description <text>` replaces the row's description; any
+#                    other flag is refused. STUB_UPDATE_DROP answers 0 and
+#                    writes nothing.
 #   bd create        `--type --title --description --deps blocks:<id> --json`:
 #                    lands the row and, in the same write, <id>'s blocks edge
 #                    onto it, then answers {"id": ...}. The id's prefix is the
@@ -149,6 +154,23 @@ case "$verb" in
         | {id, status, issue_type, title, metadata: (.metadata // {}),
            dependencies: [ .deps[]? | {issue_id: $r.id, depends_on_id: .on, type} ]}
           + (if (.assignee // "") == "" then {} else {assignee} end) ]' "$S" ;;
+  update)
+    id="${1:-}"; shift || true
+    desc=""; dset=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --description=*) desc="${1#--description=}"; dset=1 ;;
+        --description) shift; desc="${1:-}"; dset=1 ;;
+        *) echo "gc stub: update: unexpected argument '$1'" >&2; exit 2 ;;
+      esac
+      shift || true
+    done
+    [ -n "$dset" ] || { echo "gc stub: update: nothing to update" >&2; exit 2; }
+    jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null \
+      || { echo "Error: no issue found matching \"$id\"" >&2; exit 1; }
+    [ -n "${STUB_UPDATE_DROP:-}" ] && exit 0
+    jq -c --arg id "$id" --arg d "$desc" 'map(if .id == $id then .description = $d else . end)' \
+      "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
   create)
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
     title=""; desc=""; typ="task"; deps=""
@@ -369,6 +391,7 @@ eq "$RC" "0" "(AGAIN) re-running the same park exits 0"
 eq "$(gate_count)" "3" "(AGAIN) no second gate is filed"
 has "$ERR" "already waits on the open gate $GATE" "(AGAIN) names the gate it already waits on"
 grep -q '^bd create' <<< "$CALLS" && bad "(AGAIN) a create was sent (calls: $CALLS)" || ok "(AGAIN) no create was sent"
+grep -q '^bd update' <<< "$CALLS" && bad "(AGAIN) an update was sent for the body the gate already has (calls: $CALLS)" || ok "(AGAIN) the same --body sends no update"
 
 # --- (KIND) only a gate in the text form's shape is taken for the park ---------
 # The bead already waits on a gate titled with the text. A plain gate, with no
@@ -408,6 +431,30 @@ G="$(jq -c '[ .[] | select(.issue_type == "gate" and (.id | IN("tk-dg", "tk-pg")
 has "$(jq -r '.description' <<< "$G")" "Closing this gate releases it" "(NOBODY) the default description says what releases the park"
 eq "$(edges_of tk-solo)" "$(jq -r '.id' <<< "$G")" "(NOBODY) the bead's edge lands on its gate"
 eq "$(grep -c '^held, not started: tk-solo$' <<< "$OUT")" "1" "(NOBODY) a bead with nothing under it holds itself"
+
+# --- (BODY) a --body on a re-run becomes the reused gate's description --------
+BODY2="Moved to after the faster store lands, per the operator."
+reset_store
+run_park tk-solo "$TEXT" --body "$BODY"
+G="$(edges_of tk-solo)"
+run_park tk-solo "$TEXT" --body "$BODY2"
+eq "$RC" "0" "(BODY) a re-run with a new --body exits 0"
+eq "$(gate_count)" "3" "(BODY) no second gate is filed"
+eq "$(jq -r '.description' <<< "$(row "$G")")" "$BODY2" "(BODY) the reused gate's description is the new --body"
+has "$ERR" "already waits on the open gate $G" "(BODY) the notice names the reused gate"
+has "$ERR" "its description is now the --body" "(BODY) the notice says the body was applied"
+grep -qF "bd update $G --description=$BODY2 --db $STUB_RIG_TK/.beads" <<< "$CALLS" \
+  && ok "(BODY) the update is pinned to the bead's own store" || bad "(BODY) update argv (calls: $CALLS)"
+run_park tk-solo "$TEXT"
+eq "$RC" "0" "(BODY) a re-run without --body exits 0"
+eq "$(jq -r '.description' <<< "$(row "$G")")" "$BODY2" "(BODY) a re-run without --body leaves the description"
+grep -q '^bd update' <<< "$CALLS" && bad "(BODY) an update was sent without --body (calls: $CALLS)" || ok "(BODY) no update is sent without --body"
+STUB_UPDATE_DROP=1 run_park tk-solo "$TEXT" --body "A body the store drops"
+eq "$RC" "4" "(BODY) a --body that does not read back fails (exit 4)"
+has "$ERR" "the update did not read back" "(BODY) the failure says the body did not land"
+has "$ERR" "gc bd update $G --description" "(BODY) the failure names the command that applies it"
+hasnt "$ERR" "no second gate filed" "(BODY) the failure does not report the re-run as clean"
+eq "$(jq -r '.description' <<< "$(row "$G")")" "$BODY2" "(BODY) the gate keeps its last description"
 
 # --- (WAIT) --waiting-on: an edge onto an existing bead, and no gate ----------
 reset_store
