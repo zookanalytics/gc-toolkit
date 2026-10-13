@@ -101,13 +101,32 @@ SLING_ALLOWANCE_SECS=$((10#$SLING_ALLOWANCE_SECS))
 # after dispatch on a gc build that does not extend that window to the order's
 # timeout. So a pass takes a non-blocking exclusive flock before it reads
 # anything and holds it for its whole life. The lock depends on no bead
-# surviving. gc sling and gc bd inherit the descriptor, so it is held for as long
-# as anything the pass started is live, and the kernel releases it on any exit,
-# SIGKILL included. It is keyed per rig like the order, and lives in the pack
+# surviving, and the kernel releases it when the pass exits, however it exits,
+# SIGKILL included.
+# Only the pass process holds the descriptor: every gc and escalate.sh child
+# runs with fd 9 closed. A process that a gc call starts can outlive the pass (a
+# store read can bring up a Dolt server, and gc hands the descriptors it was
+# given to what it starts), and one that kept fd 9 would hold the lock against
+# every later pass. The order's timeout kills the pass's whole process group,
+# its gc sling with it, and the next pass re-attempts the unconfirmed sling
+# through the slinging@ recovery below.
+# It is keyed per rig like the order: by GC_RIG, else by GC_RIG_ROOT, the root
+# the store resolves from, so two rigs never share a lock. It lives in the pack
 # state dir the order's env names; the override lets the hermetic test point it
 # at a tmpdir.
-RIG_KEY="$(printf '%s' "${GC_RIG:-}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-case "$RIG_KEY" in ''|.|..) RIG_KEY=_unscoped ;; esac
+state_key() {
+    local readable="$1" identity="$2" safe
+    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+    case "$safe" in ''|.|..) safe=rig ;; esac
+    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
+        printf '%s' "$safe"
+    else
+        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
+    fi
+}
+if [ -n "${GC_RIG:-}" ]; then RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
+elif [ -n "${GC_RIG_ROOT:-}" ]; then ROOT_TAIL="${GC_RIG_ROOT%/}"; RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
+else RIG_KEY=_unscoped; fi
 STATE_DIR="${DEFERRED_DISPATCH_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/deferred-dispatch}/$RIG_KEY"
 # A holder older than this is not a slow pass, because the order's timeout would
 # have killed it: something the pass started still owns the descriptor, and
@@ -140,7 +159,7 @@ trap cleanup EXIT
 mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch.XXXXXX")" || return 1; TMPFILES+=("$REPLY"); }
 
 bd_() {
-    if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@"; else gc bd "$@"; fi
+    if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@" 9>&-; else gc bd "$@" 9>&-; fi
 }
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -640,9 +659,9 @@ sling_bead() { # id target args_json -> rc
         return 0
     fi
     if [ -n "${GC_RIG:-}" ]; then
-        gc sling --rig "$GC_RIG" "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
+        gc sling --rig "$GC_RIG" "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1 9>&-
     else
-        gc sling "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
+        gc sling "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1 9>&-
     fi
 }
 
@@ -824,7 +843,7 @@ cmd_reconcile() {
                 echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; escalating and leaving the arm for a person" >&2
                 if [ -x "$ESCALATE" ]; then
                     "$ESCALATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --message "deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry." >/dev/null 2>&1 || true
+                      --message "deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry." >/dev/null 2>&1 9>&- || true
                 else
                     echo "$PROG: WARN escalate tool '$ESCALATE' not executable — capped $id has no visit; disarm or clear its fail count by hand" >&2
                 fi

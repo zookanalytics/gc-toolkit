@@ -206,11 +206,19 @@ the pass carries its own lock:
 
 - Before it reads the store, `reconcile` takes a non-blocking exclusive
   `flock` on `<GC_PACK_STATE_DIR>/deferred-dispatch/<rig>/pass.lock` and
-  records its pid and start time in `pass.holder` beside it. The lock
-  depends on no bead surviving.
-- `gc sling` and `gc bd` inherit the descriptor, so the lock is held for as
-  long as anything the pass started is live. The kernel releases it on any
-  exit, `SIGKILL` included.
+  records its pid and start time in `pass.holder` beside it. `<rig>` is
+  `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
+  plus a checksum of the whole path, so two rigs never share a lock. The
+  lock depends on no bead surviving.
+- Only the pass process holds the lock's descriptor. Every `gc` and
+  `escalate.sh` call the pass makes runs with it closed. A process that a
+  `gc` call starts can outlive the pass: a store read can bring up a Dolt
+  server, and `gc` hands the descriptors it was given to what it starts. A
+  process that kept the descriptor would hold the lock against every later
+  pass. The kernel releases the lock when the pass exits, however it exits,
+  `SIGKILL` included. The order's timeout kills the pass's whole process
+  group, its `gc sling` with it, and the next pass re-attempts the
+  unconfirmed sling through the `slinging@` recovery.
 - A pass that finds the lock held prints one line and exits 0 without
   listing or slinging. Under the order it also declares the run `skipped`
   in the file the controller names in `GC_ORDER_OUTCOME_FILE`, which the

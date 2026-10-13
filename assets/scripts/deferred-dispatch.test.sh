@@ -49,6 +49,9 @@
 #   * the PASS LOCK — a pass that overlaps one in flight exits 0 having read and
 #     slung nothing, so two overlapping passes make one sling; a holder past the
 #     stall bound fails the pass, and a lock that cannot be taken refuses it;
+#     only the pass process holds it, so no gc or escalate.sh call, and no
+#     process one leaves running, carries it past the pass; with no GC_RIG it is
+#     keyed by the rig root;
 #   * the PASS BUDGET — a pass starts a sling only while a full allowance is
 #     left, on a clock the test controls, and reports the beads it left armed
 #     and untouched; a dry run takes no lock and spends no budget;
@@ -245,6 +248,19 @@ STUB
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
+# With STUB_FD9_LOG set, each call records whether fd 9, the descriptor the pass
+# lock is held on, reached it.
+if [ -n "${STUB_FD9_LOG:-}" ]; then
+    if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+    printf 'gc %s fd9=%s\n' "${1:-}" "$fd9" >> "$STUB_FD9_LOG"
+fi
+# With STUB_GC_DAEMON set, the first call leaves a process running that keeps
+# every descriptor gc was handed, as a store read that brings up a Dolt server
+# does. Its pid goes to the named file.
+if [ -n "${STUB_GC_DAEMON:-}" ] && [ ! -e "$STUB_GC_DAEMON" ]; then
+    ( exec sleep 300 ) </dev/null >/dev/null 2>&1 &
+    printf '%s\n' "$!" > "$STUB_GC_DAEMON"
+fi
 if [ "${1:-}" = "bd" ]; then
     shift
     printf '%s\n' "$*" >> "${STUB_BD_LOG:-/dev/null}"
@@ -283,6 +299,10 @@ STUB
 cat > "$BIN/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
+if [ -n "${STUB_FD9_LOG:-}" ]; then
+    if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+    printf 'escalate fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
+fi
 subject=""; key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -297,10 +317,16 @@ printf '%s\t%s\n' "$subject" "$key" >> "${ESC_CALLS:?}"
 echo "escalate: filed visit tk-visit1 on $subject [$key]"
 ESC
 # date stub: the epoch form the pass budget reads comes from $STUB_CLOCK when a
-# test sets it; every other form reaches the real date.
+# test sets it; every other form reaches the real date. The pass reads the clock
+# from its own shell, so under STUB_FD9_LOG the stub also records that the pass
+# holds fd 9: the positive control for the gc and escalate.sh records above.
 export STUB_REAL_DATE; STUB_REAL_DATE="$(command -v date)"
 cat > "$BIN/date" <<'DATE'
 #!/usr/bin/env bash
+if [ -n "${STUB_FD9_LOG:-}" ]; then
+    if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+    printf 'date fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
+fi
 if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%s" ]; then cat "$STUB_CLOCK"; exit 0; fi
 exec "${STUB_REAL_DATE:?}" "$@"
 DATE
@@ -971,6 +997,70 @@ has "$out" "flock not found" "naming the missing tool"
 eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "0" "before any read of the store"
 eq "$(slings)" "0" "and slings nothing"
 unset STUB_BD_LOG
+
+# Only the pass process holds the lock. A process a gc call starts can outlive
+# the pass, and one that kept fd 9 would hold the lock against every later pass,
+# with nothing dispatching on the rig until someone killed it.
+echo "# every gc and escalate.sh call a pass makes runs without the lock's descriptor"
+store '[
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
+ {"id":"b-cap","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"3"},"notes":"","_ready":true},
+ {"id":"b-done","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+FD9="$TMP/fd9.log"; : > "$FD9"
+out="$(STUB_FD9_LOG="$FD9" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass completes"
+eq "$(slings)" "1" "it slings the ready bead"
+eq "$(escalations)" "1" "it escalates the capped bead"
+has "$out" "retired arm on closed b-done" "it retires the closed bead's arm"
+for call in "gc bd" "gc sling" "escalate"; do
+    n="$(grep -c -F "$call fd9=" "$FD9")"
+    if [ "$n" -gt 0 ]; then ok "the pass made $n '$call' call(s)"; else bad "the pass made no '$call' call, so nothing about it was proven"; fi
+done
+leaked="$(grep -F 'fd9=open' "$FD9" | grep -v -F 'date fd9=' || true)"
+eq "$leaked" "" "no gc or escalate.sh call was handed fd 9"
+n="$(grep -c -F 'date fd9=open' "$FD9")"
+if [ "$n" -gt 0 ]; then ok "while the pass itself held it (its clock reads saw fd 9 open $n time(s))"; else bad "the pass never held fd 9, so the closed records prove nothing"; fi
+
+echo "# a process a gc call leaves running does not hold the lock against the next pass"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+DAEMON="$TMP/daemon.pid"; rm -f "$DAEMON"
+STUB_GC_DAEMON="$DAEMON" "$SUT" reconcile >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the first pass completes"
+dpid="$(cat "$DAEMON" 2>/dev/null)"
+if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
+    ok "a process the first pass's gc call started is still running"
+    store '[{"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+    out="$("$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "the next pass exits 0"
+    hasnt "$out" "already in flight" "and takes the lock that process does not hold"
+    eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-2" "and makes its sling"
+else
+    bad "the long-running process the fixture starts never ran"
+fi
+[ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+
+echo "# with no GC_RIG, the lock is keyed by the rig root, so two rigs never share one"
+# Two roots with one name, each with its own store. A pass of the first is
+# caught inside its sling, holding its lock.
+ROOT_A="$TMP/roots/a/gc-toolkit"; ROOT_B="$TMP/roots/b/gc-toolkit"; mkdir -p "$ROOT_A" "$ROOT_B"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+cp "$STUB_STORE" "$TMP/beads-b.json"
+HOLD="$TMP/hold-root"; rm -f "$HOLD".*
+GC_RIG_ROOT="$ROOT_A" STUB_SLING_HOLD="$HOLD" "$SUT" reconcile > "$TMP/root-a.out" 2>&1 &
+first=$!
+if await "$HOLD.started"; then
+    out="$(GC_RIG_ROOT="$ROOT_B" STUB_STORE="$TMP/beads-b.json" "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a pass of another rig root exits 0"
+    hasnt "$out" "already in flight" "and is not held by the first root's lock, though both roots share a name"
+    has "$out" "1 dispatched" "it makes its own dispatch"
+    out="$(GC_RIG_ROOT="$ROOT_A" "$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a second pass of the first root exits 0"
+    has "$out" "already in flight" "and is held off by that root's lock"
+    : > "$HOLD.release"; wait "$first"
+else
+    bad "the first root's pass never reached its sling (fixture wedged)"
+    : > "$HOLD.release"; wait "$first" 2>/dev/null
+fi
 
 # --- the pass budget: no sling the timeout would cut short ---------------------
 # The order's timeout kills a pass wherever it stands, and a sling killed
