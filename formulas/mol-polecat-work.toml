@@ -1520,7 +1520,7 @@ done
 case "$BCG_RC" in
   0) : ;;
   3)
-    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_BEAD_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or stamp bring_current_from when that is what it asks, then re-run this block. Do not drain: finishing the audit is yours."
+    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_BEAD_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or, when it asks where the work began, stamp bring_current_from and bring_current_scope with the command it prints, then re-run this block. Do not drain: finishing the audit is yours."
     exit 3 ;;
   *)
     echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."

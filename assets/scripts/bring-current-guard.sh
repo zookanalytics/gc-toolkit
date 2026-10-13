@@ -493,7 +493,7 @@ read_handoff() { # <bead> <to> <from-arg>
   [ "$SCOPE" = "merge-only" ] || SCOPE="with-work"
   FROM="${stamp:-$3}"
   if [ -z "$stamp" ] && { [ -z "$FROM" ] || [ "$(git rev-parse -q --verify "$FROM^{commit}" 2>/dev/null)" = "$TO" ]; }; then
-    echo "$PROG: nothing records where $BEAD's work on ${BRANCH:-its branch} began (no bring_current_from stamp, and nothing was pushed past ${FROM:-an unknown head} by this hand-off), so whether it brought the branch current cannot be read. Stamp the head the branch had before this bead's first commit or merge: gc bd update $BEAD --set-metadata bring_current_from=<oid>, then re-run" >&2
+    echo "$PROG: nothing records where $BEAD's work on ${BRANCH:-its branch} began (no bring_current_from stamp, and nothing was pushed past ${FROM:-an unknown head} by this hand-off), so whether it brought the branch current cannot be read. Stamp the head the branch had before this bead's first commit or merge, and beside it the scope of a bead with work of its own (a start stamped alone marks a resume that asks for no audit): gc bd update $BEAD --set-metadata bring_current_from=<oid> --set-metadata bring_current_scope=with-work, then re-run" >&2
     return 3
   fi
   git fetch -q origin "+refs/heads/$TARGET:refs/remotes/origin/$TARGET" >/dev/null 2>&1 || true
