@@ -103,7 +103,7 @@ fi
 ```
 
 **4. Pin the commit.** The dispatch stamped `reviewed_oid` with the head it
-reviewed for; that pin wins when present. The diff you read, the tests you
+reviewed for; that pin wins when present. The diff you read, any test you
 run, and the OID you hand off are all that one commit — a verdict recorded
 against a head you never read certifies unreviewed code:
 ```bash

@@ -23,7 +23,8 @@
 #               suite, and its review-test-evidence block counts the anchor's
 #               self-review stamp only on an exact match in a rig that
 #               declares a test command, in bash and in zsh; neither the
-#               frame nor mol-review's shared review step runs a suite.
+#               frame nor any mol-review text every check reads runs or
+#               presumes a suite.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -139,6 +140,9 @@ notF "$REVIEW_STEP" 'run the tests' "(EVIDENCE) the shared review step neither p
 notF "$REVIEW_STEP" 'Run the tests' "(EVIDENCE) the shared review step has no step that runs the tests"
 notF "$REVIEW_STEP" 'run the suites' "(EVIDENCE) the shared review step runs no suite"
 hasF "$REVIEW_STEP" 'The check section of the' "(EVIDENCE) the shared review step leaves test runs to the check section"
+# Every check also reads the formula's hard rules and its pin step.
+notF "$ROOT/formulas/mol-review.toml" 'run the tests yourself' "(EVIDENCE) mol-review's hard rules do not tell every check to run the tests"
+notF "$ROOT/formulas/mol-review.toml" 'the tests you' "(EVIDENCE) mol-review's pin step does not presume every check runs tests"
 
 # The block runs as written against a stub gc: bd show answers the anchor, and
 # formula show answers the rig's mol-polecat-work vars.
