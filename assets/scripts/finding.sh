@@ -1099,10 +1099,13 @@ ruled_visit() { # <visit-id>
 # close records the ruled visit as finding.ruling_visit, which pr-facts.sh's
 # review dismissal names. Until then the finding holds its review
 # changes-requested, and a visit that closed without a ruling (moot, benign,
-# dismissed, cut short) never releases it. Review dispatch is held meanwhile too:
-# by fix-in-flight while a fix unit on its lane is live, and by gate-ensure's
-# open_rework_child while a ruling's child is. A visit, blocker list, census or
-# rework read that will not answer leaves it open.
+# dismissed, cut short) never releases it; the operator's own approval is then
+# what replaces the review. A sitting cut short moves its wait to the subject,
+# and the later sitting that rules on it closes a visit of its own, which this
+# does not follow. Review dispatch is held meanwhile too: by fix-in-flight while
+# a fix unit on its lane is live, and by gate-ensure's open_rework_child while a
+# ruling's child is. A visit, blocker list, census or rework read that will not
+# answer leaves it open.
 cmd_close_answered() {
   local anchor="" reason=""
   while [ $# -gt 0 ]; do case "$1" in

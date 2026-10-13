@@ -314,8 +314,12 @@ review open until the operator rules the visit holding its question and the work
 the ruling calls for lands, while the others let it clear. The ruling is
 recorded on the visit (`gc.ruling`), and a fold hands the question on to the
 visit it folds into (`gc.folded_into`), so a visit closed moot, benign,
-dismissed or cut short releases nothing. The review the operator reads on the
-PR therefore always matches what is still owed.
+dismissed or cut short releases nothing. Such a finding stays open until its
+anchor closes, and the review it holds stays changes-requested until the
+operator's own approval replaces it. A sitting cut short is one such close: its
+wait moves to the subject, and the later sitting that rules on it closes a visit
+of its own, which the finding does not follow. The review the operator reads on
+the PR therefore always matches what is still owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
