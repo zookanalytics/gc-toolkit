@@ -187,6 +187,10 @@ writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.s
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
+# Triage widens it (signoff.sh --add-gates), and bring-current-guard.sh adds
+# triage to a set that lacks it when a bring-current round conflicts, so triage
+# rules on every such round. Neither widens the none or off opt-out, which only
+# a person changes: on one, the guard lifts the approval itself.
 check_set_default = "correctness,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
@@ -200,11 +204,13 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # standing across later pushes until it is dismissed, with a standing
 # CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
 # before each reviewer's latest is taken, so it neither approves nor vetoes, and
-# it does not hide its author's older approval. No check.approval marker and no
-# check_set token arm or opt out of it; GitHub branch protection is an extra
-# layer, not the authority. Declaration only, like the rest of this section (the
-# rule lives in gctk merge's reviewVerdict, and in review-verdict.sh for the
-# shell readers).
+# it does not hide its author's older approval. Once a ruling on a bring-current
+# round lifts the approval, no approval submitted at or before the anchor's
+# bring_current_lifted_at counts, dismissed or not. No check.approval marker
+# and no check_set token arm or opt out of it; GitHub branch protection is an
+# extra layer, not the authority. Declaration only, like the rest of this
+# section (the rule lives in gctk merge's reviewVerdict, and in
+# review-verdict.sh for the shell readers).
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -280,7 +286,9 @@ posture_key = "pr_posture"
 # The pack's own vocabulary, lowercase, derived in this precedence order: a
 # standing CHANGES_REQUESTED outranks an unanswered comment, which outranks an
 # approval — one reviewer's approval does not answer another reviewer's
-# question. "none" is a PR no reviewDecision applies to.
+# question. An approval the anchor's bring_current_lifted_at set aside reads
+# review_required, because the merge no longer counts it. "none" is a PR no
+# reviewDecision applies to.
 postures = ["changes_requested", "commented", "approved", "review_required", "none"]
 # GitHub's mergeStateStatus, recorded verbatim and uppercase: the vocabulary is
 # GitHub's, and a value it adds next year must read as GitHub's, not as ours.
@@ -450,6 +458,7 @@ keys = [
   "opened_as_draft", "draft_readied",
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
+  "bring_current_lifted_at",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -613,17 +622,32 @@ keys = [
 #   (bring-current-guard.sh guard): the head, the start, the target, the class
 #   (clean or conflicted), the guard's evidence per item, the worker's audit,
 #   and the round's ruling once made: triage's (bring-current-guard.sh decide,
-#   run by signoff.sh), or the guard's closed ruling, marked by=guard, on an
-#   anchor whose check_set declares no triage lane. A conflicted round no
-#   ruling covers yet is carried into the next round's record. Every message
+#   run by signoff.sh), or one the guard recorded itself, marked by=guard,
+#   which a re-run of the same hand-off carries out again. A conflicted round
+#   no ruling covers yet is carried into the next round's record. Every message
 #   about a round renders from it. A JSON object, overwritten each round.
 # bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
-#   triage, written by the guard; the lanes triage's rulings reopened or added;
-#   and every lane a closed ruling reopened. lane-state.sh lets no GitHub
-#   approval submitted before bring_current_round_at back one of these lanes.
-#   A comma list that only grows.
+#   triage, written by the guard, and the lanes triage's rulings reopened or
+#   added. lane-state.sh lets no GitHub approval submitted before
+#   bring_current_round_at back one of these lanes. A comma list that only
+#   grows.
 # bring_current_round_at — when the latest conflicted round was recorded (UTC,
 #   ISO 8601), written by the guard with that round's record.
+# bring_current_lifted_at — the round time of the latest conflicted round whose
+#   ruling lifted the human approval (UTC, YYYY-MM-DDTHH:MM:SSZ; the ruling's
+#   own time when the round recorded none). Written by bring-current-guard.sh
+#   once a ruling to lift the approval is recorded, by decide for triage's and
+#   by guard for one it recorded itself, and read back before any approval is
+#   dismissed; it never moves back. The approval rule
+#   counts no approval submitted at or before it: gctk merge's reviewVerdict
+#   at the merge's approval gate and in its visit order, whose terminal re-read
+#   holds a merge when the line moved after validation, and review-verdict.sh
+#   in pr-facts.sh's conflict arm and posture arm, which records such an
+#   approval as review_required and keeps the line in the posture's basis. So
+#   an approval GitHub would not let the guard dismiss still lands nothing, the
+#   board shows the approval owed, and one submitted after it lands the PR.
+#   A later round whose ruling keeps the approval leaves it as it is. Absent
+#   means no ruling lifted the approval. Never cleared.
 
 [metadata.gates]
 keys = [
@@ -785,8 +809,12 @@ keys = [
   # deferred files a claimable follow-up bead (gated behind the anchor, its
   # provenance edge --discovered-from the finding) and closes the finding; declined
   # closes it with the reason, no edge.
-  # needs-you files a visit for the operator and leaves the finding OPEN — an open
-  # finding holds its human review changes-requested until they rule the visit.
+  # needs-you files a visit for the operator, or names one already open on the
+  # anchor's feedback, and leaves the finding OPEN — an open finding holds its
+  # human review changes-requested until the operator rules the visit holding
+  # its question (gc.ruling on it, following any fold) and no fix unit on its
+  # lane, nor a ruling's rework child, is in flight, when finding.sh
+  # close-answered closes it.
   "finding.disposition",
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
@@ -827,15 +855,27 @@ keys = [
   # reason, and a --discovered-from edge to the finding for provenance; the anchor
   # --blocks it until the merge.
   "finding.follow_up",
-  # The visit a needs-you finding files for the operator, set by finding.sh as the
-  # ruling runs. The finding stays open and its visit id is posted to the raiser's
-  # thread; the operator's ruling on the visit re-dispositions the finding.
+  # The visit that carries a needs-you finding's decision, set by finding.sh as
+  # the ruling runs: one it filed, or one already open on the anchor's feedback
+  # that the ruling named. The finding stays open and the visit id is posted to
+  # the raiser's thread. close-answered follows it through any fold to the visit
+  # holding the question, and closes the finding once that visit has closed
+  # carrying the operator's ruling (gc.ruling) and no fix unit on the finding's
+  # lane, nor a ruling's rework child, is in flight. A visit closed with no
+  # ruling releases nothing.
   "finding.visit",
+  # The visit whose recorded ruling released a needs-you finding, stamped by
+  # finding.sh close-answered in the write that closes it: finding.visit itself,
+  # or the visit a fold handed its question on to. pr-facts.sh's review dismissal
+  # names it, and counts a closed needs-you finding as answered only when it is
+  # set. Absent on an open finding and on one closed any other way. A bead id.
+  "finding.ruling_visit",
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
   # human findings by their originating review, so once every finding one review
-  # raised has closed the write-back dismisses THAT review and re-requests its
-  # author — per-review, independent of other reviews on the same PR.
+  # raised has closed, and every answer one of them owes its raiser is on the PR
+  # (finding.reply_posted), the write-back dismisses THAT review and re-requests
+  # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
@@ -1164,6 +1204,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
+  "gc.ruling", "gc.folded_into",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1231,6 +1272,20 @@ keys = [
 #   converse-claim.sh's stranded-finish recovery do. Absent or empty leaves that
 #   line out of the closed reminder. Never cleared. Freeform text, rendered as
 #   one line.
+# gc.ruling — on a VISIT, the operator's ruling in its sitting, the one line
+#   converse-signoff.sh --ruled yes resolves the sitting's demands with. Stamped
+#   and read back before the visit closes; a --ruled no sign-off clears one an
+#   earlier run left, and stops when either write does not read back. finding.sh
+#   close-answered reads it: a needs-you finding is released only by a closed
+#   visit carrying one, because a visit closed moot, benign, dismissed or cut
+#   short answers nothing. Absent means nobody ruled in that sitting. Freeform
+#   text.
+# gc.folded_into — on a VISIT closed `folded`, the visit it folded into, which now
+#   carries its question. visit-close.sh requires --into on every fold and stamps
+#   it with the outcome pair, read back before the close. finding.sh
+#   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
+#   a re-homed visit, to the visit whose ruling answers the question. Never
+#   cleared. A bead id in the folded visit's own store.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
