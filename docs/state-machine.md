@@ -92,8 +92,10 @@ the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
 `unverified:PR#<n>` sentinel, or no `merged_target` records none of the three,
 and the bead keeps the record it already had. The gate asks the rig's checkout
 whether that commit is on `origin/<merged_target>`. A squash GitHub made is not
-there until the checkout fetches it, so the transition fetches that branch
-first whenever the commit is missing from it.
+there until the checkout fetches it, so the transition fetches that branch into
+`$GC_RIG_ROOT` first whenever the commit is missing from it. With no
+`GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
+nothing and prints one WARN line naming the landing.
 
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`

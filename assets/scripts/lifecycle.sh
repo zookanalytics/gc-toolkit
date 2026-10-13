@@ -20,12 +20,13 @@
 # merged_sha) and gc.work_branch (merged_target), each unless the call writes
 # that key itself. A landing whose merged_sha is no object id, or that names no
 # merged_target, records none of the three, and the bead keeps the record it
-# already had. When the commit is not yet on
-# origin/<branch> in $GC_RIG_ROOT, the branch is fetched there first, because
-# the runtime's work-record gate asks that checkout whether it is. A state's
-# declared routing rides in the same call unless --route is given: human states
-# stamp gc.routed_to=human, and detached states clear it unless the bead already
-# rests on the park route.
+# already had. When the commit is not yet on origin/<branch> in $GC_RIG_ROOT,
+# the branch is fetched there first, because the runtime's work-record gate
+# asks that checkout whether it is. With no GC_RIG_ROOT, or a branch git does
+# not accept as a branch name, nothing is fetched and one WARN line names the
+# landing. A state's declared routing rides in the same call unless --route is
+# given: human states stamp gc.routed_to=human, and detached states clear it
+# unless the bead already rests on the park route.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to

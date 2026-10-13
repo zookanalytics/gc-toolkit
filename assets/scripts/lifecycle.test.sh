@@ -953,13 +953,41 @@ eq "$(bstatus f-3)" "closed" "the close lands"
 eq "$(meta f-3 gc.work_branch)" "no-such-branch" "the work record names the branch the call gave"
 has "$out" "WARN f-3 records gc.work_commit=$LANDED on gc.work_branch=no-such-branch" "the landing the gate cannot verify is named"
 
-# With no rig checkout named there is nowhere to fetch, and nothing is run.
+# With no rig checkout named there is nowhere to fetch, and nothing is run. The
+# line it prints is the only report that the landing went unchecked.
 store '[{"id":"f-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
 : > "$STUB_GC_LOG"
 out="$(PATH="$TMP/realgit:$PATH" "$SUT" transition f-4 --to merged --close --set merged_sha="$LANDED" 2>&1)"; rc=$?
 eq "$rc" 0 "a merged close with no GC_RIG_ROOT exits 0"
 eq "$(meta f-4 gc.work_commit)" "$LANDED" "the work record is written without a checkout"
 eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "no git runs without a checkout to run it in"
+has "$out" "WARN f-4 records gc.work_commit=$LANDED on gc.work_branch=main, but GC_RIG_ROOT names no rig checkout" "the landing nothing checked is named"
+
+# The branch goes into a refspec, so a name git does not accept as a branch is
+# never fetched: a `*` would make the fetch a glob over every matching branch,
+# a `:` would split the refspec, and a leading `-` would read as an option. The
+# record still lands, and the line names the branch.
+for spec in 'f-6|release/*' 'f-7|a:b' 'f-8|-x'; do
+  id="${spec%%|*}"; br="${spec#*|}"
+  store '[{"id":"'"$id"'","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+  : > "$STUB_GC_LOG"
+  out="$(land "$id" "$LANDED" --set "merged_target=$br")"; rc=$?
+  eq "$rc" 0 "a landing on branch '$br' still records"
+  eq "$(meta "$id" gc.work_branch)" "$br" "the work record names '$br', the branch the call gave"
+  eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'$br' is not fetched"
+  has "$out" "WARN $id records gc.work_commit=$LANDED on gc.work_branch=$br, which git does not accept as a branch name" "the refused branch '$br' is named"
+done
+# check-ref-format --branch expands @{-N} to a branch the checkout had before,
+# and the refspec would carry the unexpanded text. Inside a checkout whose
+# @{-1} resolves, the name is still refused.
+"$REAL_GIT" -C "$TMP/rig" checkout -q -b previous
+"$REAL_GIT" -C "$TMP/rig" checkout -q main
+store '[{"id":"f-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$(cd "$TMP/rig" && land f-9 "$LANDED" --set 'merged_target=@{-1}')"; rc=$?
+eq "$rc" 0 "a landing on branch '@{-1}' still records"
+eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'@{-1}' is not fetched, though git expands it in that checkout"
+has "$out" "on gc.work_branch=@{-1}, which git does not accept as a branch name" "the refused '@{-1}' is named"
 
 # --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
 echo "# reopen"

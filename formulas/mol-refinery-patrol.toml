@@ -667,7 +667,10 @@ fi
 **If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
 (the real target branch may be checked out in the rig's canonical
 worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. A push rejected for branch protection (GH006/GH013/
+lifecycle call. The call is handed the `RIG_ROOT` this block resolved as
+`GC_RIG_ROOT`: the writer checks the landing in that checkout, and the lookup
+reads the roster when the session carries no `GC_RIG_ROOT` of its own. A push
+rejected for branch protection (GH006/GH013/
 "protected branch"/"Changes must be made through a pull request"/"approving
 review"/"Cannot update this protected ref") auto-promotes the bead to
 `merge_strategy=pr` and falls through to the mr block — the prep worktree is
@@ -700,7 +703,7 @@ if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
     echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
     gc runtime drain-ack; exit 1
   fi
-  "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
+  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
 else
   case "$(cat "$PUSH_ERR")" in
     *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)

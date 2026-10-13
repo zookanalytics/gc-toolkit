@@ -177,17 +177,30 @@ var landingFetchTimeout = 60 * time.Second
 // write. The direct strategy fetches its target before it records, which leaves
 // nothing to fetch here.
 //
-// The checkout is $GC_RIG_ROOT, which the merge cadence and the refinery both
-// run with. With none named there is no checkout to fetch into. A landing this
-// cannot make visible still records, and the gate judges it as it would have.
-// That case prints one line, because the gate's own warning goes to output the
-// writer discards on a successful update.
+// The checkout is $GC_RIG_ROOT. The merge cadence exports the root it runs in,
+// and the refinery's direct strategy hands its transition the root it resolved.
+// A landing this cannot make visible still records, and the gate judges it as
+// it would have. Each way that happens prints one line, because the gate's own
+// warning goes to output the writer discards on a successful update: no
+// checkout is named, the branch is not a name git accepts as a branch, or the
+// fetch does not bring the commit.
 //
 // commit and branch are the gc.work_commit and gc.work_branch the closing
-// update records, empty when it records none.
+// update records, empty when it records none. A commit that is not an object id
+// names nothing to fetch.
 func fetchLanding(id, commit, branch string, stderr io.Writer) {
+	if !objectID.MatchString(commit) || branch == "" {
+		return
+	}
 	root := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
-	if root == "" || !objectID.MatchString(commit) || branch == "" || strings.HasPrefix(branch, "-") {
+	if root == "" {
+		fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, but GC_RIG_ROOT names no rig checkout, so none was checked for it or fetched; the work-record gate reads it as unreachable if the rig checkout lacks it on origin/%s\n",
+			prog, id, commit, branch, branch)
+		return
+	}
+	if !validBranch(branch) {
+		fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, which git does not accept as a branch name, so origin/%s was not fetched into %s\n",
+			prog, id, commit, branch, branch, root)
 		return
 	}
 	ref := "refs/remotes/origin/" + branch
@@ -200,6 +213,17 @@ func fetchLanding(id, commit, branch string, stderr io.Writer) {
 	}
 	fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, but %s does not hold it on origin/%s (fetch rc=%d); the work-record gate reads it as unreachable until that checkout fetches it\n",
 		prog, id, commit, branch, root, branch, rc)
+}
+
+// validBranch reports whether git accepts name, exactly as written, as a branch
+// name. The name comes from bead metadata and goes into a refspec, where a `*`
+// would turn the fetch into a glob over every matching branch and a `:` would
+// split it. `git check-ref-format --branch` refuses both, and a leading `-`.
+// It also expands @{-N} to a branch the checkout had before, so a name passes
+// only when git hands it back unchanged.
+func validBranch(name string) bool {
+	out, err := exec.Command("git", "check-ref-format", "--branch", name).Output()
+	return err == nil && strings.TrimSuffix(string(out), "\n") == name
 }
 
 // gitIn runs one git command in dir, bounded by landingFetchTimeout, and
