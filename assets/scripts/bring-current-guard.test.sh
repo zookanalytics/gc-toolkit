@@ -31,12 +31,16 @@
 #   filing no visit, while a lane that cannot be reopened lifts nothing; an
 #   anchor whose check_set declares no triage lane gains triage, with a note,
 #   and its round goes to triage like any other, reopening no other lane,
-#   lifting no approval and filing no visit; a re-run adds triage once; the none
-#   opt-out and a pre-open anchor gain it too; a check_set that does not read
-#   back hands nothing off; a merge-only bead owes entries for its own commits; a
-#   pre-open-rebase child and a re-queued anchor are guarded; an earlier round
-#   awaiting triage rides into the next record, and a re-run keeps where it
-#   began; no stamp and nothing pushed is refused; the resume stamp
+#   lifting no approval and filing no visit; a re-run adds triage once; a
+#   pre-open anchor gains it too; the none and off opt-outs, read with case and
+#   blanks ignored, are left as they are, and the guard rules on their round
+#   itself: nothing reopens, and the approval before the round is lifted with
+#   the line at the round's time, on a pre-open anchor too, filing no visit,
+#   and a re-run finishes a lift that stopped half-way; a check_set that does
+#   not read back hands nothing off; a merge-only bead owes entries for its own
+#   commits; a pre-open-rebase child and a re-queued anchor are guarded; an
+#   earlier round awaiting triage rides into the next record, and a re-run keeps
+#   where it began; no stamp and nothing pushed is refused; the resume stamp
 #   marks the start; a start stamped with no scope owes no entries, and its
 #   round is recorded and routed all the same; the anchor resolves from the
 #   branch; a failed write or supersede exits 1.
@@ -550,13 +554,46 @@ eq "$rc" "0" "it exits 0"
 eq "$(meta AN1 check_set)" "correctness,arch,triage" "the check_set is unchanged"
 eq "$(notes AN1 | grep -c 'declared no triage lane')" "1" "…and the note is not written again"
 
-echo "# guard: the none opt-out gains triage too, and a pre-open anchor reads no GitHub"
+echo "# guard: the none opt-out is left as it is, and the guard rules on its round: nothing reopens, and the approval is lifted"
+# Only a person sets or widens the opt-out, and no review weighs the round, so
+# the guard lifts the approval, the one merge rule the opt-out leaves.
 store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = "none"')]"
+reviews "$(approve human1 501),$(approve human2 502 APPROVED 2099-01-01T00:00:00Z)"
 fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "it exits 0"
-eq "$(meta AN1 check_set)" "none,triage" "the opt-out keeps its token and gains triage, the one lane the resolver reads in it"
-has "$(cat "$STUB_RO_LOG")" "supersede-lane --anchor AN1 --lane triage" "triage is reopened to rule"
+has "$out" "the guard's ruling on it is carried out: nothing reopens, and the approval given before the round is lifted. Why: the anchor's check_set 'none' opts out of every review lane" "…saying what it ruled and why"
+eq "$(meta AN1 check_set)" "none" "the opt-out is left as it is"
+hasnt "$(notes AN1)" "declared no triage lane" "…and no widening is noted"
+eq "$(rec_of AN1 | jq -c '.triage | {by, reopen, add, dismiss}')" '{"by":"guard","reopen":[],"add":[],"dismiss":true}' "the record carries the guard's ruling where triage's goes"
+eq "$(meta AN1 bring_current_reopened)" "<absent>" "no lane is recorded as reopened"
+eq "$(cat "$STUB_RO_LOG")" "" "…and none is superseded, triage included"
+ROUND_AT=$(meta AN1 bring_current_round_at)
+case "$ROUND_AT" in 20*Z) ok "the round's time is recorded" ;; *) bad "bring_current_round_at is '$ROUND_AT'" ;; esac
+eq "$(meta AN1 bring_current_lifted_at)" "$ROUND_AT" "…and the lift line is drawn at it"
+has "$(cat "$STUB_GH_LOG")" "reviewers[]=human1" "the approver is asked to review again"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "…and the one given after it stands"
+has "$(cat "$STUB_GH_LOG")" "changed code by hand that this approval did not see" "the dismissal note tells the ruling as the guard's"
+eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
+
+echo "# guard: the off opt-out is read with case and blanks ignored, and a re-run finishes a lift that stopped half-way"
+store "[$(child MI4 "$(audit_meta "$(entry v.txt)")"), $(anchorrow AN1 | jq -c '.metadata.check_set = " Off "')]"
+reviews "$(approve human1 501)"
+fresh
+out=$(STUB_DROP_KEYS="AN1:bring_current_lifted_at" guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
+eq "$rc" "1" "a lift line that does not read back exits 1, so the hand-off retries"
+eq "$(rec_of AN1 | jq -c '.triage | {by, dismiss}')" '{"by":"guard","dismiss":true}' "…with the ruling already recorded"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and nothing dismissed"
+fresh
+out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "the re-run exits 0"
+eq "$(meta AN1 check_set)" " Off " "the opt-out is left as it is"
+eq "$(meta AN1 bring_current_lifted_at)" "$(meta AN1 bring_current_round_at)" "the line is drawn at the round's time"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "…and the approval given before the round is dismissed"
+eq "$(cat "$STUB_RO_LOG")" "" "nothing is reopened"
+
+echo "# guard: a pre-open anchor gains triage too, and an opt-out one draws the line; neither reads GitHub"
 PRE_CHILD4=$(child MI4 "$(audit_meta "$(entry v.txt)")" "Merge main into polecat/x1: base moved, the branch no longer merges" \
   | jq -c 'del(.metadata.pr_number, .metadata.pr_url, .metadata.existing_pr)')
 store "[$PRE_CHILD4, $(anchorrow AN1 | jq -c '.metadata.merge_result = "pre_open_gate" | .metadata.check_set = "correctness" | del(.metadata.pr_number, .metadata.pr_url)')]"
@@ -564,6 +601,12 @@ fresh
 out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
 eq "$rc" "0" "on a pre-open anchor it exits 0"
 eq "$(meta AN1 check_set)" "correctness,triage" "…triage is added"
+eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_ESC_LOG")" "" "…and nothing reads GitHub or files a visit"
+store "[$PRE_CHILD4, $(anchorrow AN1 | jq -c '.metadata.merge_result = "pre_open_gate" | .metadata.check_set = "none" | del(.metadata.pr_number, .metadata.pr_url)')]"
+fresh
+out=$(guard --bead MI4 --from "$A" --to "$MODIFY_H"); rc=$?
+eq "$rc" "0" "on a pre-open opt-out anchor it exits 0"
+eq "$(meta AN1 bring_current_lifted_at)" "$(meta AN1 bring_current_round_at)" "…drawing the line for any approval to come"
 eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_ESC_LOG")" "" "…and nothing reads GitHub or files a visit"
 
 echo "# guard: a check_set that does not read back hands nothing off"

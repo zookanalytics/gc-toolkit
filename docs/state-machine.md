@@ -825,10 +825,18 @@ review to keep current (its anchor is gating, or a PR stands on it):
   replay of the conflict shows the resolution kept), and the triage lane is
   reopened: it is added to `bring_current_reopened` with the round's time,
   `bring_current_round_at`, and its standing review is superseded. An anchor
-  whose `check_set` declares no triage lane (`correctness` alone, say, or the
-  `none` opt-out) gains `triage` in the same write, with a note saying why, so
-  triage rules on every conflicted round and the merge, which waits on every
-  declared lane, waits for that ruling. The guard rules on no round itself.
+  whose `check_set` declares no triage lane (`correctness` alone, say) gains
+  `triage` in the same write, with a note saying why, so triage rules on its
+  conflicted round and the merge, which waits on every declared lane, waits
+  for that ruling.
+- **Conflicted, on an opt-out anchor**: the `none` and `off` opt-outs are the
+  one case where the guard rules on a round itself. Only a person sets or
+  widens an opt-out, so the guard leaves the `check_set` as it is, and no
+  review weighs the round. Approval is the one merge rule the opt-out leaves,
+  so nothing reopens and the approval given before the round is lifted, the
+  lift line drawn as for triage's ruling below, with no visit. The ruling is
+  stored in the record marked `by: guard`, and a re-run of the same hand-off
+  carries it out again, so a lift that stopped half-way is finished.
 
 Generated renders (linguist-generated) owe no entry. A hand-off with no
 `bring_current_from` stamp that pushed nothing past the origin head it started

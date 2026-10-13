@@ -189,7 +189,8 @@ writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.s
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
 # Triage widens it (signoff.sh --add-gates), and bring-current-guard.sh adds
 # triage to a set that lacks it when a bring-current round conflicts, so triage
-# rules on every such round.
+# rules on every such round. Neither widens the none or off opt-out, which only
+# a person changes: on one, the guard lifts the approval itself.
 check_set_default = "correctness,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green

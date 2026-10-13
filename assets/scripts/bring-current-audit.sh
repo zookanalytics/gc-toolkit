@@ -7,7 +7,8 @@
 # what collided and why it chose what it chose, so it writes that down as it
 # resolves: one entry per conflicted file, and one per edit beyond the merge.
 # bring-current-guard.sh holds the hand-back to that coverage, stores the entries
-# on the anchor beside its own diff evidence, and routes the round to triage.
+# on the anchor beside its own diff evidence, and routes the round to triage, or
+# rules on it itself on an anchor that opts out of review.
 # Every message about the round is rendered here from that stored record: the
 # triage verdict posted on the PR, the note on a dismissed approval, and the
 # visit that asks for a decision the worker could not make. None is composed

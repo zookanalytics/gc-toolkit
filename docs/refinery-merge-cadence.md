@@ -390,7 +390,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    handoff runs `bring-current-guard.sh`, which refuses it until the worker's
    audit covers every conflict and, when the round conflicted, reopens triage
    to rule on what it reopens and whether the approval stands, adding triage
-   to an anchor whose `check_set` declares none; a ruling that lifts the
+   to an anchor whose `check_set` declares no triage lane, or, on the `none`
+   or `off` opt-out, lifting the approval itself; a ruling that lifts the
    approval draws `bring_current_lifted_at`, before which no approval counts,
    and files no visit
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the

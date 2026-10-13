@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bring-current-guard — holds a bring-current to the worker's audit of it, and
-# routes a conflicted one to triage, so no review covers code it never saw.
+# routes a conflicted one to triage, or lifts the approval on an anchor that
+# opts out of review, so no review or approval covers code it never saw.
 #
 # Bringing a branch current merges its base in. Run at every hand-off
 # (submit-and-exit in formulas/mol-polecat-work.toml, right after the push),
@@ -41,14 +42,24 @@
 #   (bring_current_round_at). lane-state.sh lets no approval given before that
 #   time vouch for a reopened lane, so a standing approval neither lets the
 #   merge skip triage nor keeps triage from being dispatched. An anchor whose
-#   check_set declares no triage lane (correctness alone, say, or the none
-#   opt-out) gains triage in the same write, with a note saying why, so triage
-#   rules on its round as on every other and the merge waits for that ruling.
+#   check_set declares no triage lane (correctness alone, say) gains triage in
+#   the same write, with a note saying why, so triage rules on its round as on
+#   every other and the merge waits for that ruling. The none and off opt-outs
+#   are the exception: see OPT-OUT RULING below.
 #
-# The guard weighs no round and rules on none, and the worker's rating of an
-# entry gates nothing. Triage decides what the round reopens, and records it
-# through signoff.sh, which runs `decide` here: lanes to run again, and whether
-# the human approval is lifted.
+# The guard weighs no round, and the worker's rating of an entry gates nothing.
+# Triage decides what the round reopens, and records it through signoff.sh,
+# which runs `decide` here: lanes to run again, and whether the human approval
+# is lifted.
+#
+# OPT-OUT RULING. A check_set of none or off opts the anchor out of every review
+# lane, and only a person sets or widens one (signoff.sh's widening refuses
+# to), so the guard leaves the set as it is and no review rules on the round.
+# Approval is the one merge rule the opt-out leaves, so this is the one round
+# the guard rules on itself: nothing reopens, and the approval given before the
+# round is lifted the way DECIDE lifts it, with no visit. The ruling is stored
+# in the record where triage's goes, marked by: guard, so every reader treats
+# the round as ruled.
 #
 # A ruling the guard recorded in a round's record, marked by: guard where
 # triage's goes, is carried out again by a re-run of the same hand-off: the
@@ -102,8 +113,8 @@
 # audit covers it. classify: prints none, clean, conflicted or unreadable, then
 # one evidence line per item. All three read the git repository of the working
 # directory.
-# Exit: 0 nothing owed, or the round recorded (and routed to triage, or its
-# recorded ruling carried out) ·
+# Exit: 0 nothing owed, or the round recorded (and routed to triage, or the
+# guard's own ruling on it carried out) ·
 # 1 a read or a write failed, so nothing was handed off and the caller retries ·
 # 2 usage · 3 the audit does not cover the round, or nothing records where it
 # began: the worker completes it and re-runs
@@ -652,11 +663,25 @@ cmd_guard() {
     return 0
   fi
 
+  # The none and off opt-outs (OPT-OUT RULING above) are read the way signoff.sh
+  # and gate-ensure.sh read them, with case, blanks and commas ignored. Only a
+  # person sets or widens one, so the set is left as it is, and the guard rules
+  # on the round itself: nothing reopens, and the approval is lifted.
+  cs=$(bca_meta "$AROW" check_set)
+  case "$(printf '%s' "$cs" | tr -d '[:space:],' | tr '[:upper:]' '[:lower:]')" in
+    none|off)
+      record=$(printf '%s' "$record" | jq -c --arg at "$(now)" \
+        --arg why "the anchor's check_set '$cs' opts out of every review lane, so no review weighs what the round changed, and approval is the one merge rule the opt-out leaves" \
+        '.triage = {by: "guard", reopen: [], add: [], dismiss: true, reason: $why, at: $at}' 2>/dev/null)
+      [ -n "$record" ] || { echo "$PROG: the round's record could not be composed; nothing is handed off and the caller retries" >&2; return 1; }
+      guard_ruling "$record" "$round_at"
+      return $? ;;
+  esac
+
   # An empty check_set is stamped with the default, which declares triage. A
   # set that declares no triage lane gains it in the record's write, so triage
   # rules on this round as on every other, and the merge, which waits on every
   # declared lane, waits for that ruling. The note says why the set grew.
-  cs=$(bca_meta "$AROW" check_set)
   cs_tokens=$(printf '%s' "$cs" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g; /^$/d')
   newcs=""
   if [ -n "$cs_tokens" ] && ! grep -qx -- "$TRIAGE_LANE" <<< "$cs_tokens"; then
@@ -734,7 +759,7 @@ guard_ruling() { # <record-json carrying the ruling> <round-at, empty for a new 
   if [ "$dismiss" = "true" ]; then
     dismiss_approvals "$ANCHOR" "$got" "$(bca_meta_json "$got" bring_current_record)" || return 1
   fi
-  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")), and the guard's ruling on it is carried out: $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing reopens" else join(", ") + (if length == 1 then " runs" else " run" end) + " again on the merged code" end')$([ "$dismiss" = "true" ] && echo ", and the approval given before the round is lifted")"
+  echo "$PROG: bringing ${BRANCH:-the branch} current with $TARGET conflicted (up to $(short "$TO")), and the guard's ruling on it is carried out: $(printf '%s' "$lanes_json" | jq -r 'if length == 0 then "nothing reopens" else join(", ") + (if length == 1 then " runs" else " run" end) + " again on the merged code" end')$([ "$dismiss" = "true" ] && echo ", and the approval given before the round is lifted"). Why: $(printf '%s' "$ruling" | jq -r '.reason // ""')"
   return 0
 }
 
