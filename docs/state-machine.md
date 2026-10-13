@@ -489,10 +489,11 @@ merge as it answers, as every rework child does, and a conflicting branch is no
 exception: an anchor that owes feedback skips the stale-base arm and its skip
 guards entirely. Either way the filed bead holds the merge until it closes —
 the rework child through a `blocks` edge, the visit through the `pr_number`
-stamp that `merge.sh`'s in-flight-holder probe reads. A visit takes no
-`blocks` edge: `escalate.sh` files it *depending on* its subject, so an edge
-back would be a cycle. `pr_comment_disposition` records which was chosen.
-Silence is not one of the options.
+stamp that `merge.sh`'s in-flight-holder probe reads. The visit's hold is that
+stamp alone, so a fold moves the hold with it: `visit-close.sh --into` carries
+`pr_number` to the visit it folds into before it closes the folded one.
+`pr_comment_disposition` records which was chosen. Silence is not one of the
+options.
 
 ## The status label (GitHub projection)
 
@@ -595,10 +596,12 @@ summary, and lists `base: integration` beside `status:` in its own colour.
 Checks say whether one review passed. **`pr.machine`** says what the merge cadence
 can do with the anchor as a whole on its next pass, so a reader learns whether an
 anchor is moving without re-implementing two scripts' predicates. Declared in
-`lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh` and
-`merge.sh` through `lifecycle.sh` at the points where each already reaches the
-verdict, from `pre_open_gate` onward — most wedged anchors have no PR number yet,
-so a key written only for open pull requests would miss the majority of them.
+`lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh`
+through `lifecycle.sh`, and by `merge.sh` through the lifecycle writer that
+`gctk merge` runs in-process, at the points where each already reaches the
+verdict, from `pre_open_gate` onward — most wedged anchors have no PR number
+yet, so a key written only for open pull requests would miss the majority of
+them.
 
 | Value | Meaning |
 |---|---|
@@ -646,7 +649,7 @@ sequenceDiagram
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
   C->>G: pr-open.sh — gh pr create when every check in check_set reads green
   C->>G: merge.sh — validate, merge --match-head-commit
-  C->>L: close + merged_sha, one lifecycle.sh call
+  C->>L: close + merged_sha, one lifecycle transition (gctk merge, in-process)
 ```
 
 ## Rejection and rework loops

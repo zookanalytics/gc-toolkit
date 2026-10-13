@@ -88,7 +88,8 @@ meaning = "no commits on branch; routed to human"
 status = "open"
 meaning = "a sitting is waiting on an operator decision; routed to human"
 
-# Transitions. Every edge names its writer; lifecycle.sh performs the write.
+# Transitions. Every edge names its writer; the lifecycle writer performs the
+# write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
 from = "unanchored"
@@ -207,7 +208,8 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # bring_current_lifted_at counts, dismissed or not. No check.approval marker
 # and no check_set token arm or opt out of it; GitHub branch protection is an
 # extra layer, not the authority. Declaration only, like the rest of this
-# section (the rule lives in merge.sh).
+# section (the rule lives in gctk merge's reviewVerdict, and in
+# review-verdict.sh for the shell readers).
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -341,7 +343,7 @@ machine_key = "pr.machine"
 machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
-writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
+writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
 
 [conversation]
 # Where the exchange with the operator stands, recorded on the anchor by
@@ -697,13 +699,22 @@ keys = [
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
-# anchor_bead — the gating anchor a review, rework, finding or visit child
-#   names, so every reader can enumerate an anchor's children by
-#   `--metadata-field anchor_bead=<id>`. Written by gate-ensure.sh, finding.sh,
-#   review-outcome.sh, signoff.sh and pr-facts.sh. Empty on a child is the
-#   unstamped-orphan signal those readers adopt; on a review bead signoff.sh
-#   falls back to the up `blocks` edge and refuses the verdict if none resolves.
-#   Never cleared. A bead id.
+# anchor_bead — the gating anchor a review, rework, finding, validation or visit
+#   child names; the key is what makes it a child. The child also has an edge
+#   onto the anchor, its membership edge, of any type. bd keeps one edge per
+#   ordered pair, so an edge the pair already carries is the membership edge.
+#   A visit whose subject is the anchor is usually joined by the `tracks` edge
+#   escalate.sh puts from the visit onto its subject. A pair with no edge is
+#   joined with `related`. A reader enumerates the live children by
+#   `--metadata-field anchor_bead=<id>`, and the closed ones through that edge
+#   (every dependent of the anchor, whatever the edge's type)
+#   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
+#   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh,
+#   pr-facts.sh, pre-open-rebase.sh and visit-close.sh, each on a child joined to
+#   the anchor no later than the stamp. Empty on a child is the unstamped-orphan
+#   signal those readers adopt; on a review bead signoff.sh falls back to the up
+#   `blocks` edge and refuses the verdict if none resolves. Never cleared. A
+#   bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.
@@ -815,9 +826,11 @@ keys = [
   # closes.
   "finding.pr_comment",
   # Set by the same write-back once a posted finding has closed and its comment
-  # carries the answer: `1` when it was answered, `gone` when the comment had been
-  # removed from the PR and nothing was left to answer. A finding carrying it
-  # costs the write-back no GitHub read.
+  # carries the answer: `1` when it was answered and its thread, if it has one,
+  # is resolved, carries a later post that is not the city's own, or stays open
+  # for the operator because the finding was declined or deferred, and `gone`
+  # when the comment had been removed from the PR and nothing was left to
+  # answer. A finding carrying it costs the write-back no GitHub read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection, the deferral
