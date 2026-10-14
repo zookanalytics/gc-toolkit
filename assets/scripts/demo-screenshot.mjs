@@ -145,16 +145,31 @@ function freshStyle() {
   return { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, strike: false, inverse: false };
 }
 
-/** Apply one SGR parameter list (`1;31`, `38;5;208`, `` for reset) to a style. */
+/** A colour given as sub-parameters: `5:n`, `2:r:g:b`, or `2:<colour space>:r:g:b`. */
+function subColor(sub) {
+  if (sub[0] === 5 && sub.length >= 2) return color256(sub[1] & 255);
+  if (sub[0] === 2 && sub.length >= 5) return rgb(sub[2], sub[3], sub[4]);
+  if (sub[0] === 2 && sub.length === 4) return rgb(sub[1], sub[2], sub[3]);
+  return null;
+}
+
+/**
+ * Apply one SGR parameter list (`1;31`, `38;5;208`, `38:2::255:135:0`, `` for
+ * reset) to a style. A `;` separates parameters and a `:` separates one
+ * parameter's sub-parameters, so `4:3`, a curly underline, is one parameter. A
+ * private marker (`<=>?`) makes the sequence another one, such as xterm's
+ * `CSI > 4 ; 2 m`, which sets nothing that is drawn.
+ */
 function applySgr(style, params) {
-  const p = params === '' ? [0] : params.split(/[;:]/).map((x) => (x === '' ? 0 : Number(x)));
+  if (!/^[0-9;:]*$/.test(params)) return;
+  const p = (params === '' ? '0' : params).split(';').map((g) => g.split(':').map((x) => (x === '' ? 0 : Number(x))));
   for (let i = 0; i < p.length; i++) {
-    const c = p[i];
+    const [c, ...sub] = p[i];
     if (c === 0) Object.assign(style, freshStyle());
     else if (c === 1) style.bold = true;
     else if (c === 2) style.dim = true;
     else if (c === 3) style.italic = true;
-    else if (c === 4) style.underline = true;
+    else if (c === 4) style.underline = sub[0] !== 0;
     else if (c === 7) style.inverse = true;
     else if (c === 9) style.strike = true;
     else if (c === 22) { style.bold = false; style.dim = false; }
@@ -168,12 +183,17 @@ function applySgr(style, params) {
     else if (c >= 100 && c <= 107) style.bg = PALETTE[c - 100 + 8];
     else if (c === 39) style.fg = null;
     else if (c === 49) style.bg = null;
-    else if (c === 38 || c === 48) {
+    else if (c === 38 || c === 48 || c === 58) {
+      // The colour is in this parameter's sub-parameters or in the parameters
+      // that follow it. 58 colours the underline, which is drawn in the text's
+      // colour, so its colour is only skipped.
       let col = null;
-      if (p[i + 1] === 5 && i + 2 < p.length) { col = color256(p[i + 2] & 255); i += 2; }
-      else if (p[i + 1] === 2 && i + 4 < p.length) { col = rgb(p[i + 2], p[i + 3], p[i + 4]); i += 4; }
+      if (sub.length) col = subColor(sub);
+      else if (p[i + 1]?.[0] === 5 && i + 2 < p.length) { col = color256(p[i + 2][0] & 255); i += 2; }
+      else if (p[i + 1]?.[0] === 2 && i + 4 < p.length) { col = rgb(p[i + 2][0], p[i + 3][0], p[i + 4][0]); i += 4; }
       else break;
-      if (c === 38) style.fg = col; else style.bg = col;
+      if (col && c === 38) style.fg = col;
+      else if (col && c === 48) style.bg = col;
     }
   }
 }
@@ -194,7 +214,7 @@ function styleCss(s) {
 
 // An escape sequence: CSI (ESC [ … final), OSC (ESC ] … BEL or ST), or any
 // other ESC, its intermediate bytes and its final byte, such as ESC ( B. Only a
-// CSI ending in `m` (SGR) changes what is drawn.
+// CSI ending in `m` with no private marker (SGR) changes what is drawn.
 const ESCAPE = /\x1b\[([0-9;:?<=>]*)[ -\/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[ -\/]*[0-~]?/g;
 
 /**
@@ -208,8 +228,9 @@ export function ansiToHtml(text, maxLines = Infinity) {
   let widest = 0;
   const out = shown.map((line) => {
     // A carriage return draws over the line from its start; keep what the last
-    // redraw shows, with the styles every earlier segment set.
-    const segs = line.split('\r');
+    // redraw shows, with the styles every earlier segment set. A return that
+    // ends the line redraws nothing, so the line stands.
+    const segs = line.replace(/\r+$/, '').split('\r');
     for (const dropped of segs.slice(0, -1)) {
       for (const m of dropped.matchAll(ESCAPE)) if (m[2] === 'm') applySgr(style, m[1]);
     }

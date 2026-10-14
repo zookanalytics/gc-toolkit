@@ -342,6 +342,13 @@ else
   eq "$r" 'abcd' "every escape that is not SGR draws nothing"
   r=$(js "m.ansiToHtml('10%\r\x1b[31m50%\r100%').html")
   eq "$r" '<span style="color:#cd3131">100%</span>' "a carriage return keeps the last redraw, with the styles earlier segments set"
+  r=$(js "m.ansiToHtml('abc\r\r\nnext\r').html")
+  eq "$r" 'abc
+next' "a carriage return that ends a line redraws nothing"
+  r=$(js "m.ansiToHtml('\x1b[38:2::1:2:3ma\x1b[48:5:208mb\x1b[39;49;4:3mc\x1b[4:0md').html")
+  eq "$r" '<span style="color:#010203">a</span><span style="color:#010203;background:#ff8700">b</span><span style="text-decoration:underline">c</span>d' "a colon joins one parameter's sub-parameters: a colour, an underline style"
+  r=$(js "m.ansiToHtml('\x1b[58;2;1;2;3ma\x1b[58:5:1mb\x1b[>4;2mc').html")
+  eq "$r" 'abc' "an underline colour is skipped, and a CSI with a private marker sets nothing"
   r=$(js "m.ansiToHtml('<a href=\"x\">&</a>').html")
   eq "$r" '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;' "text is HTML-escaped"
   r=$(js "m.ansiToHtml('a\x07b\x08c\x00d').html")

@@ -25,8 +25,8 @@ attaches one file.
 Playwright MCP launches Google Chrome, which this host does not have
 (tk-qrga4h5). The SprintShow engine's Playwright launches the
 chromium-headless-shell build that `rig-demo-capture.sh` already provisions, so
-the screenshot resolves the engine and provisions the browser exactly as the
-video capture does. Two shorter paths were set aside:
+the screenshot finds the engine where the video capture finds it and provisions
+the browser with the same command. Two shorter paths were set aside:
 
 - The engine's proof mode burns a caption into each frame, assembles an MP4,
   which needs ffmpeg, and keeps its frames only when a step fails or `--keep`
@@ -81,11 +81,12 @@ Each PNG was opened and judged.
 | A triage verdict written by hand in the shape PR 1251's summary describes | markdown, then `--expand` | 0, 0 | The first line, two collapsed `<details>` blocks and the anchor line; expanded, the table and trail inside them (1604x334 px, 1604x588 px). |
 | The engine's sample app, its own demo script with one assertion made false | page, `--selector '#board'` | 3 | The board reading "3 tasks · 1 done" against a script that asserted 2 done (1280x658 px). |
 
-`demo-screenshot.test.sh` holds 134 assertions, run under `env -i` with stubs
-for node, npm, npx, gc and gh. Fifteen mutants of the two scripts each turn it
-red, among them a dropped stale-PNG removal, an open stdin, a lost stderr, a
-skipped PNG check, a lost engine argument, a missing repository context and a
-greedy `--expand`.
+`demo-screenshot.test.sh` runs the script's cases under `env -i` with stubs for
+node, npm, npx, gc and gh, and the driver's renderers in a real node. Each
+mutant of the two scripts turns it red, among them a dropped stale-PNG removal,
+an open stdin, a lost stderr, a skipped PNG check, a lost engine argument, a
+missing repository context, a greedy `--expand`, a carriage return that ends a
+line read as an empty redraw, and SGR sub-parameters read as parameters.
 
 **Not proven live: the attach.** No PNG has been attached to a real PR in this
 city. `demo-deliver.sh` is unchanged, and the gh on this host (2.102.0)
