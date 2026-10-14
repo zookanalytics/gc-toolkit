@@ -18,9 +18,11 @@
 # Exec, not a formula: two `bd list`s plus one `gc-helm open` per gate still
 # owed a visit needs no LLM. Cooldown, not event: the stamp makes a re-run a
 # no-op, and a gate missed on one pass is caught on the next.
-# Rig-scoped: one pass per importing rig against its own store; the runtime's
-# open-tracking gate is the single-flight guard, so keep `timeout` under the
-# tracking sweep's stale-after (10m). Tune interval from city.toml
+# Rig-scoped: one pass per importing rig against its own store. The runtime's
+# open-tracking gate is the single-flight guard, and it holds only while a run's
+# tracking bead stays open. On a gc build that does not extend the window to the
+# order's timeout, the controller watchdog closes that bead 2m after dispatch,
+# so keep `timeout` at or under 2m. Tune interval from city.toml
 # [[orders.overrides]].
 [order]
 description = "File one converse visit per open human gate on its gated bead, recorded as gc.gate_visit (opt out with gc.gate_visit=skip; unset it to re-offer)"
