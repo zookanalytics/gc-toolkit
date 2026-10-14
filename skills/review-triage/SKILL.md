@@ -100,8 +100,8 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
 - **Adding nothing needs no flag** — approve on its own is the full verdict.
 
 Your verdict body is the triage trail, collapsed under the line `signoff.sh`
-opens the comment with: what you read, each check you added or left out and
-why, and any test runs. Triage files no findings, so it has no findings block.
+opens the comment with: what you read, and each check you added or left out
+and why. Triage files no findings, so it has no findings block.
 
 ## A bring-current round that conflicted
 

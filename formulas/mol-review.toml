@@ -196,7 +196,7 @@ Anything else the review writes to disk goes in the workspace beside `wt`
 
 **3. Apply the check's method.** The method the dispatch note's check section
 names, with any rig extension appended, decides what you read and run here,
-which findings block, the lines it adds below the verdict envelope in step 6,
+which findings block, the lines it adds to the verdict envelope in step 6,
 and the flags the verdict call passes. Run its blocks after the pin block and
 step 2's blocks, in the same shell, and run nothing it does not call for.
 

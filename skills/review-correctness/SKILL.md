@@ -173,9 +173,10 @@ P1 goes in `findings.json`; a P2 does not.
 
 ## The verdict body
 
-The envelope's `Findings:` line lists every P0, P1 and P2, each with its
-grade, location, impact and fix. Below the envelope, add the line that records
-the test evidence:
+The envelope's Findings block lists every P0, P1 and P2, each with its grade,
+location, impact and fix, and its summary counts them per grade, as in
+`1 P1, 2 P2`. The trail ends with the line that records the test evidence,
+after `Filed:`:
 
 ```
 Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
