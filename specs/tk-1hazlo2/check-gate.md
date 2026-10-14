@@ -123,10 +123,15 @@ one (a rig value outranks the routed one in a pour), else the branch
 - **The process group and the relay** follow `gitIn` on PR #1212 (Setpgid,
   TERM to the group, SIGTERM/SIGINT relayed, exit 128+N). That PR is unmerged,
   so the runner lives in `internal/rig`, and no package-level name in
-  `internal/cli` collides with that branch's. A writer that is not a file is
-  fed through a pipe whose wait `WaitDelay` bounds. The CLI hands its own
-  stdout and stderr files to the command directly, so a child the command
-  leaves running cannot hold the gate open.
+  `internal/cli` collides with that branch's. A relayed signal stops the group
+  the way a timeout does, SIGTERM and then SIGKILL after the grace, and `Run`
+  returns only once the command has been waited for. Returning as soon as the
+  signal was relayed left a command that ignores SIGTERM running, and let the
+  command's output copier write into a caller's buffer after `Run` had
+  returned, which `go test -race` caught in the CLI's signal test. A writer
+  that is not a file is fed through a pipe whose wait `WaitDelay` bounds. The
+  CLI hands its own stdout and stderr files to the command directly, so a
+  child the command leaves running cannot hold the gate open.
 
 ## Measured cost
 
@@ -152,6 +157,10 @@ the gate makes costs those plus the real `gc formula show`, `bash -n` and the
 record write, about half a second around the command itself. An answer from a
 record skips everything after the lookup.
 
+The end-to-end figures grow with the host's load. At load average 77-79 on the
+same host, `gctk rig lint --check` answered from a record in a clone of
+gc-toolkit took median 834 ms (min 440, max 1209), n=15.
+
 ## What the cutover inherits
 
 - **self-review-check.sh** runs in the condition sandbox, where `gc` can fail.
@@ -165,6 +174,12 @@ record skips everything after the lookup.
 - **The refinery** calls `--pre-existing <tracker>` after its tracker path. It
   should keep the gate's `--timeout` under its detached job's two-hour bound,
   so the job's own stop does not race the gate's.
+- **A stop does not reach this rig's in-flight suites.**
+  `tools/run-tests.sh` runs each suite in a process group of its own under
+  `set -m` and passes no stop on to them. A relayed signal or a timeout ends
+  the runner and leaves its runs going until their own timeouts, and
+  `detached-job.sh`'s stop leaves them the same way. tk-rq1d2g4 carries the
+  fix in the runner.
 - **The self-review** passes `--affected --base {{base_branch}}` and
   `--publish-bead $WORK_BEAD_ID`.
 - **docs/component-model.md §4** places what a running city executes. Nothing
