@@ -1045,6 +1045,8 @@ const (
 	mdSignoffCap      = "signoff_cap"
 	mdRebaseHold      = "rebase_hold"
 	mdPRMergeState    = "pr_merge_state"
+	mdOpenedAsDraft   = "opened_as_draft"
+	mdDraftReadied    = "draft_readied"
 
 	// The posture vocabulary pr-facts.sh records, mirroring
 	// lifecycle/lifecycle.toml [posture].postures.
@@ -2162,15 +2164,15 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 		kids := reworkKids[tiles[i].ID]
 		prP := prPhase(a, kids)
 		phase := beadPhase(a, f, kids)
-		// prstatus.Derive names the phase from posture, merge-state, holds and an
-		// in-flight count. A blocked machine verdict is a hold it cannot see from
-		// those alone — an unrouted blocker carries no count it reads, and a base
-		// gone BEHIND is not its BLOCKED case — so the board lifts a blocked row to
-		// needs-attention off the machine axis it already reads. The lift touches
-		// both tri-states a live merge anchor carries — the PR-axis PRPhase behind
-		// the chip and the per-bead Phase the frontier speaks — so a row the machine
-		// calls blocked cannot read needs-attention on one and awaiting-review on the
-		// other.
+		// prstatus.Derive names the phase from posture, merge-state, holds, the
+		// draft stage and an in-flight count. A blocked machine verdict is a hold
+		// it cannot see from those alone — an unrouted blocker carries no count it
+		// reads, and a base gone BEHIND is not its BLOCKED case — so the board lifts
+		// a blocked row to needs-attention off the machine axis it already reads.
+		// The lift touches both tri-states a live merge anchor carries — the
+		// PR-axis PRPhase behind the chip and the per-bead Phase the frontier
+		// speaks — so a row the machine calls blocked cannot read needs-attention
+		// on one and awaiting-review on the other.
 		if isBlocked(tiles[i].PRMachine) {
 			prP = PhaseNeedsAttention
 			phase = PhaseNeedsAttention
@@ -2362,13 +2364,14 @@ func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 
-// phaseFacts gathers the prstatus.Facts a row projects. The holds and the dated
-// posture/merge-state are read straight off the anchor — prstatus splits the '@'
-// and applies the hold truthiness itself, so the stored values pass through as
-// they are. The in-flight count is the one input that differs by row shape: a
-// merge anchor counts its open review/rework children (each names it in
-// [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
-// live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
+// phaseFacts gathers the prstatus.Facts a row projects. The holds, the dated
+// posture/merge-state and the draft-stage markers are read straight off the
+// anchor — prstatus splits the '@' and applies the hold truthiness itself, so
+// the stored values pass through as they are. The in-flight count is the one
+// input that differs by row shape: a merge anchor counts its open review/rework
+// children (each names it in [mdAnchorBead]), the set prPhase has always fed;
+// any other bead reads the live-workflow signal standing over its own bead
+// ([Facts.anchorInFlight]).
 func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	inFlight := openReworkKids
 	if !isMergeAnchor(a) {
@@ -2380,6 +2383,8 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 		RebaseHold:    a.Metadata[mdRebaseHold],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
+		OpenedAsDraft: a.Metadata[mdOpenedAsDraft],
+		DraftReadied:  a.Metadata[mdDraftReadied],
 		InFlightCount: inFlight,
 	}
 }

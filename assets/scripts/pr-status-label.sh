@@ -6,8 +6,8 @@
 #   status:  who must act on the PR next — the city holds the ball, a human should
 #            review the head, or a human must weigh in before the PR can settle.
 #            One value at a time, and pr-facts.sh recomputes it every cadence pass
-#            from the anchor's posture, holds, and rework children. It is workflow
-#            state, never an approval, and never asserts a PR may merge:
+#            from the anchor's posture, holds, draft stage and rework children. It
+#            is workflow state, never an approval, and never asserts a PR may merge:
 #            machine-readiness rides pr.machine and the draft flag. The tri-state
 #            itself — the values, what each projects from, and their precedence —
 #            is decided by one Go package, services/gctk/prstatus, reached through
