@@ -932,12 +932,17 @@ distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
 carries it now. The fifth, `not-needed`, says nothing carries it: the bead
 was not needed, and the pointer names the evidence that concluded so,
 typically the visit bead from the sitting that ruled. The pointer is required
-under every kind, because it is the whole of that distinction. The read side
-searches every store before concluding a close was false. Consumers: the
-mechanik/converse close paths
+under every kind, because it is the whole of that distinction. The kind is
+read from the close reason, which opens with the kind's phrase and the
+successor, as in `not needed, per <successor> in <store>`. When the pointer is
+added after an earlier close, a `Disposition recorded` note carries that reason
+instead. The read side searches every store before concluding a close was
+false. Consumers: the mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), and any patrol judging a closed bead.
+twins), `preexisting-failure.sh` (a pre-existing-failure gate follows a closed
+tracker's pointer to the live bead that carries its failure, and a
+`not-needed` close ends that chain), and any patrol judging a closed bead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,
