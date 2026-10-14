@@ -109,7 +109,7 @@ export function resolveDrillTarget(search: string): string | null {
 // is how the two would drift.
 function owedSince(tile: Tile): string {
   // pr_owed_since first: on a merge anchor it is the only stamp that dates the
-  // TURN. A wedged anchor is touched by every reconcile pass, so updated_at
+  // TURN. An owed anchor is touched by every reconcile pass, so updated_at
   // reports the most neglected row as the freshest one.
   const stamp = tile.pr_owed_since ?? tile.takeaway_at ?? tile.updated_at;
   return stamp ? stamp.slice(0, 10) : 'unknown';
@@ -125,7 +125,7 @@ function isPRRow(tile: Tile): boolean {
  *
  * Before the PR opens the branch is the identity, and it links to the branch's
  * GitHub tree view when the rig's repository is known — the common case among
- * wedged rows, not an edge one. A row that can name neither says so; it is the
+ * pre-open rows, not an edge one. A row that can name neither says so; it is the
  * anchor at a human state that records no branch, and there the absence is the
  * whole answer. The conversation lives in GitHub and the link is the one click
  * to it; the board never reproduces a comment thread.

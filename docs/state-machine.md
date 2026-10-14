@@ -625,23 +625,21 @@ anchor is moving without re-implementing two scripts' predicates. Declared in
 `lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh`
 through `lifecycle.sh`, and by `merge.sh` through the lifecycle writer that
 `gctk merge` runs in-process, at the points where each already reaches the
-verdict, from `pre_open_gate` onward — most wedged anchors have no PR number
-yet, so a key written only for open pull requests would miss the majority of
-them.
+verdict, from `pre_open_gate` onward — an anchor can stall before its PR number
+exists, so a key written only for open pull requests would miss the pre-open
+ones.
 
 | Value | Meaning |
 |---|---|
 | `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
 | `settled` | every declared check reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `blocked` | a hold no review verdict clears: an unresolved required review thread, a base gone `BEHIND`, or a branch that conflicts with the base with no merge-in rework in flight. The cause rides `pr.machine_reason`, and the board owes it to the operator as needs-attention rather than folding it into the awaiting-review tail |
-| `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
 
-`wedged-exception` names the anchor's wedge in the value itself: no automated
-actor will move it, and the value says what releases it, so a reader acts
-without re-deriving the shape. A standing non-city `CHANGES_REQUESTED` is not a
-wedge — the city answers it by filing rework every round without bound, so the
-anchor reads `progressing`, and the standing review is carried on the posture
-axis.
+A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
+what it waits on. While a fix unit answering it is in flight the anchor reads
+`progressing`. Once nothing is in flight the merge pass records `settled`, the
+PR waits on that reviewer's re-review, and the standing review rides the
+posture axis.
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
 `<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`

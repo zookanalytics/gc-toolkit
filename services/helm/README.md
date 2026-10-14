@@ -235,12 +235,12 @@ Six kinds are gathered. The first three are selected by the bead's issue
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
-yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+yet, so a number-keyed query cannot see a gate that stalls before the PR opens.
 `pr_branch` is what identifies those rows, and it travels as its own field
 because a table without a `frontier` column has nothing else to name them with.
-It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
-— keeps its `human` row through the dedup instead of flipping kind between
-passes.
+It is gathered LAST, so a merge anchor routed to a person — which carries
+`gc.routed_to=human` too — keeps its `human` row through the dedup instead of
+flipping kind between passes.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
@@ -498,7 +498,7 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
@@ -523,11 +523,9 @@ not grow with the number of pull requests.
 `progressing` whatever the last gate pass recorded, because that half of the
 derivation is a bead read the gather already makes. The route is the
 discriminator: an anchor also blocks on ordinary prerequisites and on the demand
-bead that makes it `asking`, and no pool will claim either. A recorded wedge
-always stands, since an operator who loses sight of a wedge has lost the row this
-surface exists to show.
+bead that makes it `asking`, and no pool will claim either.
 
-**Whose move.** A row is owed by the operator when the machine axis is wedged,
+**Whose move.** A row is owed by the operator when the machine axis is blocked,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
@@ -562,9 +560,9 @@ on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
-wedge, a demand, a takeaway or a human route already owns the row and names it, so
-the signal defers to each; it is a merge anchor either way, so it reads in the
-`review` band beside the wedged pre-open rows.
+demand, a takeaway or a human route already owns the row and names it, so the
+signal defers to each; it is a merge anchor either way, so it reads in the
+`review` band beside the other pre-open rows.
 
 **`pr_conversation` reads the recorded position.** `asking` is the demand edge,
 rendered wherever it is there. `quiet`, `outstanding` and `answered` are read

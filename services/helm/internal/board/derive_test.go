@@ -2183,7 +2183,7 @@ func TestCapFamiliesKeepsFamiliesWhole(t *testing.T) {
 // does not.
 
 const (
-	// A 40-hex oid, the grammar the gate markers and the dated keys share.
+	// A 40-hex oid, the shape the dated keys carry.
 	headLive = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	headOld  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
@@ -2312,13 +2312,13 @@ func mustTile(t *testing.T, b Board, id string) Tile {
 	return tile
 }
 
-// A closed anchor is never owed, and the merge axes are no exception. A wedge
-// is a live claim on the operator's time; on a bead that has closed it is a
-// leftover marker, and admitting it would put a finished row at the head of a
-// queue ordered by how long each has waited.
+// A closed anchor is never owed, and the merge axes are no exception. A blocked
+// verdict is a live claim on the operator's time; on a bead that has closed it
+// is a leftover marker, and admitting it would put a finished row at the head of
+// a queue ordered by how long each has waited.
 func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	a := mergeAnchor("tk-shut", map[string]string{
-		"pr.machine":   dated(MachineWedgedException, headLive, fixtureNow.Add(-72*time.Hour)),
+		"pr.machine":   dated(MachineBlocked, headLive, fixtureNow.Add(-72*time.Hour)),
 		"gc.routed_to": "human",
 	})
 	a.ClosedAt = fixtureNow.Add(-24 * time.Hour)
@@ -2334,8 +2334,8 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 		t.Errorf("needs says a closed row leaves on its own: got %q", tile.Needs)
 	}
 	// The axes still travel: the row is closed, not unreadable.
-	if tile.PRMachine != MachineWedgedException {
-		t.Errorf("pr_machine = %q, want the recorded wedge", tile.PRMachine)
+	if tile.PRMachine != MachineBlocked {
+		t.Errorf("pr_machine = %q, want the recorded verdict", tile.PRMachine)
 	}
 }
 
@@ -2420,52 +2420,31 @@ func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
 	}
 }
 
-// TestWedgedAnchorIsOwedAndNamed covers the exception wedge.
-//
-// It is the state six of the seven wedged anchors were in, and five of those
-// six had no pull request open, which is why the row is keyed on the anchor and
-// carries the branch instead. It was visible as nothing but "routed to a
-// person", which reads the same for an anchor awaiting a ruling and for one
-// nothing will ever move.
-func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-72 * time.Hour)
-	anchors := []Anchor{
-		mergeAnchor("tk-exc", map[string]string{
-			"merge_result":   "pre_open_gate",
-			"pr.machine":     dated(MachineWedgedException, headLive, wedgedAt),
-			"gc.routed_to":   "human",
-			"merge_hold":     "true",
-			"signoff_cap":    "codex",
-			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
-		}),
-	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+// TestPreOpenRowIsIdentifiedByBranch. An anchor at pre_open_gate has no pull
+// request open, so the row is keyed on the anchor and carries the branch
+// instead: as a field, because the tables with no frontier column are the ones
+// the operator reads first, and in the frontier beside the age the queue is
+// sorted by. A pre-open check stalled three days is the owed shape here.
+func TestPreOpenRowIsIdentifiedByBranch(t *testing.T) {
+	pre := mergeAnchor("tk-pre", map[string]string{
+		"merge_result": "pre_open_gate",
+		"check_set":    "correctness",
+	})
+	pre.UpdatedAt = fixtureNow.Add(-72 * time.Hour)
+	tile := mustTile(t, BuildBoard([]Anchor{pre}, fixtureNow, false, nil, Facts{}), "tk-pre")
 
-	exc := mustTile(t, b, "tk-exc")
-	if exc.PRMachine != MachineWedgedException {
-		t.Errorf("pr_machine = %q, want %q", exc.PRMachine, MachineWedgedException)
+	if !tile.Owed {
+		t.Fatal("a pre-open check stalled three days is owed by the operator")
 	}
-	if !exc.Owed {
-		t.Error("a wedged anchor is owed by the operator: nothing else will move it")
-	}
-	if !strings.Contains(exc.Needs, "wedged") || !strings.Contains(exc.Needs, "review cap") {
-		t.Errorf("needs must name the wedge and its shape, got %q", exc.Needs)
-	}
-	if !exc.PROwedSince.Equal(wedgedAt) {
-		t.Errorf("pr_owed_since = %v, want the wedge stamp %v", exc.PROwedSince, wedgedAt)
-	}
-	// No PR number: the identity is the branch, which is the majority case. It
-	// travels as a field as well as in the prose, because the tables that have
-	// no frontier column are the ones the operator reads first.
-	if exc.PRNumber != 0 || !strings.Contains(exc.Frontier, "polecat/tk-exc") {
+	if tile.PRNumber != 0 || !strings.Contains(tile.Frontier, "polecat/tk-pre") {
 		t.Errorf("a pre-open row identifies itself by branch, got number=%d frontier=%q",
-			exc.PRNumber, exc.Frontier)
+			tile.PRNumber, tile.Frontier)
 	}
-	if exc.PRBranch != "polecat/tk-exc" {
-		t.Errorf("pr_branch = %q, want the branch the row is identified by", exc.PRBranch)
+	if tile.PRBranch != "polecat/tk-pre" {
+		t.Errorf("pr_branch = %q, want the branch the row is identified by", tile.PRBranch)
 	}
-	if !strings.Contains(exc.Frontier, "owed 3d") {
-		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
+	if !strings.Contains(tile.Frontier, "owed 3d") {
+		t.Errorf("the row carries the age the queue is sorted by, got %q", tile.Frontier)
 	}
 }
 
@@ -2871,11 +2850,11 @@ func TestApprovalUnknownWhenThePostureIsStaleOrAbsent(t *testing.T) {
 
 // TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove. The reconcile cadence
 // re-derives the same verdict at the same head every few minutes; a clock that
-// restarts there reports a three-day wedge as new and sorts the most neglected
+// restarts there reports a three-day wait as new and sorts the most neglected
 // row last.
 func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-72 * time.Hour)
-	held := dated(MachineWedgedException, headLive, wedgedAt)
+	blockedAt := fixtureNow.Add(-72 * time.Hour)
+	held := dated(MachineBlocked, headLive, blockedAt)
 
 	first := mustTile(t, BuildBoard([]Anchor{
 		mergeAnchor("tk-w", map[string]string{"pr.machine": held}),
@@ -2894,31 +2873,32 @@ func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
 			first.PROwedSince, second.PROwedSince)
 	}
 
-	// A head move releases a wedge, so a wedge at the NEW head is a new turn.
+	// A verdict is pinned to the head it judged, so one at the NEW head is a new
+	// turn.
 	moved := mustTile(t, BuildBoard([]Anchor{
 		mergeAnchor("tk-w", map[string]string{
-			"pr.machine": dated(MachineWedgedException, headOld, later),
+			"pr.machine": dated(MachineBlocked, headOld, later),
 		}),
 	}, later, false, nil, Facts{}), "tk-w")
 	if !moved.PROwedSince.Equal(later) {
-		t.Errorf("a wedge at a new head starts a fresh clock: got %v, want %v",
+		t.Errorf("a verdict at a new head starts a fresh clock: got %v, want %v",
 			moved.PROwedSince, later)
 	}
 }
 
-// TestOwedSinceTakesTheEarliestCause. A row wedged three days ago and asked
+// TestOwedSinceTakesTheEarliestCause. A row blocked three days ago and asked
 // about an hour ago has been owed for three days, and the queue ranks it there.
 func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+	blockedAt := fixtureNow.Add(-72 * time.Hour)
 	askedAt := fixtureNow.Add(-1 * time.Hour)
 	a := mergeAnchor("tk-both", map[string]string{
-		"pr.machine": dated(MachineWedgedException, headLive, wedgedAt),
+		"pr.machine": dated(MachineBlocked, headLive, blockedAt),
 	}, Blocker{ID: "tk-d", Title: "and a question", Status: "open",
 		RoutedTo: "human", CreatedAt: askedAt})
 
 	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-both")
-	if !tile.PROwedSince.Equal(wedgedAt) {
-		t.Errorf("pr_owed_since = %v, want the EARLIEST cause %v", tile.PROwedSince, wedgedAt)
+	if !tile.PROwedSince.Equal(blockedAt) {
+		t.Errorf("pr_owed_since = %v, want the EARLIEST cause %v", tile.PROwedSince, blockedAt)
 	}
 }
 
@@ -3072,7 +3052,7 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
 	b := BuildBoard([]Anchor{
-		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, recent)}),
+		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineBlocked, headLive, recent)}),
 		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
 				out := make([]Child, 40)
@@ -3081,7 +3061,7 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 				}
 				return out
 			}()},
-		mergeAnchor("tk-old", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, old)}),
+		mergeAnchor("tk-old", map[string]string{"pr.machine": dated(MachineBlocked, headLive, old)}),
 	}, fixtureNow, false, nil, Facts{})
 
 	q := OperatorQueue(b.Tiles)
@@ -3090,31 +3070,31 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 		got = append(got, t.ID)
 	}
 	if !slices.Equal(got, []string{"tk-old", "tk-new"}) {
-		t.Errorf("the queue is the wedged rows, oldest-owed first: got %v", got)
+		t.Errorf("the queue is the blocked rows, oldest-owed first: got %v", got)
 	}
 	if _, ok := tileByID(Board{Tiles: q}, "tk-big"); ok {
 		t.Error("a container nobody is owed anything on is not in the operator's queue")
 	}
 }
 
-// TestWedgedAnchorGathersTwiceAndCollapsesToOneRow.
+// TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow.
 //
-// A wedged anchor carries `gc.routed_to=human` AND `merge_result`, so the
-// gather admits it under both kinds and hands BuildBoard two anchors with one
-// id. Both rows read the same metadata, so they band the same and tie on
+// A merge anchor routed to a person carries `gc.routed_to=human` AND
+// `merge_result`, so the gather admits it under both kinds and hands BuildBoard
+// two anchors with one id. Both rows read the same metadata, so they band the same and tie on
 // rank_score — which means the stable sort, not the band, decides which
 // survives, and the gather's ordering is load-bearing rather than incidental.
 //
 // The row that survives has to keep both halves: the `human` kind every
 // human-gate rule keys on, and the PR axes, which are what this surface adds.
 // Losing either is silent — the operator just sees one fewer fact.
-func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+func TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
+	blockedAt := fixtureNow.Add(-72 * time.Hour)
 	md := map[string]string{
-		"merge_result": "pre_open_gate",
+		"merge_result": "pull_request",
 		"branch":       "polecat/tk-w",
 		"gc.routed_to": "human",
-		"pr.machine":   dated(MachineWedgedException, headLive, wedgedAt),
+		"pr.machine":   dated(MachineBlocked, headLive, blockedAt),
 	}
 	humanRow := mergeAnchor("tk-w", md)
 	humanRow.Kind, humanRow.Source = "human", "human"
@@ -3129,7 +3109,7 @@ func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	if tile.Kind != "human" {
 		t.Errorf("kind = %q, want human — the gather orders it first so the kind cannot flip between passes", tile.Kind)
 	}
-	if tile.PRMachine != MachineWedgedException || !tile.PROwedSince.Equal(wedgedAt) {
+	if tile.PRMachine != MachineBlocked || !tile.PROwedSince.Equal(blockedAt) {
 		t.Errorf("the surviving row lost its axes: machine=%q since=%v", tile.PRMachine, tile.PROwedSince)
 	}
 	if !tile.Owed {
@@ -3138,8 +3118,8 @@ func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	// Both derivations agree it is owed, so neither ordering could drop it from
 	// the queue — but they must also agree on the phrase, or the row a reader
 	// sees depends on which copy won.
-	if !strings.Contains(tile.Needs, "wedged") {
-		t.Errorf("needs = %q, want the wedge named", tile.Needs)
+	if !strings.Contains(tile.Needs, "blocked") {
+		t.Errorf("needs = %q, want the block named", tile.Needs)
 	}
 }
 

@@ -795,22 +795,9 @@ STRAY
   mr=$(meta_of "$row" merge_result)
   head=$(live_head_for "$branch")
   # The machine axis this pass reaches for the anchor as a whole. The check loop
-  # already derives each lane as green (settled) or short of green; these two
-  # flags keep that answer instead of discarding it at the end of the iteration.
-  #
-  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
-  # HERE, per anchor, not inside the per-check loop: the park sits on the
-  # anchor's own merge_hold, not on any one lane, so a fully green capped
-  # anchor (one check hand-greened, or all of them) must still record the
-  # wedge even though the loop below never reaches a hold check for it.
-  # merge_hold's value must be the literal string "signoff_cap" — an
-  # operator's own hold (merge_hold=true) beside a stale orphan signoff_cap
-  # is not the cap's park.
-  mach_wedge=0
+  # already derives each lane as green (settled) or short of green; this flag
+  # keeps that answer instead of discarding it at the end of the iteration.
   mach_progress=0
-  if [ "$hold" = "signoff_cap" ] && [ -n "$(meta_of "$row" signoff_cap)" ]; then
-    mach_wedge=1
-  fi
   # Quiescence is anchor-wide and read at most once per anchor, lazily: the first
   # non-green lane to reach the dispatch decision computes it, and a fully green
   # anchor computes it once at the settle decision below (settling asserts nothing
@@ -933,9 +920,7 @@ STRAY
     mach_progress=1
 
     # Operator hold gates a re-dispatch (pipeline work toward landing); the armed
-    # check already holds the merge, so held-and-gated is safe. Whether this hold
-    # IS the cap's park (wedged, not merely progressing) was already decided once
-    # for the whole anchor, above.
+    # check already holds the merge, so held-and-gated is safe.
     case "$hold" in
       ""|false|False|FALSE|0|null) : ;;
       *) echo "$PROG: $id check '$g' needs raising ($why) but merge_hold is set (operator gate); no dispatch"
@@ -1153,11 +1138,6 @@ GATES
   #
   # Only with a readable head. The value is head-pinned so a stale verdict can
   # never read as current, and a verdict pinned to nothing is not evidence.
-  #
-  # A wedged check outranks a progressing one. The two can co-occur only on a
-  # multi-check check_set, and there the anchor still cannot land: the cap's park
-  # holds every check at once, so no amount of progress on the others moves it,
-  # and the operator's move is the same one either way.
   if [ -n "$head" ]; then
     # Settling asserts nothing is owed, which is more than every lane deriving
     # green: an in-flight fix unit or a validation pass acts on the anchor as a
@@ -1167,7 +1147,7 @@ GATES
     # fully green anchor lets the loop skip the lazy compute, so run it here
     # before settling and fail closed — a hold, an unanswered must-fix finding,
     # or a probe that cannot answer is progressing, not settled.
-    if [ "$mach_wedge" = 0 ] && [ "$mach_progress" = 0 ]; then
+    if [ "$mach_progress" = 0 ]; then
       if [ "$quiesce_computed" = 0 ]; then
         quiesce_computed=1
         compute_quiescence "$id"
@@ -1176,8 +1156,7 @@ GATES
         mach_progress=1
       fi
     fi
-    if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
-    elif [ "$mach_progress" = 1 ]; then mach="progressing"
+    if [ "$mach_progress" = 1 ]; then mach="progressing"
     else mach="settled"
     fi
     #

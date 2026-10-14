@@ -62,7 +62,7 @@ func TestPreOpenCheckStallFires(t *testing.T) {
 			t.Errorf("%s: the row carries its age on the frontier, got %q", c.id, tile.Frontier)
 		}
 		// It is a merge anchor, so it still reads in the REVIEW band beside the
-		// wedged pre-open rows, not re-sectioned.
+		// other pre-open rows, not re-sectioned.
 		if tile.Section != SectionReview {
 			t.Errorf("%s: section = %q, want review", c.id, tile.Section)
 		}
@@ -193,10 +193,9 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 }
 
 // TestPreOpenCheckStallDoesNotFire: every shape that must NOT surface as a
-// stall. A fresh hold, every lane green, a recorded wedge, and a check_set that
-// declares no lane each keep their own position phrase.
+// stall. A fresh hold, every lane green, and a check_set that declares no lane
+// each keep their own position phrase.
 func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-120 * time.Hour)
 	const unknown = "position unknown — the merge cadence has recorded none"
 	cases := []struct {
 		name      string
@@ -246,12 +245,6 @@ func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 			}),
 			wantOwed:  false,
 			wantNeeds: unknown,
-		},
-		{
-			name:      "a recorded wedge already owns the row",
-			anchor:    preOpenGateAnchor("tk-wedge", 5, map[string]string{"pr.machine": dated(MachineWedgedException, headLive, wedgedAt)}),
-			wantOwed:  true, // owed, but by the wedge — not the stall
-			wantNeeds: "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 		},
 		{
 			name:      "check_set none is the checkless opt-out",
