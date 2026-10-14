@@ -22,8 +22,10 @@
 # given at any commit, because an approval stands across later pushes until it
 # is dismissed; dismissed reviews are dropped before each reviewer's latest is
 # taken, so a dismissed approval does not count and a dismissed
-# CHANGES_REQUESTED does not hide its author's older approval; a standing
-# CHANGES_REQUESTED from any other account vetoes); mergeStateStatus CLEAN
+# CHANGES_REQUESTED does not hide its author's older approval; once a ruling on
+# a bring-current round lifts the approval, no approval submitted at or before
+# the anchor's bring_current_lifted_at counts, dismissed on GitHub or not; a
+# standing CHANGES_REQUESTED from any other account vetoes); mergeStateStatus CLEAN
 # (UNSTABLE decided on required contexts only; an UNKNOWN, which is GitHub still
 # computing it, read again within one budget per pass); generated/seed-audit
 # current at the MERGE RESULT (its inputs re-hashed in the tree `git

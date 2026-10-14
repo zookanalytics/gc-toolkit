@@ -175,7 +175,7 @@ git init -q -b main "$C/cwd"; commit "$C/cwd" "control cwd" >/dev/null
 eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered in the cwd repo"
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
-# --- 3. mol-review: the review's test worktree. --------------------------------
+# --- 3. mol-review: the review's worktree. -------------------------------------
 # The worktree lives in the review's workspace, made by review-workspace.sh add
 # and removed by the verdict step's remove line.
 echo "── mol-review: review-workspace-add and review-workspace-remove ──"
@@ -310,6 +310,11 @@ block "$PATROL_TOML" shared-branch-push-mode "$TMP/push.sh"
 eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its repo with -C"
 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
+# The pack, where the prep block finds detached-job.sh to stop a gate left
+# running in the prep worktree. It is named by path, so the cwd plays no part.
+PACK_CITY="$TMP/pack-city"
+mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/detached-job.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -320,7 +325,7 @@ prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   git -C "$d/seed" push -q "$d/origin.git" polecat/wb
   STALE=$(git -C "$d/rig" rev-parse origin/polecat/wb)
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET_BRANCH_DEFAULT=main \
+  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" GC_CITY_PATH="$PACK_CITY" WORK=wb TARGET_BRANCH_DEFAULT=main \
       FAKE_META="$TMP/meta.json" FAKE_LOG="$d/gc.log" bash "$TMP/prep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }

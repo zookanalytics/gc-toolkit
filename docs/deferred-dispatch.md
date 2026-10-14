@@ -38,7 +38,8 @@ that already happened is
 [gascity-dispatch-containment.md](gascity-dispatch-containment.md). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
-rather than restating it.
+rather than restating it. What holds an armed bead is defined once, in
+`assets/scripts/hold-lib.sh`, and this doc says how the pass applies it.
 
 ## Arm it instead of remembering it
 
@@ -98,7 +99,7 @@ pass would sling a first reaction at a bead the arm is about to dispatch.
 To see what is owed, in this rig's store:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead: waiting / dispatchable / closed
+deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatchable / closed
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
@@ -109,9 +110,10 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 and the dispatcher's open-tracking gate gives each rig its own
 single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed open bead whose own `blocks` edges have all
-  closed — the ones `bd` reports ready, and also the ones bd holds unready
-  only through a blocked or deferred ancestor (see below) — stamping its own
+- **dispatches** every armed open bead nothing holds — the ones `bd` reports
+  ready, and also the ones bd keeps unready only through an ancestor that
+  waits on a demand gate, or through any held ancestor of a bead in flight
+  (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -126,35 +128,72 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   state — a pass that died before or during its sling, or a failed sling
   whose rollback did not land — because that dispatch was never proven and
   retiring it would silently lose the work;
-- **withholds** — leaving the record armed and saying so — when the bead
-  is still blocked, when someone holds it by `assignee`, when the sling
-  fails, or when the recorded arguments are malformed;
+- **withholds** — leaving the record armed and saying so — when a blocker
+  holds the bead, on it or on an ancestor, when someone has it by `assignee`,
+  when the sling fails, or when the recorded arguments are malformed;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
-  at a non-`open` live status. The record is kept, because the hold may
-  yet clear, but it is counted apart from `waiting` and reported rather
+  at a non-`open` live status. The record is kept, because the status may
+  yet be cleared, but it is counted apart from `held` and reported rather
   than left in a silent count. `list` marks the same beads
-  `STRANDED — status=<s> is never --ready`. A held bead and a gated bead
-  are both "not ready", and conflating them is what hides a dead arm: the
-  gated one dispatches when its blocker closes, the held one never
+  `STRANDED — status=<s> is never --ready`. A stranded bead and a held
+  one are both "not ready", and conflating them is what hides a dead arm:
+  the held one dispatches when its hold releases, the stranded one never
   dispatches at all.
 
-The arm waits on the bead's OWN blockers, which is narrower than `bd list
---ready`. `--ready` applies beads' own claimability predicate — open, no
-active blocker of a blocking type (`blocks` / `waits-for` /
-`conditional-blocks`), not `in_progress`, `blocked`, `deferred` or `hooked` —
-and it ALSO excludes a bead held only by a blocked or deferred ANCESTOR,
-because the is_blocked flag cascades DOWN parent-child edges. An armed epic
-child whose own blockers have all closed is ready to run, but sits under a
-container the operator holds on a human demand gate, so it never enters
-`bd --ready` while that gate is open and its arm would never fire. So the
-pass reads `bd --ready` as the fast path, then asks any open bead bd holds
-unready one direct question — are all of its own `blocks` edges closed? — and
-dispatches on a yes. The status gate still holds (a non-`open` bead is a
-deliberate hold and is never dispatched), and an assignee still HELDs the
-bead. The one question reconcile answers itself is the arm's own: whether the
-thing the arm waits on has landed. `bd blocked` and `bd ready` cannot answer
-it under this bead's id, because the cascade attributes the block to the
-ancestor.
+The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
+defines it: an open `blocks` blocker on the bead or on one of its
+parent-child ancestors. A park and a prerequisite hold alike, so an armed
+member of a parked epic, or of an epic that waits on a task, is held at any
+depth under it, and so is a bead whose own blocker is still open. A demand
+gate on an ancestor does not count: it is the operator's pending decision
+(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
+on the bead itself does count. Where `bd` decides the same question, the
+definition follows it: a closed or pinned blocker holds nothing, and a closed
+or pinned ancestor ends the walk.
+
+A read that fails fails the pass, so an unread hold never passes for none. A
+read that answers without an id it was asked for says this store holds no
+such bead: a bead in another store, or one deleted. bd's cascade passes a
+hold down only from an ancestor row the store holds, so an ancestor with no
+row, or a blocker with no row on an ancestor, holds nothing, as it holds
+nothing in `bd list --ready`. A blocker with no row on the bead itself holds
+it, marked unread, because it is the bead's own sequencing and the walk
+cannot tell whether it is open. The walk runs only where bd keeps the bead
+out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
+so a bead bd has no other reason to hold is ready and the pass slings it, as
+`arm` warns when it records the arm. An ancestor past the walk's depth cap
+(`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
+unread.
+
+A hold holds work that has not started. A bead whose work has started is in
+flight: it carries a `branch`, a `merge_result` or a `rejection_reason`. Only
+a blocker of its own holds a bead in flight, and the walk reads none of its
+ancestors, so a park on its epic leaves it running. An armed re-dispatch of
+work already begun therefore fires under a parked epic once its own blockers
+close, while the epic's members that have not started stay held, including
+the ones under a parent in flight.
+
+`bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
+parent-child edges, so an armed child of an epic that waits only on a demand
+gate never enters `--ready`, and neither does a bead in flight under a parked
+epic. The pass therefore asks hold-lib about every open armed bead bd keeps
+unready, and slings the ones nothing holds. The
+status gate still holds (a non-`open` bead is never dispatched), and an
+assignee still keeps the pass off the bead. The pass reads each generation
+of ancestors in one listing and their blockers in one more, so its cost does
+not grow with the number of armed beads under a held epic.
+
+A held arm keeps its record. Releasing the hold, by closing a park's gate or
+by the prerequisite landing, needs no re-arm: the first pass after it
+dispatches the bead. `list` shows a held arm as `HELD by <blocker>
+"<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, so a
+parked arm says why it is parked and what releases it. A blocker of the
+bead's own that the store does not return shows as `(unreadable)`, and so
+does an ancestor past the depth cap. The pass log names,
+on every pass, each hold that sits on an ancestor once, followed by the arms
+it keeps. An arm its own blocker holds is counted in the summary without a
+line, because the output of a failing pass reaches its `order.failed` event
+only as its last 2 KB, and a line per arm would push the pass's warnings out.
 
 The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
 **first**, slings **second**, promotes the marker to `slung@<ts>` on
@@ -185,10 +224,11 @@ and `arm` still succeeds, still writes a well-formed record, and nothing
 ever performs it — the same invisible hold, one layer down.
 `doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
 cadence can be live and the pass still leave a dispatch unmade, so it flags an
-arm whose own `blocks` edges have all closed but that has stayed open and
-armed past the reconcile window, or one armed at a non-open status the pass can
-never dispatch — a dispatch silently not firing, surfaced before a human has to
-notice it days later.
+arm nothing holds that has stayed open and armed past the reconcile window, or
+one armed at a non-open status the pass can never dispatch — a dispatch
+silently not firing, surfaced before a human has to notice it days later. It
+reads holds through the same `hold-lib.sh`, so an arm a park holds is not
+reported.
 
 ## The resolved-by consumer (`until`)
 
