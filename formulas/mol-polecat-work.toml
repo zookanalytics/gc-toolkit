@@ -217,11 +217,12 @@ if [ -n "$WHY" ]; then
   # escalation a wait follows runs with the window off. The claim the owner
   # check let through is this session's or a crashed owner's, and the wait
   # releases it, because the re-sling fires only for an open, unassigned bead.
+  # await-ruling.sh proves a crashed owner gone by the same session list.
   ESCALATE_WINDOW="${GC_ESCALATE_VERDICT_WINDOW:-}"
   [ -z "$AWAIT" ] || ESCALATE_WINDOW=0
   if [ -n "$ESCALATE_KEY" ] && ! GC_ESCALATE_VERDICT_WINDOW="$ESCALATE_WINDOW" "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --message "$ESCALATE_MESSAGE"; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
-  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --formula mol-polecat-work ${WORK_OWNER:+--release-from "$WORK_OWNER"}; then
+  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "$CANCEL_LABEL: $WORK_BEAD_ID $WHY"; then
     gc runtime drain-ack

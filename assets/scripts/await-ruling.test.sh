@@ -20,10 +20,12 @@
 #     records it as resling_target, so after an arm that is refused or whose
 #     write fails, a re-run with no --target arms to the same pool;
 #   * the claim: a bead open or in_progress under any of this session's names,
-#     or under the owner --release-from names, is released with bd's
-#     compare-and-swap unclaim before the arm, its session pins dropped, and
-#     read back open and unassigned; any other claim is refused before the
-#     edge, and a release that does not land leaves the claim and arms nothing;
+#     or in_progress under an owner `gc session list --state all` lists under
+#     none of its names, is released with bd's compare-and-swap unclaim before
+#     the arm, its session pins dropped, and read back open and unassigned; an
+#     owner the list names, a list that cannot be read, and an open bead under
+#     another assignee are refused before the edge, and a release that does not
+#     land leaves the claim and arms nothing;
 #   * fail-closed: an unreadable bead, a parked bead, no visit, a refused edge,
 #     a refused route clear, a refused arm, no pool to re-sling to;
 #   * a closed work bead needs no wait and exits 0;
@@ -31,7 +33,11 @@
 #   * every metadata key the script writes is registered in lifecycle.toml;
 #   * a situation that recurs after its visit closed moot: the real escalate.sh
 #     files nothing inside its verdict window, so the wait cannot land, and
-#     with the window off it files a fresh visit the wait lands on.
+#     with the window off it files a fresh visit the wait lands on;
+#   * a decline arm later in a mol-polecat-work run, its block taken from the
+#     formula, meets a crashed owner's claim that load-context built over: the
+#     wait lands and the run is cancelled, and a listed owner's claim stops the
+#     arm before the cancel.
 #
 # No live city, Dolt, network, or beads: a tmpdir, a `gc` stub over a JSON store
 # and an edge file, and the scripts themselves.
@@ -68,11 +74,21 @@ mkdir -p "$TMP/bin"
 # unassigned bead; $FAKE_UNCLAIM_FAIL refuses it outright, and
 # $FAKE_UNCLAIM_NOOP answers success and changes nothing. `bd create` files an
 # open bead from --title and --metadata and answers its id, so the real
-# escalate.sh can run against the store.
+# escalate.sh can run against the store. `session list` answers $FAKE_SESSIONS,
+# an empty session list when it is unset, and fails when $FAKE_SESSIONS_FAIL is
+# set. `runtime drain-ack` records DRAIN in $FAKE_TRACE.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
 printf '%s\n' "$*" >> "${GC_LOG:?}"
+case "${1:-} ${2:-}" in
+  "session list")
+    [ -n "${FAKE_SESSIONS_FAIL:-}" ] && { echo "gc: supervisor unreachable (stub)" >&2; exit 1; }
+    if [ -n "${FAKE_SESSIONS+set}" ]; then printf '%s\n' "$FAKE_SESSIONS"; else printf '%s\n' '{"sessions":[]}'; fi
+    exit 0 ;;
+  "runtime drain-ack")
+    printf 'DRAIN\n' >> "${FAKE_TRACE:-/dev/null}"; exit 0 ;;
+esac
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift
 [ "${1:-}" = "--db" ] && shift 2
@@ -261,7 +277,7 @@ eq "$(blocks_rows)" 0 "a closed work bead: no edge"
 # ── 4b. a claim on the work bead is released before the arm ──────────────────
 # The arm refuses an in_progress bead and reconcile never slings over an
 # assignee, so the wait releases a claim no live worker holds: this session's,
-# or the one --release-from names.
+# or an in_progress claim whose owner no session lists.
 for who in pool__polecat-lx-me lx-me rig/rig.polecat me-alias; do
   for st in open in_progress; do
     reset; claim "$st" "$who"
@@ -277,22 +293,63 @@ eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<ab
   "the claim's session pins are dropped, so no orphan sweep restores a pool route from them"
 eq "$(blocks_rows)" 1 "a released claim: one edge onto the visit"
 
-# A crashed owner's claim is released only on the caller's word.
+# A foreign claim is released once the script proves its owner gone: the bead is
+# in_progress, and `gc session list --state all` lists no session under that
+# owner's name, id or agent address. No caller names the owner.
+LIVE_LIST='{"sessions":[{"id":"lx-live","alias":"rig/rig.hicks","session_name":"pool__polecat-lx-live","state":"active"},{"id":"lx-nap","alias":null,"session_name":"pool__polecat-lx-nap","state":"asleep"}]}'
 reset; claim in_progress lx-dead
+OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 0 "in_progress under an owner no session lists: the wait lands"
+eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a crashed owner's claim is released"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a crashed owner's claim: the re-sling is armed"
+eq "$(grep -c '^tk-work|blocks|tk-v1$' "$FAKE_DEPS" | tr -d ' ')" 1 "a crashed owner's claim: the work bead waits on the visit"
+eq "$(grep -c '^bd unclaim tk-work --if-assignee lx-dead$' "$GC_LOG" | tr -d ' ')" 1 \
+  "a crashed owner's claim: the release is a compare-and-swap on that owner"
+eq "$(grep -c '^session list --state all --json$' "$GC_LOG" | tr -d ' ')" 1 \
+  "a crashed owner: proven gone by one read of every session, asleep ones included"
+eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
+  "a crashed owner's claim: its session pins are dropped"
+reset; claim in_progress lx-dead
+OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work --dry-run 2>&1); RC=$?
+eq "$RC" 0 "dry run over a crashed owner's claim: exit 0"
+has "$OUT" "after releasing its claim (status in_progress, assignee lx-dead)" "dry run over a crashed owner's claim: names the release"
+eq "$(field tk-work assignee)" "lx-dead" "dry run over a crashed owner's claim: nothing released"
+
+# An owner the list names, in any of its forms and in any state, may be live.
+for who in lx-live pool__polecat-lx-live rig/rig.hicks rig.hicks lx-nap; do
+  reset; claim in_progress "$who"
+  OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+  eq "$RC" 1 "in_progress under listed owner '$who': exit 1"
+  has "$OUT" "under $who, a claim not in this session's name: gc session list still lists that owner" \
+    "listed owner '$who': says why the claim is kept"
+  eq "$(blocks_rows)" 0 "listed owner '$who': refused before the edge"
+  eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|$who" "listed owner '$who': the claim is kept"
+  eq "$(meta tk-work gc.execution_routed_to)" "$POOL" "listed owner '$who': the route keys are untouched"
+done
+
+# A session list that cannot be read proves no owner gone.
+for list in FAIL "" '{"error":"supervisor down"}' '{"sessions":"none"}' '{"sessions":[1]}' 'not json'; do
+  reset; claim in_progress lx-dead
+  if [ "$list" = FAIL ]; then
+    OUT=$(env "${SELF[@]}" FAKE_SESSIONS_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+  else
+    OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$list" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+  fi
+  eq "$RC" 1 "an unreadable session list ('$list'): exit 1"
+  has "$OUT" "gc session list could not be read, so nothing proves that owner gone" "an unreadable session list ('$list'): says why"
+  eq "$(blocks_rows)" 0 "an unreadable session list ('$list'): refused before the edge"
+  eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|lx-dead" "an unreadable session list ('$list'): the claim is kept"
+done
+
+# An open bead under another assignee is a hand-off, whatever the list says.
+reset; claim open lx-dead
 OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
-eq "$RC" 1 "in_progress under a foreign owner, no --release-from: exit 1"
-has "$OUT" "under lx-dead, a claim neither in this session's name nor proven gone" "a foreign claim: says why it is kept"
-eq "$(blocks_rows)" 0 "a foreign claim: refused before the edge"
-eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|lx-dead" "a foreign claim: left as it was"
-eq "$(meta tk-work gc.execution_routed_to)" "$POOL" "a foreign claim: the route keys are untouched"
-OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work --release-from lx-other 2>&1); RC=$?
-eq "$RC" 1 "--release-from naming a different owner: exit 1"
-eq "$(field tk-work assignee)" "lx-dead" "--release-from naming a different owner: the claim is kept"
-OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work --release-from lx-dead 2>&1); RC=$?
-eq "$RC" 0 "--release-from naming the crashed owner: the wait lands"
-eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "--release-from: the crashed owner's claim is released"
-eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--release-from: the re-sling is armed"
-eq "$(grep -c '^tk-work|blocks|tk-v1$' "$FAKE_DEPS" | tr -d ' ')" 1 "--release-from: the work bead waits on the visit"
+eq "$RC" 1 "open under another assignee no session lists: exit 1"
+has "$OUT" "is open under lx-dead, a claim not in this session's name: an open bead under another assignee is a hand-off" \
+  "open under another assignee: says it is a hand-off"
+eq "$(blocks_rows)" 0 "open under another assignee: refused before the edge"
+eq "$(field tk-work status)|$(field tk-work assignee)" "open|lx-dead" "open under another assignee: left as it was"
+eq "$(grep -c '^session list' "$GC_LOG" | tr -d ' ')" 0 "open under another assignee: no session list is read"
 
 # An in_progress bead that names no assignee is reopened.
 reset; claim in_progress ""
@@ -449,6 +506,47 @@ run tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "with the window off: the wait lands"
 eq "$(grep -c "^tk-work|blocks|$NEWV\$" "$FAKE_DEPS" | tr -d ' ')" 1 "with the window off: the work bead waits on the fresh visit"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "with the window off: the re-sling is armed"
+
+# ── 9. a decline arm later in the run meets a crashed owner's claim ──────────
+# load-context builds over an in_progress claim whose owner no session lists, and
+# nothing in the run releases it before a later decline arm asks for the wait.
+# The arm is workspace-setup's missing-branch block, read from the formula, and
+# its await-ruling.sh is this script; the escalation it follows and the cancel
+# after it are stubs that record their turn, and the visit is already open.
+ARM="$TMP/missing-branch-arm.sh"
+awk '/^# >>> workspace-setup-missing-branch-decline$/ {f=1; next} /^# <<< workspace-setup-missing-branch-decline$/ {f=0} f' \
+  "$HERE/../../formulas/mol-polecat-work.toml" > "$ARM"
+has "$(cat "$ARM")" 'await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch' \
+  "the missing-branch arm is read from mol-polecat-work.toml"
+mkdir -p "$TMP/pack/assets/scripts"
+for v in escalate:ESCALATE run-cancel:CANCEL; do
+  printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/assets/scripts/${v%%:*}.sh"
+done
+printf '#!/usr/bin/env bash\nprintf "AWAIT\\n" >> "$FAKE_TRACE"\nexec "%s" "$@"\n' "$SCRIPT" > "$TMP/pack/assets/scripts/await-ruling.sh"
+chmod +x "$TMP/pack/assets/scripts/"*.sh
+arm() { # <session list> -> "<rc>|<ordered trace>"
+  local rc=0
+  : > "$TMP/trace"
+  env "${SELF[@]}" FAKE_SESSIONS="$1" FAKE_TRACE="$TMP/trace" GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=st-setup bash "$ARM" > "$TMP/arm.out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/trace")"
+}
+arm_reset() {
+  reset; claim in_progress lx-dead
+  jq -c '. + [{"id":"tk-vm","status":"open","assignee":"","metadata":{"task_kind":"visit","escalation_key":"polecat-missing-branch","gc.continuation_group":"tk-work","gc.routed_to":"human"}}]' \
+    "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+}
+arm_reset
+eq "$(arm "$LIVE_LIST")" "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "a later arm on a crashed owner's claim: the visit, the wait, the cancel, the drain"
+eq "$(grep -c '^tk-work|blocks|tk-vm$' "$FAKE_DEPS" | tr -d ' ')" 1 "a later arm on a crashed owner's claim: the work bead waits on the arm's visit"
+eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a later arm on a crashed owner's claim: the claim is released"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a later arm on a crashed owner's claim: closing the visit re-slings the work"
+arm_reset
+jq -c 'map(if .id == "tk-work" then .assignee = "lx-live" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+eq "$(arm "$LIVE_LIST")" "1|ESCALATE;AWAIT;" \
+   "a later arm on a listed owner's claim: the wait does not land, so no cancel and no drain"
+eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|lx-live" "a later arm on a listed owner's claim: the claim is kept"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"

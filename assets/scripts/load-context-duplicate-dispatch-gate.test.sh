@@ -30,9 +30,10 @@
 #      await-ruling.sh so closing the visit re-slings the work. Each situation
 #      has its own key. The escalation a wait follows runs with escalate.sh's
 #      verdict window off, so a situation a person already closed moot still
-#      gets an open visit to wait on, and the wait releases the claim the owner
-#      check let through (this session's, or a crashed owner's) with
-#      --release-from.
+#      gets an open visit to wait on. The wait is asked with no owner, whatever
+#      claim the owner check let through (this session's, or a crashed
+#      owner's): await-ruling.sh proves which claims it may release
+#      (await-ruling.test.sh).
 #   4. FAIL CLOSED — a visit or a wait that did not land means no cancel and no
 #      drain, and a cancel that did not land means no drain: the step stays
 #      claimed for the next worker. A note the store refuses is reported, and
@@ -525,21 +526,22 @@ eq "$(cat "$TMP/esc-window")" "" "parked: no wait follows, so escalate.sh keeps 
 GC_ESCALATE_VERDICT_WINDOW=600 run '[{"status":"deferred","assignee":"","metadata":{}}]' >/dev/null
 eq "$(cat "$TMP/esc-window")" "600" "parked: a window the caller set passes through"
 
-# The re-sling fires only for an open, unassigned bead, so the wait releases
-# the claim the owner check let through: a crashed owner's, or this session's.
+# The re-sling fires only for an open, unassigned bead. The claim the owner check
+# let through, a crashed owner's or this session's, is the wait's to release,
+# and the wait proves which it may release, so the gate names no owner.
 eq "$(FAKE_SESSIONS="$SESS_EMPTY" FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" \
       run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]')" \
    "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "undecided tree, in_progress under a crashed foreign owner: escalates, waits, cancels"
-eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work --release-from lx-dead" \
-   "undecided tree under a crashed owner: the wait releases that owner's claim"
+eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work" \
+   "undecided tree under a crashed owner: the wait is asked with no owner"
 for self in "$SELF_NAME" "$SELF_ID" "$SELF_AGENT" "$SELF_ALIAS"; do
   for st in open in_progress; do
     eq "$(FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" run "[{\"status\":\"$st\",\"assignee\":\"$self\",\"metadata\":{}}]")" \
        "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
        "undecided tree, $st under this session's '$self': escalates, waits, cancels"
-    eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work --release-from $self" \
-       "undecided tree, $st under '$self': the wait releases this session's claim"
+    eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work" \
+       "undecided tree, $st under '$self': the wait is asked with no owner"
   done
 done
 

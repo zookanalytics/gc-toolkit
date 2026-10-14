@@ -3,8 +3,7 @@
 # and re-sling it when the ruling is "proceed".
 #
 #   await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
-#                   [--subject <bead>] [--target <pool>] [--release-from <owner>]
-#                   [--dry-run]
+#                   [--subject <bead>] [--target <pool>] [--dry-run]
 #
 # A worker that declines work it cannot finish without a person files the
 # question with escalate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -42,12 +41,16 @@
 # The re-sling fires only for an open, unassigned bead: the arm refuses an
 # in_progress one, and reconcile never slings over an assignee. So a claim the
 # work bead still carries is released after the edge lands and before the arm,
-# when no live worker holds it: a claim in this session's name, or the one
-# --release-from names, which the caller has proven gone. The release is
-# `gc bd unclaim --if-assignee`, which reopens the bead and clears its assignee
-# in one write, and only while that claim is still the one this run read. Any
-# other claim exits 1 before anything is written, because its worker may be
-# live.
+# when no live worker holds it. That is a claim in this session's name, or an
+# in_progress claim whose owner `gc session list --state all` lists under none
+# of its names. mol-polecat-work's load-context builds over such a crashed
+# owner's claim, and this script proves the owner gone itself, so a wait asked
+# at any step of that run releases the claim without the caller naming it.
+# The release is `gc bd unclaim --if-assignee`, which reopens the bead and
+# clears its assignee in one write, and only while that claim is still the one
+# this run read. Any other claim exits 1 before anything is written: an owner
+# the list still names may be live, a list that cannot be read proves no owner
+# gone, and an open bead under another assignee is a hand-off, not a claim.
 #
 # The edge, the release and the arm are read back. Any of them not landing exits
 # 1, and the caller does not cancel its run: a cancelled run with no recorded
@@ -75,8 +78,7 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'USAGE'
 usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
-                       [--subject <bead>] [--target <pool>]
-                       [--release-from <owner>] [--dry-run]
+                       [--subject <bead>] [--target <pool>] [--dry-run]
 
   <work-bead>     the bead the declined run was poured for
   --key           the situation key escalate.sh filed the visit under (required)
@@ -86,10 +88,11 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
   --target        the pool to re-sling to; default the bead's
                   gc.execution_routed_to, else its gc.routed_to, else the pool
                   an earlier run armed or recorded as resling_target
-  --release-from  the assignee of a claim the caller has proven no live worker
-                  holds; it is released before the arm. A claim in this
-                  session's name is released without it.
   --dry-run       resolve and report; write nothing
+
+A claim on the work bead is released before the arm when it is this session's,
+or when the bead is in_progress under an owner `gc session list --state all`
+does not list. Any other claim is kept, and no wait is recorded.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_AGENT, GC_ALIAS name this session.
 
@@ -102,19 +105,18 @@ require_value() {
     echo "$PROG: $1 requires a value" >&2; usage; exit 2
   fi
   case "$2" in
-    --key|--formula|--subject|--target|--release-from|--dry-run|-h|--help)
+    --key|--formula|--subject|--target|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2; usage; exit 2 ;;
   esac
 }
 
-WORK=""; KEY=""; FORMULA=""; SUBJECT=""; TARGET=""; RELEASE_FROM=""; DRY_RUN=0
+WORK=""; KEY=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)     require_value "$@"; KEY="$2";     shift 2 ;;
     --formula) require_value "$@"; FORMULA="$2"; shift 2 ;;
     --subject) require_value "$@"; SUBJECT="$2"; shift 2 ;;
     --target)  require_value "$@"; TARGET="$2";  shift 2 ;;
-    --release-from) require_value "$@"; RELEASE_FROM="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 2 ;;
     -*)        echo "$PROG: unknown argument '$1'" >&2; usage; exit 2 ;;
@@ -127,9 +129,9 @@ if [ -z "$WORK" ] || [ -z "$KEY" ] || [ -z "$FORMULA" ]; then
   echo "$PROG: a work bead, --key and --formula are all required" >&2; usage; exit 2
 fi
 [ -n "$SUBJECT" ] || SUBJECT="$WORK"
-case "$WORK$KEY$FORMULA$SUBJECT$RELEASE_FROM" in
+case "$WORK$KEY$FORMULA$SUBJECT" in
   *'{{'*|*'}}'*)
-    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$FORMULA' '$SUBJECT' '$RELEASE_FROM'); the pour did not render it" >&2; exit 2 ;;
+    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
 esac
 case "$WORK$KEY$FORMULA$SUBJECT" in
   *[!A-Za-z0-9._-]*)
@@ -164,17 +166,41 @@ case "$STATUS" in
     exit 1 ;;
 esac
 
+# owner_listed <assignee> — how many sessions `gc session list --state all`
+# lists under that assignee, in any of the three forms a claim writes: the
+# session name, the session id, or the agent address, which is a session's
+# alias or the end of one. The same match decides load-context's owner check.
+# Prints nothing when the list cannot be read.
+owner_listed() {
+  gc session list --state all --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
+    if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
+      [ .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
+                             or ((.session_name // "") == $o) or ((.id // "") == $o)) ] | length
+    else empty end' 2>/dev/null
+}
+
 # RELEASE says how the bead becomes open and unassigned before the arm:
 # `unclaim` a claim no live worker holds, `reopen` an in_progress bead that
 # names no assignee, or nothing for a bead already open and unassigned.
 RELEASE=""
 if [ -n "$ASSIGNEE" ]; then
-  for me in "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_AGENT:-}" "${GC_ALIAS:-}" "$RELEASE_FROM"; do
+  for me in "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_AGENT:-}" "${GC_ALIAS:-}"; do
     if [ -n "$me" ] && [ "$me" = "$ASSIGNEE" ]; then RELEASE=unclaim; break; fi
   done
   if [ -z "$RELEASE" ]; then
-    echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim neither in this session's name nor proven gone by --release-from. Reconcile never slings an assigned bead, and that worker may be live, so the claim is not released and no wait was recorded" >&2
-    exit 1
+    KEPT="an open bead under another assignee is a hand-off, not a claim this run can release"
+    if [ "$STATUS" = in_progress ]; then
+      LISTED=$(owner_listed "$ASSIGNEE")
+      case "$LISTED" in
+        0)  RELEASE=unclaim ;;
+        "") KEPT="gc session list could not be read, so nothing proves that owner gone" ;;
+        *)  KEPT="gc session list still lists that owner, so its worker may be live" ;;
+      esac
+    fi
+    if [ -z "$RELEASE" ]; then
+      echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim not in this session's name: $KEPT. Reconcile never slings an assigned bead, so the claim is kept and no wait was recorded" >&2
+      exit 1
+    fi
   fi
 elif [ "$STATUS" = in_progress ]; then
   RELEASE=reopen
