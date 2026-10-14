@@ -123,7 +123,12 @@ pre-existing fail beside the refinery caller that needs it.
 - **A dirty tree is refused in every recorded mode**, `--check` and
   `--nothing-declared` included. A pass reported for a dirty tree would certify
   content no record saw. `setup` and `build` record nothing, so they run in a
-  dirty tree.
+  dirty tree. Untracked files count in `--check` too, though it certifies
+  nothing new. Letting `--check` pass them would not unstall a self-review
+  whose suite leaves an artifact behind: `self-review-check.sh` refuses the
+  same files with its own clean-worktree check, and the next run call in that
+  checkout refuses them as well. So the cutover requires check commands that
+  leave none behind.
 - **The checkout is checked before the run and after it.** Before the run,
   any change HEAD does not hold refuses the call. After the run, a moved HEAD
   or a changed tracked file, staged or not, records nothing, pass or fail. A
@@ -131,7 +136,9 @@ pre-existing fail beside the refinery caller that needs it.
   a `lint_command` that fixes files and exits 0 would otherwise record a pass
   at a commit whose own content fails lint. Untracked files the run left
   behind do not count. A suite's artifacts, such as `cover.out`, `.coverage`
-  or build output that is not ignored, change no file the commit holds.
+  or build output that is not ignored, change no file the commit holds. The
+  run names them in a WARN line, because the next call in that checkout
+  refuses them.
 - **Publishing.** `--publish-bead` writes the record as one JSON value on
   `rig_check.<check>` (registered in `lifecycle/lifecycle.toml`) through
   `gcbd.Client.Update`, and reads it back with `ShowDirect`. gcbd's writes fork
@@ -200,6 +207,15 @@ build's `--check` measured median 182 ms at load average 40-47, and median
   step, and pass the loop only on `--check` exit 0, which a pass that ran
   nothing gives too. Exit 3 is a commit nobody recorded, and exit 4 includes a
   dirty worktree.
+- **A rig's check commands leave no untracked file that git does not
+  ignore.** A run that leaves one keeps its record, but the next call in that
+  checkout exits 4, `--check` included, and `self-review-check.sh`'s own
+  clean-worktree check refuses the file too. Both lines name the paths: the
+  run's WARN line and the next call's exit-4 line. The remedy lives in the
+  rig, as a `.gitignore` entry or a command that removes its own output. In
+  the worktree at hand, removing the named files is enough, because the
+  record at HEAD still answers and nothing runs again. A call site does not
+  run `git clean`, which would also delete an agent's uncommitted new files.
 - **review-test-evidence** reads `--check`'s one JSON line: `result`, and
   `scope`, where `none` certifies no tests and `affected` certifies the subset.
 - **The refinery** resolves its vars at run time and passes them, so its

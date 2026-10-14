@@ -60,7 +60,9 @@ calls nothing but git.
 
 A checkout with changes HEAD does not hold is refused, except by setup and
 build: a record certifies a commit. A run that moves HEAD or changes a
-tracked file records nothing, pass or fail.
+tracked file records nothing, pass or fail. Untracked files a run leaves
+behind do not stop its record, but the next call refuses them, so a check
+command leaves none that git does not ignore.
 
 exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
       4 machine failure, nothing recorded or published: a refused checkout, a
@@ -304,8 +306,9 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	// A run speaks for co.Commit only while it leaves HEAD and every tracked
 	// file as it found them, so a command that commits, checks out or writes a
 	// tracked file records nothing, pass or fail. An untracked file it leaves
-	// behind changes neither, so its result stands.
-	moved, _, err := co.Changes()
+	// behind changes neither, so its result stands, and the next call here
+	// refuses the file.
+	moved, left, err := co.Changes()
 	if err != nil {
 		return machine("cannot read the checkout after the run: %v", err)
 	}
@@ -318,6 +321,9 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 		return rigExitMachine
 	}
 	say("%s at %s (%s); recorded", result, co.Commit, outcomeLabel(rec))
+	if left != "" {
+		say("WARN the run left files git does not ignore, and the next call in this checkout is refused until they are gone:\n%s", firstLines(left, 10))
+	}
 	rigPublish(check, o.publish, rec, say)
 	return resultExit(rec)
 }

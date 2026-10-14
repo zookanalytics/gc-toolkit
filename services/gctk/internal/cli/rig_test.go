@@ -186,8 +186,8 @@ func TestRigTestPassAtACommitIsRecordedAndNotRunAgain(t *testing.T) {
 	full := countCmd("full")
 
 	code, _, errs := f.call("test", "--scope", "full", "--command", full)
-	if code != 0 {
-		t.Fatalf("first run = %d, want 0; stderr:\n%s", code, errs)
+	if code != 0 || strings.Contains(errs, "WARN") {
+		t.Fatalf("first run = %d, want 0 and no WARN; stderr:\n%s", code, errs)
 	}
 	eqRuns(t, f.runs(), "full")
 	r := f.record(rig.CheckTest, f.head())
@@ -554,16 +554,34 @@ func TestRigARunThatChangesTheCheckoutRecordsNothing(t *testing.T) {
 }
 
 // An untracked file a run leaves behind changes no file the commit holds, so
-// the run's result is recorded.
+// the run's result is recorded, and the run names the file. The next call in
+// the checkout refuses it, --check included. Once the file is gone, the record
+// answers without a second run.
 func TestRigARunThatLeavesAnUntrackedFileKeepsItsRecord(t *testing.T) {
 	f := newRigFixture(t)
 	command := `printf x > cover.out; ` + countCmd("full")
-	if code, _, errs := f.call("test", "--scope", "full", "--command", command); code != 0 {
-		t.Fatalf("run = %d, want 0:\n%s", code, errs)
+	code, _, errs := f.call("test", "--scope", "full", "--command", command)
+	if code != 0 || !strings.Contains(errs, "WARN the run left files git does not ignore") || !strings.Contains(errs, "?? cover.out") {
+		t.Fatalf("run = %d, want 0 and a WARN naming cover.out:\n%s", code, errs)
 	}
 	if r := f.record(rig.CheckTest, f.head()); r == nil || r.Result != rig.ResultPass {
 		t.Fatalf("record = %+v, want the pass", r)
 	}
+	for _, args := range [][]string{{"test", "--check"}, {"lint", "--command", countCmd("lint")}} {
+		if code, _, errs := f.call(args...); code != 4 || !strings.Contains(errs, "?? cover.out") {
+			t.Fatalf("%v after the run = %d, want 4 naming cover.out:\n%s", args, code, errs)
+		}
+	}
+	if err := os.Remove(filepath.Join(f.repo, "cover.out")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := f.call("test", "--check"); code != 0 {
+		t.Fatalf("--check once the file is gone = %d, want 0:\n%s", code, errs)
+	}
+	if code, _, errs := f.call("test", "--scope", "full", "--command", command); code != 0 || !strings.Contains(errs, "not run again") {
+		t.Fatalf("the same call once the file is gone = %d, want 0 from the record:\n%s", code, errs)
+	}
+	eqRuns(t, f.runs(), "full")
 }
 
 func TestRigCheckReadsTheRecordWithNoGc(t *testing.T) {
