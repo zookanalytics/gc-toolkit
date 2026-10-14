@@ -9,12 +9,16 @@
 # a gate can afford to run and one it cannot.
 #
 # Usage:
-#   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q] [PATH ...]
+#   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q]
+#                [--affected BASE | PATH ...]
 #
 #   -j, --jobs N       concurrent runs (default: $TEST_JOBS or half the cores)
 #   -t, --timeout SECS per-run wall limit, 0 disables (default: $TEST_TIMEOUT or 900)
 #       --retry N      serial re-runs for a run that failed in parallel
 #                      (default: $TEST_RETRY or 1); --no-retry sets 0
+#       --affected BASE
+#                      run the subset of the change HEAD's commits make since
+#                      BASE (below), for example --affected origin/main
 #       --list         print what would run, one run per line, and exit
 #   -q, --quiet        print only the summary and the failures
 #
@@ -43,9 +47,18 @@
 #
 # A test that reaches a file only through a path it builds at run time, or
 # through a chain of scripts that run one another, is outside the subset, and
-# only the full run covers it. `run-tests.sh $(git diff --name-only
-# origin/main...HEAD)` runs the subset of a branch's change, and an empty
-# subset is a clean pass rather than a failure.
+# only the full run covers it.
+#
+# --affected BASE runs the subset of a branch's change, which it reads from
+# git: the files that `git diff --name-only --no-renames BASE...HEAD` names.
+# Those are the files HEAD's commits change since their merge base with BASE.
+# A renamed file counts under its old path as well as its new one, because a
+# suite that names the old path breaks. An uncommitted edit is not part of the
+# change. When the change names no file, nothing runs, because a tree that
+# matches its base can break no suite; the run prints one line saying so and
+# exits 0. A BASE git cannot read is a usage error. A change handed over as
+# PATHs, as in `run-tests.sh $(git diff --name-only origin/main...HEAD)`, runs
+# every suite when it is empty, because an empty change expands to no PATH.
 #
 # A file runs once, unless its opening comment block declares named parts:
 #
@@ -111,7 +124,8 @@
 # (assets/scripts/test-harness.sh).
 #
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
-# empty; 1 one or more failed serially too; 2 a usage or enumeration error.
+# empty; 1 one or more failed serially too; 2 a usage or enumeration error,
+# such as a BASE git cannot read.
 
 set -uo pipefail
 
@@ -137,6 +151,8 @@ TIMEOUT="${TEST_TIMEOUT:-900}"
 RETRY="${TEST_RETRY:-1}"
 LIST_ONLY=0
 QUIET=0
+AFFECTED=""
+AFFECTED_SET=0
 declare -a ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -150,6 +166,8 @@ while [ $# -gt 0 ]; do
     --retry)       RETRY="${2:-}"; shift 2 ;;
     --retry=*)     RETRY="${1#--retry=}"; shift ;;
     --no-retry)    RETRY=0; shift ;;
+    --affected)    AFFECTED="${2:-}"; AFFECTED_SET=1; shift; [ $# -eq 0 ] || shift ;;
+    --affected=*)  AFFECTED="${1#--affected=}"; AFFECTED_SET=1; shift ;;
     --list)        LIST_ONLY=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     -h|--help)     usage; exit 0 ;;
@@ -163,6 +181,14 @@ case "$JOBS" in ''|*[!0-9]*) echo "run-tests: --jobs must be a positive integer"
 case "$TIMEOUT" in ''|*[!0-9]*) echo "run-tests: --timeout must be a non-negative integer (0 disables)" >&2; exit 2 ;; esac
 case "$RETRY" in ''|*[!0-9]*) echo "run-tests: --retry must be a non-negative integer (0 disables)" >&2; exit 2 ;; esac
 [ "$JOBS" -ge 1 ] || JOBS=1
+if [ "$AFFECTED_SET" -eq 1 ]; then
+  case "$AFFECTED" in
+    '')    echo "run-tests: --affected needs a base, such as origin/main" >&2; exit 2 ;;
+    -*)    echo "run-tests: --affected needs a base, such as origin/main, not the option '$AFFECTED'" >&2; exit 2 ;;
+    *..*)  echo "run-tests: --affected takes a base, such as origin/main, not the range '$AFFECTED'" >&2; exit 2 ;;
+  esac
+  [ "${#ARGS[@]}" -eq 0 ] || { echo "run-tests: --affected reads the change from git, so it takes no PATH" >&2; exit 2; }
+fi
 
 # The tracked suites whose opening comment block declares a scope (see the
 # header), one "<path>\t<scope>" line each. The block ends at the first line
@@ -262,6 +288,26 @@ naming() {
     "(^|[^A-Za-z0-9._-])($re)(\$|[^A-Za-z0-9_-])" -- "${spec[@]}" \
     | grep -vE '^[^:]*:[[:space:]]*#' | cut -d: -f1 | sort -u
 }
+
+# The change --affected reads (see the header) becomes the PATHs. git writes the
+# names NUL-separated, so a name with a space, or with a byte git would quote,
+# arrives whole. A diff git cannot read fails the run, because read as an empty
+# change it would pass without running anything.
+if [ "$AFFECTED_SET" -eq 1 ]; then
+  change_file="$(mktemp "${TMPDIR:-/tmp}/run-tests-change.XXXXXX")" || {
+    echo "run-tests: mktemp failed" >&2; exit 2; }
+  if ! git -C "$ROOT" diff --no-color --name-only --no-renames -z "${AFFECTED}...HEAD" -- >"$change_file"; then
+    rm -f "$change_file"
+    echo "run-tests: cannot read the change from $AFFECTED to HEAD (git diff ${AFFECTED}...HEAD failed)" >&2
+    exit 2
+  fi
+  while IFS= read -r -d '' rel; do ARGS+=("$rel"); done <"$change_file"
+  rm -f "$change_file"
+  if [ "${#ARGS[@]}" -eq 0 ]; then
+    [ "$LIST_ONLY" -eq 1 ] || echo "run-tests: ${AFFECTED}...HEAD changes no file — nothing to run"
+    exit 0
+  fi
+fi
 
 # Resolve the set of *.test.sh files to run.
 declare -a TESTS=()
