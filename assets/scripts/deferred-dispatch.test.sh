@@ -1482,12 +1482,12 @@ eq "$(cut -f1 "$REHOME_CALLS" | paste -sd, -)" "u-3" "the next pass disposes the
 has "$out" "0 left for the next pass" "and leaves nothing"
 
 echo "# until: with no knob set, the shipped budget and allowance pace the pass"
-# 90s and 30s: two 40s disposals start, and the third would begin with 10s left.
+# 420s and 30s: two 200s disposals start, and the third would begin with 20s left.
 store "$THREE_OWED"
 printf '1000\n' > "$CLOCK"
 out="$( (unset DEFERRED_DISPATCH_PASS_BUDGET_SECS DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS
-         STUB_CLOCK="$CLOCK" STUB_REHOME_SECS=40 "$SUT" reconcile) 2>&1)"
-eq "$(rehomes)" "2" "the default budget starts two 40s disposals"
+         STUB_CLOCK="$CLOCK" STUB_REHOME_SECS=200 "$SUT" reconcile) 2>&1)"
+eq "$(rehomes)" "2" "the default budget starts two 200s disposals"
 has "$out" "1 left for the next pass" "and leaves the third"
 
 echo "# until: a budget spent before the until half begins skips its scan"
