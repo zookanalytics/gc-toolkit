@@ -308,7 +308,9 @@ a framed conversation with a first-reaction card already written. A recommend
 adds an action the operator can Accept: the reaction names the move and the
 execution mol, and the visit offers Accept beside Discuss. When the reaction
 judges the action clear and reversible, it routes the capture, holds it, or hands
-it to a validating closer, and puts nothing to the operator. The script
+it to a validating closer, and puts nothing to the operator. A capture that is
+not a member of an epic is not routed: it waits for the operator's placement
+sitting ([steering.md](steering.md)). The script
 files nothing on the reaction path; a second visit would split one conversation
 into two sittings of the same subject.
 

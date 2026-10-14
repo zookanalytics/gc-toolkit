@@ -66,8 +66,8 @@ wherever the steps derive REVIEW_BEAD from the convoy.
 
 **Do not substitute any other review method.** Do not match a review-shaped
 skill out of your catalog, and do not improvise one. **One agent, single
-pass. No fan-out**: read the diff yourself, run the tests yourself, write
-the verdict yourself — no subagents, no persona reviewers,
+pass. No fan-out**: read the diff yourself and write the verdict
+yourself — no subagents, no persona reviewers,
 no parallel review pass.
 
 **What to review** is on this bead's metadata: `pr_number` (post-open) or
@@ -138,9 +138,39 @@ case "$CHECK_NAME" in
   correctness)
     cat <<'M'
 The standing correctness review. Judge whether the change is correct and safe
-as merged: read the whole diff, run the tests it touches at the pinned commit,
-and hold it to the work-quality standards, grading findings P0/P1/P2 with
-file:line. This is the concern, not a tool — no reviewer is presumed.
+as merged: read the whole diff, settle its test evidence as below, and hold it
+to the work-quality standards, grading findings P0/P1/P2 with file:line. This is
+the concern, not a tool — no reviewer is presumed.
+
+**Test evidence.** The self-review that built a commit runs the rig's declared
+test command and stamps the head it saw pass on the work bead as
+`self_review_passed_sha`. The anchor's stamp is evidence only when it is the
+reviewed commit's full sha and the rig declares a test command. A merge of the
+base or a rework round leaves it naming an older head, and where the rig
+declares no test command the stamp certifies no declared tests. Read it in the
+review step, in the same shell as that step's pin block:
+
+```bash
+# >>> review-test-evidence
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
+STAMP=""
+[ -n "$ANCHOR" ] && STAMP=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r '.[0].metadata.self_review_passed_sha // empty' 2>/dev/null)
+DECLARED=$(gc formula show mol-polecat-work ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null | jq -r '[.vars[]? | select(.name == "affected_tests_command" or .name == "test_command") | if .rig_default != null then .rig_default else (.default // "") end | select(. != "")] | length' 2>/dev/null)
+if [ -n "$STAMP" ] && [ "$STAMP" = "$REVIEWED_OID" ] && [ "${DECLARED:-0}" -gt 0 ] 2>/dev/null; then
+  echo "test evidence: the anchor's self-review passed the rig's declared tests at $REVIEWED_OID; run no suite"
+else
+  echo "no test evidence at ${REVIEWED_OID:-an unpinned commit} (anchor stamp: ${STAMP:-none}; declared test commands: ${DECLARED:-unread}); run the suites the diff touches"
+fi
+# <<< review-test-evidence
+```
+
+With evidence, run no suite. Without it, run the suites the diff touches in the
+review's worktree, each as `hb bash -c '<suite>'` through the review step's
+keepalive, and record the real pass and fail counts. Either way you may run one
+targeted suite for a gap you suspect, and the Testing check's run of each new
+case against the pre-change code is yours. A failing suite is not automatically
+a finding: check whether it fails on the base too. A pre-existing failure
+belongs in the verdict as context, not as this branch's defect.
 M
     ;;
   triage)
@@ -181,12 +211,14 @@ does, pick the modality: a visual the repo already carries, a screenshot of one
 rendered state, or a narrated video of a flow. Deliver it to the PR inline and
 uncommitted with `demo-deliver.sh`, and judge what it shows, not what the diff
 claims. A fitting visual the city cannot produce here is a note in an approve,
-never a block. The one verdict call records the decision:
+never a block. A cheaper visual delivered in its place is a fallback. The one
+verdict call records the decision:
 
-    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video
+    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video [--visual-fallback-from screenshot|video]
 
-`none` records with `approve` only. Whether the change is the right thing to ship,
-and lets the operator decide, is `pm`'s.
+`none` records with `approve` only. A fallback names the modality that fits with
+`--visual-fallback-from`. Whether the change is the right thing to ship, and lets
+the operator decide, is `pm`'s.
 M
     ;;
   arch)

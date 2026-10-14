@@ -61,6 +61,7 @@ GC
 cat > "$BIN/lifecycle" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
+echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
 chmod +x "$BIN/gc" "$BIN/lifecycle"
 export PATH="$BIN:$PATH"
@@ -175,7 +176,7 @@ git init -q -b main "$C/cwd"; commit "$C/cwd" "control cwd" >/dev/null
 eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered in the cwd repo"
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
-# --- 3. mol-review: the review's test worktree. --------------------------------
+# --- 3. mol-review: the review's worktree. -------------------------------------
 # The worktree lives in the review's workspace, made by review-workspace.sh add
 # and removed by the verdict step's remove line.
 echo "── mol-review: review-workspace-add and review-workspace-remove ──"
@@ -375,6 +376,9 @@ for mode in env roster; do
       ok "direct-merge/$mode: recorded and closed through one lifecycle transition" ;;
     *) bad "direct-merge/$mode: recorded and closed through one lifecycle transition" "$(cat "$D/lc.log" 2>/dev/null || true)" ;;
   esac
+  # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
+  # gets the rig this block resolved, from the roster too.
+  eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
   eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: the merge worktree is unregistered on exit; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
   eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: the scratch directory is removed on exit"
