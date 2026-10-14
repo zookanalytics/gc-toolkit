@@ -136,6 +136,26 @@ PY
 else
   echo "skip - open-visit check: $TOML_PY"
 fi
+# The same rule over the prose a worker declines by hand from.
+FRAG_WAITS=0; FRAG_BAD=""
+while IFS= read -r frag; do
+  out=$(awk -v f="$frag" '
+    /escalate\.sh" --subject/ || /"\$BCA" ask/ { filer = $0 }
+    /await-ruling\.sh" "/ {
+      n++
+      if (filer == "") bad = bad f ": a wait with no escalation before it; "
+      else if (filer ~ /escalate\.sh"/ && filer !~ /GC_ESCALATE_VERDICT_WINDOW=/) bad = bad f ": the escalation before a wait keeps the verdict window; "
+    }
+    END { printf "%d|%s", n, bad }' "$ROOT/$frag")
+  FRAG_WAITS=$((FRAG_WAITS + ${out%%|*})); FRAG_BAD="$FRAG_BAD${out#*|}"
+done < <(git -C "$ROOT" grep -l 'await-ruling.sh" "' -- 'template-fragments/*.md' 'agents/*' 'skills/*' 2>/dev/null)
+if [ "$FRAG_WAITS" -eq 0 ]; then
+  bad "no fragment, prompt or skill shows a wait; the doctrine's decline recipe is expected to"
+elif [ -z "$FRAG_BAD" ]; then
+  ok "each of the $FRAG_WAITS waits in fragments, prompts and skills follows an escalation with the verdict window off"
+else
+  bad "$FRAG_BAD"
+fi
 
 # --- Fakes for the executed blocks. -------------------------------------------
 # gc: `runtime drain-ack` records DRAIN; `bd show` answers $FAKE_SHOW; every

@@ -372,7 +372,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `assets/scripts/work-tree-holder.sh` | work | Tells load-context whether a live session is working the bead's tree, the one sign of a run in flight on a work bead the workflow never claims. |
-| `assets/scripts/await-ruling.sh` | work | Records a declined run's wait on its work bead: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes. |
+| `assets/scripts/await-ruling.sh` | work | Records a declined run's wait on its work bead: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes, after it releases a claim on the work bead that no live worker holds. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |

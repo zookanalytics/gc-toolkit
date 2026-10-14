@@ -239,11 +239,14 @@ must go on once a person rules, file the visit first, then run
 `await-ruling.sh`. It makes the work bead wait on the visit with a `blocks`
 edge and arms the work's re-sling, so closing the visit is the ruling to
 proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
-proceed closes the work bead first. When nobody has a decision to make, because
-the work is finished or a live peer is building it, cancel with no visit:
+proceed closes the work bead first. File that visit with `escalate.sh`'s
+verdict window off, because a wait needs an open visit and the window files
+none for a situation a person already closed `moot` or `benign`. When nobody
+has a decision to make, because the work is finished or a live peer is
+building it, cancel with no visit:
 
 ```bash
-"$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the work>" \
+GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the work>" \
   || { echo "escalate.sh recorded no visit; NOT cancelling or draining" >&2; exit 1; }
 "$SCRIPTS/await-ruling.sh" "<work-bead>" --key "<situation-key>" --formula "<the formula a re-sling pours>" \
   || { echo "the wait did not land on the work bead; NOT cancelling or draining" >&2; exit 1; }

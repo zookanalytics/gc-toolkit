@@ -198,7 +198,11 @@ sends it, after resolving the run from the step this session holds, and the
 pack writes no member of the molecule. Nothing resumes a cancelled run, so a
 wait for a person sits on the work bead: `assets/scripts/await-ruling.sh` makes
 the work bead wait on the visit with a `blocks` edge and arms its re-sling, and
-closing the visit pours a fresh run.
+closing the visit pours a fresh run. The re-sling fires only for an open,
+unassigned bead, so the script first releases a claim on the work bead that no
+live worker holds. The visit is filed with `escalate.sh`'s verdict window off,
+because a wait needs an open visit and the window files none for a situation a
+person already closed `moot` or `benign`.
 
 The refusal drains only after the cancel lands. A cancel that does not land
 leaves the step claimed by this session, and the step goes back to the pool
