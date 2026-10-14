@@ -58,9 +58,10 @@ exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check, --pre-existing
       4 machine failure, nothing recorded · 128+N stopped by signal N
 `
 
-// The gate's exit codes. A machine failure is any outcome that says nothing
-// about the code: a dirty tree, a command that could not run, a timeout, a
-// kill, vars that could not be read.
+// The gate's exit codes. A machine failure is any outcome the gate does not
+// record as the code's result: a dirty tree, a command that could not run, a
+// timeout, a kill, vars that could not be read, a result the record store did
+// not take.
 const (
 	rigExitPass    = 0
 	rigExitFail    = 1
@@ -297,10 +298,10 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 		}
 		rec := newRecord(check, rig.ResultPass, rig.MethodNone, co, "", 0, 0)
 		if err := store.Put(rec); err != nil {
-			say("nothing to run: %s. WARN the pass was not recorded: %v", why, err)
-		} else {
-			say("nothing to run: %s. Recorded at %s as a pass with method none", why, co.Commit)
+			say("machine failure: nothing to run (%s), and the record store did not take the pass with method none: %v", why, err)
+			return rigExitMachine
 		}
+		say("nothing to run: %s. Recorded at %s as a pass with method none", why, co.Commit)
 		rigPublish(check, o.publish, rec, say)
 		return rigExitPass
 	}
@@ -323,10 +324,10 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	}
 	rec := newRecord(check, result, method, co, command, out.ExitCode, out.Duration)
 	if err := store.Put(rec); err != nil {
-		say("%s at %s (method %s, %s); WARN not recorded: %v", result, co.Commit, method, out.Duration.Round(time.Millisecond), err)
-	} else {
-		say("%s at %s (method %s, exit %d, %s); recorded", result, co.Commit, method, out.ExitCode, out.Duration.Round(time.Millisecond))
+		say("machine failure: the record store did not take the %s at %s (method %s, exit %d, %s): %v", result, co.Commit, method, out.ExitCode, out.Duration.Round(time.Millisecond), err)
+		return rigExitMachine
 	}
+	say("%s at %s (method %s, exit %d, %s); recorded", result, co.Commit, method, out.ExitCode, out.Duration.Round(time.Millisecond))
 	rigPublish(check, o.publish, rec, say)
 	return resultExit(rec)
 }
@@ -506,7 +507,8 @@ func printRecord(w io.Writer, rec *rig.Record) {
 }
 
 // rigPublish copies rec onto the bead's rig_check.<check> key through the gcbd
-// write path and reads it back. The copy is for whoever reads the bead; the
+// write path and reads it back. rec is a record the store holds: one it just
+// took, or one a lookup returned. The copy is for whoever reads the bead; the
 // record in the store is what answers the gate, so a publish that fails is
 // reported and changes nothing else.
 func rigPublish(check, bead string, rec *rig.Record, say func(string, ...any)) {

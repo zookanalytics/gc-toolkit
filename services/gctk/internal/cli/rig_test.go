@@ -440,6 +440,60 @@ func TestRigMachineFailuresHaveTheirOwnExitAndAreNotRecorded(t *testing.T) {
 	})
 }
 
+// A result the record store does not take is no answer of the gate's: the
+// call exits 4 and publishes nothing, so a published result always has the
+// record --check reads behind it.
+func TestRigAResultTheStoreDoesNotTakeIsAMachineFailureAndIsNotPublished(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only directory")
+	}
+	cases := []struct {
+		name string
+		vars map[string]string
+		rc   string
+		want string
+		exit int
+	}{
+		{"a pass", map[string]string{rig.VarTest: countCmd("full")}, "0", "did not take the pass at", 0},
+		{"a fail", map[string]string{rig.VarTest: countCmd("full")}, "1", "did not take the fail at", 1},
+		{"a pass with nothing to run", map[string]string{}, "0", "did not take the pass with method none", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRigFixture(t)
+			f.vars(c.vars)
+			t.Setenv("CHECK_RC", c.rc)
+			store := filepath.Join(f.repo, ".git", "gc-rig-checks")
+			if err := os.Mkdir(store, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(store, 0o755) })
+
+			code, _, errs := f.gate("test", "--publish-bead", "tk-work")
+			if code != 4 || !strings.Contains(errs, "machine failure: ") || !strings.Contains(errs, c.want) || !strings.Contains(errs, "permission denied") {
+				t.Fatalf("run = %d, want 4 naming %q and the store's error:\n%s", code, c.want, errs)
+			}
+			if got := f.gcCalls("bd update"); len(got) != 0 {
+				t.Fatalf("a result the store did not take was published: %q", got)
+			}
+			if code, _, _ := f.gate("test", "--check"); code != 3 {
+				t.Fatalf("--check after the refused write = %d, want 3", code)
+			}
+
+			// Nothing stands in for the record, so the next call runs again.
+			if err := os.Chmod(store, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if code, _, errs := f.gate("test", "--publish-bead", "tk-work"); code != c.exit || !strings.Contains(errs, "published to tk-work") {
+				t.Fatalf("the next call = %d, want %d:\n%s", code, c.exit, errs)
+			}
+			if r := f.record(rig.CheckTest, f.head()); r == nil {
+				t.Fatal("the next call recorded nothing")
+			}
+		})
+	}
+}
+
 func TestRigRefusesADirtyTree(t *testing.T) {
 	for name, dirty := range map[string]func(f *rigFixture){
 		"an untracked file":   func(f *rigFixture) { f.write("new.txt", "x\n") },

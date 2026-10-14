@@ -177,33 +177,42 @@ func (s *Store) Lookup(check, commit, tree string) (Found, error) {
 	return f, nil
 }
 
-// Put records rec at its commit. It is an upsert, and the last write wins, so
-// two runners at one commit may both run the check and both write; neither
-// waits on the other. Each file is written whole and renamed into place, so a
-// reader sees the old record or the new one, never part of either.
+// Put records rec at its commit, or returns an error. It is an upsert, and the
+// last write wins, so two runners at one commit may both run the check and both
+// write; neither waits on the other. Each file is written whole and renamed
+// into place, so a reader sees the old record or the new one, never part of
+// either.
 //
 // A full-suite test result also keeps the tree's entry: a pass files it, so
 // every commit with the same tree reads the pass, and a fail withdraws it,
-// because the tree's latest full-suite result is no longer a pass.
+// because the tree's latest full-suite result is no longer a pass. The entry
+// changes before the commit's record is written, so a fail is never recorded
+// beside a pass the tree still answers with. A pass's entry is withdrawn again
+// when the commit's record cannot be written. So a Put that returns an error
+// leaves no record of rec, unless the error says that withdrawal failed too.
 func (s *Store) Put(rec *Record) error {
 	if err := rec.valid(); err != nil {
 		return err
 	}
-	if err := writeRecord(s.CommitPath(rec.Check, rec.Commit), rec); err != nil {
-		return err
-	}
+	commit := s.CommitPath(rec.Check, rec.Commit)
 	if rec.Check != CheckTest || rec.Method != MethodFull {
-		return nil
+		return writeRecord(commit, rec)
 	}
 	tree := s.TreePath(rec.Check, rec.Tree)
-	if rec.Result == ResultPass {
-		if err := writeRecord(tree, rec); err != nil {
-			return fmt.Errorf("recorded at the commit, but the tree entry was not written: %w", err)
+	if rec.Result == ResultFail {
+		if err := os.Remove(tree); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("the tree's entry was not withdrawn: %w", err)
 		}
-		return nil
+		return writeRecord(commit, rec)
 	}
-	if err := os.Remove(tree); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("recorded at the commit, but the tree entry was not withdrawn: %w", err)
+	if err := writeRecord(tree, rec); err != nil {
+		return fmt.Errorf("the tree's entry was not written: %w", err)
+	}
+	if err := writeRecord(commit, rec); err != nil {
+		if rerr := os.Remove(tree); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			return fmt.Errorf("%w; the tree's entry, already written, could not be withdrawn: %v", err, rerr)
+		}
+		return err
 	}
 	return nil
 }

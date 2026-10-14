@@ -11,6 +11,7 @@ import (
 const (
 	commitA = "1111111111111111111111111111111111111111"
 	commitB = "2222222222222222222222222222222222222222"
+	commitC = "3333333333333333333333333333333333333333"
 	treeT   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	treeU   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
@@ -116,6 +117,59 @@ func TestPutIsALastWriteWinsUpsert(t *testing.T) {
 	left, err := filepath.Glob(filepath.Join(s.Root(), CheckLint, "commits", ".*.tmp"))
 	if err != nil || len(left) != 0 {
 		t.Fatalf("temporary files left behind: %v %v", left, err)
+	}
+}
+
+// readOnly makes dir, creating it if need be, refuse writes until the test
+// ends. It still reads, so a lookup through it answers.
+func readOnly(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only directory")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+}
+
+func TestAPutTheStoreDoesNotTakeLeavesNoRecordOfTheResult(t *testing.T) {
+	cases := []struct {
+		name string
+		// prior is recorded before the store stops taking writes.
+		prior *Record
+		r     *Record
+		// refused is the directory under the check's own that takes no writes.
+		refused string
+	}{
+		{"a lint pass", nil, rec(CheckLint, ResultPass, MethodFull, commitA, treeT), "commits"},
+		{"an affected pass", nil, rec(CheckTest, ResultPass, MethodAffected, commitA, treeT), "commits"},
+		{"a full pass whose tree entry cannot be written", nil, rec(CheckTest, ResultPass, MethodFull, commitA, treeT), "trees"},
+		{"a full pass whose commit record cannot be written", nil, rec(CheckTest, ResultPass, MethodFull, commitA, treeT), "commits"},
+		{"a full fail that cannot withdraw the tree's pass", rec(CheckTest, ResultPass, MethodFull, commitB, treeT), rec(CheckTest, ResultFail, MethodFull, commitA, treeT), "trees"},
+		{"a full fail whose commit record cannot be written", rec(CheckTest, ResultPass, MethodFull, commitB, treeT), rec(CheckTest, ResultFail, MethodFull, commitA, treeT), "commits"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := NewStore(t.TempDir())
+			if c.prior != nil {
+				mustPut(t, s, c.prior)
+			}
+			readOnly(t, filepath.Join(s.Root(), c.r.Check, c.refused))
+			if err := s.Put(c.r); err == nil {
+				t.Fatal("Put reported no error")
+			}
+			// No commit reads the result: not its own, not one the tree answers
+			// for.
+			for _, commit := range []string{commitA, commitB, commitC} {
+				if f := mustLookup(t, s, c.r.Check, commit, treeT); f.Record != nil && *f.Record == *c.r {
+					t.Fatalf("commit %s reads the result Put refused, from %q", commit, f.Source)
+				}
+			}
+		})
 	}
 }
 
