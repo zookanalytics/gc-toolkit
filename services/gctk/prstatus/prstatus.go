@@ -24,7 +24,7 @@
 //
 // Derive reads only state the city records: the anchor's holds
 // (merge_hold/rebase_hold and the signoff-cap park), whether an open visit
-// names it, the pr-facts.sh posture and merge state, and the anchor's in-flight
+// covers it, the pr-facts.sh posture and merge state, and the anchor's in-flight
 // set — any live bead carrying anchor_bead, the same membership test pr-facts.sh
 // applies in its own arms. It does not consult GitHub's review posture directly
 // — the working -> needs-review flip rests on that live work, which closes as it
@@ -76,12 +76,14 @@ type Facts struct {
 	SignoffCap string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
-	// OpenVisit is whether an open visit names the anchor: a task_kind=visit
-	// bead, open or in_progress, whose subject (gc.continuation_group) is the
-	// anchor. A visit is a conversation a person owes an answer to, and the merge
-	// pass's finalize gate (assets/scripts/finalize-gate.sh) holds the PR until
-	// it closes, so it reads as a hold, as merge_hold and rebase_hold do,
-	// whatever work is in flight.
+	// OpenVisit is whether an open visit covers the anchor: a task_kind=visit
+	// bead, open or in_progress, whose subject is the anchor by the shared visit
+	// identity (assets/scripts/visit-identity.sh). That subject is the bead the
+	// visit's tracks edge names, or its gc.continuation_group stamp when it has
+	// no tracks edge. A visit is a conversation a person owes an answer to, and
+	// the merge pass's finalize gate (assets/scripts/finalize-gate.sh) holds the
+	// PR until it closes, so it reads as a hold, as merge_hold and rebase_hold
+	// do, whatever work is in flight.
 	OpenVisit bool
 	// PRPosture is metadata.pr_posture, stored value@oid@instant; only the value
 	// before the first '@' is read.

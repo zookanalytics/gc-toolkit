@@ -86,7 +86,7 @@ func TestPRStatusDerive(t *testing.T) {
 	})
 
 	// An approved PR the merge pass would land reads working until an open visit
-	// names its anchor; the visit is a hold, so the same PR then reads
+	// covers its anchor; the visit is a hold, so the same PR then reads
 	// needs-attention.
 	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}}]`
 	visit := `[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"}}]`
@@ -121,6 +121,37 @@ func TestPRStatusDerive(t *testing.T) {
 			t.Fatalf("derive with the visit read failing = (%q, %d), want (%q, 2)", out, code, "")
 		}
 	})
+
+	// The visit read answers every open visit in the store, and the shared visit
+	// identity picks the ones covering the anchor: the tracks edge, or the
+	// gc.continuation_group stamp only for a visit with no tracks edge. Edges ride
+	// each row in the `gc bd list` spelling, {type, depends_on_id}.
+	for _, tc := range []struct{ name, visits, want string }{
+		{"a visit that tracks the anchor with no stamp => needs-attention",
+			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"tracks"}]}]`,
+			"needs-attention\n"},
+		{"a visit that tracks the anchor under another bead's stamp => needs-attention",
+			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"tracks"}]}]`,
+			"needs-attention\n"},
+		{"visits on other beads, by stamp or by edge => working",
+			`[{"id":"tk-v1","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other"}},
+			  {"id":"tk-v2","status":"in_progress","metadata":{"task_kind":"visit"},"dependencies":[{"issue_id":"tk-v2","depends_on_id":"tk-other","type":"tracks"}]}]`,
+			"working\n"},
+		{"an anchor stamp beside a tracks edge to another bead => working",
+			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]`,
+			"working\n"},
+		{"an edge of another type to the anchor => working",
+			`[{"id":"tk-v","status":"open","metadata":{"task_kind":"visit"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"blocks"}]}]`,
+			"working\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubGC(t, approved, `[]`)
+			t.Setenv("STUB_VISITS", tc.visits)
+			if out, code := derive(t, "tk-a"); code != 0 || out != tc.want {
+				t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, tc.want)
+			}
+		})
+	}
 }
 
 func TestPRStatusUsageErrors(t *testing.T) {

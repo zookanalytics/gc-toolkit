@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -51,7 +52,7 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 // prStatusDerive gathers the facts the city records about the anchor and prints
 // the state prstatus.Derive returns: the holds and the dated posture/merge-state
 // off the anchor, the size of the anchor's in-flight set, and whether an open
-// visit names the anchor.
+// visit covers the anchor.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -103,13 +104,15 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// The open visits on the anchor: a visit names its subject in
-	// gc.continuation_group, and formula steps carry that key too, so the read
-	// selects task_kind=visit beside it. Open and in_progress are the statuses
-	// the finalize gate holds the merge on: a visit waiting for a person, and one
-	// a sitting is holding.
+	// The open visits that cover the anchor. Coverage is the shared visit
+	// identity the finalize gate holds the merge on: a visit covers the bead its
+	// tracks edge names, and its gc.continuation_group stamp only when it has no
+	// tracks edge. The stamp can land empty while the edge stands, so no metadata
+	// filter selects every visit on the anchor. The read lists every visit that is
+	// open or in_progress, the statuses the finalize gate holds on: a visit waiting
+	// for a person, and one a sitting is holding. Each row carries its own edges,
+	// and visitCovers judges it.
 	visits, ok := client.List(
-		"--metadata-field", "gc.continuation_group="+anchor,
 		"--metadata-field", "task_kind=visit",
 		"--status", "open,in_progress",
 		"--limit", "0",
@@ -119,16 +122,39 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: could not read the open visits on %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2
 	}
+	openVisit := false
+	for i := range visits {
+		if visitCovers(&visits[i], anchor) {
+			openVisit = true
+			break
+		}
+	}
 
 	state := prstatus.Derive(prstatus.Facts{
 		MergeHold:     bead.Meta("merge_hold"),
 		SignoffCap:    bead.Meta("signoff_cap"),
 		RebaseHold:    bead.Meta("rebase_hold"),
-		OpenVisit:     len(visits) > 0,
+		OpenVisit:     openVisit,
 		PRPosture:     bead.Meta("pr_posture"),
 		PRMergeState:  bead.Meta("pr_merge_state"),
 		InFlightCount: len(rows),
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
 	return 0
+}
+
+// visitCovers reports whether visit v covers subject by the shared visit
+// identity, visit_covers in assets/scripts/visit-identity.sh: the subject its
+// tracks edge names, or, for a visit with no tracks edge, its
+// gc.continuation_group stamp. A stamp never widens a non-empty edge set, so a
+// stale stamp beside an edge to another bead does not cover subject.
+func visitCovers(v *gcbd.Bead, subject string) bool {
+	if subject == "" {
+		return false
+	}
+	tracked := v.DependsOn("tracks")
+	if len(tracked) == 0 {
+		return v.Meta("gc.continuation_group") == subject
+	}
+	return slices.Contains(tracked, subject)
 }

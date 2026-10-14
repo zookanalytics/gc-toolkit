@@ -156,6 +156,19 @@ store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","
         {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "working" "a visit on another bead does not hold this PR"
 
+# needs-attention — a visit covers the bead its tracks edge names, and its
+# gc.continuation_group stamp can land empty while the edge stands, so a visit that
+# only tracks the anchor holds the PR too. A `gc bd list` row carries the edge as
+# {type, depends_on_id}.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"tracks"}]}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit that only tracks the anchor (no stamp) => needs-attention"
+
+# working — a visit that tracks another bead does not hold this PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a visit that tracks another bead does not hold this PR"
+
 # working — only a visit holds: another bead in the anchor's continuation group does not.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
         {"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]'
