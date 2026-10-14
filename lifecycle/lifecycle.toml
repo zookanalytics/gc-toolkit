@@ -602,15 +602,17 @@ keys = [
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
 #   a session that re-runs the handoff after the push still reads the whole
 #   round. Absent, the guard starts from the origin head it read before the push,
-#   and refuses a hand-off that pushed nothing past it. Never cleared; the next
-#   resume overwrites it. An oid.
+#   and refuses a hand-off that pushed nothing past it until the worker stamps
+#   it, with bring_current_scope beside it. Never cleared; the next resume
+#   overwrites it. An oid.
 # bring_current_scope — whether bringing the branch current is the resumed
 #   bead's whole job: merge-only for a conflict or stale-base rejection, else
-#   with-work. Written by the resume block beside bring_current_from. On a
-#   merge-only bead the guard counts a commit of the bead's own as an edit
-#   beyond the merge, which owes an audit entry. Absent reads as with-work;
-#   absent beside a bring_current_from stamp, it marks a resume step that asks
-#   for no audit, so the round owes no entries.
+#   with-work. Written by the resume block beside bring_current_from, and as
+#   with-work by a worker whose hand-off the guard refused for recording no
+#   start. On a merge-only bead the guard counts a commit of the bead's own as
+#   an edit beyond the merge, which owes an audit entry. Absent reads as
+#   with-work; absent beside a bring_current_from stamp, it marks a resume
+#   step that asks for no audit, so the round owes no entries.
 # conflict_audit — the worker's audit of the round, on the bead it holds: a
 #   JSON array of {path, collided, resolution, check, rating}, one per item the
 #   guard names, rating routine or judgment. Written by bring-current-audit.sh
@@ -652,7 +654,7 @@ keys = [
 [metadata.gates]
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
-  "signoff_verdict", "visual",
+  "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
@@ -699,10 +701,20 @@ keys = [
 #   `video`). Written by signoff.sh on a `demo` review bead in the same update as
 #   reviewed_oid, and read back before the verdict posts; signoff.sh refuses it
 #   on any other check. A record only: no gate reads it, and the posted verdict
-#   names it on a `Visual:` line. Absent means signoff.sh recorded no demo
-#   verdict on the bead: another check's review, a demo review closed without a
-#   verdict, a lane backing review-outcome.sh wrote, or a review closed before
-#   the stamp existed. Never cleared. One of those four values.
+#   names it on a `Visual:` line, where `repo-artifact` reads `author-committed`.
+#   Absent means signoff.sh recorded no demo verdict on the bead: another
+#   check's review, a demo review closed without a verdict, a lane backing
+#   review-outcome.sh wrote, or a review closed before the stamp existed. Never
+#   cleared. One of those four values.
+# visual_fallback_from — on a demo review bead whose delivered visual stands in
+#   for the modality that fits, because that one could not be produced: the
+#   modality that fits, `screenshot` or `video`, always costlier than `visual`.
+#   Written by signoff.sh in the same update as visual and read back before the
+#   verdict posts. A demo verdict that names no fallback clears it in that
+#   update, so a retried verdict never keeps an earlier attempt's. A record
+#   only: no gate reads it, and the posted verdict names it on the `Visual:`
+#   line as `fallback from <modality>`. Absent means the demo verdict delivered
+#   or named the modality that fits, recorded none, or was never given.
 # check_name — the lane a review or backing bead speaks for, defaulting to
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
@@ -1119,6 +1131,26 @@ keys = [
 #   reads as known, not as a stray. bead-context.sh still shows them on such a
 #   bead, and a validating closer reads _reason as the close brief of a reaction
 #   that ran before reaction beads.
+
+[metadata.placement]
+# Intake's hold on new work (docs/steering.md). A bead may reach a pool only as a
+# member of an epic, as PR-finishing work, as a checked emergency, or by the
+# operator's own move. Other new work waits for the operator's placement sitting,
+# which places it under an epic or routes it on its own.
+keys = ["placement"]
+# placement — `pending`, the marker on a bead held for the placement sitting.
+#   Written by first-reaction-dispose.sh when intake holds its actionable route
+#   or its blocked exit's --then-route, and read back before the release; by
+#   mol-witness-patrol.toml's bug-file block, in the create of a pack-defect bug;
+#   and by mol-feedback-distiller.toml, in the create of each prompt-update and
+#   engineering bead. Read through assets/scripts/placement.sh, whose
+#   awaiting_placement is the queue gc-helm.sh unplaced lists, the named wait
+#   liveness-classify.sh and liveness-recheck.sh give the bead, the exemption
+#   doctor/check-blocked-work-armed reads, and the beads the proactive scan
+#   (tools/gc-proactive.sh) files no first reaction for. A parent, a route, an
+#   arm, an assignee or a live pour places a bead whatever the marker says, so a
+#   marker left on a placed bead names no wait. Absent means intake never held
+#   the bead. No pack writer clears it. A string.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to

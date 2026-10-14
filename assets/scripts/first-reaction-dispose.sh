@@ -32,6 +32,15 @@
 #               recommend -> a human gate on the subject, Discuss-only. A gate
 #               that carries a determinable action is the recommend exit.
 #
+# Intake holds findings for placement (docs/steering.md). The actionable exit's
+# pool route and the blocked exit's --then-route reach a pool only for a bead
+# that may enter one: a member of an epic (it has a parent), PR-finishing work
+# (it carries anchor_bead), or an emergency whose failing check --emergency
+# names and main's own checks confirm, which is routed at P0. Any other bead is marked
+# placement=pending and left unrouted, for the operator's placement sitting
+# (gc-helm.sh unplaced lists it). A named agent's own work (--assign,
+# --then-assign) is not pool work, so the rule does not read it.
+#
 # ruling and recommend file a native human gate (gc-helm.sh demand) that blocks
 # the subject: the gate is the escalation's state, and orders/gate-visit-sweep
 # files the visit that resolves it on its next pass. --visit holds the subject
@@ -91,12 +100,12 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   first-reaction-dispose.sh <bead> --disposition actionable --reason "<why>" --takeaway "<headline>"
-                            [--route <rig>/<agent> | --assign <named-agent>]
+                            [--route <rig>/<agent> [--emergency <check>] | --assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition recommend --reason "<why>" --takeaway "<recommendation; why discuss>"
                             --recommended-formula <mol> [--visit <visit-bead-id>]
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
-                            [--then-route <rig>/<agent> | --then-assign <named-agent>]
+                            [--then-route <rig>/<agent> [--emergency <check>] | --then-assign <named-agent>]
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
@@ -132,6 +141,19 @@ Usage:
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh). An arm that does not
   land fails the exit before the landed proof, so a re-run resumes it.
+  Intake decides whether the actionable route and the --then-route arm are
+  written at all. Only a member of an epic, PR-finishing work (anchor_bead)
+  or a confirmed emergency reaches a pool. Any other bead is marked
+  placement=pending and left unrouted, with no arm, for the operator's
+  placement sitting.
+  --emergency <check> (actionable, or blocked with --then-route) claims the
+  bead is a red main or a broken gate, and names the check on main whose
+  failure it is about: a check run's name or a commit status's context. The
+  claim is checked, not taken: on the head of the default branch of the
+  subject's repository, that check must be failing (gh). Another check failing
+  there confirms nothing. A confirmed emergency is routed, or armed, at P0. An
+  unconfirmed one is held for placement like any other bead, and its note says
+  what the check found.
   --assign (actionable) releases the bead to a named agent instead of a pool:
   the agent becomes its assignee, the address its own hook matches, and no
   route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
@@ -159,7 +181,7 @@ EOF
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
-ASSIGN=""; THEN_ASSIGN=""
+ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
 STAND_DOWN=""
 WAITING=""          # space-separated bead ids
@@ -182,6 +204,9 @@ while [ $# -gt 0 ]; do
         --assign=*) ASSIGN="${1#--assign=}"; shift ;;
         --then-assign)   shift; [ $# -gt 0 ] || usage_die "--then-assign needs a named-agent identity"; THEN_ASSIGN="$1"; shift ;;
         --then-assign=*) THEN_ASSIGN="${1#--then-assign=}"; shift ;;
+        --emergency)   shift; case "${1:--}" in -*) usage_die "--emergency needs the name of the check that fails on main" ;; esac
+                       EMERGENCY="$1"; EMERGENCY_SET=1; shift ;;
+        --emergency=*) EMERGENCY="${1#--emergency=}"; EMERGENCY_SET=1; shift ;;
         --waiting-on)   shift; [ $# -gt 0 ] || usage_die "--waiting-on needs a bead id"; WAITING="$WAITING $1"; shift ;;
         --waiting-on=*) WAITING="$WAITING ${1#--waiting-on=}"; shift ;;
         --blocker)   shift; [ $# -gt 0 ] || usage_die "--blocker needs a title"; BLOCKER_TITLE="$1"; shift ;;
@@ -225,6 +250,14 @@ else
     [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
 fi
 [ "$REACTION_BEAD" != "$BEAD" ] || usage_die "--reaction-bead $REACTION_BEAD is the subject itself; R tracks S, it is not S"
+# An emergency is confirmed only by the check it names, so a claim that names
+# none is refused rather than read as no claim.
+if [ -n "$EMERGENCY_SET" ]; then
+    case "$EMERGENCY" in
+        *[![:space:]]*) : ;;
+        *) usage_die "--emergency needs the name of the check that fails on main: a check run's name or a commit status's context" ;;
+    esac
+fi
 
 # One store. `bd dep add` naming a bead in another rig's store answers "✓
 # Added dependency" and holds nothing (component-model I1), so a cross-store
@@ -240,6 +273,7 @@ case "$DISPOSITION" in
         # filter, and a named agent's hook never reads the route.
         if [ -n "$ASSIGN" ]; then
             [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
+            [ -z "$EMERGENCY" ] || usage_die "--emergency admits a bead to a pool at P0, and --assign hands it to a named agent instead, which intake does not hold. Pass --route for the pool an emergency goes to, or drop --emergency."
         else
             [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
             case "$ROUTE" in
@@ -256,8 +290,8 @@ case "$DISPOSITION" in
         # until that root closes, so it is poured as the bead's sole dispatch
         # surface, never a second one stacked on the live reaction. A reaction
         # bead is not a workflow on the subject, so it slings the closer now.
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA" ] \
-            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--then-route/--assign/--then-assign/--visit/--recommended-formula belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$ASSIGN$THEN_ASSIGN$RECOMMENDED_FORMULA$EMERGENCY" ] \
+            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--then-route/--assign/--then-assign/--visit/--recommended-formula/--emergency belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -295,6 +329,9 @@ case "$DISPOSITION" in
             # record it the exit cannot land, so it does not start.
             [ -x "$DEFERRED" ] \
                 || die "--then-route needs $DEFERRED to arm the dispatch for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+        else
+            [ -z "$EMERGENCY" ] \
+                || usage_die "--emergency admits the dispatch a --then-route arms, at P0, and this blocked exit arms none. Pass --then-route <rig>/<agent>, or drop --emergency."
         fi
         ;;
     recommend|ruling)
@@ -305,8 +342,8 @@ case "$DISPOSITION" in
         # stamps the key the board's Accept reads); ruling REJECTS it (the
         # operator's judgment names no worker-runnable action, so the visit is
         # Discuss-only).
-        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW" ] \
-            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow belong to the other exits"
+        [ -z "$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$EMERGENCY" ] \
+            || usage_die "$DISPOSITION takes --visit (and --recommended-formula on recommend); --route/--assign/--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--emergency belong to the other exits"
         if [ -n "$VISIT" ]; then
             [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
             same_store "$VISIT" "$BEAD" \
@@ -346,6 +383,10 @@ if [ -z "$DB" ]; then
 fi
 BD_DB_ARGS=""
 [ -n "$DB" ] && BD_DB_ARGS="--db $DB"
+# The subject's rig checkout, for the one read that needs its repository rather
+# than its store: an emergency's check of main.
+RIG_PATH="${_path:-}"
+[ -n "$RIG_PATH" ] || case "$DB" in */.beads) RIG_PATH="${DB%/.beads}" ;; esac
 
 # The pin rides at the END of every call: `gc bd <verb> … --db <path>`, the
 # form every other caller in the pack uses.
@@ -435,6 +476,176 @@ else
     fi
 fi
 
+# ── Intake: only placed work, PR-finishing work or an emergency enters a pool ──
+# A bead may be routed or armed to a pool only when it is a member of an epic,
+# PR-finishing work of an anchor, an emergency checked rather than asserted, or
+# routed by the operator (docs/steering.md). A reaction is none of the
+# operator's moves, so the first three decide. The pool route this exit would
+# write is the actionable exit's --route or the blocked exit's --then-route. A
+# named agent's own work (--assign, --then-assign) is no pool route, so the rule
+# does not read it, and the close exit's validating closer shrinks the queue
+# rather than adding work to it.
+#
+# A bead the rule does not admit is held for placement: marked placement=pending
+# and left unrouted, with no arm, until the operator's placement sitting places
+# it under an epic or routes it on its own. An unreadable subject proves no
+# membership, so it is held too.
+POOL_TARGET=""
+case "$DISPOSITION" in
+    actionable) [ -n "$ASSIGN" ] || POOL_TARGET="$ROUTE" ;;
+    blocked)    POOL_TARGET="$THEN_ROUTE" ;;
+esac
+
+# subject_parent — the subject's parent, or empty. bd shows a parent as .parent
+# and as a parent-child dependency; either one is membership.
+subject_parent() {
+    printf '%s' "$SUBJECT_JSON" | jq -r '
+        if type == "array" and length > 0 then
+          (.[0] as $b
+           | [ ($b.parent // ""),
+               ($b.dependencies[]? | select(((.dependency_type // .type) // "") == "parent-child")
+                                   | (.id // .depends_on_id // "")) ]
+           | map(select(type == "string" and . != "")) | .[0] // "")
+        else "" end' 2>/dev/null || printf ''
+}
+
+# main_red <check> — is <check> failing on the default branch of the subject's
+# repository right now? <check> is the name of a check run or the context of a
+# commit status. Failing is a check run on the head that concluded failure,
+# timed_out or startup_failure, or a commit status of failure or error. A run
+# that is still going, or one cancelled by a newer push, is not failing. Only
+# the named check confirms: another check failing on main says nothing about
+# this bead, so it confirms nothing, and the note names it. Sets MAIN_RED_WHY to
+# the evidence either way and returns 0 failing, 1 not failing, 2 unknown.
+# Unknown covers a checkout, an origin or a GitHub answer that could not be
+# read, and it confirms nothing, so a check that cannot run leaves the claim
+# unconfirmed. A gate broken in a way main's own checks do not show cannot be
+# confirmed here either.
+#
+# Every GitHub read is bounded (gh_bounded), so a stalled connection cannot hold
+# the reaction, and its pool slot, with R leased; a read that runs out of time
+# is unknown. The check runs and the commit statuses are read across all their
+# pages, so a failure past the first page still confirms.
+MAIN_RED_WHY=""
+GH_TIMEOUT="${GC_FIRST_REACTION_GH_TIMEOUT:-20}"
+case "$GH_TIMEOUT" in ''|*[!0-9]*) GH_TIMEOUT=20 ;; esac
+if command -v timeout >/dev/null 2>&1; then GH_TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then GH_TIMEOUT_BIN=gtimeout
+else GH_TIMEOUT_BIN=""
+fi
+gh_bounded() {
+    if [ -n "$GH_TIMEOUT_BIN" ] && [ "$GH_TIMEOUT" -gt 0 ]; then
+        "$GH_TIMEOUT_BIN" "$GH_TIMEOUT" gh "$@" </dev/null
+    else
+        gh "$@" </dev/null
+    fi
+}
+# gh_unanswered <what> <rc> — MAIN_RED_WHY for a GitHub read that failed.
+gh_unanswered() {
+    if [ "$2" -eq 124 ]; then
+        MAIN_RED_WHY="GitHub did not answer for $1 within ${GH_TIMEOUT}s"
+    else
+        MAIN_RED_WHY="GitHub did not answer for $1 (gh exit $2)"
+    fi
+}
+main_red() {
+    MAIN_RED_WHY=""
+    command -v gh >/dev/null 2>&1 \
+        || { MAIN_RED_WHY="gh is not installed, so main's checks could not be read"; return 2; }
+    [ -n "$RIG_PATH" ] \
+        || { MAIN_RED_WHY="no rig checkout is known for ${BEAD%%-*}, so its repository could not be named"; return 2; }
+    _url=$(git -C "$RIG_PATH" remote get-url origin 2>/dev/null | tr -d '[:space:]')
+    _slug=""
+    case "$_url" in
+        git@github.com:*|https://github.com/*|ssh://git@github.com/*)
+            _slug=$(printf '%s' "$_url" | sed -e 's#^ssh://git@github.com/##' \
+                -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#\.git$##' -e 's#/*$##') ;;
+    esac
+    case "$_slug" in */*/*|/*|*/) _slug="" ;; */*) : ;; *) _slug="" ;; esac
+    [ -n "$_slug" ] \
+        || { MAIN_RED_WHY="the origin of $RIG_PATH (${_url:-none}) is not a GitHub repository"; return 2; }
+    _rc=0; _repo=$(gh_bounded api "repos/$_slug" 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the default branch of $_slug" "$_rc"; return 2; }
+    _branch=$(printf '%s' "$_repo" | scrub | jq -r 'if type == "object" then (.default_branch // "") else "" end' 2>/dev/null || printf '')
+    [ -n "$_branch" ] \
+        || { MAIN_RED_WHY="GitHub did not name the default branch of $_slug"; return 2; }
+    # --paginate prints one JSON object per page; jq -s merges their arrays. A
+    # read that stopped partway is never merged, because its exit is checked
+    # first.
+    _rc=0; _runs=$(gh_bounded api "repos/$_slug/commits/$_branch/check-runs?per_page=100" --paginate 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the check runs on $_branch of $_slug" "$_rc"; return 2; }
+    _rc=0; _status=$(gh_bounded api "repos/$_slug/commits/$_branch/status?per_page=100" --paginate 2>/dev/null) || _rc=$?
+    [ "$_rc" -eq 0 ] || { gh_unanswered "the commit statuses on $_branch of $_slug" "$_rc"; return 2; }
+    _runs=$(printf '%s' "$_runs" | scrub | jq -cs '
+        if length > 0 and all(.[]; type == "object" and (.check_runs | type) == "array")
+        then {check_runs: [.[].check_runs[]]} else null end' 2>/dev/null)
+    _status=$(printf '%s' "$_status" | scrub | jq -cs '
+        if length > 0 and all(.[]; type == "object" and (.statuses | type) == "array")
+        then {sha: .[0].sha, statuses: [.[].statuses[]]} else null end' 2>/dev/null)
+    _shape=$(jq -rn --argjson r "${_runs:-null}" --argjson s "${_status:-null}" '
+        if (($r | type) == "object" and ($r.check_runs | type) == "array"
+            and ($s | type) == "object" and ($s.statuses | type) == "array") then "ok" else "unknown" end' 2>/dev/null || printf 'unknown')
+    [ "$_shape" = ok ] \
+        || { MAIN_RED_WHY="GitHub did not answer for the checks on $_branch of $_slug"; return 2; }
+    _sha=$(jq -rn --argjson r "$_runs" --argjson s "$_status" \
+        '($s.sha // $r.check_runs[0].head_sha // "") | tostring | .[0:12]' 2>/dev/null || printf '')
+    _head="$_branch of $_slug${_sha:+ at $_sha}"
+    # One line, three fields: whether the head carries a check by the claimed
+    # name (1 or 0), that check's failing entries, and every other failing one.
+    _verdict=$(jq -rn --argjson r "$_runs" --argjson s "$_status" --arg c "$1" '
+        def shown: "\(.name) (\(.state))" | gsub("[[:cntrl:]]"; " ");
+        [ ($r.check_runs[] | {name: ((.name // "") | tostring), state: ((.conclusion // "") | tostring),
+                              red: (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")}),
+          ($s.statuses[] | {name: ((.context // "") | tostring), state: ((.state // "") | tostring),
+                            red: (.state == "failure" or .state == "error")}) ] as $all
+        | [ (if ($all | any(.name == $c)) then "1" else "0" end),
+            ($all | map(select(.red and .name == $c) | shown) | unique | join(", ")),
+            ($all | map(select(.red and .name != $c) | shown) | unique | join(", ")) ]
+        | join("\u001f")' 2>/dev/null) \
+        || { MAIN_RED_WHY="the checks on $_head could not be read"; return 2; }
+    IFS=$(printf '\037') read -r _present _named _others <<EOF
+$_verdict
+EOF
+    if [ -n "$_named" ]; then
+        MAIN_RED_WHY="$_head is red: $_named"
+        return 0
+    fi
+    if [ "$_present" = 1 ]; then
+        MAIN_RED_WHY="$1 is not failing on $_head"
+    else
+        MAIN_RED_WHY="$_head has no check named $1"
+    fi
+    [ -z "$_others" ] || MAIN_RED_WHY="$MAIN_RED_WHY; other checks failing there: $_others"
+    return 1
+}
+
+ADMIT=""         # member | pr-finishing | emergency; empty holds the bead for placement
+ADMIT_WHY=""; HOLD_WHY=""
+if [ -n "$POOL_TARGET" ]; then
+    if [ -n "$EMERGENCY" ]; then
+        if main_red "$EMERGENCY"; then
+            ADMIT=emergency; ADMIT_WHY="$MAIN_RED_WHY"
+        else
+            HOLD_WHY="--emergency was not confirmed: $MAIN_RED_WHY"
+        fi
+    fi
+    if [ -z "$ADMIT" ]; then
+        _parent=$(subject_parent)
+        _anchor=$(subject_meta anchor_bead)
+        if [ -n "$_parent" ]; then
+            ADMIT=member; ADMIT_WHY="a member of $_parent"
+        elif [ -n "$_anchor" ]; then
+            ADMIT=pr-finishing; ADMIT_WHY="PR-finishing work of $_anchor"
+        fi
+    fi
+    if [ -n "$ADMIT" ]; then
+        note "intake admits $BEAD to $POOL_TARGET: ${ADMIT_WHY}${HOLD_WHY:+ ($HOLD_WHY)}"
+    else
+        HOLD_WHY="${HOLD_WHY:+$HOLD_WHY; }$BEAD has no parent epic and is not PR-finishing work"
+        note "intake holds $BEAD for placement instead of ${POOL_TARGET}: $HOLD_WHY"
+    fi
+fi
+
 # ── Route only where something can claim ─────────────────────────────
 # A route to a pool this city does not run — or one whose rig does not own this
 # bead's store — is worse than a visit: the bead is open, unassigned and offered
@@ -442,8 +653,14 @@ fi
 # this against the agent roster and, given the bead, against store ownership too
 # (a rig-scope pool only claims beads in its own store), for any rig-qualified
 # target, and it answers no only on a positive finding — so a probe that cannot
-# run leaves the disposition alone.
-if { [ "$DISPOSITION" = "actionable" ] || [ "$DISPOSITION" = "close" ]; } && [ -n "$ROUTE" ] && [ -x "$PROACTIVE" ]; then
+# run leaves the disposition alone. A route intake holds for placement is never
+# written, so it is not asked about.
+CLAIM_ROUTE=""
+case "$DISPOSITION" in
+    actionable) [ -n "$ADMIT" ] && CLAIM_ROUTE="$ROUTE" ;;
+    close)      CLAIM_ROUTE="$ROUTE" ;;
+esac
+if [ -n "$CLAIM_ROUTE" ] && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$ROUTE" "$BEAD" 2>/dev/null)" || {
         if [ "$DISPOSITION" = "actionable" ]; then
             usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. Route it to a pool that can claim it, or address it with --assign to the named agent whose work it is (a town-repo edit is gc-toolkit.mechanik's). Put it to the operator (--disposition recommend or ruling) only when the next move is the operator's."
@@ -468,8 +685,9 @@ fi
 # placeholder passes; a target the roster does not know, or one whose rig does
 # not own this bead's store, would arm a dispatch every reconcile pass replays
 # into a failure. The probe answers no only on a positive finding, so an
-# unrunnable probe leaves the arm alone.
-if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -x "$PROACTIVE" ]; then
+# unrunnable probe leaves the arm alone. An arm intake holds for placement is
+# never written, so it is not asked about either.
+if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ] && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" "$BEAD" 2>/dev/null)" || {
         usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the reconcile pass replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
     }
@@ -481,15 +699,20 @@ fi
 # guardrail that a genuine fork, an irreversible or destructive action, or a
 # policy call still goes to a human lives in the reacting agent's rubric
 # (agents/proactive/prompt.template.md), which is what chooses the disposition;
-# this script performs the one it was given. The route-deliverability and
-# same-store guards above are the checks that stay, because they catch a
-# disposition that cannot land whatever the reacting agent intended.
+# this script performs the one it was given. The checks above stay whatever the
+# reacting agent intended: intake, because the operator decides what new work
+# enters a pool, and the route-deliverability and same-store guards, because
+# they catch a disposition that cannot land.
 
 if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
         actionable) if [ -n "$ASSIGN" ]; then
                         printf 'would release %s to named agent %s (assignee, no route)\n' "$BEAD" "$ASSIGN"
+                    elif [ -z "$ADMIT" ]; then
+                        printf 'would hold %s for placement (placement=pending, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
+                    elif [ "$ADMIT" = emergency ]; then
+                        printf 'would release %s to %s at P0: %s\n' "$BEAD" "$ROUTE" "$ADMIT_WHY"
                     else
                         printf 'would release %s to %s\n' "$BEAD" "$ROUTE"
                     fi ;;
@@ -498,7 +721,13 @@ if [ -n "$DRY" ]; then
                     else
                         printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD"
                     fi ;;
-        blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}" ;;
+        blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}"
+                    if [ -n "$THEN_ROUTE" ] && [ -z "$ADMIT" ]; then
+                        printf 'would hold %s for placement (placement=pending) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
+                    elif [ -n "$THEN_ROUTE" ]; then
+                        _p0=""; [ "$ADMIT" = emergency ] && _p0=" at P0"
+                        printf 'would arm a dispatch to %s%s for when the wait lifts\n' "$THEN_ROUTE" "$_p0"
+                    fi ;;
         close)      if [ -n "$AFTER_WORKFLOW" ]; then
                         printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
                     else
@@ -556,6 +785,14 @@ case "$DISPOSITION" in
     close)      TARGET="$ROUTE" ;;
     ruling)     TARGET="$VISIT" ;;
 esac
+if [ -n "$POOL_TARGET" ]; then
+    case "$DISPOSITION:$ADMIT" in
+        blocked:)          TARGET="$TARGET; held for placement" ;;
+        actionable:)       TARGET="held for placement" ;;
+        blocked:emergency) TARGET="$TARGET; armed at P0" ;;
+        *:emergency)       TARGET="$TARGET at P0" ;;
+    esac
+fi
 
 # ── The recommendation, before the act ───────────────────────────────
 # A recommend disposition stamps gc.recommended_formula: it is the field that
@@ -744,28 +981,82 @@ The card in $BEAD's notes carries the evidence. Resolving this gate makes $BEAD 
     note "put $BEAD to the operator as the human gate $GATE; gate-visit-sweep files its visit on its next pass"
 fi
 
+# ── Intake's write, before the act ───────────────────────────────────
+# A held bead carries placement=pending before the release leaves it unrouted,
+# so it is never open and unrouted without the marker that puts it in the
+# sitting's queue. A confirmed emergency carries P0 before its route or its arm,
+# so it is never claimable at the priority it was filed at. Either write carries
+# a note saying what intake found, and either is read back: one that did not
+# land stops the exit before the act, with no landed proof, so a re-run resumes.
+# subject_now <jq-path> answers "v:<value>" from a readable subject and "u:"
+# from anything else, so an unreadable subject never reads as a write that
+# landed.
+subject_now() {
+    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
+        | jq -r "if (type == \"array\" and length > 0) then \"v:\" + (((.[0] | $1) // \"\") | tostring) else \"u:\" end" 2>/dev/null \
+        || printf 'u:'
+}
+if [ -n "$POOL_TARGET" ]; then
+    INTAKE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ -z "$ADMIT" ]; then
+        set -- --set-metadata "placement=pending" --append-notes "## Intake (first reaction, $INTAKE_AT)
+Held for placement instead of reaching $POOL_TARGET: $HOLD_WHY. The operator's placement sitting places it under an epic or routes it on its own; gc-helm.sh unplaced lists it."
+        WANT="v:pending"; WHAT="placement=pending"; NOW_PATH=".metadata.placement"
+    elif [ "$ADMIT" = emergency ]; then
+        set -- --priority 0 --append-notes "## Intake (first reaction, $INTAKE_AT)
+Routed to $POOL_TARGET at P0 as an emergency: $ADMIT_WHY."
+        WANT="v:0"; WHAT="priority P0"; NOW_PATH=".priority"
+    else
+        set --
+    fi
+    if [ $# -gt 0 ]; then
+        gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
+            || die "could not write $WHAT on $BEAD (does it exist${DB:+ in $DB}?), so it was not released. Nothing else was written by this step; clear the cause and re-run this command."
+        if [ "$(subject_now "$NOW_PATH")" != "$WANT" ]; then
+            if [ "$ADMIT" = emergency ]; then
+                gc_bd update "$BEAD" --priority 0 >/dev/null 2>&1 || true
+            else
+                gc_bd update "$BEAD" --set-metadata "placement=pending" >/dev/null 2>&1 || true
+            fi
+            _got="$(subject_now "$NOW_PATH")"
+            [ "$_got" = "$WANT" ] \
+                || die "$WHAT did not land on $BEAD (it read back as '$_got', want '$WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The release is withheld, so $BEAD is not left unrouted without its marker or routed at the wrong priority. Clear the cause and re-run this command."
+        fi
+        note "intake wrote $WHAT on $BEAD"
+    fi
+fi
+
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
 # --route releases the bead to a pool instead of back to the human, and
 # --assign releases it to a named agent as its assignee.
 #
 # Each disposition also answers the headline's own question — is anything still
-# waiting on this bead? An actionable one is not: it is moving, and the pool its
-# route names, or the agent it is assigned to, will take it, so --no-wait says
-# so. A blocked one names its wait as an edge, and a --then-assign rides the same
-# release, so the agent's hook offers the bead once the edge clears. A recommend
-# or a ruling names its human gate as its wait, or the visit --visit named: the
-# subject is waiting on a person, and that bead carries the wait, so
-# --waiting-on records the blocks edge onto it. On a gate that edge is the one
-# gc-helm.sh demand already wrote, and adding it again leaves it single. The
-# release parks the subject and the edge holds it, so it is not offered again
-# until the gate resolves or the visit closes, and the wait is a graph state
-# doctor/check-wait-is-an-edge reads rather than prose it reports.
+# waiting on this bead? An actionable one is not waiting on a bead: it is
+# moving, and the pool its route names, or the agent it is assigned to, will
+# take it. Held for placement, it is released with no route into the sitting's
+# queue, which placement=pending names and gc-helm.sh unplaced lists. Either
+# way --no-wait says so. A blocked one names its wait as an edge, and a
+# --then-assign rides the same release, so the agent's hook offers the bead
+# once the edge clears. A recommend or a ruling names its human gate as its
+# wait, or the visit --visit named: the subject is waiting on a person, and
+# that bead carries the wait, so --waiting-on records the blocks edge onto
+# it. On a gate that edge is the one gc-helm.sh demand already wrote, and
+# adding it again leaves it single. The release parks the subject and the edge
+# holds it, so it is not offered again until the gate resolves or the visit
+# closes, and the wait is a graph state doctor/check-wait-is-an-edge reads
+# rather than prose it reports.
+#
+# A subject held for placement can carry the stamp a dead pour left
+# (gc.execution_routed_to), which the queue reads as a live pour. The release
+# clears it and fails when it survives on a held bead, so this exit stops before
+# its landed proof rather than record a hold the sitting cannot see.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable)
         if [ -n "$ASSIGN" ]; then set -- "$@" --assign "$ASSIGN" --no-wait
-        else set -- "$@" --route "$ROUTE" --no-wait; fi ;;
+        elif [ -n "$ADMIT" ]; then set -- "$@" --route "$ROUTE" --no-wait
+        else set -- "$@" --no-wait; fi ;;
     blocked)
         for w in $WAITING; do set -- "$@" --waiting-on "$w"; done
         if [ -n "$THEN_ASSIGN" ]; then set -- "$@" --assign "$THEN_ASSIGN"; fi ;;
@@ -804,7 +1095,9 @@ if [ -n "$HOLD_WAITS" ]; then
     # fails the exit the way a missing edge does, before the landed proof. The
     # release leaves the bead open, unassigned and unrouted, which is what the
     # arm needs, and the arm rewrites its own record, so a re-run arms cleanly.
-    if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ]; then
+    # A bead intake held for placement is armed by nothing: its dispatch is the
+    # sitting's, once it places the bead.
+    if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ]; then
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
         if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
             note "armed the dispatch to $THEN_ROUTE for when the wait lifts"

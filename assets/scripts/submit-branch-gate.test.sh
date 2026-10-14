@@ -1277,6 +1277,9 @@ eq "$(run_bcg 3)" "3|GUARD" "an audit that does not cover the round stops before
 grep -q "BRING-CURRENT AUDIT INCOMPLETE" "$TMP/out" \
   && ok "…and tells the worker to record the entries and re-run" \
   || bad "the audit refusal must tell the worker to complete the audit"
+grep -q "stamp bring_current_from and bring_current_scope" "$TMP/out" \
+  && ok "…and, when the guard asks where the work began, to stamp the scope beside the start" \
+  || bad "the audit refusal must ask for bring_current_scope beside bring_current_from: a start stamped alone waives the audit"
 eq "$(run_bcg 0 '')" "0|GUARD" "an unread origin head still runs the guard, which decides what that means"
 eq "$(cat "$TMP/guard-argv")" "guard --bead tk-work --to sha-local --from " \
    "…passing the empty start through rather than dropping the flag"

@@ -80,6 +80,12 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # shellcheck source=../assets/scripts/dispatch-path.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/dispatch-path.sh" \
     || { printf '%s: cannot source assets/scripts/dispatch-path.sh from the pack\n' "$PROG" >&2; exit 1; }
+# The one definition of a bead that waits for placement, shared with gc-helm.sh
+# unplaced, the liveness classifier and doctor/check-blocked-work-armed. Exposes
+# $PLACEMENT_JQ, which scan_precision_filter applies after $DISPATCH_PATH_JQ.
+# shellcheck source=../assets/scripts/placement.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/placement.sh" \
+    || { printf '%s: cannot source assets/scripts/placement.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one resolver of a bead id to the store that owns it, and of whether that
 # store holds the bead (docs/bead-store-resolution.md). subject_present_guard
 # asks it.
@@ -729,8 +735,8 @@ cmd_demand() {
 # Plus a state predicate: no dispatch path, has a description; deduped by id.
 # A subject that already has an open reaction is NOT dropped here — that dedup
 # needs a per-bead query (reaction_absent_guard at sling time), and a completed
-# reaction has already routed, held or stamped a takeaway on the subject, so the
-# dispatch-path and takeaway clauses drop it then.
+# reaction stamps its takeaway on the subject on every exit, so the takeaway
+# clause drops it then.
 #   - gc.reaction_owned — a live owner already owns reacting to this bead, so an
 #     autonomous first reaction would duplicate it. An operator engage (gc-helm
 #     engage --new-subject) is the setter today: it creates the subject marked,
@@ -748,6 +754,14 @@ cmd_demand() {
 #     bead dispatched twice. An arm reconcile has stopped retrying at its
 #     failure cap is dropped too: that bead waits on the visit the cap
 #     escalated, not on a first reaction.
+#   - waits for placement (awaiting_placement, assets/scripts/placement.sh) —
+#     intake held it as new work for the operator's placement sitting
+#     (docs/steering.md), so its next move is the sitting's. The witness and the
+#     feedback distiller file their beads marked and unrouted, with no takeaway,
+#     so no other clause drops them. A reaction would only triage the bead again,
+#     and its close exit could close a proposal before the operator reads it.
+#     A marked bead that something has placed since is not in the queue, and
+#     the other clauses judge it.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -755,10 +769,11 @@ scan_precision_filter() {
     # than raw input. Kept as one list so the review-lane keys and the
     # implementation-anchor keys share a single source of truth.
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
-    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
         map(select(
             ((.metadata["gc.reaction_owned"] // "") == "")
             and (has_dispatch_path | not)
+            and (awaiting_placement | not)
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
