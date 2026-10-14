@@ -70,7 +70,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-polecat-work.toml
 d11172c61ecfa85cc275b76fc41650adfa8e30a968231be51564f81a77f88e5f
 formulas/mol-refinery-patrol.toml
-1b3482e7e62b2b4de28664918f7ad3666c2224d4d18e704e988e5b4f140a35ec
+db8b4f80c1289c4dab9cf9ecf49075ee76fffabc11bf3cec589b737d07af9781
 formulas/mol-review-quorum-signoff.toml
 5d344c78d555c23569d256816be3aae5e7f08da4159cf967dd67a23c768c92fd
 formulas/mol-review.toml
