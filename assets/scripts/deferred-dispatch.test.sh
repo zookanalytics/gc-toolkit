@@ -60,9 +60,10 @@
 #   * the PASS LOCK — a pass that overlaps one in flight exits 0 having read and
 #     slung nothing, so two overlapping passes make one sling; a holder past the
 #     stall bound fails the pass, and a lock that cannot be taken refuses it;
-#     only the pass process holds it, so no gc or escalate.sh call, and no
-#     process one leaves running, carries it past the pass; with no GC_RIG it is
-#     keyed by the rig root;
+#     no gc or escalate.sh call is handed its descriptor, so no process one
+#     leaves running carries it past the pass, while a call still running holds
+#     it after a pass killed by itself; with no GC_RIG it is keyed by the rig
+#     root;
 #   * the PASS BUDGET — a pass starts a sling or an escalation only while a full
 #     allowance is left, on a clock the test controls, and reports the beads it
 #     left armed and untouched; a pass that fails declares nothing; a dry run
@@ -1194,9 +1195,9 @@ eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "0" "before any read of the store"
 eq "$(slings)" "0" "and slings nothing"
 unset STUB_BD_LOG
 
-# Only the pass process holds the lock. A process a gc call starts can outlive
-# the pass, and one that kept fd 9 would hold the lock against every later pass,
-# with nothing dispatching on the rig until someone killed it.
+# No gc or escalate.sh call is handed the lock's descriptor. A process a gc call
+# starts can outlive the pass, and one that kept fd 9 would hold the lock against
+# every later pass, with nothing dispatching on the rig until someone killed it.
 echo "# every gc and escalate.sh call a pass makes runs without the lock's descriptor"
 store '[
  {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
@@ -1234,6 +1235,31 @@ else
     bad "the long-running process the fixture starts never ran"
 fi
 [ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+
+echo "# a pass killed by itself mid-sling leaves the lock held until its sling exits"
+# The order's timeout stops the pass's whole process group. A pass killed by
+# itself leaves its gc sling running, and the subshell pass_child runs the sling
+# from keeps the lock until the sling exits, so no second pass slings beside it.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+LOCKF="$TMP/state/_unscoped/pass.lock"
+HOLD="$TMP/hold-kill"; rm -f "$HOLD".*
+# Launched as a simple command, so $! is the pass itself.
+STUB_SLING_HOLD="$HOLD" "$SUT" reconcile > /dev/null 2>&1 &
+first=$!
+if await "$HOLD.started"; then
+    kill -9 "$first" 2>/dev/null; wait "$first" 2>/dev/null
+    out="$("$SUT" reconcile 2>&1)"; rc=$?
+    eq "$rc" 0 "a pass while the killed pass's sling runs on exits 0"
+    has "$out" "already in flight" "and is held off by the lock that sling's subshell still holds"
+    eq "$(slings)" "1" "so the killed pass's sling is the only one"
+    : > "$HOLD.release"
+    i=0; while ! ( exec 8>>"$LOCKF"; flock -n 8 ) 2>/dev/null && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+    ( exec 8>>"$LOCKF"; flock -n 8 ) 2>/dev/null && ok "the lock is free once that sling exits" \
+        || bad "the lock outlived the killed pass's sling"
+else
+    bad "the pass to be killed never reached its sling (fixture wedged)"
+    : > "$HOLD.release"; wait "$first" 2>/dev/null
+fi
 
 echo "# with no GC_RIG, the lock is keyed by the rig root, so two rigs never share one"
 # Two roots with one name, each with its own store. A pass of the first is

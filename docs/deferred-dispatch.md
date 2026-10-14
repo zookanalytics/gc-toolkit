@@ -250,15 +250,19 @@ the pass carries its own lock:
   `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
   plus a checksum of the whole path, so two rigs never share a lock. The
   lock depends on no bead surviving.
-- Only the pass process holds the lock's descriptor. Every `gc` and
-  `escalate.sh` call the pass makes runs with it closed. A process that a
-  `gc` call starts can outlive the pass: a store read can bring up a Dolt
-  server, and `gc` hands the descriptors it was given to what it starts. A
-  process that kept the descriptor would hold the lock against every later
-  pass. The kernel releases the lock when the pass exits, however it exits,
-  `SIGKILL` included. The order's timeout kills the pass's whole process
-  group, its `gc sling` with it, and the next pass re-attempts the
-  unconfirmed sling through the `slinging@` recovery.
+- The lock, its state key and the way a pass runs what it calls are
+  `bd-lib.sh`'s `take_pass_lock`, `rig_state_key` and `pass_child`.
+- Every `gc` and `escalate.sh` call the pass makes runs through `pass_child`,
+  with the lock's descriptor closed. A process that a `gc` call starts can
+  outlive the pass: a store read can bring up a Dolt server, and `gc` hands
+  the descriptors it was given to what it starts. A process that kept the
+  descriptor would hold the lock against every later pass. The subshell
+  `pass_child` runs a call from holds the descriptor until the call exits, so
+  a pass killed by itself leaves the lock held while the call it was making
+  runs on. The kernel releases the lock once the pass and its calls have
+  exited, however they exit, `SIGKILL` included. The order's timeout kills
+  the pass's whole process group, its `gc sling` with it, and the next pass
+  re-attempts the unconfirmed sling through the `slinging@` recovery.
 - A pass that finds the lock held prints one line and exits 0 without
   listing or slinging. Under the order it also declares the run `skipped`
   in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
