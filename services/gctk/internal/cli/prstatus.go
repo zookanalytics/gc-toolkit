@@ -50,9 +50,9 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 }
 
 // prStatusDerive gathers the facts the city records about the anchor and prints
-// the state prstatus.Derive returns: the holds and the dated posture/merge-state
-// off the anchor, the size of the anchor's in-flight set, and whether an open
-// visit covers the anchor.
+// the state prstatus.Derive returns: the holds, the dated posture/merge-state
+// and the draft-stage markers off the anchor, the size of the anchor's
+// in-flight set, and whether an open visit covers the anchor.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -137,6 +137,8 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		OpenVisit:     openVisit,
 		PRPosture:     bead.Meta("pr_posture"),
 		PRMergeState:  bead.Meta("pr_merge_state"),
+		OpenedAsDraft: bead.Meta("opened_as_draft"),
+		DraftReadied:  bead.Meta("draft_readied"),
 		InFlightCount: len(rows),
 	})
 	fmt.Fprintf(stdout, "%s\n", state)

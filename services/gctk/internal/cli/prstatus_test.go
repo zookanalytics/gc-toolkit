@@ -71,6 +71,20 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
+	t.Run("a draft the city opened, not yet readied => working", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123"}}]`, `[]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
+		}
+	})
+
+	t.Run("a draft the city readied => needs-review", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","draft_readied":"abc123"}}]`, `[]`)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
+		}
+	})
+
 	t.Run("nothing outstanding => needs-review", func(t *testing.T) {
 		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, `[]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {

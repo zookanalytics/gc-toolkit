@@ -2220,6 +2220,9 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), 0, PhaseWorking},
 		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), 0, PhaseNeedsReview},
 		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
+		{"a draft the city opened is working until readied", merge(map[string]string{mdOpenedAsDraft: "abc"}), 0, PhaseWorking},
+		{"a readied draft with nothing in flight needs review", merge(map[string]string{mdOpenedAsDraft: "abc", mdDraftReadied: "abc"}), 0, PhaseNeedsReview},
+		{"a held draft needs attention", merge(map[string]string{mdOpenedAsDraft: "abc", mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 	}
 	for _, tc := range cases {
 		if got := prPhase(tc.a, Facts{}, tc.kids); got != tc.want {
@@ -2238,6 +2241,26 @@ func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
 		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	}
+}
+
+// A draft the city opened is not yet up for review, so the PR chip (PRPhase) and
+// the row's own liveness (Phase) both read working until pr-open.sh records
+// draft_readied. Its readied twin, with nothing in flight, is the settled row a
+// human reviews.
+func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
+	draft := mergeAnchor("tk-draft", map[string]string{mdOpenedAsDraft: "abc"})
+	readied := mergeAnchor("tk-ready", map[string]string{mdOpenedAsDraft: "abc", mdDraftReadied: "abc"})
+
+	b := BuildBoard([]Anchor{draft, readied}, fixtureNow, false, nil, Facts{})
+	for _, tc := range []struct{ id, want string }{
+		{"tk-draft", PhaseWorking},
+		{"tk-ready", PhaseNeedsReview},
+	} {
+		tile := mustTile(t, b, tc.id)
+		if tile.PRPhase != tc.want || tile.Phase != tc.want {
+			t.Errorf("%s: PRPhase=%q Phase=%q, want both %q", tc.id, tile.PRPhase, tile.Phase, tc.want)
+		}
 	}
 }
 

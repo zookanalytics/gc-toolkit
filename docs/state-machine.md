@@ -536,8 +536,8 @@ is extensible: one value is set at a time, and setting one removes any other
 
 | Label | Who acts next | When |
 |---|---|---|
-| `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
-| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green, reworked and handed back, or a non-blocking review left comments |
+| `status: working` | the city | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
+| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
 | `status: needs-attention` | a human weighs in | a hold stands, whatever rework is in flight — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, a rebase hold, or an open visit on the anchor, which the merge pass's finalize gate holds the PR on — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
@@ -547,22 +547,28 @@ Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 block or to resolve what a hold stands for.
 
 The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, any open visit on it, and its rework children —
-not GitHub's review posture directly and not a lane marker. The
-`working`->`needs-review` flip rests on the rework child, which is scoped to the
-reviewed commit and closes when the fix lands, so a sticky `CHANGES_REQUESTED`
-never traps the label in `working` after a rework hands back, and a
-`check.<g>=green` that outlives a rewritten reviewed commit ([Green survives new
-commits](#checks), the bug tk-4zsj1p) cannot read the label settled.
+state on the anchor, its holds, any open visit on it, its draft-stage markers,
+and its rework children — not GitHub's review posture or draft flag directly
+and not a lane marker. The `working`->`needs-review` flip rests on
+the rework child, which is scoped to the reviewed commit and closes when the fix
+lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
+rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
+commit ([Green survives new commits](#checks), the bug tk-4zsj1p) cannot read the
+label settled.
 
 The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR
 opens as a draft when its `check_set` names an `open-as-draft` check, and
 `pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
 reads green ([Checks](#checks)); merge readiness waits on every phase and the
-universal approval besides.
+universal approval besides. A draft the city opened carries `opened_as_draft`
+and reads `working` until `pr-open.sh` records `draft_readied`, because until
+then the city still owes the checks that flip it and the flip itself. A draft
+anyone else made, or one re-drafted after the city readied it, reads like any
+other PR.
 `assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
-label when it opens a PR and when it flips a draft to ready, and `signoff.sh`
+label when it opens a PR and when it records a draft ready, whether it flipped
+the draft or found it already ready, and `signoff.sh`
 flips it on each of the city's own verdicts. A human's review moves it in the
 merge cadence's posture and feedback arms, in the pass that records the review.
 The posture arm re-derives the label for an anchor whose posture value it
