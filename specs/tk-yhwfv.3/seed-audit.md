@@ -1,6 +1,6 @@
 ---
 name: Seed audit — what was built, what it cannot see, and the fidelity measurement
-description: Design record for docs/seed-audit/ and assets/scripts/render-seed-audit.sh — why the render runs against a pinned synthetic city rather than the live one, the measured fidelity against live gc prime, and three limitations found while building it (gc prime ignores rig scope; formula list over-reports vs formula show; a missing prompt template renders a generic prompt with exit 0). Read before changing the renderer or trusting the artifact's coverage.
+description: Design record for generated/seed-audit/ and assets/scripts/render-seed-audit.sh — why the render runs against a pinned synthetic city rather than the live one, how a stale render is caught by rendering the merge, the measured fidelity against live gc prime, and three limitations found while building it (gc prime ignores rig scope; formula list over-reports vs formula show; a missing prompt template renders a generic prompt with exit 0). Read before changing the renderer or trusting the artifact's coverage.
 ---
 
 # Seed audit
@@ -13,29 +13,30 @@ description: Design record for docs/seed-audit/ and assets/scripts/render-seed-a
 
 ## Scope
 
-**Mandate.** Why `docs/seed-audit/` is generated the way it is, what it
+**Mandate.** Why `generated/seed-audit/` is generated the way it is, what it
 provably covers, and what it provably does not. The record of a design
 decision and three measurements, not a description of the artifact — that
-lives in `docs/seed-audit/INDEX.md`.
+lives in `generated/seed-audit/INDEX.md`.
 
 **Boundaries.** Tier 1 only: the deterministic, repo-owned half of the seed.
 The ~26k-token harness layer is tier 2 and is deliberately not wired to any
 gate; `specs/tk-yhwfv.2` owns it.
 
-## What landed
+## What it is made of
 
 | File | Role |
 |---|---|
-| `assets/scripts/render-seed-audit.sh` | Renders every agent prompt and formula recipe; `--check`, `--print-digest`, `--install-hook` |
+| `assets/scripts/render-seed-audit.sh` | Renders every agent prompt and formula recipe. `--check` re-renders a checkout, `--check-merge` renders a merge result, `--sizes` prints byte and token counts, `--install-hook` wires the hook |
 | `assets/hooks/pre-commit` | Regenerates the artifact when a staged path is a seed input |
-| `doctor/check-seed-audit-current/` | The gate: cheap digest comparison, plus a report when the hook is not wired |
-| `docs/seed-audit/` | The artifact: 16 agent prompts, 28 formula recipes, `INDEX.md` manifest |
+| `doctor/check-seed-audit-current/` | Reports an absent artifact or an unwired hook, and renders nothing |
+| `generated/seed-audit/` | The artifact: one file per agent prompt and per formula recipe, and an `INDEX.md` that links them and carries the resolved fragment composition |
 
-44 rendered scenarios. **`docs/seed-audit/INDEX.md` is the only source for the
-totals** — they move on every render, so a number restated here is stale by the
-next fragment edit. (It already was: this line carried 627,696 B / ~156,924 tok
-against the artifact's 632,438 B / ~158,109 tok one rebase later — tk-wchab,
-pre-open signoff P2.)
+No size is committed. `render-seed-audit.sh --sizes [<base-rev>]` prints each
+render's bytes and estimated tokens, and their change since a base revision
+when one is named. A total restated in a committed file is stale by the next
+fragment edit, and a per-agent size row moves with every edit to its agent's
+prompt, so two pull requests that touch two different agents conflict on
+neighbouring rows.
 
 ## Decision: render against a pinned synthetic city, not the live one
 
@@ -77,17 +78,13 @@ like anything else, and the artifact stays a pure function of the repo.
 
 Three mechanical requirements follow, and all are load-bearing:
 
-- **The renderer is itself a digest input.** Pinning the scenario inside the
-  script makes the script part of the audited surface, so the staleness gate has
-  to hash it. The first cut did not, and the gate was blind in exactly the place
-  it was supposed to be sharp: editing one line of the embedded
-  `[agent_defaults]` moved 13 agent prompts, `--check` reported the tree stale,
-  and `doctor/check-seed-audit-current` still reported it current (tk-wchab,
-  pre-open signoff P1). `digest_inputs()` hashes the whole file rather than
-  parsing the scenario out of it — a comment-only edit costs one re-render, and
-  no scenario edit can slip past. `assets/hooks/pre-commit`'s `INPUT_RE` carries
-  the same path, and `run.test.sh` asserts both halves see a renderer-only
-  change, because two hand-synced lists are how one of them ends up short.
+- **The renderer is itself an input.** Pinning the scenario inside the
+  script makes the script part of the audited surface: when this was built,
+  editing one line of the embedded `[agent_defaults]` moved 13 agent prompts.
+  So `assets/hooks/pre-commit`'s `INPUT_RE` carries the renderer's path, and a
+  comment-only edit costs one re-render. `--check-merge` renders each tree with
+  the renderer that tree carries, so a change to the scenario is judged by the
+  scenario it ships.
 
 - **Every `gc` call is `env -i`.** Not tidiness. An inherited `GC_CITY` points
   the render at the operator's live city; inherited `GC_RIG`/`GC_AGENT` leak the
@@ -247,36 +244,36 @@ other disabled (two guards in series otherwise mask each other):
    `gemini` and `control-dispatcher` legitimately *are* the builtin worker
    prompt — banning it outright would fail them.
 
-## Why the gate is `gc doctor` and not GitHub Actions
+## Where staleness is judged
 
-The bead asked for "CI: regenerate and `git diff --exit-code`". There is no CI
-to add it to: `gh api repos/zookanalytics/gc-toolkit/actions/workflows` returns
-`total_count: 0`, there is no `.github/` directory, and `gh pr checks` on the
-most recent PR reports "no checks reported". The repo's own research says so and
-says it is deliberate — `specs/tk-uuzyw/branch-workflow-research.md` §3.5 lists
-gc-toolkit as "CI bar: None (pack; no `.github/workflows/`) · Pre-commit: None"
-against gascity and signal-loom, and §3.4 adds "gc-toolkit's bar is
-intentionally low".
+The bead asked for "CI: regenerate and `git diff --exit-code`". A render needs
+the `gc` binary and its pack cache, and the CI runners carry neither, so CI runs
+the renderer's hermetic suite against a stub `gc` and renders nothing real. The
+audit is judged where a render can run:
 
-A GitHub Actions workflow would also be unrunnable: the render needs the `gc`
-binary and its pack cache, neither of which exists on a runner.
+- `render-seed-audit.sh --check` re-renders a checkout and compares the result
+  with the committed tree, file by file.
+- `render-seed-audit.sh --check-merge <base> <head>` is what `merge.sh` runs
+  before it lands a pull request. It renders the merge result with the renderer
+  that result carries, and judges every file the render writes or the merge
+  commits. A file passes when the merge commits it exactly as rendered. A file
+  that fails that test still passes when the merge leaves it as the base commits
+  it and it renders the same on the base, because the base was already stale
+  there and the pull request did not cause it; the check reports it as the
+  base's own staleness. Any other file holds the merge. The base is rendered
+  only when some file fails the first test.
 
-What does gate this repo is `gc doctor`, which discovers `doctor/check-*/run.sh`
-automatically and is run by the mechanik, the deacon, and by `gc doctor --fix`.
-So the check lands there, and `render-seed-audit.sh --check` is the one-command
-form for any CI that appears later.
-
-The check is a **digest comparison, not a re-render**: `INDEX.md` records a
-sha256 over every input file, and the check recomputes it by hashing (~0.5 s)
-rather than rendering (~15-25 s), which is what makes it affordable on every
-`gc doctor`. `--check` remains the authoritative full re-render.
+Rendering is what lets the gate see every input. A file no path list names, or a
+`gc` binary that composes prompts differently, moves the render, and no list of
+inputs has to be kept in step with what the render reads.
+`doctor/check-seed-audit-current` renders nothing: it reports an absent artifact
+and an unwired hook, which is what `gc doctor` can afford on every run.
 
 The `gc` version is deliberately not recorded: it is not a function of the repo,
 so stamping it into the per-branch artifact drifts with the host binary and drags
 host state into unrelated commits. Prompt composition lives in the binary, so an
 upgrade can still move the artifact with no commit here to explain it; the commit
-that renders the artifact is the record of which `gc` built it. Content drift is
-the error the check catches.
+that renders the artifact is the record of which `gc` built it.
 
 ## Cost — measured
 
@@ -286,15 +283,21 @@ ideally it's something updated on some form of pre-commit hook cheaply".
 | Operation | Cost |
 |---|---|
 | Commit touching no seed input | **~9 ms** hook contribution (5 commits in 115 ms total, git included) |
-| `--print-digest` (what `gc doctor` pays) | 0.5 s |
 | Full render, 16 agents + 28 formulas, `--jobs 8` | 13-23 s wall (44 `gc` invocations) |
 | Commit touching a fragment, end to end | 9.4 s |
+| `--check-merge`, merge result committed as rendered (one render) | 11-13 s |
+| `--check-merge`, base rendered too (two renders) | 22-59 s |
+
+The `--check-merge` rows were measured on 2026-10-10 on the macOS host (18
+cores, load averages 41-55); the rows above them on 2026-08-23 on the Debian
+host.
 
 Verified end to end in a throwaway clone: an unrelated commit finished in 46 ms
 and touched no audit file; editing `template-fragments/polecat-convoys.template.md`
 regenerated the artifact and staged exactly `INDEX.md`,
 `agents/polecat.md` and `agents/polecat-codex.md` alongside the fragment,
-leaving a clean working tree.
+leaving a clean working tree. (`INDEX.md` moved then for its size rows, which it
+no longer carries.)
 
 ## Known gaps
 
@@ -305,25 +308,18 @@ leaving a clean working tree.
   refuses to run if `.git/hooks` already holds a hand-installed hook, because
   `core.hooksPath` replaces that directory rather than layering onto it.
 - **The gascity rig sets `core.hooksPath=/dev/null`** deliberately, for host
-  capacity. There the hook cannot run at all and the doctor check *is* the
-  mechanism. Nothing here proposes changing that.
+  capacity. There the hook cannot run at all. Nothing here proposes changing
+  that.
 - **The renderer reads the working tree, not the index.** Under a partial
   `git add -p` of a fragment, the artifact the hook stages describes the working
   tree rather than the commit. The hook says so on stderr rather than doing it
   quietly, and the two reconcile on the next commit. It deliberately does not
   stash to "fix" this: the stash stack is shared with every other worktree of
   this repo.
-- **`doctor/check-seed-audit-current/run.test.sh` is not auto-discovered.**
-  Nothing in this repo globs `*.test.sh`; there is no Makefile and no runner.
-  The 12 assertions in it (including mutation-verified guards) run only when
-  invoked by hand — `bash doctor/check-seed-audit-current/run.test.sh`. The
-  load-bearing gate is the check itself, which `gc doctor` does run.
 
 ---
 
-**2026-08-23 — the tree moved.** `docs/seed-audit/` is now
-`generated/seed-audit/`, a new top-level tier for machine-written artifacts
-(tk-yhwfv.3.1); the renderer, the pre-commit hook and
-`doctor/check-seed-audit-current` moved with it. Every path above this line is
-left as-built on 2026-08-23. This file is the record of what was decided then,
-preserved as context — not a description anybody refreshes.
+The fidelity table, the three limitations and the cost rows are measurements,
+and each names the base, host or date it was taken on; the paths inside them are
+as they were then (`docs/seed-audit/` is now `generated/seed-audit/`). The rest
+of this record describes the design as it stands.

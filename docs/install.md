@@ -190,7 +190,7 @@ The pack's checks, and what a failure means:
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
 | `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (`gc.superseded_by`); a closed epic with no hypothesis predates stewardship and is exempt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
-| `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
+| `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
 | `check-recycle-capable` | cycle-recycle can fire: a Stop event reaches the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, and no refinery defer guard is latched | the Stop wiring stopped passing the hook its stdin, the transcript shape moved under the measurement, or an uncommitted tracked file has latched the refinery's git-op guard |
 | `check-cycle-recycle-hook` | the cycle-recycle Stop hook and its no-consent doctrine are wired to the same roles: every agent carrying the `cycle-recycle` overlay also injects the `heartbeat-no-consent-ui` fragment, and vice versa (static: pack.toml + prompt templates) | a role that recycles with nothing forbidding it a blocking consent UI, or a role carrying the doctrine for a turn boundary it never reaches |
 | `check-wisp-cascade-intact` | every bead store carries the four `ON DELETE CASCADE` foreign keys from the wisp auxiliary tables into `wisps(id)` | a store whose schema migration recorded the constraints as applied without adding them, leaving it to accumulate auxiliary rows no wisp reaches |
@@ -232,23 +232,25 @@ Confirm the native roster is present — `polecat`, `polecat-codex`,
 `refinery`, `witness`, `deacon`, `dog`, `converse-opus`, `converse-fable`,
 `converse-codex`, `mechanik` — with no gastown entries.
 
-### First render of the seed audit
+### The seed audit's upkeep
 
-`generated/seed-audit/` ships empty; render it once per clone, which also
-wires the pre-commit hook that keeps it current:
+`generated/seed-audit/` is committed rendered. Wire the pre-commit hook that
+keeps it current once per clone:
 
 ```bash
 assets/scripts/render-seed-audit.sh --install-hook
 ```
 
-Until then `check-seed-audit-current` warns rather than errors.
+Until then `check-seed-audit-current` warns rather than errors, and so it does
+for a clone that carries no render yet.
 
 The hook keeps a branch current against its own base, which is not the same as
 keeping the landing branch current: the artifact is rendered from the whole
 source tree, so a PR whose render predates a prompt input the base has since
 gained lands over that input. `merge.sh` refuses such a merge, using
-`render-seed-audit.sh --check-merge` over the tree `git merge-tree` writes, so
-merges on this rig need git 2.38 or newer.
+`render-seed-audit.sh --check-merge`, which renders the tree `git merge-tree`
+writes. So the host that runs the refinery's merges needs `gc` on its PATH and
+git 2.38 or newer.
 
 ### Smoke test
 

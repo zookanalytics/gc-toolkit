@@ -27,10 +27,10 @@
 # the anchor's bring_current_lifted_at counts, dismissed on GitHub or not; a
 # standing CHANGES_REQUESTED from any other account vetoes); mergeStateStatus CLEAN
 # (UNSTABLE decided on required contexts only; an UNKNOWN, which is GitHub still
-# computing it, read again within one budget per pass); generated/seed-audit
-# current at the MERGE RESULT (its inputs re-hashed in the tree `git
-# merge-tree` writes, so a render clobbered by a base that moved holds and
-# escalates rather than landing). The FULL anchor-local authorization set is
+# computing it, read again within one budget per pass); no generated/seed-audit
+# render made stale at the MERGE RESULT (the tree `git merge-tree` writes is
+# re-rendered, so a render the merge would leave stale holds and escalates
+# rather than landing). The FULL anchor-local authorization set is
 # re-read immediately before the merge; any mismatch holds. `gh pr merge
 # --squash --match-head-commit`, then ONE lifecycle transition --to merged
 # --close. A failed record exits non-zero loudly and the anchor is recovered by
