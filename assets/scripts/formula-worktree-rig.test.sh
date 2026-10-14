@@ -175,7 +175,7 @@ git init -q -b main "$C/cwd"; commit "$C/cwd" "control cwd" >/dev/null
 eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered in the cwd repo"
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
-# --- 3. mol-review: the review's test worktree. --------------------------------
+# --- 3. mol-review: the review's worktree. -------------------------------------
 # The worktree lives in the review's workspace, made by review-workspace.sh add
 # and removed by the verdict step's remove line.
 echo "── mol-review: review-workspace-add and review-workspace-remove ──"

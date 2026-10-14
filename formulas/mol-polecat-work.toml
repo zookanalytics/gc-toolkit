@@ -684,8 +684,8 @@ if [ -n "$REJECTION" ]; then
       *) RESUME_SCOPE=with-work ;;
     esac
     gc bd update "$WORK_BEAD_ID" --set-metadata bring_current_from="$RESUME_FROM" --set-metadata bring_current_scope="$RESUME_SCOPE" --unset-metadata conflict_audit --unset-metadata conflict_question
-    if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata.bring_current_from // empty')" != "$RESUME_FROM" ]; then
-        echo "bring_current_from=$RESUME_FROM did not read back on $WORK_BEAD_ID; NOT merging, since the guard could not read the round. Re-run this block." >&2
+    if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r '.[0].metadata | [.bring_current_from, .bring_current_scope] | map(. // "" | tostring) | join(" ")')" != "$RESUME_FROM $RESUME_SCOPE" ]; then
+        echo "bring_current_from=$RESUME_FROM and bring_current_scope=$RESUME_SCOPE did not both read back on $WORK_BEAD_ID; NOT merging, since the guard reads the round from the start, and a start with no scope beside it as a resume that owes no audit. Re-run this block." >&2
         exit 1
     fi
     git merge --no-edit origin/{{base_branch}}
@@ -1557,7 +1557,7 @@ done
 case "$BCG_RC" in
   0) : ;;
   3)
-    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_BEAD_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or stamp bring_current_from when that is what it asks, then re-run this block. Do not drain: finishing the audit is yours."
+    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_BEAD_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or, when it asks where the work began, stamp bring_current_from and bring_current_scope with the command it prints, then re-run this block. Do not drain: finishing the audit is yours."
     exit 3 ;;
   *)
     echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_BEAD_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard."

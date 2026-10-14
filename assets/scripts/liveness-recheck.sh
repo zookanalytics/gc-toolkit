@@ -58,6 +58,14 @@ command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
+# The one definition of a bead that waits for placement, and the dispatch path
+# it reads, shared with liveness-sweep.sh and its precheck, gc-helm.sh unplaced,
+# the proactive scan and the doctor checks. Exposes $DISPATCH_PATH_JQ and
+# $PLACEMENT_JQ, which the classify block splices in.
+# shellcheck source=dispatch-path.sh
+. "$HERE/dispatch-path.sh" || { echo "liveness-recheck: cannot source dispatch-path.sh from $HERE" >&2; exit 1; }
+# shellcheck source=placement.sh
+. "$HERE/placement.sh" || { echo "liveness-recheck: cannot source placement.sh from $HERE" >&2; exit 1; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -186,10 +194,10 @@ if [ -n "$PASS_AT" ]; then
 fi
 
 # --- classify ------------------------------------------------------------
-# Precedence: resolved > worked > standing > held > not-ready (skipped when
-# the ready read failed) > marker (flagged, never dropped) > recorded
-# (flagged, never dropped) > idle; unreadable = the batched read did not
-# return it (stays visible).
+# Precedence: resolved > worked > standing > held > awaiting-placement >
+# not-ready (skipped when the ready read failed) > marker (flagged, never
+# dropped) > recorded (flagged, never dropped) > idle; unreadable = the
+# batched read did not return it (stays visible).
 CENSUS=$(jq -n \
     --slurpfile beadfile "$BEADFILE" \
     --argjson ready "$READY_JSON" \
@@ -208,6 +216,9 @@ CENSUS=$(jq -n \
   # Standing-record idioms (never claimable, never close): standing_kinds,
   # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
   '"$STANDING_KINDS_JQ"'
+  # awaiting_placement, from placement.sh, which asks has_dispatch_path from
+  # dispatch-path.sh: the queue gc-helm.sh unplaced lists.
+  '"$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset
@@ -242,6 +253,15 @@ CENSUS=$(jq -n \
                           ["demand " + $demandby[$id] + " is open on it — a person owes this answer"]
                         else [] end))
                     | join("  ")}
+         # Intake held it as new work for the placement sitting, and gc-helm.sh
+         # unplaced lists it there, so this visit would put the same decision
+         # on a second agenda. That queue lists the bead whether or not a
+         # blocker holds it or a first reaction left a takeaway on it, so this
+         # rule comes before the not-ready, marker, recorded and idle rules.
+         elif ($b | awaiting_placement) then
+           {verdict: "awaiting-placement",
+            detail: ("placement=pending"
+                     + (if ($b | mv("gc.takeaway")) != "" then "  gc.takeaway=" + ($b | mv("gc.takeaway")) else "" end))}
          elif ($readyset != null and (($readyset[$id] // false) == false)) then
            {verdict: "not-ready",
             detail: ("status=" + ($b.status // "?") + " — it left the ready set (a blocker, a gate, a park edge, or a status change)")}
@@ -319,6 +339,7 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
     + bucket($rows; "resolved";   "resolved — closed since the pass; do NOT route"; true)
     + bucket($rows; "worked";     "now worked — someone has it"; true)
     + bucket($rows; "held";       "now held — a person owes an answer on it"; true)
+    + bucket($rows; "awaiting-placement"; "waits for placement — the placement sitting places it (gc-helm.sh unplaced lists it); do NOT route it from here"; true)
     + bucket($rows; "standing";   "not work — a standing record, held by design; it was never dispositionable"; true)
     + bucket($rows; "not-ready";  "no longer ready — a blocker, gate or park appeared"; true)
     end;
