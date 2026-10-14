@@ -503,6 +503,69 @@ func TestRigRefusesADirtyTree(t *testing.T) {
 	}
 }
 
+// A run speaks for the commit it started at only while it leaves HEAD and
+// every tracked file as it found them. One that changes either records and
+// publishes nothing, pass or fail.
+func TestRigARunThatChangesTheCheckoutRecordsNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		reason  string
+	}{
+		{"a commit, then a pass", `git commit -q --allow-empty -m moved`, "HEAD moved from"},
+		{"a tracked file rewritten, then a pass", `printf 'fixed\n' > a.txt`, "its pass (exit 0) says nothing about"},
+		{"a tracked file rewritten, then a fail", `printf 'fixed\n' > a.txt; exit 1`, "its fail (exit 1) says nothing about"},
+		{"a new file staged", `printf 'x\n' > b.txt && git add b.txt`, "A  b.txt"},
+		{"a tracked file deleted", `rm a.txt`, " D a.txt"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRigFixture(t)
+			start := f.head()
+			code, _, errs := f.call("test", "--scope", "full", "--command", c.command, "--publish-bead", "tk-work")
+			if code != 4 || !strings.Contains(errs, "machine failure, nothing recorded: the command changed the checkout it ran in") ||
+				!strings.Contains(errs, c.reason) || !strings.Contains(errs, start) {
+				t.Fatalf("run = %d, want 4 naming %q and %s:\n%s", code, c.reason, start, errs)
+			}
+			if _, err := os.Stat(filepath.Join(f.repo, ".git", "gc-rig-checks")); !os.IsNotExist(err) {
+				t.Fatalf("a run that changed the checkout wrote to the record store: %v", err)
+			}
+			if got := f.gcCalls("bd update"); len(got) != 0 {
+				t.Fatalf("a run that changed the checkout was published: %q", got)
+			}
+		})
+	}
+	t.Run("a checkout rig cannot read after the run", func(t *testing.T) {
+		f := newRigFixture(t)
+		// Git looks for the moved .git no higher than the clone itself.
+		t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(f.repo))
+		gitDir := filepath.Join(f.repo, ".git")
+		code, _, errs := f.call("test", "--scope", "full", "--command", `mv .git .git-gone`)
+		if err := os.Rename(gitDir+"-gone", gitDir); err != nil {
+			t.Fatal(err)
+		}
+		if code != 4 || !strings.Contains(errs, "machine failure, nothing recorded: cannot read the checkout after the run") {
+			t.Fatalf("run = %d, want 4:\n%s", code, errs)
+		}
+		if _, err := os.Stat(filepath.Join(gitDir, "gc-rig-checks")); !os.IsNotExist(err) {
+			t.Fatalf("a run rig could not check wrote to the record store: %v", err)
+		}
+	})
+}
+
+// An untracked file a run leaves behind changes no file the commit holds, so
+// the run's result is recorded.
+func TestRigARunThatLeavesAnUntrackedFileKeepsItsRecord(t *testing.T) {
+	f := newRigFixture(t)
+	command := `printf x > cover.out; ` + countCmd("full")
+	if code, _, errs := f.call("test", "--scope", "full", "--command", command); code != 0 {
+		t.Fatalf("run = %d, want 0:\n%s", code, errs)
+	}
+	if r := f.record(rig.CheckTest, f.head()); r == nil || r.Result != rig.ResultPass {
+		t.Fatalf("record = %+v, want the pass", r)
+	}
+}
+
 func TestRigCheckReadsTheRecordWithNoGc(t *testing.T) {
 	f := newRigFixture(t)
 	if code, _, _ := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 {

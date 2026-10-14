@@ -142,6 +142,34 @@ func TestDirtyListsAChangeConfigWouldHide(t *testing.T) {
 	}
 }
 
+func TestChangesSplitsTrackedChangesAndAMovedHEADFromUntrackedFiles(t *testing.T) {
+	dir := repo(t)
+	c, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect := func(step, wantMoved, wantUntracked string) {
+		t.Helper()
+		moved, untracked, err := c.Changes()
+		if err != nil || moved != wantMoved || untracked != wantUntracked {
+			t.Fatalf("%s: Changes = %q, %q, %v; want %q, %q", step, moved, untracked, err, wantMoved, wantUntracked)
+		}
+	}
+	expect("clean", "", "")
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expect("an untracked file", "", "?? new.txt")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expect("an unstaged change", " M a.txt", "?? new.txt")
+	gitIn(t, dir, "add", "a.txt")
+	expect("a staged change", "M  a.txt", "?? new.txt")
+	gitIn(t, dir, "commit", "-q", "-m", "two")
+	expect("a new commit", "HEAD moved from "+c.Commit+" to "+gitIn(t, dir, "rev-parse", "HEAD"), "")
+}
+
 func TestOutputCarriesGitsOwnMessage(t *testing.T) {
 	dir := repo(t)
 	_, err := Output(dir, "rev-parse", "--verify", "no-such-ref")

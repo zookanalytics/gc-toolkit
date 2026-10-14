@@ -59,13 +59,16 @@ record. --check needs no command: it reports whatever is recorded at HEAD, and
 calls nothing but git.
 
 A checkout with changes HEAD does not hold is refused, except by setup and
-build: a record certifies a commit.
+build: a record certifies a commit. A run that moves HEAD or changes a
+tracked file records nothing, pass or fail.
 
 exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
       4 machine failure, nothing recorded or published: a refused checkout, a
         command bash cannot parse, find or execute (126, 127), a command ended
-        by a signal or still running at the timeout, or a result the record
-        store did not take. Such a run says nothing about the code.
+        by a signal or still running at the timeout, a command that moved
+        HEAD or changed a tracked file, a checkout rig cannot read after the
+        run, or a result the record store did not take. Such a run says
+        nothing about the code.
       128+N stopped by signal N
 `
 
@@ -297,6 +300,17 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	result := rig.ResultPass
 	if out.Kind == rig.Failed {
 		result = rig.ResultFail
+	}
+	// A run speaks for co.Commit only while it leaves HEAD and every tracked
+	// file as it found them, so a command that commits, checks out or writes a
+	// tracked file records nothing, pass or fail. An untracked file it leaves
+	// behind changes neither, so its result stands.
+	moved, _, err := co.Changes()
+	if err != nil {
+		return machine("cannot read the checkout after the run: %v", err)
+	}
+	if moved != "" {
+		return machine("the command changed the checkout it ran in, so its %s (exit %d) says nothing about %s:\n%s", result, out.ExitCode, co.Commit, firstLines(moved, 10))
 	}
 	rec := newRecord(check, result, scope, co, o.command, out.ExitCode, out.Duration)
 	if err := store.Put(rec); err != nil {

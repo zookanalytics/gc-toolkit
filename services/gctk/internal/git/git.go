@@ -87,3 +87,32 @@ func (c *Checkout) Dirty() (string, error) {
 	}
 	return strings.TrimRight(out, "\n"), nil
 }
+
+// Changes compares the checkout with the commit Open read. moved names HEAD
+// at another commit, or else lists the tracked files that differ from it,
+// staged or not. untracked lists the untracked files that are not ignored,
+// which leave the commit's files as they are. Both lists are in Dirty's form,
+// and a caller that found the checkout clean reads them as what changed since.
+func (c *Checkout) Changes() (moved, untracked string, err error) {
+	head, err := Output(c.Top, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", "", fmt.Errorf("cannot read HEAD: %w", err)
+	}
+	if head = strings.TrimSpace(head); head != c.Commit {
+		return fmt.Sprintf("HEAD moved from %s to %s", c.Commit, head), "", nil
+	}
+	dirty, err := c.Dirty()
+	if err != nil {
+		return "", "", err
+	}
+	var tracked, other []string
+	for _, l := range strings.Split(dirty, "\n") {
+		switch {
+		case strings.HasPrefix(l, "?? "):
+			other = append(other, l)
+		case l != "":
+			tracked = append(tracked, l)
+		}
+	}
+	return strings.Join(tracked, "\n"), strings.Join(other, "\n"), nil
+}

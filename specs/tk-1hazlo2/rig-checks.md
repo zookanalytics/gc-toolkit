@@ -110,11 +110,12 @@ pre-existing fail beside the refinery caller that needs it.
   at every commit for a typo in `city.toml`. Exits 126 and 127, which the shell
   gives a command it cannot execute or find. A command ended by a signal,
   killed outright or 128+N from its shell, so an OOM kill under load never
-  records a fail that sticks. A timeout. A result the record store does not
-  take, pass or fail: `rig`'s answer is its record, so a result with no record
-  behind it neither sets the exit nor is published. A suite that exits 126,
-  127 or 129-192 on its own is misread as a machine failure. That costs a
-  re-run, never a false record.
+  records a fail that sticks. A timeout. A command that moved HEAD or changed
+  a tracked file, pass or fail, and a checkout `rig` cannot read after the
+  run. A result the record store does not take, pass or fail: `rig`'s answer
+  is its record, so a result with no record behind it neither sets the exit
+  nor is published. A suite that exits 126, 127 or 129-192 on its own is
+  misread as a machine failure. That costs a re-run, never a false record.
 - **`--timeout`, default two hours.** The refinery stops its detached gate at
   two hours. Without a bound, a wedged suite under the lease heartbeat would
   hold its pool slot indefinitely. A timeout sends SIGTERM to the group, then
@@ -123,10 +124,14 @@ pre-existing fail beside the refinery caller that needs it.
   `--nothing-declared` included. A pass reported for a dirty tree would certify
   content no record saw. `setup` and `build` record nothing, so they run in a
   dirty tree.
-- **The tree is checked before the run, not after.** A command that rewrites
-  tracked files, such as a formatter that writes, still records against the
-  commit it started from. Refusing a tree the run dirtied would also refuse
-  every suite that leaves an untracked artifact behind.
+- **The checkout is checked before the run and after it.** Before the run,
+  any change HEAD does not hold refuses the call. After the run, a moved HEAD
+  or a changed tracked file, staged or not, records nothing, pass or fail. A
+  test script that commits or checks out has run against another commit, and
+  a `lint_command` that fixes files and exits 0 would otherwise record a pass
+  at a commit whose own content fails lint. Untracked files the run left
+  behind do not count. A suite's artifacts, such as `cover.out`, `.coverage`
+  or build output that is not ignored, change no file the commit holds.
 - **Publishing.** `--publish-bead` writes the record as one JSON value on
   `rig_check.<check>` (registered in `lifecycle/lifecycle.toml`) through
   `gcbd.Client.Update`, and reads it back with `ShowDirect`. gcbd's writes fork
@@ -168,7 +173,8 @@ tree can answer a call that the commit's own record does not match. The
 reviewed lookup stopped at the commit's record. The second read adds about
 15 µs, which the end-to-end `--check` does not show. A `--check` costs about one
 gctk start, one `git rev-parse` and one `git status`. A run costs those plus
-`bash -n` and the record write around the command itself. It no longer
+`bash -n` and the record write around the command itself, and one more
+`git rev-parse` and `git status` after it, to check the checkout. It no longer
 includes the `gc formula show` the reviewed build ran, which measured median
 234 ms at load average 40-47 on 2026-10-13.
 
