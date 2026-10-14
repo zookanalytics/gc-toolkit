@@ -17,8 +17,11 @@
 #       carrying the operator's pre-recorded PR-close disposition for this kind
 #       and successor (pr-dispose.sh) is a ruling already made, and (b) does not
 #       re-judge it.
-#   The judgment kinds re-homed|folded|not-needed are a person's call, held to
-#   (a) only: a non-closed merge_result does not bar them.
+#   The judgment kinds re-homed|folded|not-needed are held to (a) only, and a
+#   non-closed merge_result does not bar them, because the judgment is the
+#   caller's. A hand disposition judges the bead itself, and an automated
+#   caller proves its own case before it calls (docs/authority-map.md,
+#   Close-with-successor).
 # --check evaluates those gates for the given origin/successor/kind and exits
 # 0 (eligible) or non-zero (refused, with the reason on stderr), writing
 # nothing.
@@ -46,9 +49,12 @@
 # Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
 # pr-facts.sh (a PR closed with a pre-recorded disposition, and that branch's
 # parked rework children), scaffolding-sweep.sh (a finding a disposed PR leaves
-# unanswered, closed onto the bug that carries it), deferred-dispatch.sh (a bead
-# whose `until` targets have all closed and that carries no live work, closed
-# onto the one that closed last).
+# unanswered, closed onto the bug that carries it), deferred-dispatch.sh
+# (folded, onto the `until` target that closed last, for an open, unassigned
+# bead whose `until` targets have all closed, whose `until` edge to that target
+# still stands, that no open `blocks` blocker of its own holds, and that carries
+# no live work as live-work.sh defines it, checked on its listing and again on
+# a fresh read just before the call).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -316,12 +322,16 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
 
     # (b) The evidence kinds assert a specific claim — this bead's work is
     # already delivered elsewhere — so they carry the burden of proving it.
-    # The judgment kinds (re-homed, folded, not-needed) are a person's call, so a
-    # non-closed merge_result does not bar them: the converse retire path
-    # disposes an in-flight anchor through here on the operator's ruling. An
-    # origin carrying the operator's pre-recorded PR-close disposition for this
-    # kind and successor (pr-dispose.sh) is that ruling already made, read from
-    # the store rather than taken from the caller, so (b) does not re-judge it.
+    # The judgment kinds (re-homed, folded, not-needed) carry the caller's
+    # judgment, which this script does not re-judge, so a non-closed
+    # merge_result does not bar them: the converse retire path disposes an
+    # in-flight anchor through here on the operator's ruling. An origin
+    # carrying the operator's pre-recorded PR-close disposition for this kind
+    # and successor (pr-dispose.sh) is that ruling already made, read from the
+    # store rather than taken from the caller, so (b) does not re-judge it. An
+    # automated caller passes a judgment kind only on its own proof:
+    # deferred-dispatch.sh passes folded only for a bead its `until` targets
+    # resolved, and never for one carrying live work, which a merge_result is.
     if ruled_disposition; then
         return 0
     fi

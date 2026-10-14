@@ -927,7 +927,31 @@ searches every store before concluding a close was false. Consumers: the
 mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), and any patrol judging a closed bead.
+twins), the deferred-dispatch reconcile pass (`deferred-dispatch.sh`, the closer
+of a bead its `until` dependency resolved), and any patrol judging a closed
+bead.
+
+`bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
+`duplicate` it re-establishes that the successor is closed or shipped in the
+same store and that the origin recorded no work, unless the origin carries the
+operator's pre-recorded PR-close disposition for that kind and successor.
+Under `re-homed`, `folded` and `not-needed` it applies only the checks every
+kind gets: the origin is not a review bead, a step bead or a workflow root, and
+no other session holds it in progress. The judgment that the bead should close
+is the caller's. A hand disposition, by the mechanik, converse or the operator,
+judges the bead itself. An automated caller proves its own case before it
+calls, and [authority-map.md](authority-map.md) records the power in its
+Close-with-successor row. The deferred-dispatch reconcile pass passes
+`folded` only for a pure wait: an open, unassigned bead whose own `until`
+targets have all closed, whose `until` edge to the successor still stands, that
+no open `blocks` blocker of its own holds, and that carries no live work as
+`assets/scripts/live-work.sh` defines it. The pass checks them on its
+pass-start listing and again on a fresh read of the bead and what depends on
+it, made just before the call. It leaves a bead that fails any of them as it
+is and never calls `bead-rehome.sh` on it
+([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
+Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
+close.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,

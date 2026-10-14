@@ -739,8 +739,9 @@ eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
 eq "$(field alpha status al-unlanded)" open "the origin is left open"
 eq "$(field alpha m.gc.superseded_by al-unlanded)" "" "and nothing is stamped"
 has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
-# A judgment kind is a person's call: the converse retire path disposes an
-# in-flight anchor through this writer on the operator's ruling.
+# A judgment kind carries the caller's judgment, which the writer does not
+# re-judge: the converse retire path disposes an in-flight anchor through it on
+# the operator's ruling.
 mkbead alpha open al-retire
 mkbead beta  open bt-rtsucc
 printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
