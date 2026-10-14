@@ -7,7 +7,8 @@
 // capture launches the chromium-headless-shell build the engine's Playwright
 // installed. The engine library supplies the browser's sandbox arguments and,
 // for an app page, the demo:capture grammar, the server seam, the action runner
-// and the proof checks, so a screenshot drives an app exactly as a video does.
+// and the proof checks, so a page screenshot takes the script and the app
+// target a video takes.
 //
 // Kinds, one per surface a change can show:
 //   page      drive an app to a state with a demo:capture script, then capture

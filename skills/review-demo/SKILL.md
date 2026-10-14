@@ -157,8 +157,8 @@ reports whether the `gh` it needs is present.
   `<details>` block collapsed, and `--expand` opens every one, for a second
   capture of what the collapsed blocks hold.
 
-  Keep the PNG beside the script, and name it for what it shows, because the
-  file's name is the image's alt text on the PR. Exit 0 is a capture. For a
+  Write the PNG in the review workspace, as the block above does, and name it
+  for what it shows, because the file's name is the image's alt text on the PR. Exit 0 is a capture. For a
   page, exit 3 is a capture in which at least one step failed its proof. Exit 1
   is no capture. The last line names the PNG and its size, and for a command it
   gives the command's exit status. Open the PNG before you deliver it:
