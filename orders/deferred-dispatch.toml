@@ -17,7 +17,7 @@
 # its env too; deferred-dispatch.test.sh holds the budget below this timeout.
 # Tune interval from city.toml [[orders.overrides]].
 [order]
-description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome each open, unassigned bead whose until targets have all closed, that no open blocks blocker holds, and that carries no live work"
+description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared; retire the record on beads that closed first; dispose through bead-rehome each open, unassigned bead whose until targets have all closed, that no open blocks blocker of its own holds, and that carries no live work"
 trigger = "cooldown"
 interval = "5m"
 timeout = "120s"

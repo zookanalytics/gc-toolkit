@@ -10,8 +10,8 @@
 #
 # The silent stall this catches, caught nowhere else: the bead is open and
 # unassigned, every one of its `until` targets has closed, no open `blocks`
-# blocker still holds it, yet it has stayed undisposed well past the reconcile
-# cadence since it became owed. Either the order is not running
+# blocker of its own still holds it, yet it has stayed undisposed well past the
+# reconcile cadence since it became owed. Either the order is not running
 # (check-cadence-live/I10 is the direct cause, but a single owed disposition
 # makes the effect concrete), its passes spend their budget before they reach
 # the bead, or the close is stuck. The common stuck case is a legitimate hold:
@@ -28,7 +28,7 @@
 #
 # ONLY `until` makes a bead owed. A `blocks` edge is sequencing — its target
 # closing leaves the dependent fully owed — so it is never a disposal and a bead
-# held by an open `blocks` blocker is correctly waiting, never flagged. A bead already assigned is
+# held by an open `blocks` blocker of its own is correctly waiting, never flagged. A bead already assigned is
 # a live worker's, and reconcile would not dispose over it; a non-open bead is a
 # deliberate hold the pass leaves alone; neither is owed a disposition.
 #

@@ -748,7 +748,7 @@ reconcile_until() {
     [ "$ufailed" = 0 ]
 }
 
-# The dispatch half: sling every armed bead that is now ready, and retire each
+# The dispatch half: sling every armed bead nothing holds now, and retire each
 # arm whose dispatch is no longer owed.
 reconcile_dispatch() {
     local rows all_cache

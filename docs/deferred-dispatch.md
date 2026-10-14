@@ -340,7 +340,7 @@ The positive control in `deferred-dispatch.test.sh` and `check-cadence-live`
 `doctor/check-until-resolved-owed` is the resolved-by mirror of
 `check-armed-dispatch-owed`: it flags an open, unassigned
 bead whose `until` targets have all closed and that no open `blocks` blocker
-still holds, yet that has stayed undisposed past the reconcile window — the
+of its own still holds, yet that has stayed undisposed past the reconcile window — the
 disposition silently not firing, surfaced before the bead drifts back into a
 triage sitting. It decides through the same `until-resolved.sh` and makes the
 same fresh read before it reports a bead, so it reports what the pass would do.
