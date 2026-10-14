@@ -17,8 +17,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 )
 
 // The checks whose result is a property of a commit. setup and build run with
@@ -115,10 +116,6 @@ func NewStore(commonDir string) *Store {
 // Root is the store's directory.
 func (s *Store) Root() string { return s.root }
 
-// objectID is a full git object name, SHA-1 or SHA-256. Commits and trees name
-// files, so nothing else may reach a path.
-var objectID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-
 func validCheck(check string) bool {
 	switch check {
 	case CheckTest, CheckLint, CheckTypecheck:
@@ -147,7 +144,7 @@ func (s *Store) TreePath(check, tree string) string {
 // absence.
 func (s *Store) Lookup(check, commit, tree string) (Found, error) {
 	var f Found
-	if !validCheck(check) || !objectID.MatchString(commit) || !objectID.MatchString(tree) {
+	if !validCheck(check) || !git.IsObjectID(commit) || !git.IsObjectID(tree) {
 		return f, fmt.Errorf("lookup: invalid check %q, commit %q or tree %q", check, commit, tree)
 	}
 	path := s.CommitPath(check, commit)
@@ -225,7 +222,7 @@ var ErrNoFail = errors.New("no fail recorded at this commit")
 // carried by tracker, and returns the annotated record. Only the commit's own
 // record is annotated: fails are never read across commits.
 func (s *Store) MarkPreExisting(check, commit, tracker string) (*Record, error) {
-	if !validCheck(check) || !objectID.MatchString(commit) {
+	if !validCheck(check) || !git.IsObjectID(commit) {
 		return nil, fmt.Errorf("annotate: invalid check %q or commit %q", check, commit)
 	}
 	if tracker == "" {
@@ -298,9 +295,9 @@ func (r *Record) valid() error {
 		return fmt.Errorf("method %q is not full, affected or none", r.Method)
 	case r.Method == MethodNone && r.Result != ResultPass:
 		return fmt.Errorf("a run of nothing cannot fail")
-	case !objectID.MatchString(r.Commit):
+	case !git.IsObjectID(r.Commit):
 		return fmt.Errorf("commit %q is not a full object name", r.Commit)
-	case !objectID.MatchString(r.Tree):
+	case !git.IsObjectID(r.Tree):
 		return fmt.Errorf("tree %q is not a full object name", r.Tree)
 	}
 	return nil

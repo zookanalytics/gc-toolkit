@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
@@ -216,7 +217,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 		say("machine failure, nothing recorded: "+format, a...)
 		return rigExitMachine
 	}
-	co, err := rig.Open(".")
+	co, err := git.Open(".")
 	if err != nil {
 		return machine("%v", err)
 	}
@@ -335,7 +336,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 // selectCommand picks what a run of check executes, the method it records,
 // and, when the command is empty, why there is nothing to run. msg is a
 // machine failure.
-func selectCommand(check string, o rigOpts, vars rig.Vars, co *rig.Checkout) (command, method, why, msg string) {
+func selectCommand(check string, o rigOpts, vars rig.Vars, co *git.Checkout) (command, method, why, msg string) {
 	full := vars.Value(rigCheckVar[check])
 	if check != rig.CheckTest || !o.affected {
 		return full, methodOf(full, rig.MethodFull), rigCheckVar[check] + " is not set", ""
@@ -346,9 +347,9 @@ func selectCommand(check string, o rigOpts, vars rig.Vars, co *rig.Checkout) (co
 	}
 	base := o.base
 	if base == "" {
-		base = co.DefaultBase(vars)
+		base = rig.DefaultBase(co, vars)
 	}
-	empty, err := co.DiffScopeEmpty(base)
+	empty, err := rig.DiffScopeEmpty(co, base)
 	if err != nil {
 		return "", "", "", fmt.Sprintf("cannot work out the affected subset: %v", err)
 	}
@@ -369,7 +370,7 @@ func methodOf(command, method string) string {
 // $GC_RIG and $GC_RIG_ROOT describe one rig, so when both name it the checkout
 // must be a worktree of the clone at $GC_RIG_ROOT: one rig's commands are never
 // run against another rig's checkout and recorded there.
-func resolveRigName(o rigOpts, co *rig.Checkout) (string, string) {
+func resolveRigName(o rigOpts, co *git.Checkout) (string, string) {
 	if o.rigName != "" {
 		return o.rigName, ""
 	}
@@ -381,7 +382,7 @@ func resolveRigName(o rigOpts, co *rig.Checkout) (string, string) {
 	if root == "" {
 		return name, ""
 	}
-	clone, err := rig.Open(root)
+	clone, err := git.Open(root)
 	if err != nil {
 		return "", fmt.Sprintf("$GC_RIG_ROOT %s is not a checkout of rig %s, so this checkout cannot be matched to it: %v", root, name, err)
 	}
@@ -409,7 +410,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 		say("machine failure: "+format, a...)
 		return rigExitMachine
 	}
-	co, err := rig.Open(".")
+	co, err := git.Open(".")
 	if err != nil {
 		return machine("%v", err)
 	}
@@ -449,7 +450,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	return rigExitPass
 }
 
-func newRecord(check, result, method string, co *rig.Checkout, command string, exit int, d time.Duration) *rig.Record {
+func newRecord(check, result, method string, co *git.Checkout, command string, exit int, d time.Duration) *rig.Record {
 	return &rig.Record{
 		Check:      check,
 		Result:     result,

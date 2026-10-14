@@ -249,6 +249,7 @@ cmd/gctk/            dispatch and `version`
 internal/lifecycle/  the state machine — states, classifications, edges
 internal/cli/        one file per subcommand; each port keeps its script's contract
 internal/gcbd/       the `gc bd` subprocess seam and its jq-equivalent accessors
+internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        the check gate: var resolution, the runner, the commit-keyed record store
 ```
 
