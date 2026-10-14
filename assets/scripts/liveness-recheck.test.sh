@@ -233,6 +233,58 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-exec")] | .[0
     && ok "the worked detail names the execution route" \
     || bad "the worked detail names the execution route" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "b-exec")] | .[0].detail')"
 
+echo "── a bead held for placement reads as that wait, whatever else it carries ──"
+# Intake marks new work placement=pending and leaves it unrouted, and
+# gc-helm.sh unplaced lists it for the placement sitting. A visit the sweep
+# filed before intake held the bead still lists it, and reading it as idle or
+# recorded would put the same decision on this sitting's agenda too. The queue
+# lists such a bead whether or not a blocker holds it or the first reaction left
+# its takeaway, so neither sends it to not-ready, recorded or idle. A parent or
+# a route places the bead whatever its marker says, and an open demand is a
+# person's answer owed, which outranks the wait as it does in the sweep.
+jq -nc --argjson b "[
+  $(bead p-plain    open '{"placement":"pending"}')
+ ,$(bead p-take     open '{"placement":"pending","gc.takeaway":"actionable — held for placement"}')
+ ,$(bead p-blocked  open '{"placement":"pending"}')
+ ,$(bead p-blk-take open '{"placement":"pending","gc.takeaway":"blocked — held for placement"}')
+ ,$(bead p-parent   open '{"placement":"pending"}')
+ ,$(bead p-routed   open '{"placement":"pending","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
+ ,$(bead p-demand   open '{"placement":"pending"}')
+]" '$b
+  | map(if (.id == "p-blocked" or .id == "p-blk-take") then .dependencies = [{depends_on_id: "tk-blocker", type: "blocks"}] else . end)
+  | map(if .id == "p-parent" then (.parent = "tk-epic" | .dependencies = [{depends_on_id: "tk-epic", type: "parent-child"}]) else . end)' > "$STUB_BEADS"
+# The two blocked beads and the demanded one left the ready set.
+jq -nc '[{id:"p-plain"},{id:"p-take"},{id:"p-parent"},{id:"p-routed"}]' > "$STUB_READY"
+jq -nc '[{id:"d-2",metadata:{"gc.demand_for":"p-demand"}}]' > "$STUB_DEMANDS"
+PIDS="p-plain,p-take,p-blocked,p-blk-take,p-parent,p-routed,p-demand"
+C="$("$SCRIPT" --ids "$PIDS" --json 2>/dev/null)"
+eq "$(verdict_of "$C" p-plain)"    "awaiting-placement" "a bead held for placement reads as that wait, not idle"
+eq "$(verdict_of "$C" p-take)"     "awaiting-placement" "…with the first reaction's takeaway on it, not recorded"
+eq "$(verdict_of "$C" p-blocked)"  "awaiting-placement" "…with a blocker holding it, not not-ready"
+eq "$(verdict_of "$C" p-blk-take)" "awaiting-placement" "…with a takeaway and a blocker both"
+eq "$(verdict_of "$C" p-parent)"   "idle"               "a parent places the bead whatever its marker says"
+eq "$(verdict_of "$C" p-routed)"   "worked"             "a route places the bead whatever its marker says"
+eq "$(verdict_of "$C" p-demand)"   "held"               "an open demand outranks the placement wait"
+eq "$(printf '%s' "$C" | jq -r '.summary.new_live')" "1" \
+   "the placement wait is not on this sitting's live agenda (only the placed, idle bead is)"
+printf '%s' "$C" | jq -e '[.new[] | select(.id == "p-take")] | .[0].detail | test("gc.takeaway=actionable")' >/dev/null 2>&1 \
+    && ok "the placement detail carries the first reaction's takeaway" \
+    || bad "the placement detail carries the first reaction's takeaway" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "p-take")] | .[0].detail')"
+T="$("$SCRIPT" --ids "$PIDS" 2>/dev/null)"
+printf '%s' "$T" | grep -q "p-blk-take" \
+    && ok "a bead held for placement is PRINTED, not silently dropped from the report" \
+    || bad "a bead held for placement is PRINTED, not silently dropped from the report" "p-blk-take absent from the text report"
+printf '%s' "$T" | grep -q "gc-helm.sh unplaced lists it" \
+    && ok "its bucket names the queue that lists it" \
+    || bad "its bucket names the queue that lists it" "no placement bucket in the report"
+# The rule reads the bead's own row, not the ready set, so a failed ready read
+# leaves the wait named.
+printf 'FAIL\n' > "$STUB_READY"
+C="$("$SCRIPT" --ids "p-plain,p-blocked" --json 2>/dev/null)"
+eq "$(verdict_of "$C" p-plain)$(verdict_of "$C" p-blocked)" "awaiting-placementawaiting-placement" \
+   "with the ready set unverified, a bead held for placement still reads as that wait"
+printf '[]\n' > "$STUB_DEMANDS"
+
 # --- 2. report-don't-hide on every failure path ------------------------------
 echo "── the bead read failing prints NO census (a partial one looks complete) ──"
 printf 'FAIL\n' > "$STUB_BEADS"
