@@ -22,8 +22,8 @@
 #       --list         print what would run, one run per line, and exit
 #   -q, --quiet        print only the summary and the failures
 #
-# With no PATH it runs every tracked *.test.sh. With PATHs it runs the affected
-# subset, the tests a change to those paths can break:
+# With neither PATH nor --affected it runs every tracked *.test.sh. With PATHs
+# it runs the affected subset, the tests a change to those paths can break:
 #
 #   - a *.test.sh runs itself, and a directory runs every *.test.sh beneath it;
 #   - a script X.sh runs its sibling X.test.sh;
