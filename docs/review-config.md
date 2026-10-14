@@ -19,10 +19,10 @@ and how the review machinery reads them.
 
 **Boundaries.** This does not cover the review machinery itself — the index
 parser (`assets/scripts/review-checks.sh`), the dispatch composer
-(`assets/scripts/review-dispatch-body.sh`), and the check methods
-(`formulas/mol-review.toml` and the `skills/review-*` method skills) are pack
-content. Nor does it decide which checks a given rig declares; that judgment
-lives in each rig's own index.
+(`assets/scripts/review-dispatch-body.sh`), the review lifecycle
+(`formulas/mol-review.toml`), and the check methods (the `skills/review-*`
+method skills) are pack content. Nor does it decide which checks a given rig
+declares; that judgment lives in each rig's own index.
 
 ## The check index: `review-checks.toml`
 
@@ -33,7 +33,7 @@ check, and one line of purpose.
 
 ```toml
 [checks.correctness]
-method = "formulas/mol-review.toml"
+method = "skills/review-correctness/SKILL.md"
 purpose = "Is the change correct and safe as merged?"
 
 [checks.arch]
@@ -59,12 +59,15 @@ stops the review.
 ## A check's method extension: `docs/review-<check>.md`
 
 A check's method has two layers. The generic method is pack content that every
-rig installing the pack gets: the per-check arm in `review-dispatch-body.sh`
-and, for correctness, the steps of `mol-review.toml`. A rig may add a local
-extension at `docs/review-<check>.md` in its own repository — `docs/review-arch.md`
-for the arch check, `docs/review-pm.md` for the PM check. The dispatch note
-appends the extension to the generic method text. The extension adds; it never
-replaces, and absent is the common case.
+rig installing the pack gets: the per-check arm in `review-dispatch-body.sh` and
+the method file the check's index row names. The review formula is part of no
+check's method: `mol-review` and its two-lane variant carry only the lifecycle
+every check shares, which is the pins, the review workspace and its claim-lease
+keepalive, the verdict envelope, and the one `signoff.sh` call. A rig may add a
+local extension at `docs/review-<check>.md` in its own repository —
+`docs/review-arch.md` for the arch check, `docs/review-pm.md` for the PM check.
+The dispatch note appends the extension to the generic method text. The
+extension adds; it never replaces, and absent is the common case.
 
 An extension earns its place when a rig needs to point a check at reference docs
 the generic method would not find on its own, or to add method guidance specific

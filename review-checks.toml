@@ -32,7 +32,7 @@
 # commit; the pack skill stays rig-agnostic.
 
 [checks.correctness]
-method = "formulas/mol-review.toml"
+method = "skills/review-correctness/SKILL.md"
 purpose = "Is the change correct and safe as merged?"
 phase = "pre-open"
 

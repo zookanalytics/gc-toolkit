@@ -18,8 +18,9 @@ makes the worktree, and it removes the directory when the review ends.
 **Mandate:** the directory a review works in on disk: where it lives, how a
 review gets its worktree, and when and how the directory is removed.
 
-**Boundaries:** the review method itself belongs to `formulas/mol-review.toml`
-and `formulas/mol-review-quorum-signoff.toml`. A polecat's per-bead worktree is
+**Boundaries:** the review lifecycle belongs to `formulas/mol-review.toml` and
+`formulas/mol-review-quorum-signoff.toml`, and what a review reads, runs and
+judges to its check's method. A polecat's per-bead worktree is
 worktree-reap's ([worktree-reclaim.md](worktree-reclaim.md)). Harness session
 scratch, and the per-uid tmpfs quota that every tenant of `/tmp` counts
 against, are described in [scratch-reclaim.md](scratch-reclaim.md).

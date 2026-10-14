@@ -94,27 +94,26 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Review the diff, read-only.** Apply the review method defined in
-`formulas/mol-review.toml`'s `review` step — its whole "What to check" list
-(intent, correctness, contract, testing, readiness, comments, the PR
-summary and page) and the work-quality standards it resolves from the pack's
-`template-fragments/work-quality-*`. Read the WHOLE diff
-(`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
-NOT run the test suite — the synthesis step runs it once for the quorum; a
-finding that depends on a test result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+**2. Apply the check's method to the diff, read-only.** The method is the one
+the check section of the review bead's dispatch note names; for the
+correctness check it is `skills/review-correctness/SKILL.md`. Read the diff
+(`git diff origin/<base>...<reviewed_oid>`) as that method directs and judge it
+as the method does. Run nothing at the reviewed commit: whatever the method
+runs there, the synthesis step runs once for the quorum, and a finding that
+depends on its result is the synthesis's to confirm. Record a mutation
+baseline with `git status --porcelain=v1 -z` before and after and report any
+delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
 `lane_id`={{lane_one_id}}, `provider`={{lane_one_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
 `fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
-`severity` P0/P1/P2, `title`, `body` stating what is wrong / why it matters /
-the fix, `file`, and `line` or range), `evidence` (what you read),
-`read_only_enforcement` (`baseline_command`, `after_command`, `passed`),
-`mutations_delta` (empty if none). Severities follow mol-review: P0 broken as
-merged, P1 a real defect that will bite, P2 worth fixing not worth blocking.
+`severity`, the grade the check's method gives the finding or `blocking` or
+`note` where the method grades none, `title`, `body` stating what is wrong /
+why it matters / the fix, `file`, and `line` or range), `evidence` (what you
+read), `read_only_enforcement` (`baseline_command`, `after_command`,
+`passed`), `mutations_delta` (empty if none).
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
@@ -159,27 +158,26 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Review the diff, read-only.** Apply the review method defined in
-`formulas/mol-review.toml`'s `review` step — its whole "What to check" list
-(intent, correctness, contract, testing, readiness, comments, the PR
-summary and page) and the work-quality standards it resolves from the pack's
-`template-fragments/work-quality-*`. Read the WHOLE diff
-(`git diff origin/<base>...<reviewed_oid>`), in chunks for a large one. You do
-NOT run the test suite — the synthesis step runs it once for the quorum; a
-finding that depends on a test result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+**2. Apply the check's method to the diff, read-only.** The method is the one
+the check section of the review bead's dispatch note names; for the
+correctness check it is `skills/review-correctness/SKILL.md`. Read the diff
+(`git diff origin/<base>...<reviewed_oid>`) as that method directs and judge it
+as the method does. Run nothing at the reviewed commit: whatever the method
+runs there, the synthesis step runs once for the quorum, and a finding that
+depends on its result is the synthesis's to confirm. Record a mutation
+baseline with `git status --porcelain=v1 -z` before and after and report any
+delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
 `lane_id`={{lane_two_id}}, `provider`={{lane_two_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
 `fail`, `blocked`), `summary`, `findings_count`, `findings` (each with
-`severity` P0/P1/P2, `title`, `body` stating what is wrong / why it matters /
-the fix, `file`, and `line` or range), `evidence` (what you read),
-`read_only_enforcement` (`baseline_command`, `after_command`, `passed`),
-`mutations_delta` (empty if none). Severities follow mol-review: P0 broken as
-merged, P1 a real defect that will bite, P2 worth fixing not worth blocking.
+`severity`, the grade the check's method gives the finding or `blocking` or
+`note` where the method grades none, `title`, `body` stating what is wrong /
+why it matters / the fix, `file`, and `line` or range), `evidence` (what you
+read), `read_only_enforcement` (`baseline_command`, `after_command`,
+`passed`), `mutations_delta` (empty if none).
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
@@ -247,13 +245,12 @@ a pass: say so in the verdict body and, when the missing lane leaves you unable
 to reach a confident verdict, treat the review as request-changes with a
 finding that names the coverage gap rather than approving on one lane.
 
-**3. Run the suite once at the pinned commit** in the review's workspace,
-exactly as `formulas/mol-review.toml`'s `review` step 2 does
-(`review-workspace.sh add`; anything else you write to disk goes in the same
-workspace). The lanes did not run tests; this is the quorum's single
-verification. A failure that also fails on the base is pre-existing
-context, not this branch's defect. Run each suite under `hb`, this step's
-claim-lease keepalive:
+**3. Run what the check's method runs at the pinned commit, once,** in the
+review's workspace, made exactly as `formulas/mol-review.toml`'s `review` step
+2 makes it (`review-workspace.sh add`; anything else you write to disk goes in
+the same workspace). The lanes ran nothing there, so this is the quorum's one
+run, and a method that runs nothing there leaves this step nothing to do. Run
+each long command under `hb`, this step's claim-lease keepalive:
 ```bash
 SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
 # >>> quorum-lease-keepalive
@@ -268,16 +265,17 @@ hb() { if [ -n "$LHB" ]; then "$LHB" "$SYNTH_BEAD" -- "$@"; else "$@"; fi; }
 **4. Synthesize the verdict body.** UNION the lanes' findings — two providers
 catch more than one, which is the point — then dedupe findings that are the
 same defect at the same locus, keeping lane provenance. A finding either lane
-raises as blocking (P0/P1) that survives your own judgment is blocking for the
-quorum. `approve` iff no P0 and no P1 across both lanes and your test run;
-otherwise `request-changes`. Write the verdict body to `findings.md` in the
-mol-review verdict shape (VERDICT, reviewed branch/base/commit, scope checked,
-findings with location+impact+fix, filed, verification), self-contained
-because pre-open it is replayed verbatim as the opening PR comment. Note which
-lanes covered what, and any reduced coverage.
+raises as blocking under the check's method that survives your own judgment is
+blocking for the quorum. `approve` iff no blocking finding stands across both
+lanes and your own run; otherwise `request-changes`. Write the verdict body to
+`findings.md` in the mol-review verdict envelope (VERDICT, reviewed
+branch/base/commit, scope checked, findings with location+impact+fix, filed)
+with the lines the check's method adds below it, self-contained because
+pre-open it is replayed verbatim as the opening PR comment. Note which lanes
+covered what, and any reduced coverage.
 
 **5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
-per BLOCKING (P0/P1) finding, `[]` on approve — exactly as
+per blocking finding, `[]` on approve — exactly as
 `formulas/mol-review.toml`'s `review` step 6b specifies (rebase-stable locus:
 a file and a symbol or section, never a line number or oid).
 
@@ -292,8 +290,7 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework or
 finding beads, and never run `gh pr review --approve`.
 
-Pass on this same call any flag the check section of the review bead's dispatch
-note names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+Pass on this same call every flag the check's method names for the verdict.
 When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.
@@ -326,10 +323,10 @@ done
 gc runtime drain-ack
 ```
 
-**Exit criteria:** both lanes read (or reduced coverage recorded), suite run
-once at the pinned commit under `hb`, findings.md + findings.json written, exactly one
-signoff.sh call succeeded (or findings appended and the route restored), step
-chain closed forward, the workspace removed unless the bead went back to the
-pool, drain acknowledged.
+**Exit criteria:** both lanes read (or reduced coverage recorded), whatever the
+check's method runs at the pinned commit run once under `hb`, findings.md +
+findings.json written, exactly one signoff.sh call succeeded (or findings
+appended and the route restored), step chain closed forward, the workspace
+removed unless the bead went back to the pool, drain acknowledged.
 """
 metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }

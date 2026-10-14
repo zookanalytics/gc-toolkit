@@ -104,15 +104,15 @@ fi
 # names what the check judges, never how many lanes read it (that is the
 # formula's question above). A shared specialist stance precedes every
 # non-baseline arm, emitted once so no specialist skill or arm restates it;
-# correctness and triage are exempt, being the baseline that holds its own
-# stance in its own arm.
+# correctness and triage are exempt, being the baseline whose methods state
+# their own stance.
 echo
 echo "---"
 echo
 printf '## Check: `%s`\n' "$CHECK_NAME"
 echo
 case "$CHECK_NAME" in
-  correctness|triage) : ;;   # baseline: its own stance is in its arm, below
+  correctness|triage) : ;;   # baseline: its method states its own stance
   *)
     cat <<'S'
 **The specialist stance.** Every specialist check holds it, so no check's skill
@@ -137,40 +137,11 @@ esac
 case "$CHECK_NAME" in
   correctness)
     cat <<'M'
-The standing correctness review. Judge whether the change is correct and safe
-as merged: read the whole diff, settle its test evidence as below, and hold it
-to the work-quality standards, grading findings P0/P1/P2 with file:line. This is
-the concern, not a tool — no reviewer is presumed.
-
-**Test evidence.** The self-review that built a commit runs the rig's declared
-test command and stamps the head it saw pass on the work bead as
-`self_review_passed_sha`. The anchor's stamp is evidence only when it is the
-reviewed commit's full sha and the rig declares a test command. A merge of the
-base or a rework round leaves it naming an older head, and where the rig
-declares no test command the stamp certifies no declared tests. Read it in the
-review step, in the same shell as that step's pin block:
-
-```bash
-# >>> review-test-evidence
-ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-STAMP=""
-[ -n "$ANCHOR" ] && STAMP=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r '.[0].metadata.self_review_passed_sha // empty' 2>/dev/null)
-DECLARED=$(gc formula show mol-polecat-work ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null | jq -r '[.vars[]? | select(.name == "affected_tests_command" or .name == "test_command") | if .rig_default != null then .rig_default else (.default // "") end | select(. != "")] | length' 2>/dev/null)
-if [ -n "$STAMP" ] && [ "$STAMP" = "$REVIEWED_OID" ] && [ "${DECLARED:-0}" -gt 0 ] 2>/dev/null; then
-  echo "test evidence: the anchor's self-review passed the rig's declared tests at $REVIEWED_OID; run no suite"
-else
-  echo "no test evidence at ${REVIEWED_OID:-an unpinned commit} (anchor stamp: ${STAMP:-none}; declared test commands: ${DECLARED:-unread}); run the suites the diff touches"
-fi
-# <<< review-test-evidence
-```
-
-With evidence, run no suite. Without it, run the suites the diff touches in the
-review's worktree, each as `hb bash -c '<suite>'` through the review step's
-keepalive, and record the real pass and fail counts. Either way you may run one
-targeted suite for a gap you suspect, and the Testing check's run of each new
-case against the pre-change code is yours. A failing suite is not automatically
-a finding: check whether it fails on the base too. A pre-existing failure
-belongs in the verdict as context, not as this branch's defect.
+`skills/review-correctness/SKILL.md`. The standing correctness review: judge
+whether the change is correct and safe as merged. The method reads the whole
+diff, settles its test evidence, works its What to check list, grades every
+finding P0, P1 or P2 with its location, and adds a Verification line to the
+verdict. This is the concern, not a tool — no reviewer is presumed.
 M
     ;;
   triage)
@@ -249,10 +220,12 @@ M
   *)
     cat <<M
 No generic method is declared for the \`$CHECK_NAME\` check in the dispatching
-pack. Follow the \`mol-review\` steps as written, hold the diff to the reviewed
-repo's own method for this check where one exists, and say in your verdict's
-coverage line that the check had no declared method — an undeclared method is a
-gap worth an observation.
+pack. Follow the \`mol-review\` steps as written, which carry no check's
+judgment of their own. Hold the diff to the reviewed repo's own method for this
+check where one exists, and otherwise to the correctness method
+(\`skills/review-correctness/SKILL.md\`). Say in your verdict's coverage line
+that the check had no declared method — an undeclared method is a gap worth an
+observation.
 M
     ;;
 esac

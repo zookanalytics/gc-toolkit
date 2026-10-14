@@ -29,7 +29,7 @@ IDX="$TMP/review-checks.toml"
 cat >"$IDX" <<'TOML'
 # a comment line, ignored
 [checks.correctness]
-method = "formulas/mol-review.toml"
+method = "skills/review-correctness/SKILL.md"
 purpose = "Is the change correct and safe as merged?"
 phase = "pre-open"
 
@@ -51,7 +51,7 @@ TOML
 OUT="$("$SUT" --file "$IDX")"; RC=$?
 is  "all-rows exit 0" "$RC" "0"
 is  "declares exactly three checks" "$(printf '%s\n' "$OUT" | grep -c .)" "3"
-has "correctness row carries its method" "$OUT" "correctness	formulas/mol-review.toml	"
+has "correctness row carries its method" "$OUT" "correctness	skills/review-correctness/SKILL.md	"
 has "triage row present" "$OUT" "triage	skills/review-triage/SKILL.md	"
 has "demo method keeps the + join" "$OUT" "gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
 case "$OUT" in *"unrelated"*) bad "a key outside [checks.*] is not read as a check" "leaked 'unrelated'" ;; *) ok "a key outside [checks.*] is not read as a check" ;; esac
@@ -105,7 +105,7 @@ fi
 
 # ---- the phase column ---------------------------------------------------------
 OUT="$("$SUT" --file "$IDX")"
-has "emit carries the phase column (correctness pre-open)" "$OUT" "correctness	formulas/mol-review.toml	Is the change correct and safe as merged?	pre-open"
+has "emit carries the phase column (correctness pre-open)" "$OUT" "correctness	skills/review-correctness/SKILL.md	Is the change correct and safe as merged?	pre-open"
 has "emit carries open-as-draft (demo)" "$OUT" "	open-as-draft"
 has "--check demo carries its phase" "$("$SUT" --file "$IDX" --check demo)" "	open-as-draft"
 

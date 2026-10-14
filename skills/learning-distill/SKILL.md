@@ -120,7 +120,7 @@ target file, the budget, and what the adoption costs to keep.
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
 | `work-quality` | `template-fragments/work-quality-base.template.md` + one `work-quality-<class>` | `work_quality_entry_cap` entries per fragment | every turn of every role that renders it |
-| `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
+| `review-rubric` | `skills/review-correctness/SKILL.md`, "What to check" | one dimension per amendment | every correctness review |
 | `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
 
 Choose by what the learning *is*:
@@ -156,11 +156,9 @@ Choose by what the learning *is*:
 Retirements and hardens use the same vocabulary — a retirement names the
 carrier it removes from, so the retirement pass can walk every surface.
 
-A `review-rubric` amendment anchors in the TOML comment ledger above the
-review step in `formulas/mol-review.toml`, not beside the dimension it
-amends: the step description renders into step beads, where an HTML comment
-is noise in the text an agent reads. The ledger line names the dimension, so
-the retirement pass can find what an anchor refers to.
+A `review-rubric` amendment anchors immediately above the dimension it amends
+in the correctness method's "What to check" list, one anchor per amendment, so
+the retirement pass finds what an anchor refers to by where it sits.
 
 An `exemplar` entry is a `###` section under its anchor, holding a trigger
 line and the pair:
@@ -317,7 +315,8 @@ Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
 one row per anchored entry across all five — the conventions fragments, the
 profile, the work-quality fragments, the exemplar corpus, and the
-`review-rubric` ledger in `formulas/mol-review.toml`. Of each entry, ask:
+`review-rubric` dimensions in `skills/review-correctness/SKILL.md`. Of each
+entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same
