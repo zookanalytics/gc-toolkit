@@ -15,8 +15,8 @@ per-rig judgment and the reason the rollout is decomposed.
 A rig's `review-checks.toml`, and any `docs/review-<check>.md` extension, is read
 from the commit under review in that rig's own repository
 (`git show <oid>:review-checks.toml`). It is not pack content and is not seeded
-from gc-toolkit — `review-checks.toml` is absent from
-`generated/seed-audit/SOURCES.txt`. A gc-toolkit PR therefore cannot carry
+from gc-toolkit — `review-checks.toml` lies outside the paths the
+`generated/seed-audit` render reads. A gc-toolkit PR therefore cannot carry
 another rig's index. The rollout is one self-contained work bead per rig, filed
 in that rig's store and dispatched to its polecat pool on `mol-polecat-work`.
 This record and `docs/review-config.md` are the gc-toolkit-side deliverable; the
