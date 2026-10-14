@@ -1275,13 +1275,32 @@ keep their markers.
 **Withdrawn work ends the run.** A work bead closed while its run was
 mid-flight was withdrawn by whoever closed it, and gascity's autoclose leaves a
 run with open steps alone, so this step cancels the run instead of handing
-anything off:
+anything off.
+
+A close that landed the work is not a withdrawal. The refinery closes a bead
+whose work landed with `gc.work_outcome=shipped`, and a merge with
+`merge_result=merged` as well. This step meets that close when it is offered
+again after its handoff, because the claimant that handed off ended before it
+closed the step. The run's work is done, so the step closes its chain with
+outcome pass, the way the handoff does, and the run is not recorded as
+cancelled:
 ```bash
 CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-withdrawn-work
-if [ "$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
+WORK_ROW=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
+if [ "$(printf '%s' "$WORK_ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
+  SHIPPED=$(printf '%s' "$WORK_ROW" | jq -r '(.[0].metadata // {}) | if ((.["gc.work_outcome"] // "") == "shipped") or ((.merge_result // "") == "merged") then "shipped" else empty end' 2>/dev/null)
+  if [ -n "$SHIPPED" ]; then
+    SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }; done
+    : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+    for STEP in load-context workspace-setup preflight-tests implement submit-and-exit; do
+      "$SC" --step "mol-polecat-work.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+    done
+    gc runtime drain-ack
+    exit 0
+  fi
   CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
   if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID was closed while its run was mid-flight"; then
     gc runtime drain-ack

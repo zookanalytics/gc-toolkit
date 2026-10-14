@@ -24,7 +24,9 @@
 #     does not land;
 #   * WITHDRAWN WORK, executed: the self-review and submit-and-exit entry gates
 #     cancel the run when the work bead was closed mid-run, fall through when it
-#     is open, and do not drain when the cancel does not land.
+#     is open, and do not drain when the cancel does not land. A close that
+#     landed the work (gc.work_outcome=shipped, or merge_result=merged) is not a
+#     withdrawal: submit-and-exit closes its chain with outcome pass instead.
 #
 # No live city, Dolt, or network: the blocks are extracted verbatim from the
 # formulas and run against a fake `gc` and stub scripts.
@@ -169,7 +171,7 @@ case "$1 ${2:-}" in
 esac
 exit 0
 GC
-for v in escalate:ESCALATE await-ruling:AWAIT run-cancel:CANCEL; do
+for v in escalate:ESCALATE await-ruling:AWAIT run-cancel:CANCEL step-close:STEPCLOSE; do
   name="${v%%:*}"; verb="${v#*:}"
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
@@ -220,7 +222,7 @@ eq "$(run "$TMP/missing.sh" "$@" FAKE_CANCEL_RC=1)" "1|ESCALATE;AWAIT;CANCEL;" \
 
 # --- 4. Withdrawn work. --------------------------------------------------------
 extract mol-polecat-work self-review-withdrawn-work > "$TMP/review.sh"
-extract mol-polecat-work submit-withdrawn-work > "$TMP/submit.sh"
+extract mol-polecat-work submit-withdrawn-work | sed 's|{{convoy_id}}|tk-cv|g' > "$TMP/submit.sh"
 [ -s "$TMP/review.sh" ] && ok "self-review gate extracted" || bad "self-review gate extraction EMPTY"
 [ -s "$TMP/submit.sh" ] && ok "submit gate extracted" || bad "submit gate extraction EMPTY"
 CLOSED='[{"id":"tk-work","status":"closed","metadata":{"gc.step_ref":"self-review.iteration.2"}}]'
@@ -246,6 +248,24 @@ eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit F
    "0|" "submit: an unreadable work bead is not read as withdrawn"
 eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$CLOSED" FAKE_CANCEL_RC=1)" \
    "1|CANCEL;" "submit: a cancel that did not land is not drained"
+
+# A close that landed the work: the step was offered again after its handoff, so
+# it closes its chain with outcome pass rather than cancelling a delivered run.
+CHAIN="STEPCLOSE;STEPCLOSE;STEPCLOSE;STEPCLOSE;STEPCLOSE;DRAIN;"
+SHIPPED='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"shipped","merge_result":"merged"}}]'
+eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW="$SHIPPED")" \
+   "0|$CHAIN" "submit: a work bead closed as shipped closes the chain and drains, exits 0"
+has "$(args step-close)" "--step mol-polecat-work.submit-and-exit --convoy tk-cv --outcome pass" \
+    "submit: a shipped close records this step as passed, in its own molecule"
+eq "$(args run-cancel)" "" "submit: a shipped close cancels nothing"
+eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"merge_result":"merged"}}]')" \
+   "0|$CHAIN" "submit: a merge closed before gc.work_outcome was stamped is a landed close too"
+eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"shipped"}}]')" \
+   "0|$CHAIN" "submit: a rework hand-back closed as shipped is a landed close"
+eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"merge_result":"pull_request"}}]')" \
+   "1|CANCEL;DRAIN;" "submit: a bead closed with its PR still open was withdrawn, so the run is cancelled"
+eq "$(run "$TMP/submit.sh" WORK_BEAD_ID=tk-work CLAIMED_STEP_BEAD_ID=st-submit FAKE_SHOW='[{"id":"tk-work","status":"closed","metadata":{"gc.work_outcome":"no-op"}}]')" \
+   "1|CANCEL;DRAIN;" "submit: a no-op close was withdrawn, so the run is cancelled"
 
 echo
 echo "decline-wiring.test.sh: $PASS passed, $FAIL failed"
