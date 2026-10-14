@@ -247,13 +247,13 @@ other account a veto. An approval stands across later pushes until it is
 dismissed, so it counts whatever commit it was given at. A dismissed review is
 dropped before each reviewer's latest review is taken, so it neither approves
 nor vetoes, and it does not hide its author's older approval. A small fix after
-an approval lands on it. An outside approval is dismissed when the code that
-would land is not the code the approver saw: by `bring-current-guard.sh` when
-the ruling on a conflicted [bring-current round](#bringing-a-branch-current)
-lifts it, and by `approval-withdraw.sh` when the validator rules a fresh
-whole-diff review warranted. Each dismisses every approval an account has not
-had dismissed (the guard, every one given before the round), not only its
-latest, because an older approval would otherwise count again. A ruling that
+an approval lands on it. An outside approval is dismissed by
+`bring-current-guard.sh` when the ruling on a conflicted
+[bring-current round](#bringing-a-branch-current) lifts it, and by
+`approval-withdraw.sh` when the validator rules a fresh whole-diff review
+warranted. Each dismisses every approval an account has not had dismissed (the
+guard, every one given before the round), not only its latest, because an older
+approval would otherwise count again. A ruling that
 lifts the approval also draws a line on the anchor, `bring_current_lifted_at`,
 at the round's time, and no approval submitted at or before it counts, so a
 dismissal GitHub refuses cannot land the PR and an approval given after the
@@ -865,9 +865,14 @@ alone, and the round is routed to triage like any other.
 verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
 [--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
 that run again on the merged code (any the anchor declares, and any it adds with
-`--add-gates`); and whether the human approval still covers what would land.
-`bring-current-guard.sh decide` records the ruling in the anchor's record and
-supersedes each reopened lane. A ruling that lifts the approval first draws the
+`--add-gates`); and whether the round made a call that is the operator's to
+make. Only such a call lifts the human approval: the round changed what the PR
+does, by inferring one side's intent or by choosing between two live designs,
+and the ruling's reason names that call. A round that only changed how the
+approved behavior is achieved reopens the lanes that can check it, and the
+approval stands. `bring-current-guard.sh decide` records the ruling in the
+anchor's record and supersedes each reopened lane. A ruling that lifts the
+approval first draws the
 lift line: the round's time is stored as `bring_current_lifted_at` and read
 back, and from then on the approval rule counts no approval submitted at or
 before it. Each approver is then re-requested and each standing approval given
@@ -879,19 +884,24 @@ the approval leaves the line where it was. A lane in `bring_current_reopened`
 is backed by a GitHub approval only when the approval was submitted after
 `bring_current_round_at` (`lane-state.sh`), so a standing approval neither lets
 the merge skip a reopened lane nor keeps its review from being dispatched. A
-routine round can therefore keep the approval while its lanes re-run, and
-material judgment removes it.
+round can therefore keep the approval while its lanes re-run, and only a call
+that is the operator's removes it.
 
-**Every message is composed from the audit.** The round section that opens
-triage's posted verdict and the note on a dismissed approval render from the
-stored record with `bring-current-audit.sh`: a headline of what the round
-needed, then per entry what collided, what was decided and why, and what to
-check. An item no entry covers is listed with the guard's evidence alone. A
-lifted approval files no visit: the re-request, the dismissal note and
-triage's posted verdict are what a person reads, and the PR's posture reads
-`review_required` until a new approval stands, so the board shows the approval
-as owed. A ruling the guard made itself posts no verdict, so its dismissal note
-tells it as the guard's and points at no triage comment. The one visit a round
+**Every message is composed from the stored record.** Triage's posted verdict
+opens, like every review comment, with the verdict and then the one decision it
+needs from the operator, or that nothing does. The round's account sits
+collapsed beneath that line, rendered from the record with
+`bring-current-audit.sh` the same way whether or not the approval was lifted:
+what the round needed and the ruling, then each judgment entry in full (what
+collided, what was decided and why, what to check) and each routine entry on
+one line. An item no entry covers is listed with the guard's evidence alone.
+When the ruling lifts the approval, the call it names opens the verdict and is
+the note on the dismissed approval. A lifted approval files no visit: the
+re-request, the dismissal note and triage's posted verdict are what a person
+reads, and the PR's posture reads `review_required` until a new approval
+stands, so the board shows the approval as owed. A ruling the guard made itself
+posts no verdict, so its dismissal note tells it as the guard's, points at no
+triage comment, and names the entries itself. The one visit a round
 files is the question the worker could not resolve, rendered from its entries
 so far and its question.
 
