@@ -90,9 +90,12 @@ func (c *Checkout) Dirty() (string, error) {
 
 // Changes compares the checkout with the commit Open read. moved names HEAD
 // at another commit, or else lists the tracked files that differ from it,
-// staged or not. untracked lists the untracked files that are not ignored,
-// which leave the commit's files as they are. Both lists are in Dirty's form,
-// and a caller that found the checkout clean reads them as what changed since.
+// staged or not, a submodule's own HEAD and tracked files included. When
+// nothing moved, untracked lists what Dirty lists, all of which leaves the
+// commit's files as they are: untracked files that are not ignored, and a
+// submodule that holds only untracked content. Both lists are in Dirty's
+// form, and a caller that found the checkout clean reads them as what changed
+// since.
 func (c *Checkout) Changes() (moved, untracked string, err error) {
 	head, err := Output(c.Top, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
@@ -101,18 +104,15 @@ func (c *Checkout) Changes() (moved, untracked string, err error) {
 	if head = strings.TrimSpace(head); head != c.Commit {
 		return fmt.Sprintf("HEAD moved from %s to %s", c.Commit, head), "", nil
 	}
-	dirty, err := c.Dirty()
+	// --ignore-submodules=untracked leaves out a submodule's untracked content
+	// alone, and overrules the config that would leave out more.
+	tracked, err := Output(c.Top, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=untracked")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("cannot read the checkout's status: %w", err)
 	}
-	var tracked, other []string
-	for _, l := range strings.Split(dirty, "\n") {
-		switch {
-		case strings.HasPrefix(l, "?? "):
-			other = append(other, l)
-		case l != "":
-			tracked = append(tracked, l)
-		}
+	if tracked = strings.TrimRight(tracked, "\n"); tracked != "" {
+		return tracked, "", nil
 	}
-	return strings.Join(tracked, "\n"), strings.Join(other, "\n"), nil
+	untracked, err = c.Dirty()
+	return "", untracked, err
 }

@@ -143,7 +143,9 @@ pre-existing fail beside the refinery caller that needs it.
   behind do not count. A suite's artifacts, such as `cover.out`, `.coverage`
   or build output that is not ignored, change no file the commit holds. The
   run names them in a WARN line, because the next call in that checkout
-  refuses them.
+  refuses them. A submodule counts by what changed in it: its HEAD at another
+  commit or a changed tracked file in it is a tracked change, and untracked
+  content in it is an artifact like any other.
 - **Publishing.** `--publish-bead` writes the record as one JSON value on
   `rig_check.<check>` (registered in `lifecycle/lifecycle.toml`) through
   `gcbd.Client.Update`, and reads it back with `ShowDirect`. gcbd's writes fork
@@ -177,7 +179,7 @@ End-to-end figures come from the built binaries in full clones of gc-toolkit
 | one record write: a full-suite pass, which writes the commit's file and the tree's entry (`Store.Put`) | 0.37-0.43 ms | 0.39-0.46 ms |
 | one test lookup that finds the record (`Store.Lookup`) | 32-43 µs | 18-23 µs |
 | `gctk rig test --check`, end to end, three rounds of n=21 | median 40-45 ms (min 30) | median 44-46 ms (min 29) |
-| `gctk rig test --scope full --command true --force`, end to end, n=11 | median 55 ms (min 46) | |
+| `gctk rig test --scope full --command true --force`, end to end, n=11, before the after-run check | median 55 ms (min 46) | |
 | `gctk version`, the process floor, n=31 | median 6 ms | |
 
 A test lookup reads the commit's record and the tree's entry, because the
@@ -186,9 +188,12 @@ reviewed lookup stopped at the commit's record. The second read adds about
 15 µs, which the end-to-end `--check` does not show. A `--check` costs about one
 gctk start, one `git rev-parse` and one `git status`. A run costs those plus
 `bash -n` and the record write around the command itself, and one more
-`git rev-parse` and `git status` after it, to check the checkout. It no longer
-includes the `gc formula show` the reviewed build ran, which measured median
-234 ms at load average 40-47 on 2026-10-13.
+`git rev-parse` and up to two `git status` after it, to check the checkout.
+It no longer includes the `gc formula show` the reviewed build ran, which
+measured median 234 ms at load average 40-47 on 2026-10-13. The run row
+predates the check after the command. At load average 51-57 on 2026-10-14, a
+forced run of `true` measured median 597 ms with that check and 394 ms
+without it, n=31 each, interleaved in full clones.
 
 The end-to-end figures grow with the host's load. On 2026-10-13 the reviewed
 build's `--check` measured median 182 ms at load average 40-47, and median

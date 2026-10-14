@@ -584,6 +584,45 @@ func TestRigARunThatLeavesAnUntrackedFileKeepsItsRecord(t *testing.T) {
 	eqRuns(t, f.runs(), "full")
 }
 
+// A submodule is read by what the run changed in it: untracked content left
+// inside one keeps the run's record, as an untracked file in the checkout
+// does, and a changed file inside one records nothing.
+func TestRigReadsASubmoduleByWhatTheRunChangedInIt(t *testing.T) {
+	withSubmodule := func(t *testing.T) *rigFixture {
+		t.Helper()
+		f := newRigFixture(t)
+		inner := t.TempDir()
+		for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "inner"}} {
+			if out, err := exec.Command("git", append([]string{"-C", inner}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		f.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub")
+		f.git("commit", "-q", "-m", "sub")
+		return f
+	}
+	t.Run("untracked content", func(t *testing.T) {
+		f := withSubmodule(t)
+		code, _, errs := f.call("test", "--scope", "full", "--command", `printf x > sub/artifact.out; `+countCmd("full"))
+		if code != 0 || !strings.Contains(errs, "WARN the run left files git does not ignore") || !strings.Contains(errs, " M sub") {
+			t.Fatalf("run = %d, want 0 and a WARN naming the submodule:\n%s", code, errs)
+		}
+		if r := f.record(rig.CheckTest, f.head()); r == nil || r.Result != rig.ResultPass {
+			t.Fatalf("record = %+v, want the pass", r)
+		}
+	})
+	t.Run("a changed file", func(t *testing.T) {
+		f := withSubmodule(t)
+		code, _, errs := f.call("test", "--scope", "full", "--command", `printf x > sub/tracked.txt && git -C sub add tracked.txt`)
+		if code != 4 || !strings.Contains(errs, "the command changed the checkout it ran in") || !strings.Contains(errs, " M sub") {
+			t.Fatalf("run = %d, want 4 naming the submodule:\n%s", code, errs)
+		}
+		if _, err := os.Stat(filepath.Join(f.repo, ".git", "gc-rig-checks")); !os.IsNotExist(err) {
+			t.Fatalf("a run that changed the submodule wrote to the record store: %v", err)
+		}
+	})
+}
+
 func TestRigCheckReadsTheRecordWithNoGc(t *testing.T) {
 	f := newRigFixture(t)
 	if code, _, _ := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 {

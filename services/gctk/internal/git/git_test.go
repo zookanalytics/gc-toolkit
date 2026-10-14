@@ -142,32 +142,66 @@ func TestDirtyListsAChangeConfigWouldHide(t *testing.T) {
 	}
 }
 
+// expectChanges fails the test unless Changes answers wantMoved and
+// wantUntracked.
+func expectChanges(t *testing.T, c *Checkout, step, wantMoved, wantUntracked string) {
+	t.Helper()
+	moved, untracked, err := c.Changes()
+	if err != nil || moved != wantMoved || untracked != wantUntracked {
+		t.Fatalf("%s: Changes = %q, %q, %v; want %q, %q", step, moved, untracked, err, wantMoved, wantUntracked)
+	}
+}
+
 func TestChangesSplitsTrackedChangesAndAMovedHEADFromUntrackedFiles(t *testing.T) {
 	dir := repo(t)
 	c, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expect := func(step, wantMoved, wantUntracked string) {
-		t.Helper()
-		moved, untracked, err := c.Changes()
-		if err != nil || moved != wantMoved || untracked != wantUntracked {
-			t.Fatalf("%s: Changes = %q, %q, %v; want %q, %q", step, moved, untracked, err, wantMoved, wantUntracked)
-		}
-	}
-	expect("clean", "", "")
+	expectChanges(t, c, "clean", "", "")
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	expect("an untracked file", "", "?? new.txt")
+	expectChanges(t, c, "an untracked file", "", "?? new.txt")
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	expect("an unstaged change", " M a.txt", "?? new.txt")
+	expectChanges(t, c, "an unstaged change", " M a.txt", "")
 	gitIn(t, dir, "add", "a.txt")
-	expect("a staged change", "M  a.txt", "?? new.txt")
+	expectChanges(t, c, "a staged change", "M  a.txt", "")
 	gitIn(t, dir, "commit", "-q", "-m", "two")
-	expect("a new commit", "HEAD moved from "+c.Commit+" to "+gitIn(t, dir, "rev-parse", "HEAD"), "")
+	expectChanges(t, c, "a new commit", "HEAD moved from "+c.Commit+" to "+gitIn(t, dir, "rev-parse", "HEAD"), "")
+}
+
+// A submodule that holds only untracked content leaves the commit's files as
+// they are, so Changes lists it with the untracked files. A changed file in
+// the submodule, or its HEAD at another commit, is a tracked change, whatever
+// the config says about submodules.
+func TestChangesReadsASubmoduleByWhatChangedInIt(t *testing.T) {
+	inner := repo(t)
+	dir := repo(t)
+	gitIn(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub")
+	gitIn(t, dir, "commit", "-q", "-m", "sub")
+	gitIn(t, dir, "config", "submodule.sub.ignore", "all")
+	c, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.WriteFile(filepath.Join(sub, "artifact.out"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectChanges(t, c, "untracked content in the submodule", "", " M sub")
+	if err := os.Remove(filepath.Join(sub, "artifact.out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "a.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectChanges(t, c, "a changed file in the submodule", " M sub", "")
+	gitIn(t, sub, "checkout", "-q", "a.txt")
+	gitIn(t, sub, "commit", "-q", "--allow-empty", "-m", "moved")
+	expectChanges(t, c, "the submodule's HEAD moved", " M sub", "")
 }
 
 func TestOutputCarriesGitsOwnMessage(t *testing.T) {
