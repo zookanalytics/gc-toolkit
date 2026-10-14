@@ -120,18 +120,20 @@ one (a rig value outranks the routed one in a pour), else the branch
   is for reads only. Its writes fork `gc bd update`, so the publish does too.
   The gate publishes the record that answered the call, whether it ran or read
   it. A failed publish warns and changes no exit.
-- **The process group and the relay** follow `gitIn` on PR #1212 (Setpgid,
-  TERM to the group, SIGTERM/SIGINT relayed, exit 128+N). That PR is unmerged,
-  so the runner lives in `internal/rig`, and no package-level name in
-  `internal/cli` collides with that branch's. A relayed signal stops the group
-  the way a timeout does, SIGTERM and then SIGKILL after the grace, and `Run`
-  returns only once the command has been waited for. Returning as soon as the
-  signal was relayed left a command that ignores SIGTERM running, and let the
-  command's output copier write into a caller's buffer after `Run` had
-  returned, which `go test -race` caught in the CLI's signal test. A writer
-  that is not a file is fed through a pipe whose wait `WaitDelay` bounds. The
-  CLI hands its own stdout and stderr files to the command directly, so a
-  child the command leaves running cannot hold the gate open.
+- **The process group and the relay** follow `gitIn` from PR #1212 (Setpgid,
+  TERM to the group, SIGTERM/SIGINT relayed, exit 128+N). That PR had not
+  merged when the gate was built, so the runner lives in `internal/rig`, and no
+  package-level name in `internal/cli` collides with its own. It has merged
+  since, and the two build and pass `go test -race` together. A relayed signal
+  stops the group the way a timeout does, SIGTERM and then SIGKILL after the
+  grace, and `Run` returns only once the command has been waited for.
+  Returning as soon as the signal was relayed left a command that ignores
+  SIGTERM running, and let the command's output copier write into a caller's
+  buffer after `Run` had returned, which `go test -race` caught in the CLI's
+  signal test. A writer that is not a file is fed through a pipe whose wait
+  `WaitDelay` bounds. The CLI hands its own stdout and stderr files to the
+  command directly, so a child the command leaves running cannot hold the gate
+  open.
 
 ## Measured cost
 
