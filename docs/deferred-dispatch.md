@@ -107,8 +107,9 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 `orders/deferred-dispatch.toml` — a `cooldown` exec order at `scope =
 "rig"`, so each importing rig reconciles its own store on its own clock,
-and the dispatcher's open-tracking gate gives each rig its own
-single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
+one pass at a time (see
+[One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
+Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also the ones bd keeps unready only through an ancestor that
@@ -130,7 +131,8 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when a blocker
   holds the bead, on it or on an ancestor, when someone has it by `assignee`,
-  when the sling fails, or when the recorded arguments are malformed;
+  when the sling fails, when the recorded arguments are malformed, or when
+  the pass has spent its budget;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
   at a non-`open` live status. The record is kept, because the status may
   yet be cleared, but it is counted apart from `held` and reported rather
@@ -229,6 +231,78 @@ one armed at a non-open status the pass can never dispatch — a dispatch
 silently not firing, surfaced before a human has to notice it days later. It
 reads holds through the same `hold-lib.sh`, so an arm a park holds is not
 reported.
+
+## One pass at a time, inside the timeout
+
+Two passes over one store would sling the same ready bead twice, which
+mints two input convoys for one work bead and bumps its attempt count
+twice. The controller's open-tracking gate keeps a second run from
+starting only while the first run's tracking bead stays open, and a sweep
+can close that bead under a pass that is still running. The core
+`order-tracking-sweep` order closes any tracking bead older than its
+`--stale-after` (10m). On a gc build that does not extend the window to the
+order's timeout, the controller watchdog closes it 2m after dispatch. So
+the pass carries its own lock:
+
+- Before it reads the store, `reconcile` takes a non-blocking exclusive
+  `flock` on `<GC_PACK_STATE_DIR>/deferred-dispatch/<rig>/pass.lock` and
+  records its pid and start time in `pass.holder` beside it. `<rig>` is
+  `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
+  plus a checksum of the whole path, so two rigs never share a lock. The
+  lock depends on no bead surviving.
+- Only the pass process holds the lock's descriptor. Every `gc` and
+  `escalate.sh` call the pass makes runs with it closed. A process that a
+  `gc` call starts can outlive the pass: a store read can bring up a Dolt
+  server, and `gc` hands the descriptors it was given to what it starts. A
+  process that kept the descriptor would hold the lock against every later
+  pass. The kernel releases the lock when the pass exits, however it exits,
+  `SIGKILL` included. The order's timeout kills the pass's whole process
+  group, its `gc sling` with it, and the next pass re-attempts the
+  unconfirmed sling through the `slinging@` recovery.
+- A pass that finds the lock held prints one line and exits 0 without
+  listing or slinging. Under the order it also declares the run `skipped`
+  in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
+  exec-order outcome contract, `internal/orders/exec_outcome.go`), which the
+  controller records as an `order.skipped` event. The controller keeps an
+  exit-0 run's output nowhere else.
+- A holder older than `DEFERRED_DISPATCH_LOCK_STALL_SECS` (900s) is not a
+  slow pass, because the order's timeout would have killed it. That pass
+  exits 1, so `order.failed` reports the wedge.
+- A pass that cannot take the lock at all exits 1 before it reads the
+  store. That covers `flock` missing from `PATH` and a lock file the pass
+  cannot create or open. Nothing else carries single-flight, so a pass that
+  ran anyway would be the second slinger the lock exists to prevent.
+
+The order's `timeout` kills a pass wherever it stands. A sling killed
+mid-flight has already minted its input convoy, leaves it with no
+workflow, and spends one of the bead's attempts. So a pass measures a
+budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
+0 = unpaced), and starts a sling only while at least
+`DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
+point it starts no sling and files no escalation, since `escalate.sh` is
+store work the timeout can cut short too. Each remaining ready bead keeps
+its arm with no marker on it, this pass counts no attempt against it, and
+the next pass slings it. A capped bead stays capped and armed, and the next
+pass files its escalation. The pass names the beads it left, counts the
+ready ones as `left for the next pass` in its summary, and declares the run
+`partial`, naming each bead and what it left there. The controller reads a
+declaration only after a run that exits 0, so a pass that also had a
+failure declares nothing. It exits 1, and its output, which the controller
+keeps for a failed run, names what it left. The retires and reports for the
+rest of the armed set still run. Each retire is one write, and a retire the
+timeout cuts short is made again by the next pass.
+
+The budget sits at least one allowance below the timeout, so the last
+sling a pass starts can run for twice its allowance before the timeout
+lands. The stall bound sits above the timeout, so a pass that is still
+running never reads as a wedged one. `deferred-dispatch.test.sh` reads
+these numbers from the files that set them and asserts both pairs. A city
+override that lowers the order's `timeout` has to lower the budget in its
+`env` as well.
+
+`--dry-run` writes nothing and slings nothing, so it takes no lock and
+spends no budget. It lists every bead a pass would sling, whether or not a
+pass is in flight.
 
 ## What this does not do
 

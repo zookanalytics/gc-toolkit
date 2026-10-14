@@ -20,7 +20,8 @@
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
 # the one this checkout describes: lifecycle.sh and merge.sh exec it and have
 # no other implementation, and orders that fire on schedule can still be
-# running logic several commits old.
+# running logic several commits old. A fourth asks whether flock(1) resolves,
+# since the pass locks of refinery-reconcile and deferred-dispatch need it.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -341,6 +342,18 @@ else
                 fi ;;
         esac
     fi
+fi
+
+# Arm 4 — the pass lock's tool resolves.
+#
+# refinery-reconcile and deferred-dispatch each take a per-rig pass lock with
+# flock(1) and refuse to run a pass without one. On a host that lacks it both
+# orders fire on schedule and every pass fails before it reads the store, so
+# nothing merges and no armed dispatch fires, while every arm above reads
+# healthy. This reads the PATH the doctor runs with, which is the controller's
+# when both start from the same environment.
+if ! command -v flock >/dev/null 2>&1; then
+    errors+=("flock: not found on PATH — refinery-reconcile and deferred-dispatch take their per-rig pass lock with flock(1) and refuse every pass without it, so nothing merges and no armed dispatch fires. Install it: util-linux on Linux, \`brew install flock\` on macOS.")
 fi
 
 if budget_spent; then

@@ -17,8 +17,10 @@
 #   2. the lookup matches the failure_key stamp alone, so a RETITLED tracker is
 #      still found, and a bug whose title merely contains the key is never
 #      taken for its tracker;
-#   3. it reads every live status a tracker can hold, and leaves closed ones
-#      out: a red that outlives a landed fix is new information;
+#   3. it reads every live status a tracker can hold. A closed tracker counts
+#      only through the live bead a fold moved its failure to, which the
+#      refinery cites and the polecat confirms on, so a red that outlives a
+#      landed fix is new information;
 #   4. an unreadable lookup is UNKNOWN, never "no duplicate": the refinery files
 #      nothing and merges nothing, and the polecat tells a human. A missing
 #      script or a key the script refuses stops a polecat block before any
@@ -167,6 +169,14 @@ bead() {
     '{id: $id, status: $st, issue_type: $ty, title: $t, metadata: $m,
       closed_at: (if $c == "" then null else $c end)}'
 }
+# folded <id> <key> <successor> — a tracker bead-rehome.sh closed into the bead
+# that carries its failure now, such as a batch.
+folded() {
+  jq -nc --arg id "$1" --arg k "$2" --arg s "$3" \
+    '{id: $id, status: "closed", issue_type: "bug", title: ("Pre-existing failure: " + $k),
+      metadata: {failure_key: $k, "gc.superseded_by": $s, "gc.superseded_by_store": "rig:gc-toolkit"},
+      closed_at: "2026-10-09T07:17:10Z", close_reason: ("folded into " + $s + " in rig:gc-toolkit — absorbed by the batch")}'
+}
 store() {
   local IFS=,
   printf '[%s]\n' "$*" > "$STUB_STORE"
@@ -248,9 +258,14 @@ eq "$(refinery)/$(created)" "0/1" "(B) the next patrol finds the bead the last o
 jq -c 'map(if .id == "tk-new1" then .title = "Make widget rebase wait for the lock" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 eq "$(refinery)/$(created)" "0/1" "(B) and still finds it once its fixer retitles it"
 
-echo "# refinery: a closed tracker does not count"
+echo "# refinery: a closed tracker counts only through the live bead a fold moved it to"
 store "$(bead tk-done closed bug "Pre-existing failure: $KEY" "{\"failure_key\":\"$KEY\"}" 2026-10-09T08:00:00Z)"
-eq "$(refinery)/$(created)" "0/1" "(I) a closed twin -> exactly one new bead: a red that outlives a fix is new"
+eq "$(refinery)/$(created)" "0/1" "(I) a closed twin with no successor -> exactly one new bead: a red that outlives a fix is new"
+store "$(folded tk-folded "$KEY" tk-batch)" "$(bead tk-batch open task "batch: clear the pre-existing failure set")"
+eq "$(refinery)/$(created)" "0/0" "(N) a closed twin folded into a live batch -> proceeds, nothing filed"
+has "$(cat "$TMP/out")" "already filed as tk-batch" "(N) the merge notes cite the batch the failure moved to"
+store "$(folded tk-folded "$KEY" tk-batch)" "$(bead tk-batch closed task "batch: clear the pre-existing failure set" null 2026-10-12T08:00:00Z)"
+eq "$(refinery)/$(created)" "0/1" "(N) once the batch has closed, the red is new -> exactly one new bead"
 
 echo "# refinery: unknown files nothing and merges nothing"
 store "$(bead tk-dup open bug "Pre-existing failure: $KEY" "{\"failure_key\":\"$KEY\"}")"
@@ -309,6 +324,10 @@ store "$(bead tk-held blocked bug "Rebase loses the lock" "{\"failure_key\":\"$P
 has "$(polecat "$TMP/lookup.sh")" "EXISTING=tk-held LOOKUP_RC=0" "3b: a tracker in a blocked status, which 3b once missed, is found by its stamp"
 store "$(bead tk-old open bug "Pre-existing failure: $PKEY — rebase loses the lock")"
 has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: an unstamped bug titled with the key is not taken for its tracker"
+store "$(folded tk-folded "$PKEY" tk-batch)" "$(bead tk-batch open task "batch: clear the pre-existing failure set")"
+has "$(polecat "$TMP/lookup.sh")" "EXISTING=tk-batch LOOKUP_RC=0" "3b: a closed twin folded into a live batch answers with the batch, so 3c confirms on it"
+store "$(bead tk-done closed bug "Pre-existing failure: $PKEY" "{\"failure_key\":\"$PKEY\"}" 2026-10-09T08:00:00Z)"
+has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: a closed twin with no successor tracks nothing, so 3d and 3e run"
 store
 has "$(polecat "$TMP/lookup.sh")" "EXISTING= LOOKUP_RC=0" "3b: no tracker -> an empty, successful lookup"
 eq "$(grep -c '^MAIL|' "$FAKE_META")" "0" "3b: a successful lookup mails nobody"
@@ -360,6 +379,10 @@ store "$(bead tk-race open bug "Rebase loses the lock" "{\"failure_key\":\"$PKEY
 polecat "$TMP/file.sh" >/dev/null
 eq "$(created)" "0" "3e: a tracker another gate filed since the lookup is not duplicated"
 has "$(cat "$FAKE_META")" "Tracked as: tk-race" "3e: the notice names that tracker"
+store "$(folded tk-folded "$PKEY" tk-batch)" "$(bead tk-batch open task "batch: clear the pre-existing failure set")"
+polecat "$TMP/file.sh" >/dev/null
+eq "$(created)" "0" "3e: a closed twin folded into a live batch is not filed again"
+has "$(cat "$FAKE_META")" "Tracked as: tk-batch" "3e: the notice names the batch"
 store
 (cd "$TMP/cwd" && STUB_CREATE_FAIL=1 GC_PACK_DIR="$ROOT" SYMPTOM_KEY=TestWidget WORK_BEAD_ID=work-1 bash "$TMP/file.sh" >/dev/null 2>&1)
 has "$(cat "$FAKE_META")" "Tracked as: nothing, the filing failed" "3e: a filing that did not land is reported as nothing filed"
