@@ -141,6 +141,8 @@ notF "$REVIEW_STEP" 'run the tests' "(EVIDENCE) the shared review step neither p
 notF "$REVIEW_STEP" 'Run the tests' "(EVIDENCE) the shared review step has no step that runs the tests"
 notF "$REVIEW_STEP" 'run the suites' "(EVIDENCE) the shared review step runs no suite"
 hasF "$REVIEW_STEP" 'The check section of the' "(EVIDENCE) the shared review step leaves test runs to the check section"
+hasF "$REVIEW_STEP" 'Verification: <"no tests run" when the check section names no test; else the test evidence' "(EVIDENCE) the verdict template tells a check that names no test to write that it ran none"
+notF "$REVIEW_STEP" 'Verification: <test evidence' "(EVIDENCE) the verdict template no longer asks every check for suite counts"
 # Every check also reads the formula's hard rules and its pin step.
 notF "$ROOT/formulas/mol-review.toml" 'run the tests yourself' "(EVIDENCE) mol-review's hard rules do not tell every check to run the tests"
 notF "$ROOT/formulas/mol-review.toml" 'the tests you' "(EVIDENCE) mol-review's pin step does not presume every check runs tests"

@@ -376,7 +376,7 @@ Findings: <every P0, P1 and P2 — each with its location, impact, and the fix>
 
 Filed: <bug ids for findings out of scope for this diff, or "none">
 
-Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
+Verification: <"no tests run" when the check section names no test; else the test evidence relied on and each suite run at the reviewed commit, N passed, M failed>
 ```
 
 Say what you did **not** check — an honest coverage line is worth more than
