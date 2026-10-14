@@ -58,6 +58,15 @@
 # checks and this script's re-offer guard both read the proof, so a re-offered
 # frozen step does not re-release a bead a downstream worker may already hold.
 #
+# --stand-down asks, before a reaction reads S, whether S takes a reaction from
+# R at all. Two markers on S say it does not. gc.reacted_by=R says R's own
+# write-back already landed, and gc.reaction_owned=1 says a live owner holds the
+# reaction (gc-helm.sh engage --new-subject, which filed S's one visit itself).
+# On either marker this script closes R, writes nothing to S, and exits 0. On
+# neither it writes nothing and exits 3, and the reaction goes ahead. R is
+# closed in one place, close_reaction below, whether the reaction ends in an
+# exit or stands down.
+#
 # No attempt record is written before the act: exactly-once for a reaction bead
 # is the substrate's, keyed on R's identity. The LANDED proof is written after
 # the act — gc.reacted_by=R for a reaction bead, gc.proactive_reaction=1 for the
@@ -65,7 +74,8 @@
 # S's notes is the record of what was chosen and why.
 # Callers: agents/proactive/prompt.template.md, in-flight mol-first-reaction
 # molecules (advance-and-drain), operators by hand.
-# Exit: 0 disposed · 2 usage · 4 runtime failure.
+# Exit: 0 disposed, or stood down with R closed · 2 usage · 3 no stand-down, so
+# the reaction goes ahead · 4 runtime failure.
 set -u
 
 PROG="first-reaction-dispose"
@@ -100,6 +110,7 @@ Usage:
                             [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
                             [--visit <visit-bead-id>]
+  first-reaction-dispose.sh <bead> --stand-down --reaction-bead <R>
   common: [--reaction-bead <R>] [--by <who>] [--db <path>] [--dry-run]
 
   --reason is required on every exit: a disposition nobody can second-guess is
@@ -107,6 +118,12 @@ Usage:
   --takeaway is the board headline (≤140 chars, enforced by gc-helm.sh).
   --reaction-bead is R, the reaction's own leased bead. Given it, this script
   stamps gc.reacted_by=R on the subject once the write-back lands and closes R.
+  --stand-down runs before the reaction reads its subject. When the subject
+  carries gc.reacted_by=<R> (this reaction's write-back already landed) or
+  gc.reaction_owned=1 (a live owner holds its reaction), it closes R, writes
+  nothing to the subject, and exits 0. Otherwise it writes nothing and exits 3,
+  and the reaction goes ahead. It takes --reaction-bead and none of the exits'
+  flags.
   --route (actionable, close) defaults to ${GC_RIG}/gc-toolkit.polecat, and
   fails closed when the target cannot be rig-qualified. On close it is the
   validating-closer pool that runs mol-validate-close, which re-checks the
@@ -166,9 +183,12 @@ BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
 ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
+STAND_DOWN=""
 WAITING=""          # space-separated bead ids
+FLAGS_GIVEN=""      # each flag by name, for the stand-down's check of what it takes
 
 while [ $# -gt 0 ]; do
+    case "$1" in -?*) FLAGS_GIVEN="$FLAGS_GIVEN ${1%%=*}" ;; esac
     case "$1" in
         --disposition) shift; [ $# -gt 0 ] || usage_die "--disposition needs a value"; DISPOSITION="$1"; shift ;;
         --disposition=*) DISPOSITION="${1#--disposition=}"; shift ;;
@@ -203,6 +223,7 @@ while [ $# -gt 0 ]; do
         --recommended-formula=*) RECOMMENDED_FORMULA="${1#--recommended-formula=}"; shift ;;
         --reaction-bead)   shift; [ $# -gt 0 ] || usage_die "--reaction-bead needs a bead id"; REACTION_BEAD="$1"; shift ;;
         --reaction-bead=*) REACTION_BEAD="${1#--reaction-bead=}"; shift ;;
+        --stand-down) STAND_DOWN=1; shift ;;
         --db)       shift; [ $# -gt 0 ] || usage_die "--db needs a path"; DB="$1"; shift ;;
         --db=*)     DB="${1#--db=}"; shift ;;
         --dry-run|-n) DRY=1; shift ;;
@@ -214,13 +235,28 @@ done
 
 # ── Validation: refuse before writing anything ───────────────────────
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
-case "$DISPOSITION" in
-    actionable|recommend|blocked|close|ruling) : ;;
-    "") usage_die "needs --disposition actionable|recommend|blocked|close|ruling" ;;
-    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|recommend|blocked|close|ruling)" ;;
-esac
-[ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
-[ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
+if [ -n "$STAND_DOWN" ]; then
+    # The stand-down decides whether a reaction runs at all, so it names no
+    # exit, and the one write it can make is R's close. Each flag given is
+    # checked against the ones it takes, the common flags, so a flag any exit
+    # takes is refused here rather than dropped unread.
+    for f in $FLAGS_GIVEN; do
+        case "$f" in
+            --stand-down|--reaction-bead|--by|--db|--dry-run|-n) : ;;
+            *) usage_die "--stand-down takes --reaction-bead only, and was given $f: it decides whether the reaction runs, so --disposition and the exits' flags belong to the call that disposes" ;;
+        esac
+    done
+    [ -n "$REACTION_BEAD" ] \
+        || usage_die "--stand-down needs --reaction-bead <R>: a subject that takes no reaction is answered by closing R"
+else
+    case "$DISPOSITION" in
+        actionable|recommend|blocked|close|ruling) : ;;
+        "") usage_die "needs --disposition actionable|recommend|blocked|close|ruling" ;;
+        *)  usage_die "unknown disposition '$DISPOSITION' (actionable|recommend|blocked|close|ruling)" ;;
+    esac
+    [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
+    [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
+fi
 [ "$REACTION_BEAD" != "$BEAD" ] || usage_die "--reaction-bead $REACTION_BEAD is the subject itself; R tracks S, it is not S"
 # An emergency is confirmed only by the check it names, so a claim that names
 # none is refused rather than read as no claim.
@@ -366,31 +402,62 @@ RIG_PATH="${_path:-}"
 gc_bd() { gc bd "$@" $BD_DB_ARGS; }
 
 # ── Read the subject once; the guards below all ask its metadata ──────
-# The store is pinned, so this reads the subject's own rig. The re-offer guard
-# and the stale-recommendation clear both key off it, and one read keeps them
-# from disagreeing. Positive finding only: an unreadable bead is not evidence of
-# anything, so an empty read falls through to the act.
+# The store is pinned, so this reads the subject's own rig. The stand-down, the
+# re-offer guard and the stale-recommendation clear all key off it, and one read
+# keeps them from disagreeing. Positive finding only: an unreadable bead is not
+# evidence of anything, so an empty read falls through to the act.
 SUBJECT_JSON=$(gc_bd show "$BEAD" --json 2>/dev/null | scrub || printf '')
 subject_meta() {
     printf '%s' "$SUBJECT_JSON" \
         | jq -r --arg k "$1" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
 }
 
-# ── Close R once the write-back has landed ────────────────────────────
+# ── Close R: every landed write-back and every stand-down end here ────
 # R is the reaction's own work bead. Closing it is what records the reaction
 # done — exactly-once is the substrate's, keyed on R, not on a stamp on S. A
 # close that is refused leaves R open under this worker's lease; the re-offer
 # then re-runs and reaches this close again, so a transient refusal self-heals.
 # R is a plain task, so its close answers the work-record contract too: its work
-# is a card and a disposition on S, never a commit, so gc.work_outcome=no-op.
+# is a card and a disposition on S, never a commit, so gc.work_outcome=no-op. A
+# stand-down's R did no work at all, which is the same no-op. The hand repair
+# the warning names writes the same fields, since a bare close records none.
 close_reaction() {
     [ -n "$REACTION_BEAD" ] || return 0
     if gc_bd update "$REACTION_BEAD" --set-metadata "gc.outcome=reacted" --set-metadata "gc.work_outcome=no-op" --status=closed >/dev/null 2>&1; then
         note "closed reaction bead $REACTION_BEAD"
     else
-        note "WARNING: could not close reaction bead $REACTION_BEAD; the write-back landed, so a re-offer of $REACTION_BEAD reads gc.reacted_by on $BEAD and closes it. Close it by hand: gc bd update $REACTION_BEAD --status=closed"
+        note "WARNING: could not close reaction bead $REACTION_BEAD; it stays open under this lease, and its re-offer reaches this close again. Close it by hand: gc bd update $REACTION_BEAD${DB:+ --db $DB} --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed"
     fi
 }
+
+# ── Stand down: a subject that takes no reaction from R ───────────────
+# The reaction asks this before it reads S. A re-offered R whose write-back
+# already reached S writes no second card, and a subject a live owner holds
+# gets no card at all. Either marker closes R through close_reaction and writes
+# nothing to S, so gc.reaction_owned stays with its owner. With neither marker
+# this writes nothing and exits 3, and the reaction goes ahead. A marker is a
+# positive finding: a subject that cannot be read carries neither. A
+# gc.reacted_by naming a different R is an earlier reaction's, so it does not
+# stand this one down.
+if [ -n "$STAND_DOWN" ]; then
+    STAND_DOWN_WHY=""
+    if [ "$(subject_meta "gc.reacted_by")" = "$REACTION_BEAD" ]; then
+        STAND_DOWN_WHY="$BEAD already carries this reaction's write-back (gc.reacted_by=$REACTION_BEAD)"
+    elif [ "$(subject_meta "gc.reaction_owned")" = "1" ]; then
+        STAND_DOWN_WHY="a live owner holds $BEAD's reaction (gc.reaction_owned=1), and the marker stays"
+    fi
+    if [ -z "$STAND_DOWN_WHY" ]; then
+        note "$BEAD carries neither gc.reacted_by=$REACTION_BEAD nor gc.reaction_owned=1; the reaction goes ahead."
+        exit 3
+    fi
+    if [ -n "$DRY" ]; then
+        printf 'would stand down: %s\nwould close reaction bead %s\n' "$STAND_DOWN_WHY" "$REACTION_BEAD"
+        exit 0
+    fi
+    note "standing down: $STAND_DOWN_WHY; closing $REACTION_BEAD with no reaction."
+    close_reaction
+    exit 0
+fi
 
 # ── A reaction happens once — self-heal the act-on-S -> close-R window ─
 # The write-back stamps a landed proof on S as its last act (gc.reacted_by=R
