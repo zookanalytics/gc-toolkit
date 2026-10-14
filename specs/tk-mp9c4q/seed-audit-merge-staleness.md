@@ -1,9 +1,27 @@
 ---
 name: seed-audit staleness at merge time
-description: Why tk-mp9c4q's squash-merge premise is falsified, what the two cited instances actually were, why the residual merge-time race needs no gate, and the one time the silent path fired (#517) before main carried a render to collide with. Read before adding a merge-time or pre-land check for generated/seed-audit/.
+description: Why tk-mp9c4q's squash-merge premise is falsified, what the two cited instances actually were, and the one time the silent path fired (#517) before main carried a render to collide with. SUPERSEDED by tk-s35k5c, which built the merge-time gate this record's disposition declined. The gate as it stands renders the merge result, and specs/tk-yhwfv.3/seed-audit.md describes it.
 ---
 
 # seed-audit staleness at merge time
+
+> **SUPERSEDED 2026-09-01 (tk-s35k5c).** The disposition below no longer
+> holds. `merge.sh` refuses a merge that would leave a `generated/seed-audit/`
+> render stale, through `render-seed-audit.sh --check-merge`. tk-s35k5c built
+> that gate after finding `origin/main` stale through the path this record
+> calls the only silent one. That path needs no unwired hook: the pre-commit
+> hook exits quietly where `gc` is absent, and it never runs for a commit a
+> rebase replays. The same change took the `- source digest:` line out of
+> `INDEX.md`, the line the self-detection argued below depends on, because the
+> conflicts it caused between pull requests that re-render for unrelated agents
+> had stalled the merge queue. It also retired `--print-digest`, which the
+> measurements below ran. tk-s4int0m then made the gate render the merge
+> result instead of comparing input hashes, deleted the per-input manifest
+> that had taken the digest line's place, and narrowed
+> `doctor/check-seed-audit-current` to the artifact's presence and the hook's
+> wiring. The gate as it stands is described in
+> [specs/tk-yhwfv.3/seed-audit.md](../tk-yhwfv.3/seed-audit.md#where-staleness-is-judged).
+> This record is kept for its forensics of #451, #452 and #517.
 
 Recommended disposition: **WONTFIX**. Build no merge-time gate.
 

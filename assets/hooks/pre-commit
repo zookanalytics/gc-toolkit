@@ -8,7 +8,7 @@
 # a commit that bypasses hooks, a host with no `gc` (which exits 0 below), and
 # a rebase that replays commits without running hooks all leave a render that
 # a later merge lands over inputs it never saw. `merge.sh` is what refuses that
-# merge; doctor/check-seed-audit-current reports it in a checkout.
+# merge; `assets/scripts/render-seed-audit.sh --check` reports it in a checkout.
 # Install once: assets/scripts/render-seed-audit.sh --install-hook
 # (sets core.hooksPath = assets/hooks; relative, so worktrees resolve too).
 # Sharp edge: the render reads the WORKING TREE, not the index — under a
@@ -17,9 +17,12 @@
 
 set -uo pipefail
 
-# Inputs the artifact is a function of — kept in step with digest_inputs()
-# in render-seed-audit.sh. The renderer itself is on the list: it CARRIES
-# the synthetic city the prompts render against.
+# The paths a commit has to touch for the render to be worth its cost. The
+# renderer itself is on the list: it CARRIES the synthetic city the prompts
+# render against. The list decides when to render and judges nothing: a path
+# it misses leaves this branch's audit stale, and merge.sh's --check-merge,
+# which renders the merge instead of reading a list, holds the merge that
+# would land it.
 INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$|assets/scripts/render-seed-audit\.sh$)'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"
