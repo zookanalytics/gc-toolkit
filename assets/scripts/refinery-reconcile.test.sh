@@ -21,9 +21,12 @@
 # skipping the arms after it; the exit-1 failure report; per-arm start and
 # elapsed lines in pass.log; the per-rig pass lock (one merge.sh writer across
 # two overlapping ticks, a wedged holder reported rather than skipped over, an
-# unobtainable lock refusing the pass before any arm); a killed pass leaving its
-# partial output in pass.log; and the invariant binding the order timeout to the
-# controller's tracking-sweep window.
+# unobtainable lock refusing the pass before any arm, every arm and the
+# drop-tail report run without its descriptor while it is held, a process an arm
+# leaves running holding no lock, and a driver killed by itself leaving it held
+# while the arm it started runs on); a killed pass leaving its partial output in
+# pass.log; and the invariant binding the order timeout to the controller's
+# tracking-sweep window.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,10 +42,20 @@ SD="$TMP/scripts"
 mkdir -p "$SD"
 cp "$RUNNER" "$SD/refinery-reconcile.sh"
 chmod +x "$SD/refinery-reconcile.sh"
+# The runner takes its pass lock and runs its arms through bd-lib.sh, which it
+# sources beside itself.
+cp "$HERE/bd-lib.sh" "$SD/bd-lib.sh"
+# With FD9_LOG set, an arm also records whether it was handed fd 9, the pass
+# lock's descriptor, and whether the lock at LOCK_PROBE was held while it ran.
 mkarm() { # <name> [rc]
   cat > "$SD/$1" <<ARM
 #!/usr/bin/env bash
 printf '%s|%s|%s|%s\n' "$1" "\$*" "\${BEADS_ACTOR:-}" "\${GC_AGENT:-}" >> "\${ARM_LOG:?}"
+if [ -n "\${FD9_LOG:-}" ]; then
+  if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+  if ( exec 8>>"\${LOCK_PROBE:?}"; flock -n 8 ) 2>/dev/null; then lk=free; else lk=held; fi
+  printf '%s fd9=%s lock=%s\n' "$1" "\$fd9" "\$lk" >> "\$FD9_LOG"
+fi
 exit ${2:-0}
 ARM
   chmod +x "$SD/$1"
@@ -321,8 +334,8 @@ await() { # <file> — bounded wait for a sentinel to appear
   while [ ! -f "$1" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
   [ -f "$1" ]
 }
-# An arm inherits fd 9, so killing a driver does not free the lock until the
-# arm it was inside exits too — which is the wedge the stall bound exists for.
+# Each arm runs from a subshell that holds the pass lock until the arm exits, so
+# killing a driver does not free the lock until the arm it was running exits too.
 await_lock_free() {
   local i=0
   while [ "$i" -lt 400 ]; do
@@ -443,6 +456,11 @@ d4=$!
 if await "$GATE_STARTED"; then
   kill -9 "$d4" 2>/dev/null
   wait "$d4" 2>/dev/null
+  # gate-ensure runs straight from the driver, with no projection subshell, so
+  # only pass_child's subshell can still hold the lock once the driver is gone.
+  ( exec 9>>"$TMP/state/myrig/pass.lock"; flock -n 9 ) 2>/dev/null \
+    && bad "killing the driver by itself freed the lock while the gate-ensure arm it started ran on" \
+    || ok "the lock stays held while the arm a killed driver started is still running"
   read -r gph _ < "$MARK" 2>/dev/null || gph=""
   eq "$gph" "decided" "a pass killed in gate-ensure left its marker at 'decided' — no dropped merge tail to report"
   grep -q '^-- (2) merge: done in [0-9]*s (rc=0)$' "$PASSLOG" \
@@ -555,6 +573,56 @@ else
   ok "no arm ran without flock"
 fi
 
+echo "# every arm and the drop-tail report run without the lock's descriptor, under the lock"
+# An arm's store read can bring up a Dolt server that outlives the pass, and one
+# that kept fd 9 would hold the lock against every later pass.
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+cat > "$SD/merge-tail-report.sh" <<'RPT'
+#!/usr/bin/env bash
+if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+if ( exec 8>>"${LOCK_PROBE:?}"; flock -n 8 ) 2>/dev/null; then lk=free; else lk=held; fi
+printf 'merge-tail-report.sh fd9=%s lock=%s\n' "$fd9" "$lk" >> "${FD9_LOG:?}"
+RPT
+chmod +x "$SD/merge-tail-report.sh"
+export FD9_LOG="$TMP/fd9.log" LOCK_PROBE="$TMP/state/myrig/pass.lock"; : > "$FD9_LOG"
+out=$(drive); rc=$?
+eq "$rc" 0 "the pass completes"
+eq "$(grep -c ' fd9=' "$FD9_LOG")" 13 "each of the twelve arm runs and the drop-tail report recorded what it was handed"
+eq "$(grep -c 'fd9=open' "$FD9_LOG")" 0 "none of them was handed fd 9"
+eq "$(grep -c 'lock=held' "$FD9_LOG")" 13 "and the pass lock was held while each of them ran"
+rm -f "$SD/merge-tail-report.sh"
+unset FD9_LOG LOCK_PROBE
+
+echo "# a process an arm leaves running does not hold the lock against the next pass"
+DAEMON="$TMP/arm-daemon.pid"; rm -f "$DAEMON"
+cat > "$SD/review-sweep.sh" <<'ARM'
+#!/usr/bin/env bash
+printf '%s|%s|%s|%s\n' "review-sweep.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
+# A process that keeps every descriptor the arm was handed and runs on after it,
+# as a Dolt server a store read brings up does.
+( exec sleep 300 ) </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" > "${ARM_DAEMON:?}"
+ARM
+chmod +x "$SD/review-sweep.sh"
+: > "$ARM_LOG"
+ARM_DAEMON="$DAEMON" drive > /dev/null; rc=$?
+eq "$rc" 0 "a pass whose arm leaves a process running completes"
+mkarm review-sweep.sh
+dpid="$(cat "$DAEMON" 2>/dev/null)"
+if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
+  ok "the process the arm started outlives the pass"
+  ( exec 9>>"$TMP/state/myrig/pass.lock"; flock -n 9 ) 2>/dev/null \
+    && ok "…and does not hold the pass lock" \
+    || bad "a process an arm left running holds the pass lock"
+  : > "$ARM_LOG"
+  out=$(drive); rc=$?
+  hasnt "$out" "already in flight" "the next pass is not held off by it"
+  grep -q '^merge.sh' "$ARM_LOG" && ok "…and runs its arms" || bad "the next pass ran no arms"
+else
+  bad "the process the fixture's arm starts never ran"
+fi
+[ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+
 echo "# the marked interlock block executes standalone against stubs"
 GATE="$(awk '/# >>> posture-gates-merge/{f=1;next} /# <<< posture-gates-merge/{f=0} f' "$RUNNER")"
 [ -n "$GATE" ] && ok "posture-gates-merge block extracted" || bad "posture-gates-merge markers missing"
@@ -583,6 +651,7 @@ export MARK_LOG="$TMP/mark-log"; : > "$MARK_LOG"
   printf 'AGENT=%q\nSTATE_DIR=%q\nPASS_T0=%s\nPASS_BUDGET_SECS=420\nARM_FLOOR_SECS=20\n' \
     'myrig/gc-toolkit.refinery' "$TMP/gsd-state" "$(date -u +%s)"
   printf 'MARK_LOG=%q\nmark_merge() { printf "%%s\\n" "$1" >> "$MARK_LOG"; }\n' "$MARK_LOG"
+  printf '. %q\n' "$HERE/bd-lib.sh"
   printf '%s\n' "$GATE"
   printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
 } > "$TMP/gaterun.sh"
@@ -682,10 +751,6 @@ has "$gate_pilot" "--sling-var lane_two_target=myrig/gc-toolkit.polecat" "lane t
 has "$gate_pilot" "--sling-var synthesis_target=myrig/gc-toolkit.polecat" "the synthesis runs on the claude pool"
 
 echo "# the per-pass bd_list cache is set up, reaches the arms, and is torn down"
-# The driver only enables the cache when it can source bd-lib (so run_pass can
-# clear it between arms); the SD above has no copy, which is why every drive()
-# before this ran uncached. Put one beside the runner so the wiring activates.
-cp "$HERE/bd-lib.sh" "$SD/bd-lib.sh"
 CACHE_DIR="$TMP/state/myrig/cache"
 CACHE_PROBE="$TMP/cache-probe"
 # A gate-ensure stub that records, from inside the pass: the cache var it was

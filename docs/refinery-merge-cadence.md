@@ -714,15 +714,25 @@ The lock:
 - The driver takes a non-blocking exclusive `flock` on
   `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
   pid and start time in `pass.holder` beside it. It depends on no bead
-  surviving.
-- The arms inherit the descriptor, so the lock is held for exactly as long as a
-  writer is live, and the kernel releases it on any exit, `SIGKILL` included.
+  surviving. The lock and its state key are `bd-lib.sh`'s `take_pass_lock` and
+  `rig_state_key`, which `deferred-dispatch.sh` takes its pass lock through
+  too.
+- The driver holds the descriptor, and each arm runs through `bd-lib.sh`'s
+  `pass_child`, from a subshell that holds it until the arm exits. So the lock
+  is held for exactly as long as a writer is live, and the kernel releases it
+  on any exit, `SIGKILL` included.
+- The arm itself runs with the descriptor closed, and so does the drop-tail
+  report. An arm's store read can bring up a Dolt server, and `gc` hands the
+  descriptors it was given to what it starts. A server that kept the descriptor
+  would outlive the pass and hold the lock against every later one.
 - A tick that finds it held logs one `SKIPPED` line and exits 0 — the cadence
   is firing and the pass in flight is doing the work.
 - A holder older than `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s default) is
-  not a slow pass: the driver is gone and an arm still owns the descriptor.
-  That tick exits 1, so `order.failed` names the wedge rather than letting a
-  stopped queue look like a firing one.
+  not a slow pass, because the order's timeout stops the pass's whole process
+  group well before that: a driver run by hand, or an arm still running after
+  its driver was killed by itself, holds the lock. That tick exits 1, so
+  `order.failed` names the wedge rather than letting a stopped queue look like
+  a firing one.
 - A tick that cannot take the lock at all runs no arm and exits 1. That covers
   `flock` missing from `PATH` and a lock file the driver cannot create or open.
   Nothing else carries single-flight, so a pass that ran anyway would be the

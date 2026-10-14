@@ -251,7 +251,8 @@ the pass carries its own lock:
   plus a checksum of the whole path, so two rigs never share a lock. The
   lock depends on no bead surviving.
 - The lock, its state key and the way a pass runs what it calls are
-  `bd-lib.sh`'s `take_pass_lock`, `rig_state_key` and `pass_child`.
+  `bd-lib.sh`'s `take_pass_lock`, `rig_state_key` and `pass_child`, which
+  `refinery-reconcile.sh` takes its pass lock through too.
 - Every `gc` and `escalate.sh` call the pass makes runs through `pass_child`,
   with the lock's descriptor closed. A process that a `gc` call starts can
   outlive the pass: a store read can bring up a Dolt server, and `gc` hands
