@@ -75,6 +75,10 @@ case "$1 $2" in
   # it says on stderr.
   "order list") reg_barrier orders; [ -n "${ORDERS_ERR:-}" ] && printf '%s\n' "$ORDERS_ERR" >&2
     [ -n "${ORDERS_JSON:-}" ] && cat "$ORDERS_JSON"; exit 0 ;;
+  # Like real gc, a bd list, ready, search or show first names the store that
+  # answers it on stderr, before bd runs and whether or not the read fails.
+  "bd list"|"bd ready"|"bd search"|"bd show")
+    shift; echo 'gc bd: answering from the rig "stub" store' >&2; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   "bd "*)     shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac

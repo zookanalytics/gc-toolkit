@@ -97,6 +97,21 @@ OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-read || exit 9
     printf "rc=%s|out=%s|err=%s" "$rc" "$(cat "$WORK/r.json")" "$(err_of "$WORK/r.json")"' "$TMP/probe")"
 eq "$OUT" "rc=3|out=[1,2]|err=  dolt: table not found" \
    "read_to returns the probe's rc, scrubs its stdout, and err_of names the first non-blank stderr line"
+# A `gc bd` read writes the store it answers from ahead of bd's own stderr, so
+# that line comes first on every failed read and is never the reason.
+OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-read || exit 9
+    read_to "$WORK/r.json" "$1" "[]" "gc bd: answering from the rig \"alpha\" store\nError: dolt: database is locked\n" 3
+    printf "%s" "$(err_of "$WORK/r.json")"' "$TMP/probe")"
+eq "$OUT" "Error: dolt: database is locked" "err_of passes over gc's line naming the store and names bd's error after it"
+OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-read || exit 9
+    read_to "$WORK/r.json" "$1" "[]" "gc bd: answering from the city store\n" 124
+    printf "[%s]" "$(err_of "$WORK/r.json")"' "$TMP/probe")"
+eq "$OUT" "[]" "a read cut off after gc named the store gives err_of nothing to print"
+OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-read || exit 9
+    read_to "$WORK/r.json" "$1" "[]" "gc bd: only supported for bd-backed beads providers (resolved \"file\" for /x)\n" 1
+    printf "%s" "$(err_of "$WORK/r.json")"' "$TMP/probe")"
+eq "$OUT" "gc bd: only supported for bd-backed beads providers (resolved \"file\" for /x)" \
+   "err_of still names an error gc bd writes itself"
 OUT="$(TMPDIR="$TMP/rt" blk 'reads_init t-read || exit 9
     read_to "$WORK/r.json" "$1" "[]" "a\001b\033c\n" 1
     printf "%s" "$(err_of "$WORK/r.json")"' "$TMP/probe")"

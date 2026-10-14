@@ -99,7 +99,10 @@ reads_init() {
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.
 # err_of <file> prints the first non-blank line of that stderr, with control
 # characters stripped and cut to 200 characters, so the warning for a failed
-# read names why it failed and not only its rc.
+# read names why it failed and not only its rc. Before a `gc bd` list, ready,
+# search or show runs bd, gc writes a line naming the store that answers it,
+# whether or not the read then fails. That line never says why a read failed,
+# so err_of passes over it.
 read_to() {
     local f="$1"; shift
     run_bounded "$@" 2>"$f.err" | scrub >"$f"
@@ -107,7 +110,8 @@ read_to() {
 }
 err_of() {
     [ -s "$1.err" ] || return 0
-    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null \
+        | grep -v '^gc bd: answering from the .* store$' | grep -m1 '[^[:space:]]' | cut -c1-200
 }
 # fanout <command...> starts <command> as a background job once fewer than
 # FANOUT_CAP of the jobs fanout started are still running, so a check scans at
