@@ -13,7 +13,7 @@ operator conversation).
 fallback wiring, the build-status file, and its board rows are in place, and
 `services/gctk/README.md` carries the operating detail. This spec scopes the
 ports. The binary also holds subcommands that port none of these scripts, and
-the README states everything it holds and why each part is compiled.
+the README states everything it holds.
 
 `lifecycle` and `merge` are ported, and neither keeps a shell fallback.
 `lifecycle.sh` and `merge.sh` only exec the binary, and a call with no binary
