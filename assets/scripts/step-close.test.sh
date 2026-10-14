@@ -1041,28 +1041,29 @@ CALL_SCAN='
 # in progress in WD[]. Quoted text joins the word of the nearest command frame
 # below it with its quotes removed, so "$SC" and $SC read alike.
 function reset_state() {
-    sp = 1; FR[1] = "T"; WD[1] = ""; WS[1] = ""; WL[1] = 0; RT[1] = 0
+    sp = 1; FR[1] = "T"; WD[1] = ""; WS[1] = ""; WL[1] = 0; RDR[1] = 0
     hn = 0; hi = 0; hb = 0; CONT = 0; pend = ""; BADESC = ""
 }
 function cmdf(t) { return t == "T" || t == "P" || t == "C" || t == "B" }
 function lvl(   k) { k = sp; while (k > 1 && !cmdf(FR[k])) k--; return k }
-function push(t, d) { FR[++sp] = t; DP[sp] = d; if (cmdf(t)) { WD[sp] = ""; WS[sp] = ""; WL[sp] = 0; RT[sp] = 0 } }
+function push(t, d) { FR[++sp] = t; DP[sp] = d; if (cmdf(t)) { WD[sp] = ""; WS[sp] = ""; WL[sp] = 0; RDR[sp] = 0 } }
 function pop1() { if (sp > 1) sp-- }
 function add(s,   k) { k = lvl(); if (WD[k] == "" && WS[k] == "") WL[k] = LN; WD[k] = WD[k] s }
-# A redirection target is not an argument of its command, so RT drops the word
-# after the operator, and redirect drops an fd number written before it.
+# A redirection target is not an argument of its command, so RDR drops the
+# word after the operator, and redirect drops an fd number written before it.
+# The array is not named RT, which gawk reserves for the record terminator.
 function endword(   k) {
     k = lvl()
     if (WD[k] == "") return
-    if (RT[k]) RT[k] = 0
+    if (RDR[k]) RDR[k] = 0
     else WS[k] = WS[k] (WS[k] == "" ? "" : SEP) WD[k]
     WD[k] = ""
 }
-function redirect(   k) { k = lvl(); if (WD[k] ~ /^[0-9]+$/) WD[k] = ""; else endword(); RT[k] = 1 }
+function redirect(   k) { k = lvl(); if (WD[k] ~ /^[0-9]+$/) WD[k] = ""; else endword(); RDR[k] = 1 }
 function endcmd(   k) {
     endword(); k = lvl()
     if (WS[k] != "") { NC++; CL[NC] = WL[k]; CW[NC] = WS[k] }
-    WS[k] = ""; WL[k] = 0; RT[k] = 0
+    WS[k] = ""; WL[k] = 0; RDR[k] = 0
 }
 # The fence is read as the shell an agent runs it in receives it, through the
 # escapes of the TOML basic string that holds it. A backslash that ends a line,
