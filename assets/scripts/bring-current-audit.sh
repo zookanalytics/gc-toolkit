@@ -115,7 +115,7 @@ bca_reviewed() { # <anchor-row-json> <bead-row-json>
 # bring-current-guard.sh stores as metadata.bring_current_record.
 BCA_RENDER_DEF='
 def oneline: (. // "") | tostring | gsub("[\\s]+"; " ") | sub("^ "; "") | sub(" $"; "");
-def sentence: oneline | if . == "" or test("[.!?]$") then . else . + "." end;
+def sentence: oneline | if . == "" or test("[.!?…]$") then . else . + "." end;
 def clip($n): oneline | if length > $n then .[0:($n - 1)] + "…" else . end;
 def short: (. // "") | tostring | if test("^[0-9a-f]{13,}$") then .[0:12] else . end;
 def count($n; $one; $many): if $n == 1 then "1 \($one)" else "\($n) \($many)" end;
@@ -130,7 +130,6 @@ def unaccounted: . as $r
 def bare_line: "`\(.path)`, no entry from the worker. Git: \(.detail | sentence)";
 def judgment_first: (map(select(.rating == "judgment")) + map(select(.rating != "judgment")));
 def git_detail($p; $rd): [ .evidence[]? | select(.path == $p and (.round // "") == ($rd // "") and .covered == true) | .detail ] | .[0] // "";
-def first_sentence: oneline | . as $t | (($t | capture("^(?<s>.+?[.!?])(\\s|$)") | .s) // $t);
 def headline:
   (covered | map(select(.kind == "conflict")) | length) as $c
   | (covered | map(select(.kind != "conflict")) | length) as $b
@@ -167,23 +166,26 @@ def ask:
   if .triage.dismiss != true then ""
   elif by_guard then
     "Needs you: check what bringing this branch current with \(.target // "the base") changed by hand (pushed head \(.head | short))."
-    + (if (.triage.reason // "") != "" then " " + (.triage.reason | sentence | cap) else "" end)
+    + (if (.triage.reason // "") != "" then " " + (.triage.reason | clip(300) | sentence | cap) else "" end)
     + " Your approval is lifted until you have checked it."
-  else "Needs you: " + (.triage.reason | sentence) + " Your approval is lifted until you decide." end;
+  else "Needs you: " + (.triage.reason | clip(300) | sentence) + " Your approval is lifted until you decide." end;
 def entry_line($g):
   "`\(.path)`, \(.rating). Collided: \(.collided | sentence) Decided: \(.resolution | sentence) Check: \(.check | sentence)"
   + (if $g != "" then " Git: \($g | sentence)" else "" end);
-def routine_line: "`\(.path)`, routine: \(.resolution | first_sentence | clip(200))";
+def routine_line: "`\(.path)`, routine: \(.resolution | sentence)";
 def generated: [ .evidence[]? | select(.kind == "generated") | .path ] | unique;
 '
 
 # Print a message composed from a record. <as> is one of:
 #   comment    the round's account, one collapsed block in the triage verdict:
 #              a summary line, then judgment entries in full and each routine
-#              entry on one line. Its shape does not depend on the ruling; only
-#              a ruling that lifts the approval says so.
+#              entry on one line, its whole decision. Its shape does not depend
+#              on the ruling; only a ruling that lifts the approval says so.
 #   ask        what a ruling that lifts the approval needs from the operator,
 #              which opens the triage verdict; empty when the ruling keeps it.
+#              It clips the ruling's reason, which the account's ruling line
+#              carries whole, so a long reason cannot push the ask's closing
+#              sentence past the dismissal note's length cap.
 #   dismissal  one paragraph, the note on a dismissed approval: the same ask.
 # A ruling the guard recorded itself (by: guard) is told as the guard's: no
 # triage verdict posts it, so no form credits it to triage, and its dismissal

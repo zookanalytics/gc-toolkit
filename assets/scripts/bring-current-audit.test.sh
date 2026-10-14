@@ -11,13 +11,14 @@
 #   collapsed block (a summary line that tallies the entries and names the
 #   lanes that re-check, what the round needed, the ruling, each judgment entry
 #   in full beside the guard's evidence for its own round, each routine entry on
-#   one line, an item no entry covers beside its evidence alone, the generated
-#   renders), the same shape whether or not the ruling lifts the approval and
-#   free of the clause every lift used to carry; the ask a lifting ruling opens
-#   the verdict with, empty when the approval stands; and the dismissal note
-#   that says the same ask, or the guard's own ruling told as the guard's with
-#   the entries no triage comment carries. Refuses an anchor with no record,
-#   and any other form.
+#   one line with its whole decision, an item no entry covers beside its
+#   evidence alone, the generated renders), the same shape whether or not the
+#   ruling lifts the approval and free of the clause every lift used to carry;
+#   the ask a lifting ruling opens the verdict with, empty when the approval
+#   stands, its reason clipped so its closing sentence survives; and the
+#   dismissal note that says the same ask, or the guard's own ruling told as the
+#   guard's with the entries no triage comment carries. Refuses an anchor with
+#   no record, and any other form.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
 #   then the branch, then the bead itself; refuses an empty question; a visit
@@ -119,8 +120,7 @@ has "$out" "Triage: arch and correctness run again on the merged code, and the a
 hasnt "$out" "no longer covers what would land" "…without the clause every lift used to carry"
 hasnt "$out" "fresh human review" "…in any form"
 has "$out" "- \`b.sh\`, judgment. Collided: main renamed run to start; the branch added a call to run. Decided: pointed the new call at start. Check: the new call site in b.sh. Git: conflicted where the merge base had lines" "a judgment entry in full: collision, decision, check, and the guard's evidence"
-has "$out" "- \`docs/a.md\`, routine: kept both, the FAQ first."$'\n' "a routine entry on one line: its decision's first sentence"
-hasnt "$out" "Each section reads on its own" "…and nothing past it"
+has "$out" "- \`docs/a.md\`, routine: kept both, the FAQ first. Each section reads on its own, so the order only follows the table of contents."$'\n' "a routine entry on one line: its whole decision"
 hasnt "$out" "Check: the section order" "…with no check or evidence"
 first=$(printf '%s\n' "$out" | grep -n '^- `' | head -1)
 has "$first" "judgment" "judgment entries come first"
@@ -152,6 +152,24 @@ out=$("$SUT" render --anchor AN1 --as dismissal)
 eq "$out" "$ask The triage comment on this PR has the round in full." "it is the ask, then where the round is told in full"
 eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "…in one paragraph"
 hasnt "$out" "did not see" "…and never says the approval predates the round"
+
+echo "# render --as comment: a routine entry keeps a later decision, and an abbreviation does not end it"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit[0].resolution = "kept both sections. Also dropped the --legacy flag."
+  | .audit += [{path: "lib/retry.sh", collided: "c", resolution: "Kept the base retry, e.g. the 3x backoff, and dropped the branch.", check: "k", rating: "routine"}]' | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as comment)
+has "$out" "- \`docs/a.md\`, routine: kept both sections. Also dropped the --legacy flag."$'\n' "a decision after the first sentence is in the line"
+has "$out" "- \`lib/retry.sh\`, routine: Kept the base retry, e.g. the 3x backoff, and dropped the branch."$'\n' "…and an abbreviation does not cut the line short"
+
+echo "# render --as ask: a long reason is clipped, so the ask's closing sentence and the dismissal note's pointer survive"
+LONG="the merge points the new call at start$(printf ', and start now reads the retry settings from the merged config%.0s' $(seq 1 32))"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c --arg r "$LONG" '.triage.reason = $r' | jq -Rc .)")]"
+ask=$("$SUT" render --anchor AN1 --as ask)
+has "$ask" "… Your approval is lifted until you decide." "the reason is clipped before the ask's closing sentence"
+hasnt "$ask" "…." "…with no period after the clip mark"
+out=$("$SUT" render --anchor AN1 --as dismissal)
+eq "$out" "$ask The triage comment on this PR has the round in full." "the dismissal note is the clipped ask, then its pointer"
+eq "$([ "${#out}" -lt 1990 ] && echo under)" "under" "…well inside the length the guard cuts a dismissal note to"
+has "$("$SUT" render --anchor AN1 --as comment)" "Why: $LONG." "the account's ruling line carries the reason whole"
 
 echo "# render: an item no entry covers is listed with the guard's evidence alone"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit |= map(select(.path != "c.sh"))' | jq -Rc .)")]"
@@ -193,6 +211,8 @@ has "$out" "Your approval is lifted until you have checked it. Where to look: b.
 hasnt "$out" "Triage:" "…crediting no ruling to triage"
 hasnt "$out" "triage comment" "…and pointing at no triage comment, since none is posted"
 eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "…in one paragraph"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$GREC" | jq -c --arg r "$LONG" '.triage.reason = $r' | jq -Rc .)")]"
+has "$("$SUT" render --anchor AN1 --as dismissal)" "… Your approval is lifted until you have checked it. Where to look:" "a long reason of the guard's is clipped before the ask's closing sentence too"
 
 echo "# render: an anchor with no record is refused"
 store "[$(anchorrow AN1)]"
