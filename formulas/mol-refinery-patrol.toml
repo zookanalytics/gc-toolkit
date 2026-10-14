@@ -34,7 +34,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
 preexisting-failure-dedup, check-set-normalize, one-anchor-per-pr,
-patrol-wisp-reconcile, patrol-pour-vars) — keep
+patrol-wisp-reconcile, patrol-pour-vars, rig-check-commands, refinery-gate) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -44,7 +44,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol re-routes a rejected bead to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route and the refinery keeps the bead."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a visit in place of the pour."
 default = "gc-toolkit."
 
 [vars.rig_name]
@@ -65,7 +65,7 @@ default = ""
 
 [vars.lint_command]
 description = "Lint command. Empty = skip."
-default = "tools/lint.sh $(git diff --name-only origin/main...HEAD)"
+default = ""
 
 [vars.test_command]
 description = "Test command (when run_tests is true)."
@@ -242,6 +242,22 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 git -C "$RIG_ROOT" fetch --prune origin
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+# A gate an interrupted iteration left running still runs in the prep worktree,
+# so it is stopped before the worktree is rebuilt under it. A gate that will not
+# stop leaves the work with the refinery. The launcher is found by path, as the
+# rig root is, never from cwd.
+GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
+JOB=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+[ -n "$JOB" ] || { echo "detached-job.sh not found, so a gate left running in $GATE cannot be stopped. NOT rebuilding the prep worktree; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+  printf '%s' "$STOP_OUT"; echo
+  echo "the gate left running in $GATE did not stop. NOT rebuilding the prep worktree under it; leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
 # Check the add result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
@@ -264,44 +280,32 @@ git -C "$PREP_WT" merge --no-edit "origin/$TARGET" || { git -C "$PREP_WT" merge 
 
 `$PREPARE_FAILED` set (conflicts): the abort already ran, so the tree is
 clean. Retire the workflow, reopen the source, and repool with rejection
-metadata — one shape-validated read, fail closed on an unreadable bead, and
-the whole transition through lifecycle.sh (it clears `merge_result`
-atomically with the repool, so the hand-back re-gates fresh; `existing_pr`
-carries the anchor's PR over so the rework reuses it instead of minting a
-duplicate):
+metadata through `rejection-repool.sh`. Its one lifecycle transition clears
+`merge_result` atomically with the repool, so the hand-back re-gates fresh,
+and `existing_pr` carries the anchor's PR over so the rework reuses it instead
+of minting a duplicate. A fresh `mol-polecat-work` pour then dispatches the
+rebuild, which no hold on the bead's epic reaches. reopen-source has already
+taken the bead out of this queue, so a repool that stops short arms a retry
+or files a visit:
 
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
-LC=""; POOL_ROUTE=""
+REPOOL=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
-  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
+  [ -x "$c/assets/scripts/rejection-repool.sh" ] && { REPOOL="$c/assets/scripts/rejection-repool.sh"; break; }
 done
-if [ -z "$LC" ]; then
-  echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
+if [ -z "$REPOOL" ]; then
+  echo "rejection-repool.sh not found — NOT repooling $WORK; ending the turn"
   gc runtime drain-ack
   exit 1
 fi
-if [ -z "$POOL_ROUTE" ]; then
-  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-fi
-POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
-  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-}
-BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
-if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-fi
-PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+BEAD_JSON=$("$REPOOL" "$WORK" --pool {{binding_prefix}}polecat --reason "$REJECT_REASON")
+case "$?" in
+  0|2) ;;
+  *) echo "rejection-repool.sh recorded nothing that dispatches $WORK (its output above says why); ending the turn"; gc runtime drain-ack; exit 1 ;;
+esac
 # <<< mr-aware-rejection
 ```
 
@@ -319,29 +323,204 @@ id = "run-tests"
 title = "Run quality checks and tests"
 needs = ["rebase"]
 description = """
-**Config: run_tests = {{run_tests}}**
+The branch under test is staged in the prep worktree (the rebase step), so
+every check runs THERE, and the rig root's checkout is never touched. A tool
+call is cut off at ten minutes, and a cold build and test on a loaded host can
+take far longer, so the checks run as one detached job through
+`assets/scripts/detached-job.sh`: it starts the job in a session of its own,
+reports a launch that did not happen, and waits for the job in bounded
+foreground calls. Launch a gate no other way. A hand-rolled background launch
+can fail without a word (macOS ships no `setsid`), and a background poll for a
+result that never comes never returns.
 
-The branch under test is staged in the prep worktree (the rebase step), so run
-every check THERE — the rig root's checkout is never touched. Resolve the same
-path and enter it first, then run each configured check in order, skipping
-empty ones:
+The checks are setup_command, typecheck_command, lint_command and
+build_command, then test_command when run_tests is "true". A rig sets them
+under its `[rigs.formula_vars]` in city.toml, and a value the rig sets wins
+over this formula's default, an empty one included. This wisp is poured
+root-only, so nothing renders those vars into this step, and a session that
+fills them in by hand can take either value. The block below reads both from
+one `gc formula show --rig` call and gives the gate the rig's value wherever
+the rig sets one, so every session runs the same checks. Never type a
+configured check in by hand.
+
+The gate runs each check in a bash of its own, in the prep worktree, with
+stdin closed. A comment, a quote, a heredoc or a `cd` in a command means what
+it would at a prompt, an `exit` in it ends only that check, and the checks
+after a failed one still run. A check's verdict is its command's exit status,
+so a command that sends its work to the background passes before that work
+ends: each must finish in the foreground.
+
+When the rig sets no check commands, the block says so and starts no gate.
+Add the quality gates documented in the rig's CLAUDE.md where the block marks,
+each as `add_check <name> '<command>'` with the command as documented and any
+environment it needs, and run the block again. Those checks run only for a rig
+that sets no check commands, and a gate with no check never starts, so the
+gates are never skipped silently. Start the gate:
 ```bash
+# >>> refinery-gate-start
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-cd "$PREP_WT"
-{{setup_command}}
-{{typecheck_command}}
-{{lint_command}}
-{{build_command}}
+COMMON="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+PREP_WT="$COMMON/gc-refinery-prep"
+GATE="$COMMON/gc-refinery-gate"
+JOB=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+[ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+[ -d "$PREP_WT" ] || { echo "cannot find the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# A gate a previous session left running reads the checks and the script this
+# block rewrites, so it is stopped first. One that survives the stop still
+# runs, so nothing is rewritten under it and the work stays with the refinery.
+if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+  printf '%s' "$STOP_OUT"; echo
+  echo "the gate a previous session left running in $GATE did not stop, so its checks are not rewritten under it; leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+rm -rf "${GATE:?}/checks"
+mkdir -p "$GATE/checks"
+# >>> rig-check-commands
+# One read serves every check. An unreadable answer gives every check an empty
+# value, which is also what a rig with no checks gives, so the block runs
+# nothing and leaves the work with the refinery to retry.
+CHECKS_JSON=""
+[ -n "${GC_RIG:-}" ] && CHECKS_JSON=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json 2>/dev/null)
+if ! printf '%s' "$CHECKS_JSON" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1; then
+  echo "cannot read the check commands of rig '${GC_RIG:-}' (gc formula show --rig failed); running no checks and leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+# rig_default is the rig's own value and wins whenever it is present, so an
+# empty one turns that check off. Otherwise the formula default applies.
+check_value() {
+  printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
+}
+# add_check <name> <command>: the command becomes the gate's next check. A
+# check that cannot be written runs nothing and leaves the work with the
+# refinery to retry.
+CHECKS=0
+add_check() {
+  CHECKS=$((CHECKS + 1))
+  printf '%s' "$2" > "$GATE/checks/$(printf '%02d' "$CHECKS")-$1" && return 0
+  echo "cannot write the $1 check into $GATE/checks; running no checks and leaving the work with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+}
+RUN_TESTS=$(check_value run_tests)
+for CHECK in setup_command typecheck_command lint_command build_command test_command; do
+  if [ "$CHECK" = "test_command" ] && [ "$RUN_TESTS" != "true" ]; then
+    echo "run-tests: test_command skipped (run_tests=${RUN_TESTS})"
+    continue
+  fi
+  CHECK_CMD=$(check_value "$CHECK")
+  if [ -z "$CHECK_CMD" ]; then
+    echo "run-tests: ${CHECK} not set"
+    continue
+  fi
+  echo "run-tests: ${CHECK} = ${CHECK_CMD}"
+  add_check "$CHECK" "$CHECK_CMD"
+done
+[ "$CHECKS" -gt 0 ] || echo "run-tests: rig ${GC_RIG} sets no check commands"
+# <<< rig-check-commands
+if [ "$CHECKS" -eq 0 ]; then
+  # The rig sets no check commands. Add each quality gate its CLAUDE.md
+  # documents here, in the order it gives them, as
+  #   add_check <name> '<the command as documented, with any environment it needs>'
+  :
+fi
+[ "$CHECKS" -gt 0 ] || { echo "run-tests: no check to run, so no gate started; add the quality gates the rig's CLAUDE.md documents where this block marks, and run it again"; exit 1; }
+cat > "$GATE/gate.sh" <<'GATE'
+cd "$1" || exit 2
+failed=""
+# check <name>: run the command on stdin in a bash of its own, with stdin
+# closed, and note its exit status when it fails.
+check() {
+  local cmd rc
+  cmd=$(cat)
+  echo "== $1"
+  bash -c "$cmd" </dev/null
+  rc=$?
+  [ "$rc" -eq 0 ] || failed="$failed $1:$rc"
+}
+# Each check is a file in the directory the job names, its name led by its
+# place in the order.
+for f in "$2"/*; do
+  [ -f "$f" ] || continue
+  name=${f##*/}
+  check "${name#*-}" < "$f"
+done
+[ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
+echo "GATE PASSED"
+GATE
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# <<< refinery-gate-start
 ```
-If run_tests = "true": `{{test_command}}` (in the same `$PREP_WT`). When the
-rig ships no commands at all, run the quality gates documented in the rig's
-CLAUDE.md instead — never silently skip the gates.
 
-Track which checks ran and what failed. Close this step when all checks
-complete (pass or fail)."""
+Then wait for it in the FOREGROUND: run the block below as an ordinary tool
+call with a ten-minute timeout (`timeout: 600000` in Claude Code), never with
+`run_in_background`. Each wait returns within about eight minutes. While it
+reports `state=running` (exit 3), run it again. Never end your turn while the
+gate runs: a gate that finishes while you sit idle wakes nothing, and the
+queue behind it waits. The wait stops a gate still running after two hours and
+reports `state=exceeded`. A wait that reports the gate still running also
+appends a note to this patrol's wisp. check-refinery-patrol-live (I14) dates a
+patrol by its wisp's last write and calls it stalled once that is an hour old
+with work queued, so the note keeps a gate in progress from reading as a stall.
+A wait that cannot find its launcher says so and exits 1 without touching the
+gate, which keeps running. Point it at the pack and wait again; do not drain
+on it.
+```bash
+# >>> refinery-gate-wait
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
+JOB=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
+done
+[ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
+WAIT_OUT=$("$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
+printf '%s' "$WAIT_OUT"; echo
+if [ "$WAIT_RC" -eq 3 ]; then
+  # This patrol's own wisp, found the way patrol-wisp-pour finds the wisp it
+  # burns, so a leftover wisp never takes the note.
+  CURRENT_WISP=${GC_BEAD_ID:-}
+  if [ -z "$CURRENT_WISP" ]; then
+    CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty')
+  fi
+  ELAPSED=$(printf '%s' "$WAIT_OUT" | sed -n 's/^elapsed=//p')
+  if [ -n "$CURRENT_WISP" ] && gc bd update "$CURRENT_WISP" --append-notes "run-tests: the gate has run ${ELAPSED:-?}s and is still running" >/dev/null 2>&1; then
+    echo "noted the running gate on patrol wisp $CURRENT_WISP"
+  else
+    echo "could not note the running gate on this patrol's wisp ('$CURRENT_WISP'), so check-refinery-patrol-live may call this patrol stalled once its wisp is an hour old; keep waiting"
+  fi
+fi
+exit "$WAIT_RC"
+# <<< refinery-gate-wait
+```
+
+Read the result off the report and the job's log (`$GATE/log`):
+- `state=done rc=0`: every check passed and the log ends `GATE PASSED`.
+- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check
+  with its exit code, and the log above it holds their output.
+- `state=running` from a wait that exits 1: the gate ran past the limit and
+  its process group survived TERM and KILL, so it still runs in the prep
+  worktree. Never start another gate beside it. Escalate with key
+  `refinery-gate-unstoppable`, naming the bead and the gate's pid, and leave
+  the work with the refinery: `gc runtime drain-ack` and end the cycle
+  without a rejection.
+- anything else (`state=died`, `state=exceeded`, or any other `rc`): the gate
+  stopped short of a verdict, ended by a signal, a restart, the limit, or a
+  missing prep worktree, which says nothing about the branch. Start it once
+  more. If the second run stops short too, escalate with key
+  `refinery-gate-cut-short`, naming the bead and the cause, and leave the work
+  with the refinery: `gc runtime drain-ack` and end the cycle without a
+  rejection.
+
+Close this step once the gate has finished, pass or fail."""
 
 [[steps]]
 id = "handle-failures"
@@ -352,46 +531,36 @@ All checks PASSED: close this step, proceed to merge-push.
 
 Any FAILED: diagnose — branch regression, or pre-existing on target?
 **FORBIDDEN: writing code to fix failures. You are a merge processor.**
+A check you re-run on the target to tell the two apart is a gate like any
+other: run it through `detached-job.sh` with a directory of its own, and wait
+for it in the foreground as run-tests does.
 
-**Branch-caused:** retire the workflow and repool with the failure summary —
-the same fail-closed lifecycle repool as the rebase step:
+**Branch-caused:** retire the workflow and repool with the failure summary,
+the same repool as the rebase step:
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
-LC=""; POOL_ROUTE=""
+REPOOL=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -z "$LC" ] && [ -x "$c/assets/scripts/lifecycle.sh" ] && LC="$c/assets/scripts/lifecycle.sh"
-  [ -z "$POOL_ROUTE" ] && [ -x "$c/assets/scripts/pool-route.sh" ] && POOL_ROUTE="$c/assets/scripts/pool-route.sh"
+  [ -x "$c/assets/scripts/rejection-repool.sh" ] && { REPOOL="$c/assets/scripts/rejection-repool.sh"; break; }
 done
-if [ -z "$LC" ]; then
-  echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
+if [ -z "$REPOOL" ]; then
+  echo "rejection-repool.sh not found — NOT repooling $WORK; ending the turn"
   gc runtime drain-ack
   exit 1
 fi
-if [ -z "$POOL_ROUTE" ]; then
-  echo "pool-route.sh not found — NOT repooling $WORK to an address no pool is proved to claim; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-fi
-POLECAT_ROUTE=$("$POOL_ROUTE" {{binding_prefix}}polecat) || {
-  echo "no live polecat pool claims {{binding_prefix}}polecat — repooling the rejection there strands it unclaimed with a rejection_reason nobody reads; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-}
-BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
-if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
-  gc runtime drain-ack
-  exit 1
-fi
-PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-"$LC" transition "$WORK" --to unanchored --assignee "" --route "$POLECAT_ROUTE" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+BEAD_JSON=$("$REPOOL" "$WORK" --pool {{binding_prefix}}polecat --reason "$REJECT_REASON")
+case "$?" in
+  0|2) ;;
+  *) echo "rejection-repool.sh recorded nothing that dispatches $WORK (its output above says why); ending the turn"; gc runtime drain-ack; exit 1 ;;
+esac
 # <<< mr-aware-rejection
 # >>> rejection-branch-keep
-# $BEAD_JSON is the read the repool above shape-validated, so an unreadable
-# bead has already exited and the branch it names is kept. A wrongly kept
-# branch is swept later; a wrongly deleted one strands a PR.
+# $BEAD_JSON is the row rejection-repool.sh read before its write, so this
+# decision costs no read of its own. It is empty only when the script could not
+# read the bead, and then the branch it names is kept: a wrongly kept branch is
+# swept later, and a wrongly deleted one strands a PR.
 # >>> merge-strategy-resolve
 # The one reading of the merge strategy. Every step that branches on it reads
 # it through this block, so the step that keeps a branch and the step that
@@ -425,7 +594,9 @@ BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 # so that test is true for the whole pre-open window. A first-pass rejection
 # lands inside it.
 PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
-if [ -z "$BRANCH" ]; then
+if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "keeping whatever branch $WORK names — rejection-repool.sh could not read the bead, and the visit it filed carries it"
+elif [ -z "$BRANCH" ]; then
   echo "no metadata.branch on $WORK — no branch to delete"
 elif [ "$MERGE_STRATEGY" != "direct" ]; then
   echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
@@ -445,16 +616,30 @@ next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
-into the filing arm reads as "no duplicate":
+into the filing arm reads as "no duplicate". Run it once per failure: each
+failing test function, each failing target that has none, and each file a
+linter flagged is its own key and its own tracker:
 ```bash
 # >>> preexisting-failure-dedup
-# ONE short, distinctive token, reused for BOTH the probe below and the
-# title of any bead it files. Dedup only works while the two agree: the
-# probe is a title SUBSTRING match, so a prose failure summary — reworded
-# every cycle — never matches the bead the last cycle filed, and each
-# patrol files another P1 for the same failure. Use the failing test name,
-# the failing target, or an error symbol.
-FAIL_TOKEN="<failing test name or error symbol>"
+# preexisting-failure.sh owns the key, the lookup and the filing. A polecat's
+# pre-flight files these trackers through it too, so both gates derive one key
+# per failure and find each other's trackers.
+PF=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/preexisting-failure.sh" ] && { PF="$c/assets/scripts/preexisting-failure.sh"; break; }; done
+if [ -z "$PF" ]; then
+  echo "preexisting-failure.sh not found — filing nothing and NOT merging $WORK; the next patrol retries"
+  gc runtime drain-ack
+  exit 1
+fi
+# The failure's KEY comes from the script, never from prose: a summary is
+# reworded every cycle and never meets the tracker the last cycle filed. A test
+# function is --test <name>. A failing suite file, package or build target with
+# no test function is --target <repo-relative path>. A lint finding is
+# --lint <linter> <repo-relative path of the flagged file>.
+if ! FAIL_KEY=$("$PF" key --test "<failing test function>"); then
+  echo "no failure key derived — filing nothing and NOT merging $WORK"
+  gc runtime drain-ack
+  exit 1
+fi
 # The evidence that makes the bead workable. A title-only P1 cannot be
 # dispositioned by anyone: nothing in it separates a host-load flake from a
 # real regression, which is the judgment the bead exists to enable. Keep the
@@ -464,49 +649,30 @@ FAIL_LOG=$(cat <<'FAILLOG'
 <the check that failed, the package or target it ran in, and its raw output>
 FAILLOG
 )
-# --title-contains is the real flag (case-insensitive title substring).
-# NOT --search: bd has no such flag, and rejects it with "unknown flag" on
-# stderr while leaving stdout EMPTY — which reads as "no duplicate found".
-# The probe reads every status a live tracker can hold, in one comma list,
-# because a repeated --status keeps only its last value. A red persists while
-# someone fixes it, so the next gate to see it usually finds its tracker
-# in_progress, or blocked under a hold. Closed is left out, because a red that
-# outlives a landed fix is new information and gets its own bead.
-LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
-DUP_JSON=$(gc bd list --type=bug --status="$LIVE_STATUSES" --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
-# SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
-# so an unreadable list cannot be told from a genuine "no match" — and
-# guessing "no match" is precisely what files the duplicate. A readable
-# empty result is the JSON array []; anything that is not an array is
-# UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
-# cannot be satisfied by a bead you were unable to check for, and the same
-# unavailable bd would fail the `gc bd create` anyway. The next patrol
+# The lookup matches the failure_key stamp, which a retitle leaves in place,
+# over every live status, because a red persists while someone fixes it. A
+# tracker that a fold closed answers with the live bead its failure moved to,
+# such as a batch, and that bead is the filing the merge notes cite. A
+# lookup that could not read the store exits non-zero. That is UNKNOWN, never
+# "no duplicate": file nothing and merge nothing, and the next patrol
 # re-probes.
-if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+if ! DUP_ID=$("$PF" find "$FAIL_KEY"); then
   echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
   gc runtime drain-ack
   exit 1
 fi
-DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
 if [ -n "$DUP_ID" ]; then
   echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
 else
-  # The SAME token goes in the title, so the NEXT patrol's probe finds it,
-  # and nothing else does: a placeholder left in the title ships as literal
-  # filler, and the detail belongs in the body anyway.
-  # The evidence goes in -d, which fills .description. That is the field
-  # pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
-  # Nothing in this pack reads .design, so a body filed there is a body no
-  # reader ever sees.
   # The observed-on branch comes off the work bead, so that read is
-  # SHAPE-validated the way the probe above is. `gc bd show` fails open the
-  # same way, and it answers an OBJECT instead of an array when the id
-  # resolves to nothing, both of them at exit 0. An unvalidated read leaves
-  # TARGET empty and takes the formula default silently, which files a P1
-  # naming the default branch for a failure observed on an integration
-  # branch. A readable bead is a NON-EMPTY array. Anything else is UNKNOWN,
-  # and unknown files nothing and merges nothing. The default stands in only
-  # for a bead that was read and genuinely carries no target.
+  # SHAPE-validated. `gc bd show` fails open, and it answers an OBJECT instead
+  # of an array when the id resolves to nothing, both at exit 0. An
+  # unvalidated read leaves TARGET empty and takes the formula default
+  # silently, which files a P1 naming the default branch for a failure
+  # observed on an integration branch. A readable bead is a NON-EMPTY array.
+  # Anything else is UNKNOWN, and unknown files nothing and merges nothing.
+  # The default stands in only for a bead that was read and genuinely carries
+  # no target.
   WORK_JSON=$(gc bd show "$WORK" --json 2>/dev/null)
   if ! printf '%s' "$WORK_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     echo "work bead $WORK unreadable — filing nothing and NOT merging $WORK; the next patrol re-reads"
@@ -515,18 +681,26 @@ else
   fi
   TARGET=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.target // empty')
   [ -n "$TARGET" ] || TARGET="{{target_branch}}"
-  gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN" -d "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
+  # The script titles the bug with the key, stamps the key on it in the same
+  # write, and puts the evidence in -d, the field every reader reads. A
+  # filing that did not land leaves the GATE unmet.
+  if ! DUP_ID=$("$PF" file "$FAIL_KEY" --message "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
 
 ## Failure
 
-$FAIL_LOG"
+$FAIL_LOG"); then
+    echo "no tracker filed for $FAIL_KEY — NOT merging $WORK; the next patrol re-probes"
+    gc runtime drain-ack
+    exit 1
+  fi
+  echo "pre-existing failure tracked as $DUP_ID — proceeding with merge"
 fi
 # <<< preexisting-failure-dedup
 ```
 Note the resulting bug id in your merge notes — it satisfies the GATE.
 
-**GATE**: no merge without all checks passing OR the pre-existing bug
-filed/found."""
+**GATE**: no merge without all checks passing OR every pre-existing
+failure's bug filed/found."""
 
 [[steps]]
 id = "merge-push"
@@ -618,7 +792,10 @@ fi
 **If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
 (the real target branch may be checked out in the rig's canonical
 worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. A push rejected for branch protection (GH006/GH013/
+lifecycle call. The call is handed the `RIG_ROOT` this block resolved as
+`GC_RIG_ROOT`: the writer checks the landing in that checkout, and the lookup
+reads the roster when the session carries no `GC_RIG_ROOT` of its own. A push
+rejected for branch protection (GH006/GH013/
 "protected branch"/"Changes must be made through a pull request"/"approving
 review"/"Cannot update this protected ref") auto-promotes the bead to
 `merge_strategy=pr` and falls through to the mr block — the prep worktree is
@@ -651,7 +828,7 @@ if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
     echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
     gc runtime drain-ack; exit 1
   fi
-  "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
+  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
 else
   case "$(cat "$PUSH_ERR")" in
     *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
@@ -801,6 +978,12 @@ other close in the pack goes through `lifecycle.sh`'s single atomic update.
 writes the status itself; its result is checked, because a close that reports
 nothing leaves a bead that is unanchored, open, and assigned, which reads like
 work still in flight.
+
+The close also records the rework's work record, which the runtime's
+work-record gate reads on it: `gc.work_outcome=shipped`, `gc.work_commit` set
+to the head read back from origin, and `gc.work_branch` set to `$BRANCH`, the
+branch that head is on. The read-back fetch has just put that head on
+`origin/$BRANCH` in the rig's refs, which is where the gate looks for it.
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
@@ -840,7 +1023,9 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
-    if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
+    if ! gc bd update "$WORK" --status=closed \
+         --set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit="$REMOTE_HEAD" --set-metadata gc.work_branch="$BRANCH" \
+         --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
       echo "merge-push: $WORK left the anchor class but the close was refused; it stays unanchored and open, and the next pass retries both idempotently" >&2
     fi
   else

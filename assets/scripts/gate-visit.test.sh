@@ -200,10 +200,10 @@ for f in "$SDIR"/*.sh; do
     case "$f" in *.test.sh) continue ;; esac    # tests quote the block; they do not ship it
     check_file "$f"
 done
-# Worker prompts carry no gate-visit copy: they are doctrine and defer the
-# dispose mechanics to their formula (proactive → mol-first-reaction's
-# advance-and-drain), so the formula and script sweeps above cover every
-# shipped copy.
+# Worker prompts carry no gate-visit copy: the proactive prompt's ruling and
+# recommend exits file a human gate through first-reaction-dispose.sh, and
+# gate-visit-sweep files that gate's visit, so the formula and script sweeps
+# above cover every shipped copy.
 
 echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
@@ -212,10 +212,10 @@ echo "── the read-back actually repairs (executed, not grepped) ──"
 EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
-cat > "$EXTMP/bin/gc" <<'GVSTUB'
-#!/usr/bin/env bash
-# Serves the reads the block makes. LOST=1 makes the first stamp vanish —
-# the observed failure: the update returns 0 and the value reads back empty.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$EXTMP/bin/gc" <<'GVSTUB'
+# Serves the reads the block makes. The create carries the group stamp in its
+# --metadata; LOST=1 makes that first stamp vanish — the observed failure: the
+# write returns 0 and the value reads back empty.
 # $AGENTS is the live identity set the route is proved against; an arm that
 # answered nothing would read as UNREADABLE, which fails open and would take
 # the whole route check out of this suite. $LIST_JSON is the file the open-visit
@@ -226,6 +226,7 @@ case "$1 ${2:-}" in
   "bd list")   printf 'LIST %s\n' "$*" >> "$LOG"
                if [ -n "${LIST_JSON:-}" ]; then cat "$LIST_JSON"; fi ;;
   "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"
+               case "$*" in *gc.continuation_group*) touch "$STATE/stamped" ;; esac
                # The title and body as bd received them, for the bound checks.
                while [ $# -gt 0 ]; do
                  case "$1" in
@@ -275,7 +276,8 @@ run_block_gv() { # <LOST> -> stdout+stderr of the block; $EXTMP/log side-effects
         GC_PACK_DIR="" GC_RIG_ROOT="$REPO" GC_CITY_PATH="" LIST_JSON="" \
         bash "$EXTMP/block.sh" 2>&1
 }
-group_writes() { grep -c 'gc.continuation_group=' "$EXTMP/log" 2>/dev/null || echo 0; }
+# Every write of the group, the create's --metadata and any update alike.
+group_writes() { grep -c 'gc.continuation_group' "$EXTMP/log" 2>/dev/null || echo 0; }
 
 OUT_OK="$(run_block_gv 0)"
 if [ "$(group_writes)" = "1" ]; then

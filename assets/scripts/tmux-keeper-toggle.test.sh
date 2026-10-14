@@ -55,8 +55,7 @@ if sh -n "$SCRIPT"; then ok "tmux-keeper-toggle.sh: valid sh"; else bad "tmux-ke
 # $FIX/bead_<id>.json, and logs every call. `session pin|unpin` only logs, to
 # its own file, which is the record of what a toggle did.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 sub="${1:-}"; shift || true
@@ -75,8 +74,7 @@ case "$sub/$verb" in
   *) echo "gc stub: unsupported '$sub $verb'" >&2; exit 2 ;;
 esac
 GC
-cat > "$TMP/bin/tmux" <<'TMUX'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUX'
 printf '%s\n' "$*" >> "${STUB_TMUX_LOG:?}"
 TMUX
 chmod +x "$TMP/bin/gc" "$TMP/bin/tmux"

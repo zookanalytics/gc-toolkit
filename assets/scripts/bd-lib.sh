@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, and the gating-PR read the merge and pr-facts arms share. Sourced,
-# never executed.
+# queries it, the one-write create every script files a stamped bead through,
+# the metadata read-back that gates handing such a bead on, the close that
+# unmakes a bead no reader can find, the validation pass's work order, and the
+# gating-PR read's field set. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -10,11 +12,12 @@
 #
 # Every read goes through `gc bd`, never `bd`: `bd` takes its store from the
 # ambient environment, so a stale one answers from the wrong store or trips the
-# circuit breaker (tools/lint-learned.d/raw-bd-invocation.sh). The JSON is piped
-# through `scrub`, which strips the C0 bytes a JSON string may not carry raw —
-# one such byte aborts jq on the whole payload. `scrub` is a name resolved at
-# call time, so the fenced copy below defines it for these helpers; a sourcing
-# script keeps its own `# >>> control-char-scrub` block for its own direct
+# circuit breaker (tools/lint-learned.d/raw-bd-invocation.sh). Both readers strip
+# the `gc bd:` rig-store notice line (a store can emit it on stdout) and pipe the
+# JSON through `scrub`, which strips the C0 bytes a JSON string may not carry raw
+# — either contaminant otherwise aborts jq on the whole payload. `scrub` is a name
+# resolved at call time, so the fenced copy below defines it for these helpers; a
+# sourcing script keeps its own `# >>> control-char-scrub` block for its own direct
 # scrubs, and the copies stay byte-identical (formula bodies carry no include
 # mechanism, so an identical copy is the pack's sharing idiom for that block).
 
@@ -26,8 +29,18 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# bd_json <gc-bd-args...> — one `gc bd` read as JSON, control chars scrubbed.
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+# bd_json <gc-bd-args...> — one `gc bd` read as JSON, the `gc bd:` rig-store
+# notice line stripped and control chars scrubbed. The notice (a store can emit
+# it on stdout) is removed with a text-mode grep BEFORE scrub, while the newline
+# that delimits its line still stands; one such line otherwise aborts jq on the
+# whole payload. stdin is /dev/null so a call inside a `while read` loop cannot
+# consume the loop's own driving input, the guard bd_list already carries.
+bd_json() { gc bd "$@" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub; }
+
+# row_meta <show-json> <key> — one metadata value off a `gc bd show --json` row,
+# as a string. A key that is absent and a row that will not parse both read as
+# empty.
+row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
 # bd_list memoization — opt-in, off by default.
 #
@@ -71,6 +84,42 @@ _bd_cache_key() {
 # _bd_cache_mtime <file> — epoch mtime, portable across GNU and BSD stat.
 _bd_cache_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'; }
 
+# _bd_cache_file <read-args...> — the cache entry for one read, or nothing when
+# the cache is off.
+_bd_cache_file() {
+  [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && [ -d "${GC_RECONCILE_BD_CACHE}" ] || return 0
+  printf '%s/%s.json' "$GC_RECONCILE_BD_CACHE" "$(_bd_cache_key "$@")"
+}
+
+# _bd_cache_hit <file> — print the entry when it is fresh; non-zero otherwise.
+_bd_cache_hit() {
+  local age cached
+  [ -n "${1:-}" ] && [ -f "$1" ] || return 1
+  age=$(( $(date +%s) - $(_bd_cache_mtime "$1") ))
+  [ "$age" -ge 0 ] && [ "$age" -le "$GC_BD_CACHE_MAX_AGE" ] || return 1
+  cached=$(cat "$1" 2>/dev/null) || return 1
+  printf '%s' "$cached"
+}
+
+# _bd_cache_drop <read-args...> — forget one read's entry, so the next read of
+# it refetches. A no-op when the cache is off. An edge write changes no bead's
+# fields, so it drops the edge reads it touched rather than every entry.
+_bd_cache_drop() {
+  local f
+  f=$(_bd_cache_file "$@")
+  [ -z "$f" ] || rm -f "$f" 2>/dev/null
+  return 0
+}
+
+# _bd_cache_put <file> <json> — store a validated read. A no-op without a file.
+_bd_cache_put() {
+  [ -n "${1:-}" ] || return 0
+  printf '%s' "$2" > "$1.$$.tmp" 2>/dev/null \
+    && mv -f "$1.$$.tmp" "$1" 2>/dev/null \
+    || rm -f "$1.$$.tmp" 2>/dev/null
+  return 0
+}
+
 # bd_cache_clear — drop every cached entry. A no-op when the cache is off or its
 # directory is gone. Whole-directory, not per-key: a write that changes one
 # anchor's rows also changes the enumerations and title probes keyed separately,
@@ -80,6 +129,12 @@ bd_cache_clear() {
   find "$GC_RECONCILE_BD_CACHE" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
   return 0
 }
+
+# _bd_call <gc-bd-args...> — the `gc bd` call bd_list and the anchor-graph
+# reads make. A script that pins its reads to one store redefines it after
+# sourcing this file (liveness-sweep.sh adds its --db pin and per-call time
+# bound), and those reads follow the pin.
+_bd_call() { gc bd "$@"; }
 
 # bd_list <gc-bd-list-args...> — a guarded array read. --limit=0 so a
 # client-side filter sees every row; a non-zero exit or a non-array (an errored
@@ -92,26 +147,218 @@ bd_cache_clear() {
 # cached, so the "could not tell" contract is unchanged: a server error is never
 # served and never stored.
 bd_list() {
-  local raw rc cache_file="" cached age
-  if [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && [ -d "${GC_RECONCILE_BD_CACHE}" ]; then
-    cache_file="$GC_RECONCILE_BD_CACHE/$(_bd_cache_key "$@").json"
-    if [ -f "$cache_file" ]; then
-      age=$(( $(date +%s) - $(_bd_cache_mtime "$cache_file") ))
-      if [ "$age" -ge 0 ] && [ "$age" -le "$GC_BD_CACHE_MAX_AGE" ]; then
-        cached=$(cat "$cache_file" 2>/dev/null) && { printf '%s' "$cached"; return 0; }
-      fi
-    fi
+  local raw rc cache_file cached
+  cache_file=$(_bd_cache_file "$@")
+  if cached=$(_bd_cache_hit "$cache_file"); then
+    printf '%s' "$cached"; return 0
   fi
-  raw=$(gc bd list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
+  raw=$(_bd_call list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
+  # Strip the `gc bd:` rig-store notice (a store can emit it on stdout) with a
+  # text-mode grep before scrub removes the newline that delimits its line; one
+  # such line otherwise fails the type==array check below and reads as "could
+  # not tell" on every call in a notice-emitting store.
+  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  _bd_cache_put "$cache_file" "$raw"
+  printf '%s' "$raw"
+}
+
+# The anchor graph. A bead that hangs off a PR anchor (a review, a rework
+# child, a finding, a validation pass, a visit) names the anchor in
+# anchor_bead, and that key is what makes it a child. Each child also has an
+# edge onto its anchor, child -> anchor, the side parent-child uses, so the
+# anchor's dependents include it. A pair with no edge is joined with a `related`
+# edge, and a pair already carrying another type is joined by that edge.
+#
+# The live children are read by anchor_bead over the live statuses. That read
+# scans only the live beads, and it is complete whatever filed the child, the
+# edge or not. The closed children are read through the edge, one
+# `gc bd dep list <anchor> --direction=up`, because an anchor_bead query that
+# covers closed has no index to use and reads the whole closed ledger. A
+# dependent is a closed child when its anchor_bead names the anchor. bd keeps
+# one edge per ordered pair, so a child joined by another type (a visit's
+# `tracks` edge) is one too, and a bead moved to another anchor leaves the old
+# one's set with its old edge still in place.
+#
+# The edge answers for the closed children only in a store marked joined:
+# `gc bd kv` carries ANCHOR_JOINED_KEY, which tools/anchor-edges-backfill.sh
+# --mark sets after a run that found no child missing its edge. An unmarked
+# store reads its closed children by anchor_bead too. Each child the pack files
+# or adopts is joined to its anchor no later than anchor_bead lands on it
+# (bd_create_child, bd_anchor_link), so a marked store stays joined. A child
+# filed some other way without the edge still reads while it is live, and
+# tools/anchor-edges-backfill.sh --check reports it.
+#
+# `related` holds nothing: it gates neither bd ready nor a close, and merge.sh's
+# blocker probe reads the `blocks` edges down from the anchor, never these.
+ANCHOR_EDGE_TYPE=related
+ANCHOR_JOINED_KEY=anchor_edges.joined
+_BD_ANCHOR_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
+
+# _bd_store_joined — 0 when the store is marked joined (ANCHOR_JOINED_KEY in
+# `gc bd kv`), served through the bd_list memo. An unset key and a read that did
+# not answer are both non-zero, and either way the caller reads the closed
+# children by anchor_bead, which is right whether the store is joined or not.
+_bd_store_joined() {
+  local cache_file cached found
+  cache_file=$(_bd_cache_file kv get "$ANCHOR_JOINED_KEY")
+  if cached=$(_bd_cache_hit "$cache_file"); then
+    [ "$cached" = 1 ]; return
+  fi
+  # `kv get` exits 1 for an unset key and still prints {"found": false}, so the
+  # answer is read from the JSON, not the exit status.
+  found=$(_bd_call kv get "$ANCHOR_JOINED_KEY" --json </dev/null 2>/dev/null | scrub | jq -r '
+    if type == "object" and has("found")
+    then (if .found == true and ((.value // "") | tostring) != "" then "1" else "0" end)
+    else empty end' 2>/dev/null)
+  [ -n "$found" ] || return 1
+  _bd_cache_put "$cache_file" "$found"
+  [ "$found" = 1 ]
+}
+
+# _bd_anchor_up <anchor> [--cached] — every dependent of <anchor>, of any edge
+# type, as one array of bead rows. --cached serves and stores it through the
+# bd_list memo. Non-zero without output = the store did not answer; an anchor
+# that does not resolve is that too, never an empty set.
+_bd_anchor_up() {
+  local raw rc cache_file="" cached
+  [ "${2:-}" = --cached ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
+  if cached=$(_bd_cache_hit "$cache_file"); then
+    printf '%s' "$cached"; return 0
+  fi
+  raw=$(_bd_call dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   raw=$(printf '%s' "$raw" | scrub)
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  if [ -n "$cache_file" ]; then
-    printf '%s' "$raw" > "$cache_file.$$.tmp" 2>/dev/null \
-      && mv -f "$cache_file.$$.tmp" "$cache_file" 2>/dev/null \
-      || rm -f "$cache_file.$$.tmp" 2>/dev/null
-  fi
+  _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
+}
+
+# bd_anchor_children <anchor> <status-csv> — the children of <anchor> in those
+# statuses, as one array of bead rows: the bd_list contract, so non-zero without
+# output means "could not tell", never "none". A row carries the bead's own
+# fields and metadata, but not its outgoing .dependencies. Every read rides the
+# bd_list memo, and none writes. The live statuses are read by anchor_bead, and
+# closed through the edge in a store marked joined, else by anchor_bead with
+# them. The live read goes first, so a child that closes between the two reads
+# is reported live rather than missed.
+bd_anchor_children() {
+  local anchor="${1:-}" statuses="${2:-}" s live="" closed="" rows='[]' up
+  [ -n "$anchor" ] && [ -n "$statuses" ] || return 1
+  for s in $(printf '%s' "$statuses" | tr ',' ' '); do
+    if [ "$s" = closed ]; then closed=1; else live="${live:+$live,}$s"; fi
+  done
+  if [ -z "$closed" ]; then
+    bd_list --metadata-field anchor_bead="$anchor" --status="$live"; return
+  fi
+  if ! _bd_store_joined; then
+    bd_list --metadata-field anchor_bead="$anchor" --status="$statuses"; return
+  fi
+  if [ -n "$live" ]; then
+    rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$live") || return 1
+  fi
+  up=$(_bd_anchor_up "$anchor" --cached) || return 1
+  # Both arrays ride stdin: an anchor's rows can carry long descriptions, and
+  # one jq argument is bounded by the OS per-argument limit.
+  printf '%s\n%s' "$rows" "$up" | jq -sc --arg a "$anchor" '
+    .[0] as $live | ([ $live[] | (.id // "") | tostring ]) as $seen
+    | $live + [ .[1][]
+        | select(((.metadata.anchor_bead // "") | tostring) == $a)
+        | select(((.status // "") | tostring | ascii_downcase) == "closed")
+        | select(((.id // "") | tostring) as $i | any($seen[]; . == $i) | not) ]' 2>/dev/null
+}
+
+# _bd_on_pair <child> <anchor> — 0 when <child> has an edge onto <anchor>, of
+# any type.
+_bd_on_pair() {
+  gc bd dep list "$1" --direction=down --json </dev/null 2>/dev/null | scrub \
+    | jq -e --arg a "$2" 'type == "array" and any(.[]; (.id // "") == $a)' >/dev/null 2>&1
+}
+
+# _bd_join <child> <anchor> — one membership edge. A pair already joined, by
+# this type or another, counts as joined. Non-zero prints bd's refusal.
+_bd_join() {
+  local err
+  err=$(gc bd dep add "$1" "$2" --type "$ANCHOR_EDGE_TYPE" </dev/null 2>&1 >/dev/null) && return 0
+  _bd_on_pair "$1" "$2" && return 0
+  echo "bd-lib: could not join $1 to anchor $2: $(printf '%s' "${err:-bd gave no reason}" | tr '\n' ' ')" >&2
+  return 1
+}
+
+# bd_anchor_link <anchor> [<child>...] — join each <child> to <anchor> by the
+# membership edge, for a bead that exists before anchor_bead is stamped on it.
+# Idempotent. Non-zero = an edge did not land (bd's refusal is printed), so the
+# caller must not count the child as joined.
+bd_anchor_link() {
+  local anchor="${1:-}" child rc=0
+  shift || true
+  [ -n "$anchor" ] || return 1
+  for child in "$@"; do
+    [ -n "$child" ] && [ "$child" != "$anchor" ] || continue
+    _bd_join "$child" "$anchor" || rc=1
+  done
+  _bd_cache_drop dep list "$anchor" --direction=up
+  return "$rc"
+}
+
+# bd_create_child <anchor> <gc bd create args...> — `gc bd create` for a bead
+# that hangs off <anchor>. The membership edge rides the create (--deps), so the
+# bead is born joined to its anchor or not at all. Prints the create's stdout
+# and returns its exit status. stdin passes through to the create
+# (--body-file -).
+bd_create_child() {
+  local anchor="${1:-}" rc
+  shift || true
+  [ -n "$anchor" ] || return 1
+  gc bd create "$@" --deps "$ANCHOR_EDGE_TYPE:$anchor"; rc=$?
+  _bd_cache_drop dep list "$anchor" --direction=up
+  return "$rc"
+}
+
+# _bd_anchor_stamp <anchor> <children-json> <up-json> [--check] — join each
+# child the up read does not show on its pair with <anchor>. A child on the pair
+# already, whatever its type, is left out, because bd refuses a second type on a
+# pair. Prints each id it joins, one per line; --check prints the ids it would
+# join and writes nothing. The joins go in one `dep add --file` write, which bd
+# commits as one transaction, so one refused pair refuses all of it; then each
+# pair is joined alone, and only a pair bd refuses on its own is left out, with
+# bd's reason printed. Exit 1 = a pair did not land; 2 = an input did not parse.
+_bd_anchor_stamp() {
+  local anchor="$1" check="${4:-}" missing edges k bad=0
+  missing=$(printf '%s\n%s' "$2" "$3" | jq -rs --arg a "$anchor" '
+    if (.[0] | type) != "array" or (.[1] | type) != "array" then error("unreadable") else . end
+    | ([ .[1][] | (.id // "") | tostring ]) as $on
+    | [ .[0][] | (.id // "") | tostring ] | unique | .[]
+    | select(. != "" and . != $a) | . as $k | select(any($on[]; . == $k) | not)' 2>/dev/null) || return 2
+  [ -n "$missing" ] || return 0
+  if [ "$check" = --check ]; then printf '%s\n' "$missing"; return 0; fi
+  edges=$(printf '%s\n' "$missing" | jq -Rc --arg a "$anchor" --arg t "$ANCHOR_EDGE_TYPE" \
+    'select(. != "") | {from: ., to: $a, type: $t}' 2>/dev/null) || return 1
+  if printf '%s\n' "$edges" | gc bd dep add --file - >/dev/null 2>&1; then
+    printf '%s\n' "$missing"; return 0
+  fi
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    if _bd_join "$k" "$anchor"; then printf '%s\n' "$k"; else bad=1; fi
+  done <<STAMP_EOF
+$missing
+STAMP_EOF
+  return "$bad"
+}
+
+# bd_anchor_backfill <anchor> [--check] — read the anchor_bead children of
+# <anchor>, every status, and join each one its up read does not reach
+# (_bd_anchor_stamp). Both reads skip the memo, so the comparison never rests on
+# an older read. Prints the ids it joined, or with --check the ids it would
+# join. Exit 1 = a join did not land; 2 = a read did not answer.
+bd_anchor_backfill() {
+  local GC_RECONCILE_BD_CACHE=""
+  local anchor="${1:-}" check="${2:-}" up kids
+  [ -n "$anchor" ] || return 2
+  up=$(_bd_anchor_up "$anchor") || return 2
+  kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 2
+  _bd_anchor_stamp "$anchor" "$kids" "$up" "$check"
 }
 
 # bd_live_children — the live beads hung on each anchor through anchor_bead:
@@ -134,75 +381,284 @@ bd_live_children() {
     | @tsv' 2>/dev/null
 }
 
-# The gating-PR read. The merge arm (merge.sh) and the pr-facts arm
-# (pr-facts.sh) both read each gating PR and decide on its merge state, so they
-# read it with one field set and the two arms see the same facts.
-# gh_pr_view_settled re-reads a PR whose merge state answered UNKNOWN, and
-# merge.sh calls it before it judges a candidate's merge state.
-
-# The pinned read's field set. pr-facts.sh asks for it plus labels. A re-read
-# asks for the set its pinned read asked for, so the two answers compare field
-# for field.
-# shellcheck disable=SC2034  # read by the scripts that source this file
-PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
-
-# GitHub computes a PR's mergeability lazily. The first read after the PR's base
-# moves answers UNKNOWN and starts the computation, which finishes within
-# seconds, and a PR nobody reads stays UNKNOWN. A re-read that answers a
-# computed state decides its PR. One that answers UNKNOWN again spends one of
-# the MERGE_STATE_REREADS that one run of the sourcing script gets, and an arm's
-# run is one pass. Once they are spent, no PR is re-read for the rest of the run.
-# So a computation stalled across the repository costs a pass at most
-# MERGE_STATE_REREADS reads that decide nothing, however many PRs answer
-# UNKNOWN. A PR's first re-read goes out at once, because its pinned read
-# already started the computation, and each later one waits
-# MERGE_STATE_REREAD_SECS.
-MERGE_STATE_REREADS="${MERGE_STATE_REREADS:-3}"
-MERGE_STATE_REREAD_SECS="${MERGE_STATE_REREAD_SECS:-5}"
-case "$MERGE_STATE_REREADS" in ''|*[!0-9]*) MERGE_STATE_REREADS=3 ;; esac
-case "$MERGE_STATE_REREAD_SECS" in ''|*[!0-9]*) MERGE_STATE_REREAD_SECS=5 ;; esac
-MERGE_STATE_REREADS_SPENT=0
-
-# gh_pr_view_settled <pr-number> <repo> <fields> <pinned-json> — read again a PR
-# whose pinned read, <pinned-json> asked with --json <fields>, answered an
-# UNKNOWN merge state. Sets PR_REREADS to the number of re-reads made, and
-# returns:
-#   0  a re-read answered a computed state. PR_REREAD_JSON holds that answer and
-#      PR_REREAD_STATE its mergeStateStatus.
-#   1  the state is still UNKNOWN and the run's re-reads are spent, by this PR's
-#      re-reads or, with PR_REREADS=0, by earlier ones.
-#   2  a re-read differs from the pinned read in a field other than
-#      mergeStateStatus, mergeable and reviewDecision, so the PR changed after
-#      the caller judged it. PR_REREAD_CHANGED names each such field with its
-#      pinned and re-read values.
-#   3  a re-read failed: gh exited non-zero, or printed nothing or something
-#      other than a JSON object. That says nothing about the merge state, so it
-#      spends nothing and is not reported as UNKNOWN.
-# shellcheck disable=SC2034  # the PR_REREAD_* results are the caller's to read
-gh_pr_view_settled() {
-  local n="$1" repo="$2" fields="$3" pinned="$4" again verdict
-  PR_REREADS=0; PR_REREAD_JSON=""; PR_REREAD_STATE=""; PR_REREAD_CHANGED=""
-  while [ "$MERGE_STATE_REREADS_SPENT" -lt "$MERGE_STATE_REREADS" ]; do
-    [ "$PR_REREADS" -eq 0 ] || sleep "$MERGE_STATE_REREAD_SECS"
-    PR_REREADS=$((PR_REREADS + 1))
-    again=$(gh pr view "$n" --repo "$repo" --json "$fields" 2>/dev/null) || return 3
-    [ -n "$again" ] || return 3
-    verdict=$(jq -rn --arg q "'" --argjson a "$pinned" --argjson b "$again" '
-      def pinned: del(.mergeStateStatus, .mergeable, .reviewDecision);
-      if ($b | type) != "object" then "unreadable"
-      else
-        [ ([$a, $b] | map(pinned | keys[]) | unique)[] as $k
-          | select($a[$k] != $b[$k])
-          | "\($k) \($q)\($a[$k] | tostring)\($q) -> \($q)\($b[$k] | tostring)\($q)" ] as $changed
-        | if ($changed | length) > 0 then "changed " + ($changed | join(", "))
-          else "state " + (($b.mergeStateStatus // "") | tostring) end
-      end' 2>/dev/null) || return 3
-    case "$verdict" in
-      "changed "*) PR_REREAD_CHANGED="${verdict#changed }"; return 2 ;;
-      "state "|"state UNKNOWN") MERGE_STATE_REREADS_SPENT=$((MERGE_STATE_REREADS_SPENT + 1)) ;;
-      "state "*) PR_REREAD_JSON="$again"; PR_REREAD_STATE="${verdict#state }"; return 0 ;;
-      *) return 3 ;;
+# bd_create [--select <keys>] [--child-of <anchor>] <metadata-json>
+#   <gc-bd-create-args...> — file one bead with its metadata in the same write,
+#   and print its id.
+#
+# The metadata a bead is born with is what its readers select it by: its
+# task_kind, the anchor it hangs on, the key its producer dedups on. Written in
+# a second `update --set-metadata`, it is missing whenever that write fails or
+# the create's id never comes back. No reader can see such a bead, so nothing
+# closes it, and the producer's next run files a stamped twin beside it.
+# `gc bd create --metadata` lands the payload in the bead's own row insert, so
+# the bead exists with its metadata or not at all.
+#
+# <metadata-json> must be a JSON object with at least one key. Anything else is
+# refused before a create runs, so this helper never files a bead with no
+# metadata. The other arguments are `gc bd create`'s own: the title, -t, -d or
+# --body-file - (stdin reaches the create), --status, --notes, --deps, --db and
+# the rest. The helper adds --metadata and --json.
+#
+# --child-of files the bead as a child of <anchor>, which the payload must name
+# as its anchor_bead. A child's membership edge stands no later than its
+# anchor_bead, and here anchor_bead lands with the create, so the edge rides the
+# create too: it goes through bd_create_child, and the child is born joined to
+# its anchor or not filed at all. An empty <anchor>, or one the payload's
+# anchor_bead does not name, is refused before a create runs.
+#
+# The bead is read back from the store the create wrote, and every key must
+# read back with the value written. A bead short of a key is written the whole
+# payload once more and read back again (bd_meta_ensure). That write carries
+# only the values the create carried, onto a bead filed a moment before.
+#
+# --select names, comma-joined, the payload keys the caller's own probe finds
+# the bead by, and the caller keeps that list beside the probe. A bead still
+# short of one of them after the second write is one no later run can find,
+# while an edge it carries can still hold its anchor, so it is closed
+# (bd_unmake) and reported as nothing filed. With no --select, a bead is closed
+# only when it is still short of every key. A --select key the payload does not
+# carry is refused before a create runs.
+#
+# Returns:
+#   0  filed, and every key read back. Prints the id.
+#   1  nothing a reader can find was filed. Either the payload, --select or
+#      --child-of was refused, or bd refused the create (its reason goes to
+#      stderr: a --child-of anchor that does not resolve is one), or no id
+#      came back, or the bead stayed short of a --select key, or of every key,
+#      and was closed (gc.outcome=abandoned) so that no reader meets it. A
+#      create whose reply was lost can still have landed whole, so a caller
+#      that files again first looks for the bead the way its own dedup does.
+#   2  filed, but the read-back could not be made or did not show every key as
+#      written. Prints the id. The bead carries every --select key, or some key
+#      with no --select, so the caller's next run can find it, and a caller
+#      hands it on only once bd_meta_ensure has made it whole.
+bd_create() {
+  local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
+  while :; do
+    case "${1:-}" in
+      --select) sel="${2:-}" ;;
+      --child-of) child=1; anchor="${2:-}" ;;
+      *) break ;;
     esac
+    shift 2 || { echo "bd_create: $1 takes a value; nothing filed" >&2; return 1; }
   done
+  if [ -n "$child" ] && [ -z "$anchor" ]; then
+    echo "bd_create: --child-of names no anchor; nothing filed" >&2
+    return 1
+  fi
+  meta="${1:-}"
+  shift || true
+  printf '%s' "$meta" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1 \
+    || { echo "bd_create: refusing to file a bead without a metadata object; nothing filed" >&2; return 1; }
+  meta=$(printf '%s' "$meta" | jq -c . 2>/dev/null) \
+    || { echo "bd_create: could not normalize the metadata payload; nothing filed" >&2; return 1; }
+  if [ -n "$sel" ] && ! printf '%s' "$meta" | jq -e --arg s "$sel" \
+       '. as $m | ($s | split(",")) | all(.[]; . as $k | $m | has($k))' >/dev/null 2>&1; then
+    echo "bd_create: --select '$sel' names a key the payload does not carry; nothing filed" >&2
+    return 1
+  fi
+  if [ -n "$anchor" ] && ! printf '%s' "$meta" | jq -e --arg a "$anchor" \
+       '((.anchor_bead // "") | tostring) == $a' >/dev/null 2>&1; then
+    echo "bd_create: --child-of $anchor is not the anchor_bead the payload names; nothing filed" >&2
+    return 1
+  fi
+  # The read-back, the second write and the close go to the store the create
+  # wrote.
+  for a in "$@"; do
+    [ "$prev" = "--db" ] && db="$a"
+    case "$a" in --db=*) db="${a#--db=}" ;; esac
+    prev="$a"
+  done
+  if [ -n "$anchor" ]; then
+    reply=$(bd_create_child "$anchor" "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  else
+    reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  fi
+  bd_cache_clear
+  id=$(printf '%s' "$reply" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  if [ -z "$id" ] || [ "$id" = "null" ]; then
+    err=$(printf '%s' "$reply" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+    echo "bd_create: bd create returned no id${err:+: $err}" >&2
+    return 1
+  fi
+  row=$(bd_json show "$id" ${db:+--db "$db"} </dev/null)
+  got=$(bd_meta_judge "$id" "$meta" "$row")
+  [ "${got%%$'\t'*}" = landed ] && { printf '%s\n' "$id"; return 0; }
+  if short=$(bd_meta_ensure --row "$row" "$id" "$meta" ${db:+--db "$db"}); then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  if [ "$short" != unreadable ]; then
+    if [ -n "$sel" ]; then
+      lost=$(jq -rn --arg s "$sel" --arg q "$short" \
+        '($q | split(",")) as $q | [ $s | split(",")[] | select(. as $k | any($q[]; . == $k)) ] | join(",")' 2>/dev/null)
+    elif [ "$short" = "$(printf '%s' "$meta" | jq -r 'keys_unsorted | join(",")' 2>/dev/null)" ]; then
+      lost="$short"
+    fi
+  fi
+  if [ -n "$lost" ]; then
+    if bd_unmake "$id" "Unmade by bd_create: this bead did not read back carrying $lost, which its producer finds it by, so no reader could find it. Its producer files it afresh." ${db:+--db "$db"}; then
+      echo "bd_create: $id did not read back carrying $lost, so no reader could find it; closed it, nothing filed" >&2
+    else
+      echo "bd_create: $id did not read back carrying $lost, so no reader can find it, and it would not close; whatever its edges hold stays held until it is closed by hand" >&2
+    fi
+    return 1
+  fi
+  echo "bd_create: $id was filed but its metadata did not read back as written (short: $short)" >&2
+  printf '%s\n' "$id"
+  return 2
+}
+
+# bd_meta_judge <id> <metadata-json> <show-json> — how a bead carries a metadata
+# payload, judged from a `gc bd show --json` reply the caller already holds, with
+# no read of its own. Prints one line: a verdict, a tab, and the payload's keys
+# that do not read back with the value written, comma-joined.
+#   landed      every key reads back as written
+#   bare        the bead carries none of the payload's keys
+#   partial     some key is missing, or reads back with another value
+#   unreadable  the reply does not hold the bead
+# A value compares as its text, jq's tostring of it, because bd keeps a create's
+# string values as strings while a --set-metadata write of the same key can
+# store a number, a boolean or null. So "42" matches 42 and "false" matches
+# false, while false, null and the empty string each match only themselves.
+bd_meta_judge() {
+  local id="${1:-}" meta="${2:-}" row="${3:-}" out
+  out=$(printf '%s' "$row" | jq -r --arg id "$id" --argjson m "$meta" '
+    if type == "array" and ((.[0].id // "") == $id) then
+      ((.[0].metadata // {}) | if type == "object" then . else {} end) as $got
+      | [ $m | to_entries[] | . as $e
+          | select((($got | has($e.key))
+                    and (($got[$e.key] | tostring) == ($e.value | tostring))) | not)
+          | .key ] as $short
+      | (if ($short | length) == 0 then "landed"
+         elif ($m | keys | all(.[]; . as $k | ($got | has($k)) | not)) then "bare"
+         else "partial" end) + "\t" + ($short | join(","))
+    else "unreadable\t" end' 2>/dev/null)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else printf 'unreadable\t\n'; fi
+}
+
+# bd_meta_readback <id> <metadata-json> [gc-bd-args...] — bd_meta_judge on a
+# fresh read of the bead. The trailing arguments reach `gc bd show`, so the read
+# follows the --db a write named.
+bd_meta_readback() {
+  local id="${1:-}" meta="${2:-}"
+  shift 2 || true
+  bd_meta_judge "$id" "$meta" "$(bd_json show "$id" "$@" </dev/null)"
+}
+
+# bd_meta_ensure [--row <show-json>] <id> <metadata-json> [gc-bd-args...] — make
+# a bead that already exists carry a payload before its caller hands it on. The
+# payload is judged against the bead: against --row, a `gc bd show --json` reply
+# the caller already read, or else against a fresh read. When any key is short,
+# every key is written in one update and read back again. Returns 0 once every
+# key reads back as written. Otherwise prints the keys still short,
+# comma-joined, or "unreadable" when the bead itself did not read back, and
+# returns 1. A bead that does not read back before the write is not written:
+# nothing then shows who holds it. The trailing arguments reach the read, the
+# write and the read-back alike, so a --db sends all three to that store.
+#
+# A route or a sling makes a bead someone's work order, so a caller gates that
+# act on this check and not on the exit of the write that filed the bead:
+# bd_create prints the id of a bead whose read-back fell short (its rc 2), and
+# `gc bd update` can exit 0 without writing. The write ignores bd's claim guard,
+# so a caller runs this only on a bead nobody has taken.
+bd_meta_ensure() {
+  local row="" seen="" id meta got kv sets=()
+  if [ "${1:-}" = "--row" ]; then row="${2:-}"; seen=1; shift 2 || true; fi
+  id="${1:-}"; meta="${2:-}"
+  shift 2 || true
+  if [ -n "$seen" ]; then got=$(bd_meta_judge "$id" "$meta" "$row")
+  else got=$(bd_meta_readback "$id" "$meta" "$@"); fi
+  case "${got%%$'\t'*}" in
+    landed) return 0 ;;
+    unreadable) printf 'unreadable\n'; return 1 ;;
+  esac
+  while IFS= read -r -d '' kv; do
+    sets+=(--set-metadata "$kv")
+  done < <(printf '%s' "$meta" | jq -j 'to_entries[] | "\(.key)=\(.value | if type == "string" then . else tojson end)\u0000"' 2>/dev/null)
+  if [ "${#sets[@]}" -gt 0 ]; then
+    gc bd update "$id" "$@" "${sets[@]}" </dev/null >/dev/null 2>&1 || true
+    bd_cache_clear
+    got=$(bd_meta_readback "$id" "$meta" "$@")
+    [ "${got%%$'\t'*}" = landed ] && return 0
+  fi
+  if [ "${got%%$'\t'*}" = unreadable ]; then printf 'unreadable\n'; else printf '%s\n' "${got#*$'\t'}"; fi
   return 1
 }
+
+# bd_unmake <id> <note> [gc-bd-args...] — close a bead its producer filed but no
+# reader can find, so that nothing it carries holds anything. The close carries
+# gc.outcome=abandoned and appends <note>, which names who unmade it and why.
+# The trailing arguments reach the close and its read-back, so a --db sends both
+# to that store. Returns 0 once the bead reads back closed, 1 otherwise: the
+# update's exit cannot say, because `gc bd update` can exit 0 without writing.
+bd_unmake() {
+  local id="${1:-}" note="${2:-}" st
+  shift 2 || true
+  gc bd update "$id" "$@" --status=closed --set-metadata gc.outcome=abandoned --append-notes "$note" \
+    </dev/null >/dev/null 2>&1 || true
+  bd_cache_clear
+  st=$(bd_json show "$id" "$@" </dev/null | jq -r --arg id "$id" '
+    if type == "array" and ((.[0].id // "") == $id)
+    then ((.[0].status // "") | tostring | ascii_downcase) else "" end' 2>/dev/null)
+  [ "$st" = closed ]
+}
+
+# bd_unmake_orphans <select-keys> <title> <note> [gc-bd-args...] — close what a
+# producer that stamped a bead in a second write after its create left behind:
+# an open bead with that producer's <title> in its own, which nobody has taken
+# (no assignee, no route, no pour) and which is short of a key in
+# <select-keys>, the comma-joined keys the producer's probe finds its beads by.
+# No probe can find such a bead, yet a blocks edge it carries still holds its
+# anchor, and the producer files a whole bead beside it. bd_create never leaves
+# one, so this finds only beads filed the older way. Each is closed through
+# bd_unmake and its id printed. Returns 1 when the listing did not answer, else
+# 0. The trailing arguments reach the listing and the closes.
+bd_unmake_orphans() {
+  local sel="${1:-}" title="${2:-}" note="${3:-}" rows oid
+  shift 3 || true
+  rows=$(bd_list --status=open --title-contains "$title" "$@") || return 1
+  while IFS= read -r oid; do
+    [ -n "$oid" ] || continue
+    bd_unmake "$oid" "$note" "$@" && printf '%s\n' "$oid"
+  done < <(printf '%s' "$rows" | jq -r --arg s "$sel" --arg t "$title" '
+    ($s | split(",")) as $sel
+    | .[]
+    | select(((.status // "") | tostring | ascii_downcase) == "open")
+    | select(((.title // "") | tostring) | contains($t))
+    | select(((.assignee // "") | tostring) == "")
+    | ((.metadata // {}) | if type == "object" then . else {} end) as $m
+    | select((($m["gc.routed_to"] // "") | tostring) == "")
+    | select((($m["gc.execution_routed_to"] // "") | tostring) == "")
+    | select(any($sel[]; (($m[.] // "") | tostring) == ""))
+    | .id' 2>/dev/null)
+  return 0
+}
+
+# The keys a validation pass is found by: signoff.sh's machine-lane probe and
+# pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
+# and its lane, so a pass short of one of them is one neither can find.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+VALIDATION_SELECT="task_kind,anchor_bead,check_name"
+
+# validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
+# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
+# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
+# rules the findings whose finding.lane matches it. reviewed_oid pins the head
+# the batch was produced at, which mol-validate needs to back a machine lane; an
+# empty <reviewed-oid> leaves the pin out.
+validation_work_order() {
+  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+    '{task_kind: "validation", anchor_bead: $a, check_name: $l}
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
+}
+
+# The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm
+# (`gctk merge`, prFields in services/gctk/internal/cli/merge.go) both read each
+# gating PR and decide on its merge state, so they read it with one field set
+# and the two arms see the same facts. merge.test.sh holds the merge arm's reads
+# to this set.
+
+# The pinned read's field set. pr-facts.sh asks for it plus labels.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"

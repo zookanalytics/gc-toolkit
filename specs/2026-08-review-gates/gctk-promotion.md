@@ -1,6 +1,6 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); lifecycle's shell fallback dropped 2026-10-05 (tk-crzvfv); the remaining subcommands follow one PR at a time.
+description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. lifecycle and merge are ported and keep no shell fallback, and the remaining subcommands port one PR at a time.
 ---
 
 # gctk: the compiled data plane
@@ -9,15 +9,16 @@ Status: **in progress**. Follow-up to the rewrite; independent of the
 review-gates work (same specs dir because both were scoped from the same
 operator conversation).
 
-Landed 2026-08-26 (tk-utjreo): `services/gctk`, the `lifecycle` port, the
-build/deploy pattern below, the fallback wiring, the build-status file, and its
-board rows. `services/gctk/README.md` carries the operating detail.
+`services/gctk` is the binary's source. The build/deploy pattern below, the
+fallback wiring, the build-status file, and its board rows are in place, and
+`services/gctk/README.md` carries the operating detail.
 
-Landed 2026-10-05 (tk-crzvfv): `lifecycle`'s shell fallback dropped, ahead of
-the teardown, once the build order had published a current binary through
-eight days of clean ticks. `lifecycle.sh` now only execs the binary, and a call
-with no binary to run exits 1 naming the `gctk-build` order. The fallback still
-stands for the other subcommands.
+`lifecycle` and `merge` are ported, and neither keeps a shell fallback.
+`lifecycle.sh` and `merge.sh` only exec the binary, and a call with no binary
+to run exits 1 naming the `gctk-build` order. The two rules the merge shares
+with shell readers, the required-check set (`pr-facts.sh`) and the approval
+rule (`review-verdict.sh`), are held to gctk merge's own by `merge.test.sh`,
+which runs both over the same fixtures.
 
 Remaining, one subcommand per PR in this order: `gate-ensure`,
 `pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
@@ -68,15 +69,17 @@ readable as a script.
 
 ## Build and deploy
 
-Same pattern as helm-svc, same lessons: a `gctk-build` city order (cooldown,
-staleness by `find -newer` and by the recorded revision, atomic publish, never
-build in the exec path),
-launcher resolves the prebuilt binary. Until the binary exists at the
+Same pattern as helm-svc, same lessons, same script: a `gctk-build` city order
+runs the builder helm-build runs (`assets/scripts/gc-build.sh gctk`), with its
+cooldown, staleness by `find -newer` and by the recorded revision, atomic
+publish, and no build in the exec path. The launcher resolves the prebuilt
+binary. Until the binary exists at the
 deployed path, the shell scripts remain — the driver prefers `gctk` when
 present, falls back to the script during migration, and drops the fallback
-when the last port lands. `lifecycle` dropped its fallback early (tk-crzvfv):
-with no binary to run, `lifecycle.sh` refuses the call and names the build
-order, and a build that fails keeps the last good binary answering.
+when the last port lands. `lifecycle` and `merge` are the exception and have
+no fallback: with no binary to run, `lifecycle.sh` and `merge.sh` refuse the
+call and name the build order, and a build that fails keeps the last good
+binary answering.
 
 **Failure-mode tradeoff, stated:** a script edit is live from the working
 tree instantly; a gctk change rides the build order (~5m) and a broken build
@@ -106,3 +109,7 @@ and answers neither the sharing problem nor deploy as cleanly.
 Linking the beads library directly (changes the observability and permission
 surface); porting anything agents paste; a shared shell library (rejected by
 measured decision, unchanged); rewriting services/helm.
+
+The helm and gctk builders are not a shared library. They are one script,
+`assets/scripts/gc-build.sh`, parameterised by component, so the build logic
+they have in common exists once and no library carries it.

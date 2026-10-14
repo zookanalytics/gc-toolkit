@@ -15,10 +15,18 @@
 # --close only into a closed state, and a closed state requires --close (status
 # and merge_result move together). --to merged also requires a non-empty
 # --set merged_sha, the landing the state names; a bead that never had a PR is
-# no merge anchor and closes with a plain `gc bd close`. A state's declared
-# routing rides in the same call unless --route is given: human states stamp
-# gc.routed_to=human, and detached states clear it unless the bead already rests
-# on the park route.
+# no merge anchor and closes with a plain `gc bd close`. The same write records
+# the work the landing shipped: gc.work_outcome=shipped, gc.work_commit (the
+# merged_sha) and gc.work_branch (merged_target), each unless the call writes
+# that key itself. A landing whose merged_sha is no object id, or that names no
+# merged_target, records none of the three, and the bead keeps the record it
+# already had. When the commit is not yet on origin/<branch> in $GC_RIG_ROOT,
+# the branch is fetched there first, because the runtime's work-record gate
+# asks that checkout whether it is. With no GC_RIG_ROOT, or a branch git does
+# not accept as a branch name, nothing is fetched and one WARN line names the
+# landing. A state's declared routing rides in the same call unless --route is
+# given: human states stamp gc.routed_to=human, and detached states clear it
+# unless the bead already rests on the park route.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to
@@ -30,7 +38,8 @@
 # satisfies the guard.
 # reopen: repair a bead closed while merge_result is a NON-closed state — set
 # status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
-# Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol.
+# Callers: pr-open.sh, pr-facts.sh, mol-refinery-patrol. gctk merge runs the
+# same writer in-process.
 # Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage, or no
 # gctk binary to run; 2 post-write verification mismatch (or unreadable bead).
 # CAVEAT (docs/gascity-routing-model.md row 46): clearing an assignee on a bead

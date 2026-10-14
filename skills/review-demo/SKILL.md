@@ -76,20 +76,63 @@ the file to it in a comment, inline and uncommitted. It refuses a PR outside the
 rig's origin and exits non-zero when it cannot attach. `doctor/check-demo-toolchain`
 reports whether the `gh` it needs is present.
 
-- `video`: `skills/gc-demo-script/SKILL.md` writes a `demo:capture` script from
-  the anchor and the diff. `skills/demo-capture/SKILL.md` records that script
-  against the running app and assembles the narrated MP4. The app is the
-  draft's preview where one deploys, and otherwise the app served from the
-  reviewed commit. Write the clip outside the tracked tree.
-  `doctor/check-demo-toolchain` reports whether the capture toolchain resolves
-  in this session.
-- `screenshot` and `repo-artifact`: this pack has no production path for either.
-  Record the modality you picked and approve with the note that it fits and was
-  not delivered.
+- `video`: record it in this review with `assets/scripts/rig-demo-capture.sh`,
+  the rig-demo mol's capture core. Do not pour `mol-rig-demo` for it. A pour
+  runs later in another session, so this verdict could not judge its clip,
+  and by then the reviewed worktree is gone.
+  `skills/gc-demo-script/SKILL.md` writes the `demo:capture` script from the
+  anchor and the diff. Keep the script and the clip in the review workspace,
+  the directory that holds `$REVIEW_WT`, and capture from there, so the
+  engine's working files stay out of the reviewed tree. Run the capture under
+  `hb`, the review step's lease keepalive, because a capture takes minutes:
+
+  ```bash
+  cd "$(dirname "$REVIEW_WT")"
+  hb "$SCRIPTS/rig-demo-capture.sh" --script demo.md --output demo.mp4 <app target>
+  ```
+
+  The app target is the draft's preview, `--base-url <url>`, where one
+  deploys. Otherwise serve the reviewed worktree, so the clip shows the
+  reviewed commit: `--serve-dir "$REVIEW_WT/<dir>"` for a static build, or
+  `--serve "<command>" --cwd "$REVIEW_WT"` for a dev server. Exit 0 is a clip
+  in which every step's proof held, exit 3 is a clip in which at least one
+  step failed its proof, and exit 1 is no clip. The last line names the clip
+  and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
+  session. Without it the clip is silent and captioned, and it still shows the
+  change. `doctor/check-demo-toolchain` reports which parts of the capture
+  toolchain resolve in this session.
+- `repo-artifact`: list the visuals the reviewed commit already carries.
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" candidates --base "origin/$BASE" --oid "$REVIEWED_OID" --anchor <anchor>
+  ```
+
+  Each line gives a reason and a path. `changed` is a visual the diff adds or
+  edits. `named` is one whose path appears in a line the diff adds or in the
+  anchor. `near` is one in a directory close to a changed file's, nearest
+  first. Exit 3 means the commit carries no such visual, so this modality does
+  not fit. Open an image candidate at `$REVIEW_WT/<path>` before you pick it.
+  A committed visual shows what its author recorded, not a run of the reviewed
+  commit. Pick one that matches what the diff does, because one that shows a
+  state the reviewed commit no longer produces would mislead the human.
+  Deliver the one you pick:
+
+  ```bash
+  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --base "origin/$BASE" --oid "$REVIEWED_OID" --subject <anchor>
+  ```
+
+  It attaches the file as the reviewed commit stores it, through
+  `demo-deliver.sh`. The comment says where the visual came from: whether this
+  change adds, edits, moves or copies it, or leaves it unchanged, and the commit
+  that last changed it. The delivery's last line says the same, and the verdict
+  body repeats it.
+- `screenshot`: this pack has no production path for it. Record the modality
+  you picked and approve with the note that it fits and was not delivered.
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
-stands.
+stands. The verdict records a delivered fallback as one: `--visual` names the
+modality delivered, and `--visual-fallback-from` names the one that fits.
 
 A rig can name its own visual surfaces, and how to serve its app for a capture,
 in `docs/review-demo.md`. The dispatch note appends that file from the reviewed
@@ -101,6 +144,14 @@ The visual is evidence: judge what it shows, not what the diff claims. A capture
 in which the surface errors, a flow breaks, or a step fails against what the
 change claims is a finding against the change. Request changes, and name the
 visual as the evidence.
+
+A video capture that exits 3 recorded a step whose proof failed. The engine's
+step lines name that step and the assertion that did not hold. A capture run
+with `--mode proof` also keeps a screenshot of every step in the working
+directory its last line names. Read them to tell whether the change fails or
+the script asserted the wrong thing. A change that fails is the finding above,
+and the clip is its evidence to deliver. A script that asserted the wrong thing
+is yours to correct before you capture again.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, or no
@@ -120,17 +171,29 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve --visual screenshot \
 `signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with
 `request-changes`, because a check that found no visual needed has nothing to
 block on. It stamps the decision on the review bead as `visual` and names it on
-the posted comment.
+the posted comment's `Visual:` line. That line says what kind of visual the
+verdict rests on. A `repo-artifact` reads `author-committed` there, because a
+committed visual is what an author recorded, not a capture of the reviewed
+commit. A fallback adds `--visual-fallback-from <the modality that fits>`,
+stamped as `visual_fallback_from`, and the line then reads, for example,
+`Visual: repo-artifact (author-committed; fallback from video)`. `signoff.sh`
+refuses a fallback that is not cheaper than the modality it stands in for.
 
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
-and where the visual was delivered, or what stopped it.
+and where the visual was delivered, or what stopped it. A delivered video's
+sentence also says whether the clip is narrated or silent. A delivered
+repo-artifact's sentence also says where the visual came from, as its delivery
+comment does.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
 - **Delivered, and it shows the change working.** Approve with its modality.
 - **Delivered, and it shows the change failing.** Request changes with its
   modality. The finding goes in `findings.json`.
+- **Delivered as a fallback.** Judge what it shows the same way. Record the
+  modality delivered with `--visual` and the one that fits with
+  `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: no production path in this
   pack, a capture toolchain that does not resolve, or no running app to capture.

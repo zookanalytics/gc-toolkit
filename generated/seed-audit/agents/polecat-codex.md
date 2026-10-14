@@ -51,11 +51,14 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -183,12 +186,17 @@ closed.
 
 ### Integration branches (owned convoys)
 
-`metadata.target` is not always the default branch. Under an owned convoy
-with an integration branch, `gc sling`'s convoy-ancestor walk resolves
-`metadata.target = integration/<convoy-id>`: you branch from
-`origin/integration/<convoy-id>`, the refinery lands your work on that
-integration branch, and main moves only when the convoy graduates later.
-Nothing special to do — the formula preserves `metadata.target` — just do not
+`metadata.target` is not always the default branch. A child of an owned
+convoy with an integration branch carries `metadata.target =
+integration/<convoy-id>`, which the owned-convoy recipe stamps when it links
+the child. `gc sling` takes the bead's own target as the base branch before
+anything else: you branch from `origin/integration/<convoy-id>`, the refinery
+lands your work on that integration branch, and main moves only when the
+convoy graduates later. Without the stamp, sling reads a convoy target only
+off the one parent chain bd reports, so a child whose reported parent is an
+epic outside the convoy is poured from the default branch. workspace-setup
+holds that molecule before it cuts a branch. Otherwise there is nothing
+special to do, because the formula preserves `metadata.target`. Just do not
 read "landed in the refinery" as "main moved".
 
 ## Work bead metadata contract
@@ -199,16 +207,20 @@ read "landed in the refinery" as "main moved".
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
 | `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
-| `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
+| `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
 
 **Rejection-aware resume.** `metadata.rejection_reason` + `metadata.branch`
 mean a previous attempt was rejected with the branch intact. Resume that
-branch and fix the stated reason. Bring it current the way `prepare_mode`
-says: `merge` means the branch is SHARED — merge the base in, never rebase,
-never force-push; anything else rebases. The formula's workspace-setup step
-carries the exact block.
+branch and fix the stated reason. Bring it current by merging the base in;
+never rebase it and never force-push it. When the merge conflicts, write one
+audit entry per conflicted file as you resolve it, saying what collided, what
+you decided and why, and what a reviewer should check. The hand-off is refused
+without them, and every message a person reads about the merge is composed
+from them. A conflict you cannot resolve without guessing is a question for a
+person: push nothing and ask. The formula's workspace-setup step carries the
+exact blocks.
 
 ## The claimed bead and the anchor
 
@@ -445,8 +457,16 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
+OBS_META=$(jq -nc \
+  --arg category "<free-slug>" \
+  --arg scope "<repo:<rig> or agent:<role> or global — guess narrow>" \
+  --arg directive "<standing or diff>" \
+  --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
+  '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation -d "## Statement
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <the generalizable point>
 
 ## Quote
@@ -459,17 +479,10 @@ OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source re
 <optional: what the diff was doing>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-gc bd update "$OBS" \
-  --set-metadata task_kind=observation \
-  --set-metadata "obs.category=<free-slug>" \
-  --set-metadata "obs.scope=<repo:<rig> or agent:<role> or global — guess narrow>" \
-  --set-metadata obs.source=self \
-  --set-metadata "obs.directive=<standing or diff>" \
-  --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
-  --set-metadata gc.outcome=recorded \
-  --set-metadata gc.work_outcome=no-op \
-  --status=closed
 ```
+
+The metadata and the closed status ride the create, so the observation is
+filed whole or not at all.
 
 The provenance key's `<owner/repo>` is the full slug — derive it with
 `gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
@@ -491,8 +504,8 @@ is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
 
 Operator fast path: "learn this: …" files the same bead with the
-operator's wording as `## Statement`, plus `obs.source=operator` and
-`--set-metadata obs.endorsed=operator`.
+operator's wording as `## Statement`, and `"obs.source": "operator"` plus
+`"obs.endorsed": "operator"` in its metadata.
 
 
 

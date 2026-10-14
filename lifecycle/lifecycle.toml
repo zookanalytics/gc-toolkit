@@ -48,7 +48,9 @@ park_route = "human"
 # closed state, and a transition into a closed state must carry --close.
 # Entering `merged` additionally requires a non-empty --set merged_sha: its
 # meaning is "landed; merged_sha recorded", so it cannot be entered without the
-# landing that defines it.
+# landing that defines it. The same write records the work record that landing
+# gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
+# [metadata.runtime_owned]).
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.
@@ -88,7 +90,8 @@ meaning = "no commits on branch; routed to human"
 status = "open"
 meaning = "a sitting is waiting on an operator decision; routed to human"
 
-# Transitions. Every edge names its writer; lifecycle.sh performs the write.
+# Transitions. Every edge names its writer; the lifecycle writer performs the
+# write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
 from = "unanchored"
@@ -131,7 +134,7 @@ writer = "assets/scripts/pr-open.sh"
 [[transition]]
 from = "pre_open_gate"
 to = "unanchored"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rejection back to the pool, or a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "pull_request"
@@ -151,7 +154,7 @@ writer = "assets/scripts/pr-facts.sh"
 [[transition]]
 from = "pull_request"
 to = "unanchored"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rejection back to the pool, or a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "abandoned"
@@ -186,6 +189,10 @@ writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.s
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
+# Triage widens it (signoff.sh --add-gates), and bring-current-guard.sh adds
+# triage to a set that lacks it when a bring-current round conflicts, so triage
+# rules on every such round. Neither widens the none or off opt-out, which only
+# a person changes: on one, the guard lifts the approval itself.
 check_set_default = "correctness,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
@@ -199,10 +206,13 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # standing across later pushes until it is dismissed, with a standing
 # CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
 # before each reviewer's latest is taken, so it neither approves nor vetoes, and
-# it does not hide its author's older approval. No check.approval marker and no
-# check_set token arm or opt out of it; GitHub branch protection is an extra
-# layer, not the authority. Declaration only, like the rest of this section (the
-# rule lives in merge.sh).
+# it does not hide its author's older approval. Once a ruling on a bring-current
+# round lifts the approval, no approval submitted at or before the anchor's
+# bring_current_lifted_at counts, dismissed or not. No check.approval marker
+# and no check_set token arm or opt out of it; GitHub branch protection is an
+# extra layer, not the authority. Declaration only, like the rest of this
+# section (the rule lives in gctk merge's reviewVerdict, and in
+# review-verdict.sh for the shell readers).
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -278,7 +288,9 @@ posture_key = "pr_posture"
 # The pack's own vocabulary, lowercase, derived in this precedence order: a
 # standing CHANGES_REQUESTED outranks an unanswered comment, which outranks an
 # approval — one reviewer's approval does not answer another reviewer's
-# question. "none" is a PR no reviewDecision applies to.
+# question. An approval the anchor's bring_current_lifted_at set aside reads
+# review_required, because the merge no longer counts it. "none" is a PR no
+# reviewDecision applies to.
 postures = ["changes_requested", "commented", "approved", "review_required", "none"]
 # GitHub's mergeStateStatus, recorded verbatim and uppercase: the vocabulary is
 # GitHub's, and a value it adds next year must read as GitHub's, not as ours.
@@ -301,11 +313,12 @@ issue_comment_watermark_key = "pr_issue_comment_watermark"
 # the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
-# child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
-# the merge until it closes — the child through a blocks edge, the visit through
-# the pr_number stamp merge.sh's in-flight-holder probe reads. A visit takes no
-# blocks edge: escalate.sh files it depending on its subject, so an edge back
-# would be a cycle.
+# child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
+# no fix pool, or the PR head branch unresolved). Either holds the merge until it
+# closes — the child through a blocks edge, the visit through the pr_number stamp
+# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge:
+# escalate.sh files it depending on its subject, so an edge back would be a
+# cycle.
 disposition_key = "pr_comment_disposition"
 
 [machine_axis]
@@ -335,7 +348,34 @@ machine_key = "pr.machine"
 machines = ["progressing", "settled", "wedged-exception", "blocked"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
-writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
+writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
+
+[conversation]
+# Where the exchange with the operator stands, recorded on the anchor by
+# pr-facts.sh against the [posture] watermarks. A dated key,
+# `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
+# moved on never reads as current, and the board's board.prConversation gates it
+# on the pr.machine head the same way the approval clause gates the posture.
+conversation_key = "pr.conversation"
+# The values pr-facts.sh records, derived from the watermarks and the routing
+# disposition each pass:
+#   quiet        no human utterance in any of the three id spaces — and a pre-open
+#                anchor, where no PR yet exists to speak on
+#   outstanding  a human utterance sits above its space's watermark, or a batch
+#                routed to a fix unit that has not closed yet — the city still
+#                working it, the coarser truth, never collapsed into quiet
+#   answered     the routed fix unit has closed — a rework child when its branch
+#                lands, a visit when a person resolves it — so the city's reply is
+#                there to look at. A head move alone is not answered: a merge-in of
+#                the base or an operator push leaves the fix unit open.
+# The position re-derives from the disposition, which lands in the same
+# transition as the watermark it routes past, so a routed batch survives a
+# dropped conversation write; an anchor with no disposition and no recorded
+# position stays unknown until a new utterance.
+# asking is NOT here: it is the demand edge, read from the graph with no key of
+# its own. covered is NOT here: it waits on a comment-to-bead link nothing
+# records yet, so an utterance the city works reads outstanding until then.
+conversations = ["quiet", "outstanding", "answered"]
 
 [dated_keys]
 # Keys in the shape <value>@<oid>@<since>. The queue the helm board renders is
@@ -344,7 +384,7 @@ writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle
 # rather than in a key beside it: a timestamp that can be written when the value
 # is not ends up dating a state that no longer holds, with nothing in either key
 # saying so.
-keys = ["pr.machine", "pr_posture"]
+keys = ["pr.machine", "pr.conversation", "pr_posture"]
 # lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
 # the existing instant while the value and the oid both hold, stamp the current
 # one when either differs. Set, preserve and clear all fall out of it — the
@@ -373,9 +413,9 @@ since_format = "RFC 3339 UTC"
 # --route to carry — are stamped directly with gc bd update --set-metadata by
 # whichever script or formula owns that bead's dispatch. The recurring shapes: an
 # escalation or visit routed to its handler pool or parked to `human`
-# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
-# mol-feedback-distiller.toml); a rework child routed to its fix pool
-# (pr-facts.sh, pre-open-rebase.sh); a review
+# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-feedback-distiller.toml); a
+# reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
+# routed to its fix pool (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
 # value is a rig-qualified pool identity (<rig>/<agent>) or
 # the park sentinel `human` ([machine] park_route); the pool
@@ -418,7 +458,9 @@ keys = [
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
   "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
-  "bring_current_from",
+  "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
+  "bring_current_record", "bring_current_reopened", "bring_current_round_at",
+  "bring_current_lifted_at",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -471,7 +513,7 @@ keys = [
 #   an alias normalized to `mr` on read. An absent key resolves to the
 #   default_merge_strategy var (default `mr`); an empty value resolves to
 #   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
-#   pre-open-rebase.sh, mol-feedback-distiller.toml and mol-first-reaction.toml,
+#   pre-open-rebase.sh and mol-feedback-distiller.toml,
 #   and existing_pr forces the resolved mode up from `direct` at the refinery.
 #   A target under `polecat/` (another bead's per-bead PR head) carrying no PR of
 #   its own resolves the other way, from `mr` down to `direct`, so the branch
@@ -548,28 +590,77 @@ keys = [
 #   draft it created, or on an adopted draft only when the city's own login
 #   authored it and its timeline carries no conversion to draft. Its PRESENCE is
 #   what tells the draft-to-ready arm this is a draft the refinery owns the flip
-#   of (not an operator's manual draft or re-draft) and tells gate-ensure.sh the
+#   of (not an operator's manual draft or re-draft), and tells gate-ensure.sh
+#   and services/gctk/prstatus (the status: label and the board's PR phase) the
 #   anchor is still in the open-as-draft stage. Absent means the PR opened ready,
 #   or is a draft someone else owns. Never cleared. An oid.
 # draft_readied — the head oid a PR was read ready at (pr-open.sh): the head the
 #   draft-to-ready arm flipped it at, or the head it already read ready at,
 #   whatever holds the anchor. Its PRESENCE stops that arm re-reading the PR
 #   every pass and stops it ever re-flipping a PR an operator later re-drafted,
-#   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
-#   Absent means the arm has not read it ready. Never cleared. An oid.
+#   and tells gate-ensure.sh and services/gctk/prstatus the anchor reached the
+#   ready-for-review stage. Absent means the arm has not read it ready. Never
+#   cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
-#   in. bring-current-guard.sh reads it at submit as the start of what the
-#   bring-current added, so a session that re-runs the handoff after the push
-#   still reads the whole bring-current. Absent, the guard starts from the origin
-#   head it read before the push. Never cleared; the next resume overwrites it.
-#   An oid.
+#   in. bring-current-guard.sh reads it at submit as the start of the round, so
+#   a session that re-runs the handoff after the push still reads the whole
+#   round. Absent, the guard starts from the origin head it read before the push,
+#   and refuses a hand-off that pushed nothing past it until the worker stamps
+#   it, with bring_current_scope beside it. Never cleared; the next resume
+#   overwrites it. An oid.
+# bring_current_scope — whether bringing the branch current is the resumed
+#   bead's whole job: merge-only for a conflict or stale-base rejection, else
+#   with-work. Written by the resume block beside bring_current_from, and as
+#   with-work by a worker whose hand-off the guard refused for recording no
+#   start. On a merge-only bead the guard counts a commit of the bead's own as
+#   an edit beyond the merge, which owes an audit entry. Absent reads as
+#   with-work; absent beside a bring_current_from stamp, it marks a resume
+#   step that asks for no audit, so the round owes no entries.
+# conflict_audit — the worker's audit of the round, on the bead it holds: a
+#   JSON array of {path, collided, resolution, check, rating}, one per item the
+#   guard names, rating routine or judgment. Written by bring-current-audit.sh
+#   add; cleared by the resume block when a round starts.
+# conflict_question — the conflict a worker could not resolve without
+#   guessing: {paths, collided, question}. Written by bring-current-audit.sh
+#   ask, which files the visit that asks it; cleared when a round starts.
+# bring_current_record — the anchor's record of its latest bring-current round
+#   (bring-current-guard.sh guard): the head, the start, the target, the class
+#   (clean or conflicted), the guard's evidence per item, the worker's audit,
+#   and the round's ruling once made: triage's (bring-current-guard.sh decide,
+#   run by signoff.sh), or one the guard recorded itself, marked by=guard,
+#   which a re-run of the same hand-off carries out again. A conflicted round
+#   no ruling covers yet is carried into the next round's record. Every message
+#   about a round renders from it. A JSON object, overwritten each round.
+# bring_current_reopened — the lanes the anchor's conflicted rounds reopened:
+#   triage, written by the guard, and the lanes triage's rulings reopened or
+#   added. lane-state.sh lets no GitHub approval submitted before
+#   bring_current_round_at back one of these lanes. A comma list that only
+#   grows.
+# bring_current_round_at — when the latest conflicted round was recorded (UTC,
+#   ISO 8601), written by the guard with that round's record.
+# bring_current_lifted_at — the round time of the latest conflicted round whose
+#   ruling lifted the human approval (UTC, YYYY-MM-DDTHH:MM:SSZ; the ruling's
+#   own time when the round recorded none). Written by bring-current-guard.sh
+#   once a ruling to lift the approval is recorded, by decide for triage's and
+#   by guard for one it recorded itself, and read back before any approval is
+#   dismissed; it never moves back. The approval rule
+#   counts no approval submitted at or before it: gctk merge's reviewVerdict
+#   at the merge's approval gate and in its visit order, whose terminal re-read
+#   holds a merge when the line moved after validation, and review-verdict.sh
+#   in pr-facts.sh's conflict arm and posture arm, which records such an
+#   approval as review_required and keeps the line in the posture's basis. So
+#   an approval GitHub would not let the guard dismiss still lands nothing, the
+#   board shows the approval owed, and one submitted after it lands the PR.
+#   A later round whose ruling keeps the approval leaves it as it is. Absent
+#   means no ruling lifted the approval. Never cleared.
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "signoff_verdict", "visual",
+  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
-  "review_pool", "source_review_bead", "source_review", "task_kind",
+  "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
   "dispatch_count", "dispatch_backstop.<g>",
@@ -588,6 +679,15 @@ keys = [
 #   back before the irreversible dismissal, so no dismissal goes unrecorded. A
 #   record only: no gate reads it, since approval is a universal merge rule that
 #   no dismissal arms or relaxes. Never cleared.
+# approval_dismissed — on a validation-pass bead, the outside approvals that
+#   pass dismissed when it ruled a fresh whole-diff review warranted: the GitHub
+#   review ids, comma-separated. A lone id can read back as a number, so a
+#   reader compares it with tostring. Written by approval-withdraw.sh and read
+#   back before it notes the judgment on the anchor and before the first
+#   irreversible dismissal. A retry of the same pass reads it and dismisses only
+#   those reviews, so it never dismisses an approval given after them. Absent
+#   means the pass dismissed nothing: it converged, or no approval stood. Never
+#   cleared.
 # signoff_verdict — the review verdict, `approve` or `request-changes`, written
 #   in the same write that closes the review bead (signoff.sh's closing update;
 #   review-outcome.sh writes `approve` in the create that files a back-lane
@@ -605,21 +705,46 @@ keys = [
 #   `video`). Written by signoff.sh on a `demo` review bead in the same update as
 #   reviewed_oid, and read back before the verdict posts; signoff.sh refuses it
 #   on any other check. A record only: no gate reads it, and the posted verdict
-#   names it on a `Visual:` line. Absent means signoff.sh recorded no demo
-#   verdict on the bead: another check's review, a demo review closed without a
-#   verdict, a lane backing review-outcome.sh wrote, or a review closed before
-#   the stamp existed. Never cleared. One of those four values.
+#   names it on a `Visual:` line, where `repo-artifact` reads `author-committed`.
+#   Absent means signoff.sh recorded no demo verdict on the bead: another
+#   check's review, a demo review closed without a verdict, a lane backing
+#   review-outcome.sh wrote, or a review closed before the stamp existed. Never
+#   cleared. One of those four values.
+# visual_fallback_from — on a demo review bead whose delivered visual stands in
+#   for the modality that fits, because that one could not be produced: the
+#   modality that fits, `screenshot` or `video`, always costlier than `visual`.
+#   Written by signoff.sh in the same update as visual and read back before the
+#   verdict posts. A demo verdict that names no fallback clears it in that
+#   update, so a retried verdict never keeps an earlier attempt's. A record
+#   only: no gate reads it, and the posted verdict names it on the `Visual:`
+#   line as `fallback from <modality>`. Absent means the demo verdict delivered
+#   or named the modality that fits, recorded none, or was never given.
 # check_name — the lane a review or backing bead speaks for, defaulting to
 #   `correctness` when absent. Written on the review child by gate-ensure.sh and on a
 #   backing outcome by review-outcome.sh; read by signoff.sh, lane-state.sh and
 #   the provenance check. Never cleared.
-# anchor_bead — the gating anchor a review, rework, finding or visit child
-#   names, so every reader can enumerate an anchor's children by
-#   `--metadata-field anchor_bead=<id>`. Written by gate-ensure.sh, finding.sh,
-#   review-outcome.sh, signoff.sh and pr-facts.sh. Empty on a child is the
-#   unstamped-orphan signal those readers adopt; on a review bead signoff.sh
-#   falls back to the up `blocks` edge and refuses the verdict if none resolves.
-#   Never cleared. A bead id.
+# anchor_bead — the gating anchor a review, rework, finding, validation or visit
+#   child names; the key is what makes it a child. The child also has an edge
+#   onto the anchor, its membership edge, of any type. bd keeps one edge per
+#   ordered pair, so an edge the pair already carries is the membership edge.
+#   A visit whose subject is the anchor is usually joined by the `tracks` edge
+#   escalate.sh puts from the visit onto its subject. A pair with no edge is
+#   joined with `related`. A reader enumerates the live children by
+#   `--metadata-field anchor_bead=<id>`, and the closed ones through that edge
+#   (every dependent of the anchor, whatever the edge's type)
+#   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
+#   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh,
+#   pr-facts.sh, pre-open-rebase.sh and visit-close.sh, each on a child joined to
+#   the anchor no later than the stamp. A review, rework, finding or validation
+#   child carries it from the create that files it
+#   (tools/lint-learned.d/create-then-stamp.sh holds that); pr-facts.sh stamps it
+#   onto the visits escalate.sh files for a feedback batch it cannot route and
+#   for unengaged review threads. Empty on an open child of a producer's own
+#   title, it marks one an earlier two-write create left behind: gate-ensure.sh,
+#   signoff.sh and pr-facts.sh close such a child before they file its
+#   replacement (bd_unmake_orphans in bd-lib.sh), and pr-facts.sh's red-check
+#   arm adopts one. On a review bead signoff.sh falls back to the up `blocks`
+#   edge and refuses the verdict if none resolves. Never cleared. A bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.
@@ -633,12 +758,23 @@ keys = [
 #   child by gate-ensure.sh, which reads it back (falling back to
 #   gc.execution_routed_to) to repair a wedged lane. Never cleared. A pool name.
 # source_review_bead / source_review — which feedback a rework child answers, in
-#   two id spaces that cannot share a key. signoff.sh stamps source_review_bead =
-#   the review BEAD it filed the child from, and gate-ensure's already-answered
-#   probe counts a child by that key. pr-facts.sh
+#   two id spaces that cannot share a key. rework-child.sh stamps
+#   source_review_bead = the review BEAD signoff.sh files the child for, and
+#   gate-ensure's already-answered probe counts a child by that key. pr-facts.sh
 #   stamps source_review = the comma-joined GitHub review ids whose bodies its
 #   child carries verbatim, a comment batch rather than a signoff round.
 #   Neither is cleared.
+# source_ruling_bead — the visit a ruling-sourced rework child answers, the
+#   analog of source_review_bead for an operator ruling rather than a review
+#   verdict. rework-child.sh stamps it = the visit converse-rework.sh names, the
+#   one the sitting reached the ruling in. A child rework-child.sh files carries
+#   source_review_bead or source_ruling_bead, never both, and the writer dedups
+#   a second child against that key. gate-ensure's quiescence probe counts a
+#   live child by either key, and duplicate-sweep.sh's twin pass pairs a
+#   never-dispatched child with a landed sibling by either key. The finding
+#   lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no child
+#   carrying source_ruling_bead: it answers the ruling, not a finding. Not
+#   cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a
@@ -689,8 +825,12 @@ keys = [
   # deferred files a claimable follow-up bead (gated behind the anchor, its
   # provenance edge --discovered-from the finding) and closes the finding; declined
   # closes it with the reason, no edge.
-  # needs-you files a visit for the operator and leaves the finding OPEN — an open
-  # finding holds its human review changes-requested until they rule the visit.
+  # needs-you files a visit for the operator, or names one already open on the
+  # anchor's feedback, and leaves the finding OPEN — an open finding holds its
+  # human review changes-requested until the operator rules the visit holding
+  # its question (gc.ruling on it, following any fold) and no fix unit on its
+  # lane, nor a ruling's rework child, is in flight, when finding.sh
+  # close-answered closes it.
   "finding.disposition",
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
@@ -720,24 +860,41 @@ keys = [
   # closes.
   "finding.pr_comment",
   # Set by the same write-back once a posted finding has closed and its comment
-  # carries the answer: `1` when it was answered, `gone` when the comment had been
-  # removed from the PR and nothing was left to answer. A finding carrying it
-  # costs the write-back no GitHub read.
+  # carries the answer: `1` when it was answered and its thread, if it has one,
+  # is resolved, carries a later post that is not the city's own, or stays open
+  # for the operator because the finding was declined or deferred, and `gone`
+  # when the comment had been removed from the PR and nothing was left to
+  # answer. A finding carrying it costs the write-back no GitHub read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
-  # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the finding for provenance; the anchor
-  # --blocks it until the merge.
+  # set by finding.sh as the deferral runs. It carries the objection and the
+  # deferral reason, and the create that files it carries both its edges: the
+  # anchor --blocks it until the merge, and it is --discovered-from the finding.
+  # The same create stamps it source_finding, below. A deferral retried after a
+  # failure finds the follow-up the failed attempt filed by that stamp, so the
+  # retry files no second one.
   "finding.follow_up",
-  # The visit a needs-you finding files for the operator, set by finding.sh as the
-  # ruling runs. The finding stays open and its visit id is posted to the raiser's
-  # thread; the operator's ruling on the visit re-dispositions the finding.
+  # The visit that carries a needs-you finding's decision, set by finding.sh as
+  # the ruling runs: one it filed, or one already open on the anchor's feedback
+  # that the ruling named. The finding stays open and the visit id is posted to
+  # the raiser's thread. close-answered follows it through any fold to the visit
+  # holding the question, and closes the finding once that visit has closed
+  # carrying the operator's ruling (gc.ruling) and no fix unit on the finding's
+  # lane, nor a ruling's rework child, is in flight. A visit closed with no
+  # ruling releases nothing.
   "finding.visit",
+  # The visit whose recorded ruling released a needs-you finding, stamped by
+  # finding.sh close-answered in the write that closes it: finding.visit itself,
+  # or the visit a fold handed its question on to. pr-facts.sh's review dismissal
+  # names it, and counts a closed needs-you finding as answered only when it is
+  # set. Absent on an open finding and on one closed any other way. A bead id.
+  "finding.ruling_visit",
   # The databaseId of the GitHub review that raised a human finding, stamped by
   # pr-facts.sh at file time beside finding.comment_id. It groups an anchor's
   # human findings by their originating review, so once every finding one review
-  # raised has closed the write-back dismisses THAT review and re-requests its
-  # author — per-review, independent of other reviews on the same PR.
+  # raised has closed, and every answer one of them owes its raiser is on the PR
+  # (finding.reply_posted), the write-back dismisses THAT review and re-requests
+  # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
@@ -748,6 +905,14 @@ keys = [
   # child's edge too. A finding filed without one falls back to the lane-level
   # match. A bead id.
   "finding.fix_unit",
+  # On the follow-up a deferred finding files, the finding it carries forward,
+  # stamped by finding.sh in the create that files the follow-up. finding.sh reads
+  # it when a deferral is retried: of the finding's live discovered-from
+  # dependents, only one carrying the stamp is the follow-up to reuse. Other
+  # beads are discovered-from a finding too, such as the bug scaffolding-sweep.sh
+  # files to carry a disposed anchor's finding forward, and none is taken for the
+  # follow-up. A bead id. Never cleared.
+  "source_finding",
 ]
 
 [metadata.review_quorum]
@@ -845,11 +1010,14 @@ keys = [
 ]
 
 [metadata.pr_round_trip]
+# pr.machine and pr.conversation are the two round-trip axes, both dated keys
+# (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
+# pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
 # pr.machine_reason is the human sentence naming why a `blocked` machine verdict
 # cannot merge (which thread, which base, which blocker). It is plain, not dated:
 # it is read only while pr.machine is `blocked`, and merge.sh writes the two
 # together and clears the reason whenever it records any other verdict.
-keys = ["pr.machine", "pr.machine_reason"]
+keys = ["pr.machine", "pr.machine_reason", "pr.conversation"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
@@ -873,8 +1041,10 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
-# rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
-# in-flight-holder count. The pack never writes or clears either.
+# rebasing or dispatching it, save the one dispatch pr-facts.sh files whatever
+# holds the anchor: a review-feedback batch's rework child, which brings the
+# branch current by merge as it answers. tracking_only opts a PR out of
+# merge.sh's in-flight-holder count. The pack never writes or clears either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
@@ -885,19 +1055,21 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # the refinery stamps it by hand when parking a branch. Never cleared. Freeform.
 
 [metadata.proactive]
-# The proactive first-reaction surface. gc.proactive and gc.proactive_reaction
-# answer different questions and are not duplicates: the first asks the scan for
-# a reaction, the second is the completion proof the guards key on. The group
-# also holds the recommendation a recommend exit leaves for the operator's
-# Accept, and the marker that stands the scan down on a subject a live owner
-# already reacts to.
+# The proactive first-reaction surface. A first reaction is its own leased task
+# bead R that tracks the subject S; exactly-once is the substrate's, keyed on R's
+# identity, not a marker on S
+# (specs/tk-5n01ns/reaction-bead-first-reaction.md). The group also holds the
+# recommendation a recommend exit leaves for the operator's Accept, and the
+# marker that stands the scan down on a subject a live owner already reacts to.
 keys = [
-  "gc.proactive", "gc.proactive_reaction",
-  "gc.first_reaction", "gc.first_reaction_reason",
-  "gc.first_reaction_target", "gc.first_reaction_at",
+  "gc.proactive",
+  "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
+  "gc.reacted_by", "gc.proactive_reaction",
   "gc.blocker_key",
   "gc.recommended_formula", "gc.recommended_formula_dispatched",
   "gc.reaction_owned",
+  "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
+  "gc.first_reaction_at",
 ]
 # gc.proactive — `1`, the standing scan opt-in, written by patrol-finding.sh in
 #   the create payload of each finding it files. Read by tools/gc-proactive.sh,
@@ -905,31 +1077,33 @@ keys = [
 #   gc.proactive=1`) with a movable-forward query of every ready, unassigned,
 #   non-epic bead, and runs both through one precision filter. An absent key
 #   therefore excludes no bead. Never cleared.
-# gc.proactive_reaction — `1`, the completion proof. gc-helm.sh `takeaway
-#   --release` writes it in the same write that parks the subject. The close
-#   exit of first-reaction-dispose.sh releases nothing, so it writes the key
-#   itself once the closer is dispatched. mol-first-reaction.toml's
-#   advance-and-drain writes it on a subject gc.reaction_owned marks, before it
-#   consumes that marker. It is what
-#   first-reaction-dispose.sh, tools/gc-proactive.sh and mol-first-reaction.toml
-#   read to refuse a SECOND dispose, which would re-release a bead a worker now
-#   holds. Absent means the reaction has not landed. Never cleared.
-# gc.first_reaction — the disposition chosen, `actionable | recommend | blocked |
-#   close | ruling`, written by first-reaction-dispose.sh BEFORE the act. Its
-#   presence proves the reaction was ATTEMPTED, not that it landed: a record
-#   present with no gc.proactive_reaction=1 is a part-way failure, and the run
-#   RESUMES rather than refusing. The completion proof is gc.proactive_reaction,
-#   not this key. Read by that script's own guard, tools/gc-proactive.sh,
-#   mol-first-reaction.toml and bead-context.sh. Never cleared.
-# gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route, waiting-ids, human gate or
-#   visit it named, and the timestamp. A ruling or recommend that files its own
-#   gate stamps _target in a second write, once the gate exists. _reason is the
-#   closer's brief: mol-validate-close.toml reads it as the claim it re-derives
-#   against live state before it closes or escalates a bead the close exit
-#   handed it. first-reaction-dispose.sh reads _target and _at to compose its
-#   "already landed" message. bead-context.sh returns every key of the record
-#   with a subject's context. Never cleared. _at is RFC-3339 UTC.
+# gc.reaction_kind — the reaction sub-type on the reaction bead R, `first-reaction`.
+#   Written by tools/gc-proactive.sh in R's create call. Leaves room for other
+#   reaction kinds without a second dedup dimension. Never cleared.
+# gc.reaction_subject / _store — on the reaction bead R, the subject S it tracks
+#   and (only where the id prefix is ambiguous) that subject's store. Written by
+#   tools/gc-proactive.sh in R's create call, so R is born tracking S; read by the
+#   create-R-once dedup (with task_kind=reaction) and by the reaction worker to
+#   resolve S. A tracks edge R->S mirrors the subject. Never cleared. Bead id / store.
+# gc.reacted_by — on the SUBJECT S, the reaction bead R whose write-back landed.
+#   Written by first-reaction-dispose.sh LAST, after the disposition act and any
+#   edge, so its presence proves the whole write-back landed. Read by that
+#   script's re-offer recovery and by its --stand-down, which the reaction worker
+#   (agents/proactive/prompt.template.md) runs before it reacts, to close a
+#   re-claimed R without re-disposing S, and shown by bead-context.sh. It
+#   is not a guard progress is refused on — the write-backs are idempotent — and it
+#   is keyed to R's id, so a marker left by a closed R does not block a later
+#   re-reaction by a different R. Never cleared. A bead id.
+# gc.proactive_reaction — `1`, the legacy landed proof on the SUBJECT S for a
+#   frozen mol-first-reaction molecule, which has no reaction bead R to key on.
+#   Written by first-reaction-dispose.sh's no-`--reaction-bead` path after the
+#   disposition act, the close exit's included, in place of gc.reacted_by; a
+#   frozen molecule's advance-and-drain also writes it on a subject
+#   gc.reaction_owned marks, before it consumes that marker. Read by that
+#   molecule's frozen REACTED checks and by this script's re-offer guard, so a re-offered
+#   frozen step does not re-release a subject a worker already holds. gc.reacted_by
+#   is its replacement for the reaction-bead path; kept until pre-cutover molecules
+#   drain. Never cleared.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
@@ -938,8 +1112,8 @@ keys = [
 #   instances. Never cleared. A caller-supplied string.
 # gc.recommended_formula — the execution mol a recommend exit names, which the
 #   operator can Accept from the subject's visit. first-reaction-dispose.sh sets
-#   it in the record write of a recommend disposition and unsets a stale one on
-#   every other disposition, reading the key back either way. gc-helm.sh
+#   it before the act of a recommend disposition and unsets a stale one on every
+#   other disposition, reading the key back either way. gc-helm.sh
 #   `accept` unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
 #   recommendation no longer valid. The board's Accept derivation
@@ -957,16 +1131,49 @@ keys = [
 #   live owner already holds. gc-helm.sh `engage --new-subject` writes it in the
 #   create payload of the subject it files, beside gc.origin, so no scan sees
 #   that subject unmarked. tools/gc-proactive.sh drops a marked bead from its
-#   scan and refuses to sling one. When a reaction is poured anyway,
-#   mol-first-reaction.toml's advance-and-drain writes gc.proactive_reaction=1,
-#   reads it back, and only then unsets this key. Absent means no live owner.
-#   Cleared only by that consume.
+#   scan and refuses to file a reaction for one, and a reaction that reaches one
+#   anyway closes its reaction bead without acting and leaves the marker
+#   (first-reaction-dispose.sh --stand-down, which
+#   agents/proactive/prompt.template.md runs). A frozen mol-first-reaction
+#   molecule's advance-and-drain still consumes it: it writes
+#   gc.proactive_reaction=1, reads it back, and only then unsets this key.
+#   Absent means no live owner. Cleared only by that frozen consume.
+# gc.first_reaction / _reason / _target / _at — RETIRED. The attempt record a
+#   reaction wrote on its subject before the act, with the reason, the target it
+#   named and the time. Nothing writes them now: a reaction bead's identity is
+#   its exactly-once key, and the card in the subject's notes is the record of
+#   what was chosen and why. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray. bead-context.sh still shows them on such a
+#   bead, and a validating closer reads _reason as the close brief of a reaction
+#   that ran before reaction beads.
+
+[metadata.placement]
+# Intake's hold on new work (docs/steering.md). A bead may reach a pool only as a
+# member of an epic, as PR-finishing work, as a checked emergency, or by the
+# operator's own move. Other new work waits for the operator's placement sitting,
+# which places it under an epic or routes it on its own.
+keys = ["placement"]
+# placement — `pending`, the marker on a bead held for the placement sitting.
+#   Written by first-reaction-dispose.sh when intake holds its actionable route
+#   or its blocked exit's --then-route, and read back before the release; by
+#   mol-witness-patrol.toml's bug-file block, in the create of a pack-defect bug;
+#   and by mol-feedback-distiller.toml, in the create of each prompt-update and
+#   engineering bead. Read through assets/scripts/placement.sh, whose
+#   awaiting_placement is the queue gc-helm.sh unplaced lists, the named wait
+#   liveness-classify.sh and liveness-recheck.sh give the bead, the exemption
+#   doctor/check-blocked-work-armed reads, and the beads the proactive scan
+#   (tools/gc-proactive.sh) files no first reaction for. A parent, a route, an
+#   arm, an assignee or a live pour places a bead whatever the marker says, so a
+#   marker left on a placed bead names no wait. Absent means intake never held
+#   the bead. No pack writer clears it. A string.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
 # a successor bead or a duplicate is folded into a survivor. The pointer is how a
 # closed bead names where its work went; pr-dispose.sh reads gc.superseded_by to
-# treat an already-disposed anchor as a no-op, and the helm board renders it.
+# treat an already-disposed anchor as a no-op, preexisting-failure.sh follows it
+# from a closed tracker to the live bead that carries its failure, and the helm
+# board renders it.
 keys = [
   "gc.superseded_by", "gc.superseded_by_store",
   "superseded_by", "superseded_by_store",
@@ -983,15 +1190,51 @@ keys = [
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
 #   enumerates by `--has-metadata-key duplicate_of`. Stamped by hand on a
-#   diagnosed duplicate, and by duplicate-sweep.sh on a rework twin it has
-#   already closed, so pr-stack.sh drops that twin from the branch's bead list.
-#   A bead id. Never cleared.
+#   diagnosed duplicate; no pack script writes it. pr-stack.sh drops a row
+#   carrying it from the branch's bead list. A bead id. Never cleared.
 # duplicate_of_store — the store that survivor lives in, the sibling of
 #   gc.superseded_by_store, set only where the survivor's id prefix is ambiguous.
 #   duplicate-sweep.sh reads it to leave a duplicate alone when its survivor sits
 #   in a store this pass cannot resolve; absent reads as this rig's own store.
 #   Stamped beside duplicate_of by hand; no pack script writes it. Never cleared.
 #   A store ref.
+
+[metadata.epic_stewardship]
+# An epic's contract and the ruling on its hypothesis, recorded on the epic bead
+# (issue_type=epic). docs/epics.md is the contract these fields make
+# machine-readable, and docs/epic-stewardship.md is the enforcement that reads
+# them. They are the operator's: stamped when the operator confirms a contract
+# field or rules at a sitting on the epic, the dated decision docs/epics.md calls
+# for. No pack script writes them. finalize-gate.sh (clause_epic_ruling_recorded)
+# and doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
+# epic_ruling_reason.
+keys = [
+  "epic_handle", "epic_hypothesis", "epic_boundaries",
+  "epic_closure_condition", "epic_indicators",
+  "epic_ruling", "epic_ruling_reason",
+  "epic_ruling_at", "epic_ruling_by", "epic_ruling_evidence",
+]
+# epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
+#   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
+#   boundaries. epic_hypothesis is also the close gate's trigger: its presence
+#   brings an epic under the ruling requirement (clause_epic_ruling_recorded).
+# epic_closure_condition / epic_indicators — the rest of the contract (3-6
+#   closure checks, 1-3 leading indicators). Absent means unrecorded.
+# epic_ruling — the latest ruling on the hypothesis: `continue`, `shift`, or
+#   `close` (docs/epics.md). continue and shift keep the epic open; close is the
+#   one terminal ruling. Each later ruling overwrites the last.
+#   clause_epic_ruling_recorded holds a stewarded epic's finalize until it reads
+#   close with an outcome, and check-epic-closed-implies-ruled errors on a closed
+#   stewarded epic that lacks either. Absent means the hypothesis has not been
+#   ruled on.
+# epic_ruling_reason — why the latest ruling was made, written with it. On a close
+#   ruling it is the outcome, and the close requires it: the hypothesis held, was
+#   disproven, cannot be met as stated, stalled, or ran past its cost. On continue
+#   or shift it says what the next body of work is aimed at. Absent or whitespace
+#   alone reads as unrecorded.
+# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
+#   was recorded, who recorded it, and the visit bead of the sitting that carried
+#   it. Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
 
 [metadata.human_surface]
 keys = [
@@ -1011,6 +1254,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
+  "gc.ruling", "gc.folded_into",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1030,8 +1274,9 @@ keys = [
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
 #   bead-context.sh returns it with a subject's context. It decides no
-#   first-reaction exit. The rubric in mol-first-reaction.toml has the reacting
-#   agent triage an operator capture on its merits like any other bead, and
+#   first-reaction exit. The rubric in agents/proactive/prompt.template.md has
+#   the reacting agent triage an operator capture on its merits like any other
+#   bead, and
 #   first-reaction-dispose.sh gates nothing on it. Absent is an ordinary bead.
 #   Not cleared.
 # gc.outcome_reason — on a closed VISIT, the one-line sentence naming why it
@@ -1077,15 +1322,41 @@ keys = [
 #   converse-claim.sh's stranded-finish recovery do. Absent or empty leaves that
 #   line out of the closed reminder. Never cleared. Freeform text, rendered as
 #   one line.
+# gc.ruling — on a VISIT, the operator's ruling in its sitting, the one line
+#   converse-signoff.sh --ruled yes resolves the sitting's demands with. Stamped
+#   and read back before the visit closes; a --ruled no sign-off clears one an
+#   earlier run left, and stops when either write does not read back. finding.sh
+#   close-answered reads it: a needs-you finding is released only by a closed
+#   visit carrying one, because a visit closed moot, benign, dismissed or cut
+#   short answers nothing. Absent means nobody ruled in that sitting. Freeform
+#   text.
+# gc.folded_into — on a VISIT closed `folded`, the visit it folded into, which now
+#   carries its question. visit-close.sh requires --into on every fold and stamps
+#   it with the outcome pair, read back before the close. finding.sh
+#   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
+#   a re-homed visit, to the visit whose ruling answers the question. Never
+#   cleared. A bead id in the folded visit's own store.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key is the dedup identity — one live bead per key, narrowed to
-# finding.about when the finding names a subject bead. finding.scope is which
-# patrol filed it; finding.digest is the message hash that tells a recurrence
-# with changed text from an identical one. finding.occurrences counts the
-# recurrences and finding.first_seen/finding.last_seen bracket them.
+# it). finding.key and finding.about together are the dedup identity. A report
+# whose key and subject both match a live bead records a recurrence on that
+# bead, unless that bead is held at blocked with nothing open left to wait on.
+# A report that names no subject matches only a bead with no finding.about. An
+# --about that names a wisp (`*-wisp-*`) is dropped, and the key alone
+# identifies the finding. A patrol burns its wisp when the pass ends, so no
+# later pass can name the same one. When no live bead takes the report, a new
+# bead is refused while a live finding with the same finding.scope carries the
+# report's key under another subject or none, or the report's subject under
+# another key. The refusal lists those findings, and a caller reporting one of
+# them re-runs with that finding's key and subject, which records a recurrence
+# there. --distinct files the new bead despite those findings, though an exact
+# match still records a recurrence. A key meant to hold one finding per subject
+# passes --distinct on every call. finding.scope is which patrol filed it;
+# finding.digest is the message hash that tells a recurrence with changed text
+# from an identical one. finding.occurrences counts the recurrences and
+# finding.first_seen/finding.last_seen bracket them.
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
 # way a fix that did not hold is visible.
@@ -1098,6 +1369,21 @@ keys = [
 # ([metadata.review_findings]); the two families share the name and are told
 # apart by task_kind, and only these patrol keys (scope, digest, the seen
 # timestamps, occurrences, about, recurrence_of) belong to this one.
+
+[metadata.preexisting_failure]
+# One tracker per failure already red on a base branch, filed through
+# assets/scripts/preexisting-failure.sh by the refinery's merge gate
+# (mol-refinery-patrol.toml, handle-failures) and by a polecat's pre-flight
+# (mol-polecat-work.toml, preflight-tests).
+keys = ["failure_key"]
+# failure_key — the failure's dedup identity, as the script's `key` derives it:
+#   a test function, a repo-relative path, or a linter and a path. `file` writes
+#   it in the create and reads it back; `find` matches it exactly, over the live
+#   statuses for both gates' lookup, then over closed beads when no live tracker
+#   holds it, to follow the most recently closed tracker's gc.superseded_by
+#   chain to a live bead, and over closed beads for the pre-flight's landed-fix
+#   check. `find` reads no title, so a bug without it is no tracker. Never
+#   cleared, so a retitle or a fold leaves it in place. A string.
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
@@ -1229,30 +1515,44 @@ keys = [
 #   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
 #   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
-# gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-tracking
-#   stamps on a claimed work bead: the worker's checkout, its head commit and its
-#   branch, written by the gascity binary on the claim/close path (gc.work_branch
-#   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
-#   and gc.work_commit — with the pack-written bare work_dir defined in
-#   merge_identity — as proof a run produced work before disposing a duplicate.
-#   mol-polecat-work's workspace-setup also writes gc.work_branch, with the branch
-#   the work lands on, since the claim stamps the pool worktree's base checkout.
-#   The runtime's work-record close gate reads it: a `shipped` close needs
-#   gc.work_commit reachable on gc.work_branch (warn-only by default).
-#   No pack script reads gc.work_branch, and the runtime's detached-handoff
-#   orphan sweep reads the bare branch defined in merge_identity, not this key.
-#   Absent means no such product was recorded. A path, a sha, a branch.
+# gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-record
+#   keys on a work bead: the worker's checkout, the commit that satisfied the
+#   bead, and the branch that commit is on. The gascity binary writes gc.work_dir
+#   and gc.work_branch at claim time (hookClaimIdentityPatch), from the claiming
+#   worker's checkout. mol-polecat-work's workspace-setup rewrites gc.work_branch
+#   with the branch the work is cut on, since the claim stamps the pool
+#   worktree's base checkout. The lifecycle writer's transition into `merged`
+#   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
+#   the landing it records, when that landing names both.
+#   mol-refinery-patrol.toml's rework hand-back close writes them from the head
+#   it read back from origin and the branch that head is on. duplicate-sweep.sh
+#   reads gc.work_dir and gc.work_commit — with the pack-written bare work_dir
+#   defined in merge_identity — as proof a run produced work before disposing a
+#   duplicate, and bead-rehome.sh reads them the same way before a duplicate or
+#   fixed-upstream close.
+#   The runtime's work-record close gate reads the commit and the branch: a
+#   `shipped` close needs gc.work_commit reachable on gc.work_branch in the
+#   rig's checkout (warn-only by default). The gate runs git in gc.work_dir when
+#   the bead records one, and the pack's worker checkouts are worktrees of the
+#   rig checkout, sharing its refs. No pack script reads gc.work_branch, and the
+#   runtime's detached-handoff orphan sweep reads the bare branch defined in
+#   merge_identity, not this key. Absent means no such product was recorded. A
+#   path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). Its meaning is the runtime's,
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
-#   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `no-op`
-#   from dead-molecule-dispose.sh, mol-validate-close, work-outcome.sh on every
-#   visit close, the observation-filing recipes, and converse by hand.
-#   duplicate-sweep.sh reads it to confirm a no-op duplicate is disposable,
-#   pr-stack.sh drops a no-op row from a branch's ledger, and each falls back to
-#   the legacy bare `work_outcome` alias. Absent leaves the disposition
-#   unstated. Never cleared.
+#   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
+#   from the lifecycle writer's transition into `merged` and from
+#   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
+#   dead-molecule-dispose.sh, duplicate-sweep.sh on a rework twin it disposes,
+#   first-reaction-dispose.sh on the reaction bead it closes,
+#   mol-validate-close, work-outcome.sh on every visit close, the
+#   observation-filing recipes, and converse by hand. duplicate-sweep.sh reads it
+#   to confirm a no-op duplicate is disposable, bead-rehome.sh to confirm a no-op
+#   origin is, pr-stack.sh drops a no-op row from a branch's ledger, and each
+#   falls back to the legacy bare `work_outcome` alias. Absent leaves the
+#   disposition unstated. Never cleared.
 # configured_named_session — on a session bead, the authoritative "standing
 #   named" gate: "true" marks a session the pack's [[named_session]] config
 #   declares standing, applied by the runtime. pin-keepalive.sh reads it beside

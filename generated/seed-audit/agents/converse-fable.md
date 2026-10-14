@@ -350,15 +350,16 @@ Rules:
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
-  yours, and a recommend-close visit is the common trigger: `mol-first-reaction`
-  files one and stamps `recommend close: <why>` as the subject's takeaway when
-  it finds nothing to do, leaving the close to the operator. The operator must
+  yours, and the common trigger is a visit on a subject the validating closer
+  would not close on its own: a first reaction that finds nothing to do hands
+  the subject to `mol-validate-close`, which closes it on its own confident
+  check and otherwise leaves it open and files the visit. The operator must
   have agreed, in this sitting, that the subject should close; what the ruling
   licenses then follows the subject's state. A **no-work** subject you dispose
   directly: its `merge_result` empty or absent, or `merged`, unassigned,
   holding no branch or PR still in flight to a pool, and not a review, step, or
-  workflow bead. This is the no-work shape `duplicate-sweep.sh` already
-  disposes, proved there by `gc.work_outcome=no-op` or no work-product key (the
+  workflow bead. This is the no-work shape `bead-rehome.sh` disposes, proved by
+  `gc.work_outcome=no-op` or no work-product key (the
   `Close-with-successor` row of `docs/authority-map.md`); record
   `gc.work_outcome=no-op` on the subject, then close it through the one writer:
   `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind
@@ -522,11 +523,14 @@ visit, say) keeps that format. Operator-initiated form: the
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
-- A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed,
-  find what allowed it to happen, and prefer a design in which it cannot
-  happen again over a patch for the instance.
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+- A rename, a re-framing, a rendering change, a sweep that closes state
+  which should not exist, or one more guard for each newly found bypass is
+  not a fix for the thing that produced the symptom. Take a report at the
+  severity it was filed, find what allowed it to happen, and prefer a design
+  in which it cannot happen again over a patch for the instance. When a
+  sweep or a guard must still ship, the change names the cause it leaves in
+  place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -588,8 +592,16 @@ the instance in front of you, then file one observation bead before the
 turn ends:
 
 ```bash
+OBS_META=$(jq -nc \
+  --arg category "<free-slug>" \
+  --arg scope "<repo:<rig> or agent:<role> or global — guess narrow>" \
+  --arg directive "<standing or diff>" \
+  --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
+  '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation -d "## Statement
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
 <the generalizable point>
 
 ## Quote
@@ -602,17 +614,10 @@ OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source re
 <optional: what the diff was doing>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-gc bd update "$OBS" \
-  --set-metadata task_kind=observation \
-  --set-metadata "obs.category=<free-slug>" \
-  --set-metadata "obs.scope=<repo:<rig> or agent:<role> or global — guess narrow>" \
-  --set-metadata obs.source=self \
-  --set-metadata "obs.directive=<standing or diff>" \
-  --set-metadata "obs.provenance=<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
-  --set-metadata gc.outcome=recorded \
-  --set-metadata gc.work_outcome=no-op \
-  --status=closed
 ```
+
+The metadata and the closed status ride the create, so the observation is
+filed whole or not at all.
 
 The provenance key's `<owner/repo>` is the full slug — derive it with
 `gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
@@ -634,5 +639,5 @@ is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
 
 Operator fast path: "learn this: …" files the same bead with the
-operator's wording as `## Statement`, plus `obs.source=operator` and
-`--set-metadata obs.endorsed=operator`.
+operator's wording as `## Statement`, and `"obs.source": "operator"` plus
+`"obs.endorsed": "operator"` in its metadata.

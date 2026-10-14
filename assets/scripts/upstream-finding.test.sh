@@ -20,8 +20,7 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -63,6 +62,10 @@ case "${1:-}" in
       shift || true
     done
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
+    # STUB_DROP_KEYS lands the create without the named keys, a payload that
+    # half-landed, so the read-back finds the rest.
+    meta=$(printf '%s' "$meta" | jq -c --arg d "${STUB_DROP_KEYS:-}" \
+      '($d | split(",")) as $drop | with_entries(select(.key as $k | $drop | index($k) | not))')
     tmp=$(mktemp)
     # The real `gc bd create` stamps --metadata (a JSON object) atomically; model
     # it so the visit carries the identity the create sets, not only what a
@@ -91,8 +94,7 @@ case "${1:-}" in
 esac
 STUB
 
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 echo "gh stub: upstream-finding must never invoke gh" >&2
 exit 99
@@ -148,6 +150,8 @@ has "$OUT" "nothing sent" "says out loud that nothing was sent"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "gh_target_repo is the target"
 eq "$(meta up-1 gh_verb)" "issue create" "gh_verb is the two-word verb"
 eq "$(meta up-1 task_kind)" "upstream-send" "task_kind marks the bead"
+has "$(cat "$STUB_GC_LOG")" '--metadata {"task_kind":"upstream-send","upstream_send_key":' "the send and its key ride the create"
+hasnt "$(cat "$STUB_GC_LOG")" "update up-1" "…with no second write to stamp them"
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh is never invoked"
 
 # The parked command must reassemble into the exact argv, body and all.

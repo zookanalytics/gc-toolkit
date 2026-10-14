@@ -389,13 +389,16 @@ type Tile struct {
 	// city rather than an all-clear.
 	PRMachine string `json:"pr_machine"`
 
-	// PRConversation is where the exchange with the operator stands. It reads
-	// `unknown` on every row today: its other values all resolve to
-	// acknowledgement watermarks that do not exist yet, and a surface that
-	// guesses is wrong in the one direction that matters — every failed
-	// derivation looks like silence, which is the answer that tells the
-	// operator to stop looking. It ships now so the wire contract does not
-	// change shape when the watermarks land.
+	// PRConversation is where the exchange with the operator stands: quiet,
+	// outstanding, answered, asking, or unknown. asking is the demand edge;
+	// quiet, outstanding and answered are read off the position pr-facts.sh
+	// records against the acknowledgement watermarks and the routing disposition
+	// — answered once the routed fix unit closes (a rework child landing, a visit
+	// resolved), not on a bare head move. covered is not reachable yet — it waits
+	// on a comment-to-bead link nothing records — so an utterance the city is
+	// working reads the coarser outstanding. `unknown` is a rendered value, not a
+	// fallback to the quiet end: an unread axis and a clear one are not
+	// interchangeable.
 	PRConversation string `json:"pr_conversation"`
 
 	// PRApproval is whether this pull request still owes an external approval
@@ -498,10 +501,10 @@ type Tile struct {
 	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
-	// and for a merge anchor its open rework/review children, or for any other
-	// bead the live-workflow signal standing over it. A bead's board liveness and
-	// its GitHub `status:` label come from that one core. A row WITH child tiles
-	// then takes their rolled-up state in place of that per-bead value
+	// the draft stage, and for a merge anchor its open rework/review children, or
+	// for any other bead the live-workflow signal standing over it. A bead's board
+	// liveness and its GitHub `status:` label come from that one core. A row WITH
+	// child tiles then takes their rolled-up state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR

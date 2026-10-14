@@ -152,8 +152,7 @@ export CURL_LOG="$TMP/curl.log"
 # assert here) and an empty client_session, and dumps the display-menu argv
 # one argument per line — labels contain spaces and box-drawing characters,
 # so one-per-line is the only unambiguous dump.
-cat > "$BIN/tmux" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/tmux" <<'STUB'
 set -u
 while [ $# -gt 0 ] && [ "$1" = "-L" ]; do shift 2; done
 case "${1:-}" in

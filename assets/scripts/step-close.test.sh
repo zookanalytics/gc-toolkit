@@ -33,6 +33,17 @@
 #     to the same session, is still never touched; that in_progress outranks
 #     open rather than merging with it; and that ambiguity inside the open tier
 #     is refused like any other;
+#   * --convoy naming the molecule: the live root poured over the input convoy,
+#     taken only when this session holds or held a bead in it, so neither a
+#     re-pour over the same convoy nor an alias every session of an agent
+#     shares makes the fresh root this shell's; the derivation is the fallback;
+#   * the session stamp read from open and in_progress rows first, with closed
+#     rows read only when none of those carries it;
+#   * the chain-close loop the formula ships, run against the script: a loop
+#     that names its molecule issues no gc.session_id read;
+#   * every step-close call in a formula with an input convoy passing
+#     --convoy {{convoy_id}}, with each call found by what it runs, whatever
+#     variable or path names the script;
 #   * ambiguity: two in_progress beads for one step, which is refused rather
 #     than guessed, because guessing is how the original defect writes;
 #   * the refusal DIAGNOSTIC distinguishing "not your bead" from "your bead, in
@@ -73,29 +84,38 @@ hasnt()  { if hasin "$1" "$2"; then bad "$3 (found '$2' in: $1)"; else ok "$3"; 
 mkdir -p "$TMP/bin"
 
 # --- gc stub. ----------------------------------------------------------------
-# Bead table, one per line: id|assignee|step_ref|status[|root[|session_id]]
+# Bead table, one per line:
+#   id|assignee|step_ref|status[|root[|session_id[|input_convoy|formula]]]
 # Root defaults to root-1 and the session id to absent, so a row that does not
-# care about the molecule stays four fields wide.
+# care about the molecule stays four fields wide. A row with an input convoy is
+# a workflow root, as gascity pours one: gc.kind=workflow, gc.input_convoy_id
+# and gc.formula_name, and no gc.step_ref or gc.root_bead_id of its own.
 # `bd show`   : the single bead, as a one-element array (unknown id -> []).
 # `bd list`   : every bead matching --status=, --assignee= and
 #               --metadata-field=<key>=<value>. Status takes a comma list, and
 #               an unsupported metadata key matches nothing — bd filters on the
 #               key it was given, and a stub that ignored it would answer a
-#               question the real one never would.
+#               question the real one never would. With $FAKE_CALLS set, each
+#               list call's argv is appended there, one line per call, so a
+#               case can assert which reads a close issued.
 # `bd update` : records "<id> <outcome>" in $FAKE_CLOSED; refuses ids listed in
 #               $FAKE_UPDFAIL so the write-failure arm is reachable.
 # FAKE_CTRL=1 injects a raw control character into every title, reproducing the
 # bd payloads that make an unfiltered `| jq` exit "invalid".
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] || exit 0
 shift
 
 emit_one() {
   # $1 id  $2 assignee  $3 step_ref  $4 status  $5 root  $6 session id
+  # $7 input convoy (a workflow root when set)  $8 the root's formula
   local title="step $1" meta
   [ "${FAKE_CTRL:-0}" = "1" ] && title="step $(printf '\001')$1"
-  meta=$(printf '"gc.step_ref":"%s","gc.root_bead_id":"%s"' "$3" "${5:-root-1}")
+  if [ -n "${7:-}" ]; then
+    meta=$(printf '"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.input_convoy_id":"%s","gc.formula_name":"%s"' "$7" "${8:-}")
+  else
+    meta=$(printf '"gc.step_ref":"%s","gc.root_bead_id":"%s"' "$3" "${5:-root-1}")
+  fi
   [ -n "${6:-}" ] && meta="$meta,\"gc.session_id\":\"$6\""
   printf '{"id":"%s","title":"%s","status":"%s","assignee":"%s","metadata":{%s}}' \
     "$1" "$title" "$4" "$2" "$meta"
@@ -105,13 +125,14 @@ case "$1" in
   show)
     want="$2"
     out=""
-    while IFS='|' read -r id assignee step status root sid; do
+    while IFS='|' read -r id assignee step status root sid convoy formula; do
       [ -n "$id" ] || continue
       [ "$id" = "$want" ] || continue
-      out=$(emit_one "$id" "$assignee" "$step" "$status" "${root:-root-1}" "${sid:-}")
+      out=$(emit_one "$id" "$assignee" "$step" "$status" "${root:-root-1}" "${sid:-}" "${convoy:-}" "${formula:-}")
     done < "$FAKE_BEADS"
     if [ -n "$out" ]; then printf '[%s]\n' "$out"; else printf '[]\n'; fi ;;
   list)
+    [ -n "${FAKE_CALLS:-}" ] && printf '%s\n' "$*" >> "$FAKE_CALLS"
     # FAKE_LIST_BLIND makes the listing return nothing while `show` still
     # answers — the only way to reach the last-resort env path, which is
     # otherwise shadowed by discovery.
@@ -132,7 +153,7 @@ case "$1" in
       shift
     done
     out=""
-    while IFS='|' read -r id assignee step status root sid; do
+    while IFS='|' read -r id assignee step status root sid convoy formula; do
       [ -n "$id" ] || continue
       root="${root:-root-1}"
       if [ -n "$wstatus" ]; then
@@ -141,12 +162,13 @@ case "$1" in
       [ -n "$wassignee" ] && [ "$assignee" != "$wassignee" ] && continue
       case "$wkey" in
         "") ;;
-        gc.root_bead_id) [ "$root" = "$wval" ] || continue ;;
-        gc.session_id)   [ "${sid:-}" = "$wval" ] || continue ;;
-        gc.step_ref)     [ "$step" = "$wval" ] || continue ;;
+        gc.root_bead_id)    [ -z "${convoy:-}" ] && [ "$root" = "$wval" ] || continue ;;
+        gc.session_id)      [ "${sid:-}" = "$wval" ] || continue ;;
+        gc.step_ref)        [ -z "${convoy:-}" ] && [ "$step" = "$wval" ] || continue ;;
+        gc.input_convoy_id) [ -n "${convoy:-}" ] && [ "$convoy" = "$wval" ] || continue ;;
         *) continue ;;
       esac
-      obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}")
+      obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}" "${convoy:-}" "${formula:-}")
       if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
     done < "$FAKE_BEADS"
     printf '[%s]\n' "$out" ;;
@@ -167,8 +189,8 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
-export FAKE_BEADS="$TMP/beads" FAKE_CLOSED="$TMP/closed" FAKE_UPDFAIL="$TMP/updfail"
-: > "$FAKE_CLOSED"; : > "$FAKE_UPDFAIL"
+export FAKE_BEADS="$TMP/beads" FAKE_CLOSED="$TMP/closed" FAKE_UPDFAIL="$TMP/updfail" FAKE_CALLS="$TMP/calls"
+: > "$FAKE_CLOSED"; : > "$FAKE_UPDFAIL"; : > "$FAKE_CALLS"
 
 MINE="gc-toolkit__polecat-lx-zzk9"
 STEP="mol-feedback-distiller.load-and-gate"
@@ -528,6 +550,175 @@ run --step "$FSTEP"
 eq "$RC" "0" "(HUSKS) two abandoned molecules do not block a close"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(HUSKS) closed the bead for this step"
 
+# --- 1f. --convoy names the molecule -----------------------------------------
+# A formula step passes `--convoy {{convoy_id}}`, and the live workflow root
+# poured over that convoy is its molecule. The refusal it answers was live: a
+# step claimed with `gc bd update --claim` carries no gc.session_id stamp, so
+# only the assignee names its molecule, and every queued molecule's unassigned
+# bead for the same step is a rival the guard refuses over.
+FR="mol-first-reaction.advance-and-drain"
+convoy_store() {
+  cat > "$FAKE_BEADS" <<B
+root-mine|||in_progress|||conv-mine|mol-first-reaction
+root-q1|||open|||conv-q1|mol-first-reaction
+root-q2|||open|||conv-q2|mol-first-reaction
+tk-own11|$MINE|$FR|in_progress|root-mine|
+tk-q1aaa||$FR|open|root-q1|
+tk-q2aaa||$FR|open|root-q2|
+B
+  : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+}
+convoy_store
+run --step "$FR"
+eq "$RC" "2" "(CONVOY) with nothing naming the molecule, the queued rivals refuse the close"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY) …and nothing is written"
+has "$OUT" "gc.root_bead_id on the step bead" "(CONVOY) the refusal points at the step bead's own root"
+hasnt "$OUT" "gc hook --claim --json" "(CONVOY) …not at a claim, which takes new work on a pool worker"
+
+convoy_store
+run --step "$FR" --convoy conv-mine
+eq "$RC" "0" "(CONVOY) --convoy names the molecule, so the close proceeds past the queued rivals"
+has "$(cat "$FAKE_CLOSED")" "tk-own11 pass" "(CONVOY) it closes this molecule's bead"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-q" "(CONVOY) no queued molecule's bead is touched"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY) no gc.session_id read is issued"
+eq "$(wc -l < "$FAKE_CALLS" | tr -d ' ')" "2" "(CONVOY) two reads in all: the convoy's root, then the molecule's live rows"
+
+# (b) A forced re-pour over the same convoy closes the old root and pours a
+#     fresh one. A shell still running the old molecule resolves the fresh
+#     root from the convoy, and that molecule's steps are open and unassigned,
+#     exactly as an unclaimed successor of its own would be. This session holds
+#     nothing in it, so the convoy's root is not taken, and the derivation finds
+#     the molecule this shell actually ran.
+cat > "$FAKE_BEADS" <<B
+root-old|||closed|||conv-1|mol-polecat-work
+root-new|||open|||conv-1|mol-polecat-work
+tk-oldlc|$MINE|$FSTEP|closed|root-old|lx-zzk9
+tk-newlc||$FSTEP|open|root-new|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-1
+eq "$RC" "0" "(CONVOY-REPOURED) a shell whose molecule was replaced exits clean"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-REPOURED) the fresh molecule's step is NOT closed"
+has "$OUT" "re-pour" "(CONVOY-REPOURED) says why the convoy's root was not taken"
+has "$OUT" "tk-oldlc ($FSTEP) is already closed" "(CONVOY-REPOURED) the replaced molecule's own step reads as done"
+
+# (c) A convoy with no live root, as after the finalizer closed it, falls back
+#     to the derivation rather than refusing.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-none
+eq "$RC" "0" "(CONVOY-NONE) a convoy with no live root falls back to the derivation"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(CONVOY-NONE) …which closes this session's stamped bead"
+has "$OUT" "names no single live workflow root" "(CONVOY-NONE) the fallback is reported"
+
+# (d) Several live roots over one convoy: the one of this step's formula is
+#     taken when it stands alone, and a tie is no answer at all.
+cat > "$FAKE_BEADS" <<B
+root-pw|||in_progress|||conv-2|mol-polecat-work
+root-rv|||in_progress|||conv-2|mol-review
+tk-mine22|$MINE|$FSTEP|in_progress|root-pw|
+tk-rv1111|$MINE|mol-review.review|open|root-rv|
+tk-q3aaaa||$FSTEP|open|root-q3|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-2
+eq "$RC" "0" "(CONVOY-FORMULA) the root of this step's formula is taken among several"
+has "$(cat "$FAKE_CLOSED")" "tk-mine22 pass" "(CONVOY-FORMULA) it closes the bead in that molecule"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-q3aaaa" "(CONVOY-FORMULA) the queued rival is untouched"
+
+cat > "$FAKE_BEADS" <<B
+root-a|||in_progress|||conv-3|mol-polecat-work
+root-b|||in_progress|||conv-3|mol-polecat-work
+tk-mine33||$FSTEP|open|root-a|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --convoy conv-3
+has "$OUT" "names no single live workflow root" "(CONVOY-TIE) two roots of one formula over the convoy are no answer"
+has "$(cat "$FAKE_CLOSED")" "tk-mine33 pass" "(CONVOY-TIE) …and the derivation still closes this session's bead"
+
+# (e) The inline chain: this session claimed load-context and has closed it,
+#     and the successor it is closing now was never claimed, so it carries no
+#     assignee and no stamp. The session also ran an earlier molecule of the
+#     same formula, so its stamp names two roots and the derivation cannot
+#     settle it. The closed rows of the convoy's molecule still show this
+#     session's hand, and the close proceeds.
+cat > "$FAKE_BEADS" <<B
+root-mine|||in_progress|||conv-4|mol-polecat-work
+tk-lc111|$MINE|mol-polecat-work.load-context|closed|root-mine|lx-zzk9
+tk-ws111||mol-polecat-work.workspace-setup|open|root-mine|
+tk-lc222|$MINE|mol-polecat-work.load-context|closed|root-old|lx-zzk9
+tk-ws222|$MINE|mol-polecat-work.workspace-setup|closed|root-old|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step mol-polecat-work.workspace-setup
+eq "$RC" "2" "(CONVOY-INLINE) with the stamp naming two molecules, the derivation refuses"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-INLINE) …and writes nothing"
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step mol-polecat-work.workspace-setup --convoy conv-4
+eq "$RC" "0" "(CONVOY-INLINE) --convoy closes the unclaimed successor in this session's molecule"
+has "$(cat "$FAKE_CLOSED")" "tk-ws111 pass" "(CONVOY-INLINE) it is this molecule's bead that closes"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-ws222" "(CONVOY-INLINE) the earlier molecule is untouched"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY-INLINE) no gc.session_id read is issued"
+
+# (f) An agent alias is shared by every session of that agent. When another
+#     session of the same agent has claimed the fresh molecule's step, that step
+#     carries this shell's alias as its assignee, but its stamp names the other
+#     session, so the convoy's root is still not taken and their step is not
+#     closed.
+cat > "$FAKE_BEADS" <<B
+root-old|||closed|||conv-5|mol-review
+root-new|||open|||conv-5|mol-review
+tk-oldrv|gc-toolkit/gc-toolkit.nux|mol-review.review|closed|root-old|lx-zzk9
+tk-newrv|gc-toolkit/gc-toolkit.nux|mol-review.review|in_progress|root-new|lx-other
+B
+: > "$FAKE_CLOSED"
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_ALIAS="gc-toolkit/gc-toolkit.nux" \
+       -- --step mol-review.review --convoy conv-5
+eq "$RC" "0" "(CONVOY-ALIAS) a shell whose molecule was replaced exits clean"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-ALIAS) the other session's step under the shared alias is NOT closed"
+has "$OUT" "re-pour" "(CONVOY-ALIAS) the shared alias does not make the fresh root this shell's"
+has "$OUT" "tk-oldrv (mol-review.review) is already closed" "(CONVOY-ALIAS) this shell's own step reads as done"
+
+# --- 1g. the session stamp is read from live rows first -----------------------
+# The step this shell is executing is open or in_progress, and a read of those
+# rows stays cheap where one that includes closed rows scans the store. One live
+# root answers, even when closed rows name an earlier molecule this session
+# finished; before, that pair was ambiguous and a stripped bead was refused.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$FSTEP"
+eq "$RC" "0" "(LIVE-FIRST) a live stamped bead names the molecule past an earlier closed one"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-FIRST) it closes this molecule's bead"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(LIVE-FIRST) the earlier molecule is untouched"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=open,in_progress " "(LIVE-FIRST) the stamp is read from open and in_progress rows"
+hasnt "$(cat "$FAKE_CALLS")" "blocked,closed" "(LIVE-FIRST) …and closed rows are never read for it"
+
+# A re-run over a closed chain finds no live stamp, and only then reads closed rows.
+cat > "$FAKE_BEADS" <<B
+tk-9b3d8|$MINE|$STEP|closed|root-1|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$STEP"
+eq "$RC" "0" "(LIVE-EMPTY) a re-run over a closed chain still resolves"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=blocked,closed " "(LIVE-EMPTY) the closed rows are read once no live row carries the stamp"
+
+# Two live roots under the stamp are no answer, and reading closed rows could
+# not make one, so they are not read.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
+tk-oth111||mol-polecat-work.implement|in_progress|root-other|lx-zzk9
+B
+: > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+run --step "$FSTEP"
+eq "$RC" "0" "(LIVE-AMBIG) the assignee still settles a step the live stamp cannot"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-AMBIG) it closes this session's bead"
+hasnt "$(cat "$FAKE_CALLS")" "blocked,closed" "(LIVE-AMBIG) two live roots skip the closed read"
+
 # --- 2. resolution with no env id at all -------------------------------------
 reset_beads
 run --step "$STEP"
@@ -821,6 +1012,457 @@ for f in mol-feedback-distiller mol-feedback-miner; do
   hasnt "$CMDS" 'gc bd update "\$GC_BEAD_ID"' "(SHIPPED) $f closes no bead on \$GC_BEAD_ID"
   has "$(cat "$FORMULA")" 'step-close.sh' "(SHIPPED) $f closes through step-close.sh"
 done
+
+# Every step-close call in a formula that has an input convoy names its
+# molecule with it. A formula without one has nothing to pass, and its closes
+# rest on the derivation.
+#
+# A call is found by what it runs, not by how it names the script: a variable
+# of any name bound to the script's path, the path itself, or a wrapper such as
+# bash in front of either, with its words read across continued lines and
+# inside substitutions. It reads the fences tagged bash, sh or shell, which is
+# where the formulas put the shell an agent runs. Text that a command runs as
+# shell, such as a quoted string after bash -c or eval, or a heredoc fed to
+# bash, is not read as commands. CALL_SCAN prints one tab-separated line per
+# finding:
+#   call <line> named|unnamed <words>  a command that runs step-close.sh, and
+#                                      whether it passes --convoy {{convoy_id}}
+#   unread <line> <words>              a --step with no script named before it
+#   unlexed <line> <why>               a shell fence the scan cannot read to
+#                                      its end
+# An unread --step or an unlexed fence fails the formula too: the scan cannot
+# tell what runs there, so a call that drops --convoy could sit in it unseen.
+CALL_SCAN='
+# Frames FR[1..sp]: T the top level, P a subshell (...), C a substitution
+# $(...), <(...) or >(...), B a backtick substitution, S a single-quoted
+# string, A a $-single-quoted one, Q a double-quoted one, K ${...} and R
+# $((...)) with a nesting depth in DP[], and H an unquoted heredoc body. T, P,
+# C and B hold commands: each collects its finished words in WS[] and the word
+# in progress in WD[]. Quoted text joins the word of the nearest command frame
+# below it with its quotes removed, so "$SC" and $SC read alike.
+function reset_state() {
+    sp = 1; FR[1] = "T"; WD[1] = ""; WS[1] = ""; WL[1] = 0; RDR[1] = 0
+    hn = 0; hi = 0; hb = 0; CONT = 0; pend = ""; BADESC = ""
+}
+function cmdf(t) { return t == "T" || t == "P" || t == "C" || t == "B" }
+function lvl(   k) { k = sp; while (k > 1 && !cmdf(FR[k])) k--; return k }
+function push(t, d) { FR[++sp] = t; DP[sp] = d; if (cmdf(t)) { WD[sp] = ""; WS[sp] = ""; WL[sp] = 0; RDR[sp] = 0 } }
+function pop1() { if (sp > 1) sp-- }
+function add(s,   k) { k = lvl(); if (WD[k] == "" && WS[k] == "") WL[k] = LN; WD[k] = WD[k] s }
+# A redirection target is not an argument of its command, so RDR drops the
+# word after the operator, and redirect drops an fd number written before it.
+# The array is not named RT, which gawk reserves for the record terminator.
+function endword(   k) {
+    k = lvl()
+    if (WD[k] == "") return
+    if (RDR[k]) RDR[k] = 0
+    else WS[k] = WS[k] (WS[k] == "" ? "" : SEP) WD[k]
+    WD[k] = ""
+}
+function redirect(   k) { k = lvl(); if (WD[k] ~ /^[0-9]+$/) WD[k] = ""; else endword(); RDR[k] = 1 }
+function endcmd(   k) {
+    endword(); k = lvl()
+    if (WS[k] != "") { NC++; CL[NC] = WL[k]; CW[NC] = WS[k] }
+    WS[k] = ""; WL[k] = 0; RDR[k] = 0
+}
+# The fence is read as the shell an agent runs it in receives it, through the
+# escapes of the TOML basic string that holds it. A backslash that ends a line,
+# not itself escaped, joins the line to the next and drops the whitespace and
+# blank lines between them; toml_joins reports one and leaves the line without
+# it in TJ. Of the escapes, \\ is one backslash, \" a quote, \t a tab and \n a
+# line break, and \b, \f, \r and \e are characters the shell treats as
+# ordinary. \u and \U can spell any character, a quote among them, so TE names
+# the escape and the fence is reported unread.
+function toml_joins(s,   n) {
+    sub(/[ \t]+$/, "", s)
+    n = 0; while (n < length(s) && substr(s, length(s) - n, 1) == "\\") n++
+    if (n % 2 == 0) return 0
+    TJ = substr(s, 1, length(s) - 1); return 1
+}
+function toml_text(s,   out, i, n, c, d) {
+    out = ""; n = length(s); TE = ""
+    for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\\" && i < n) {
+            d = substr(s, i + 1, 1); i++
+            if (d == "\\" || d == "\"") out = out d
+            else if (d == "t") out = out "\t"
+            else if (d == "n") out = out "\n"
+            else if (d ~ /[bfre]/) out = out "_"
+            else { TE = d; out = out "_" }
+            continue
+        }
+        out = out c
+    }
+    return out
+}
+# A heredoc body is input to the command that opened it. An unquoted body is
+# scanned for the substitutions in it, which run, and the word below it is
+# restored when the body ends, so the body text never starts the first word of
+# the command after it.
+function body_begin() {
+    hb = 1; hbt = HT[hi]; hbq = HQ[hi]; hbd = HD[hi]; hbsp = sp
+    if (!hbq) { hbw = WD[lvl()]; push("H", 0) }
+}
+function body_end() {
+    if (!hbq) { sp = hbsp; WD[lvl()] = hbw }
+    if (++hi <= hn) body_begin(); else { hb = 0; hn = 0; hi = 0 }
+}
+function scan(s,   n, i, c, t, rest, w, dash, tok) {
+    n = length(s); CONT = 0
+    for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1); t = FR[sp]
+        if (t == "S") { if (c == "\047") pop1(); else add(c); continue }
+        if (t == "A") { if (c == "\\") { add(substr(s, i + 1, 1)); i++ } else if (c == "\047") pop1(); else add(c); continue }
+        if (t == "R") { if (c == "(") DP[sp]++; else if (c == ")" && --DP[sp] <= 0) pop1(); continue }
+        if (t == "K") { add(c); if (c == "{") DP[sp]++; else if (c == "}" && --DP[sp] <= 0) pop1(); continue }
+        if (c == "\\") {
+            if (i == n) { CONT = 1; break }
+            add(substr(s, i + 1, 1)); i++; continue
+        }
+        if (c == "$") {
+            rest = substr(s, i + 1)
+            if (substr(rest, 1, 2) == "((") { add("$(())"); push("R", 2); i += 2; continue }
+            c = substr(rest, 1, 1)
+            if (c == "(") { add("$("); push("C", 0); i++; continue }
+            if (c == "{") { add("${"); push("K", 1); i++; continue }
+            if (t != "Q" && t != "H") {
+                if (c == "\047") { push("A", 0); i++; continue }
+                if (c == "\"") { push("Q", 0); i++; continue }
+            }
+            add("$"); continue
+        }
+        if (c == "`") {
+            if (t == "B") { endcmd(); pop1(); add("`") } else { add("`"); push("B", 0) }
+            continue
+        }
+        if (t == "Q") { if (c == "\"") pop1(); else add(c); continue }
+        if (t == "H") { add(c); continue }
+        # T, P, C and B are unquoted.
+        if (c == "\047") { push("S", 0); continue }
+        if (c == "\"") { push("Q", 0); continue }
+        if (c == " " || c == "\t") { endword(); continue }
+        if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[[:space:];&|()<>]/)) break
+        if (c == "(") { endcmd(); push("P", 0); continue }
+        if (c == ")") {
+            if (t == "C") { endcmd(); pop1(); add(")") }
+            else if (t == "P") { endcmd(); pop1() }
+            else endcmd()
+            continue
+        }
+        if (c == ";") { endcmd(); continue }
+        if (c == "&") {
+            if (substr(s, i + 1, 1) == "&") { endcmd(); i++ }
+            else if (substr(s, i + 1, 1) == ">") { redirect(); i++; if (substr(s, i + 1, 1) == ">") i++ }
+            else endcmd()
+            continue
+        }
+        if (c == "|") { endcmd(); if (substr(s, i + 1, 1) ~ /[|&]/) i++; continue }
+        if (c == "<" && substr(s, i + 1, 2) == "<<") { redirect(); i += 2; continue }
+        if (c == "<" && substr(s, i + 1, 1) == "<") {
+            endword()
+            rest = substr(s, i + 2); w = 0; dash = 0
+            if (substr(rest, 1, 1) == "-") { dash = 1; rest = substr(rest, 2); w = 1 }
+            match(rest, /^[[:space:]]*/); w += RLENGTH; rest = substr(rest, RLENGTH + 1)
+            if (match(rest, /^[A-Za-z_\047"\\][^[:space:]<>;&|()]*/)) {
+                tok = substr(rest, 1, RLENGTH)
+                HQ[++hn] = (tok ~ /[\047"\\]/)
+                gsub(/[\047"\\]/, "", tok)
+                HT[hn] = tok; HD[hn] = dash
+                i += 1 + w + RLENGTH
+            } else i++
+            continue
+        }
+        if ((c == "<" || c == ">") && substr(s, i + 1, 1) == "(") { add(c "("); push("C", 0); i++; continue }
+        if (c == "<" || c == ">") { redirect(); if (substr(s, i + 1, 1) ~ /[<>&|]/) i++; continue }
+        add(c)
+    }
+}
+function physical(line,   t) {
+    if (hb) {
+        t = line
+        if (hbd) sub(/^\t+/, "", t)
+        sub(/[[:space:]]+$/, "", t)
+        if (t == hbt) { body_end(); return }
+        if (hbq) return
+    }
+    scan(line)
+    if (!CONT) {
+        if (cmdf(FR[sp])) endcmd()
+        else if (FR[sp] == "S" || FR[sp] == "A" || FR[sp] == "Q" || FR[sp] == "H") add(" ")
+    }
+    # A heredoc body starts on the line after the command that opened it ends.
+    if (!hb && hn > 0 && !CONT && FR[sp] != "S" && FR[sp] != "Q" && FR[sp] != "A") { hi = 1; body_begin() }
+}
+function shell_fence(l,   lang) {
+    lang = l
+    sub(/^[[:space:]]*```[[:space:]]*/, "", lang)
+    sub(/[[:space:]].*$/, "", lang)
+    return (lang == "bash" || lang == "sh" || lang == "shell")
+}
+function fence_end(   what) {
+    what = ""
+    if (BADESC != "") what = "a TOML escape \\" BADESC " that can spell a quote"
+    else if (pend != "" || CONT) what = "a line continued past its end"
+    else if (hb || hn > 0) what = "a heredoc whose terminator never comes"
+    else if (sp != 1) what = OPEN[FR[sp]]
+    if (what != "") print "unlexed\t" FL "\tthe fence opened here ends inside " what
+    endcmd(); reset_state()
+}
+BEGIN {
+    SEP = "\037"; reset_state()
+    OPEN["S"] = "a single-quoted string"; OPEN["A"] = "a $\047...\047 string"; OPEN["Q"] = "a double-quoted string"
+    OPEN["K"] = "a ${...} expansion"; OPEN["R"] = "a $((...)) expansion"; OPEN["C"] = "a substitution"
+    OPEN["P"] = "a (...) subshell"; OPEN["B"] = "a backtick substitution"; OPEN["H"] = "a heredoc"
+}
+/^[[:space:]]*```/ {
+    if (inb) { inb = 0; fence_end() }
+    else if (other) other = 0
+    else if (shell_fence($0)) { inb = 1; FL = FNR; reset_state() }
+    else other = 1
+    next
+}
+!inb { next }
+pend != "" && /^[[:space:]]*$/ { next }
+{
+    src = $0
+    if (pend != "") { sub(/^[[:space:]]+/, "", src); src = pend src; pend = "" } else LN = FNR
+    if (toml_joins(src)) { pend = TJ; next }
+    nseg = split(toml_text(src), seg, "\n")
+    if (TE != "") BADESC = TE
+    if (nseg == 0) physical("")
+    for (g = 1; g <= nseg; g++) physical(seg[g])
+}
+# The scripts a word names: a path ending in <name>.sh, or a variable the
+# formula binds to one. An assignment-shaped word binds instead of naming.
+function scripts_of(w,   nm, k, kp, out) {
+    if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) return ""
+    if (w ~ /(^|\/)[A-Za-z0-9_.-]+\.sh$/) { sub(/^.*\//, "", w); return w }
+    nm = ""
+    if (w ~ /^[$][A-Za-z_][A-Za-z0-9_]*$/) nm = substr(w, 2)
+    else if (w ~ /^[$][{][A-Za-z_][A-Za-z0-9_]*(:?[-=?+][^}]*)?[}]$/) { nm = substr(w, 3); sub(/[^A-Za-z0-9_].*$/, "", nm) }
+    if (nm == "") return ""
+    out = ""
+    for (k in BIND) { split(k, kp, SUBSEP); if (kp[1] == nm) out = out " " kp[2] }
+    return out
+}
+function reserved(w) { return w ~ /^(if|then|else|elif|fi|do|done|while|until|[{]|[}]|!|time)$/ }
+END {
+    if (inb) print "unlexed\t" FL "\tthe fence opened here never closes"
+    # A variable binds to every script a value assigned to it names, through
+    # other variables too, so bindings are collected to a fixed point.
+    na = 0
+    for (c = 1; c <= NC; c++) {
+        n = split(CW[c], w, SEP); j = 1; decl = 0
+        while (j <= n && reserved(w[j])) j++
+        for (; j <= n; j++) {
+            if (w[j] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                AN[++na] = w[j]; sub(/=.*$/, "", AN[na]); AV[na] = substr(w[j], length(AN[na]) + 2)
+                continue
+            }
+            if (!decl && w[j] ~ /^(local|export|declare|readonly|typeset)$/) { decl = 1; continue }
+            if (decl && w[j] ~ /^-/) continue
+            break
+        }
+    }
+    do {
+        grew = 0
+        for (a = 1; a <= na; a++) {
+            m = split(scripts_of(AV[a]), sc, " ")
+            for (q = 1; q <= m; q++) if (!((AN[a], sc[q]) in BIND)) { BIND[AN[a], sc[q]] = 1; grew = 1 }
+        }
+    } while (grew)
+    # A command runs step-close.sh when its command word names the script, or
+    # when a word naming it is followed by --step, as under bash or timeout.
+    # Each --step belongs to the script named last before it, and one with no
+    # script before it is reported unread. A word naming the script with no
+    # --step after it is data, as in dirname "$SC".
+    for (c = 1; c <= NC; c++) {
+        n = split(CW[c], w, SEP); j = 1
+        while (j <= n && reserved(w[j])) j++
+        while (j <= n && w[j] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) j++
+        if (j > n || w[j] ~ /^(\[|\[\[|test|:|local|export|declare|readonly|typeset)$/) continue
+        last = scripts_of(w[j]); call = ((" " last " ") ~ / step-close\.sh /)
+        unread = 0; named = 0; text = w[j]
+        for (k = j + 1; k <= n; k++) {
+            r = scripts_of(w[k]); if (r != "") last = r
+            if (w[k] == "--step") {
+                if (last ~ /^[[:space:]]*$/) unread = 1
+                else if ((" " last " ") ~ / step-close\.sh /) call = 1
+            }
+            if (w[k] == "--convoy" && k < n && w[k + 1] == "{{convoy_id}}") named = 1
+            text = text " " w[k]
+        }
+        if (call) print "call\t" CL[c] "\t" (named ? "named" : "unnamed") "\t" text
+        else if (unread) print "unread\t" CL[c] "\t" text
+    }
+}
+'
+formula_calls() { awk "$CALL_SCAN" "$1"; }
+# calls_unnamed <scan> and scan_unread <scan> print the findings that fail a
+# formula with an input convoy, one "<line>: <words or why>" per line.
+calls_unnamed() { awk -F '\t' '$1 == "call" && $3 == "unnamed" { print $2 ": " $4 }' <<< "$1"; }
+scan_unread()   { awk -F '\t' '$1 == "unread" || $1 == "unlexed" { print $2 ": " $3 }' <<< "$1"; }
+
+NAMED=0
+for FORMULA in "$ROOT"/formulas/*.toml; do
+  grep -q '{{convoy_id}}' "$FORMULA" || continue
+  F=$(basename "$FORMULA")
+  if ! SCAN=$(formula_calls "$FORMULA"); then bad "(SHIPPED) the call scan could not run on $F"; continue; fi
+  UNREAD=$(scan_unread "$SCAN")
+  [ -z "$UNREAD" ] || bad "(SHIPPED) $F has shell the call scan cannot read, so a call there could drop --convoy unseen: $UNREAD"
+  hasin "$SCAN" '^call' || continue
+  NAMED=$((NAMED + 1))
+  UNNAMED=$(calls_unnamed "$SCAN")
+  if [ -z "$UNNAMED" ]; then
+    ok "(SHIPPED) every step-close call in $F passes --convoy {{convoy_id}}"
+  else
+    bad "(SHIPPED) $F calls step-close without naming its molecule: $UNNAMED"
+  fi
+done
+[ "$NAMED" -ge 2 ] && ok "(SHIPPED) the convoy check reached the formulas that close steps ($NAMED)" \
+                   || bad "(SHIPPED) expected formulas calling step-close with an input convoy, found $NAMED"
+
+# The scan reads a call however it is spelled. Each fixture line is one case:
+# a call the scan must read, words that only name the script, or shell the scan
+# must report it cannot read.
+FX="$TMP/mol-fx.toml"
+cat > "$FX" <<'FX'
+formula = "mol-fx"
+description = """
+Prose that shows `"$SCRIPTS/step-close.sh" --step mol-fx.a` runs nothing.
+```bash
+STEP_CLOSE="$SCRIPTS/step-close.sh"
+CLOSER="$STEP_CLOSE"
+"$SCRIPTS/step-close.sh" --step mol-fx.a --outcome pass
+"${SCRIPTS:?no pack}/step-close.sh" --step mol-fx.a
+"$CLOSER" --step mol-fx.a
+bash "$STEP_CLOSE" --step mol-fx.a
+"$STEP_CLOSE" \
+  --step mol-fx.a
+OUT=$("$STEP_CLOSE" --step mol-fx.a 2>&1)
+"$STEP_CLOSE" --step mol-fx.a --convoy {{convoy_id}} && "$STEP_CLOSE" --step mol-fx.b
+"$STEP_CLOSE" --step mol-fx.a --outcome "pass --convoy {{convoy_id}}"
+"$STEP_CLOSE" --step mol-fx.a --convoy "$CONVOY"
+"$STEP_CLOSE" --convoy "{{convoy_id}}" --step mol-fx.a
+cat <<NOTE
+$("$STEP_CLOSE" --step mol-fx.a)
+NOTE
+# "$STEP_CLOSE" --step mol-fx.a
+[ -x "$STEP_CLOSE" ] && dirname "$STEP_CLOSE" >/dev/null
+cat <<'NOTE'
+"$STEP_CLOSE" --step mol-fx.a is data in a quoted heredoc body
+NOTE
+"$SCRIPTS/molecule-hold.sh" --step mol-fx.a --reason "a hold, not a close"
+"$UNBOUND" --step mol-fx.a --convoy {{convoy_id}}
+"$STEP_CLOSE" --step mol-fx.c \\
+  --convoy {{convoy_id}}
+"$STEP_CLOSE" --step mol-fx.d\
+  --convoy {{convoy_id}}
+cat <<NOTE
+an unquoted heredoc body
+NOTE
+"$STEP_CLOSE" --step mol-fx.e --convoy {{convoy_id}}
+```
+```
+"$STEP_CLOSE" --step mol-fx.a, quoted in a fence that is not shell
+```
+```bash
+echo "a string the fence never closes
+```
+"""
+FX
+FXSCAN=$(formula_calls "$FX" | tr '\t' '|')
+fx() { # <expected finding, fields joined by |> <what it shows>
+  case $'\n'"$FXSCAN"$'\n' in
+    *$'\n'"$1"$'\n'*) ok "(SCAN) $2" ;;
+    *) bad "(SCAN) $2 (no finding '$1' in: $FXSCAN)" ;;
+  esac
+}
+fx 'call|7|unnamed|$SCRIPTS/step-close.sh --step mol-fx.a --outcome pass' "a call through the script's path is read"
+fx 'call|8|unnamed|${SCRIPTS:?no pack}/step-close.sh --step mol-fx.a' "a call through a guarded expansion of the scripts directory is read"
+fx 'call|9|unnamed|$CLOSER --step mol-fx.a' "a call through a variable bound to another one that holds the path is read"
+fx 'call|10|unnamed|bash $STEP_CLOSE --step mol-fx.a' "a call under a wrapper is read"
+fx 'call|11|unnamed|$STEP_CLOSE --step mol-fx.a' "a call continued onto a second line is read as one command"
+fx 'call|13|unnamed|$STEP_CLOSE --step mol-fx.a' "a call inside a command substitution is read"
+fx 'call|14|named|$STEP_CLOSE --step mol-fx.a --convoy {{convoy_id}}' "the first of two calls on one line is judged on its own words"
+fx 'call|14|unnamed|$STEP_CLOSE --step mol-fx.b' "the second of two calls on one line is judged on its own words"
+fx 'call|15|unnamed|$STEP_CLOSE --step mol-fx.a --outcome pass --convoy {{convoy_id}}' "--convoy inside a quoted argument names no molecule"
+fx 'call|16|unnamed|$STEP_CLOSE --step mol-fx.a --convoy $CONVOY' "--convoy given any value but {{convoy_id}} names no molecule of this formula"
+fx 'call|17|named|$STEP_CLOSE --convoy {{convoy_id}} --step mol-fx.a' "--convoy with the convoy quoted names the molecule, in any argument order"
+fx 'call|19|unnamed|$STEP_CLOSE --step mol-fx.a' "a call in an unquoted heredoc body runs, so it is read"
+fx 'unread|27|$UNBOUND --step mol-fx.a --convoy {{convoy_id}}' "a --step with no script named before it is reported unread"
+fx 'call|28|named|$STEP_CLOSE --step mol-fx.c --convoy {{convoy_id}}' "a call the shell continues over a TOML-escaped backslash is read as one command"
+fx 'call|30|unnamed|$STEP_CLOSE --step mol-fx.d--convoy {{convoy_id}}' "a TOML backslash joins lines without the space between them, so the call it glues to --convoy is read unnamed"
+fx 'call|35|named|$STEP_CLOSE --step mol-fx.e --convoy {{convoy_id}}' "a call after an unquoted heredoc is read at its own line, with none of the body's text"
+fx 'unlexed|40|the fence opened here ends inside a double-quoted string' "a fence left inside an open string is reported unlexed"
+eq "$(grep -c . <<< "$FXSCAN")" "17" "(SCAN) nothing else reads as a finding: prose, a comment, a test, dirname, a quoted heredoc body, molecule-hold's --step, or a fence not tagged as shell"
+
+# A mutant of the shipped tree: mol-review's review-step close rewritten in the
+# "$SCRIPTS/step-close.sh" spelling with --convoy dropped. The check fails it,
+# where it passes the unmutated formula above.
+MUT="$TMP/mol-review.toml"
+if awk '
+     index($0, "--step mol-review.review ") && index($0, "--convoy {{convoy_id}}") { print "\"$SCRIPTS/step-close.sh\" --step mol-review.review --outcome pass"; n++; next }
+     { print }
+     END { exit (n == 1 ? 0 : 1) }' "$ROOT/formulas/mol-review.toml" > "$MUT"; then
+  MUTLINE=$(grep -n -F -- '"$SCRIPTS/step-close.sh" --step mol-review.review --outcome pass' "$MUT" | cut -d: -f1)
+  eq "$(calls_unnamed "$(formula_calls "$MUT")")" "$MUTLINE: \$SCRIPTS/step-close.sh --step mol-review.review --outcome pass" \
+     "(MUTANT) the check fails a \"\$SCRIPTS/step-close.sh\" --step call that drops --convoy, and nothing else in mol-review"
+else
+  bad "(MUTANT) expected exactly one review-step close in mol-review.toml to rewrite"
+fi
+
+# --- 18. a step loop that names its molecule never scans gc.session_id --------
+# The terminal chain-close runs step-close once per step. Deriving the molecule
+# on each call read the session stamp over closed rows every time, about 6 to 9
+# seconds a call on a loaded store. The loop the formula ships is extracted and
+# run against the real script: every step resolves inside the named molecule,
+# and no read keys on gc.session_id.
+LOOP_SRC=$(awk '/^# >>> submit-chain-close$/ {f = 1; next} /^# <<< submit-chain-close$/ {f = 0} f' \
+  "$ROOT/formulas/mol-polecat-work.toml")
+if [ -n "$LOOP_SRC" ]; then ok "(LOOP) the submit-chain-close loop is extracted"; else bad "(LOOP) submit-chain-close markers missing from mol-polecat-work.toml"; fi
+loop_store() {
+  cat > "$FAKE_BEADS" <<B
+root-loop|||in_progress|||conv-loop|mol-polecat-work
+tk-s1aaa|gc-toolkit__polecat-lx-a|mol-polecat-work.load-context|closed|root-loop|lx-a
+tk-s2aaa||mol-polecat-work.workspace-setup|closed|root-loop|
+tk-s3aaa||mol-polecat-work.preflight-tests|closed|root-loop|
+tk-s4aaa||mol-polecat-work.implement|closed|root-loop|
+tk-s5aaa|$MINE|mol-polecat-work.submit-and-exit|in_progress|root-loop|lx-zzk9
+tk-wfaaa||mol-polecat-work.workflow-finalize|open|root-loop|
+tk-q1aaa||mol-polecat-work.submit-and-exit|open|root-q1|
+tk-q2aaa||mol-polecat-work.load-context|open|root-q2|
+B
+  : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
+}
+run_loop() { # <loop file>; sets OUT and RC
+  RC=0
+  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    bash "$1" 2>&1) || RC=$?
+}
+
+printf '%s\n' "$LOOP_SRC" | sed 's/{{convoy_id}}/conv-loop/g' > "$TMP/loop-convoy.sh"
+loop_store
+run_loop "$TMP/loop-convoy.sh"
+eq "$RC" "0" "(LOOP) the shipped loop runs clean"
+eq "$(cat "$FAKE_CLOSED")" "tk-s5aaa pass" "(LOOP) it closes this session's step and nothing else"
+eq "$(grep -c 'is already closed' <<< "$OUT")" "4" "(LOOP) the four steps other sessions closed read as done"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(LOOP) a loop that names its molecule issues no gc.session_id read"
+
+# The same loop given --root, as a caller holding the root passes it.
+printf '%s\n' "$LOOP_SRC" | sed 's/--convoy {{convoy_id}}/--root root-loop/' > "$TMP/loop-root.sh"
+loop_store
+run_loop "$TMP/loop-root.sh"
+eq "$(cat "$FAKE_CLOSED")" "tk-s5aaa pass" "(LOOP-ROOT) a loop given --root closes this session's step"
+hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(LOOP-ROOT) a loop given --root issues no gc.session_id read"
+
+# CONTROL: the loop with the molecule's name removed derives it on every call,
+# which is the read the two runs above are asserted not to issue.
+printf '%s\n' "$LOOP_SRC" | sed 's/ --convoy {{convoy_id}}//' > "$TMP/loop-bare.sh"
+loop_store
+run_loop "$TMP/loop-bare.sh"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9" "(LOOP-CONTROL) without the molecule's name, every call reads the session stamp"
 
 echo
 echo "step-close.test.sh: $PASS passed, $FAIL failed"

@@ -64,17 +64,24 @@ overrule — but declining a human objection owes them an answer, passed as
 silent decline; a deferral owes the same answer, its follow-up id posted the same
 way, and a comment the pass genuinely cannot judge is `needs-you` — it files a
 visit, holds the review changes-requested until the operator rules it, and posts
-the visit id to their thread; a re-raise re-blocks because the closed finding
-re-adopts fresh on re-review),
+the visit id to their thread; a comment whose question an open visit on the
+anchor's feedback already carries is `needs-you --visit` on that visit, never
+ruled on its merits, and `finding.sh` refuses any other ruling while that visit
+sits on the comment's own rework; a re-raise re-blocks because the closed
+finding re-adopts fresh on re-review),
 and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
 review is warranted. A `human` batch is anchor-wide: unconverged, it supersedes
 every lane the anchor's `check_set` declares (`supersede-anchor`); converged, it
 writes no outcome, leaving the declared lanes' green and the open must-fix
-findings to hold the merge. It never stamps a `check.<lane>` marker, never closes
-or routes the anchor, and never runs `gh pr review --approve` — the city does not
-approve PRs. Closing the validation-pass bead is the terminal step; the
+findings to hold the merge. A batch of either shape that has not converged also
+dismisses every approval on the PR from an account other than the city's
+(`approval-withdraw.sh`) and notes that on the anchor, because the change it
+calls for is not the code the approver saw. A converged batch leaves any
+approval standing. The pass never stamps a `check.<lane>` marker, never closes
+or routes the anchor, and never runs `gh pr review --approve` — the city does
+not approve PRs. Closing the validation-pass bead is the terminal step; the
 dispositions and any convergence outcome above are what carry the lane state.
 H
 

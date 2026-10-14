@@ -3,7 +3,15 @@
 # audited writer for check.<gate> markers). Run once by the review agent after
 # mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
-#              [--notes-file <path>] [--reviewed-oid <oid>]
+#              [--notes-file <path>] [--reviewed-oid <oid>] [--needs-you <text>]
+# The posted artifact opens with one line, the same for every check: the check
+# and its verdict, then the one decision it needs from the operator or "Nothing
+# needs you". The reviewer's notes follow it as the trail.
+# A triage approve on an anchor whose bring-current round awaits triage also
+# carries that round's ruling (--reopen, --round-reason, --dismiss-approval),
+# which bring-current-guard.sh's `decide` records and carries out before the
+# artifact is posted. The round's account sits collapsed under the opening line,
+# and a ruling that lifts the approval is the decision that line names.
 # Both verdicts first record reviewed_oid on the review bead. A lane state names
 # no commit, but lane-state.sh derives green only from a local backing bead that
 # carries a reviewed_oid, so recording it here is what lets an approve close back
@@ -11,7 +19,8 @@
 # approve: post the artifact (gh pr review --comment post-open; review-bead
 # notes pre-open), stamp check.<name>=green on the anchor, and dismiss the
 # city's own superseded CHANGES_REQUESTED review. request-changes: clear the
-# marker, returning the lane to unreviewed, and file ONE routed rework child.
+# marker, returning the lane to unreviewed, and file ONE routed rework child
+# through rework-child.sh.
 # Convergence is judged, not counted. The validator rules whether a further
 # whole-diff review is warranted once the must-fix set closes
 # (specs/tk-ztapg/review-cycle-architecture.md), so request-changes files a
@@ -50,9 +59,12 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
-# The route gate (pool-route.sh) lives beside this script; the rework route is
-# proved through it before the fix child is filed.
+# The check-index parser (review-checks.sh) lives beside this script.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+# The one writer of a rework child. request-changes files its fix unit through it,
+# under this review's provenance, and the writer proves the pool route, the work
+# order, the blocks edge and the dispatch.
+REWORK_CHILD="$HERE/rework-child.sh"
 # The single writer of the workflow-owned `status:` PR label. A verdict is the
 # event-precise flip: request-changes sets the PR working (a rework child now
 # stands on it), the cap park sets needs-attention, and an approve reconciles to
@@ -66,18 +78,30 @@ VALIDATE_BODY="${GC_VALIDATE_BODY_TOOL:-$HERE/validate-dispatch-body.sh}"
 # so the review carries the city's mark, and the superseded-block dismissal asks
 # its definition of the city's own review (gc_city_own) rather than the login.
 PR_POST="$HERE/pr-post.sh"
+# The bring-current round's ruling: what a conflicted round reopens, and whether
+# the approval it touched is dismissed. Overridable so the hermetic test can
+# stand in for it.
+BRING_CURRENT="${GC_BRING_CURRENT_TOOL:-$HERE/bring-current-guard.sh}"
 
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
-                  [--reviewed-oid <oid>] [--add-gates <checks>]
-                  [--visual <decision>]
+                  [--reviewed-oid <oid>] [--needs-you <text>] [--add-gates <checks>]
+                  [--visual <decision> [--visual-fallback-from <modality>]]
+                  [--reopen <lanes>|none --round-reason <text> [--dismiss-approval]]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
                  or request-changes (required)
-  --notes-file   the verdict body; default: the review bead's notes
+  --notes-file   the verdict body, the trail under the opening line; default:
+                 the review bead's notes
+  --needs-you    the one decision this review needs from the operator: what it
+                 is, what it means, and where to look. The opening line names
+                 it; absent, it says nothing needs them. A finding is not one,
+                 because the city fixes it. Refused beside a ruling that lifts
+                 the approval, on this call or recorded by this review's
+                 earlier attempt, whose round reason is the decision.
   --findings-file
                  the structured finding set as a JSON array, one object per
                  blocking finding, each with a rebase-stable `locus` (a file and
@@ -103,22 +127,56 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  screenshot or video). Required on every demo verdict and
                  refused on any other check's; none records with approve only.
                  Stamped on the review bead as visual=<decision> and named on
-                 the posted artifact's `Visual:` line.
+                 the posted artifact's `Visual:` line, where repo-artifact
+                 reads `author-committed`: a committed visual is what an
+                 author recorded, not a capture of the reviewed commit.
+  --visual-fallback-from
+                 the modality that fits when --visual names a cheaper one
+                 delivered in its place because the fitting one could not be
+                 produced: screenshot or video, costlier than --visual.
+                 Stamped as visual_fallback_from and named on the `Visual:`
+                 line as `fallback from <modality>`. A demo verdict without it
+                 clears the stamp.
+  --reopen       triage's ruling on a bring-current round that conflicted:
+                 the lanes the anchor declares that run again on the merged
+                 code, or none. Required on a triage approve while the anchor's
+                 bring_current_record holds a conflicted round triage has not
+                 ruled on. A check the anchor does not declare is added with
+                 --add-gates, and a lane added on this call runs on the merged
+                 code as well. On a round this review already ruled on, the
+                 verdict's retry carries out the recorded ruling, with these
+                 flags dropped or stating that ruling. Refused anywhere else.
+  --round-reason why the round reopens what it does, one line; required with
+                 --reopen. With --dismiss-approval it is the call the operator
+                 is asked to make, and it opens the posted verdict and the
+                 dismissal note.
+  --dismiss-approval
+                 the round made a call that is the operator's to make: it
+                 changed what the PR does, by inferring one side's intent or
+                 by choosing between two live designs. Lift the approval: no
+                 approval given at or before the round counts toward the merge
+                 from then on, and each approver is asked to review again.
 U
 }
 
 warn() { echo "signoff: $*" >&2; }
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""; ADD_GATES=""; VISUAL=""
+VISUAL_FALLBACK=""; REOPEN=""; ROUND_REASON=""; DISMISS_APPROVAL=""; NEEDS_YOU=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
     --verdict)      VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
     --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
+    --needs-you)    NEEDS_YOU="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --add-gates)    ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
     --visual)       VISUAL="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --visual-fallback-from) VISUAL_FALLBACK="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --reopen)       REOPEN="${2:-}";          shift 2 || { usage; exit 1; } ;;
+    --round-reason) ROUND_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --dismiss-approval) DISMISS_APPROVAL=1;   shift ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
@@ -134,11 +192,22 @@ fi
 if [ -n "$FINDINGS_FILE" ] && [ ! -r "$FINDINGS_FILE" ]; then
   warn "--findings-file '$FINDINGS_FILE' is not readable; nothing written"; exit 1
 fi
+# The decision rides the opening line, so it is one line. A "Needs you:" the
+# reviewer wrote into it is the line's own label, and a decision of none or
+# nothing is no decision.
+NEEDS_YOU=$(printf '%s' "$NEEDS_YOU" | tr '\000-\037' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+  "needs you:"*) NEEDS_YOU="${NEEDS_YOU:10}"; NEEDS_YOU="${NEEDS_YOU# }" ;;
+esac
+case "$(printf '%s' "$NEEDS_YOU" | tr '[:upper:]' '[:lower:]')" in
+  ''|none|none.|nothing|nothing.|n/a) NEEDS_YOU="" ;;
+  *[.!?]) : ;;
+  *) NEEDS_YOU="$NEEDS_YOU." ;;
+esac
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
-row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
@@ -221,7 +290,15 @@ fi
 # refused rather than recorded without the decision it exists to make, and no
 # other check records one. none is approve-only: a check that found no visual
 # needed has nothing to block on. Refused before a marker is touched.
+#
+# --visual-fallback-from records that the visual delivered stands in for the
+# modality that fits, which could not be produced here. A fallback is cheaper
+# than what it stands in for, and the modalities rank by cost: repo-artifact,
+# then screenshot, then video. So the flag names a modality costlier than
+# --visual, and --visual none, which delivers nothing, takes none.
 VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+VISUAL_FALLBACK=$(printf '%s' "$VISUAL_FALLBACK" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+modality_cost() { case "$1" in repo-artifact) echo 1 ;; screenshot) echo 2 ;; video) echo 3 ;; *) echo 0 ;; esac; }
 if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
   case "$VISUAL" in
     none|repo-artifact|screenshot|video) ;;
@@ -232,7 +309,21 @@ if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
     warn "--visual none records that the change needs no visual, which leaves the '$VISUAL_GATE' check nothing to block on; it records with --verdict approve only. Nothing written"
     exit 1
   fi
-elif [ -n "$VISUAL" ]; then
+  if [ -n "$VISUAL_FALLBACK" ]; then
+    case "$VISUAL_FALLBACK" in
+      screenshot|video) ;;
+      *) warn "--visual-fallback-from must be screenshot or video, the modality that fits (got '$VISUAL_FALLBACK'); nothing written"; exit 1 ;;
+    esac
+    if [ "$VISUAL" = none ]; then
+      warn "--visual-fallback-from names the modality a delivered visual stands in for, and --visual none delivers no visual; nothing written"
+      exit 1
+    fi
+    if [ "$(modality_cost "$VISUAL")" -ge "$(modality_cost "$VISUAL_FALLBACK")" ]; then
+      warn "a fallback is cheaper than the modality it stands in for, so '$VISUAL' cannot be a fallback from '$VISUAL_FALLBACK'; nothing written"
+      exit 1
+    fi
+  fi
+elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
   warn "only the '$VISUAL_GATE' check records a visual decision (this review is '$CHECK_NAME'); nothing written"
   exit 1
 fi
@@ -248,6 +339,62 @@ fi
 [ -n "$ANCHOR" ] || { warn "no anchor resolves for $REVIEW_BEAD (no metadata.anchor_bead, no blocks edge); refusing — the check has nowhere to land"; exit 1; }
 ANCHOR_ROW=$(bd_json show "$ANCHOR")
 is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
+
+# A bring-current round that conflicted and awaits this triage verdict's ruling.
+# The guard filed it on the anchor and reopened the triage lane, so a triage
+# verdict on this anchor is that ruling as well as its classification, and it is
+# not recorded without one. decide records a ruling on the round before it
+# reopens a lane or dismisses an approval, so a round this same review already
+# ruled on may hold a ruling that was never carried out: its retry runs decide
+# again, which carries out what was recorded. A round another review ruled on
+# owes this verdict nothing.
+ROUND_HEAD=""; ROUND_RULING=""
+if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
+  ROUND=$(printf '%s' "$ANCHOR_ROW" | jq -c --arg rv "$REVIEW_BEAD" '(.[0].metadata.bring_current_record // null)
+    | if type == "string" then (fromjson? // null) else . end
+    | if type == "object" and .class == "conflicted"
+         and (.triage == null or ((.triage | type) == "object" and (.triage.review // "") == $rv))
+      then {head: (.head // ""), ruling: .triage} else empty end' 2>/dev/null)
+  ROUND_HEAD=$(printf '%s' "$ROUND" | jq -r '.head // ""' 2>/dev/null)
+  ROUND_RULING=$(printf '%s' "$ROUND" | jq -c '.ruling // empty' 2>/dev/null)
+fi
+if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
+  [ "$CHECK_NAME" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
+    || { warn "--reopen, --round-reason and --dismiss-approval carry triage's ruling on a bring-current round, which only a triage approve records; nothing written"; exit 1; }
+  [ -n "$ROUND_HEAD" ] \
+    || { warn "no bring-current round on $ANCHOR awaits triage's ruling; drop --reopen, --round-reason and --dismiss-approval. Nothing written"; exit 1; }
+fi
+# The lanes a --reopen names, as decide reads them: none, or the lanes sorted and
+# comma-joined.
+round_lanes() { if [ "$1" = "none" ]; then echo none; else gate_tokens "$1" | LC_ALL=C sort -u | paste -sd, -; fi; }
+if [ -n "$ROUND_HEAD" ] && [ -n "$ROUND_RULING" ] && [ "$VERDICT" = "approve" ]; then
+  # This review's ruling is already recorded, and a retry carries it out as
+  # recorded. A call that states a different one is refused rather than replaced
+  # unseen, since the posted account of the round renders the recorded ruling.
+  RULED_LANES=$(printf '%s' "$ROUND_RULING" | jq -r '[ .reopen[]? | tostring | ascii_downcase ] | unique | if length == 0 then "none" else join(",") end' 2>/dev/null)
+  RULED_DISMISS=$(printf '%s' "$ROUND_RULING" | jq -r 'if .dismiss == true then "1" else "" end' 2>/dev/null)
+  if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ] \
+     && { [ "$(round_lanes "$REOPEN")" != "$RULED_LANES" ] || [ "$DISMISS_APPROVAL" != "$RULED_DISMISS" ]; }; then
+    warn "$REVIEW_BEAD already ruled on the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR (reopen $RULED_LANES$([ -n "$RULED_DISMISS" ] && echo ", dismiss the approval")), and a recorded ruling is carried out as recorded: re-run with that ruling, or with no --reopen, --round-reason or --dismiss-approval. Nothing written"
+    exit 1
+  fi
+  REOPEN="$RULED_LANES"; DISMISS_APPROVAL="$RULED_DISMISS"
+  RULED_REASON=$(printf '%s' "$ROUND_RULING" | jq -r '.reason // ""' 2>/dev/null)
+  [ -z "$RULED_REASON" ] || ROUND_REASON="$RULED_REASON"
+fi
+# A ruling that lifts the approval, passed on this call or recorded by this
+# review's earlier attempt, names its decision in the round's reason, and the
+# opening line names one decision.
+if [ -n "$NEEDS_YOU" ] && [ -n "$DISMISS_APPROVAL" ]; then
+  warn "a ruling that lifts the approval asks the operator the call its round reason names, and the opening line names one decision; drop --needs-you. Nothing written"
+  exit 1
+fi
+if [ -n "$ROUND_HEAD" ] && [ "$VERDICT" = "approve" ]; then
+  if [ -z "$REOPEN" ] || [ -z "$(printf '%s' "$ROUND_REASON" | tr -d '[:space:]')" ]; then
+    warn "the bring-current round up to ${ROUND_HEAD:0:12} on $ANCHOR awaits this triage's ruling: pass --reopen <lanes>|none and --round-reason <why>, and --dismiss-approval only when the round made a call that is the operator's to make, with --round-reason naming it (bring-current-audit.sh render --anchor $ANCHOR --as comment reads the round). Nothing written"
+    exit 1
+  fi
+fi
 
 # Post-open iff the ANCHOR names a PR.
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
@@ -378,19 +525,53 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   exit 0
 fi
 
-# The artifact body. It always names the anchor and the exact commit judged,
-# so the posted comment is traceable back to the check it satisfied.
+# The artifact body. Its first line is the same for every check: the check and
+# its verdict, then the one decision this review needs from the operator, or
+# that nothing does, so a busy reader can stop there. Under it come the round's
+# account when a triage ruling rides this verdict, the reviewer's notes as the
+# trail, and the lines scripts read: the demo decision, and the trailer naming
+# the anchor and the exact commit judged, which traces the posted comment back
+# to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE" "${INDEX_FILE:-}"' EXIT
+TRAIL_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-trail.XXXXXX") || { rm -f "$BODY_FILE"; warn "mktemp failed"; exit 1; }
+trap 'rm -f "$BODY_FILE" "$TRAIL_FILE" "${INDEX_FILE:-}"' EXIT
 if [ -n "$NOTES_FILE" ]; then
-  cat "$NOTES_FILE" > "$BODY_FILE"
+  cat "$NOTES_FILE" > "$TRAIL_FILE"
 else
-  printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$BODY_FILE" 2>/dev/null
+  printf '%s' "$REVIEW_ROW" | jq -r '.[0].notes // ""' > "$TRAIL_FILE" 2>/dev/null
 fi
-[ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
-printf '\n' >> "$BODY_FILE"
-[ -z "$VISUAL" ] || printf 'Visual: %s\n' "$VISUAL" >> "$BODY_FILE"
-printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
+# Set by apply_round_decision: the round's account, and what a ruling that lifts
+# the approval asks of the operator.
+ROUND_BODY=""; ROUND_ASK=""
+# A check's name as the opening word; a name of two letters is an acronym.
+check_label() { # <check-name>
+  if [ "${#1}" -le 2 ]; then printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
+  else printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"; fi
+}
+# The opening line's first half: the check and its verdict. A request-changes
+# verdict hands this half alone to its rework child as the summary, because the
+# second half speaks to the operator and the child's reader is the worker that
+# fixes it.
+verdict_head() { printf '%s: %s.' "$(check_label "$CHECK_NAME")" "$VERDICT"; }
+compose_artifact() {
+  local needs="Nothing needs you." visual_note=""
+  if [ -n "$ROUND_ASK" ]; then needs="$ROUND_ASK"
+  elif [ -n "$NEEDS_YOU" ]; then needs="Needs you: $NEEDS_YOU"; fi
+  # The Visual line says what the visual is, not only its modality: a
+  # repo-artifact is what an author committed, not a capture of the reviewed
+  # commit, and a fallback names the modality that fits.
+  if [ -n "$VISUAL" ]; then
+    [ "$VISUAL" != repo-artifact ] || visual_note="author-committed"
+    [ -z "$VISUAL_FALLBACK" ] || visual_note="${visual_note:+$visual_note; }fallback from $VISUAL_FALLBACK"
+  fi
+  {
+    printf '%s %s\n\n' "$(verdict_head)" "$needs"
+    [ -z "$ROUND_BODY" ] || printf '%s\n\n' "$ROUND_BODY"
+    [ ! -s "$TRAIL_FILE" ] || printf '%s\n\n' "$(cat "$TRAIL_FILE")"
+    [ -z "$VISUAL" ] || printf 'Visual: %s%s\n' "$VISUAL" "${visual_note:+ ($visual_note)}"
+    printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID"
+  } > "$BODY_FILE"
+}
 
 # The commit a verdict bound to is recorded on the review bead first, and only
 # then does the artifact go where its findings are read. That record is the
@@ -405,10 +586,20 @@ printf 'Anchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" 
 # is part of the same ledger. Because the record is written first, a store that
 # will not take it costs a re-run instead of a marker nothing accounts for. A
 # demo verdict's visual decision rides in the same write, so the record names
-# what the check decided as well as the commit it decided on.
+# what the check decided as well as the commit it decided on. So does its
+# fallback, which the write clears when this verdict names none, because a
+# retried verdict must not keep an earlier attempt's.
 post_artifact() {
+  compose_artifact
   local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
-  [ -z "$VISUAL" ] || rec+=(--set-metadata "visual=$VISUAL")
+  if [ -n "$VISUAL" ]; then
+    rec+=(--set-metadata "visual=$VISUAL")
+    if [ -n "$VISUAL_FALLBACK" ]; then
+      rec+=(--set-metadata "visual_fallback_from=$VISUAL_FALLBACK")
+    else
+      rec+=(--unset-metadata visual_fallback_from)
+    fi
+  fi
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
   local row got
   row=$(bd_json show "$REVIEW_BEAD")
@@ -420,6 +611,11 @@ post_artifact() {
   got=$(row_meta "$row" visual)
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
     warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" visual_fallback_from)
+  if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL_FALLBACK" ]; then
+    warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted and no marker stamped, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then
@@ -486,14 +682,15 @@ close_review() {
 # the review open to retry rather than closing it past a gap. Fail closed: a
 # shape or edge that does not read back exits non-zero.
 ensure_validation_pass() {
-  local rows vpass vtitle vctx vbody vmeta vfix vblk orphans
-  if ! rows=$(bd_list --metadata-field anchor_bead="$ANCHOR" \
-       --metadata-field task_kind=validation --metadata-field check_name="$CHECK_NAME" \
-       --status="$LIVE_STATUSES"); then
+  local rows vpass vtitle vctx vbody vident vmeta vfix vblk
+  # The lane probe selects a pass by the VALIDATION_SELECT keys (bd-lib.sh).
+  if ! rows=$(bd_anchor_children "$ANCHOR" "$LIVE_STATUSES"); then
     warn "validation-pass probe for lane $CHECK_NAME on $ANCHOR is unreadable; review left open for a retry"
     exit 2
   fi
-  vpass=$(printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null)
+  vpass=$(printf '%s' "$rows" | jq -r --arg l "$CHECK_NAME" '
+    [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation")
+          | select(((.metadata.check_name // "") | tostring) == $l) | .id ] | .[0] // empty' 2>/dev/null)
   if [ -n "$POST_OPEN" ]; then
     vtitle="Validate PR#$PR_NUMBER $CHECK_NAME review @ $REVIEWED_OID"
     vctx="a $CHECK_NAME review batch on PR#$PR_NUMBER at $REVIEWED_OID"
@@ -504,28 +701,26 @@ ensure_validation_pass() {
   if [ -n "$vpass" ]; then
     echo "signoff: reusing open validation pass $vpass for lane $CHECK_NAME on $ANCHOR"
   else
-    # A prior attempt that created the bead but failed to stamp its shape left an
-    # orphan the lane probe above cannot see (task_kind/check_name unset). Adopt
-    # it by exact title — the title names this lane and head — rather than mint a
-    # twin that would double-block the anchor. Live only; a closed orphan is
-    # already dispositioned. Best-effort: an unreadable probe falls through to mint.
-    if orphans=$(bd_list --title-contains "$vtitle" --status="$LIVE_STATUSES"); then
-      vpass=$(printf '%s' "$orphans" | jq -r --arg t "$vtitle" --arg l "$CHECK_NAME" '
-        [ .[] | select(((.title // "") | tostring) == $t)
-              | select(((.metadata.check_name // "") | tostring) as $c | $c == "" or $c == $l)
-              | .id ] | .[0] // empty' 2>/dev/null)
-    fi
-    if [ -n "$vpass" ]; then
-      echo "signoff: adopting unstamped validation-pass orphan $vpass for lane $CHECK_NAME on $ANCHOR"
+    # A pass an earlier two-write create left behind carries this title but
+    # not the shape the lane probe reads, while its blocks edge holds the anchor
+    # beside the pass filed below, so it is closed first. Best-effort: an
+    # unreadable listing closes nothing and the pass is filed anyway.
+    bd_unmake_orphans "$VALIDATION_SELECT" "$vtitle" \
+      "Unmade by signoff: a $CHECK_NAME validation pass on $ANCHOR filed without the shape the lane probe selects it by, so no validator could rule it, while its blocks edge held $ANCHOR. A pass carrying it is filed in its place." >/dev/null || true
+    # The pass is filed whole: the shape the validator path reads, the blocks
+    # edge that holds the anchor and the membership edge onto it (--child-of)
+    # ride the create. A create whose reply is lost has still landed where the
+    # lane probe above finds it, so the retry reuses it rather than minting a
+    # twin that would double-block the anchor. One that stays short of a
+    # VALIDATION_SELECT key is closed by bd_create, which then prints no id.
+    vident=$(validation_work_order "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID")
+    vbody=""
+    [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
+    if [ -n "$vbody" ]; then
+      vpass=$(printf '%s' "$vbody" | bd_create --select "$VALIDATION_SELECT" --child-of "$ANCHOR" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR" --body-file -)
     else
-      vbody=""
-      [ -x "$VALIDATE_BODY" ] && vbody=$("$VALIDATE_BODY" --note "This validation pass rules $vctx. The findings to rule are the open task_kind=finding beads on anchor $ANCHOR carrying finding.lane=$CHECK_NAME." 2>/dev/null) || vbody=""
-      if [ -n "$vbody" ]; then
-        vpass=$(printf '%s' "$vbody" | gc bd create "$vtitle" -t task --body-file - --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-      else
-        warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
-        vpass=$(gc bd create "$vtitle" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-      fi
+      warn "validate-dispatch note unavailable ($VALIDATE_BODY); opening a title-only validation pass"
+      vpass=$(bd_create --select "$VALIDATION_SELECT" --child-of "$ANCHOR" "$vident" "$vtitle" -t task --deps "blocks:$ANCHOR")
     fi
     if [ -z "$vpass" ]; then
       warn "could not open a validation pass for lane $CHECK_NAME on $ANCHOR; review left open for a retry"
@@ -539,6 +734,13 @@ ensure_validation_pass() {
   # it opened at rather than a validator mid-rule being moved under it.
   vmeta=$(bd_json show "$vpass")
   is_rows "$vmeta" || { warn "validation pass $vpass did not resolve after open; review left open for a retry"; exit 2; }
+  # A pass about to take anchor_bead is joined to the anchor first, so the stamp
+  # never lands on a pass the anchor's closed-children read cannot reach. A pass
+  # filed above carries the edge from its create.
+  if [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ] && ! bd_anchor_link "$ANCHOR" "$vpass"; then
+    warn "validation pass $vpass could not be joined to anchor $ANCHOR; review left open for a retry"
+    exit 2
+  fi
   vfix=()
   [ "$(row_meta "$vmeta" task_kind)" != "validation" ]   && vfix+=(--set-metadata task_kind=validation)
   [ "$(row_meta "$vmeta" anchor_bead)" != "$ANCHOR" ]    && vfix+=(--set-metadata "anchor_bead=$ANCHOR")
@@ -730,6 +932,34 @@ $tok"
   WIDEN_SUMMARY=" (check_set now $newset${added:+; added $added})"
 }
 
+# Triage's ruling on the bring-current round: recorded and carried out by the
+# guard's `decide` (the lanes to run again, the dismissal), AFTER the widening so
+# a lane added on this call is reopened with the rest, and BEFORE the artifact
+# and the green stamp, so a ruling that did not land leaves the review open and
+# the round still owed. The artifact then carries the round's account under its
+# opening line, and a ruling that lifts the approval gives that line its ask,
+# both rendered from the anchor's record.
+apply_round_decision() {
+  [ -n "$ROUND_HEAD" ] || return 0
+  local round_body round_ask rc args added
+  round_body=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-round.XXXXXX") || { warn "mktemp failed"; exit 2; }
+  round_ask=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-ask.XXXXXX") || { rm -f "$round_body"; warn "mktemp failed"; exit 2; }
+  added=$(gate_tokens "$ADD_GATES" | paste -sd, -)
+  args=(decide --anchor "$ANCHOR" --review-bead "$REVIEW_BEAD" --reopen "$REOPEN"
+        --reason "$ROUND_REASON" --body-out "$round_body" --ask-out "$round_ask")
+  [ -z "$added" ] || args+=(--add "$added")
+  [ -z "$DISMISS_APPROVAL" ] || args+=(--dismiss-approval)
+  "$BRING_CURRENT" "${args[@]}"; rc=$?
+  case "$rc" in
+    0) : ;;
+    1) rm -f "$round_body" "$round_ask"; warn "the bring-current ruling was refused; nothing written, re-run this call with the ruling corrected"; exit 1 ;;
+    *) rm -f "$round_body" "$round_ask"; warn "the bring-current ruling did not fully land on $ANCHOR; review left OPEN, and the same call retries it"; exit 2 ;;
+  esac
+  ROUND_BODY=$(cat "$round_body")
+  ROUND_ASK=$(tr '\000-\037' ' ' < "$round_ask" | sed 's/  */ /g; s/^ //; s/ $//')
+  rm -f "$round_body" "$round_ask"
+}
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker is an operator-granted gate exception that
   # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
@@ -748,6 +978,7 @@ if [ "$VERDICT" = "approve" ]; then
       ;;
   esac
   apply_triage_decision
+  apply_round_decision
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
@@ -794,18 +1025,11 @@ fi
 FINDING_COUNT=0
 [ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
 
-# The child is offered off this route by exact byte equality, and GC_RIG picks
-# both the store it lands in and the rig segment a rig-scoped pool carries, so
-# an address built out of GC_RIG alone renders bare for a rig-less caller: the
-# stamp reads back clean, no polecat is ever offered the rework, and the PR
-# just stops moving. Prove the route BEFORE the child exists — a review left
-# open is retried, a rework child nothing claims is found by a human.
+# The fix unit is filed by rework-child.sh under this review's provenance
+# (source_review_bead). What the review decides is decided here: the pool the
+# rework routes to (the review's fix_target_pool, else the writer's default),
+# where it lands, and the reason and title it carries.
 FIX_POOL_NAME=$(row_meta "$REVIEW_ROW" fix_target_pool)
-[ -n "$FIX_POOL_NAME" ] || FIX_POOL_NAME="gc-toolkit.polecat"
-FIX_POOL=$("$SCRIPT_DIR/pool-route.sh" "$FIX_POOL_NAME") || {
-  warn "the rework child would route to '$FIX_POOL_NAME', which no live pool claims; review left open for a retry"
-  exit 2
-}
 FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$REVIEW_ROW" review_base)
@@ -813,7 +1037,7 @@ if [ -z "$FIX_TARGET" ]; then
   warn "no landing target resolves for the rework child (anchor merged_target/target, review_base all empty); review left open"
   exit 2
 fi
-REASON_HEAD=$(head -n 1 "$BODY_FILE" | cut -c1-200)
+REASON_HEAD=$(verdict_head)
 # The objections are filed as findings beside this child; the rejection_reason
 # carries the one-line summary and points the resumed worker at the beads, rather
 # than being the whole record.
@@ -827,115 +1051,18 @@ if [ -n "$POST_OPEN" ]; then
 else
   TITLE="Rework branch $BRANCH: address pre-open signoff findings"
 fi
-# One review bead owns at most one rework child. This path is fully re-runnable:
-# close_review is its last write, and every exit-2 above it (a create whose id
-# did not come back, work-order verify, an unproven pour) leaves the review OPEN
-# with a child already filed. A re-pool re-enters here, so a create keyed to the
-# same review mints a SECOND child for one finding — one dispatches and lands,
-# the other is a duplicate a human must reap. Adopt the open child that already
-# answers this review instead.
-#
-# Discover it by the source_review_bead it carries, not by the anchor's blocks
-# edge. The child carries that key from its create (below), before its blocks
-# edge is hung, so a prior run that filed the child but exited before hanging the
-# edge leaves an orphan no anchor-edge walk can see, and the create arm mints a
-# second child. source_review_bead is the exact key: it is this review bead's own
-# id, unique to one review of one anchor, and the only bead type stamped with it
-# is a rework child — so a match needs no wider scope, and a genuine next round is
-# a new review bead the key does not match. When more than one live child carries
-# the key, a prior pass filed one and died before dispatch while a retry filed and
-# dispatched another; a child stamped gc.execution_routed_to is in flight on the
-# branch, so prefer it over any inert sibling. Selecting the inert one by creation
-# order re-slings it and double-dispatches the molecule the routed child already
-# owns. Fail closed: an unreadable query cannot be told from "no prior child", and
-# a create on that ambiguity is the double-file this guard prevents, so leave the
-# review open for a retry instead.
-if PRIOR_CHILDREN=$(bd_list --metadata-field "source_review_bead=$REVIEW_BEAD" --status="$LIVE_STATUSES"); then
-  FIX_BEAD=$(printf '%s' "$PRIOR_CHILDREN" | jq -r --arg r "$REVIEW_BEAD" '
-      [ .[]? | select((.metadata.source_review_bead // "") == $r) ]
-      | sort_by(.created_at // .id) as $all
-      | ( ( [ $all[] | select((.metadata["gc.execution_routed_to"] // "") != "") ][0] )
-          // $all[0] )
-      | (.id // empty)' 2>/dev/null)
-else
-  warn "could not read prior rework children for review $REVIEW_BEAD (dedup query failed); review left open for a retry rather than risk a second child"
+REWORK_ARGS=(--anchor "$ANCHOR" --review-bead "$REVIEW_BEAD" --branch "$BRANCH"
+             --target "$FIX_TARGET" --title "$TITLE" --reason "$REJECTION_REASON")
+[ -z "$FIX_POOL_NAME" ] || REWORK_ARGS+=(--pool "$FIX_POOL_NAME")
+[ -z "$POST_OPEN" ] || REWORK_ARGS+=(--pr-url "$PR_URL" --pr-number "$PR_NUMBER")
+# close_review is this path's last write, so a filing that did not complete leaves
+# the review open. The re-pool re-enters here, and the writer adopts the child
+# this pass filed rather than minting a second one.
+if ! FILED=$("$REWORK_CHILD" "${REWORK_ARGS[@]}"); then
+  warn "the rework child for review $REVIEW_BEAD was not dispatched; review left open for a retry"
   exit 2
 fi
-if [ -n "$FIX_BEAD" ]; then
-  # A child that already read back a pour (gc.execution_routed_to stamped) is in
-  # flight: only close_review was still owed. Re-stamping or re-slinging it would
-  # stomp a live worktree or double-dispatch the molecule, so close and stop.
-  ADOPT_ROUTE=$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")
-  if [ -n "$ADOPT_ROUTE" ]; then
-    echo "signoff: rework child $FIX_BEAD (source_review_bead=$REVIEW_BEAD) was already dispatched to $ADOPT_ROUTE; closing the review it left open, filing no second child"
-    ensure_validation_pass
-    close_review
-    # The in-flight rework child means the city holds the ball; keep it working.
-    [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
-      --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-    echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $ADOPT_ROUTE"
-    exit 0
-  fi
-  # Never dispatched: adopt it and finish the dispatch this pass owes. The work
-  # order is re-stamped below, repairing a partial prior write; the round the
-  # child already records is this same round, so it is preserved rather than
-  # advanced, and refilled only if that prior write never landed one.
-  echo "signoff: adopting existing open rework child $FIX_BEAD for review $REVIEW_BEAD (a prior attempt filed it but never dispatched); filing no second child"
-  [ -n "$(row_meta "$(bd_json show "$FIX_BEAD")" rejection_reason)" ] && REJECTION_REASON=""
-else
-  # The identity keys ride in the create itself. The dedup above finds a prior
-  # child by source_review_bead alone, so a child that exists without it is
-  # invisible to the retry, which files a second child beside it. A create
-  # followed by a separate stamp is two writes: a create whose id never comes
-  # back, or a run that ends before the work-order stamp below, leaves a child
-  # carrying no key any reader matches on. One write cannot: the child and its
-  # identity land together or not at all. The full work order is stamped and
-  # read back below, on a fresh child and an adopted one alike.
-  FIX_IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg r "$REVIEW_BEAD" \
-    '{task_kind: "rework", anchor_bead: $a, source_review_bead: $r}' 2>/dev/null)
-  if [ -z "$FIX_IDENTITY" ]; then
-    warn "could not build the rework child's identity metadata; review left open for a retry"
-    exit 2
-  fi
-  FIX_BEAD=$(gc bd create "$TITLE" -t task --metadata "$FIX_IDENTITY" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
-  if [ -z "$FIX_BEAD" ]; then
-    warn "the rework child create returned no id; review left open for a retry, which adopts the child by source_review_bead=$REVIEW_BEAD if the create landed"
-    exit 2
-  fi
-fi
-
-# The stamped fields ARE the work order: branch/target say what to resume and
-# where it lands, existing_pr keeps the rework on THIS PR, source_review_bead
-# names the findings it answers. task_kind and anchor_bead are the role marker:
-# the child resumes the ANCHOR's own branch, so with no marker a metadata read
-# cannot tell the child from the anchor, and the title prefix is the only signal
-# left.
-META=(
-  --set-metadata "task_kind=rework"
-  --set-metadata "anchor_bead=$ANCHOR"
-  --set-metadata "branch=$BRANCH"
-  --set-metadata "target=$FIX_TARGET"
-  --set-metadata "source_review_bead=$REVIEW_BEAD"
-  --set-metadata "merge_strategy=mr"
-)
-# Always set on a fresh child; empty only when adopting one that already records
-# its round, which is kept rather than overwritten with a later round's number.
-[ -n "$REJECTION_REASON" ] && META+=(--set-metadata "rejection_reason=$REJECTION_REASON")
-if [ -n "$POST_OPEN" ]; then
-  META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL" --set-metadata "pr_number=$PR_NUMBER")
-fi
-gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
-
-# The child must BLOCK the anchor. Recorded the other way round it waits on an
-# anchor that closes only once the rework lands, so nothing ever claims it, and
-# count_rounds, which walks the anchor's dependencies, cannot see it either.
-# Skip when the edge is already there: an adopted child carries it from the
-# prior attempt, and a second identical edge is one the round-count walk sees
-# twice.
-if ! bd_json dep list "$ANCHOR" --direction=down -t blocks \
-     | jq -e --arg f "$FIX_BEAD" 'any(.[]?; .id == $f)' >/dev/null 2>&1; then
-  gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
-fi
+read -r FIX_BEAD FIX_POOL FIX_STATE <<< "$FILED"
 
 # The fix unit's edges onto the findings it answers are NOT hung here. Every
 # finding is still unvalidated at this point, and a fix unit that blocked one the
@@ -943,61 +1070,15 @@ fi
 # blocked issue) and stall the validator's triage. The close-ordering edge onto a
 # finding is hung as the validator rules that finding must-fix (finding.sh
 # set-disposition), so the fix unit blocks only the findings it must answer. The
-# anchor edge above is what holds the merge in the meantime.
-
-# Verify the work order — every field the resumed workflow reads — and the
-# blocks edge BEFORE the pour, so a claimed rework can never run against absent
-# fields.
-FIX_ROW=$(bd_json show "$FIX_BEAD")
-MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
-  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg pr "${POST_OPEN:+$PR_URL}" \
-  --arg a "$ANCHOR" '
-  (.[0] // {}) as $x | ($x.metadata // {}) as $m | [
-    (if ($m.task_kind // "") == "rework" then empty else "task_kind" end),
-    (if ($m.anchor_bead // "") == $a then empty else "anchor_bead" end),
-    (if ($m.branch // "") == $b then empty else "branch" end),
-    (if ($m.target // "") == $t then empty else "target" end),
-    (if ($m.source_review_bead // "") != "" then empty else "source_review_bead" end),
-    (if ($m.merge_strategy // "") == "mr" then empty else "merge_strategy" end),
-    (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
-    (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end)
-  ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
-if [ "$MISSING" = "ok" ]; then
-  EDGE=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
-    | jq -r --arg f "$FIX_BEAD" 'if type == "array" and any(.[]; .id == $f) then "ok" else "" end' 2>/dev/null)
-  [ "$EDGE" = "ok" ] || MISSING="blocks_edge"
-fi
-if [ "$MISSING" != "ok" ]; then
-  warn "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
-  exit 2
-fi
-
-# Dispatch is a sling, not a bare route stamp. mol-polecat-work gives the rework
-# the same control-dispatcher driver and continuation affinity poured work and
-# reviews (gate-ensure.sh) get; a bare gc.routed_to route has no driver and
-# starves behind assigned molecule steps in the pool's pull queue. The pour
-# retires gc.routed_to and stamps gc.execution_routed_to=<pool> on the work
-# bead — that is the read-back that proves it. On success wake the pool to claim
-# it. If the route does not read back the pour may still have started the
-# workflow and only failed to stamp the route (a partial pour that exits
-# success); a bare gc.routed_to stamp would then let the pool claim query and
-# the workflow dispatcher both act on the same work — a double-dispatch. So
-# never bare-stamp: exit non-zero and leave the review unclosed, so the dispatch
-# is retried rather than the work double-dispatched.
-WORK_FORMULA="mol-polecat-work"
-gc sling ${GC_RIG:+--rig "$GC_RIG"} "$FIX_POOL" "$FIX_BEAD" --on "$WORK_FORMULA" >/dev/null 2>&1
-if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")" = "$FIX_POOL" ]; then
-  DISPATCH="slung $WORK_FORMULA to"
-  gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
-  gc session nudge "$FIX_POOL" "Rework $FIX_BEAD for anchor $ANCHOR" >/dev/null 2>&1 || true
-else
-  warn "rework child $FIX_BEAD: mol-polecat-work pour did not stamp gc.execution_routed_to=$FIX_POOL; not falling back to a bare route (double-dispatch hazard) — review left open for a retry."
-  exit 2
-fi
+# fix unit's edge onto the anchor is what holds the merge in the meantime.
 ensure_validation_pass
 close_review
 # A rework child now stands on the anchor; the city holds the ball until it lands.
 [ -z "$POST_OPEN" ] || "$PR_STATUS_LABEL" set --pr "$PR_NUMBER" --value working \
   --repo "$PR_REPO_Q" --host "$PR_HOST" >/dev/null 2>&1 || true
-echo "signoff: request-changes recorded on $ANCHOR — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD $DISPATCH $FIX_POOL"
+if [ "$FIX_STATE" = in-flight ]; then
+  echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"
+else
+  echo "signoff: request-changes recorded on $ANCHOR — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD slung mol-polecat-work to $FIX_POOL"
+fi
 exit 0

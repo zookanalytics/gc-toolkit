@@ -45,8 +45,7 @@ extract() {
 # gc : only `runtime drain-ack` is reached (the arms write no bd notes); it
 #      records DRAIN so the ordered verb log is provable.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
 esac

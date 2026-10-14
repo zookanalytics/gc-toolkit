@@ -25,8 +25,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 # script sees without re-writing the stubs.
 mkdir -p "$TMP/bin"
 
-cat > "$TMP/bin/bd" <<'BD'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'BD'
 # bd show <id> --json | bd dep tree <id> --json | bd list … --json | bd update <id> …
 . "$STATE"
 case "$1" in
@@ -90,8 +89,7 @@ update)
 esac
 BD
 
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 # gc session nudge <target> <message>
 #
 # GC_COLD=1 models the ralph condition env with a cold import cache: every gc

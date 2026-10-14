@@ -85,8 +85,7 @@ has "$OUT" "src/planted.sh:1: fixture violation" "the finding names the file and
 echo "── 2. an enumeration it cannot complete exits 2 ──"
 BIN="$TMP/bin"; mkdir -p "$BIN"
 REAL_GIT="$(command -v git)"
-cat > "$BIN/git" <<GITSTUB
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<GITSTUB
 # Fails the listing the way a corrupt index or an unreadable object store
 # would, and passes everything else through.
 if [ "\${1:-}" = "ls-files" ]; then

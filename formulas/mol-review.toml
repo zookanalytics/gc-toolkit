@@ -26,8 +26,8 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- Single honest pass. Read the diff yourself, run the tests yourself, write
-  your findings yourself. No subagents doing the review, no persona
+- Single honest pass. Read the diff yourself and write your findings
+  yourself. No subagents doing the review, no persona
   reviewers. The review may run as a two-provider quorum instead: two lanes
   each do one honest pass, and one synthesizer combines their findings into
   the single verdict (the mol-review-quorum-signoff formula). One verdict per
@@ -103,7 +103,7 @@ fi
 ```
 
 **4. Pin the commit.** The dispatch stamped `reviewed_oid` with the head it
-reviewed for; that pin wins when present. The diff you read, the tests you
+reviewed for; that pin wins when present. The diff you read, any test you
 run, and the OID you hand off are all that one commit — a verdict recorded
 against a head you never read certifies unreviewed code:
 ```bash
@@ -123,7 +123,7 @@ drain — the same session carries on into `review`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --outcome pass
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
 **Exit criteria:** shape discriminated, base and branch pinned (never a
@@ -144,7 +144,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "review"
-title = "Read the diff, run the tests, write the verdict body"
+title = "Read the diff and its test evidence, write the verdict body"
 needs = ["load-dispatch"]
 description = """
 Each block is its own shell, so re-derive the pins first.
@@ -173,18 +173,19 @@ Three dots — compare against the merge-base, so you review what the branch
 changed rather than what the base moved on underneath it. A large diff gets
 read in chunks, not sampled.
 
-**2. Run the tests at the pinned commit** in a detached worktree inside this
-review's workspace, so they run against exactly what you reviewed. The
-workspace is a directory named for the review bead, and it belongs to the
-review rather than to any one shell: `add` returns the same worktree each time
-it runs, so a later block gets it back by running these lines again.
+**2. Check out the pinned commit** in a detached worktree inside this review's
+workspace, so the tree you read is the commit the verdict names. The workspace
+is a directory named for the review bead, and it belongs to the review rather
+than to any one shell: `add` returns the same worktree each time it runs, so a
+later block gets it back by running these lines again. The check section of the
+dispatch note says whether this review runs a test; one that names none runs none.
 ```bash
 # >>> review-lease-keepalive
-# Keep this review claim's lease in the future across the suites: a claim's
-# lease has a fixed five-minute TTL and a suite can outlive it, so a live
-# reviewer whose lease expired reads to a lease consumer like a dead one.
-# Refresh $CLAIMED_STEP_BEAD_ID through the keepalive while each suite runs
-# (best-effort — an unresolved wrapper runs the command plain and never fails it).
+# Keep this review claim's lease in the future across a long command (a suite,
+# a demo capture): a claim's lease has a fixed five-minute TTL and the command
+# can outlive it, so a live reviewer whose lease expired reads to a lease
+# consumer like a dead one. `hb <command>` refreshes $CLAIMED_STEP_BEAD_ID while
+# it runs (best-effort — an unresolved wrapper runs it plain and never fails it).
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
 # <<< review-lease-keepalive
@@ -202,8 +203,6 @@ done
 REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
 # <<< review-workspace-add
-# run the suites the diff touches through hb, e.g. `hb bash -c '<suite>'`;
-# record real pass/fail counts
 ```
 Anything else the review writes to disk, such as a log, probe output, or a
 second worktree at the base, goes in the workspace beside `wt`
@@ -211,10 +210,6 @@ second worktree at the base, goes in the workspace beside `wt`
 workspace when the review ends there, and the hourly review-workspace-reap
 order removes any workspace whose review bead has closed
 (docs/review-workspace.md).
-
-A failing suite is not automatically a finding: check whether it fails on the
-base too. A pre-existing failure belongs in the verdict as context, not as
-this branch's defect.
 
 **3. What to check.** Work the whole list on every round. A P0 or a P1 is not
 a stopping point: a blocking finding discovered a round later costs another
@@ -236,9 +231,9 @@ finding this diff carries, not the first one that appears.
   a marker-fenced block a test holds every copy to.
 - **Testing** — do the tests exercise real behavior, is the new path
   covered, does a regression pin the bug that was fixed? A new case pins its
-  change only if it fails when the change is reverted, so run each new case
-  against the pre-change code, and confirm that a failure-path case's stub
-  can produce the failure it names.
+  change only if it fails when the change is reverted, so the correctness
+  check runs each new case against the pre-change code, and confirms that a
+  failure-path case's stub can produce the failure it names.
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
 - **Comments** — a comment carries the code's non-obvious why. Narration of
@@ -367,26 +362,40 @@ id. Say so in the verdict rather than filing blind, and the next round
 re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
-it travels verbatim to the next step:
+it travels verbatim to the next step. `signoff.sh` opens the posted comment
+with one line, the check and its verdict and then what needs the operator, so
+the body is the trail under that line, collapsed:
 
 ```
-VERDICT: <approve|request-changes>
+<details>
+<summary>Findings: <none, or the count per severity, e.g. 1 P1, 2 P2></summary>
+
+<every P0, P1 and P2 — each with its location, impact, and the fix>
+
+</details>
+
+<details>
+<summary><Check> trail: <what it holds, e.g. scope, files read, test runs></summary>
+
 Reviewed branch: <branch>
 Reviewed base:   <base>
 Reviewed commit: <REVIEWED_OID>
 
 Scope checked: <what you actually read>
 
-Findings: <every P0, P1 and P2 — each with its location, impact, and the fix>
-
 Filed: <bug ids for findings out of scope for this diff, or "none">
 
-Verification: <suite -> N passed, M failed, run at the reviewed commit>
+Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
+
+</details>
 ```
 
-Say what you did **not** check — an honest coverage line is worth more than
-an implied "I read everything". Write it self-contained: pre-open, it is
-replayed verbatim as the opening PR comment.
+A check that files no findings leaves that block out. Say what you did **not**
+check — an honest coverage line is worth more than an implied "I read
+everything". Write it self-contained: pre-open, it is replayed verbatim as the
+opening PR comment. When a decision is the operator's to make, pass it on the
+verdict call as `--needs-you "<the decision, what it means, where to look>"`;
+a finding is not one, because the city fixes it.
 
 **6b. Emit the finding set** to `findings.json` beside `findings.md`. This is
 the structured half of the same findings your prose states: signoff.sh files
@@ -416,14 +425,14 @@ drain — the same session carries on into `verdict-and-drain`:
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --outcome pass
+"${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --convoy {{convoy_id}} --outcome pass
 ```
 
-**Exit criteria:** whole diff read, tests run at the pinned commit, published
-page and work-quality standards checked, every blocking finding enumerated,
-out-of-scope findings filed or named unfiled, findings.md written in the
-verdict shape, findings.json written as the structured finding set (`[]` on
-approve), this step bead closed.
+**Exit criteria:** whole diff read, test evidence settled as the check section
+says, published page and work-quality standards checked, every blocking
+finding enumerated, out-of-scope findings filed or named unfiled, findings.md
+written in the verdict shape, findings.json written as the structured finding
+set (`[]` on approve), this step bead closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -459,7 +468,8 @@ beads or finding beads (signoff.sh files the findings from your
 `findings.json`), and never run `gh pr review --approve`.
 
 Pass on this same call any flag the check section of this bead's dispatch note
-names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+names for the verdict, such as triage's `--add-gates` or demo's `--visual`, and
+`--needs-you` when the review step named a decision for the operator.
 When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.
@@ -508,7 +518,7 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
 done
 : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-dispatch review verdict-and-drain; do
-  "$SC" --step "mol-review.$STEP" --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
 done
 # >>> review-workspace-remove
 [ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"

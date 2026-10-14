@@ -109,7 +109,6 @@ bd_show() {
   printf '%s' "$raw"
 }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
-row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
 NL='
@@ -248,7 +247,7 @@ ROW_JQ='.[] | select(((.metadata.task_kind // "") | tostring) == $k)
   | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")'
 CANDS=""
 if [ -n "$ANCHOR_ONLY" ]; then
-  ROWS=$(bd_list --metadata-field anchor_bead="$ANCHOR_ONLY" --status="$LIVE_STATUSES") || {
+  ROWS=$(bd_anchor_children "$ANCHOR_ONLY" "$LIVE_STATUSES") || {
     echo "$PROG: could not enumerate the live scaffolding on $ANCHOR_ONLY; nothing swept, retry next pass" >&2
     exit 1
   }

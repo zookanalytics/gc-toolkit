@@ -33,10 +33,12 @@ mkdir -p "$TMP/bin" "$TMP/show"
 # --- gc stub -------------------------------------------------------------------
 # Serves the census reads from fixture files, `bd show` from $SHOW_DIR/<id>.json,
 # the refile guard's closed listing from $PRIOR_VISITS, and records every write.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="$1 ${2:-}"
 args="$*"
+# READ_LOG records every list, dep, kv and show read, so a case can see the
+# sweep's --db pin reach them.
+case "$sub" in "bd list"|"bd dep"|"bd kv"|"bd show") [ -n "${READ_LOG:-}" ] && printf '%s\n' "$args" >> "$READ_LOG" ;; esac
 case "$sub" in
   "bd ready")
     [ -n "${GC_READY_FAIL:-}" ] && exit 1
@@ -45,11 +47,14 @@ case "$sub" in
     case "$args" in
       *anchor_bead=*)
         # The edge-less wedge's lane fix-unit census: reworks for an anchor,
-        # served from $SHOW_DIR/reworks-<anchor>.json (default []).
-        aid=""
-        for a in "$@"; do case "$a" in anchor_bead=*) aid="${a#anchor_bead=}"; break ;; esac; done
+        # served from $SHOW_DIR/reworks-<anchor>.json (default []), the rows in
+        # the statuses the read asks for.
+        aid=""; st=""
+        for a in "$@"; do case "$a" in anchor_bead=*) aid="${a#anchor_bead=}" ;; --status=*) st="${a#--status=}" ;; esac; done
         f="$SHOW_DIR/reworks-$aid.json"
-        if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+        if [ -f "$f" ]; then
+          jq -c --arg st "$st" '[ .[] | . as $r | select($st == "" or ((($st | split(",")) | index($r.status // "open")) != null)) ]' "$f"
+        else printf '[]\n'; fi
         exit 0 ;;
       *--status=closed*)
         # Model the server-side --metadata-field KEY=VALUE narrow: the store
@@ -78,7 +83,12 @@ case "$sub" in
       *) printf '[]\n'; exit 0 ;;
     esac ;;
   "bd show")
-    id="$3"
+    # The id is the first operand after show; a --db pin may come before it.
+    id=""; skip=0
+    for a in "${@:3}"; do
+      if [ "$skip" = 1 ]; then skip=0; continue; fi
+      case "$a" in --db) skip=1 ;; --*) : ;; *) [ -n "$id" ] || id="$a" ;; esac
+    done
     case " ${GC_SHOW_FAIL:-} " in *" $id "*) exit 1 ;; esac
     f="$SHOW_DIR/$id.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
@@ -95,6 +105,11 @@ case "$sub" in
     f="$SHOW_DIR/dep-$depid.json"
     if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
     exit 0 ;;
+  "bd kv")
+    # The store's anchor-edges mark: set when KV_JOINED is, unset otherwise
+    # (bd's {"found": false} answer at exit 1).
+    if [ -n "${KV_JOINED:-}" ]; then printf '{"found":true,"key":"anchor_edges.joined","value":"2026-10-11T00:00:00Z"}\n'; exit 0; fi
+    printf '{"found":false,"key":"anchor_edges.joined","value":""}\n'; exit 1 ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$GC_CALLS"
     printf '{"id":"tk-subj-new"}\n'; exit 0 ;;
@@ -114,8 +129,7 @@ chmod +x "$TMP/bin/gc"
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
 # It serves $GH_PRS verbatim, an updatedAt on every row, so a test can date the
 # open PRs and show that no age changes how their anchors classify.
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gh" <<'GH'
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
@@ -197,6 +211,8 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator direction pending"}},
   {"id":"c-hold-bare","title":"held, no reason named","issue_type":"task","metadata":{"triage.hold":"true"}},
   {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
+  {"id":"c-placement","title":"held for the placement sitting","issue_type":"bug","metadata":{"placement":"pending"}},
+  {"id":"c-placement-placed","title":"placed under an epic, its marker left behind","issue_type":"task","metadata":{"placement":"pending"},"dependencies":[{"depends_on_id":"e-placed","type":"parent-child"}]},
   {"id":"c-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
   {"id":"c-husk-tracked","title":"tracked only by a dead synthetic convoy","issue_type":"bug","metadata":{}},
   {"id":"c-inputconvoy","title":"input convoy for c-plain","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
@@ -278,7 +294,7 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
 # delta-test survivor assertion, plus the two structural-edge candidates the
 # exec script now folds in: c-parented is gated by its open child, and
 # c-trackslive by its outgoing tracks edge to a live bead).
-EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-ordertalk,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway,c-takeaway-empty,c-titletalk,c-wisp-other"
+EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-ordertalk,c-placement-placed,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway,c-takeaway-empty,c-titletalk,c-wisp-other"
 
 echo "── first run: absent baseline → full census filed, baseline advanced ──"
 run_sweep ABSENT
@@ -324,7 +340,7 @@ for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
             c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
             c-slingconvoy c-synthconvoy c-synthconvoy-bool c-wisp-order c-husk-step-1 c-husk-step-2 \
-            c-rootvisit-step c-parented c-trackslive; do
+            c-rootvisit-step c-parented c-trackslive c-placement; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
         *) ok "dropped $drop" ;;
@@ -334,7 +350,8 @@ for keep in c-pr-merged c-pr-closed c-pr-otherrepo c-pr-nourl c-preopen-fixable 
             c-preopen-partial c-preopen-nomarker c-preopen-noset c-preopen-none \
             c-husk-tracked c-live-step c-noconvoy-step c-titletalk c-slingtalk \
             c-ordertalk c-wisp-other \
-            c-realconvoy c-docupdate c-takeaway c-takeaway-empty c-hold-empty; do
+            c-realconvoy c-docupdate c-takeaway c-takeaway-empty c-hold-empty \
+            c-placement-placed; do
     case ",$(cat "$BASELINE_FILE")," in
         *",$keep,"*) ok "kept $keep" ;;
         *) bad "kept $keep" "was hidden — the inverse defect" ;;
@@ -367,7 +384,7 @@ grep -q "c-demand-live" "$ESC_BODIES" \
 echo "── the delta splits new from carried; index 0 is a real hit ──"
 PARTIAL="$(printf '%s' "$EXPECT_SURVIVORS" | cut -d, -f2-)"   # all but the FIRST id
 run_sweep "$PARTIAL"
-grep -q "delta: 1 new, 21 carried" <<< "$OUT" \
+grep -q "delta: 1 new, 22 carried" <<< "$OUT" \
     && ok "baseline missing one id → exactly 1 new (and position 0 counts as carried)" \
     || bad "delta split" "$OUT"
 grep -q "c-docupdate" "$ESC_BODIES" && ok "the new one is enumerated" || bad "new enumeration" "$(cat "$ESC_BODIES")"
@@ -639,6 +656,51 @@ run_sweep
 grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
     && bad "an edge-less finding with an in-flight lane fix escalated" "esc-calls: $(cat "$ESC_CALLS")" \
     || ok "an edge-less finding whose lane fix is in flight is left for its landing — nothing escalated"
+
+echo "── a store marked joined reads the landed fix unit through the anchor's edge ──"
+# There the census takes its live fix units by anchor_bead and its closed ones
+# from the anchor's dependents (bd-lib.sh's anchor graph): the landed fix is a
+# related dependent of the anchor, and no live fix unit is left.
+printf '[]\n' > "$TMP/show/reworks-we-anchor.json"
+printf '%s\n' '[{"id":"we-fix","status":"closed","dependency_type":"related","metadata":{"task_kind":"rework","anchor_bead":"we-anchor","source_review_bead":"we-rev"}}]' > "$TMP/show/dep-we-anchor.json"
+KV_JOINED=1 run_sweep
+grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "marked: an edge-less finding whose lane fix landed escalates, the fix read through the anchor's edge" \
+    || bad "marked: edge-read wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+run_sweep
+grep -q 'we-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "unmarked: a fix unit only the edge reaches escalated" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "unmarked: the census reads by anchor_bead alone, so a fix unit only the edge reaches is not counted"
+: > "$TMP/reads.log"
+KV_JOINED=1 LIVENESS_SWEEP_DB="$TMP/pin.db" READ_LOG="$TMP/reads.log" run_sweep
+grep -q '^we-anchor landed-fix-wedge$' "$ESC_CALLS" \
+    && ok "pinned: the marked-store wedge still escalates under a --db pin" \
+    || bad "pinned: wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
+for want in "bd kv --db $TMP/pin.db get anchor_edges.joined" \
+            "bd list --db $TMP/pin.db --metadata-field anchor_bead=we-anchor" \
+            "bd dep --db $TMP/pin.db list we-anchor --direction=up"; do
+    grep -qF -- "$want" "$TMP/reads.log" \
+        && ok "pinned: the census read '${want}…' carries the pin" \
+        || bad "pinned: the census read carries the pin" "missing '$want' in: $(grep -F 'we-anchor\|kv' "$TMP/reads.log")"
+done
+rm -f "$TMP/show/dep-we-anchor.json"
+
+echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
+# A ruling's rework child carries no source_review_bead, like a human batch's, but
+# it answers the ruling. An anchor sent back to pre_open_gate keeps that closed
+# child, which must not read as the landed fix of a human objection nobody answered.
+cat > "$TMP/live.json" <<'JSON'
+[
+  {"id":"wr-anchor","status":"open","title":"edge-less human finding beside a ruling's rework","metadata":{"merge_result":"pre_open_gate","branch":"polecat/wr-anchor"}},
+  {"id":"wr-find","status":"open","title":"edge-less human must-fix finding","metadata":{"task_kind":"finding","finding.disposition":"must-fix","finding.lane":"human","anchor_bead":"wr-anchor"}}
+]
+JSON
+printf '[]\n' > "$TMP/show/dep-wr-find.json"
+printf '%s\n' '[{"id":"wr-fix","status":"closed","metadata":{"task_kind":"rework","anchor_bead":"wr-anchor","source_ruling_bead":"wr-visit"}}]' > "$TMP/show/reworks-wr-anchor.json"
+run_sweep
+grep -q 'wr-anchor landed-fix-wedge' "$ESC_CALLS" \
+    && bad "a ruling's landed rework was read as a human finding's fix" "esc-calls: $(cat "$ESC_CALLS")" \
+    || ok "a ruling's landed rework answers no human finding — nothing escalated"
 
 echo "── the phase-aware census asks the resolver, with a controlled index ──"
 # A real index (not the missing-file fallback the rest of this file uses):

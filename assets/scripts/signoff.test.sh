@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/signoff.sh — the single check-verdict writer.
 # Stubbed gc/gh/git; no live city, Dolt, network, or PRs. The posted artifact
-# carries the anchor link; --approve is NEVER used. A verdict records a lane
-# state and binds to no commit, so the reviewed oid reaches the artifact and the
-# review bead and nothing else, and a head that moved under the review refuses
-# nothing. request-changes always files exactly one rework child — convergence
+# opens with one line naming the check, its verdict and what needs the
+# operator, and carries the anchor link; --approve is NEVER used. A verdict
+# records a lane state and binds to no commit, so the reviewed oid reaches the
+# artifact and the review bead and nothing else, and a head that moved under the
+# review refuses nothing. request-changes always files exactly one rework child — convergence
 # is judged by the validator, not counted here — and is idempotent on
 # source_review_bead, so a re-pool adopts the child it already filed rather than
 # minting a twin.
@@ -25,8 +26,7 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
@@ -142,11 +142,14 @@ case "${1:-}" in
     # refuses only invalid JSON and stores any other document as given. The stub
     # also refuses a document that is not an object: it holds no key a
     # --metadata-field query can match, so a caller that sends one fails here.
-    cmeta='{}'
+    # --deps <type:id> rides the insert too, as an edge row from the new bead,
+    # except blocks:<id>, which bd turns around: <id> depends on the new bead.
+    cmeta='{}'; cdeps=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --metadata=*) cmeta="${1#--metadata=}" ;;
+        --deps) shift; cdeps="$cdeps ${1:-}" ;;
       esac
       shift || true
     done
@@ -163,6 +166,12 @@ case "${1:-}" in
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    for d in $cdeps; do
+      case "$d" in
+        blocks:*) printf '%s|fix-%s|blocks\n' "${d#blocks:}" "$n" >> "$DEPS" ;;
+        *) printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS" ;;
+      esac
+    done
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -172,9 +181,23 @@ case "${1:-}" in
     # A row is "<dependent>|<blocker>|<type>", matching the real binary:
     # `dep add A B` is "A depends on B", `dep S --blocks D` is "D depends on S",
     # --direction=down lists what an id depends on and =up lists what depends
-    # on it. Model these backwards and a reversed edge reads as correct.
+    # on it, every type unless -t names one, each row carrying dependency_type.
+    # Model these backwards and a reversed edge reads as correct.
     case "${1:-}" in
-      add) printf '%s|%s|%s\n' "$2" "$3" "${4#--type=}" >> "$DEPS"; echo "dep added" ;;
+      add)
+        # --file <path|->: newline-delimited {"from","to","type"} edges.
+        if [ "${2:-}" = "--file" ]; then
+          if [ "${3:-}" = "-" ]; then lines=$(cat); else lines=$(cat "${3:-}"); fi
+          printf '%s\n' "$lines" | jq -r 'select(type == "object") | "\(.from)|\(.to)|\(.type // "blocks")"' >> "$DEPS"
+          echo "deps added"
+        else
+          a="${2:-}"; b="${3:-}"; ty=""; shift 3 || true
+          while [ $# -gt 0 ]; do
+            case "$1" in --type=*) ty="${1#--type=}" ;; --type|-t) shift; ty="${1:-}" ;; esac
+            shift || true
+          done
+          printf '%s|%s|%s\n' "$a" "$b" "$ty" >> "$DEPS"; echo "dep added"
+        fi ;;
       list)
         shift; id="$1"; shift
         dir=""; typ=""
@@ -187,12 +210,12 @@ case "${1:-}" in
         first=1
         while IFS='|' read -r f t ty; do
           [ -n "$f" ] || continue
-          [ "$ty" = "$typ" ] || continue
+          [ -z "$typ" ] || [ "$ty" = "$typ" ] || continue
           other=""
           if [ "$dir" = "down" ] && [ "$f" = "$id" ]; then other="$t"; fi
           if [ "$dir" = "up" ] && [ "$t" = "$id" ]; then other="$f"; fi
           [ -n "$other" ] || continue
-          row=$(jq -c --arg id "$other" '(.[] | select(.id == $id)) // {"id":$id,"metadata":{}}' "$STORE")
+          row=$(jq -c --arg id "$other" --arg ty "$ty" '((.[] | select(.id == $id)) // {"id":$id,"metadata":{}}) + {dependency_type: $ty}' "$STORE")
           [ "$first" = 1 ] || out="$out,"
           out="$out$row"; first=0
         done < "$DEPS"
@@ -239,8 +262,7 @@ case "${1:-}" in
 esac
 STUB
 
-cat > "$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 printf '%s\n' "$*" >> "${STUB_GH_ALL:?}"
@@ -271,8 +293,7 @@ esac
 exit 0
 STUB
 
-cat > "$BIN/git" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
 # resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
 # then reads the check index at the reviewed commit with
 # `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
@@ -432,6 +453,39 @@ reset "$ANCHOR_PR"
 printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
 "$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/notes" >/dev/null 2>&1
 has "$(cat "$STUB_GH_BODY")" "P2: nit at foo.sh:3" "--notes-file body reaches the artifact"
+
+# --- the opening line ----------------------------------------------------------------
+# Every verdict opens the same way, whichever check wrote it: the check and its
+# verdict, then the one decision it needs from the operator, or that nothing
+# does. The reviewer's notes are the trail under it, and the lines scripts read
+# (the demo decision, the anchor trailer) close it.
+echo "# a verdict opens with the check, its verdict, and that nothing needs the operator"
+reset "$ANCHOR_PR"
+printf '<details>\n<summary>Correctness trail: scope</summary>\n\nScope checked: the whole diff\n\n</details>\n' > "$TMP/trail"
+"$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/trail" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "it exits 0"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Nothing needs you." "the first line is the verdict, and says nothing needs the operator"
+eq "$(sed -n 2p "$STUB_GH_BODY")" "" "…standing alone"
+eq "$(sed -n 3p "$STUB_GH_BODY")" "<details>" "…with the reviewer's trail under it"
+# has() is grep -F, which reads a needle's lines as separate patterns, so a
+# needle that spans lines is matched against the body with its newlines as |.
+has "$(tr '\n' '|' < "$STUB_GH_BODY")" "</details>||Anchor: tk-anc — check.correctness @ $OID_HEAD|" "…and the anchor trailer on its own line after the trail"
+reset "$ANCHOR_PRE"
+"$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/trail" >/dev/null 2>&1
+has "$(notes rv-1 | tr '\n' '|')" "|Correctness: approve. Nothing needs you.||<details>|" "pre-open, the notes pr-open.sh replays open the same way"
+
+echo "# --needs-you names the one decision on the opening line"
+reset "$ANCHOR_PR"
+"$SUT" --review-bead rv-1 --verdict approve --needs-you "Needs you: the PR also raises the retry default; decide whether that belongs here. See lib/retry.sh" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "it exits 0"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Needs you: the PR also raises the retry default; decide whether that belongs here. See lib/retry.sh." "the decision rides the opening line, labelled once and punctuated"
+reset "$ANCHOR_PR"
+"$SUT" --review-bead rv-1 --verdict approve --needs-you " none " >/dev/null 2>&1
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Nothing needs you." "a decision of none is no decision"
+PMRV='{"id":"rv-pm","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"pm","anchor_bead":"tk-anc"},"notes":"pm body"}'
+reset "$ANCHOR_PR" ",$PMRV"
+"$SUT" --review-bead rv-pm --verdict approve >/dev/null 2>&1
+eq "$(head -1 "$STUB_GH_BODY")" "PM: approve. Nothing needs you." "a check named by two letters reads as an acronym"
 
 # --- the bead-side record of what was judged -------------------------------------
 # The lane state names no commit, so lane-state.sh derives a lane green only
@@ -751,6 +805,8 @@ has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "child blocks the anchor"
 has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child stays open and unblocked"
 hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, not the reverse"
 has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the summary"
+eq "$(meta fix-1 rejection_reason)" "signoff requested changes: Correctness: request-changes." "…which is the opening line's check and verdict, without the half that speaks to the operator"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Nothing needs you." "the posted verdict opens with the whole line"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
 
@@ -987,19 +1043,22 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 eq "$(grep -c 'tk-anc|vp-open|blocks' "$STUB_DEPS")" "1" "exactly one validation-pass edge holds the anchor — no duplicate accrued"
 eq "$(meta vp-open reviewed_oid)" "$OID_OLD" "the reused pass keeps the head it opened at — a validator mid-rule is not moved"
 
-echo "# request-changes adopts a same-title unstamped orphan instead of minting a twin"
-# A prior attempt that created the bead but never stamped its shape leaves an
-# orphan the lane probe cannot see; it is adopted by exact title and stamped
-# into shape rather than twinned into a second anchor blocker.
-reset "$ANCHOR_PR" ',{"id":"vp-orphan","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+echo "# the validation pass is filed whole: its shape and its blocks edge ride the create"
+# A create whose reply is lost has then still landed where the lane probe finds
+# it, so the retry reuses it (the reuse case above) rather than minting a twin.
+reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes exits 0"
-has "$out" "adopting unstamped validation-pass orphan vp-orphan" "the unstamped orphan is adopted by title"
-hasnt "$(cat "$STUB_CREATED")" "Validate" "no twin pass is minted"
-eq "$(meta vp-orphan task_kind)" "validation" "the adopted orphan is stamped into shape"
-eq "$(meta vp-orphan check_name)" "correctness" "…with the lane"
-eq "$(meta vp-orphan anchor_bead)" "tk-anc" "…and the anchor"
-has "$(cat "$STUB_DEPS")" "tk-anc|vp-orphan|blocks" "…and it is hung on the anchor"
+VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
+VPC=$(grep "^bd create Validate PR#42" "$STUB_GC_LOG")
+has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'"}' \
+  "the pass's shape rides its create"
+has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
+has "$VPC" "--deps related:tk-anc" "…and the membership edge onto it"
+eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")|$(grep -c "^$VP|tk-anc|blocks\$" "$STUB_DEPS")" "1|1|0" \
+  "…both landing with the pass, each the way bd orients it"
+hasnt "$(grep "^bd dep $VP" "$STUB_GC_LOG")" "--blocks" "…so the blocks edge the create carried holds the anchor, with no second write"
+hasnt "$(grep "^bd update $VP" "$STUB_GC_LOG")" "task_kind=validation" "…so no second write stamps the shape"
 
 echo "# a different lane's open pass is not reused — one pass per lane"
 reset "$ANCHOR_PR" ',{"id":"vp-arch","status":"open","assignee":"","metadata":{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"arch","reviewed_oid":"'"$OID_HEAD"'"},"notes":""}'
@@ -1012,12 +1071,30 @@ eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") ] | len
 echo "# a validation pass whose shape does not read back is exit 2, review left open"
 reset "$ANCHOR_PR"
 # The pass is the second bead created (after the rework child fix-1); dropping
-# its task_kind models a shaping write that half-landed and the validator path
-# could never see, so the verdict must not close past it.
+# its task_kind models a create that half-landed and the validator path could
+# never see, so bd_create closes it and the verdict must not close past it.
 out=$(STUB_DROP_KEYS="fix-2:task_kind" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "a pass missing its task_kind exits 2"
-has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+has "$out" "fix-2 did not read back carrying task_kind, so no reader could find it; closed it" "…the pass no probe could find is closed"
+has "$out" "could not open a validation pass for lane correctness" "…and no pass is reported opened"
+eq "$(status fix-2)|$(meta fix-2 gc.outcome)" "closed|abandoned" "…closed as abandoned, so its edge holds nothing"
 eq "$(status rv-1)" "in_progress" "the review is left open for a retry"
+reset "$ANCHOR_PR"
+# Short only of its pin, the pass is one the lane probe finds, so it is kept
+# and the shape gate holds the verdict until the pin reads back.
+out=$(STUB_DROP_KEYS="fix-2:reviewed_oid" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a pass missing its reviewed_oid exits 2"
+has "$out" "did not record the batch shape" "…naming the shape that did not stick"
+eq "$(status fix-2)|$(status rv-1)" "open|in_progress" "…and the pass and the review are left open for a retry"
+
+echo "# a pass an earlier two-write create left without its shape is closed before a fresh one is filed"
+reset "$ANCHOR_PR" ',{"id":"vp-orph","status":"open","assignee":"","title":"Validate PR#42 correctness review @ '"$OID_HEAD"'","metadata":{},"notes":""}'
+printf 'tk-anc|vp-orph|blocks\n' >> "$STUB_DEPS"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes exits 0"
+eq "$(status vp-orph)|$(meta vp-orph gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"
+eq "$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | .status ] | join(",")' "$STUB_STORE")" "open" \
+  "…and one whole pass is filed in its place"
 
 echo "# pre-open request-changes opens a branch-titled validation pass"
 reset "$ANCHOR_PRE"
@@ -1098,6 +1175,14 @@ FIX2=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$S
 has "$(meta "$FIX2" rejection_reason)" "signoff requested changes:" "rejection_reason keeps its one-line prose summary"
 hasnt "$(meta "$FIX2" rejection_reason)" "finding(s) this bead blocks" "…and names no findings when none were filed"
 
+echo "# a decision for the operator opens the posted verdict and never reaches the rework child's reason"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --needs-you "decide whether the retry default belongs in this PR" 2>&1); rc=$?
+eq "$rc" 0 "request-changes with --needs-you exits 0"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Needs you: decide whether the retry default belongs in this PR." "the posted verdict opens with the decision"
+FIX3=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
+eq "$(meta "$FIX3" rejection_reason)" "signoff requested changes: Correctness: request-changes." "the rework child's reason is the check and verdict alone, since the worker that reads it is not the operator"
+
 # --- a malformed findings file never costs the rework dispatch ------------------
 echo "# a malformed findings file is best-effort"
 reset "$ANCHOR_PR"
@@ -1175,6 +1260,150 @@ reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=none"
 out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
 eq "$rc" 0 "triage on a none anchor still records its verdict"
 eq "$(meta tk-anc check_set)" "none" "the none opt-out stays human-only, not widened"
+
+# --- a bring-current round awaiting triage: the verdict carries the round's ruling ---
+# The guard's decide is stubbed: it logs its argv, writes the round's account to
+# --body-out and STUB_BC_ASK, the ask of a ruling that lifts the approval, to
+# --ask-out, and exits STUB_BC_RC. bring-current-guard.test.sh proves what it
+# does.
+cat > "$BIN/bring-current" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_BC_LOG:?}"
+out=""; ask=""
+while [ $# -gt 0 ]; do case "$1" in --body-out) out="${2:-}"; shift 2 ;; --ask-out) ask="${2:-}"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] && printf 'ROUND ACCOUNT: what collided and what was decided\n' > "$out"
+[ -n "$ask" ] && printf '%s\n' "${STUB_BC_ASK:-}" > "$ask"
+exit "${STUB_BC_RC:-0}"
+STUB
+chmod +x "$BIN/bring-current"
+export GC_BRING_CURRENT_TOOL="$BIN/bring-current" STUB_BC_LOG="$TMP/bc.log"
+ROUND_OWED=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted", triage: null}')
+ROUND_RULED=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted", triage: {review: "rv-old"}}')
+
+echo "# a triage verdict on a round awaiting it is refused without the ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a triage approve with no ruling exits 1"
+has "$out" "awaits this triage's ruling: pass --reopen" "…naming the flags the ruling takes"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none 2>&1); rc=$?
+eq "$rc" 1 "a ruling with no --round-reason exits 1"
+
+echo "# the ruling rides the verdict: the guard decides, and the round's account sits under the opening line"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" 2>&1); rc=$?
+eq "$rc" 0 "a ruled triage approve exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "the guard's decide gets the anchor, the review, the lanes and the reason"
+has "$(cat "$STUB_BC_LOG")" "--ask-out" "…and where to write the ask of a ruling that lifts the approval"
+eq "$(head -1 "$STUB_GH_BODY")" "Triage: approve. Nothing needs you." "a ruling that keeps the approval leaves the opening line saying nothing needs the operator"
+eq "$(sed -n 3p "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was decided" "the round's account comes next"
+eq "$(sed -n 5p "$STUB_GH_BODY")" "triage body" "…and the reviewer's own notes follow it"
+eq "$(meta tk-anc "check.triage")" "green" "the marker is stamped"
+eq "$(status rv-tri)" "closed" "…and the review closed"
+
+echo "# lanes triage adds, and a dismissal, reach the ruling, and the lift's ask opens the verdict"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$(STUB_INDEX="$IDX" STUB_BC_ASK="Needs you: the merge kept the branch default; decide which default ships. Your approval is lifted until you decide." "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reopen none --round-reason "the merge kept the branch default; decide which default ships" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 0 "it exits 0"
+has "$(cat "$STUB_BC_LOG")" "--add demo" "a lane added on the call is reopened with the round"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…and the dismissal is passed on"
+has "$(meta tk-anc check_set)" "demo" "the widening still lands"
+eq "$(head -1 "$STUB_GH_BODY")" "Triage: approve. Needs you: the merge kept the branch default; decide which default ships. Your approval is lifted until you decide." "the verdict opens with the call the lift asks of the operator"
+eq "$(sed -n 3p "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was decided" "…and the round's account sits under it as before"
+
+echo "# a lift names its one decision in the round's reason, so --needs-you beside it is refused"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "x" --dismiss-approval --needs-you "something else" 2>&1); rc=$?
+eq "$rc" 1 "it exits 1"
+has "$out" "drop --needs-you" "…naming the flag to drop"
+eq "$(cat "$STUB_BC_LOG")" "" "…before the guard is called"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…and with no marker"
+
+echo "# a ruling the guard refuses or cannot land records nothing"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"
+out=$(STUB_BC_RC=1 "$SUT" --review-bead rv-tri --verdict approve --reopen pm --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a refused ruling exits 1"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…with no marker"
+out=$(STUB_BC_RC=2 "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
+eq "$rc" 2 "a ruling that did not land exits 2"
+eq "$(status rv-tri)" "in_progress" "…leaving the review open for the retry"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…and no marker stamped"
+
+echo "# a ruling this review recorded but did not carry out is carried out by its retry"
+# decide records the ruling on the round before it reopens a lane or dismisses an
+# approval, so a ruling that did not fully land leaves the round ruled by this
+# same review. The decide stub writes no record, so each case stamps the one the
+# first call's decide left behind.
+ROUND_HALF=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", class: "conflicted",
+  triage: {review: "rv-tri", reopen: ["correctness"], add: [], dismiss: true, reason: "the merged default changes behaviour", at: "2026-10-12T00:00:00Z"}}')
+ASK_HALF="Needs you: the merged default changes behaviour. Your approval is lifted until you decide."
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$(STUB_BC_RC=2 "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 2 "the first call's ruling did not fully land: exit 2"
+anchor_meta "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$(STUB_BC_ASK="$ASK_HALF" "$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" --dismiss-approval 2>&1); rc=$?
+eq "$rc" 0 "the same call, retried, exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…calling the guard's decide again, which carries out the recorded ruling"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+eq "$(head -1 "$STUB_GH_BODY")" "Triage: approve. $ASK_HALF" "…the posted verdict opens with the ask the recorded lift renders"
+eq "$(sed -n 3p "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was decided" "…and the round's account sits under it"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+eq "$(status rv-tri)" "closed" "…and the review closed"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$(STUB_BC_ASK="$ASK_HALF" "$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a retry without the ruling flags exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness --reason the merged default changes behaviour --body-out" "…passing decide the ruling the round records"
+has "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…the dismissal with it"
+eq "$(head -1 "$STUB_GH_BODY")" "Triage: approve. $ASK_HALF" "…the posted verdict opens with the ask the recorded lift renders"
+eq "$(sed -n 3p "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was decided" "…and the round's account sits under it"
+eq "$(meta tk-anc "check.triage")" "green" "…before the marker is stamped"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$(printf '%s' "$ROUND_HALF" | jq -c '.triage.reopen = [] | .triage.dismiss = false')"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a recorded ruling that reopens nothing is retried too"
+has "$(cat "$STUB_BC_LOG")" "--reopen none --reason" "…passed to decide as none"
+hasnt "$(cat "$STUB_BC_LOG")" "--dismiss-approval" "…and with no dismissal"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "nothing to reopen" 2>&1); rc=$?
+eq "$rc" 1 "a retry whose flags state another ruling exits 1"
+has "$out" "already ruled on the bring-current round" "…saying the round carries this review's ruling"
+has "$out" "reopen correctness, dismiss the approval" "…naming the ruling recorded"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a retry that drops the recorded dismissal exits 1 too"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "…and so does one that names a reason and no lanes"
+has "$out" "already ruled on the bring-current round" "…refused as another ruling too"
+eq "$(cat "$STUB_BC_LOG")" "" "…neither calling the guard"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_HALF"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --needs-you "something else" 2>&1); rc=$?
+eq "$rc" 1 "a retry of a recorded lift that names another decision exits 1"
+has "$out" "drop --needs-you" "…since the recorded lift's reason is the one decision"
+eq "$(cat "$STUB_BC_LOG")" "" "…without calling the guard"
+eq "$(meta tk-anc "check.triage")" "<absent>" "…stamping no marker"
+eq "$(status rv-tri)" "in_progress" "…and leaving the review open"
+
+echo "# the ruling flags are refused where no round awaits them, and on any other check"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "no round on the anchor: --reopen exits 1"
+has "$out" "no bring-current round on tk-anc awaits" "…saying so"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_RULED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a round already ruled on owes this verdict nothing"
+eq "$(cat "$STUB_BC_LOG")" "" "…and the guard is not called"
+reset "$ANCHOR_PR"; anchor_meta "bring_current_record=$ROUND_OWED"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reopen none --round-reason "x" 2>&1); rc=$?
+eq "$rc" 1 "a correctness review cannot carry the ruling"
+has "$out" "only a triage approve records" "…naming the rule"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness verdict on an anchor whose round awaits triage is not held for it"
 
 echo "# --add-gates is validated against the check index at the reviewed commit"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
@@ -1270,6 +1499,86 @@ out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "a correctness verdict needs no --visual"
 hasnt "$(cat "$STUB_GH_BODY")" "Visual:" "…and its artifact carries no Visual line"
 eq "$(meta rv-1 visual)" "<absent>" "…and its review bead no visual stamp"
+
+echo "# a repo-artifact is named author-committed on the Visual line"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying --visual repo-artifact exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed)" "the posted line says the visual was committed, not captured"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and names no fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the stamp stays the bare modality"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "no fallback is stamped"
+
+echo "# a delivered fallback names the modality that fits"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from ' Video ' 2>&1); rc=$?
+eq "$rc" 0 "a demo approve carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: repo-artifact (author-committed; fallback from video)" "the posted line names the provenance and the fallback"
+eq "$(meta rv-demo visual)" "repo-artifact" "the delivered modality is stamped as visual"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and the modality that fits as visual_fallback_from, lowercase"
+eq "$(meta tk-anc check.demo)" "green" "the demo lane reads green"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict request-changes --visual screenshot --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 0 "a demo request-changes carrying a fallback exits 0"
+has "$(cat "$STUB_GH_BODY")" "Visual: screenshot (fallback from video)" "a captured fallback names only the fallback"
+eq "$(meta rv-demo visual_fallback_from)" "video" "…and stamps it"
+
+echo "# pre-open, the fallback reaches the notes the PR replays"
+reset "$ANCHOR_PRE" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from screenshot 2>&1); rc=$?
+eq "$rc" 0 "a pre-open demo approve with a fallback exits 0"
+has "$(notes rv-demo)" "Visual: repo-artifact (author-committed; fallback from screenshot)" "the pre-open notes carry the whole line"
+
+echo "# a verdict without a fallback clears one an earlier attempt stamped"
+DEMO_STALE='{"id":"rv-demo","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"demo","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat","visual":"repo-artifact","visual_fallback_from":"video"},"notes":"demo body: the board reads better seen"}'
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 0 "the retried verdict exits 0"
+eq "$(meta rv-demo visual_fallback_from)" "<absent>" "the earlier fallback is cleared"
+hasnt "$(cat "$STUB_GH_BODY")" "fallback" "…and the posted line names none"
+reset "$ANCHOR_PR" ",$DEMO_STALE"
+printf 'rv-demo visual_fallback_from\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact 2>&1); rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+
+echo "# a fallback is read back before anything is posted"
+reset "$ANCHOR_PR" ",$DEMO"
+out=$(STUB_DROP_KEYS="rv-demo:visual_fallback_from" "$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 2 "a fallback that did not read back exits 2 (review left open)"
+has "$out" "visual fallback did not read back" "the failure names the read-back"
+eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
+eq "$(meta tk-anc check.demo)" "<absent>" "no marker is stamped"
+eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# a fallback that is not cheaper than what it stands in for is refused, nothing written"
+for pair in "video screenshot" "screenshot screenshot"; do
+  set -- $pair
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual "$1" --visual-fallback-from "$2" 2>&1); rc=$?
+  eq "$rc" 1 "--visual $1 with --visual-fallback-from $2 exits 1"
+  has "$out" "a fallback is cheaper than the modality it stands in for" "…naming the cost rule"
+  eq "$(meta rv-demo visual)" "<absent>" "…with no decision stamped"
+  eq "$(cat "$STUB_GH_BODY")" "" "…and nothing posted"
+done
+reset "$ANCHOR_PR" ",$DEMO"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual none --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a fallback beside --visual none exits 1"
+has "$out" "--visual none delivers no visual" "the refusal says none delivers nothing"
+eq "$(meta rv-demo visual)" "<absent>" "no decision is stamped"
+for bad in repo-artifact gif; do
+  reset "$ANCHOR_PR" ",$DEMO"
+  out=$("$SUT" --review-bead rv-demo --verdict approve --visual repo-artifact --visual-fallback-from "$bad" 2>&1); rc=$?
+  eq "$rc" 1 "--visual-fallback-from $bad exits 1"
+  has "$out" "--visual-fallback-from must be screenshot or video" "…naming the values a fallback can stand in for"
+done
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --visual-fallback-from video 2>&1); rc=$?
+eq "$rc" 1 "a correctness verdict carrying --visual-fallback-from exits 1"
+has "$out" "only the 'demo' check records a visual decision" "the refusal names the owning check"
+eq "$(meta rv-1 visual_fallback_from)" "<absent>" "no fallback is stamped"
 
 echo "# the decision is read back before anything is posted"
 reset "$ANCHOR_PR" ",$DEMO"

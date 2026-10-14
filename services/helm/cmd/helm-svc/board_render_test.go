@@ -325,6 +325,97 @@ func TestRenderQueueClusterCarriesPerBeadContext(t *testing.T) {
 	}
 }
 
+// The conversation axis is how the board shows which pull requests carry the
+// operator's comments, so a live pull request row ends with where its
+// conversation stands, in the wire's own word: on its own line in the queue, as
+// a family member in the overview, and as the member of a fold. An asking row
+// already names its question in its needs, a closed row's conversation is
+// nobody's move, and a row that is not a pull request has none.
+func TestRenderShowsWherePRConversationsStand(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	pr := func(id, conv, needs string, rank int) board.Tile {
+		return board.Tile{
+			ID: id, Rig: "gc-toolkit", Kind: "merge", Title: "pull request " + id,
+			Severity: board.SevElevated, Section: board.SectionReview, Owed: true,
+			Frontier: "PR #9", Needs: needs, PRMachine: board.MachineSettled,
+			PRConversation: conv, GroupRoot: id, RankScore: rank,
+		}
+	}
+	tiles := []board.Tile{
+		pr("tk-out", board.ConversationOutstanding, "green, waiting on your review", 2_000_005),
+		pr("tk-ans", board.ConversationAnswered, "changes requested — reviewer re-review needed", 2_000_004),
+		pr("tk-qui", board.ConversationQuiet, "green — waiting on the merge pass", 2_000_003),
+		pr("tk-unk", board.ConversationUnknown, "position unknown — the merge cadence has recorded none", 2_000_002),
+		pr("tk-ask", board.ConversationAsking, "asking: Which base should this land on?", 2_000_001),
+		{ID: "tk-epic", Rig: "gc-toolkit", Kind: "epic", Title: "not a pull request",
+			Severity: board.SevHigh, Section: board.SectionStalled, MTotal: 2, Open: 2,
+			Frontier: "2 open", Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-epic",
+			RankScore: 3_000_000},
+	}
+	shut := pr("tk-shut", board.ConversationAnswered, "closed — ages out", -999_000)
+	shut.Severity, shut.Section, shut.Owed, shut.ClosedAt = board.SevDone, board.SectionDone, false, now.Add(-2*time.Hour)
+
+	// The row for id, which must be on the board: a "no note" check against a
+	// row that never printed would pass whatever the renderer did.
+	lineFor := func(out, id string) string {
+		t.Helper()
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, id) {
+				return line
+			}
+		}
+		t.Fatalf("no row for %s in:\n%s", id, out)
+		return ""
+	}
+	check := func(view, out string, bare ...string) {
+		t.Helper()
+		for _, c := range []struct{ id, tail string }{
+			{"tk-out", "green, waiting on your review · conversation outstanding"},
+			{"tk-ans", "changes requested — reviewer re-review needed · conversation answered"},
+			{"tk-qui", "green — waiting on the merge pass · conversation quiet"},
+			{"tk-unk", "position unknown — the merge cadence has recorded none · conversation unknown"},
+		} {
+			if line := lineFor(out, c.id); !strings.HasSuffix(strings.TrimRight(line, " "), c.tail) {
+				t.Errorf("%s: the %s row must end %q; got %q", view, c.id, c.tail, line)
+			}
+		}
+		for _, id := range bare {
+			if line := lineFor(out, id); strings.Contains(line, "conversation ") {
+				t.Errorf("%s: the %s row carries no conversation note; got %q", view, id, line)
+			}
+		}
+		if !strings.Contains(out, "A live pull request row ends with its conversation: outstanding=") {
+			t.Errorf("%s: the legend explains the conversation note; got:\n%s", view, out)
+		}
+	}
+
+	var queue strings.Builder
+	renderQueue(&queue, board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}, tiles, now, 1)
+	check("queue", queue.String(), "tk-ask", "tk-epic")
+
+	withDone := append(append([]board.Tile{}, tiles...), shut)
+	var overview strings.Builder
+	renderTable(&overview, board.Board{GeneratedAt: now, Total: len(withDone), Tiles: withDone}, withDone, now, 1)
+	check("overview", overview.String(), "tk-ask", "tk-epic", "tk-shut")
+
+	// A fold shares the needs sentence, not the conversation, so each pull
+	// request member keeps its own beside its title.
+	var folded []board.Tile
+	for i, conv := range []string{board.ConversationOutstanding, board.ConversationAnswered, board.ConversationQuiet} {
+		f := pr(fmt.Sprintf("tk-fold%d", i), conv, "in the merge cadence", 1_000_000-i)
+		f.ClusterKey = f.Needs
+		folded = append(folded, f)
+	}
+	var fold strings.Builder
+	renderQueue(&fold, board.Board{GeneratedAt: now, Total: len(folded), Tiles: folded}, folded, now, 1)
+	for i, conv := range []string{"outstanding", "answered", "quiet"} {
+		id := fmt.Sprintf("tk-fold%d", i)
+		if want := "pull request " + id + " · conversation " + conv; !strings.Contains(lineFor(fold.String(), id), want) {
+			t.Errorf("the folded member %s must carry %q; got:\n%s", id, want, fold.String())
+		}
+	}
+}
+
 func firstLines(s string, n int) string {
 	lines := strings.SplitN(s, "\n", n+1)
 	if len(lines) > n {

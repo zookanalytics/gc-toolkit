@@ -85,8 +85,7 @@ root() {
 # them — the (OPENROOT) case is only meaningful if the filter is what excludes
 # the open root. A store with no fixture answers `[]` (an empty store, which
 # is not an unreadable one).
-cat > "$TMP/bin/gc" <<'GCEOF'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCEOF'
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
     [ -f "$GC_RIGS_RC" ] && exit "$(cat "$GC_RIGS_RC")"
     cat "$GC_RIGS"; exit 0

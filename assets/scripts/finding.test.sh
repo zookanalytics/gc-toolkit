@@ -476,8 +476,7 @@ store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"",
 upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "assets/scripts/r.sh:$1()" --message "$2" --fix-unit "$3"; }
 mkdir -p "$TMP/cross"
 FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
   "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
 fi
@@ -496,8 +495,7 @@ eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it 
 # child, right after the batch's write. The re-adoption reads the disposition after
 # that write, so it sees must-fix and hangs its child.
 FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
-cat > "$TMP/cross/gc" <<SHIM
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 "$BIN/gc" "\$@"; rc=\$?
 if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
   "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null
@@ -597,16 +595,45 @@ gc bd update "$HH" --set-metadata finding.disposition=must-fix >/dev/null
 out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
 eq "$rc" "1" "a machine lane's fix unit does not answer an edge-less human finding"
 eq "$out" "$HH" "…so the human finding is reported unanswered"
-# pr-facts.sh files the human batch's fix unit: task_kind=rework, no source_review_bead.
+# pr-facts.sh files the human batch's fix unit: task_kind=rework, no source_review_bead,
+# born joined to the anchor by its edge.
 store "$(jq -c '. + [{"id":"fuHh","status":"open","assignee":"","title":"Address review comments","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancH","source_review":"5000"}}]' "$STUB_STORE")"
+printf '%s\n' 'fuHh|related|tk-ancH' >> "$STUB_DEPS"
 out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
 eq "$rc" "0" "the human batch's fix unit answers the edge-less human finding"
 eq "$out" "fuHh open $HH" "…matched by lane"
-# A read that fails is never "no fix unit".
-STUB_DEP_GARBAGE=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+# A read that fails is never "no fix unit": the finding's blockers (read down
+# from it), the anchor's live findings, and the lane census, which in a store
+# marked joined reads the anchor's closed fix units through its edges.
+STUB_DEP_GARBAGE="--direction=down" "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable blocker read exits 2"
 STUB_LIST_FAIL=1 "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
 eq "$rc" "2" "an unreadable finding read exits 2"
+printf 'anchor_edges.joined=2026-10-11T00:00:00Z\n' > "$STUB_KV"
+out=$("$SUT" fix-in-flight --anchor tk-ancH); rc=$?
+eq "$rc:$out" "0:fuHh open $HH" "marked: the lane census still matches the human batch's fix unit"
+STUB_DEP_GARBAGE="--direction=up" "$SUT" fix-in-flight --anchor tk-ancH >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "marked: an unreadable census edge read exits 2"
+: > "$STUB_KV"
+
+# A ruling's rework child carries no source_review_bead, like a human batch's, but
+# it answers the ruling its source_ruling_bead names, not a finding. Matched into
+# the human lane, its landing would close a human objection nobody addressed.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex"}},
+        {"id":"fuRr","status":"open","assignee":"","title":"Rework PR#9: apply operator ruling","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR","source_ruling_bead":"vis-R"}}]'
+gc bd dep fuRr --blocks tk-ancR >/dev/null
+HR=$("$SUT" upsert --anchor tk-ancR --lane human --locus "PR review" --message "keep the old flag")
+gc bd update "$HR" --set-metadata finding.disposition=must-fix >/dev/null
+out=$("$SUT" fix-in-flight --anchor tk-ancR); rc=$?
+eq "$rc" "1" "a ruling's rework child does not answer an edge-less human finding"
+eq "$out" "$HR" "…so the human finding is reported unanswered"
+HR2=$("$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzook" --locus "b.sh:f()" --message "guard the empty case")
+"$SUT" set-disposition --finding "$HR2" --anchor tk-ancR --disposition must-fix
+hasnt "$(deps)" "fuRr|blocks|$HR2" "a human must-fix ruling never hangs the ruling's child onto the finding"
+gc bd update fuRr --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancR
+eq "$(bstatus "$HR2")" "open" "…so the ruling's rework landing leaves the human finding open"
 
 # ---------------------------------------------------------------------------
 # shed-orphaned: an unvalidated finding whose anchor has left the open set is
@@ -703,6 +730,474 @@ eq "$(live_unstamped)" "0" "…so no open finding bead is left unstamped"
 FA5b=$(upsert_a five "close a keyless birth")
 eq "$(meta "$FA5b" 'finding.key')" "$(key_a five "close a keyless birth")" "the retry files the finding with its key"
 eq "$(live_titled "finding[correctness]: close a keyless birth")" "1" "…and it is the only open bead with that title"
+
+# ---------------------------------------------------------------------------
+# One finding has one follow-up. A deferred ruling that fails after it filed its
+# follow-up leaves the finding unvalidated, so the validator rules it again. The
+# retry reuses that follow-up: a second one would be armed beside the first, and
+# both would dispatch the same later-work once the anchor merges.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+# The follow-ups filed for a finding: the beads hung discovered-from it.
+followups() { awk -F'|' -v f="$1" '$2 == "discovered-from" && $3 == f {print $1}' "$STUB_DEPS"; }
+# Every bead carrying a title, whatever its edges, so a follow-up filed bare is counted too.
+titled() { jq -r --arg t "$1" '[ .[] | select(.title == $t) ] | length' "$STUB_STORE"; }
+upsert_r() { "$SUT" upsert --anchor tk-ancR --lane correctness --locus "assets/scripts/retry.sh:$1()" --message "$2"; }
+defer_r() { "$SUT" set-disposition --finding "$1" --anchor tk-ancR --disposition deferred --reason "later work"; }
+
+# The follow-up is filed whole: its gate, its discovered-from edge and its
+# source_finding stamp ride the create, so no follow-up exists ungated or
+# unfindable from its finding.
+: > "$STUB_GC_LOG"
+RW=$(upsert_r whole "file the follow-up whole")
+defer_r "$RW"
+RWFU=$(meta "$RW" 'finding.follow_up')
+has "$(cat "$STUB_GC_LOG")" "--deps blocked-by:tk-ancR,discovered-from:$RW --json" "the follow-up's gate and discovered-from edge ride its create"
+eq "$(meta "$RWFU" source_finding)" "$RW" "…and so does its source_finding stamp, naming the finding"
+hasnt "$(cat "$STUB_GC_LOG")" "bd dep tk-ancR --blocks $RWFU" "…so no second write wires the gate"
+hasnt "$(cat "$STUB_GC_LOG")" "bd dep add $RWFU" "…or the provenance edge"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata source_finding" "…or the stamp"
+
+# The ruling fails after the arm: STUB_CLOSE_FAIL refuses only the finding's
+# --status=closed write, so the follow-up is filed, gated and armed when it fails.
+RL=$(upsert_r late "fail after the arm")
+export STUB_CLOSE_FAIL="$RL"
+defer_r "$RL" 2>/dev/null; rc=$?
+export STUB_CLOSE_FAIL=""
+if [ "$rc" -ne 0 ]; then ok "a deferral whose close is refused exits non-zero ($rc)"; else bad "a deferral whose close was refused exited 0"; fi
+eq "$(meta "$RL" 'finding.disposition')|$(bstatus "$RL")" "unvalidated|open" "…and leaves the finding unvalidated and open, so the validator rules it again"
+RLFU=$(followups "$RL")
+eq "$(printf '%s\n' "$RLFU" | grep -c .)" "1" "…holding the one follow-up it filed"
+eq "$(meta "$RLFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…already armed to the fix pool"
+defer_r "$RL"; rc=$?
+eq "$rc" "0" "the clean re-run succeeds"
+eq "$(meta "$RL" 'finding.disposition')|$(bstatus "$RL")" "deferred|closed" "…and closes the finding deferred"
+eq "$(followups "$RL")" "$RLFU" "…reusing the follow-up the failed attempt filed"
+eq "$(titled "follow-up: fail after the arm")" "1" "…so exactly one follow-up exists"
+eq "$(meta "$RL" 'finding.follow_up')" "$RLFU" "…recorded on the finding"
+has "$(meta "$RL" 'finding.reply')" "$RLFU" "…and named in the reply the raiser's thread receives"
+eq "$(meta "$RLFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "the one follow-up is armed"
+eq "$(notes "$RLFU" | grep -c 'dispatch armed by')" "1" "…once: an arm already on the fix pool is not written again"
+has "$(deps)" "tk-ancR|blocks|$RLFU" "…and gated behind the anchor"
+
+# The ruling fails at the arm: the follow-up is filed, and its gate rode the
+# create, so it waits behind the anchor unarmed. The retry reuses it and arms it.
+cat > "$TMP/dispatch-fail.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "deferred-dispatch: simulated arm failure" >&2
+exit 1
+STUB
+chmod +x "$TMP/dispatch-fail.sh"
+RA=$(upsert_r arm "fail at the arm")
+GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" "$SUT" set-disposition --finding "$RA" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RA" 'finding.disposition')" "2|unvalidated" "a deferral whose arm fails exits 2 and leaves the finding unvalidated"
+RAFU=$(followups "$RA")
+eq "$(printf '%s\n' "$RAFU" | grep -c .)|$(meta "$RAFU" 'gc.dispatch_when_ready')" "1|<absent>" "…with its one follow-up filed but not armed"
+has "$(deps)" "tk-ancR|blocks|$RAFU" "…and already gated, so nothing dispatches it early"
+defer_r "$RA"; rc=$?
+eq "$rc|$(followups "$RA")" "0|$RAFU" "the retry reuses the unarmed follow-up"
+eq "$(meta "$RAFU" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…and arms it"
+eq "$(titled "follow-up: fail at the arm")" "1" "…filing no second follow-up"
+
+# A reused follow-up whose gate is gone gets it back before the finding closes.
+RG=$(upsert_r gate "regain a removed gate")
+export STUB_CLOSE_FAIL="$RG"
+defer_r "$RG" 2>/dev/null
+export STUB_CLOSE_FAIL=""
+RGFU=$(followups "$RG")
+gc bd dep remove "$RGFU" tk-ancR >/dev/null
+hasnt "$(deps)" "tk-ancR|blocks|$RGFU" "(fixture) the follow-up's gate is removed after the failed attempt"
+defer_r "$RG"; rc=$?
+eq "$rc|$(followups "$RG")" "0|$RGFU" "the retry reuses the follow-up whose gate was removed"
+has "$(deps)" "tk-ancR|blocks|$RGFU" "…and wires its gate again"
+
+# The create lands and its reply is lost: the stamped edge the follow-up was
+# born with finds it in the same call, so the deferral completes without a twin.
+RC=$(upsert_r reply "recover a lost create reply")
+export STUB_CREATE_GARBAGE=1
+defer_r "$RC"; rc=$?
+export STUB_CREATE_GARBAGE=""
+eq "$rc|$(meta "$RC" 'finding.disposition')" "0|deferred" "a follow-up create whose reply does not parse is recovered in the same call"
+eq "$(meta "$RC" 'finding.follow_up')" "$(followups "$RC")" "…by the stamped discovered-from edge it was born with"
+eq "$(titled "follow-up: recover a lost create reply")" "1" "…and no twin is filed"
+
+# A refused create files nothing, so the retry files exactly one follow-up.
+RF=$(upsert_r refused "retry a refused create")
+export STUB_CREATE_FAIL=1
+defer_r "$RF" 2>/dev/null; rc=$?
+export STUB_CREATE_FAIL=""
+eq "$rc|$(meta "$RF" 'finding.disposition')|$(titled "follow-up: retry a refused create")" "2|unvalidated|0" "a refused follow-up create exits 2, files nothing and leaves the finding unvalidated"
+defer_r "$RF"; rc=$?
+eq "$rc|$(titled "follow-up: retry a refused create")|$(followups "$RF" | grep -c .)" "0|1|1" "the retry files exactly one follow-up"
+
+# A closed follow-up is not reused: a deferral must leave a follow-up that can
+# still dispatch, and a closed bead never will.
+RX=$(upsert_r closed "skip a closed follow-up")
+export STUB_CLOSE_FAIL="$RX"
+defer_r "$RX" 2>/dev/null
+export STUB_CLOSE_FAIL=""
+RXFU=$(followups "$RX")
+gc bd update "$RXFU" --status=closed >/dev/null
+defer_r "$RX"; rc=$?
+RXFU2=$(meta "$RX" 'finding.follow_up')
+if [ "$rc" -eq 0 ] && [ -n "$RXFU" ] && [ "$RXFU2" != "$RXFU" ] && [ "$(bstatus "$RXFU2")" = "open" ]; then
+  ok "a closed follow-up is not reused: the deferral files a live one"
+else
+  bad "the deferral did not file a live follow-up past the closed $RXFU (rc=$rc, follow_up=$RXFU2)"
+fi
+eq "$(meta "$RXFU2" 'gc.dispatch_when_ready')" "gc-toolkit/gc-toolkit.polecat" "…armed like any follow-up"
+has "$(deps)" "tk-ancR|blocks|$RXFU2" "…and gated behind the anchor"
+
+# A bead another writer hangs discovered-from on the finding is not its
+# follow-up. scaffolding-sweep.sh files a disposed anchor's carried-forward bug
+# that way, born superseding the finding, and the bug takes its own route to a
+# first reaction. The deferral files a stamped follow-up of its own and leaves
+# the bug unarmed and ungated.
+RB=$(upsert_r carried "skip a carried-forward bug")
+RBB=$(gc bd create "carried forward" -t bug --deps "discovered-from:$RB" --metadata "{\"gc.supersedes\":\"$RB\"}" --json | jq -r '.id')
+eq "$(followups "$RB")" "$RBB" "(fixture) a carried-forward bug hangs discovered-from on the finding"
+defer_r "$RB"; rc=$?
+RBFU=$(meta "$RB" 'finding.follow_up')
+if [ "$rc" -eq 0 ] && [ -n "$RBFU" ] && [ "$RBFU" != "<absent>" ] && [ "$RBFU" != "$RBB" ]; then
+  ok "a deferral does not take a bead it did not file for its follow-up"
+else
+  bad "the deferral took $RBB, which it did not file, for its follow-up (rc=$rc, follow_up=$RBFU)"
+fi
+eq "$(meta "$RBFU" source_finding)|$(meta "$RBFU" 'gc.dispatch_when_ready')" "$RB|gc-toolkit/gc-toolkit.polecat" "…it files a stamped follow-up of its own and arms it"
+eq "$(meta "$RBB" 'gc.dispatch_when_ready')" "<absent>" "…and leaves the carried-forward bug unarmed"
+hasnt "$(deps)" "tk-ancR|blocks|$RBB" "…and ungated"
+
+# A read that cannot tell whether a follow-up was filed files nothing: the
+# finding's edges answer garbage, an array from a read that failed, or nothing.
+RU=$(upsert_r unread "file nothing on an unread lookup")
+STUB_DEP_GARBAGE=1 "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "a deferral whose follow-up lookup answers garbage exits 2 and files nothing"
+STUB_DEP_PARTIAL=1 "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "…and so does one whose lookup prints [] from a failed read"
+mkdir -p "$TMP/quietdep"
+cat > "$TMP/quietdep/gc" <<STUB
+#!/usr/bin/env bash
+case " \$* " in *" dep list "*discovered-from*) exit 0 ;; esac
+exec "$BIN/gc" "\$@"
+STUB
+chmod +x "$TMP/quietdep/gc"
+PATH="$TMP/quietdep:$PATH" "$SUT" set-disposition --finding "$RU" --anchor tk-ancR --disposition deferred --reason "later work" 2>/dev/null; rc=$?
+eq "$rc|$(meta "$RU" 'finding.disposition')|$(titled "follow-up: file nothing on an unread lookup")" "2|unvalidated|0" "…and so does one whose lookup prints nothing and exits 0"
+
+# ---------------------------------------------------------------------------
+# A ruling that replaces must-fix releases the must-fix hold only after its own
+# commit. A deferral, decline or needs-you ruling that fails anywhere before the
+# commit leaves the finding must-fix, open and still blocking the anchor, so the
+# objection holds the merge until a ruling lands.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancH","status":"open","assignee":"","title":"ancH","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+        {"id":"fuH","status":"open","assignee":"","title":"a bead that blocks a finding","notes":"","metadata":{}}]'
+must_fix_h() { # <slug> <message>: a finding on tk-ancH, ruled must-fix
+  local f
+  f=$("$SUT" upsert --anchor tk-ancH --lane correctness --locus "assets/scripts/hold.sh:$1()" --message "$2")
+  "$SUT" set-disposition --finding "$f" --anchor tk-ancH --disposition must-fix
+  printf '%s\n' "$f"
+}
+still_holds() { # <finding> <rc> <what failed>
+  eq "$2|$(meta "$1" 'finding.disposition')|$(bstatus "$1")" "2|must-fix|open" "$3 exits 2 and leaves the finding must-fix and open"
+  has " $(probe_blockers tk-ancH) " " $1 " "…still blocking the anchor through the probe the merge runs"
+}
+defer_h() { "$SUT" set-disposition --finding "$1" --anchor tk-ancH --disposition deferred --reason "later work"; }
+
+HL=$(must_fix_h lookup "defer past an unread follow-up lookup")
+STUB_DEP_GARBAGE=discovered-from defer_h "$HL" 2>/dev/null; rc=$?
+still_holds "$HL" "$rc" "a deferral whose follow-up lookup does not read"
+HC=$(must_fix_h create "defer past a refused follow-up create")
+STUB_CREATE_FAIL=1 defer_h "$HC" 2>/dev/null; rc=$?
+still_holds "$HC" "$rc" "a deferral whose follow-up create is refused"
+HA=$(must_fix_h arm "defer past a failed arm")
+GC_DEFERRED_DISPATCH_SH="$TMP/dispatch-fail.sh" defer_h "$HA" 2>/dev/null; rc=$?
+still_holds "$HA" "$rc" "a deferral whose arm fails"
+HR=$(must_fix_h reply "defer past a refused reply")
+STUB_UPDATE_FAIL="$HR" defer_h "$HR" 2>/dev/null; rc=$?
+still_holds "$HR" "$rc" "a deferral whose reply stamp is refused"
+HX=$(must_fix_h close "defer past a refused close")
+STUB_CLOSE_FAIL="$HX" defer_h "$HX" 2>/dev/null; rc=$?
+still_holds "$HX" "$rc" "a deferral whose close is refused"
+# The clean re-run commits, and only then releases the hold. A fix unit wired
+# onto the finding meanwhile is stripped before the close, which bd would refuse
+# while it blocks the finding; the finding's own edge onto the anchor does not
+# block that close.
+gc bd dep fuH --blocks "$HX" >/dev/null
+STUB_ENFORCE_BLOCKS=1 defer_h "$HX"; rc=$?
+eq "$rc|$(meta "$HX" 'finding.disposition')|$(bstatus "$HX")" "0|deferred|closed" "the clean re-run commits the deferral"
+hasnt " $(probe_blockers tk-ancH) " " $HX " "…and releases the hold once it has"
+hasnt "$(deps)" "$HX|blocks|tk-ancH" "…dropping the edge itself"
+eq "$(followups "$HX" | grep -c .)" "1" "…on the one follow-up the refused attempt filed"
+
+HD=$(must_fix_h declined "decline past a refused close")
+STUB_CLOSE_FAIL="$HD" "$SUT" set-disposition --finding "$HD" --anchor tk-ancH --disposition declined --reason "not an objection" 2>/dev/null; rc=$?
+still_holds "$HD" "$rc" "a decline whose close is refused"
+HDR=$(must_fix_h declined-reply "decline past a refused reply")
+STUB_UPDATE_FAIL="$HDR" "$SUT" set-disposition --finding "$HDR" --anchor tk-ancH --disposition declined --reason "not an objection" --reply "No change needed." 2>/dev/null; rc=$?
+still_holds "$HDR" "$rc" "a decline whose owed reply is refused"
+STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$HD" --anchor tk-ancH --disposition declined --reason "not an objection"; rc=$?
+eq "$rc|$(meta "$HD" 'finding.disposition')|$(bstatus "$HD")" "0|declined|closed" "the clean re-run commits the decline"
+hasnt "$(deps)" "$HD|blocks|tk-ancH" "…and releases the hold once it has"
+
+cat > "$TMP/escalate-fail.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "escalate: simulated failure" >&2
+exit 1
+STUB
+chmod +x "$TMP/escalate-fail.sh"
+HN=$(must_fix_h needs-you "escalate past an unfiled visit")
+GC_ESCALATE_SH="$TMP/escalate-fail.sh" "$SUT" set-disposition --finding "$HN" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+still_holds "$HN" "$rc" "a needs-you ruling whose visit cannot be filed"
+HNC=$(must_fix_h needs-you-commit "escalate past a refused commit")
+STUB_UPDATE_FAIL="$HNC" GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+still_holds "$HNC" "$rc" "a needs-you ruling whose commit is refused"
+GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call"; rc=$?
+eq "$rc|$(meta "$HNC" 'finding.disposition')|$(bstatus "$HNC")" "0|needs-you|open" "the clean re-run commits needs-you"
+hasnt " $(probe_blockers tk-ancH) " " $HNC " "…and releases the hold once it has"
+
+# ---------------------------------------------------------------------------
+# A human finding whose question an open visit already carries. pr-facts mints a
+# rework per human feedback batch, and that rework can put the question to the
+# operator before the validator rules: a visit that tracks the rework, or one on
+# the anchor that holds the rework through a blocks edge. Declining or deferring
+# the finding then overrules a decision the operator holds, and its close lets
+# pr-facts dismiss their review; a fresh needs-you visit asks them twice. So those
+# rulings refuse (exit 3) and needs-you --visit defers to the open visit.
+# List rows carry their dependencies the way `gc bd list --json` renders them,
+# which is what the shared visit identity reads.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancV","status":"open","assignee":"","title":"PR#7 anchor","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat","pr_review_batch":"rework:rwV|0|5000","pr_issue_comment_batch":"rework:rwV|0|50"}},
+        {"id":"rwV","status":"blocked","assignee":"","title":"Address review comments on PR#7 (through review 5000, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancV","source_review":"5000"},"dependencies":[{"issue_id":"rwV","depends_on_id":"visV","type":"blocks"}]},
+        {"id":"visV","status":"open","assignee":"","title":"visit: tk-ancV — PR#7 approach is rejected; drop it or keep it?","notes":"","metadata":{"task_kind":"visit","escalation_key":"approach-rejected","gc.continuation_group":"tk-ancV","gc.routed_to":"human"},"dependencies":[{"issue_id":"visV","depends_on_id":"tk-ancV","type":"tracks"}]},
+        {"id":"visOld","status":"closed","assignee":"","title":"visit: tk-ancV — an old question, already ruled","notes":"","metadata":{"task_kind":"visit","escalation_key":"old-question","gc.continuation_group":"tk-ancV"},"dependencies":[{"issue_id":"visOld","depends_on_id":"tk-ancV","type":"tracks"}]}]'
+human_finding() { # <anchor> <locus> <message> <comment-id> [<review-id>]
+  local f
+  f=$("$SUT" upsert --anchor "$1" --lane human --source "human:johnzook" --locus "$2" --message "$3")
+  gc bd update "$f" --set-metadata "finding.comment_id=$4" >/dev/null
+  [ -z "${5:-}" ] || gc bd update "$f" --set-metadata "finding.review_id=$5" >/dev/null
+  printf '%s' "$f"
+}
+FV1=$(human_finding tk-ancV "PR review" "This sweeps state that should not exist instead of fixing its cause" 5000 5000)
+
+out=$("$SUT" open-visits --anchor tk-ancV); rc=$?
+eq "$rc" "0" "open-visits exits 0 while a visit is open on the anchor's feedback"
+has "$out" "visV	tracks anchor tk-ancV, holds rework rwV	" "…and names the visit holding the batch's rework, and the anchor it tracks"
+has "$out" "approach-rejected	visit: tk-ancV — PR#7 approach is rejected" "…with its key and title, so the validator can read what it asks"
+hasnt "$out" "visOld" "a closed visit carries no question the operator still holds"
+
+BEFORE=$(jq 'length' "$STUB_STORE")
+err=$("$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition declined --reason "a reaper is the principled design" --reply "We disagree." 2>&1 >/dev/null); rc=$?
+eq "$rc" "3" "declining a human finding whose batch rework an open visit holds is refused (exit 3)"
+has "$err" "visV" "…naming the visit that already carries the question"
+has "$err" "needs-you --visit" "…and the ruling that defers to it"
+eq "$(meta "$FV1" 'finding.disposition')" "unvalidated" "…and nothing is ruled, so the validator's retry set still holds the finding"
+eq "$(bstatus "$FV1")" "open" "…and the finding stays open, so pr-facts keeps the operator's review changes-requested"
+eq "$(meta "$FV1" 'finding.reply')" "<absent>" "…and no overrule is stamped for the write-back to post"
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition deferred --reason "later" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "deferring it is refused the same way"
+eq "$(meta "$FV1" 'finding.follow_up')" "<absent>" "…and no follow-up is filed"
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition needs-you --reason "the operator's call" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a needs-you that would file a second visit for the same question is refused"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and none of the refused rulings wrote a bead"
+
+"$SUT" set-disposition --finding "$FV1" --anchor tk-ancV --disposition needs-you --visit visV --reason "visV already asks whether to drop the approach"; rc=$?
+eq "$rc" "0" "needs-you --visit defers to the open visit"
+eq "$(meta "$FV1" 'finding.disposition')" "needs-you" "…recording needs-you"
+eq "$(meta "$FV1" 'finding.visit')" "visV" "…naming the visit that carries the decision"
+has "$(meta "$FV1" 'finding.reply')" "visit visV already asks you for it" "…as the reply the raiser's thread receives"
+eq "$(bstatus "$FV1")" "open" "…and the finding stays open, holding the review"
+eq "$(jq 'length' "$STUB_STORE")" "$BEFORE" "…and no second visit is filed"
+has "$(notes "$FV1")" "deferred to open visit visV" "…and the finding's notes record the deferral"
+
+FV2=$(human_finding tk-ancV "assets/scripts/x.sh" "quote the expansion" 4999 5000)
+"$SUT" set-disposition --finding "$FV2" --anchor tk-ancV --disposition must-fix >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "must-fix is refused too: it would settle the operator's question as keep-and-fix"
+hasnt "$(deps)" "$FV2|blocks|tk-ancV" "…and wires no hold"
+
+# A Conversation comment names no review, so the anchor's batch ledger is what
+# names its batch's rework.
+FV3=$(human_finding tk-ancV "PR conversation" "why an hourly order at all?" 40)
+"$SUT" set-disposition --finding "$FV3" --anchor tk-ancV --disposition declined --reason "answered in the PR summary" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a Conversation comment routed to the held rework by the batch ledger is refused too"
+
+# A machine finding carries no comment of a human's, so no visit holds its question.
+FM=$("$SUT" upsert --anchor tk-ancV --lane correctness --locus "assets/scripts/m.sh:m()" --message "nit: rename")
+"$SUT" set-disposition --finding "$FM" --anchor tk-ancV --disposition declined --reason "cosmetic"; rc=$?
+eq "$rc" "0" "a machine finding is declined past the open visit"
+
+# --visit must name an open visit on this anchor's feedback.
+FV4=$(human_finding tk-ancV "docs/y.md" "is this the product intent?" 4998 5000)
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition needs-you --visit visOld >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "needs-you --visit refuses a closed visit"
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition needs-you --visit tk-nosuch >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "…and a visit that is not on the anchor's feedback"
+eq "$(meta "$FV4" 'finding.disposition')" "unvalidated" "…leaving the finding unruled"
+"$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition declined --visit visV >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "--visit applies to needs-you only"
+STUB_LIST_FAIL=1 "$SUT" set-disposition --finding "$FV4" --anchor tk-ancV --disposition declined --reason "x" >/dev/null 2>&1; rc=$?
+eq "$rc" "2" "a store that will not list the visits refuses the ruling (exit 2), never reads as none open"
+eq "$(bstatus "$FV4")" "open" "…and leaves the finding open"
+
+# The PR#992 shape: the rework's own visit tracks the rework, holding no edge, and
+# the anchor carries no ledger, so source_review (stored as a number) names the
+# batch. A visit on the anchor itself is left to the validator's judgment.
+: > "$STUB_DEPS"
+store "$(jq -c '. + [
+  {"id":"tk-ancW","status":"open","assignee":"","title":"PR#9 anchor","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"rwW","status":"in_progress","assignee":"","title":"Address review comments on PR#9 (through review 777, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancW","source_review":777}},
+  {"id":"rwW2","status":"open","assignee":"","title":"Address review comments on PR#9 (through review 999, comment 0)","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancW","source_review":"999"}},
+  {"id":"visW","status":"open","assignee":"","title":"visit: rwW — PR#9 sweep or fix the cause?","notes":"","metadata":{"task_kind":"visit","escalation_key":"pr9-sweep-approach","gc.continuation_group":"rwW"},"dependencies":[{"issue_id":"visW","depends_on_id":"rwW","type":"tracks"}]},
+  {"id":"visA","status":"open","assignee":"","title":"visit: tk-ancW — seed-audit merge gate","notes":"","metadata":{"task_kind":"visit","escalation_key":"seed-audit-merge-gate.9","gc.continuation_group":"tk-ancW"}}]' "$STUB_STORE")"
+FW1=$(human_finding tk-ancW "PR review" "This feels heavy handed; fix why the state occurs" 777 777)
+FW2=$(human_finding tk-ancW "assets/scripts/w.sh" "nit: a typo" 1001 999)
+out=$("$SUT" open-visits --anchor tk-ancW)
+has "$out" "visW	tracks rework rwW" "open-visits names the visit tracking the batch's rework"
+has "$out" "visA	tracks anchor tk-ancW" "…and the anchor's own visit, which the validator judges"
+"$SUT" set-disposition --finding "$FW1" --anchor tk-ancW --disposition declined --reason "x" >/dev/null 2>&1; rc=$?
+eq "$rc" "3" "a visit tracking the rework minted for the finding's review refuses the decline"
+"$SUT" set-disposition --finding "$FW2" --anchor tk-ancW --disposition declined --reason "cosmetic"; rc=$?
+eq "$rc" "0" "a finding from another batch is declined past both visits: one sits on another rework, one on the anchor"
+eq "$(bstatus "$FW2")" "closed" "…and closes"
+"$SUT" set-disposition --finding "$FW1" --anchor tk-ancW --disposition declined --reason "not an objection" --unrelated-visit visW; rc=$?
+eq "$rc" "0" "--unrelated-visit names a visit that asks something else, and the ruling proceeds"
+eq "$(meta "$FW1" 'finding.disposition')" "declined" "…as the ruling the validator meant"
+has "$(notes "$FW1")" "past open visit(s) visW" "…and the finding's notes record the visit it was ruled past"
+
+# ---------------------------------------------------------------------------
+# The release: a needs-you finding closes once the operator has ruled the visit
+# holding its question and no fix unit on its lane, nor a ruling's rework child,
+# is in flight. converse-signoff.sh records the ruling on the visit as
+# gc.ruling. While a fix unit on its lane is in flight, fix-in-flight names it so
+# quiescence holds reviews off a diff the ruling may still change.
+# ---------------------------------------------------------------------------
+# set_visit <id> <jq-update> — rewrite one visit row in the store.
+set_visit() {
+  jq -c --arg id "$1" "map(if .id == \$id then $2 else . end)" "$STUB_STORE" > "$STUB_STORE.n" \
+    && mv "$STUB_STORE.n" "$STUB_STORE"
+}
+out=$("$SUT" fix-in-flight --anchor tk-ancV); rc=$?
+eq "$rc" "0" "fix-in-flight holds while the held rework answers the needs-you finding's lane"
+has "$out" "rwV blocked" "…naming that rework"
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "open" "close-answered leaves a needs-you finding open while its visit is open"
+set_visit visV '.status = "closed" | .metadata["gc.outcome"] = "resolved" | .metadata["gc.ruling"] = "drop the sweep and fix the cause"'
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "open" "…and once the operator has ruled it, while the rework the ruling released is still in flight"
+gc bd update rwV --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancV
+eq "$(bstatus "$FV1")" "closed" "…and closes it once the rework has landed too"
+has "$(notes "$FV1")" "the operator ruled its visit visV" "…recording the ruling that released it"
+eq "$(meta "$FV1" 'finding.ruling_visit')" "visV" "…and naming the ruled visit for the review dismissal"
+# A needs-you finding with nothing answering it waits on a person and holds no
+# merge, so it never reads as an unanswered demand.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancN","status":"open","assignee":"","title":"ancN","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visN","status":"open","assignee":"","title":"visit: tk-ancN","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancN"}}]'
+FN=$(human_finding tk-ancN "docs/n.md" "which audience is this for?" 60)
+"$SUT" set-disposition --finding "$FN" --anchor tk-ancN --disposition needs-you --visit visN >/dev/null; rc=$?
+eq "$rc" "0" "needs-you --visit adopts a visit on the anchor itself"
+out=$("$SUT" fix-in-flight --anchor tk-ancN); rc=$?
+eq "$rc/$out" "1/" "fix-in-flight reports a needs-you finding with no fix unit as neither in flight nor unanswered"
+set_visit visN '.status = "closed" | .metadata["gc.ruling"] = "the operator audience"'
+STUB_SHOW_FAIL=1 "$SUT" close-answered --anchor tk-ancN >/dev/null 2>&1
+eq "$(bstatus "$FN")" "open" "a ruled visit whose row will not read releases nothing"
+"$SUT" close-answered --anchor tk-ancN
+eq "$(bstatus "$FN")" "closed" "close-answered closes it once its visit is ruled, with no fix unit to wait on"
+# A ruling's rework child (converse-rework.sh) answers no lane, but when the
+# operator's ruling on the visit calls for a change, that child is the work the
+# needs-you finding waits on: the finding, and so its review, stay open until it
+# lands.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancU","status":"open","assignee":"","title":"ancU","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visU","status":"open","assignee":"","title":"visit: tk-ancU","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancU"}}]'
+FU=$(human_finding tk-ancU "docs/u.md" "drop this section or keep it?" 62)
+"$SUT" set-disposition --finding "$FU" --anchor tk-ancU --disposition needs-you --visit visU >/dev/null
+jq -c 'map(if .id == "visU" then .status = "closed" | .metadata["gc.ruling"] = "drop the section" else . end)
+       + [{"id":"rlU","status":"in_progress","assignee":"","title":"Rework PR#12: apply operator ruling","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancU","source_ruling_bead":"visU"}}]' \
+  "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+gc bd dep rlU --blocks tk-ancU >/dev/null
+"$SUT" close-answered --anchor tk-ancU
+eq "$(bstatus "$FU")" "open" "a needs-you finding stays open after its visit is ruled while the ruling's rework child is in flight"
+gc bd update rlU --status=closed >/dev/null
+"$SUT" close-answered --anchor tk-ancU
+eq "$(bstatus "$FU")" "closed" "…and closes once that child has landed"
+has "$(notes "$FU")" "nor a ruling's rework child" "…recording that it waited on the ruling's child too"
+
+# A visit can close with no ruling: closed moot or benign by a sitting that put
+# nothing to the operator, dismissed by the operator from the board, cut short
+# by a sitting whose question outlived it, or folded with no holder recorded.
+# None of those answers the question, so each leaves the finding open and its
+# review changes-requested, however long nothing is in flight.
+for how in moot benign dismissed cut-short folded; do
+  : > "$STUB_DEPS"
+  store '[{"id":"tk-ancO","status":"open","assignee":"","title":"ancO","notes":"","metadata":{"merge_result":"pull_request"}},
+          {"id":"visO","status":"open","assignee":"","title":"visit: tk-ancO","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancO"}}]'
+  FO=$(human_finding tk-ancO "docs/o.md" "is this the right audience?" 63)
+  "$SUT" set-disposition --finding "$FO" --anchor tk-ancO --disposition needs-you --visit visO >/dev/null
+  set_visit visO ".status = \"closed\" | .metadata[\"gc.outcome\"] = \"$how\""
+  "$SUT" close-answered --anchor tk-ancO
+  eq "$(bstatus "$FO")" "open" "a visit closed $how carries no ruling, so the needs-you finding stays open"
+  eq "$(meta "$FO" 'finding.ruling_visit')" "<absent>" "…and records no ruling visit"
+done
+
+# A fold hands the question on: visit-close.sh records the holder as
+# gc.folded_into, and bead-rehome.sh records a re-homed visit's successor as
+# gc.superseded_by. close-answered follows either to the visit holding the
+# question, which releases the finding only once it is ruled.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancF2","status":"open","assignee":"","title":"ancF2","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visF1","status":"open","assignee":"","title":"visit: tk-ancF2","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}},
+        {"id":"visF2","status":"open","assignee":"","title":"visit: tk-ancF2 (holder)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}},
+        {"id":"visF3","status":"open","assignee":"","title":"visit: tk-ancF2 (re-homed)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancF2"}}]'
+FF2=$(human_finding tk-ancF2 "docs/f.md" "keep this flag or drop it?" 64)
+"$SUT" set-disposition --finding "$FF2" --anchor tk-ancF2 --disposition needs-you --visit visF1 >/dev/null
+set_visit visF1 '.status = "closed" | .metadata["gc.outcome"] = "folded" | .metadata["gc.folded_into"] = "visF2"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "open" "a finding whose visit folded into one still open stays open"
+set_visit visF2 '.status = "closed" | .metadata["gc.outcome"] = "not-needed" | .metadata["gc.superseded_by"] = "visF3"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "open" "…and when that holder was re-homed to a visit still open"
+set_visit visF3 '.status = "closed" | .metadata["gc.ruling"] = "drop the flag"'
+"$SUT" close-answered --anchor tk-ancF2
+eq "$(bstatus "$FF2")" "closed" "…and closes once the visit now holding the question is ruled"
+eq "$(meta "$FF2" 'finding.ruling_visit')" "visF3" "…recording that visit as the one whose ruling released it"
+has "$(notes "$FF2")" "moved from visit visF1 to visit visF3" "…and noting where its question moved"
+# A hand-off that ends at a bead that is not a visit, or that comes back to a
+# visit already passed, reaches no ruling, so the finding stays open.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancG","status":"open","assignee":"","title":"ancG","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visG1","status":"open","assignee":"","title":"visit: tk-ancG","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancG"}},
+        {"id":"visG2","status":"open","assignee":"","title":"visit: tk-ancG (loop)","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancG"}},
+        {"id":"bugG","status":"closed","assignee":"","title":"a bug carrying it forward","notes":"","metadata":{"gc.ruling":"not a visit"}}]'
+FG=$(human_finding tk-ancG "docs/g.md" "which name do we ship?" 65)
+"$SUT" set-disposition --finding "$FG" --anchor tk-ancG --disposition needs-you --visit visG1 >/dev/null
+set_visit visG1 '.status = "closed" | .metadata["gc.superseded_by"] = "bugG"'
+"$SUT" close-answered --anchor tk-ancG
+eq "$(bstatus "$FG")" "open" "a hand-off to a bead that is not a visit releases nothing"
+set_visit visG1 '.metadata["gc.superseded_by"] = "" | .metadata["gc.folded_into"] = "visG2"'
+set_visit visG2 '.status = "closed" | .metadata["gc.folded_into"] = "visG1"'
+"$SUT" close-answered --anchor tk-ancG
+eq "$(bstatus "$FG")" "open" "…and neither does a fold that comes back to a visit already passed"
+
+# shed-orphaned: a needs-you finding on an anchor that has closed is moot; its
+# visit is the operator's and stays.
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancS","status":"closed","assignee":"","title":"merged","notes":"","metadata":{"merge_result":"merged"}},
+        {"id":"tk-ancT","status":"open","assignee":"","title":"open","notes":"","metadata":{"merge_result":"pull_request"}},
+        {"id":"visS","status":"open","assignee":"","title":"visit: tk-ancS","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancS"}},
+        {"id":"visT","status":"open","assignee":"","title":"visit: tk-ancT","notes":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-ancT"}}]'
+FS=$(human_finding tk-ancS "a.md" "orphaned question" 70)
+gc bd update "$FS" --set-metadata finding.disposition=needs-you --set-metadata finding.visit=visS >/dev/null
+FT=$(human_finding tk-ancT "b.md" "live question" 71)
+gc bd update "$FT" --set-metadata finding.disposition=needs-you --set-metadata finding.visit=visT >/dev/null
+"$SUT" shed-orphaned --reason "test"
+eq "$(bstatus "$FS")" "closed" "shed-orphaned closes a needs-you finding whose anchor has closed"
+eq "$(bstatus "visS")" "open" "…and leaves its visit to the operator"
+eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its visit"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

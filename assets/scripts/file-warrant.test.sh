@@ -31,8 +31,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 BIN="$TMP/bin"; mkdir -p "$BIN"
 export STUB_GC_LOG="$TMP/gc.log"
 export STUB_STORE="$TMP/store.json"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 STORE="${STUB_STORE:?}"; [ -s "$STORE" ] || echo '[]' > "$STORE"

@@ -33,11 +33,11 @@ func TestReviewStateRefusesAStreamThatStopsDecoding(t *testing.T) {
 		`garbage`, // garbled
 		`"a string, not a review row"`,
 	} {
-		if _, ok := reviewState([]byte(good+tail), "bot"); ok {
+		if _, ok := reviewState([]byte(good+tail), "bot", ""); ok {
 			t.Errorf("reviewState(two rows + %q) ok = true; want false (unreadable)", tail)
 		}
 	}
-	rs, ok := reviewState([]byte(good), "bot")
+	rs, ok := reviewState([]byte(good), "bot", "")
 	if !ok || rs.approver != "human1" {
 		t.Fatalf("reviewState(two good rows) = (%+v, %v); want approver human1, ok", rs, ok)
 	}
@@ -47,9 +47,41 @@ func TestReviewStateRefusesAStreamThatStopsDecoding(t *testing.T) {
 // empty stream as [].
 func TestReviewStateReadsAnEmptyHistory(t *testing.T) {
 	for _, raw := range []string{"", "   \n"} {
-		rs, ok := reviewState([]byte(raw), "bot")
+		rs, ok := reviewState([]byte(raw), "bot", "")
 		if !ok || rs != (reviewSummary{}) {
 			t.Errorf("reviewState(%q) = (%+v, %v); want the zero summary, ok", raw, rs, ok)
+		}
+	}
+}
+
+// Once a ruling on a bring-current round lifts the approval, the rule counts only
+// an approval submitted strictly after the anchor's lift line, and names the
+// standing approval it set aside. A line not in GitHub's instant form lets no
+// approval count, and the veto stands whenever it was given. The cases mirror
+// review-verdict.test.sh's for the two-argument review_verdict.
+func TestReviewVerdictCountsOnlyAnApprovalAfterTheLiftLine(t *testing.T) {
+	rv := func(login, state, at string, id int64) reviewRow {
+		return reviewRow{Login: login, State: state, SubmittedAt: at, IDNum: id}
+	}
+	const lift = "2026-08-21T00:00:00Z"
+	for _, tc := range []struct {
+		name   string
+		rows   []reviewRow
+		lifted string
+		want   reviewSummary
+	}{
+		{"no line lifts nothing", []reviewRow{rv("human1", "APPROVED", "2026-08-20T00:00:00Z", 1)}, "", reviewSummary{approver: "human1"}},
+		{"an approval before the line is set aside", []reviewRow{rv("human1", "APPROVED", "2026-08-20T00:00:00Z", 1)}, lift, reviewSummary{lifted: "human1"}},
+		{"so is one at the line itself", []reviewRow{rv("human1", "APPROVED", lift, 1)}, lift, reviewSummary{lifted: "human1"}},
+		{"one after the line approves", []reviewRow{rv("human1", "APPROVED", "2026-08-20T00:00:00Z", 1), rv("human2", "APPROVED", "2026-08-22T00:00:00Z", 2)}, lift, reviewSummary{approver: "human2"}},
+		{"an account that approved again after the line approves", []reviewRow{rv("human1", "APPROVED", "2026-08-20T00:00:00Z", 1), rv("human1", "APPROVED", "2026-08-22T00:00:00Z", 2)}, lift, reviewSummary{approver: "human1"}},
+		{"the veto stands whenever it was given", []reviewRow{rv("human1", "APPROVED", "2026-08-22T00:00:00Z", 1), rv("human2", "CHANGES_REQUESTED", "2026-08-20T00:00:00Z", 2)}, lift, reviewSummary{veto: "human2", approver: "human1"}},
+		{"a line not in GitHub's form lets no approval count", []reviewRow{rv("human1", "APPROVED", "2026-08-22T00:00:00Z", 1)}, "2026-08-21", reviewSummary{lifted: "human1"}},
+		{"with no approval standing nothing is set aside", []reviewRow{rv("human1", "DISMISSED", "2026-08-20T00:00:00Z", 1)}, lift, reviewSummary{}},
+		{"the city's own approval is never one", []reviewRow{rv("bot", "APPROVED", "2026-08-22T00:00:00Z", 1)}, lift, reviewSummary{}},
+	} {
+		if got := reviewVerdict(tc.rows, "bot", tc.lifted); got != tc.want {
+			t.Errorf("%s: reviewVerdict = %+v, want %+v", tc.name, got, tc.want)
 		}
 	}
 }
@@ -86,10 +118,10 @@ func TestJqHasToStringMirrorsHasThenToString(t *testing.T) {
 
 // A re-read of an UNKNOWN merge state may differ from the pinned read only in
 // the mergeability facts, and the hold names every other field that changed.
-// The comparison is gh_pr_view_settled's jq `!=`, so key order and number
+// The comparison is jq's `!=` on the decoded values, so key order and number
 // spelling are no change, and a key one read lacks reads as null. Each want is
-// what that jq prints for the same two reads.
-func TestChangedFieldsMirrorsTheScriptsComparison(t *testing.T) {
+// what jq prints for the same two reads.
+func TestChangedFieldsComparesAsJqDoes(t *testing.T) {
 	row := func(raw string) map[string]json.RawMessage {
 		var r map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &r); err != nil {
@@ -123,8 +155,8 @@ func TestJqAltStringMirrorsAlternativeThenToString(t *testing.T) {
 }
 
 // MERGE_STATE_REREADS and MERGE_STATE_REREAD_SECS take their default unless the
-// value is all digits, as bd-lib.sh's case guard does, so a negative or garbled
-// value cannot lift the pass's re-read budget.
+// value is all digits, so a negative or garbled value cannot lift the pass's
+// re-read budget.
 func TestEnvCountTakesTheDefaultUnlessAllDigits(t *testing.T) {
 	for _, tc := range []struct {
 		val  string
@@ -141,9 +173,8 @@ func TestEnvCountTakesTheDefaultUnlessAllDigits(t *testing.T) {
 
 // A binary run without GCTK_SCRIPTS_DIR refuses the pass: every helper would be
 // a bare name, found through PATH if at all. A named directory is not refused
-// for a helper it lacks, because merge.sh has no such pass-level check. A
-// missing helper fails where it is called, and the pass still records a PR
-// that has already merged (merge.test.sh pins that in both arms).
+// for a helper it lacks: a missing helper fails where it is called, and the
+// pass still records a PR that has already merged (merge.test.sh pins that).
 func TestHelperDirProblemRefusesOnlyAnUnsetDirectory(t *testing.T) {
 	if p := helperDirProblem(""); !strings.Contains(p, "GCTK_SCRIPTS_DIR is unset") {
 		t.Errorf("unset dir: problem = %q, want the unset diagnosis", p)
@@ -232,10 +263,10 @@ func TestAnchorRowReadsTheStoreNotTheSupervisorCache(t *testing.T) {
 	}
 }
 
-// merge.sh's loop: --deadline and --cursor each take the argument after them,
-// even one that looks like a flag, and anything else is passed over. A flag
-// that ends the arguments reads as empty.
-func TestMergePaceArgsReadsTheFlagsAsMergeShDoes(t *testing.T) {
+// --deadline and --cursor each take the argument after them, even one that
+// looks like a flag, and anything else is passed over. A flag that ends the
+// arguments reads as empty.
+func TestMergePaceArgsTakesTheArgumentAfterEachFlag(t *testing.T) {
 	for _, tc := range []struct {
 		args             []string
 		deadline, cursor string
@@ -296,6 +327,8 @@ func TestLandsFirstHoldsBackOnlyWhatCannotLandThisPass(t *testing.T) {
 		{"only the acting login approved", `,"check_set":"correctness"`, `"4"`, "bot", false},
 		{"a later veto", `,"check_set":"correctness"`, `"5"`, "bot", false},
 		{"approved only by an account with no login", `,"check_set":"correctness"`, `"6"`, "bot", false},
+		{"approved before the lift line", `,"check_set":"correctness","bring_current_lifted_at":"2026-08-20T01:00:00Z"`, `"1"`, "bot", false},
+		{"approved after the lift line", `,"check_set":"correctness","bring_current_lifted_at":"2026-08-20T00:59:59Z"`, `"1"`, "bot", true},
 		{"DIRTY at the live head", `,"check_set":"correctness","pr_merge_state":"DIRTY@h1"`, `"1"`, "bot", false},
 		{"BLOCKED at the live head", `,"check_set":"correctness","pr_merge_state":"BLOCKED@h1"`, `"1"`, "bot", false},
 		{"BEHIND at the live head", `,"check_set":"correctness","pr_merge_state":"BEHIND@h1"`, `"1"`, "bot", false},
@@ -349,7 +382,7 @@ func TestOpenPRsReadsTheWholeStreamOrNothing(t *testing.T) {
 	if !ok || len(open) != 2 || open["61"] == nil || open["62"] == nil || !open["62"].IsDraft {
 		t.Fatalf("two good pages: (%v, ok=%v); want PRs 61 and 62, 62 a draft", open, ok)
 	}
-	if v := reviewVerdict(open["61"].reviews(), "bot"); v.approver != "human1" || v.veto != "" {
+	if v := reviewVerdict(open["61"].reviews(), "bot", ""); v.approver != "human1" || v.veto != "" {
 		t.Errorf("PR 61 verdict = %+v, want approver human1 and no veto", v)
 	}
 	want := "api graphql --hostname github.com --paginate -f query=" + openPRsQuery + " -f owner=zook -f repo=gc-toolkit"

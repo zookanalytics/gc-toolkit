@@ -63,8 +63,7 @@ mkdir -p "$TMP/bin"
 # reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling and
 # close are recorded; update is recorded AND persists gc.outcome/gc.outcome_reason
 # to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC.
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="${1:-}"; verb="${2:-}"
 case "$sub" in
   rig)

@@ -6,13 +6,13 @@ Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
 board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
 the bash dies).
 
-> **The bash board is gone; the bash WRITE VERBS are what is left.**
+> **The bash board is gone; the bash verbs are what is left.**
 > `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
-> binary. `gc-helm.sh` no longer renders a board at all: it carries `open`,
-> `react`, `takeaway`, `demand` and `dismiss`, and `gc-helm.sh --json` exits 2
-> with `unknown verb`. Its own usage text points at `helm-svc board`. Retiring the
-> remaining verbs is a separate decision recorded under "Two helm boards, and
-> they diverge" in `docs/gascity-human-engagement.md`.
+> binary. `gc-helm.sh` no longer renders a board at all: it carries the write
+> and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
+> exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
+> Retiring the remaining verbs is a separate decision recorded under "Two helm
+> boards, and they diverge" in `docs/gascity-human-engagement.md`.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -499,15 +499,16 @@ field would be lying on a normal day.
 | field | values | read from |
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
-| `pr_conversation` | `unknown` (see below) | — |
+| `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
 marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
-record it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>`
-shape the gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+record it through the lifecycle writer, gate-ensure through `lifecycle.sh` and
+`gctk merge` in-process, in the head-pinned `<value>@<oid>@<since>` shape the
+gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
 
 **No per-PR GitHub call.** A conversation read costs one GitHub round trip per
 open pull request, and a backlog of ordinary size spends the board's whole cache
@@ -565,12 +566,34 @@ wedge, a demand, a takeaway or a human route already owns the row and names it, 
 the signal defers to each; it is a merge anchor either way, so it reads in the
 `review` band beside the wedged pre-open rows.
 
-**`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
-`outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
-the city does not record. Deriving them without those marks means guessing, and
-every failed guess resolves to silence, which is the one answer that tells the
-operator to stop looking. The field is on the wire so the contract does not
-change shape once the marks exist.
+**`pr_conversation` reads the recorded position.** `asking` is the demand edge,
+rendered wherever it is there. `quiet`, `outstanding` and `answered` are read
+off `pr.conversation`, which `pr-facts.sh` records each pass against the
+acknowledgement watermarks and the routing disposition: `quiet` when no human
+has spoken, and on a pre-open gate, where no PR yet exists to speak on;
+`outstanding` while a human utterance sits above its space's watermark, or a
+batch routed to a fix unit that has not closed yet; `answered` once that fix
+unit closes — a rework child when its branch lands, a visit when a person
+resolves it — so the city's reply is there to look at. A head move alone is not
+`answered`: a merge-in of the base or an operator push leaves the fix unit open.
+A batch the city is working reads the coarser `outstanding` rather than `quiet`,
+because `covered` — `outstanding` with a bead on the utterance — waits on a
+comment-to-bead link nothing records yet. Because the disposition lands in the
+same transition as the watermark it routes past, `outstanding` re-derives from
+it even when a conversation write was dropped; an anchor with no disposition and
+no recorded position stays `unknown` until a new utterance. The recorded value
+is current only at the head `pr.machine` was last resolved at; pinned to any
+other head it reads `unknown`, which is a rendered value and never a fallback to
+the quiet end.
+
+**Every live PR row shows its conversation.** The row is where the operator sees
+which pull requests carry their comments. The dashboard puts a `💬 <value>` chip
+beside the PR link, colored for `outstanding`, `answered` and `asking`, with the
+value's meaning on hover. The terminal board ends the row's needs with
+`conversation <value>`, including a member row inside a fold, and skips it on an
+`asking` row, whose needs already names the question. Neither prints one on a
+closed row, since nobody acts on a finished pull request's conversation. Each
+surface's legend says what the values mean.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false
@@ -845,10 +868,14 @@ So the two jobs are separate:
 
 | | script | when |
 |---|---|---|
-| build | `assets/scripts/gc-helm-build.sh` | the `helm-build` order, every 5m |
+| build | `assets/scripts/gc-build.sh helm` | the `helm-build` order, every 5m |
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
-`gc-helm-build.sh` rebuilds when a source is newer than the binary, an
+`gc-build.sh` is the pack's one out-of-band builder. The `gctk-build` order runs
+it as `gc-build.sh gctk`, which builds the merge cadence's binary the same way,
+without the restart and the readability probe described below.
+
+`gc-build.sh helm` rebuilds when a source is newer than the binary, an
 ordinary `find -newer` dependency, the same question `make` asks. It also
 rebuilds when the build-status record names a revision other than the one the
 tick sees. It publishes by atomic rename so a failed link can never truncate a
@@ -907,7 +934,7 @@ file. The same record is what carries a hand-run build (below) to the service.
 To build by hand — after editing Go sources or rebuilding `web/dist` — run:
 
 ```bash
-assets/scripts/gc-helm-build.sh            # build iff stale
+assets/scripts/gc-build.sh helm            # build iff stale
 gc service restart helm                    # serve it now, rather than waiting
 ```
 
@@ -942,7 +969,7 @@ atomic rename:
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |
-| `behind_main` | how many commits `origin/<default>` carries under the helm source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
+| `behind_main` | how many commits `origin/<default>` carries under the component's source paths that the checkout's HEAD lacks — how far off-main the served code is. REPORT-ONLY: it bands the row, never triggers a rebuild |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the
@@ -959,10 +986,10 @@ and how far behind main it is — and yields to every louder signal: a failed
 build, an unreadable binary, a pending restart, a stopped build order, a local
 source/binary gap. It never feeds the rebuild decision: a checkout may be
 off-main on purpose, so the drift is REPORTED, not built away. The comparison
-needs a current `origin/<default>`, so the build order fetches it at most once
-per `GC_HELM_ORIGIN_FETCH_TTL` (default 1800s; `0` leans entirely on
-reconcile-rig-checkouts' own fetch), and a fetch it cannot reach degrades to a
-stale gap rather than a failed build.
+needs a current `origin/<default>`, so each build order fetches it at most once
+per `GC_HELM_ORIGIN_FETCH_TTL` or `GC_GCTK_ORIGIN_FETCH_TTL` (default 1800s;
+`0` leans entirely on reconcile-rig-checkouts' own fetch), and a fetch it
+cannot reach degrades to a stale gap rather than a failed build.
 
 `internal/source.GatherPackHealth` reads every
 `<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else
@@ -1373,7 +1400,7 @@ which is absent from the supervisor spec; do not hand-write supervisor shapes.
 ```bash
 cd services/helm
 go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache + the embedded app)
-go build ./cmd/helm-svc  # or: assets/scripts/gc-helm-build.sh
+go build ./cmd/helm-svc  # or: assets/scripts/gc-build.sh helm
 
 cd web && npm test            # the app's own tests: ttyd protocol, endpoint check, detach invariant
 
@@ -1393,7 +1420,7 @@ helm-svc links ICU through Dolt's go-icu-regex, a cgo package. On macOS,
 Homebrew installs icu4c keg-only, off cgo's default search path, so a bare
 `go build`, `go test` or `go vet` there needs it named first:
 `export CGO_CPPFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib"`.
-`gc-helm-build.sh` and `tools/lint.sh` add both flags themselves, through
+`gc-build.sh helm` and `tools/lint.sh` add both flags themselves, through
 `assets/scripts/icu4c-cgo.sh`.
 
 Discovery env:

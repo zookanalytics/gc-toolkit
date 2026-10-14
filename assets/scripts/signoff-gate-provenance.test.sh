@@ -40,8 +40,7 @@ printf '{"rigs":[{"name":"alpha","path":"%s"}]}\n' "$RIG" > "$TMP/rigs.json"
 # use, and each flag is honoured the way bd honours it: --status open hides the
 # closed rows, --all shows them, --has-metadata-key selects on key PRESENCE, and
 # a --db naming a store that is not this one answers nothing at all.
-cat > "$BIN/gc" <<GC
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<GC
 set -u
 STORE="\${STUB_STORE:?}"
 printf '%s\n' "\$*" >> "\${STUB_GC_LOG:?}"
@@ -108,8 +107,7 @@ GC
 
 # signoff posts its artifact and probes the head through gh; the check consults
 # no GitHub review at all, so the reviews served here matter only to signoff.
-cat > "$BIN/gh" <<'GH'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'GH'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 case "${1:-}" in
@@ -132,8 +130,7 @@ GH
 # ls-remote is the only call that would reach the network. Everything else, the
 # doctor's `git -C <rig> remote get-url origin` included, runs against the real
 # throwaway repo so the origin parse is tested and not simulated.
-cat > "$BIN/git" <<GIT
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<GIT
 if [ "\${1:-}" = "ls-remote" ]; then
   [ -n "\${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "\$STUB_LSREMOTE" "\${3#refs/heads/}"
   exit 0

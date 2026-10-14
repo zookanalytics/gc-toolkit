@@ -26,6 +26,10 @@ SUT="$HERE/lifecycle.sh"
 TOML="$ROOT/lifecycle/lifecycle.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lifecycle-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+# The real git, for the cases that fetch a landing. It is captured before
+# harness_init, which puts the stub bin and then the test floor at the front of
+# PATH, and the floor refuses git.
+REAL_GIT="$(command -v git)"
 
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -486,15 +490,17 @@ eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assign
 # --- unassigning takes the executor identity with it ----------------------------
 # gc.session_id and gc.session_name name the session that claimed the bead, so
 # they are the third field of the same let-go as the route and the assignee. The
-# mr-aware-rejection repool hands a rejected rework back to the pool with
-# --assignee ""; a stamp that survives is doctor/executor-identity-residue's
-# report the moment the bead next carries a route, and the runtime's stale
-# orphan-recovery pin. So the clear rides the same atomic update as the unassign.
+# refinery's rejection repool (rejection-repool.sh) hands a rejected bead back to
+# the pool with --assignee ""; a stamp that survives is
+# doctor/executor-identity-residue's report the moment the bead next carries a
+# route, and the runtime's stale orphan-recovery pin. So the clear rides the same
+# atomic update as the unassign.
 echo "# unassigning clears the executor identity"
-store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"lx-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition x-1 --to unanchored --assignee "" --route gc-toolkit/gc-toolkit.polecat --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
-eq "$rc" 0 "the mr-aware-rejection repool shape exits 0"
+out="$("$SUT" transition x-1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
+eq "$rc" 0 "the rejection repool's shape exits 0"
+eq "$(meta x-1 'gc.execution_routed_to')" "<absent>" "the repool's release clears the last pour's stamp"
 eq "$(bassignee x-1)" "" "the repool cleared the assignee"
 eq "$(meta x-1 'gc.session_id')" "<absent>" "gc.session_id went with the assignee"
 eq "$(meta x-1 'gc.session_name')" "<absent>" "gc.session_name went with the assignee"
@@ -790,6 +796,201 @@ eq "$rc" 1 "an explicitly empty merged_sha is no evidence either"
 has "$out" "requires --set merged_sha" "the empty sha is refused by the same rule"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged close attempted a bd update"
 
+# --- merged writes the work record from the landing it records -------------------
+# The runtime's work-record gate reads gc.work_outcome, gc.work_commit and
+# gc.work_branch on the close. A merged transition already holds all three
+# facts, so it writes them in the same atomic update: shipped, the merge commit,
+# and the branch that commit landed on.
+echo "# merged writes the work record"
+SHA_A=0123456789abcdef0123456789abcdef01234567
+store '[{"id":"w-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main","gc.work_branch":"polecat/w-1"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition w-1 --to merged --expect pull_request --close --set merged_sha=$SHA_A 2>&1)"; rc=$?
+eq "$rc" 0 "a merged close exits 0"
+eq "$(meta w-1 gc.work_outcome)" "shipped" "gc.work_outcome is shipped"
+eq "$(meta w-1 gc.work_commit)" "$SHA_A" "gc.work_commit is the merge commit"
+eq "$(meta w-1 gc.work_branch)" "main" "gc.work_branch is merged_target, the branch the merge commit is on, not the polecat branch it was cut from"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the work record rides the ONE update that closes"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--set-metadata gc.work_commit=$SHA_A" "the commit is in the closing update, which is where the gate reads it"
+
+# The direct strategy names its target in the same call, and that value is the
+# branch recorded.
+store '[{"id":"w-2","status":"open","assignee":"","notes":"","metadata":{"merged_target":"main"}}]'
+out="$("$SUT" transition w-2 --to merged --close --set merged_sha=$SHA_A --set merged_target=release 2>&1)"; rc=$?
+eq "$rc" 0 "an unanchored -> merged close (direct strategy) exits 0"
+eq "$(meta w-2 gc.work_branch)" "release" "gc.work_branch follows the merged_target the call sets"
+
+# A landing that names only one of the commit and the branch writes none of the
+# record. The bead can already hold part of one, such as the branch
+# workspace-setup stamps, and half a new record beside half of that one pairs a
+# commit with a branch it is not on. The unverified:PR#<n> sentinel names no
+# commit, so the bead keeps the record it had.
+SHA_P=89abcdef0123456789abcdef0123456789abcdef
+store '[{"id":"w-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main","gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-3"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition w-3 --to merged --close --set 'merged_sha=unverified:PR#7' 2>&1)"; rc=$?
+eq "$rc" 0 "an unverified landing still records"
+eq "$(bstatus w-3)" "closed" "an unverified landing still closes"
+eq "$(meta w-3 gc.work_outcome)" "<absent>" "an unverified landing writes no gc.work_outcome"
+eq "$(meta w-3 gc.work_commit)" "$SHA_P" "the bead keeps its gc.work_commit, so the target branch is not paired with it"
+eq "$(meta w-3 gc.work_branch)" "polecat/w-3" "the bead keeps its gc.work_branch"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_" "the closing update carries no work-record key"
+
+# A landing with no merged_target names no branch, so the merge commit is not
+# paired with the polecat branch the bead still records.
+store '[{"id":"w-6","status":"open","assignee":"","notes":"","metadata":{"gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-6"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition w-6 --to merged --close --set merged_sha=$SHA_A 2>&1)"; rc=$?
+eq "$rc" 0 "an unanchored -> merged close with no merged_target exits 0"
+eq "$(meta w-6 gc.work_outcome)" "<absent>" "a landing that names no branch writes no gc.work_outcome"
+eq "$(meta w-6 gc.work_commit)" "$SHA_P" "the merge commit is not paired with the polecat branch"
+eq "$(meta w-6 gc.work_branch)" "polecat/w-6" "the bead keeps its gc.work_branch"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_" "the closing update carries no work-record key"
+
+# A key the caller sets itself is written even when the landing derives none.
+store '[{"id":"w-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+out="$("$SUT" transition w-7 --to merged --close --set 'merged_sha=unverified:PR#8' --set gc.work_commit=$SHA_A 2>&1)"; rc=$?
+eq "$rc" 0 "a partial landing whose caller sets gc.work_commit exits 0"
+eq "$(meta w-7 gc.work_commit)" "$SHA_A" "the caller's gc.work_commit is written"
+eq "$(meta w-7 gc.work_outcome)" "<absent>" "no gc.work_outcome is derived beside it"
+eq "$(meta w-7 gc.work_branch)" "<absent>" "no gc.work_branch is derived beside it"
+
+# A key the caller writes itself is the one written.
+store '[{"id":"w-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition w-4 --to merged --close --set merged_sha=$SHA_A --set gc.work_branch=polecat/w-4 2>&1)"; rc=$?
+eq "$rc" 0 "a merged close that sets gc.work_branch itself exits 0"
+eq "$(meta w-4 gc.work_branch)" "polecat/w-4" "the caller's gc.work_branch is the one written"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_branch=main" "no derived gc.work_branch is written beside it"
+
+# Only a landing writes a work record.
+store '[{"id":"w-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","merged_target":"main"}}]'
+out="$("$SUT" transition w-5 --to pull_request --set pr_url=https://x/pr/5 --set pr_number=5 2>&1)"; rc=$?
+eq "$rc" 0 "a non-landing transition exits 0"
+eq "$(meta w-5 gc.work_outcome)" "<absent>" "a non-landing transition writes no gc.work_outcome"
+
+# --- the landing is visible where the work-record gate looks ----------------------
+# The gate runs inside the closing `gc bd update` and asks the rig's checkout
+# ($GC_RIG_ROOT) whether gc.work_commit is an ancestor of
+# refs/remotes/origin/<gc.work_branch>. A merge GitHub performed is on origin
+# before that checkout has fetched it, so the transition fetches the branch
+# first, and only when the ref does not already hold the commit. These cases run
+# real git against a local origin; the harness's git stub stays for every other
+# section.
+echo "# the landing is fetched before the close"
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
+"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.name tester
+"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.email tester@example.com
+"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" commit.gpgsign false
+"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
+"$REAL_GIT" init -q --bare "$TMP/origin.git"
+"$REAL_GIT" clone -q "$TMP/origin.git" "$TMP/rig" 2>/dev/null
+"$REAL_GIT" -C "$TMP/rig" commit -q --allow-empty -m base
+"$REAL_GIT" -C "$TMP/rig" push -q origin HEAD:main
+# A second clone pushes the commit GitHub's squash would put on origin, so the
+# rig checkout has not fetched it.
+"$REAL_GIT" clone -q "$TMP/origin.git" "$TMP/github"
+"$REAL_GIT" -C "$TMP/github" commit -q --allow-empty -m squash
+"$REAL_GIT" -C "$TMP/github" push -q origin HEAD:main
+LANDED="$("$REAL_GIT" -C "$TMP/github" rev-parse HEAD)"
+if "$REAL_GIT" -C "$TMP/rig" merge-base --is-ancestor "$LANDED" refs/remotes/origin/main 2>/dev/null; then
+  bad "fixture: the rig checkout must not hold the landing before the transition"
+else
+  ok "fixture: the rig checkout has not fetched the landing"
+fi
+# The suite's own git, logged into the gc log so the fetch and the update are
+# ordered in one file.
+mkdir -p "$TMP/realgit"
+cat > "$TMP/realgit/git" <<GIT
+#!/usr/bin/env bash
+printf 'git %s\n' "\$*" >> "\$STUB_GC_LOG"
+exec "$REAL_GIT" "\$@"
+GIT
+chmod +x "$TMP/realgit/git"
+land() { # <bead-id> <merged_sha> [extra transition args...]
+  local id="$1" sha="$2"; shift 2
+  PATH="$TMP/realgit:$PATH" GC_RIG_ROOT="$TMP/rig" \
+    "$SUT" transition "$id" --to merged --close --set merged_sha="$sha" "$@" 2>&1
+}
+
+store '[{"id":"f-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$(land f-1 "$LANDED")"; rc=$?
+eq "$rc" 0 "a merged close whose landing the checkout lacks exits 0"
+eq "$(meta f-1 gc.work_commit)" "$LANDED" "the landing is recorded as gc.work_commit"
+if "$REAL_GIT" -C "$TMP/rig" merge-base --is-ancestor "$LANDED" refs/remotes/origin/main; then
+  ok "the rig checkout's origin/main holds the landing after the transition"
+else
+  bad "the rig checkout's origin/main must hold the landing after the transition"
+fi
+fetch_at=$(grep -n '^git .* fetch ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+update_at=$(grep -n '^bd update' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$fetch_at" ] && [ -n "$update_at" ] && [ "$fetch_at" -lt "$update_at" ]; then
+  ok "the fetch runs before the closing update, the write the gate judges"
+else
+  bad "the fetch must run before the closing update (log: $(tr '\n' ';' < "$STUB_GC_LOG"))"
+fi
+hasnt "$out" "WARN" "a landing made visible prints no warning"
+
+store '[{"id":"f-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$(land f-2 "$LANDED")"; rc=$?
+eq "$rc" 0 "a merged close whose landing the checkout already holds exits 0"
+eq "$(grep -c '^git .* fetch ' "$STUB_GC_LOG" || true)" "0" "a landing the checkout already holds is not fetched"
+
+# A landing that records no work record leaves nothing to make reachable, so the
+# polecat branch the bead still names is not fetched.
+store '[{"id":"f-5","status":"open","assignee":"","notes":"","metadata":{"gc.work_branch":"polecat/f-5"}}]'
+: > "$STUB_GC_LOG"
+out="$(land f-5 "$LANDED")"; rc=$?
+eq "$rc" 0 "a merged close with no merged_target exits 0"
+eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "the polecat branch the bead still names is not fetched"
+
+# A landing the checkout cannot fetch still records, and the line it prints is
+# the only report of it: the gate's own warning stays in the update's output.
+store '[{"id":"f-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+out="$(land f-3 "$LANDED" --set merged_target=no-such-branch)"; rc=$?
+eq "$rc" 0 "a landing whose branch cannot be fetched still records"
+eq "$(bstatus f-3)" "closed" "the close lands"
+eq "$(meta f-3 gc.work_branch)" "no-such-branch" "the work record names the branch the call gave"
+has "$out" "WARN f-3 records gc.work_commit=$LANDED on gc.work_branch=no-such-branch" "the landing the gate cannot verify is named"
+
+# With no rig checkout named there is nowhere to fetch, and nothing is run. The
+# line it prints is the only report that the landing went unchecked.
+store '[{"id":"f-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$(PATH="$TMP/realgit:$PATH" "$SUT" transition f-4 --to merged --close --set merged_sha="$LANDED" 2>&1)"; rc=$?
+eq "$rc" 0 "a merged close with no GC_RIG_ROOT exits 0"
+eq "$(meta f-4 gc.work_commit)" "$LANDED" "the work record is written without a checkout"
+eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "no git runs without a checkout to run it in"
+has "$out" "WARN f-4 records gc.work_commit=$LANDED on gc.work_branch=main, but GC_RIG_ROOT names no rig checkout" "the landing nothing checked is named"
+
+# The branch goes into a refspec, so a name git does not accept as a branch is
+# never fetched: a `*` would make the fetch a glob over every matching branch,
+# a `:` would split the refspec, and a leading `-` would read as an option. The
+# record still lands, and the line names the branch.
+for spec in 'f-6|release/*' 'f-7|a:b' 'f-8|-x'; do
+  id="${spec%%|*}"; br="${spec#*|}"
+  store '[{"id":"'"$id"'","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+  : > "$STUB_GC_LOG"
+  out="$(land "$id" "$LANDED" --set "merged_target=$br")"; rc=$?
+  eq "$rc" 0 "a landing on branch '$br' still records"
+  eq "$(meta "$id" gc.work_branch)" "$br" "the work record names '$br', the branch the call gave"
+  eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'$br' is not fetched"
+  has "$out" "WARN $id records gc.work_commit=$LANDED on gc.work_branch=$br, which git does not accept as a branch name" "the refused branch '$br' is named"
+done
+# check-ref-format --branch expands @{-N} to a branch the checkout had before,
+# and the refspec would carry the unexpanded text. Inside a checkout whose
+# @{-1} resolves, the name is still refused.
+"$REAL_GIT" -C "$TMP/rig" checkout -q -b previous
+"$REAL_GIT" -C "$TMP/rig" checkout -q main
+store '[{"id":"f-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+: > "$STUB_GC_LOG"
+out="$(cd "$TMP/rig" && land f-9 "$LANDED" --set 'merged_target=@{-1}')"; rc=$?
+eq "$rc" 0 "a landing on branch '@{-1}' still records"
+eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'@{-1}' is not fetched, though git expands it in that checkout"
+has "$out" "on gc.work_branch=@{-1}, which git does not accept as a branch name" "the refused '@{-1}' is named"
+
 # --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
 echo "# reopen"
 store '[{"id":"r-1","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_url":"https://x/pr/4"}}]'
@@ -862,8 +1063,7 @@ done
 # have.
 SVC="$TMP/svc-bin"
 mkdir -p "$SVC"
-cat > "$SVC/gc" <<EOF
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SVC/gc" <<EOF
 [ "\${1:-} \${2:-}" = "service list" ] && { printf '{"city_path":"%s"}\n' "$CITY"; exit 0; }
 exec "$BIN/gc" "\$@"
 EOF

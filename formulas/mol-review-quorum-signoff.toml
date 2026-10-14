@@ -127,7 +127,7 @@ done
 # the hint. step-close.sh closes only; it does not write gc.output_json.
 LANE_BEAD="<the bead_id from your gc hook --claim --json>"
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_one_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-one --bead "$LANE_BEAD" --outcome pass
+"$SC" --step mol-review-quorum-signoff.review-lane-one --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -192,7 +192,7 @@ done
 # the hint. step-close.sh closes only; it does not write gc.output_json.
 LANE_BEAD="<the bead_id from your gc hook --claim --json>"
 gc bd update "$LANE_BEAD" --set-metadata "gc.output_json=$(jq -c . lane-{{lane_two_id}}.json)"
-"$SC" --step mol-review-quorum-signoff.review-lane-two --bead "$LANE_BEAD" --outcome pass
+"$SC" --step mol-review-quorum-signoff.review-lane-two --convoy {{convoy_id}} --bead "$LANE_BEAD" --outcome pass
 ```
 
 **Exit criteria:** whole diff read read-only, review-quorum.lane.v1 written to
@@ -259,11 +259,12 @@ catch more than one, which is the point — then dedupe findings that are the
 same defect at the same locus, keeping lane provenance. A finding either lane
 raises as blocking (P0/P1) that survives your own judgment is blocking for the
 quorum. `approve` iff no P0 and no P1 across both lanes and your test run;
-otherwise `request-changes`. Write the verdict body to `findings.md` in the
-mol-review verdict shape (VERDICT, reviewed branch/base/commit, scope checked,
-findings with location+impact+fix, filed, verification), self-contained
-because pre-open it is replayed verbatim as the opening PR comment. Note which
-lanes covered what, and any reduced coverage.
+otherwise `request-changes`. Write the verdict body to `findings.md` in
+mol-review's verdict shape (the findings with location+impact+fix, and the
+trail of reviewed branch/base/commit, scope checked, filed and verification,
+each in a collapsed block under the line `signoff.sh` opens the comment with),
+self-contained because pre-open it is replayed verbatim as the opening PR
+comment. Note in the trail which lanes covered what, and any reduced coverage.
 
 **5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
 per BLOCKING (P0/P1) finding, `[]` on approve — exactly as
@@ -282,7 +283,8 @@ Do not post the review yourself, do not touch `check.*`, do not file rework or
 finding beads, and never run `gh pr review --approve`.
 
 Pass on this same call any flag the check section of the review bead's dispatch
-note names for the verdict, such as triage's `--add-gates` or demo's `--visual`.
+note names for the verdict, such as triage's `--add-gates` or demo's `--visual`,
+and `--needs-you` when a decision is the operator's to make.
 When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.
@@ -307,7 +309,7 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
 done
 : "${SC:?step-close.sh not found in the pack}"
 for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
-  "$SC" --step "mol-review-quorum-signoff.$STEP" --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
+  "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
 done
 # >>> quorum-review-workspace-remove
 [ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"

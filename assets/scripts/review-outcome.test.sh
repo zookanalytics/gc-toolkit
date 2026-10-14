@@ -71,7 +71,7 @@ eq "$N0" "0" "…and reports zero retired"
 # ---------------------------------------------------------------------------
 RC_ANCHOR='{"id":"tk-rcanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"codex","pr_number":"91"}}'
 RC_REVIEW='{"id":"tk-rcrev","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-rcanc","reviewed_oid":"305c7b69","signoff_verdict":"request-changes","gc.outcome":"recorded"}}'
-store "[$RC_ANCHOR, $RC_REVIEW]"
+store "$(jq -c --argjson a "$RC_ANCHOR" --argjson r "$RC_REVIEW" '. + [$a, $r]' "$STUB_STORE")"
 if green tk-rcanc codex; then bad "a request-changes-only lane derived green"; else ok "a request-changes-only lane is not green (setup)"; fi
 NRC=$("$SUT" supersede-lane --anchor tk-rcanc --lane codex --reason "validator ordered a fresh whole-diff look at the unmoved head")
 eq "$NRC" "1" "supersede-lane retires the standing request-changes verdict (was a silent no-op)"
@@ -82,7 +82,7 @@ has "$(notes tk-rcrev)" "validator ordered a fresh whole-diff look" "the superse
 # back-lane after supersede: a superseded backing does not block a fresh one.
 # ---------------------------------------------------------------------------
 ID3=$("$SUT" back-lane --anchor tk-anc --lane correctness --oid abcd1234)
-if [ "$ID3" != "$ID" ]; then ok "re-converging after a supersede files a fresh backing"; else bad "back-lane returned the superseded bead"; fi
+if [ -n "$ID3" ] && [ "$ID3" != "$ID" ]; then ok "re-converging after a supersede files a fresh backing"; else bad "back-lane returned the superseded bead or nothing (got '$ID3')"; fi
 if green tk-anc correctness; then ok "the fresh backing greens the lane again"; else bad "the fresh backing did not green the lane"; fi
 
 # ---------------------------------------------------------------------------
@@ -207,6 +207,24 @@ N2=$("$SUT" supersede-anchor --anchor tk-2anc)
 eq "$N2" "2" "supersede-anchor retires a backing on every declared lane"
 if green tk-2anc correctness; then bad "correctness stayed green after anchor-wide supersede"; else ok "correctness returned to unreviewed"; fi
 if green tk-2anc arch;  then bad "arch stayed green after anchor-wide supersede";  else ok "arch returned to unreviewed"; fi
+
+# --by names the caller in each superseded review's note; without it the note
+# names the validator's human batch, as before.
+store "[$TWO_ANCHOR]"
+BC=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
+BA=$("$SUT" back-lane --anchor tk-2anc --lane arch  --oid deadbeef)
+NB=$("$SUT" supersede-anchor --anchor tk-2anc --by "operator ruling (converse visit v-1)" --reason "rework fx-1 changes the branch"); rc=$?
+eq "$rc" 0 "supersede-anchor --by succeeds"
+eq "$NB" "2" "…retiring every declared lane's backing"
+has "$(notes "$BC")" "operator ruling (converse visit v-1): superseded (anchor-wide) — rework fx-1 changes the branch" "…each note naming the caller and its reason"
+has "$(notes "$BA")" "operator ruling (converse visit v-1): superseded (anchor-wide)" "…on every lane"
+hasnt "$(notes "$BC")" "validator: superseded" "…and none crediting the validator with the supersede"
+store "[$TWO_ANCHOR]"
+BV=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
+"$SUT" supersede-anchor --anchor tk-2anc --reason "operator overturned a diff assumption" >/dev/null
+has "$(notes "$BV")" "validator: superseded (anchor-wide human batch) — operator overturned a diff assumption" "without --by the note names the validator's human batch"
+"$SUT" supersede-anchor --anchor tk-2anc --by "" >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "an empty --by is a usage error"
 
 # A checkless anchor (check_set=none) has no lane to move: no-op success, not error.
 NONE_ANCHOR='{"id":"tk-nanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"none"}}'

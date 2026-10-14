@@ -67,8 +67,7 @@ bash -n "$TMP/block.sh" \
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
 cp "$ROOT/assets/scripts/resolve-route.sh" "$TMP/rig/assets/scripts/"
 chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
-cat > "$TMP/bin/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
   "agent list")
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }

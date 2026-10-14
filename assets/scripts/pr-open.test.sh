@@ -11,7 +11,9 @@
 # PR + supersede note; same-head close is a human decision left alone); holds
 # gating the create path; the all-lanes-green gate over every check the anchor
 # declares, which no head move disturbs; the moved-head refusal on the created
-# PR; the comment-not-approval verdict replay; and the de-duplicated ## Summary
+# PR; the comment-not-approval verdict replay, which starts at the last line in
+# the shape a verdict opens with and replays notes with no such line whole; and
+# the de-duplicated ## Summary
 # heading. The phase model: a draft create when an open-as-draft check gates the
 # PR, the draft-to-ready arm (its prefilter, holds, must-fix, loud enumeration
 # failure, and the draft_readied record a held ready PR still takes), adoption's
@@ -360,8 +362,47 @@ has "$ghlog" "pr create --repo github.com/zook/gc-toolkit --base main --head pol
 hasnt "$ghlog" "--draft" "the PR is non-draft"
 has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER, pinned"
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
+has "$ghlog" "--body VERDICT: APPROVE ok"$'\n\n'"Pre-open signoff (comment-only — not an approval)." "…opening with the verdict's own first line, the comment-only note after it"
 has "$ghlog" "<!-- gc:city -->" "the replayed verdict carries the city's provenance mark (posted through pr-post.sh)"
 hasnt "$ghlog" "pr review" "never an approval"
+
+echo "# the replay starts at the verdict's opening line, past text the notes held before it"
+replay_rev() { # anchor notes
+  jq -nc --arg a "$1" --arg n "$2" '{id: ("rev-" + $a), status: "closed", assignee: "", notes: $n,
+    metadata: {task_kind: "review", anchor_bead: $a, check_name: "correctness", reviewed_oid: ("sha-" + ($a | ascii_downcase)), signoff_verdict: "approve"}}'
+}
+store "[$(pre C2 polecat/c2), $(replay_rev C2 "Findings from the attempt that failed: the retry loop is wrong.
+Correctness: approve. Nothing needs you.
+
+<details>the trail</details>
+
+Anchor: C2 — check.correctness @ sha-c2")]"
+echo "sha-c2" > "$GH_DIR/head_polecat_c2"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/78"
+printf '%s' "$(prrow 78 OPEN polecat/c2 sha-c2 main)" > "$GH_DIR/pr_view_78.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#78" "the PR was opened"
+ghlog=$(cat "$STUB_GH_LOG")
+has "$ghlog" "--body Correctness: approve. Nothing needs you."$'\n\n'"<details>the trail</details>" "the replay opens with the verdict's own first line"
+hasnt "$ghlog" "the attempt that failed" "…and leaves out the text appended before the verdict"
+has "$ghlog" "Anchor: C2 — check.correctness @ sha-c2"$'\n\n'"Pre-open signoff (comment-only — not an approval)." "…replaying the verdict through its trailer, then the comment-only note"
+
+echo "# a verdict the notes hold twice replays from the later one"
+store "[$(pre C3 polecat/c3), $(replay_rev C3 "PM: approve. Nothing needs you.
+
+Anchor: C3 — check.correctness @ sha-c3
+PM: approve. Needs you: decide whether the board shows parked work.
+
+Anchor: C3 — check.correctness @ sha-c3")]"
+echo "sha-c3" > "$GH_DIR/head_polecat_c3"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/79"
+printf '%s' "$(prrow 79 OPEN polecat/c3 sha-c3 main)" > "$GH_DIR/pr_view_79.json"
+: > "$STUB_GH_LOG"
+"$SUT" >/dev/null 2>&1
+ghlog=$(cat "$STUB_GH_LOG")
+has "$ghlog" "--body PM: approve. Needs you: decide whether the board shows parked work." "the replay opens with the later verdict's first line"
+hasnt "$ghlog" "Nothing needs you" "…and carries nothing of the earlier one"
 
 echo "# the body summarizes the diff, and demotes the dispatch text"
 # A reviewer who was not in the originating conversation opens this body. The
@@ -660,7 +701,7 @@ rev_lane() { # id anchor lane oid
 store "[$(pre DR1 polecat/dr1 '' 'correctness,demo'), $(rev DR1)]"
 echo "sha-dr1" > "$GH_DIR/head_polecat_dr1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/70"
-printf '%s' "$(prrow 70 OPEN polecat/dr1 sha-dr1 main)" > "$GH_DIR/pr_view_70.json"
+printf '%s' "$(prrow 70 OPEN polecat/dr1 sha-dr1 main)" | jq -c '. + {isDraft:true, labels:[]}' > "$GH_DIR/pr_view_70.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "opened PR#70" "a demo-bearing anchor opens once its pre-open gate is green"
@@ -668,16 +709,21 @@ eq "$(meta DR1 merge_result)" "pull_request" "the anchor flips to pull_request"
 has "$(cat "$STUB_GH_LOG")" "pr create --repo github.com/zook/gc-toolkit --base main --head polecat/dr1" "the create is pinned to origin"
 has "$(cat "$STUB_GH_LOG")" "--draft" "it opens as a draft because demo is open-as-draft"
 eq "$(meta DR1 opened_as_draft)" "sha-dr1" "the flip records opened_as_draft at the reviewed head"
+eq "$(pv_labels 70)" "status: working" "…and the draft is labelled working: the city still owes its ready flip, so no human is asked to review it"
+eq "$(meta DR1 draft_readied)" "<absent>" "…and the same pass leaves it a draft: its demo gate is not green yet"
 
 # draft -> ready: a draft the refinery opened (opened_as_draft set), every
 # open-as-draft gate green, is flipped out of draft AND records draft_readied.
+# It carried status: working through its draft stage; the label is reconciled
+# after the stamp, so it leaves the flip up for review.
 store "[$(pr_anchor DR2 polecat/dr2 71 'correctness,demo' sha-dr2), $(rev_lane rev-DR2-c DR2 correctness sha-dr2), $(rev_lane rev-DR2-d DR2 demo sha-dr2)]"
-printf '%s' "$(prrow 71 OPEN polecat/dr2 sha-dr2 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_71.json"
+printf '%s' "$(prrow 71 OPEN polecat/dr2 sha-dr2 main)" | jq -c '. + {isDraft:true, labels:[{name:"status: working"}]}' > "$GH_DIR/pr_view_71.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "flipped draft -> ready for review" "the draft is surfaced once its open-as-draft gates are green"
 has "$(cat "$STUB_GH_LOG")" "pr ready 71" "gh pr ready flips it out of draft"
 eq "$(meta DR2 draft_readied)" "sha-dr2" "the flip records draft_readied so the arm never re-reads it"
+eq "$(pv_labels 71)" "status: needs-review" "the label is reconciled after draft_readied lands, so the readied draft is up for review"
 
 # draft -> ready HOLDS while an open-as-draft gate is not yet green.
 store "[$(pr_anchor DR3 polecat/dr3 72 'correctness,demo' sha-dr3), $(rev_lane rev-DR3-c DR3 correctness sha-dr3)]"
@@ -735,12 +781,15 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr ready 77" "…gh pr ready is never called over
 
 # A PR already out of draft (surfaced externally, or adopted ready) records
 # draft_readied so the arm stops reading it every pass, and is not re-flipped.
+# It carried status: working through its draft stage, and the label reads the
+# same marker, so the stamp re-derives it: the PR is up for review.
 store "[$(pr_anchor DR9 polecat/dr9 78 'correctness,demo' sha-dr9), $(rev_lane rev-DR9-c DR9 correctness sha-dr9), $(rev_lane rev-DR9-d DR9 demo sha-dr9)]"
-printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" > "$GH_DIR/pr_view_78.json"
+printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" | jq -c '. + {labels:[{name:"status: working"}]}' > "$GH_DIR/pr_view_78.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(meta DR9 draft_readied)" "sha-dr9" "an already-ready draft records draft_readied"
 hasnt "$(cat "$STUB_GH_LOG")" "pr ready 78" "…and is not re-flipped"
+eq "$(pv_labels 78)" "status: needs-review" "…and its label is re-derived from the stamp, working to needs-review"
 
 echo "# adoption stamps opened_as_draft only on a draft the refinery opened as one"
 # The marker hands the ready flip to the draft-to-ready arm, so it goes only on a

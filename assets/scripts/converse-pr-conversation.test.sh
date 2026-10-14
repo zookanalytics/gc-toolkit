@@ -44,8 +44,7 @@ else bad "converse-pr-conversation: valid bash" "bash -n failed"; fi
 # A stub `gc` serving the one read the block makes. Anything else exits 2, so
 # a block that grows a second read fails here instead of quietly reaching the
 # live store from a test.
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ] || exit 2
 cat "$FIXDIR/subject.json"
 STUB

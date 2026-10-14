@@ -24,13 +24,19 @@
 # forbids it, refusing a second whole-diff review at a head already carrying a
 # recorded, non-superseded verdict — the durable backstop for the window between
 # the close and the fix unit and findings it files, which the transient
-# quiescence beads do not yet cover. A dispatch stamps metadata + a blocks edge
-# first (fail-closed), takes its body from review-dispatch-body.sh, then pours
-# formula and route in one call (gc sling <review-pool> <bead> --on mol-review),
-# pinned to the live head (signoff.sh binds the verdict) with fix_target_pool for
-# the rework route. An unstamped orphan is adopted by its title, never twinned;
-# a failed sling is never retried in-pass (a re-pour mints a second workflow
-# root). Reach carried by the pour ALONE is qualified before it counts: a review
+# quiescence beads do not yet cover. A dispatch files the review with its
+# metadata and its blocks edge in one create (bd_create, fail-closed), takes its
+# body from review-dispatch-body.sh, then pours formula and route in one call
+# (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
+# (signoff.sh binds the verdict) with fix_target_pool for the rework route. A
+# create whose reply is lost has still landed whole, so the next pass's stranded
+# arm re-slings it rather than filing a twin. Either sling waits until the
+# review's whole work order reads back (bd_create for a fresh review,
+# bd_meta_ensure for a stranded one), and a failed sling is never retried
+# in-pass (a re-pour mints a second workflow root). An open review a two-write
+# create left with its title but short of the keys inflight_review reads is
+# closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
+# would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. There is no dispatch
@@ -173,6 +179,28 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # last value, so both halves ride a single comma list.
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
+# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> — the
+# metadata a review bead carries. task_kind, check_name and anchor_bead are what
+# inflight_review selects it by. review_branch and review_base are what
+# mol-review reads, review_pool is the route its failure path restores, and
+# reviewed_oid pins the dispatch head that signoff.sh binds the verdict to.
+# fix_target_pool is the pool signoff.sh routes a request-changes rework to. An
+# empty <reviewed-oid> leaves the pin out, and an empty FIX_POOL leaves out
+# fix_target_pool.
+review_work_order() {
+  jq -nc --arg g "$1" --arg a "$2" --arg br "$3" --arg tg "$4" \
+    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg fp "$FIX_POOL" '
+    {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
+     review_base: $tg, review_pool: $rp}
+    + (if $oid == "" then {} else {reviewed_oid: $oid} end)
+    + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null
+}
+
+# The keys inflight_review selects a review by. A review short of one is a
+# review no pass can find, so a fresh dispatch hands them to bd_create as its
+# --select, and the orphan close before it names them too.
+REVIEW_SELECT="task_kind,check_name,anchor_bead"
+
 # A live review bead already owed to <anchor> for check <g>? Echoes its id.
 # Poured (gc.execution_routed_to), routed, or claimed counts; an open,
 # unclaimed, unrouted, unpoured one is stranded — echoed with a "stranded "
@@ -182,7 +210,7 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 # answer; the caller holds the dispatch.
 inflight_review() { # <anchor-id> <check>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" '
     [ .[]
       | select(((.metadata.task_kind // "") | tostring) == "review")
@@ -216,7 +244,7 @@ inflight_review() { # <anchor-id> <check>
 # here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$ALL_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
   printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
     [ .[]
       | (.metadata // {}) as $m
@@ -230,12 +258,14 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 }
 
 # An open rework child already filed under <anchor>? Echoes its id. A rework
-# child is a blocks-dep bead whose metadata carries a non-empty
-# source_review_bead, which request-changes stamps on the one child it files as
-# it clears check.<g>, so a lane back to unreviewed with one of these still
-# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
-# could not answer; the caller holds the dispatch, the same as an unreadable
-# in-flight-review lookup.
+# child here is a blocks-dep bead whose metadata carries a source key, which
+# rework-child.sh stamps on each child it files: source_review_bead on the one a
+# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
+# one an operator ruling files. Either is changing the branch, so a review that
+# read it now would read a mid-change diff, and a lane back to unreviewed with
+# one still open is owed the rework landing, not a fresh review. Non-zero rc =
+# the ledger could not answer; the caller holds the dispatch, the same as an
+# unreadable in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -245,7 +275,8 @@ open_rework_child() { # <anchor-id>
     ($ls | split(",")) as $live
     | [ .[]
         | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
-        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | select(((.metadata.source_review_bead // "") | tostring) != ""
+                 or ((.metadata.source_ruling_bead // "") | tostring) != "")
         | .id ] | (.[0] // empty)' 2>/dev/null
 }
 
@@ -260,7 +291,7 @@ open_rework_child() { # <anchor-id>
 # unreadable in-flight lookup.
 open_validation_passes() { # <anchor-id>
   local raw
-  raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
+  raw=$(bd_anchor_children "$1" "$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r '
     .[] | select(((.metadata.task_kind // "") | tostring) == "validation") | .id' 2>/dev/null
 }
@@ -283,8 +314,8 @@ open_validation_pass() { # <anchor-id>
 # the log), quiesce_unanswered (the open must-fix findings no fix unit is
 # answering), and quiesce_unreadable (a probe could not answer — fail closed, hold
 # and retry next pass). The clauses, in order, first hold wins:
-#   (a) a fix unit in flight answering an open must-fix finding, ANY lane [finding.sh fix-in-flight]
-#   (b) a fix unit in flight resolving a finding on the anchor            [open_rework_child]
+#   (a) a fix unit in flight answering an open must-fix or needs-you finding, ANY lane [finding.sh fix-in-flight]
+#   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
 # with inflight_review at the dispatch site. Each clause is an open-bead query;
@@ -292,14 +323,15 @@ open_validation_pass() { # <anchor-id>
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
-# and names it. Clause (b) cannot stand in for it: it sees only a request-changes
-# rework child, never the fix unit pr-facts.sh files for a human batch. A must-fix
-# finding nothing answers, with no fix unit in flight and no validation pass, sits
-# on a diff no one is changing, which is not the mid-change read quiescence
-# forbids. It holds no dispatch: a lane short of green dispatches as it would
-# without the finding, still subject to the per-head bar. It still holds the
-# merge through its blocks edge, and the settle decision still reads it as owed,
-# so it is reported here once per anchor instead of being named as an actor.
+# and names it. Clause (b) cannot stand in for it: it sees only the rework child
+# a request-changes verdict or a ruling files, never the fix unit pr-facts.sh
+# files for a human batch. A must-fix finding nothing answers, with no fix unit
+# in flight and no validation pass, sits on a diff no one is changing, which is
+# not the mid-change read quiescence forbids. It holds no dispatch: a lane short
+# of green dispatches as it would without the finding, still subject to the
+# per-head bar. It still holds the merge through its blocks edge, and the settle
+# decision still reads it as owed, so it is reported here once per anchor instead
+# of being named as an actor.
 compute_quiescence() { # <anchor-id>
   quiesce_hold=""; quiesce_reason=""; quiesce_unanswered=""; quiesce_unreadable=0
   local fif rc fu fst mf vp
@@ -313,7 +345,7 @@ compute_quiescence() { # <anchor-id>
     1) quiesce_unanswered=$(printf '%s' "$fif" | tr '\n' ' ' | sed 's/ *$//') ;;
     *) quiesce_unreadable=1; return 0 ;; # 2 unreadable, or the tool is missing
   esac
-  # (b) fix unit in flight (a live blocks-dep child carrying source_review_bead).
+  # (b) fix unit in flight (a live blocks-dep child carrying a source key).
   if ! fu=$(open_rework_child "$1"); then quiesce_unreadable=1; return 0; fi
   if [ -n "$fu" ]; then quiesce_hold=1; quiesce_reason="fix unit $fu in flight"; return 0; fi
   # (c) validation pass in flight.
@@ -770,7 +802,7 @@ STRAY
   # already derives each lane as green (settled) or short of green; these two
   # flags keep that answer instead of discarding it at the end of the iteration.
   #
-  # The cap's wedge — shared with merge.sh's is_held arm — is evaluated once
+  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
   # HERE, per anchor, not inside the per-check loop: the park sits on the
   # anchor's own merge_hold, not on any one lane, so a fully green capped
   # anchor (one check hand-greened, or all of them) must still record the
@@ -901,6 +933,19 @@ STRAY
       esac
     fi
     why="lane '$g' does not derive green (no non-superseded approve review backs it)"
+    # A lane the latest bring-current round reopened: the review reads that
+    # round's account, and the triage dispatch also rules on the round when no
+    # ruling is recorded yet.
+    round_lane=$(printf '%s' "$row" | jq -r --arg g "$g" '(.metadata.bring_current_record // null)
+      | if type == "string" then (fromjson? // null) else . end
+      | if type != "object" or .class != "conflicted" then ""
+        elif .triage == null then (if $g == "triage" then "rule" else "" end)
+        elif ((((.triage.reopen // []) + (.triage.add // [])) | index($g)) != null) then "read"
+        else "" end' 2>/dev/null)
+    case "$round_lane" in
+      rule) why="lane '$g' was reopened by a bring-current round that conflicted: rule on the round (signoff.sh --reopen, --round-reason, --dismiss-approval) after reading its account, bring-current-audit.sh render --anchor $id --as comment" ;;
+      read) why="lane '$g' was reopened by the ruling on a bring-current round: read the round's account first, bring-current-audit.sh render --anchor $id --as comment" ;;
+    esac
 
     # A lane short of green is what machine `progressing` names — not the outcome
     # of this particular attempt. A dispatch the operator hold defers, one held
@@ -966,6 +1011,19 @@ STRAY
           if [ "${roots:-0}" -gt 0 ] 2>/dev/null; then
             judge_pour_liveness "$rid"
             continue
+          fi
+          # A stranded review is re-slung only once it carries its whole work
+          # order, the one the fresh dispatch below files with. A create that
+          # read back short leaves exactly this shape, and a pour onto it could
+          # run against a work order the bead does not carry. Nobody holds a
+          # stranded review, so a short one is written the whole order once and
+          # read back again (bd_meta_ensure). The order leaves reviewed_oid
+          # out: the pin is the head the review was dispatched for, and it is
+          # never moved here. A review without one is pinned by mol-review to
+          # the head it reads.
+          if ! rshort=$(bd_meta_ensure "$rid" "$(review_work_order "$g" "$id" "$branch" "$target" "")"); then
+            echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
+            skipped=$((skipped + 1)); continue
           fi
           # Zero roots: a tracking convoy exists but carries no workflow root, so
           # nothing drives the review. Re-sling — this mints the FIRST root; the
@@ -1040,58 +1098,43 @@ STRAY
     # — a reviewer that dies after claim, a fix unit filed with its edge reversed
     # — stop the PR moving rather than spin the dispatcher.
 
-    # Orphan adoption BEFORE create: a bead this arm created whose stamp then
-    # failed carries the deterministic title but no anchor_bead — invisible to
-    # inflight_review, so re-creating would mint a twin every pass. Adopt it
-    # instead. The title carries the check name, so the orphan identity is
-    # per-check: with a multi-check baseline (correctness,triage) a sibling lane's
-    # half-stamped review is never adopted here and re-stamped with this lane's
-    # check_name onto a body the body-emitter wrote for the other check. An
-    # unreadable probe dispatches nothing (retry next pass).
-    RID_TITLE="Review branch $branch -> $target ($g):"
-    if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
+    # A review an earlier two-write create left behind carries this title but
+    # not the keys inflight_review reads, so the probe above never saw it, and
+    # its blocks edge would hold the anchor beside the review filed below. It is
+    # closed first. An unreadable listing dispatches nothing (retry next pass).
+    if ! bd_unmake_orphans "$REVIEW_SELECT" "Review branch $branch -> $target ($g):" \
+         "Unmade by $PROG: a review of $id's '$g' lane filed without the keys inflight_review selects it by, so no pass could find it to sling it, while its blocks edge held $id. A review carrying them is filed in its place." >/dev/null; then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    RID=$(printf '%s' "$orphans" | jq -r '
-      [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$RID" ]; then
-      echo "$PROG: $id adopting unstamped review orphan $RID for check '$g' (created by a prior pass whose stamp failed)"
+
+    # The review is filed whole. One create carries every key a reader selects
+    # it by, the blocks edge that holds the anchor, and the membership edge
+    # (--child-of) the anchor's closed-children read follows once the review
+    # closes with its verdict, so no review exists that inflight_review cannot
+    # see. A create whose reply is lost has still landed whole, and the next
+    # pass finds it in flight and re-slings it as stranded.
+    # A review short of a REVIEW_SELECT key after bd_create's second write is
+    # one no later pass could find, so bd_create closes it and files nothing
+    # (rc 1). One short of any other key (rc 2) is not slung, because a pour
+    # onto it could run against a work order the bead does not carry; the
+    # stranded arm above finds it next pass and slings it once it is whole.
+    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head")
+    RID_TITLE="Review branch $branch -> $target ($g): $title"
+    body=""
+    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
+    if [ -n "$body" ]; then
+      RID=$(printf '%s' "$body" | bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
     else
-      body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
-      if [ -n "$body" ]; then
-        RID=$(printf '%s' "$body" \
-          | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      else
-        echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-        RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      fi
+      echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
+      RID=$(bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
     fi
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # reviewed_oid pins the dispatch head (signoff binds the verdict to it);
-    # fix_target_pool routes a request-changes rework to the derived pool.
-    gc bd update "$RID" \
-      --set-metadata task_kind=review \
-      --set-metadata check_name="$g" \
-      --set-metadata anchor_bead="$id" \
-      --set-metadata review_branch="$branch" \
-      --set-metadata review_base="$target" \
-      --set-metadata review_pool="$REVIEW_POOL" \
-      ${head:+--set-metadata reviewed_oid="$head"} \
-      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
-    gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 \
-      || echo "$PROG: WARN could not attach review $RID as a blocks-dep of $id (anchor_bead persists the link)" >&2
-    # The anchor link is what lets the signoff find the check to stamp; verify it
-    # BEFORE the pour, or a claimed half-stamped review can never discharge.
-    got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
-    if [ "$got" != "$id" ]; then
-      echo "$PROG: WARN review $RID did not record anchor_bead=$id; not slung, merge stays held, retry next pass" >&2
+    if [ "$rid_rc" -ne 0 ]; then
+      echo "$PROG: WARN review $RID did not record its whole work order; not slung, merge stays held, the stranded arm re-slings it next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
     ge_mark_child "$id" "$RID"

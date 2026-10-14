@@ -1338,6 +1338,57 @@ it('shows a resolved PR state on the chip', async () => {
   expect(chip.className).toContain('pr-phase--merged');
 });
 
+// The conversation axis is how the board shows which pull requests carry the
+// operator's comments, so each live PR row names where its conversation stands
+// in the wire's own word, and an unread one says unknown rather than quiet.
+it('shows where each PR conversation stands on its row', async () => {
+  const values = ['quiet', 'outstanding', 'answered', 'asking', 'unknown'];
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    ...values.map((v) => ({
+      ...prTile({ id: `tk-${v}`, title: `a pull request reading ${v}`, pr_conversation: v }),
+      group_root: 'tk-root',
+    })),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('a pull request reading quiet')).toBeTruthy());
+
+  for (const v of values) {
+    const row = rowFor(`a pull request reading ${v}`);
+    expect(row).not.toBeNull();
+    const chip = within(row as HTMLElement).getByText(v);
+    expect(chip.className).toContain(`pr-conversation--${v}`);
+    expect(chip.getAttribute('title')).toMatch(new RegExp(`^conversation ${v}: \\S`));
+  }
+});
+
+// A finished pull request's conversation is nobody's move, and a row that is not
+// a merge anchor has no pull request to speak on, so neither carries the chip.
+it('shows no conversation on a closed PR row or a row that is not a PR', async () => {
+  serve([
+    tile({ id: 'tk-root', kind: 'epic', title: 'the family root', severity: 'NORMAL', section: 'active' }),
+    {
+      ...prTile({
+        id: 'tk-landed',
+        title: 'a pull request that landed',
+        owed: false,
+        severity: 'DONE',
+        section: 'done',
+        closed_at: '2026-08-20T19:14:00Z',
+        pr_conversation: 'answered',
+        pr_owed_since: undefined,
+        needs: 'closed — ages out',
+      }),
+      group_root: 'tk-root',
+    },
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('a pull request that landed')).toBeTruthy());
+
+  expect(rowFor('a pull request that landed')?.querySelector('.pr-conversation')).toBeNull();
+  expect(rowFor('the family root')?.querySelector('.pr-conversation')).toBeNull();
+});
+
 // An anchor at a human state carries merge_result and can carry no branch and no
 // number, and a cell that named an absence as an identity is the same failure
 // inverted.
@@ -1387,7 +1438,7 @@ it('withholds the all-clear while a PR position is unread', async () => {
 
   const sub = within(owedCover()).getByRole('status');
   expect(sub.textContent).toMatch(/1 of 1 have no position recorded/);
-  expect(sub.textContent).toMatch(/acknowledgement watermarks are not built yet/);
+  expect(sub.textContent).toMatch(/where the conversation stands \(the merge cadence has not recorded it\)/);
   expect(sub.textContent).not.toMatch(/^Nothing is owed by you\./);
 });
 

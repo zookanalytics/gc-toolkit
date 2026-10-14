@@ -16,13 +16,13 @@
 //
 // Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
 // cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
-// as shell. assets/scripts/merge.sh remains as the fallback for a city whose
-// gctk build has not landed yet. lifecycle has no shell fallback:
-// assets/scripts/lifecycle.sh only execs this binary, and refuses the call when
-// there is none to run. pr-status has none by design — its tri-state lives only
-// in gctk so the status: label and the helm board share one code path, so when
-// the binary is absent or stale pr-status-label.sh leaves the label unchanged
-// rather than deriving it in shell.
+// as shell. lifecycle and merge have no shell fallback:
+// assets/scripts/lifecycle.sh and assets/scripts/merge.sh only exec this
+// binary, and refuse the call when there is none to run. pr-status has none by
+// design — its tri-state lives only in gctk so the status: label and the helm
+// board share one code path, so when the binary is absent or stale
+// pr-status-label.sh leaves the label unchanged rather than deriving it in
+// shell.
 package main
 
 import (
@@ -70,9 +70,10 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 }
 
-// sourceRev is the identity gc-gctk-build.sh stamps at link time: the tree
+// sourceRev is the identity `gc-build.sh gctk` stamps at link time: the tree
 // hash of services/gctk at the commit it built from (`git rev-parse HEAD:./`),
-// the same value it records as binary_rev. -X main.sourceRev=<hash>.
+// the identity gctk-resolve.sh and doctor/check-cadence-live compare against
+// the checkout. -X main.sourceRev=<hash>.
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what

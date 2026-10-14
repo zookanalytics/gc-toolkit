@@ -54,8 +54,7 @@ chmod +x "$RIGROOT/assets/scripts/gc-deacon-ledger.sh"
 # dedup query and the post-create re-read read back.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 export STUB_GC_LOG="$TMP/gc.log" STUB_STORE="$TMP/store.json" LEDGER_LOG="$TMP/ledger.log"
-cat > "$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 STORE="${STUB_STORE:?}"; [ -s "$STORE" ] || echo '[]' > "$STORE"

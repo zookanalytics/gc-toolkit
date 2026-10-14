@@ -38,13 +38,27 @@ mkdir -p "$BIN"
 #   FAIL_STAMP  any update exits 0 but records nothing (the silent drop)
 #   FAIL_XFER   an update carrying pr_number exits 0 but records nothing (the
 #               fold hold-transfer's silent drop)
+#   FAIL_FOLDINTO  an update drops gc.folded_into and records its other keys
 #   FAIL_CLOSE  the close logs but the status never becomes closed
+#   RECLOSE_REFUSED  a close of a bead already closed exits 1 (bd answers it
+#               as a no-op success; this knob covers a store that refuses it)
 #   NEED_FORCE  a plain close is refused; only a --force close takes
-cat >"$BIN/gc" <<'STUB'
-#!/usr/bin/env bash
+#   FAIL_DEP    an edge write is refused (the holder cannot be joined)
+# The anchor graph reads answer an anchor with no children yet, and an edge
+# write is logged as "dep add <child> <anchor> ...".
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 sub="${2:-}"; id="${3:-}"; MDIR="$LOG.m"
 case "$sub" in
+    list) echo '[]' ;;
+    dep)
+        case "$id" in
+            list) echo '[]' ;;
+            add)
+                printf 'dep %s\n' "${*:3}" >>"$LOG"
+                [ -z "${FAIL_DEP:-}" ] || exit 1 ;;
+            *) exit 2 ;;
+        esac ;;
     update)
         printf 'update %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_STAMP:-}" ] && exit 0
@@ -54,7 +68,9 @@ case "$sub" in
         for a in "$@"; do
             if [ "$prev" = "--set-metadata" ]; then
                 k="${a%%=*}"; v="${a#*=}"
-                t=$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+                if [ "$k" != gc.folded_into ] || [ -z "${FAIL_FOLDINTO:-}" ]; then
+                    t=$(jq -c --arg k "$k" --arg v "$v" '.[$k]=$v' "$f") && printf '%s' "$t" >"$f"
+                fi
             fi
             prev="$a"
         done ;;
@@ -63,6 +79,9 @@ case "$sub" in
         if [ -n "${NEED_FORCE:-}" ] && [ "$forced" -eq 0 ]; then
             printf 'close-refused %s\n' "$*" >>"$LOG"; exit 1
         fi
+        if [ -n "${RECLOSE_REFUSED:-}" ] && [ "$(cat "$MDIR/$id.status" 2>/dev/null)" = "closed" ]; then
+            printf 'reclose-refused %s\n' "$*" >>"$LOG"; exit 1
+        fi
         printf 'close %s\n' "$*" >>"$LOG"
         [ -n "${FAIL_CLOSE:-}" ] || { mkdir -p "$MDIR"; printf 'closed' >"$MDIR/$id.status"; } ;;
     show)
@@ -70,7 +89,7 @@ case "$sub" in
         s="open"; [ -f "$MDIR/$id.status" ] && s=$(cat "$MDIR/$id.status")
         jq -nc --arg id "$id" --arg s "$s" --argjson m "$m" \
           '[{id:$id,status:$s,metadata:$m}]' ;;
-    *) exit 2 ;;
+    *) printf 'other %s\n' "$*" >>"$LOG"; exit 2 ;;
 esac
 STUB
 chmod +x "$BIN/gc"
@@ -133,8 +152,7 @@ echo "── the work-record outcome never holds the close ──"
 #                   ones land
 WBIN="$TMPD/wbin"; WLOG="$TMPD/wlog"
 mkdir -p "$WBIN"
-cat >"$WBIN/gc" <<'STUB'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$WBIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     update)
@@ -214,6 +232,23 @@ reset; RC=0
 ( PATH="$BIN:$PATH" LOG="$LOG" NEED_FORCE=1 bash "$SUT" --visit v-x --outcome dismissed --reason "operator ended it" >/dev/null 2>&1 ) || RC=$?
 is "without --force a refused close is not silently a success" "$RC" "4"
 
+# A visit someone closed by hand carries no outcome, and visit-close.sh is the
+# repair the role prompts name for it: it records both keys on the closed visit
+# and leaves the close standing. The store answers the re-close as a no-op, or
+# refuses it; either way the status read decides, and nothing reopens the visit.
+echo "── on a visit already closed by hand it records the outcome and exits 0 ──"
+for knob in "" RECLOSE_REFUSED; do
+    reset; mkdir -p "$LOG.m"; printf 'closed' >"$LOG.m/v-x.status"; RC=0
+    ( PATH="$BIN:$PATH" LOG="$LOG" env ${knob:+"$knob=1"} bash "$SUT" --visit v-x --outcome moot \
+        --reason "filed in error" >/dev/null 2>&1 ) || RC=$?
+    label="${knob:-re-close is a no-op}"
+    is "$label: it exits 0" "$RC" "0"
+    has "$label: the outcome word is stamped" 'set-metadata gc.outcome=moot' "$LOG"
+    has "$label: the board-visible reason is stamped" 'set-metadata gc.outcome_reason=filed in error' "$LOG"
+    hasnt "$label: no status write reopens the visit" '--status' "$LOG"
+    hasnt "$label: no other bd verb runs" 'other ' "$LOG"
+done
+
 echo "── fold: the merge-hold keys move to the holder, then the folded visit closes ──"
 reset
 seed_meta v-x pr_number 559
@@ -227,6 +262,19 @@ has "pr_number is stamped on the holder" 'update v-hold --set-metadata pr_number
 is "the holder carries pr_number after the fold" "$(meta_of v-hold pr_number)" "559"
 is "the holder carries pr_url after the fold" "$(meta_of v-hold pr_url)" "https://github.com/o/r/pull/559"
 is "the holder carries anchor_bead after the fold" "$(meta_of v-hold anchor_bead)" "tk-anchor"
+has "the holder is joined to the anchor by its edge" 'dep add v-hold tk-anchor --type related' "$LOG"
+has "the folded visit closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── fold: a holder that cannot be joined to the anchor still takes the merge hold, without anchor_bead ──"
+reset
+seed_meta v-x pr_number 559
+seed_meta v-x anchor_bead tk-anchor
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_DEP=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a fold whose holder cannot be joined still exits 0" "$RC" "0"
+is "the holder carries pr_number, the merge hold" "$(meta_of v-hold pr_number)" "559"
+is "the holder takes no anchor_bead it has no edge for" "$(meta_of v-hold anchor_bead)" ""
 has "the folded visit closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
 
 echo "── fold: a transfer that will not read back refuses the close (exit 5) ──"
@@ -307,6 +355,44 @@ RC=0
 is "a fold with no pr_number exits 0" "$RC" "0"
 hasnt "no pr_number is written when there is no hold to move" 'pr_number=' "$LOG"
 has "the folded visit still closes" 'close v-x --reason folded: folded into v-hold' "$LOG"
+
+echo "── fold: every fold names its holder; one with none is refused before any write (exit 5) ──"
+# The holder is where the folded visit's question goes, so a fold with no --into
+# is refused even when the visit holds no merge.
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --outcome folded --reason "folded" >/dev/null 2>&1 ) || RC=$?
+is "a fold with no --into exits 5" "$RC" "5"
+hasnt "nothing is written" 'update' "$LOG"
+hasnt "nothing is closed" 'close v-x' "$LOG"
+
+echo "── fold: the holder is recorded on the folded visit as gc.folded_into ──"
+# A reader waiting on the folded visit's question (finding.sh close-answered)
+# follows gc.folded_into to the visit now holding it.
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --subject tk-sub --into v-hold \
+    --outcome folded --reason "folded into v-hold" ) || RC=$?
+is "the fold exits 0" "$RC" "0"
+is "the folded visit records its holder" "$(meta_of v-x gc.folded_into)" "v-hold"
+has "…in the write that stamps the outcome" \
+    'update v-x --set-metadata gc.outcome=folded --set-metadata gc.outcome_reason=folded into v-hold --set-metadata gc.folded_into=v-hold' "$LOG"
+is "…before the close" "$(grep -m1 -e 'gc.folded_into=' -e '^close ' "$LOG" | cut -d' ' -f1)" "update"
+
+echo "── fold: a holder that does not read back refuses the close (exit 3) ──"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" FAIL_FOLDINTO=1 bash "$SUT" --visit v-x --into v-hold \
+    --outcome folded --reason "folded into v-hold" >/dev/null 2>&1 ) || RC=$?
+is "a dropped gc.folded_into exits 3" "$RC" "3"
+hasnt "the folded visit is NOT closed without its holder" 'close v-x' "$LOG"
+
+echo "── a close that is not a fold records no holder ──"
+reset
+RC=0
+( PATH="$BIN:$PATH" LOG="$LOG" bash "$SUT" --visit v-x --into v-hold --outcome moot --reason "premise died" ) || RC=$?
+is "a moot close given --into exits 0" "$RC" "0"
+hasnt "…and stamps no gc.folded_into" 'gc.folded_into' "$LOG"
 
 echo "── a non-fold close of a merge-holding visit does not require --into ──"
 reset

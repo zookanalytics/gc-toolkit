@@ -13,14 +13,16 @@
 # it returns only when none does, and the script's own shell answers instead.
 # GCTK_BIN=none forces that shell. GCTK_FALLBACK forces it for the subcommands
 # it names (space- or comma-separated) and leaves the binary serving every
-# other call. A suite drives merge.sh's shell that way, because that shell
-# records every landing through lifecycle.sh, which needs the binary.
+# other call, so a suite can test one port's shell while lifecycle.sh, which
+# has no shell, still reaches the binary. No script calls gctk_resolve: every
+# script that hands a call over is only the exec. It is the call for a port
+# that lands with its script kept as the fallback.
 #
-# gctk_require is for a script that is only the exec (lifecycle.sh). It execs
-# the binary the same chain resolves. When there is none, it names what is
-# missing and exits 1, so it never returns. GCTK_BIN=none names no binary and is
-# refused like a missing one. GCTK_FALLBACK is not read, because there is no
-# shell to fall back to.
+# gctk_require is for a script that is only the exec (lifecycle.sh,
+# merge.sh). It execs the binary the same chain resolves. When there is none,
+# it names what is missing and exits 1, so it never returns. GCTK_BIN=none
+# names no binary and is refused like a missing one. GCTK_FALLBACK is not read,
+# because there is no shell to fall back to.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
@@ -109,7 +111,7 @@ gctk_require() { # <subcommand> [args...]
     elif [ -z "$_gctk_city" ]; then
         echo "$sub: no city to find the gctk binary in — GC_CITY_PATH, GC_CITY and GC_CITY_ROOT are unset and \`gc service list --json\` named none. Set one of them, or GCTK_BIN; nothing was written" >&2
     else
-        echo "$sub: no gctk binary at $_gctk_bin, so nothing was written. The gctk-build order (orders/gctk-build.toml) publishes it: a fresh city has one after the order's first build, $_gctk_city/.gc/services/gctk/build-status.json records why the last build failed, and assets/scripts/gc-gctk-build.sh builds it now" >&2
+        echo "$sub: no gctk binary at $_gctk_bin, so nothing was written. The gctk-build order (orders/gctk-build.toml) publishes it: a fresh city has one after the order's first build, $_gctk_city/.gc/services/gctk/build-status.json records why the last build failed, and assets/scripts/gc-build.sh gctk builds it now" >&2
     fi
     exit 1
 }

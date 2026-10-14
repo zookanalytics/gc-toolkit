@@ -17,15 +17,17 @@
 # for a PR anchor. ONE fetch per pass mirrors every branch into a private ref
 # namespace; per anchor, both sides must resolve there before
 # `git merge-tree --write-tree` is asked anything.
-# CLEAN records nothing; CONFLICT files, adopts or re-routes one child that brings
-# the branch current by MERGE — no branch shape is rebased or force-pushed —
-# stamped prepare_mode=merge and counted as dispatched only once that stamp AND
-# the route read back.
+# CLEAN records nothing; CONFLICT files or re-routes one child that brings the
+# branch current by MERGE — no branch shape is rebased or force-pushed — filed
+# with its work order (prepare_mode=merge) on the create, and counted as
+# dispatched only once that work order AND the route read back.
 #
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
 # (rebasing is one horn of what a demand asks, so performing it answers the
-# person's question by fait accompli).
+# person's question by fait accompli). And the same supersession guard: a
+# branch whose conflict is a landed change deleting or rewriting the code it
+# edits gets the operator's decision instead of a child (branch-supersession.sh).
 #
 # Dedup is shared with pr-facts.sh by construction rather than by bookkeeping:
 # both arms probe children on `metadata.branch`, and the `rejection_reason`
@@ -64,6 +66,8 @@ done
 # nothing here can move a branch or a remote-tracking ref; the same device
 # merge.sh uses for its seed-audit merge gate.
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
+# Tells a branch a landed change made moot from one that only drifted.
+SUPERSESSION="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/branch-supersession.sh"
 
 # The target an anchor that records none lands on, derived per rig from
 # origin/HEAD so a rig whose default branch is not `main` gets its own.
@@ -235,6 +239,11 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   }
+  # The keys the probes below find a child by: the branch the listing above
+  # selects on, and the rejection_reason that names the head. A fresh child
+  # short of one is a child no later pass can find, so they are bd_create's
+  # --select below, and the orphan close before it names them too.
+  FIX_SELECT="branch,rejection_reason"
   # A child of a prior pass whose route stamp exited 0 without writing. The
   # route is what makes it reachable, and the dedup below matches it, so nothing
   # retries it. Narrowed to open/unassigned/unrouted at THIS head: a metadata
@@ -278,7 +287,11 @@ while IFS= read -r row; do
         elif ((($x.assignee // "") | tostring) != "") then "ok"
         elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
         else "restamp" end' 2>/dev/null)
-    if [ "$dneed" = "restamp" ]; then
+    if [ "$dneed" = "restamp" ] && ! bd_anchor_link "$id" "$dup"; then
+      # The join lands before the marker, so a marker never stands on a child
+      # the anchor's closed-children read cannot reach.
+      echo "$PROG: WARN could not join covering rework $dup to anchor $id; its role marker is left unstamped (retry next pass)" >&2
+    elif [ "$dneed" = "restamp" ]; then
       # `gc bd update` returns 0 without writing (the claim guard is one such
       # path), so the exit code cannot prove the marker landed. Read both keys
       # back and re-stamp once, claiming it only when it persists; the next pass
@@ -306,78 +319,92 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts but $frozen holds it with rebase_hold (operator gate); no rework dispatched"
     held=$((held + 1)); continue
   fi
+  # A conflict is not always drift. When a change already on the target deleted
+  # or rewrote the code this branch edits, bringing it current decides whether
+  # the branch still has work to do, and a child sent to merge it would stop and
+  # ask. branch-supersession.sh tells the two apart and puts that decision to the
+  # operator; it holds only behind an open decision visit, so anything it cannot
+  # classify or record falls through to the ordinary child. Read after the dedup
+  # above, so a live child stands the arm down first, and before the strand
+  # re-route below, so a superseded branch's strand is not routed either.
+  if [ -x "$SUPERSESSION" ] && "$SUPERSESSION" hold --anchor "$id" --branch "$branch" \
+       --target "$target" --base "$base_oid" --head "$head_oid"; then
+    held=$((held + 1)); continue
+  fi
+  # The work order: branch/target say what to bring current and where it
+  # lands, prepare_mode says how, merge_strategy=mr hands it back through the
+  # refinery, rejection_reason names the head (the key the strand probe above
+  # rescues a child by), and task_kind and anchor_bead are the role marker. The
+  # child resumes the ANCHOR's own branch, so with no marker a metadata read
+  # cannot tell the child from the anchor. A dropped prepare_mode leaves one that
+  # reads as a review bead rather than a rework resume, since pr-facts.sh keys
+  # that distinction on a non-empty prepare_mode. A fresh child is filed with
+  # this order, and a stranded one is brought up to it. The route is stamped
+  # last, in a separate write, once every key of the order reads back.
+  #
+  # No pr_url/pr_number/existing_pr rides this child: there is no PR yet. The
+  # anchor opens its own once the branch is current, which is why the work order
+  # tells the polecat not to open one.
+  FIX_REASON="stale base at head $head_oid: '$branch' no longer merges into '$target'. $fix_instruction Do NOT open a PR — anchor $id opens its own once the branch is current."
+  FIX_META=$(jq -nc --arg a "$id" --arg b "$branch" --arg t "$target" --arg r "$FIX_REASON" --arg m "$prepare_mode" \
+    '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r,
+      prepare_mode: $m, merge_strategy: "mr"}' 2>/dev/null)
+  # The route makes the child someone's work order, so it waits until every key
+  # of that order reads back, for a fresh child and a stranded one alike. Both
+  # kinds are open, unassigned and unrouted, so nobody holds the bead a write
+  # lands on. A child still short is left unrouted, and the strand probe finds
+  # it again next pass by its branch and the head its rejection_reason names.
+  fix_rc=0
   if [ -n "$stranded" ]; then
     FIX="$stranded"
     echo "$PROG: $id re-routing stranded rework $FIX for '$branch' (a prior pass's route stamp did not land)"
+    # The order written below carries anchor_bead, so the child is joined to
+    # the anchor first. A failed join writes nothing and routes nothing, so no
+    # child carries anchor_bead where the anchor's closed-children read cannot
+    # reach it.
+    if ! bd_anchor_link "$id" "$FIX"; then
+      echo "$PROG: $id could not join rework $FIX to the anchor; left unstamped and unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
+      || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
+    # A stranded child is written the whole order once and read back again
+    # (bd_meta_ensure). It was found by both FIX_SELECT keys, so it is only ever
+    # left for the retry.
+    if ! short=$(bd_meta_ensure "$FIX" "$FIX_META"); then
+      echo "$PROG: WARN rework $FIX did not record its whole work order (short: $short); left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
   else
-    # Orphan adoption BEFORE create: a child this arm created whose stamp then
-    # failed carries the deterministic title but no branch metadata — invisible
-    # to the branch dedup above, so re-creating would mint a twin every pass.
-    # The title is a pure function of the branch name, so it stays deterministic
-    # for a given branch across passes.
-    # An unreadable probe dispatches nothing (retry next pass).
-    if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
+    # A child an earlier two-write create left behind carries this title but
+    # not the branch and head the probes above find a child by, while its
+    # blocks edge holds the anchor beside the child filed below. It is closed
+    # first. An unreadable listing dispatches nothing (retry next pass).
+    if ! bd_unmake_orphans "$FIX_SELECT" "$FIX_TITLE" \
+         "Unmade by $PROG: a merge-in child of $id filed without the branch and head the strand and dedup probes find it by, so no pass could find it to route it, while its blocks edge held $id. A child carrying them is filed in its place." >/dev/null; then
       echo "$PROG: $id — '$branch' conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    FIX=$(printf '%s' "$forphans" | jq -r '
-      [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$FIX" ]; then
-      echo "$PROG: $id adopting unstamped rework orphan $FIX for '$branch' (created by a prior pass whose stamp failed)"
-    else
-      FIX=$(gc bd create "$FIX_TITLE base moved, the branch no longer merges" -t task --json 2>/dev/null \
-        | scrub | jq -r '.id // empty' 2>/dev/null)
-    fi
+    # A fresh child is filed whole: the work order, the blocks edge and the
+    # membership edge onto the anchor (--child-of) ride the create, so a create
+    # whose reply is lost has still landed with the branch the dedup above finds
+    # it by, and the next pass re-routes it as stranded.
+    # bd_create writes a short child its whole order once more, closes one
+    # still short of a FIX_SELECT key, since no later pass could find it while
+    # its blocks edge held the anchor (rc 1, no id), and prints the id of one
+    # short of any other key (rc 2), which the strand probe finds next pass.
+    FIX=$(bd_create --select "$FIX_SELECT" --child-of "$id" "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2
     skipped=$((skipped + 1)); continue
   fi
-  # The route is stamped separately, after prepare_mode reads back. A dropped
-  # branch leaves a child nothing can act on, which is the safe side; a dropped
-  # prepare_mode leaves one that reads as a review bead rather than a rework
-  # resume — pr-facts.sh keys that distinction on a non-empty prepare_mode — so
-  # it escapes the rework handling. task_kind and anchor_bead are the role
-  # marker: the child resumes the ANCHOR's own branch, so with no marker a
-  # metadata read cannot tell the child from the anchor.
-  #
-  # No pr_url/pr_number/existing_pr rides this child: there is no PR yet. The
-  # anchor opens its own once the branch is current, which is why the work order
-  # tells the polecat not to open one.
-  gc bd update "$FIX" \
-    --set-metadata task_kind=rework \
-    --set-metadata anchor_bead="$id" \
-    --set-metadata branch="$branch" \
-    --set-metadata target="$target" \
-    --set-metadata rejection_reason="stale base at head $head_oid: '$branch' no longer merges into '$target'. $fix_instruction Do NOT open a PR — anchor $id opens its own once the branch is current." \
-    --set-metadata prepare_mode="$prepare_mode" \
-    --set-metadata merge_strategy=mr >/dev/null 2>&1 \
-    || echo "$PROG: WARN rework $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
-  gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
-    || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
-  # A new rework child on this branch changes the kids/orphan probes above; drop
+  # A new rework child on this branch changes the kids probe above; drop
   # the per-pass bd_list cache so a later anchor on the same branch does not read
   # a stale "no child" and file a duplicate. No-op outside a reconcile pass.
   bd_cache_clear
-  mgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty')
-  if [ "$mgot" != "$prepare_mode" ]; then
-    echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
-    skipped=$((skipped + 1)); continue
-  fi
-  # task_kind=rework and anchor_bead are the role marker, set in the same write
-  # as prepare_mode above. That write can half-land — the exit code does not
-  # prove it — and a child dropped to no marker on the anchor's OWN branch is the
-  # misread this stamp exists to stop, yet the route below would still dispatch
-  # it. Read both back before routing. Re-stamp once; if they still will not
-  # take, leave the child unrouted (a later pass re-stamps it) rather than route
-  # a rework a metadata read cannot tell from its anchor.
-  kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
-  if [ "$kgot" != "rework|$id" ]; then
-    gc bd update "$FIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
-    kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
-  fi
-  if [ "$kgot" != "rework|$id" ]; then
-    echo "$PROG: WARN rework $FIX did not record task_kind=rework/anchor_bead=$id; left unrouted (retry next pass)" >&2
+  if [ "$fix_rc" -ne 0 ]; then
+    echo "$PROG: WARN rework $FIX did not record its whole work order; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such

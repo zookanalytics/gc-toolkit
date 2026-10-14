@@ -66,7 +66,8 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
 # The single writer of the workflow-owned PR labels. A PR is born check-green with
-# no review yet, so its initial status is needs-review; reconcile derives that (and
+# no review yet, so its initial status is needs-review, or working while it is a
+# draft whose ready flip the city still owes; reconcile derives that (and
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
 # on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
@@ -235,6 +236,18 @@ city_draft() { # <num> <author-login>
     --jq '.[] | select(.event == "convert_to_draft") | .event' 2>/dev/null) || return 2
   [ -z "$conv" ] || return 1
   return 0
+}
+
+# The verdict a review bead's notes carry, read from stdin. Before a PR is open,
+# signoff.sh appends the body it composes to the notes, which can already hold
+# other text, such as the findings a failed attempt appended before the retry
+# signed off. So the verdict starts at the last line in the shape signoff.sh
+# opens every verdict with: the check and its verdict, then "Nothing needs you."
+# or the decision. Notes with no such line are the verdict whole.
+verdict_body() {
+  awk '{ line[NR] = $0 }
+    /^[A-Z][A-Za-z0-9_-]*: (approve|request-changes)\. (Nothing needs you\.|Needs you: )/ { start = NR }
+    END { for (i = (start ? start : 1); i <= NR; i++) print line[i] }'
 }
 
 # --- branch heads: one fetch for the pass ----------------------------------------
@@ -648,15 +661,17 @@ GATES
   fi
 
   # Replay the recorded verdict as a COMMENT — the city never approves (#185).
-  REVIEW_ID=$(bd_list --metadata-field task_kind=review --metadata-field anchor_bead="$id" \
-    --status=closed,open,in_progress \
-    | jq -r 'sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
+  # It opens with the verdict's own first line, as every review comment does,
+  # and the comment-only note closes it.
+  REVIEW_ID=$(bd_anchor_children "$id" closed,open,in_progress \
+    | jq -r '[ .[] | select(((.metadata.task_kind // "") | tostring) == "review") ]
+             | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
   VERDICT=""
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
-    | jq -r '.[0].notes // ""' 2>/dev/null)
+    | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
   if [ -n "$VERDICT" ]; then
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
-      --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
+      --body "$(printf '%s\n\nPre-open signoff (comment-only — not an approval).' "$VERDICT")" >/dev/null 2>&1 || true
   else
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "Pre-open checks signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
@@ -747,9 +762,12 @@ while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
     # this PR and gate-ensure moves the anchor to its ready-for-review stage. A
     # hold does not stop this write: recording that GitHub reads the PR ready
     # surfaces nothing, and skipping it would pin the anchor's dispatch at the
-    # draft stage for as long as the hold stands.
+    # draft stage for as long as the hold stands. The status: label reads the
+    # same marker, so it is re-derived after the stamp, as the flip below does.
     gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \
       || echo "$PROG: WARN $rid PR#$rnum is ready but draft_readied did not stamp; will re-read next pass" >&2
+    "$PR_STATUS_LABEL" reconcile --anchor "$rid" --pr "$rnum" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
     continue
   fi
   # The draft is the operator's while they hold it: never surface it.
@@ -782,6 +800,8 @@ RGATESEOF
   [ -z "$rungreen" ] || continue
   # All green: surface it, and record draft_readied so this arm never re-reads or
   # re-flips the PR — including after an operator later re-drafts it to park it.
+  # The status: label reads draft_readied as the end of the draft stage, so it is
+  # reconciled after the stamp.
   if gh pr ready "$rnum" --repo "$ORIGIN_REPO_Q" >/dev/null 2>&1; then
     readied=$((readied + 1))
     gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \

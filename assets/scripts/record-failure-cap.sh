@@ -14,7 +14,7 @@
 #
 # This is the memory. It counts consecutive failures on the anchor itself and
 # hands the anchor to a person once the count reaches the cap. Both writers of
-# the same repair call it — merge.sh's two record arms and pr-facts.sh's
+# the same repair call it — gctk merge's two record arms and pr-facts.sh's
 # out-of-band record — so their attempts count against one budget rather than
 # each keeping a private tally of a repair the other one also tried.
 #
@@ -26,7 +26,8 @@
 # the whole pass through its caller's record_failed count, which is the loud
 # channel this one is not trying to duplicate.
 #
-# Callers: assets/scripts/merge.sh, assets/scripts/pr-facts.sh.
+# Callers: gctk merge (services/gctk/internal/cli/merge.go, which
+# assets/scripts/merge.sh execs), assets/scripts/pr-facts.sh.
 # Exit: always 0. A cap that cannot count must not be what fails a pass — the
 # record failure it is counting has already been reported by the caller.
 set -u

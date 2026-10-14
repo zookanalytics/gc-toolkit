@@ -40,7 +40,7 @@
 # The index declares mechanical facts only — a check's name, its method, its
 # purpose, its phase. When a check applies to a given diff is a judgment its
 # method states in prose, not a column here, so this parser reads no applies-when.
-# Callers: signoff.sh, skills/review-triage, pr-open.sh, merge.sh, gate-ensure.sh,
+# Callers: signoff.sh, skills/review-triage, pr-open.sh, gctk merge, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
 # review-checks.test.sh.
 # Exit: 0 ok · 1 no readable index or --check not declared (emit), or a --at

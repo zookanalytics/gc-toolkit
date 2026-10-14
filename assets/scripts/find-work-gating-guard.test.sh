@@ -99,8 +99,7 @@ esac
 # starvation case below actually exercises the widened window: with --limit=1 a
 # leading parked anchor is the only row the filter ever sees.
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
 [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 0   # bd fails open: empty stdout
 lim=0
@@ -171,7 +170,7 @@ printf 'tk-pre|pre_open_gate\n' > "$FAKE_ROWS"
 eq "$(select_work)" "" "(4) parked pre_open_gate anchor is NOT selected"
 
 # (5) ANY merge_result, not just the gating pair. Every path that legitimately
-#     returns a bead to this queue clears the field first (mr-aware-rejection
+#     returns a bead to this queue clears the field first (rejection-repool.sh
 #     folds --unset-metadata merge_result into the repool), so a value present
 #     means some pass recorded a disposition and this queue is not it.
 for mr in merged blocked refused_false_completion abandoned retargeted held; do

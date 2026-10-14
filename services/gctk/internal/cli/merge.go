@@ -17,13 +17,13 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
 
-// `gctk merge` is the port of assets/scripts/merge.sh: arm 2 of the merge
-// cadence, THE single writer of merged truth. The CLI is contract-preserving —
-// it takes the same two pacing flags (--deadline <epoch-secs>, --cursor
-// <file>), emits the same stdout grammar, and exits 0 except when the check
-// resolver is missing, the gating anchors cannot be enumerated, or a record
-// half failed after a merge (exit 1) — because refinery-reconcile.sh invokes it
-// as an opaque command and must not notice which language answers.
+// `gctk merge` is arm 2 of the merge cadence, THE single writer of merged
+// truth. assets/scripts/merge.sh execs it and has no other implementation. It
+// takes two pacing flags (--deadline <epoch-secs>, --cursor <file>) and exits 0
+// except when the check resolver is missing, the gating anchors cannot be
+// enumerated, or a merged PR's record failed (exit 1). refinery-reconcile.sh
+// invokes merge.sh as an opaque command: it reads only that exit code, and
+// appends what the pass prints to its pass log.
 //
 // Visit order: anchors whose PR has left the open list, or could land this pass
 // by everything read without a per-PR call (draft flag, anchor-local holds,
@@ -32,22 +32,22 @@ import (
 // (pace.go).
 //
 // The lifecycle transitions it performs are in-process (cli.Lifecycle), the
-// same writer the shell reached through lifecycle.sh. Every other seam is a
-// subprocess exactly as the script's was — gc/bd/gh/git and the sibling shell
-// helpers (escalate.sh, record-failure-cap.sh, lane-state.sh, finalize-gate.sh,
-// review-checks.sh, render-seed-audit.sh), resolved from GCTK_SCRIPTS_DIR,
-// which gctk-resolve.sh exports as merge.sh's directory before it execs this
-// binary. That keeps the stub harness, the observability and the permissions
-// surfaces identical. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass
-// refuses (exit 1) before it reads a PR.
+// writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git
+// and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
+// lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh),
+// resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh exports as merge.sh's
+// directory before it execs this binary. Subprocess seams let merge.test.sh's
+// stubs on PATH drive the binary, and keep the observability and permissions
+// surfaces those tools have for every other caller. Run any other way, with
+// GCTK_SCRIPTS_DIR unset, the pass refuses (exit 1) before it reads a PR.
 
 const mergeProg = "merge"
 const mergeGateRef = "refs/gc-toolkit/merge-gate"
 
-// prFields is the pinned read's field set, PR_FIELDS in bd-lib.sh, which the
-// script and pr-facts.sh read it from. A re-read asks for the same set, so the
-// two answers compare field for field. merge.test.sh pins the exact set for
-// both implementations.
+// prFields is the pinned read's field set, the PR_FIELDS in bd-lib.sh that
+// pr-facts.sh reads, so the two arms see the same facts. A re-read asks for the
+// same set, so the two answers compare field for field. merge.test.sh pins the
+// exact set and holds the re-read to bd-lib.sh's.
 const prFields = "state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
 
 // The statuses a referencing bead is "in flight" at: open plus every other
@@ -90,14 +90,14 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// A missing check resolver would make every anchor read as having no lanes,
-	// which is merge's fail-open, so its absence holds the pass. The script runs
-	// this check before it looks for gh, so a pass without either exits 1 here.
+	// which is merge's fail-open, so its absence holds the pass. It is checked
+	// before gh is looked for, so a pass without either exits 1 here.
 	if p := filepath.Join(scriptsDir, "review-checks.sh"); !isExecutable(p) {
 		fmt.Fprintf(stderr, "%s: the check resolver is missing (%s); merge held\n", mergeProg, p)
 		return 1
 	}
 	// A wrong merge cannot be retried away; merging nothing costs one pass. With
-	// no gh there is nothing to drive, so exit 0 quietly, as the script does.
+	// no gh there is nothing to drive, so exit 0 quietly.
 	if _, err := exec.LookPath("gh"); err != nil {
 		return 0
 	}
@@ -126,9 +126,8 @@ func Merge(args []string, stdout, stderr io.Writer) int {
 	return m.run()
 }
 
-// mergePaceArgs reads the pacing flags the way merge.sh's loop does: --deadline
-// and --cursor each take the argument after them, and any other argument is
-// passed over.
+// mergePaceArgs reads the pacing flags: --deadline and --cursor each take the
+// argument after them, and any other argument is passed over.
 func mergePaceArgs(args []string) (deadline, cursor string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -162,9 +161,9 @@ type merger struct {
 	deadline string
 	cursor   string
 
-	// The UNKNOWN re-read's bounds, MERGE_STATE_REREADS and
-	// MERGE_STATE_REREAD_SECS as bd-lib.sh reads them, and the re-reads this
-	// pass has spent on UNKNOWN answers.
+	// The UNKNOWN re-read's bounds, read from MERGE_STATE_REREADS and
+	// MERGE_STATE_REREAD_SECS by envCount, and the re-reads this pass has spent
+	// on UNKNOWN answers.
 	rereads      int
 	rereadSecs   int
 	rereadsSpent int
@@ -255,7 +254,8 @@ func (m *merger) run() int {
 //   - the anchor carries merge_hold, review comments nothing has answered, or
 //     no normalized check_set;
 //   - the approval rule (reviewVerdict), applied to each account's latest
-//     APPROVED or CHANGES_REQUESTED review, finds a veto or no approval;
+//     APPROVED or CHANGES_REQUESTED review and the anchor's lift line, finds a
+//     veto or no approval;
 //   - the merge state pr-facts.sh recorded at the PR's live head, in the
 //     posture arm that runs right before this one, is one the merge never
 //     proceeds on: anything but CLEAN, UNSTABLE, or UNKNOWN, the state GitHub
@@ -302,7 +302,7 @@ func (m *merger) landsFirst(a *gcbd.Bead, open map[string]*openPR) bool {
 		stripSpacesCommas(a.Meta("check_set")) == "" {
 		return false
 	}
-	if v := reviewVerdict(pr.reviews(), m.selfLogin); v.veto != "" || v.approver == "" {
+	if v := reviewVerdict(pr.reviews(), m.selfLogin, a.Meta("bring_current_lifted_at")); v.veto != "" || v.approver == "" {
 		return false
 	}
 	// pr_merge_state is <state>@<head>, and a state recorded at an older head
@@ -380,8 +380,7 @@ func (m *merger) visit(row *gcbd.Bead, p *pacer) bool {
 }
 
 // handle is one anchor through the pass, past the free skips. It returns
-// nothing; every outcome is a counter bump and a log line, exactly as the
-// script's loop body.
+// nothing; every outcome is a counter bump and a log line.
 func (m *merger) handle(row *gcbd.Bead) {
 	id := row.ID
 	num := row.Meta("pr_number")
@@ -494,6 +493,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	checkset := fresh.Meta("check_set")
 	posture := fresh.Meta("pr_posture")
 	aroute := fresh.Meta("gc.routed_to")
+	lifted := fresh.Meta("bring_current_lifted_at")
 
 	// --- validate, in order -------------------------------------------------------
 	if stripSpacesCommas(checkset) == "" {
@@ -587,7 +587,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	rs, rok := reviewState(reviewsRaw, m.selfLogin)
+	rs, rok := reviewState(reviewsRaw, m.selfLogin, lifted)
 	if !rok {
 		fmt.Fprintf(m.stdout, "%s: PR#%s reviews history unreadable; merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
@@ -608,8 +608,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 	if rs.approver == "" {
+		// An approval the lift line set aside is named, because GitHub still
+		// shows one whose dismissal it refused.
 		m.recordMachine(id, "settled", headOid, aroute)
-		fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review stands (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, id)
+		if rs.lifted != "" {
+			fmt.Fprintf(m.stdout, "%s: PR#%s the approval from '%s' was given at or before the bring-current round whose ruling lifted it (%s), so it no longer counts and a new approval lands the PR; merge held (anchor %s)\n", mergeProg, num, rs.lifted, lifted, id)
+		} else {
+			fmt.Fprintf(m.stdout, "%s: PR#%s no external APPROVED review stands (approval is a universal merge rule); merge held (anchor %s)\n", mergeProg, num, id)
+		}
 		m.held++
 		return
 	}
@@ -751,7 +757,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	freason := terminalReason(final, num, base, liveURL, headRef)
+	freason := terminalReason(final, num, base, liveURL, headRef, lifted)
 	if freason == "OK" {
 		fcs := final.Meta("check_set")
 		if rg, ok := m.firstNotgreenLane(id, fcs); !ok {
@@ -901,10 +907,10 @@ func (m *merger) ghOrigin(args ...string) ([]byte, int) {
 
 // anchorRow reads the anchor's live row; ok=false on an unreadable bead or one
 // whose metadata is null — never an all-default row. Both re-reads decide the
-// merge off this row, so it takes the authoritative `gc bd show` path that
-// merge.sh's anchor_row reads, never the supervisor API: the daemon's cache can
-// lag a fresh write, and a merge_hold, an unanswered-comment posture or a
-// retarget written just before the pass would read as absent.
+// merge off this row, so it takes the authoritative `gc bd show` path
+// (ShowDirect), never the supervisor API: the daemon's cache can lag a fresh
+// write, and a merge_hold, an unanswered-comment posture or a retarget written
+// just before the pass would read as absent.
 func (m *merger) anchorRow(id string) (*gcbd.Bead, bool) {
 	b := m.client.ShowDirect(id)
 	if b == nil || b.Metadata == nil {
@@ -924,8 +930,7 @@ func (m *merger) mergeCommitOid(num string) string {
 	return v.MergeCommit.Oid
 }
 
-// settledOutcome is how prViewSettled ended: gh_pr_view_settled's return code
-// in bd-lib.sh.
+// settledOutcome is how prViewSettled ended.
 type settledOutcome int
 
 const (
@@ -935,15 +940,14 @@ const (
 	settledFailed                         // a re-read failed
 )
 
-// prViewSettled is bd-lib.sh's gh_pr_view_settled. It reads again a PR whose
-// pinned read, pinnedRaw asked with --json prFields, answered an UNKNOWN merge
-// state. A re-read that answers a computed state decides the PR and spends
-// nothing. One that answers UNKNOWN again spends one of the pass's m.rereads,
-// and once they are spent no PR is re-read for the rest of the pass. A PR's
-// first re-read goes out at once, because its pinned read already started the
-// computation, and each later one waits m.rereadSecs. The wait is a `sleep`
-// subprocess, as the script's is, so the suite's stub sleep records the
-// schedule.
+// prViewSettled reads again a PR whose pinned read, pinnedRaw asked with --json
+// prFields, answered an UNKNOWN merge state. A re-read that answers a computed
+// state decides the PR and spends nothing. One that answers UNKNOWN again
+// spends one of the pass's m.rereads, and once they are spent no PR is re-read
+// for the rest of the pass. A PR's first re-read goes out at once, because its
+// pinned read already started the computation, and each later one waits
+// m.rereadSecs. The wait is a `sleep` subprocess, so the suite's stub sleep
+// records the schedule.
 //
 // reads is the number of re-reads made. On settledComputed, raw is that answer
 // and state its mergeStateStatus. On settledChanged, changed names each field
@@ -1129,12 +1133,12 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // or "" when it can. merge.sh exports its own directory as GCTK_SCRIPTS_DIR
 // before it execs this binary; a binary run any other way has no directory to
 // resolve the helpers in, and a bare name would fall to a PATH lookup. A named
-// directory missing a helper is not refused here, because merge.sh refuses the
-// pass only for a missing check resolver, which Merge checks next. Every other
-// helper is handled where it is called. A missing lane-state.sh or
-// finalize-gate.sh holds that anchor. A missing escalate.sh,
-// record-failure-cap.sh or render-seed-audit.sh is skipped. The pass still
-// records a PR that has already merged.
+// directory missing a helper is not refused here: the pass is refused only for
+// a missing check resolver, which Merge checks next. Every other helper is
+// handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
+// that anchor. A missing escalate.sh, record-failure-cap.sh or
+// render-seed-audit.sh is skipped. The pass still records a PR that has
+// already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
 		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
@@ -1226,8 +1230,8 @@ func allDigits(s string) bool {
 	return true
 }
 
-// envCount reads a count from the environment as bd-lib.sh's case guard does: a
-// value that is empty or not all digits takes the default.
+// envCount reads a count from the environment: a value that is empty or not
+// all digits takes the default.
 func envCount(name string, def int) int {
 	v := os.Getenv(name)
 	if !allDigits(v) {
@@ -1597,16 +1601,22 @@ type reviewRow struct {
 	IDNum       int64
 }
 
+// reviewSummary is the approval rule's answer: the first reviewer whose latest
+// opinion vetoes, the first whose latest approves, and, when no approval is
+// left to land the PR, the first whose standing approval the lift line set
+// aside.
 type reviewSummary struct {
 	veto     string
 	approver string
+	lifted   string
 }
 
 // reviewState applies the approval rule (reviewVerdict) to a PR's REST reviews
-// history. ok=false is an unreadable history: `jq -cs` slurps the whole stream
-// or nothing, so one row that will not decode makes all of it unreadable,
-// because the veto or the only approval may be that row or follow it.
-func reviewState(raw []byte, self string) (reviewSummary, bool) {
+// history and the anchor's lift line. ok=false is an unreadable history: `jq
+// -cs` slurps the whole stream or nothing, so one row that will not decode makes
+// all of it unreadable, because the veto or the only approval may be that row or
+// follow it.
+func reviewState(raw []byte, self, lifted string) (reviewSummary, bool) {
 	dec := json.NewDecoder(bytes.NewReader(gcbd.Scrub(raw)))
 	dec.UseNumber()
 	var all []reviewRow
@@ -1634,7 +1644,7 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 			IDNum:       numberToInt64(obj.ID),
 		})
 	}
-	return reviewVerdict(all, self), true
+	return reviewVerdict(all, self, lifted), true
 }
 
 // reviewVerdict is the approval rule, which the approval gate and the visit
@@ -1644,9 +1654,13 @@ func reviewState(raw []byte, self string) (reviewSummary, bool) {
 // latest is taken, so a dismissed approval does not count and a dismissed
 // CHANGES_REQUESTED does not hide its author's older approval. An approval
 // stands across later pushes until someone dismisses it, so the commit a review
-// was given at is not read.
-func reviewVerdict(all []reviewRow, self string) reviewSummary {
+// was given at is not read. lifted is the anchor's bring_current_lifted_at: once
+// a ruling on a bring-current round lifts the approval, an approval submitted at
+// or before it no longer approves, and empty lifts nothing (approvals_after and
+// the two-argument review_verdict in review-verdict.sh).
+func reviewVerdict(all []reviewRow, self, lifted string) reviewSummary {
 	var summary reviewSummary
+	standing := ""
 	// Group the non-self APPROVED and CHANGES_REQUESTED reviews by login and keep
 	// the latest per reviewer by (submitted_at, id). A DISMISSED row is dropped
 	// before the latest is taken.
@@ -1677,11 +1691,35 @@ func reviewVerdict(all []reviewRow, self string) reviewSummary {
 		if latest.State == "CHANGES_REQUESTED" && summary.veto == "" {
 			summary.veto = l
 		}
-		if latest.State == "APPROVED" && summary.approver == "" {
+		if latest.State == "APPROVED" && standing == "" {
+			standing = l
+		}
+		if latest.State == "APPROVED" && summary.approver == "" && approvedAfter(latest, lifted) {
 			summary.approver = l
 		}
 	}
+	if lifted != "" && summary.approver == "" {
+		summary.lifted = standing
+	}
 	return summary
+}
+
+// liftInstant is the one form a lift line is read in, the instant GitHub stamps
+// on a review, in which instants order as strings.
+var liftInstant = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
+
+// approvedAfter reports whether an approval survives the lift line: every
+// approval does when there is none, only one submitted strictly after it when
+// there is, and none when the line is not an instant in GitHub's form, so a
+// line that did not read never lets an approval count.
+func approvedAfter(r reviewRow, lifted string) bool {
+	if lifted == "" {
+		return true
+	}
+	if !liftInstant.MatchString(lifted) {
+		return false
+	}
+	return r.SubmittedAt > lifted
 }
 
 // openPR is one node of the open-PR read.
@@ -1730,7 +1768,9 @@ func numberToInt64(n json.Number) int64 {
 }
 
 // notGreenRequired names each required context that is MISSING or RED in the
-// rollup, joined by spaces. ok=false means the rollup did not decode.
+// rollup, joined by spaces. ok=false means the rollup is unreadable: it did not
+// decode, or a row of a required context carries a set conclusion or state that
+// is not a string.
 func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 	var v struct {
 		StatusCheckRollup []map[string]any `json:"statusCheckRollup"`
@@ -1747,15 +1787,29 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 		}
 		return ""
 	}
-	green := func(item map[string]any) bool {
-		if c, ok := item["conclusion"].(string); ok && c != "" {
-			u := strings.ToUpper(c)
-			return u == "SUCCESS" || u == "NEUTRAL" || u == "SKIPPED"
+	// upper is `((.<k> // "") | tostring | length) > 0` and then
+	// `.<k> | ascii_upcase`. set is false for an absent, null, false or empty
+	// value. ok is false for any other non-string, where ascii_upcase errors.
+	upper := func(item map[string]any, k string) (u string, set, ok bool) {
+		switch x := item[k].(type) {
+		case nil:
+			return "", false, true
+		case string:
+			return strings.ToUpper(x), x != "", true
+		case bool:
+			if !x {
+				return "", false, true
+			}
 		}
-		if s, ok := item["state"].(string); ok && s != "" {
-			return strings.ToUpper(s) == "SUCCESS"
+		return "", true, false
+	}
+	green := func(item map[string]any) (isGreen, ok bool) {
+		c, set, ok := upper(item, "conclusion")
+		if set {
+			return c == "SUCCESS" || c == "NEUTRAL" || c == "SKIPPED", ok
 		}
-		return false
+		s, set, ok := upper(item, "state")
+		return set && s == "SUCCESS", ok
 	}
 	var out []string
 	for _, c := range required {
@@ -1769,11 +1823,16 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 			out = append(out, c+"(MISSING)")
 			continue
 		}
+		// Every row is read, so an unreadable row after a red one still makes the
+		// rollup unreadable.
 		red := false
 		for _, h := range hits {
-			if !green(h) {
+			g, ok := green(h)
+			if !ok {
+				return "", false
+			}
+			if !g {
 				red = true
-				break
 			}
 		}
 		if red {
@@ -1784,8 +1843,9 @@ func notGreenRequired(rollupRaw []byte, required []string) (string, bool) {
 }
 
 // terminalReason re-derives the full stored authorization set immediately before
-// the merge, returning "OK" or the first field that moved.
-func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
+// the merge, returning "OK" or the first field that moved. lifted is the lift
+// line the approval was validated against.
+func terminalReason(final *gcbd.Bead, num, base, url, ref, lifted string) string {
 	st := final.StatusLower()
 	mr := final.Meta("merge_result")
 	pn := final.Meta("pr_number")
@@ -1813,6 +1873,8 @@ func terminalReason(final *gcbd.Bead, num, base, url, ref string) string {
 		return "branch changed after validation"
 	case stripSpacesCommas(fcs) == "":
 		return "check_set emptied after validation"
+	case final.Meta("bring_current_lifted_at") != lifted:
+		return "a bring-current ruling lifted the approval after validation"
 	default:
 		return "OK"
 	}

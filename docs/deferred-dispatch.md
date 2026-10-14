@@ -38,7 +38,8 @@ that already happened is
 [gascity-dispatch-containment.md](gascity-dispatch-containment.md). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
-rather than restating it.
+rather than restating it. What holds an armed bead is defined once, in
+`assets/scripts/hold-lib.sh`, and this doc says how the pass applies it.
 
 ## Arm it instead of remembering it
 
@@ -101,7 +102,7 @@ either.
 To see what is owed, in this rig's store:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead: waiting / dispatchable / closed
+deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatchable / closed
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
@@ -109,12 +110,14 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 `orders/deferred-dispatch.toml` — a `cooldown` exec order at `scope =
 "rig"`, so each importing rig reconciles its own store on its own clock,
-and the dispatcher's open-tracking gate gives each rig its own
-single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
+one pass at a time (see
+[One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
+Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed open bead whose own `blocks` edges have all
-  closed — the ones `bd` reports ready, and also the ones bd holds unready
-  only through a blocked or deferred ancestor (see below) — stamping its own
+- **dispatches** every armed open bead nothing holds — the ones `bd` reports
+  ready, and also the ones bd keeps unready only through an ancestor that
+  waits on a demand gate, or through any held ancestor of a bead in flight
+  (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -129,35 +132,73 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   state — a pass that died before or during its sling, or a failed sling
   whose rollback did not land — because that dispatch was never proven and
   retiring it would silently lose the work;
-- **withholds** — leaving the record armed and saying so — when the bead
-  is still blocked, when someone holds it by `assignee`, when the sling
-  fails, or when the recorded arguments are malformed;
+- **withholds** — leaving the record armed and saying so — when a blocker
+  holds the bead, on it or on an ancestor, when someone has it by `assignee`,
+  when the sling fails, when the recorded arguments are malformed, or when
+  the pass has spent its budget;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
-  at a non-`open` live status. The record is kept, because the hold may
-  yet clear, but it is counted apart from `waiting` and reported rather
+  at a non-`open` live status. The record is kept, because the status may
+  yet be cleared, but it is counted apart from `held` and reported rather
   than left in a silent count. `list` marks the same beads
-  `STRANDED — status=<s> is never --ready`. A held bead and a gated bead
-  are both "not ready", and conflating them is what hides a dead arm: the
-  gated one dispatches when its blocker closes, the held one never
+  `STRANDED — status=<s> is never --ready`. A stranded bead and a held
+  one are both "not ready", and conflating them is what hides a dead arm:
+  the held one dispatches when its hold releases, the stranded one never
   dispatches at all.
 
-The arm waits on the bead's OWN blockers, which is narrower than `bd list
---ready`. `--ready` applies beads' own claimability predicate — open, no
-active blocker of a blocking type (`blocks` / `waits-for` /
-`conditional-blocks`), not `in_progress`, `blocked`, `deferred` or `hooked` —
-and it ALSO excludes a bead held only by a blocked or deferred ANCESTOR,
-because the is_blocked flag cascades DOWN parent-child edges. An armed epic
-child whose own blockers have all closed is ready to run, but sits under a
-container the operator holds on a human demand gate, so it never enters
-`bd --ready` while that gate is open and its arm would never fire. So the
-pass reads `bd --ready` as the fast path, then asks any open bead bd holds
-unready one direct question — are all of its own `blocks` edges closed? — and
-dispatches on a yes. The status gate still holds (a non-`open` bead is a
-deliberate hold and is never dispatched), and an assignee still HELDs the
-bead. The one question reconcile answers itself is the arm's own: whether the
-thing the arm waits on has landed. `bd blocked` and `bd ready` cannot answer
-it under this bead's id, because the cascade attributes the block to the
-ancestor.
+The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
+defines it: an open `blocks` blocker on the bead or on one of its
+parent-child ancestors. A park and a prerequisite hold alike, so an armed
+member of a parked epic, or of an epic that waits on a task, is held at any
+depth under it, and so is a bead whose own blocker is still open. A demand
+gate on an ancestor does not count: it is the operator's pending decision
+(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
+on the bead itself does count. Where `bd` decides the same question, the
+definition follows it: a closed or pinned blocker holds nothing, and a closed
+or pinned ancestor ends the walk.
+
+A read that fails fails the pass, so an unread hold never passes for none. A
+read that answers without an id it was asked for says this store holds no
+such bead: a bead in another store, or one deleted. bd's cascade passes a
+hold down only from an ancestor row the store holds, so an ancestor with no
+row, or a blocker with no row on an ancestor, holds nothing, as it holds
+nothing in `bd list --ready`. A blocker with no row on the bead itself holds
+it, marked unread, because it is the bead's own sequencing and the walk
+cannot tell whether it is open. The walk runs only where bd keeps the bead
+out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
+so a bead bd has no other reason to hold is ready and the pass slings it, as
+`arm` warns when it records the arm. An ancestor past the walk's depth cap
+(`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
+unread.
+
+A hold holds work that has not started. A bead whose work has started is in
+flight: it carries a `branch`, a `merge_result` or a `rejection_reason`. Only
+a blocker of its own holds a bead in flight, and the walk reads none of its
+ancestors, so a park on its epic leaves it running. An armed re-dispatch of
+work already begun therefore fires under a parked epic once its own blockers
+close, while the epic's members that have not started stay held, including
+the ones under a parent in flight.
+
+`bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
+parent-child edges, so an armed child of an epic that waits only on a demand
+gate never enters `--ready`, and neither does a bead in flight under a parked
+epic. The pass therefore asks hold-lib about every open armed bead bd keeps
+unready, and slings the ones nothing holds. The
+status gate still holds (a non-`open` bead is never dispatched), and an
+assignee still keeps the pass off the bead. The pass reads each generation
+of ancestors in one listing and their blockers in one more, so its cost does
+not grow with the number of armed beads under a held epic.
+
+A held arm keeps its record. Releasing the hold, by closing a park's gate or
+by the prerequisite landing, needs no re-arm: the first pass after it
+dispatches the bead. `list` shows a held arm as `HELD by <blocker>
+"<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, so a
+parked arm says why it is parked and what releases it. A blocker of the
+bead's own that the store does not return shows as `(unreadable)`, and so
+does an ancestor past the depth cap. The pass log names,
+on every pass, each hold that sits on an ancestor once, followed by the arms
+it keeps. An arm its own blocker holds is counted in the summary without a
+line, because the output of a failing pass reaches its `order.failed` event
+only as its last 2 KB, and a line per arm would push the pass's warnings out.
 
 The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
 **first**, slings **second**, promotes the marker to `slung@<ts>` on
@@ -181,15 +222,90 @@ Three checks keep the halves together. The positive control closing
 is a rig-scoped cooldown, does not opt out of the single-flight gate, and
 still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
 (I10) then asserts the registration is live on every importing rig and
-has fired within `max(3×interval, 15m)`. Ship the arm without the cadence
+has fired within its cadence window: `max(3×interval, floor)`, where the floor
+is one trip of the order dispatch rotation (`assets/scripts/order-cadence.sh`).
+Ship the arm without the cadence
 and `arm` still succeeds, still writes a well-formed record, and nothing
 ever performs it — the same invisible hold, one layer down.
 `doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
 cadence can be live and the pass still leave a dispatch unmade, so it flags an
-arm whose own `blocks` edges have all closed but that has stayed open and
-armed past the reconcile window, or one armed at a non-open status the pass can
-never dispatch — a dispatch silently not firing, surfaced before a human has to
-notice it days later.
+arm nothing holds that has stayed open and armed past the reconcile window, or
+one armed at a non-open status the pass can never dispatch — a dispatch
+silently not firing, surfaced before a human has to notice it days later. It
+reads holds through the same `hold-lib.sh`, so an arm a park holds is not
+reported.
+
+## One pass at a time, inside the timeout
+
+Two passes over one store would sling the same ready bead twice, which
+mints two input convoys for one work bead and bumps its attempt count
+twice. The controller's open-tracking gate keeps a second run from
+starting only while the first run's tracking bead stays open, and a sweep
+can close that bead under a pass that is still running. The core
+`order-tracking-sweep` order closes any tracking bead older than its
+`--stale-after` (10m). On a gc build that does not extend the window to the
+order's timeout, the controller watchdog closes it 2m after dispatch. So
+the pass carries its own lock:
+
+- Before it reads the store, `reconcile` takes a non-blocking exclusive
+  `flock` on `<GC_PACK_STATE_DIR>/deferred-dispatch/<rig>/pass.lock` and
+  records its pid and start time in `pass.holder` beside it. `<rig>` is
+  `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
+  plus a checksum of the whole path, so two rigs never share a lock. The
+  lock depends on no bead surviving.
+- Only the pass process holds the lock's descriptor. Every `gc` and
+  `escalate.sh` call the pass makes runs with it closed. A process that a
+  `gc` call starts can outlive the pass: a store read can bring up a Dolt
+  server, and `gc` hands the descriptors it was given to what it starts. A
+  process that kept the descriptor would hold the lock against every later
+  pass. The kernel releases the lock when the pass exits, however it exits,
+  `SIGKILL` included. The order's timeout kills the pass's whole process
+  group, its `gc sling` with it, and the next pass re-attempts the
+  unconfirmed sling through the `slinging@` recovery.
+- A pass that finds the lock held prints one line and exits 0 without
+  listing or slinging. Under the order it also declares the run `skipped`
+  in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
+  exec-order outcome contract, `internal/orders/exec_outcome.go`), which the
+  controller records as an `order.skipped` event. The controller keeps an
+  exit-0 run's output nowhere else.
+- A holder older than `DEFERRED_DISPATCH_LOCK_STALL_SECS` (900s) is not a
+  slow pass, because the order's timeout would have killed it. That pass
+  exits 1, so `order.failed` reports the wedge.
+- A pass that cannot take the lock at all exits 1 before it reads the
+  store. That covers `flock` missing from `PATH` and a lock file the pass
+  cannot create or open. Nothing else carries single-flight, so a pass that
+  ran anyway would be the second slinger the lock exists to prevent.
+
+The order's `timeout` kills a pass wherever it stands. A sling killed
+mid-flight has already minted its input convoy, leaves it with no
+workflow, and spends one of the bead's attempts. So a pass measures a
+budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
+0 = unpaced), and starts a sling only while at least
+`DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
+point it starts no sling and files no escalation, since `escalate.sh` is
+store work the timeout can cut short too. Each remaining ready bead keeps
+its arm with no marker on it, this pass counts no attempt against it, and
+the next pass slings it. A capped bead stays capped and armed, and the next
+pass files its escalation. The pass names the beads it left, counts the
+ready ones as `left for the next pass` in its summary, and declares the run
+`partial`, naming each bead and what it left there. The controller reads a
+declaration only after a run that exits 0, so a pass that also had a
+failure declares nothing. It exits 1, and its output, which the controller
+keeps for a failed run, names what it left. The retires and reports for the
+rest of the armed set still run. Each retire is one write, and a retire the
+timeout cuts short is made again by the next pass.
+
+The budget sits at least one allowance below the timeout, so the last
+sling a pass starts can run for twice its allowance before the timeout
+lands. The stall bound sits above the timeout, so a pass that is still
+running never reads as a wedged one. `deferred-dispatch.test.sh` reads
+these numbers from the files that set them and asserts both pairs. A city
+override that lowers the order's `timeout` has to lower the budget in its
+`env` as well.
+
+`--dry-run` writes nothing and slings nothing, so it takes no lock and
+spends no budget. It lists every bead a pass would sling, whether or not a
+pass is in flight.
 
 ## What this does not do
 
