@@ -9,15 +9,14 @@
 # finding, or a validation pass is out on the anchor — anchor-wide, so the fix
 # for a sibling lane's must-fix holds this lane too; a must-fix finding no fix
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
-# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane
-# still carrying a legacy exception@<oid>
-# park is a pre-migration hold (wedged, no dispatch); the live-head read, which
+# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
+# exception@<oid> marker is read as nothing, so the lane derives from the graph;
+# the live-head read, which
 # decides only the dispatch pin and the machine axis (a deleted ref, a body
 # without .sha, and a failed read are all unanswerable); the stray-marker sweep
-# (undeclared and outside the lane vocabulary is cleared, the retired green@
-# grammar included; a declared or well-formed one is not, and neither is an
-# undeclared legacy exception@ — left for migrate-lane-states.sh; an unpersisted
-# clear is reported); a multi-check check_set split per check rather than joined
+# (undeclared and outside the lane vocabulary is cleared, the retired green@ and
+# exception@ grammar included; a declared or well-formed one is not; an
+# unpersisted clear is reported); a multi-check check_set split per check rather than joined
 # into one name; in-flight dedup (routed, poured, claimed) + stranded repair
 # (root probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died before
@@ -94,10 +93,9 @@ anchor() { # id mr checkset marker branch extra-json
     "${6:-}"
 }
 
-# sha1sum is exactly 40 lowercase hex, so a labelled fixture oid satisfies the
-# marker grammar. A shorter string is a MALFORMED marker — a different arm.
-# live_head_for holds the head it reads to that same grammar, so fixture HEADS
-# go through here too; a mnemonic like "sha-b4" now reads as no head at all.
+# sha1sum is exactly 40 lowercase hex, the shape live_head_for holds the head it
+# reads to, so fixture HEADS go through here; a mnemonic like "sha-b4" reads as
+# no head at all.
 oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
 # The machine axis (lifecycle/lifecycle.toml [machine_axis]) as the anchor
 # carries it, and with the instant stripped.
@@ -585,27 +583,22 @@ out=$(run)
 eq "$(meta N2 check.refinery)" "fixing" "a narrowed check_set keeps its well-formed history"
 has "$out" "0 stray markers cleared" "…and nothing was swept"
 
-echo "# …an undeclared legacy exception@ is EXEMPT from the sweep — migrate-lane-states.sh's to retire"
-# Between this PR merging and the migration running, an anchor can still carry
-# check.<g>=exception@<oid> with merge_hold unset. Sweeping it here the moment
-# check_set narrows would leave the migration nothing to find, so it survives
-# like an operator's park, not like the rest of the retired grammar.
+echo "# …an undeclared exception@ is swept like the rest of the retired grammar"
 store "[$(anchor N3 pull_request correctness green polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"'), $(backed rev-n3 N3)]"
 oid n3 > "$GH_DIR/head_polecat_n3"
 out=$(run)
-eq "$(meta N3 check.refinery)" "exception@$SHORT" "the legacy park survives the sweep"
-has "$out" "0 stray markers cleared" "…and nothing is counted as swept"
+eq "$(meta N3 check.refinery)" "<absent>" "an exception@ outside check_set is cleared"
+has "$out" "1 stray markers cleared" "…and counted"
 
-echo "# …a DECLARED lane still carrying that legacy exception@ park is a pre-migration hold"
-store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b ',"gc.routed_to":"human","blocked_reason":"round cap"')]"
+echo "# …a DECLARED lane's exception@ marker is not read: the lane derives from the graph"
+store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b)]"
 oid n3b > "$GH_DIR/head_polecat_n3b"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the pre-migration park pass exits 0"
-has "$out" "0 reviews dispatched" "a legacy exception@ park on a declared check buys no review"
-has "$out" "awaits migrate-lane-states.sh" "…and says why"
-has "$out" "1 operator-held" "…and is counted as held"
-eq "$(pinned N3b)" "wedged-exception@$(oid n3b)" "…and the machine axis reads the cap's wedge"
+eq "$rc" 0 "the pass exits 0"
+has "$out" "1 reviews dispatched" "an unbacked lane is owed its review whatever its marker says"
+has "$out" "0 operator-held" "…and nothing holds it"
+eq "$(pinned N3b)" "progressing@$(oid n3b)" "…and the machine axis reads progressing"
 
 echo "# …the none opt-out does not exempt an anchor from the sweep"
 store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
@@ -1232,7 +1225,7 @@ has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
 has "$esc" "check 'correctness' on W1 is held" "…naming the anchor and check that are stuck"
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
 has "$esc" "root-w1" "…and the spent workflow"
-has "$esc" "check.correctness is absent" "…and the marker state, not the dispatch arm's rationale"
+has "$esc" "correctness, which does not derive green until a review records a verdict" "…and the lane it holds, not the dispatch arm's rationale"
 has "$out" "0 reviews dispatched" "escalating still dispatches nothing"
 
 echo "# a pour still running its chain is never escalated"

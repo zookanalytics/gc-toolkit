@@ -136,8 +136,9 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
 WEDGE_KEY="review-wedge"
 
-# Origin pin for the live-head read; optional — an unresolvable origin or a
-# missing gh degrades to treating a present marker as satisfiable.
+# Origin pin for the live-head read; optional. An unresolvable origin or a
+# missing gh leaves the head unread: a review is dispatched without a
+# reviewed_oid pin, and the per-head bar and the machine verdict are skipped.
 ORIGIN_HOST=""; ORIGIN_REPO=""
 u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
 case "$u" in
@@ -156,8 +157,8 @@ live_head_for() { # <branch> -> sha, or nothing when unanswerable
   # head from a failure. Empty routes the callers to their "no head to test"
   # arms, which is the safe direction: an unread head cannot prove a branch
   # moved, and the next pass sees a merged anchor closed and out of scope.
-  # The head is only ever compared against a marker oid, so it is held to that
-  # same grammar.
+  # The head becomes a review's reviewed_oid pin and the oid of the dated
+  # machine verdict, so it is held to the full 40-hex shape both carry.
   [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ] && [ -n "${1:-}" ] || return 0
   local out
   out=$(gh api --hostname "$ORIGIN_HOST" \
@@ -475,7 +476,7 @@ CONVOYS
 # single read can catch a recovery mid-write and escalate a review that repairs
 # itself moments later. An unreadable root or step enumeration is HELD without
 # claiming a live pour — the merge stays held and the next pass re-probes.
-# Reads the current anchor's loop context ($id $g $title $marker $branch $target
+# Reads the current anchor's loop context ($id $g $title $branch $target
 # $REVIEW_POOL $ESCALATOR $WEDGE_KEY $PROG) and bumps $wedged on a filed visit.
 judge_pour_liveness() { # <review-bead-id>
   local rid="$1" spent_root="" spent_rc=0 rev_row seen rpool
@@ -498,7 +499,7 @@ judge_pour_liveness() { # <review-bead-id>
 "Review $rid is wedged: its poured workflow finished without a verdict, so check '$g' on $id is held with nothing driving it.
 
 Anchor:   $id — $title
-Check:    check.$g is ${marker:-absent}
+Check:    $g, which does not derive green until a review records a verdict
 Branch:   $branch -> $target
 Review:   $rid (open; no route, no assignee)
 Workflow: $spent_root — every step closed but the finalizer
@@ -533,7 +534,7 @@ recorded_verdict() { # <have> <want "value@oid">
   case "$rest" in ''|*@*) return 1 ;; *) return 0 ;; esac
 }
 
-# The oid half of the marker grammar <green|fixable|exception>@<40-hex>.
+# A full 40-hex commit oid, the shape of the live head this arm reads.
 is_oid() { # <string>
   local v="${1:-}"
   case "$v" in *[!0-9a-f]*|"") return 1 ;; esac
@@ -701,17 +702,12 @@ while IFS= read -r tagged; do
   # it. Clear it when it also fails the marker grammar: a word no lane state
   # names is not a state, and check-gate-integrity errors on it forever.
   # A well-formed marker survives — a narrowed check_set keeps its history.
-  # A legacy exception@<oid> park is exempt from the sweep: until
-  # migrate-lane-states.sh runs it is still an operator's park to retire, not
-  # damage to clear, and clearing it silently would leave the migration
-  # nothing to find.
   declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
   stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
     (.metadata // {}) | to_entries[]
     | select(.key | test("^check\\.[^.]+$"))
     | select((.value | type) == "string")
     | select((.value | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not)
-    | select((.value | test("^exception@")) | not)
     | (.key | sub("^check\\."; "")) as $g
     | select(($d | contains("," + $g + ",")) | not)
     | .key' 2>/dev/null)
@@ -871,23 +867,6 @@ STRAY
   fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    # The marker is read for two legacy purposes only — never to classify the
-    # lane. First, a legacy exception@ park: signoff.sh refuses to stamp green
-    # over it and migrate-lane-states.sh rewrites it to merge_hold=true, so until
-    # that migration runs a review poured against the parked anchor is wasted
-    # reach — it reads as wedged and held. Second, the wedge escalation's
-    # diagnostic line (judge_pour_liveness reads $marker). Both retire with the
-    # marker grammar itself, once the legacy-surface endgame lands; the lane
-    # STATE is DERIVED below.
-    marker=$(meta_of "$row" "check.$g")
-    case "$marker" in
-      exception@*)
-        mach_progress=1
-        mach_wedge=1
-        echo "$PROG: $id check '$g' carries a legacy park (check.$g=$marker); awaits migrate-lane-states.sh — no dispatch"
-        held=$((held + 1)); continue ;;
-    esac
-
     # Derive the lane's state from the finding and review-outcome graph, never a
     # marker: lane-state.sh is the one helper merge.sh and pr-open.sh derive green
     # through, so the readers agree. Green is settled — a non-superseded approve

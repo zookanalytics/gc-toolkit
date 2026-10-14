@@ -121,7 +121,7 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 		{
 			name: "a marker that is not a bare green does not settle its lane",
 			extra: map[string]string{
-				"check.correctness": "exception@abc123",
+				"check.correctness": "green@abc123",
 				"check.triage":      checkGreen,
 			},
 			want: "correctness check stalled — no review has run",

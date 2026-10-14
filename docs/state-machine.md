@@ -387,11 +387,6 @@ verdict recorded, was retired unjudged by `review-sweep.sh`, or was closed
 `superseded` by the ancestry refusal above, and either verdict against it is
 refused on the same terms: nothing written, no round spent.
 
-A legacy `exception@<oid>` marker — the pre-migration cap park — is not lane
-vocabulary an approve verdict may read or overwrite: `signoff.sh` refuses to
-stamp `green` over one, naming `migrate-lane-states.sh` as the remedy, rather
-than silently releasing a park a human is relying on.
-
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
 an unnormalized anchor holds); every check named in `check_set` reads `green`; a
@@ -804,11 +799,7 @@ review's result set.
   gate-ensure holds dispatch rather than pouring a second review while an open
   rework child is already in flight for the lane — a `blocks`-dep bead on the
   anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
-  review or the ruling the rework answers) — and reads a
-  legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
-  `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
-  marker sweep leaves that shape alone rather than clearing it, for the same
-  reason.
+  review or the ruling the rework answers).
 
 ### Bringing a branch current
 
