@@ -2222,7 +2222,7 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, tc.kids); got != tc.want {
+		if got := prPhase(tc.a, Facts{}, tc.kids); got != tc.want {
 			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -2238,6 +2238,45 @@ func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
 		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	}
+}
+
+// An open visit on a merge anchor is a hold: the merge pass's finalize gate holds
+// the PR until the visit closes. So an approved, settled PR, which reads working
+// with the merge pass next, reads needs-attention on both axes while a visit
+// names it, and its needs line stops naming the merge pass. The visit fact is the
+// one the held marker reads, so a visit a sitting is holding, which no wrapper
+// row folds onto the anchor, holds it too. The unheld twin proves the visit is
+// what moves the row.
+func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
+	md := map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMergeState: "DIRTY@" + headLive,
+		mdPRMachine:    dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:     "1162",
+	}
+	held := mergeAnchor("tk-held", md)
+	free := mergeAnchor("tk-free", md)
+
+	b := BuildBoard([]Anchor{held, free}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}})
+
+	fr := mustTile(t, b, "tk-free")
+	if fr.PRPhase != PhaseWorking || fr.Phase != PhaseWorking || fr.Needs != "green — waiting on the merge pass" {
+		t.Fatalf("test premise: the unheld twin is working with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
+	}
+
+	h := mustTile(t, b, "tk-held")
+	if !h.Held {
+		t.Fatalf("test premise: the visit fact holds the row; held=%v", h.Held)
+	}
+	if h.PRPhase != PhaseNeedsAttention || h.Phase != PhaseNeedsAttention {
+		t.Errorf("a PR an open visit holds needs attention on both axes: pr_phase=%q phase=%q", h.PRPhase, h.Phase)
+	}
+	if h.Frontier != "needs-attention · PR #1162" {
+		t.Errorf("the frontier leads with needs-attention, not working: got %q", h.Frontier)
+	}
+	if h.Needs != "green — held by an open visit, waiting on your answer" {
+		t.Errorf("the needs line names the visit hold, not the merge pass: got %q", h.Needs)
 	}
 }
 

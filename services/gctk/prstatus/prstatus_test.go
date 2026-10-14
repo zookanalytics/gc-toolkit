@@ -24,6 +24,11 @@ func TestDerive(t *testing.T) {
 		{"approved + BLOCKED + live work is working", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", InFlightCount: 1}, Working},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (cap park + live work)", Facts{MergeHold: "signoff_cap", SignoffCap: "codex", InFlightCount: 2}, NeedsAttention},
+		{"open visit on the anchor", Facts{OpenVisit: true}, NeedsAttention},
+		{"open visit on an approved PR that conflicts (DIRTY)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, NeedsAttention},
+		{"open visit on an approved, merging PR (CLEAN)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, NeedsAttention},
+		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
+		{"approved and conflicting (DIRTY), no visit", Facts{PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, Working},
 
 		// merge_hold=signoff_cap WITHOUT a cap value is not the cap park; it is a
 		// plain truthy hold, so isSet still catches it as needs-attention.

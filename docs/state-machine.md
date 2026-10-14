@@ -538,7 +538,7 @@ is extensible: one value is set at a time, and setting one removes any other
 |---|---|---|
 | `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
 | `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
+| `status: needs-attention` | a human weighs in | a hold stands, whatever rework is in flight — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, a rebase hold, or an open visit on the anchor, which the merge pass's finalize gate holds the PR on — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 
@@ -547,13 +547,13 @@ Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 block or to resolve what a hold stands for.
 
 The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, and its rework children — not GitHub's review
-posture directly and not a lane marker. The `working`->`needs-review` flip rests on
-the rework child, which is scoped to the reviewed commit and closes when the fix
-lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
-rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
-commit ([Green survives new commits](#checks), the bug tk-4zsj1p) cannot read the
-label settled.
+state on the anchor, its holds, any open visit on it, and its rework children —
+not GitHub's review posture directly and not a lane marker. The
+`working`->`needs-review` flip rests on the rework child, which is scoped to the
+reviewed commit and closes when the fix lands, so a sticky `CHANGES_REQUESTED`
+never traps the label in `working` after a rework hands back, and a
+`check.<g>=green` that outlives a rewritten reviewed commit ([Green survives new
+commits](#checks), the bug tk-4zsj1p) cannot read the label settled.
 
 The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR

@@ -936,7 +936,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, held)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -951,7 +951,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, held)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -1479,9 +1479,11 @@ func humanSince(t, now time.Time) string {
 // on: a wedge names its shape and its release, a question names itself, an
 // unmet approval names the one thing that would land the row — a first review,
 // or the re-review a standing changes_requested is waiting on — and a row
-// nothing is owed on says who has it. `unknown` says the cadence has not
-// recorded a position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
+// nothing is owed on says who has it. A settled row an open visit holds says so
+// rather than naming the merge pass, which holds the PR until the visit closes
+// (finalize-gate.sh). `unknown` says the cadence has not recorded a position,
+// which is a fact about the city rather than an all-clear.
+func prNeeds(machine, approval, posture, reason string, ask *Blocker, held bool) string {
 	switch {
 	case machine == MachineWedgedException:
 		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
@@ -1504,6 +1506,8 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 		return "green, waiting on your review"
 	case machine == MachineProgressing:
 		return "in the merge cadence"
+	case machine == MachineSettled && held:
+		return "green — held by an open visit, waiting on your answer"
 	case machine == MachineSettled:
 		return "green — waiting on the merge pass"
 	default:
@@ -2114,10 +2118,10 @@ const mergeResultMerged = "merged"
 // shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
 // round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
 // liveness, empty only on a closed row). Both read the holds and posture off the
-// anchor and count the open rework children the board already gathers (a child
-// names its anchor in [mdAnchorBead]); a non-merge bead's Phase reads its own
-// live-workflow signal from facts instead. Counting is deduped by child id,
-// because one gather can list a bead twice.
+// anchor and its open visit off facts, and count the open rework children the
+// board already gathers (a child names its anchor in [mdAnchorBead]); a
+// non-merge bead's Phase reads its own live-workflow signal from facts instead.
+// Counting is deduped by child id, because one gather can list a bead twice.
 //
 // A bead WITH children on the board then takes its children's rolled-up state in
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
@@ -2160,7 +2164,7 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 			continue
 		}
 		kids := reworkKids[tiles[i].ID]
-		prP := prPhase(a, kids)
+		prP := prPhase(a, f, kids)
 		phase := beadPhase(a, f, kids)
 		// prstatus.Derive names the phase from posture, merge-state, holds and an
 		// in-flight count. A blocked machine verdict is a hold it cannot see from
@@ -2328,11 +2332,11 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
 // [classifyPhases] calls it only on a live row; a resolved anchor's PR state is
 // [terminalPRPhase]'s, off the close rather than the frozen pre-merge facts.
-func prPhase(a Anchor, openReworkKids int) string {
+func prPhase(a Anchor, f Facts, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
+	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 
 // terminalPRPhase names a resolved PR's final state for the PR round-trip axis on
@@ -2365,10 +2369,12 @@ func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 // phaseFacts gathers the prstatus.Facts a row projects. The holds and the dated
 // posture/merge-state are read straight off the anchor — prstatus splits the '@'
 // and applies the hold truthiness itself, so the stored values pass through as
-// they are. The in-flight count is the one input that differs by row shape: a
-// merge anchor counts its open review/rework children (each names it in
-// [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
-// live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
+// they are. An open visit is the visit fact the row's held marker reads
+// ([Facts.Visits]), so the phase and the marker agree. The in-flight count is
+// the one input that differs by row shape: a merge anchor counts its open
+// review/rework children (each names it in [mdAnchorBead]), the set prPhase has
+// always fed; any other bead reads the live-workflow signal standing over its
+// own bead ([Facts.anchorInFlight]).
 func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	inFlight := openReworkKids
 	if !isMergeAnchor(a) {
@@ -2378,6 +2384,7 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 		MergeHold:     a.Metadata[mdMergeHold],
 		SignoffCap:    a.Metadata[mdSignoffCap],
 		RebaseHold:    a.Metadata[mdRebaseHold],
+		OpenVisit:     f.Visits[a.ID],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
 		InFlightCount: inFlight,

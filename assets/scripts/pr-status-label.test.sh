@@ -128,6 +128,39 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","sig
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (cap park + open child)"
 
+# needs-attention — an open visit on the anchor is a hold: the merge pass's finalize
+# gate holds the PR until a person answers, so an approved PR that would otherwise
+# read working (here conflicting, DIRTY) waits on the operator.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open visit on an approved PR => needs-attention, not working"
+
+# needs-attention — a visit a sitting holds (in_progress) holds the PR too.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit in a sitting (in_progress) => needs-attention"
+
+# precedence — an open visit outranks an open rework child.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (open visit + open child)"
+
+# working — a CLOSED visit no longer holds the PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"closed","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a closed visit releases the PR back to working"
+
+# working — the visit is anchor-scoped: a visit on another bead never holds this PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a visit on another bead does not hold this PR"
+
+# working — only a visit holds: another bead in the anchor's continuation group does not.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a non-visit bead in the anchor's continuation group does not hold the PR"
+
 store '[]'
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
 eq "$?" "2" "an unresolvable anchor exits 2 — derive never guesses a status"

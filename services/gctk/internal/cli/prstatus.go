@@ -16,8 +16,9 @@ import (
 // flipping it blind — because pr-status-label.sh calls this in place of its own
 // shell and pr-status-label.test.sh is the acceptance bar. The anchor read goes
 // through gcbd.Show (daemon-first against the supervisor API, falling back to
-// `gc bd`); the in-flight set lists through `gc bd`. The cli tests pin GC_NO_API,
-// so both answer from the same `gc bd` stub the shell acceptance drives.
+// `gc bd`); the in-flight set and the open visits list through `gc bd`. The cli
+// tests pin GC_NO_API, so every read answers from the same `gc bd` stub the
+// shell acceptance drives.
 //
 // The value is decided by prstatus.Derive, the package exported for the helm
 // board to derive the same per-bead state: one code path, so a bead's PR label
@@ -47,10 +48,10 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// prStatusDerive gathers the anchor's refinery-computed facts and prints the
-// state prstatus.Derive returns. It reads only what derive_value read: the
-// holds and the dated posture/merge-state off the anchor, and the size of the
-// anchor's in-flight set.
+// prStatusDerive gathers the facts the city records about the anchor and prints
+// the state prstatus.Derive returns: the holds and the dated posture/merge-state
+// off the anchor, the size of the anchor's in-flight set, and whether an open
+// visit names the anchor.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -102,10 +103,28 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// The open visits on the anchor: a visit names its subject in
+	// gc.continuation_group, and formula steps carry that key too, so the read
+	// selects task_kind=visit beside it. Open and in_progress are the statuses
+	// the finalize gate holds the merge on: a visit waiting for a person, and one
+	// a sitting is holding.
+	visits, ok := client.List(
+		"--metadata-field", "gc.continuation_group="+anchor,
+		"--metadata-field", "task_kind=visit",
+		"--status", "open,in_progress",
+		"--limit", "0",
+		"--json",
+	)
+	if !ok {
+		fmt.Fprintf(stderr, "%s: could not read the open visits on %s; cannot derive a status\n", prStatusProg, anchor)
+		return 2
+	}
+
 	state := prstatus.Derive(prstatus.Facts{
 		MergeHold:     bead.Meta("merge_hold"),
 		SignoffCap:    bead.Meta("signoff_cap"),
 		RebaseHold:    bead.Meta("rebase_hold"),
+		OpenVisit:     len(visits) > 0,
 		PRPosture:     bead.Meta("pr_posture"),
 		PRMergeState:  bead.Meta("pr_merge_state"),
 		InFlightCount: len(rows),
