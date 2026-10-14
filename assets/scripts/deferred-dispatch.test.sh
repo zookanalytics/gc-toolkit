@@ -822,7 +822,7 @@ eq "$(slings)" "1" "an arm in flight is slung though its epic is parked"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
 has "$out" "nothing holds b-1: it is in flight (rejection_reason set), so a hold on an ancestor leaves it running" "the pass log says why it slung a bead under a parked epic"
 hasnt "$out" "HELD by" "the park is not named as holding it"
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker)"
+eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker, plus the until consumer's one candidate scan)"
 unset STUB_BD_LOG
 
 echo "# reconcile holds an arm in flight whose own blocker is open"
@@ -1246,7 +1246,9 @@ echo "# until: without until-resolved.sh the consumer disposes nothing"
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
-mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"
+# hold-lib.sh goes beside the copy, because without it the script exits before
+# any verb, so until-resolved.sh is the one library missing.
+mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$TMP/lonely/"
 out="$("$TMP/lonely/deferred-dispatch.sh" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a pass that cannot read the guard fails"
 eq "$(rehomes)" "0" "and disposes nothing"
