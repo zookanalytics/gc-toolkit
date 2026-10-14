@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test for the two witness-patrol blocks that stamp an address:
-# warrant-file (the dog pool) and bug-dispatch (the polecat pool). It also holds
-# every step of the formula to the rule that no address is built without the
-# resolver; refinery-stuck-escalate.test.sh runs the queue read that resolves.
+# Hermetic test for the two witness-patrol blocks that file work: warrant-file,
+# which stamps the dog pool's address, and bug-file, which stamps none, because
+# a pack defect is new work and waits for the operator's placement. It also
+# holds every step of the formula to the rule that no address is built without
+# the resolver; refinery-stuck-escalate.test.sh runs the queue read that
+# resolves.
 #
-# The witness files to agents at two different scopes, and the qualifier one
-# needs is exactly the qualifier the other must not carry. Both blocks are run
-# here against the real resolve-route.sh over a roster where the rendered
+# The witness addresses agents at two different scopes, and the qualifier one
+# needs is exactly the qualifier the other must not carry. The warrant block is
+# run here against the real resolve-route.sh over a roster where the rendered
 # `{{binding_prefix}}<role>` form is WRONG, so a block that stamped what the
 # template rendered would file an address nothing claims and still exit clean.
 # Stubbed gc and git; no live city, Dolt or network.
@@ -36,21 +38,23 @@ extract() { awk -v n="$1" '
 render() { printf '%s\n' "$1" | sed 's|{{binding_prefix}}|gc-toolkit.|g'; }
 
 WARRANT="$(extract warrant-file)"
-BUG="$(extract bug-dispatch)"
+BUG="$(extract bug-file)"
 [ -n "$WARRANT" ] && ok "warrant-file block extracted" || bad "warrant-file block EMPTY — markers missing from $TOML"
-[ -n "$BUG" ] && ok "bug-dispatch block extracted" || bad "bug-dispatch block EMPTY — markers missing from $TOML"
+[ -n "$BUG" ] && ok "bug-file block extracted" || bad "bug-file block EMPTY — markers missing from $TOML"
 
-echo "# neither block writes an address of its own"
+echo "# the warrant writes no address of its own, and the bug writes none at all"
 # Inside a block, {{binding_prefix}} belongs in exactly two places: an argument
 # to the resolver, and a diagnostic naming what failed to resolve. Anywhere
 # else it is a rendered address on its way to a stamp.
 stray() { printf '%s\n' "$1" | grep -n '{{binding_prefix}}' \
   | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true; }
-for pair in "warrant-file:$WARRANT" "bug-dispatch:$BUG"; do
-  name="${pair%%:*}"; body="${pair#*:}"
-  has "$body" 'resolve-route.sh' "$name resolves its address"
-  eq "$(stray "$body")" "" "$name renders no address it does not resolve"
-done
+has "$WARRANT" 'resolve-route.sh' "warrant-file resolves its address"
+eq "$(stray "$WARRANT")" "" "warrant-file renders no address it does not resolve"
+# A pack defect is filed for placement, so the bug block names no pool at all:
+# routing it is the placement sitting's move.
+hasnt "$BUG" '{{binding_prefix}}' "bug-file renders no address"
+hasnt "$BUG" 'gc.routed_to' "bug-file stamps no route"
+hasnt "$BUG" 'resolve-route.sh' "bug-file asks the resolver for no pool"
 
 echo "# no step anywhere in the formula builds an address it does not resolve"
 # The same rule holds for every step, the stamps above and the refinery queue
@@ -110,7 +114,7 @@ run() {
 render "$WARRANT" > "$TMP/warrant.sh"
 render "$BUG" > "$TMP/bug.sh"
 bash -n "$TMP/warrant.sh" && ok "rendered warrant-file is valid bash" || bad "warrant-file failed bash -n"
-bash -n "$TMP/bug.sh" && ok "rendered bug-dispatch is valid bash" || bad "bug-dispatch failed bash -n"
+bash -n "$TMP/bug.sh" && ok "rendered bug-file is valid bash" || bad "bug-file failed bash -n"
 
 WARRANT_PRELUDE='OWNER=gc-toolkit/gc-toolkit.converse-2; REASON="No progress on tk-a for 6h"'
 BUG_PRELUDE='TITLE="submit-and-exit strands pushed work"; BODY="the branch-shape gate re-runs against a detached HEAD"'
@@ -155,42 +159,36 @@ hasnt "$LOG" 'bd create' "the dedup survives the resolver"
 has "$OUT" "tk-old" "and names the warrant already open"
 export STUB_OPEN='[]'
 
-echo "# bug-dispatch: the polecat pool is rig-scoped, so the rendered bare form is wrong"
+echo "# bug-file: a reported pack defect waits for the operator's placement"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$LOG" 'bd create' "a reported pack defect is filed as a bug"
 has "$LOG" '-t bug' "typed as one"
-has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' \
-  "and routed at the rig-qualified pool that is live"
-hasnt "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "never the bare form the template rendered"
+has "$LOG" '"placement":"pending"' "marked placement=pending, so the placement sitting's queue lists it"
+hasnt "$LOG" 'gc.routed_to' "and routed to no pool: new work reaches one only once it is placed"
+hasnt "$LOG" 'agent list' "so no roster is read for an address it never stamps"
 printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //;s/ --json.*$//' | jq -e . >/dev/null 2>&1 \
   && ok "the create metadata is parseable JSON" || bad "the metadata payload did not survive"
+has "$OUT" "waits for placement" "and the step says where it went"
 
-# The route is a field of the create, not a write that follows it: a bug that
-# exists before it is routed is an open bead offered to nobody, and a route
-# write that fails leaves it that way.
-hasnt "$LOG" 'bd update' "the route is not a second write that can fail behind a success message"
+# The marker is a field of the create, not a write that follows it: a bug that
+# exists before it is marked is an open, unrouted bead in no queue, and a write
+# that fails leaves it that way.
+hasnt "$LOG" 'bd update' "the marker is not a second write that can fail behind a success message"
 
-echo "# a city whose polecat pool is city-scoped resolves the other way"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.polecat"}]}'
-run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "the bare identity is stamped when it is the live one"
-
-echo "# no live polecat pool: file nothing"
+echo "# a city with no live polecat pool still files the bug"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"}]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-hasnt "$LOG" 'bd create' "an unroutable pool files no bug"
-has "$OUT" "escalate instead of filing" "and says to escalate"
+has "$LOG" '"placement":"pending"' "filing for placement needs no pool to exist"
 eq "$RC" 0 "and the step keeps running"
 
-echo "# a create that returns no id is reported, and what it may have filed is routed"
-export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
+echo "# a create that returns no id is reported, and what it may have filed is marked"
 export STUB_CREATE='{}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$OUT" "reported no id" "the failure is reported"
-has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' \
-  "and the one call that was made already carried the route"
+has "$OUT" "gc-helm.sh unplaced" "and names where to look before filing again"
+has "$LOG" '"placement":"pending"' "and the one call that was made already carried the marker"
 unset STUB_CREATE
 
 echo "# a create that fails outright files nothing and says so"
@@ -206,8 +204,7 @@ run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "the warrant goes out on the rendered address"
 has "$OUT" "UNVERIFIED" "marked unproven"
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' "and the bug goes out on the claimable rig-scoped pool"
-hasnt "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "not the bare form no live polecat here claims"
+has "$LOG" '"placement":"pending"' "and the bug is filed for placement, which reads no roster"
 unset STUB_AGENTS_FAIL
 
 echo

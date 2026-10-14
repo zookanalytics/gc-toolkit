@@ -211,12 +211,14 @@ does, pick the modality: a visual the repo already carries, a screenshot of one
 rendered state, or a narrated video of a flow. Deliver it to the PR inline and
 uncommitted with `demo-deliver.sh`, and judge what it shows, not what the diff
 claims. A fitting visual the city cannot produce here is a note in an approve,
-never a block. The one verdict call records the decision:
+never a block. A cheaper visual delivered in its place is a fallback. The one
+verdict call records the decision:
 
-    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video
+    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video [--visual-fallback-from screenshot|video]
 
-`none` records with `approve` only. Whether the change is the right thing to ship,
-and lets the operator decide, is `pm`'s.
+`none` records with `approve` only. A fallback names the modality that fits with
+`--visual-fallback-from`. Whether the change is the right thing to ship, and lets
+the operator decide, is `pm`'s.
 M
     ;;
   arch)
