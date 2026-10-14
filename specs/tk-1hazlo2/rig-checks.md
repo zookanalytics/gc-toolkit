@@ -115,7 +115,12 @@ pre-existing fail beside the refinery caller that needs it.
   run. A result the record store does not take, pass or fail: `rig`'s answer
   is its record, so a result with no record behind it neither sets the exit
   nor is published. A suite that exits 126, 127 or 129-192 on its own is
-  misread as a machine failure. That costs a re-run, never a false record.
+  read as a machine failure, and so is a test that crashes the same way on
+  every run, such as one that segfaults (139) or aborts (134). Each call at
+  that commit runs the whole command again, up to the timeout, and records
+  nothing, so `--check` stays at 3 and the commit never gets a fail. That
+  costs a full run on every call, never a false record, and the cutover's
+  callers bound it.
 - **`--timeout`, default two hours.** The refinery stops its detached gate at
   two hours. Without a bound, a wedged suite under the lease heartbeat would
   hold its pool slot indefinitely. A timeout sends SIGTERM to the group, then
@@ -216,6 +221,17 @@ build's `--check` measured median 182 ms at load average 40-47, and median
   the worktree at hand, removing the named files is enough, because the
   record at HEAD still answers and nothing runs again. A call site does not
   run `git clean`, which would also delete an agent's uncommitted new files.
+- **A caller bounds its retries on exit 4.** Exit 4 repeats on every call
+  at one commit when the command crashes the same way each time, such as a
+  test that segfaults (139) or aborts (134), or when it moves HEAD or writes
+  tracked files, such as a formatter that writes whenever the commit's code
+  is unformatted. Each call runs the whole command again, up to the timeout,
+  and records nothing. So the refinery and self-review callers stop after a
+  bounded number of exit-4 calls at one commit and send the bead to its
+  author, not to ops, with the reason `rig`'s line gave: the signal, or what
+  the command changed. A command bash cannot parse, find or execute exits 4
+  on every call too, but that comes from the rig's configuration, not the
+  commit, and `rig`'s line names it the same way.
 - **review-test-evidence** reads `--check`'s one JSON line: `result`, and
   `scope`, where `none` certifies no tests and `affected` certifies the subset.
 - **The refinery** resolves its vars at run time and passes them, so its
