@@ -27,7 +27,9 @@
 #   • THE DISPOSITION CONTRACT — first-reaction-dispose.sh has five exits (route
 #     it, recommend an action for the operator to trigger, hold it, hand a
 #     confident no-op to a validating closer, or ask), stamps gc.reacted_by,
-#     closes R, and never closes the subject itself.
+#     closes R, and never closes the subject itself. Its stand-down, asked
+#     before any exit, closes R through the same close when the subject takes
+#     no reaction.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -629,23 +631,33 @@ absent "the retired subject-metadata record is gone"     "gc.first_reaction=" "$
 # recorded as routed or waiting and is neither.
 has "the prompt reads the exit code before it drains"   "exits non-zero"  "$(cat "$PROMPT_MD")"
 
-echo "── the worker drains a re-offered LANDED reaction before any exit ──"
+echo "── the worker stands a re-offered LANDED reaction down before any exit ──"
 # A reaction whose write-back landed carries gc.reacted_by=<R> on its subject.
 # When R is re-offered after that (a worker disposed, then died before R closed),
 # running an exit again is wrong on all five: it re-releases a subject a worker
-# may already hold. first-reaction-dispose.sh closes R without re-disposing on
-# that marker, and the prompt's check AHEAD of the exits lets the re-offered run
-# drain clean before it writes a second card. The same check stands down on a
-# subject a live owner owns (gc.reaction_owned=1). Assert the check is there,
-# keyed on both markers, and that its drain precedes the first exit call — so a
+# may already hold. The prompt asks first-reaction-dispose.sh --stand-down AHEAD
+# of the exits, so the re-offered run closes R and drains before it writes a
+# second card. The same stand-down answers a subject a live owner owns
+# (gc.reaction_owned=1). It closes R through the close every exit makes, so the
+# prompt closes nothing itself: a close of R written into the prompt is a second
+# copy of that close, free to drift from the work record it carries.
+# first-reaction-dispose.test.sh covers the stand-down's behavior. This asserts
+# the prompt runs it, the script reads both markers, R's one close carries its
+# work outcome, and the stand-down's drain precedes the first exit call, so a
 # re-offer never reaches an exit.
-has "the prompt checks the landed marker before reacting" 'gc.reacted_by"] // ""' "$(cat "$PROMPT_MD")"
-has "…and the live-owner marker"                          'gc.reaction_owned"] // ""' "$(cat "$PROMPT_MD")"
+PM_RAW="$(cat "$PROMPT_MD")"
+has "the prompt stands down through the disposition script" '"$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R>' "$PM_RAW"
+has "…which reads the landed marker"                          "gc.reacted_by"     "$D"
+has "…and the live-owner marker"                              "gc.reaction_owned" "$D"
+absent "the prompt closes no bead itself, so R has one close"  "--status=closed"   "$PM_RAW"
+has "…and that close records R's no-op work outcome" '--set-metadata "gc.work_outcome=no-op" --status=closed' "$D"
+STANDDOWN_LINE="$(grep -n -- '--stand-down --reaction-bead' "$PROMPT_MD" | head -1 | cut -d: -f1 || true)"
 GUARD_DRAIN_LINE="$(awk '/Before you react/{f=1} f && /gc runtime drain-ack/{print NR; exit}' "$PROMPT_MD")"
 EXIT1A_LINE="$(grep -n -- '--disposition actionable' "$PROMPT_MD" | head -1 | cut -d: -f1 || true)"
-{ [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
-  && ok "the re-offer check drains before the first exit call (no exit runs on a re-offer)" \
-  || bad "the re-offer check drains before the first exit call" "guard_drain < exit1a" "guard_drain=$GUARD_DRAIN_LINE exit1a=$EXIT1A_LINE"
+{ [ -n "$STANDDOWN_LINE" ] && [ -n "$GUARD_DRAIN_LINE" ] && [ -n "$EXIT1A_LINE" ] \
+  && [ "$STANDDOWN_LINE" -lt "$GUARD_DRAIN_LINE" ] && [ "$GUARD_DRAIN_LINE" -lt "$EXIT1A_LINE" ]; } \
+  && ok "the stand-down drains before the first exit call (no exit runs on a re-offer)" \
+  || bad "the stand-down drains before the first exit call" "standdown < guard_drain < exit1a" "standdown=$STANDDOWN_LINE guard_drain=$GUARD_DRAIN_LINE exit1a=$EXIT1A_LINE"
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"

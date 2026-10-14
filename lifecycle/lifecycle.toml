@@ -1088,9 +1088,9 @@ keys = [
 # gc.reacted_by — on the SUBJECT S, the reaction bead R whose write-back landed.
 #   Written by first-reaction-dispose.sh LAST, after the disposition act and any
 #   edge, so its presence proves the whole write-back landed. Read by that
-#   script's re-offer recovery and the reaction worker's
-#   (agents/proactive/prompt.template.md), to close a re-claimed R without
-#   re-disposing S, and shown by bead-context.sh. It
+#   script's re-offer recovery and by its --stand-down, which the reaction worker
+#   (agents/proactive/prompt.template.md) runs before it reacts, to close a
+#   re-claimed R without re-disposing S, and shown by bead-context.sh. It
 #   is not a guard progress is refused on — the write-backs are idempotent — and it
 #   is keyed to R's id, so a marker left by a closed R does not block a later
 #   re-reaction by a different R. Never cleared. A bead id.
@@ -1133,7 +1133,8 @@ keys = [
 #   that subject unmarked. tools/gc-proactive.sh drops a marked bead from its
 #   scan and refuses to file a reaction for one, and a reaction that reaches one
 #   anyway closes its reaction bead without acting and leaves the marker
-#   (agents/proactive/prompt.template.md). A frozen mol-first-reaction
+#   (first-reaction-dispose.sh --stand-down, which
+#   agents/proactive/prompt.template.md runs). A frozen mol-first-reaction
 #   molecule's advance-and-drain still consumes it: it writes
 #   gc.proactive_reaction=1, reads it back, and only then unsets this key.
 #   Absent means no live owner. Cleared only by that frozen consume.

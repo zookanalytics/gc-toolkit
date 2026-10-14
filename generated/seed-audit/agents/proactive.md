@@ -55,8 +55,9 @@ exit
 
 ### Before you react — a reaction happens once
 
-Two subjects take no reaction from you. Check both before you read anything else,
-and if either matches, close `R` and drain without writing a card or disposing:
+Two subjects take no reaction from you. Ask about both before you read anything
+else. If either matches, the stand-down closes `R`, and you drain without writing
+a card or disposing:
 
 - **The write-back already landed.** If `R` was re-offered after a crash, its
   disposition may already be on `S`: `S` carries `gc.reacted_by=<R>`.
@@ -64,16 +65,26 @@ and if either matches, close `R` and drain without writing a card or disposing:
   `gc-helm engage --new-subject` carries `gc.reaction_owned=1`. That engage
   created the subject, filed its one visit, and spawned the sitting, so the engage
   is the reaction. The scan and the sling refuse such a subject, so you meet one
-  only when a reaction was filed by hand. Leave the marker where it is.
+  only when a reaction was filed by hand. The stand-down leaves the marker where
+  it is.
+
+`first-reaction-dispose.sh --stand-down` reads both markers and closes `R` the
+way every exit does. It exits 0 when it closed `R`, and you drain. It exits 3
+when neither marker is on `S`, and only that status sends you on to react. Any
+other status, such as 2 for a usage error, means the stand-down did not answer,
+and the block stops there. Fix what its message names and re-run the block
+before you read anything else.
 
 ```bash
-META=$(gc bd show "$SUBJECT" --json | jq -c '.[0].metadata // {}')
-if [ "$(printf '%s' "$META" | jq -r '.["gc.reacted_by"] // ""')" = "<R>" ] \
-   || [ "$(printf '%s' "$META" | jq -r '.["gc.reaction_owned"] // "" | tostring')" = "1" ]; then
-    gc bd update <R> --set-metadata gc.outcome=reacted --status=closed
-    gc runtime drain-ack
-    exit
-fi
+STAND_DOWN_RC=0
+"$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R> || STAND_DOWN_RC=$?
+case "$STAND_DOWN_RC" in
+    0) gc runtime drain-ack
+       exit ;;
+    3) ;;
+    *) echo "the stand-down exited $STAND_DOWN_RC without an answer, so do not react: fix what its message names and re-run this block" >&2
+       exit "$STAND_DOWN_RC" ;;
+esac
 ```
 
 ## The First Reaction

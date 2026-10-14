@@ -394,12 +394,13 @@ gates read the marker: `scan_precision_filter` drops a marked bead (the primary,
 race-free gate, so a sweep never files a first reaction for it),
 `reaction_absent_guard` refuses to file one as a no-op, and a reaction that
 reaches a marked subject anyway closes its own reaction bead without acting
-(`agents/proactive/prompt.template.md`). The engage counts as the reaction, and
-the marker stays, so no later scan reacts. The invariant is preserved, not
-relaxed: the subject gets exactly one operator-filed visit. If a later gate
-refuses the live spawn — a bad model, a suspended rig — the subject's one visit
-is still filed and parked on the board, so the topic is never lost; the operator
-engages it once the blocker is cleared.
+(`first-reaction-dispose.sh --stand-down`, which
+`agents/proactive/prompt.template.md` runs before it reacts). The engage counts
+as the reaction, and the marker stays, so no later scan reacts. The invariant is
+preserved, not relaxed: the subject gets exactly one operator-filed visit. If a
+later gate refuses the live spawn — a bad model, a suspended rig — the subject's
+one visit is still filed and parked on the board, so the topic is never lost; the
+operator engages it once the blocker is cleared.
 
 ## How a parked conversation comes back (2026-08-22)
 

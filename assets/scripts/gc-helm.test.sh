@@ -1294,8 +1294,8 @@ grep -q 'takeaway set on' "$TMP/xout" \
 # residue reports on the next route, and a surviving gc.session_id lets orphan
 # recovery resolve a dead owner for a bead nobody holds. So each is read back, a
 # lone unset retried, and a persistent miss is a verb failure on any bead, the way
-# the route and completion proof are, where the pour stamp fails the verb only on a
-# bead held for placement. orphan-dispose.sh
+# the route is, where the pour stamp fails the verb only on a bead held for
+# placement. orphan-dispose.sh
 # verifies the same pair after its own release. Covered:
 #   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
 #   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
