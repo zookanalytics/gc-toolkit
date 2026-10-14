@@ -709,6 +709,22 @@ has "$probe" "dir-present" "the cache dir exists while an arm runs"
 has "$probe" "stale-absent" "a leftover dir from a killed pass is recreated clean (its stale entry is gone)"
 if [ ! -d "$CACHE_DIR" ]; then ok "the cache dir is removed after END"; else bad "the cache dir survived past END"; fi
 
+echo "# a pass run without GC_RIG_ROOT hands its arms the root it resolved"
+# The lifecycle writer the arms close landings through reads the rig checkout
+# from GC_RIG_ROOT. A pass the order runner did not start takes its cwd as the
+# root, and the arms must be handed that same root.
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+cat > "$SD/merge.sh" <<'ARM'
+#!/usr/bin/env bash
+printf 'merge.sh|%s\n' "${GC_RIG_ROOT:-<unset>}" >> "${ARM_LOG:?}"
+ARM
+chmod +x "$SD/merge.sh"
+: > "$ARM_LOG"
+CWD_ROOT=$(cd "$TMP" && pwd)
+out=$(cd "$TMP" && env -u GC_RIG_ROOT GC_RIG=myrig "$SD/refinery-reconcile.sh" 2>&1); rc=$?
+eq "$rc" 0 "a pass run without GC_RIG_ROOT exits 0"
+eq "$(grep '^merge.sh|' "$ARM_LOG")" "merge.sh|$CWD_ROOT" "merge.sh is handed GC_RIG_ROOT, the cwd the pass took as its root"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

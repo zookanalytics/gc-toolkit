@@ -52,6 +52,9 @@ if [ -z "$RIG" ]; then
   exit 2
 fi
 RIG_ROOT="${GC_RIG_ROOT:-$PWD}"
+# The lifecycle writer the arms close landings through reads the rig checkout
+# from GC_RIG_ROOT, so a pass run without it hands the arms this root.
+export GC_RIG_ROOT="$RIG_ROOT"
 # The head a dropped-tail finding names: the base its anchors would have landed
 # on, captured once. A checkout that is not a git tree reads "unknown".
 RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
