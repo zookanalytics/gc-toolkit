@@ -7,12 +7,18 @@
 #   unknown rating, an empty field, an unreadable bead, and a write that does not
 #   read back, recording nothing.
 # show: prints a bead's entries and question, and an anchor's record.
-# render: composes the comment and the dismissal note from the anchor's record
-#   (the headline counts, judgment entries first, each entry's collision,
-#   decision and check beside the guard's evidence for its own round, an item
-#   no entry covers beside its evidence alone, triage's ruling, or the guard's
-#   own told as the guard's, the generated renders); refuses an anchor with no
-#   record, and any other form.
+# render: composes from the anchor's record the round's account as one
+#   collapsed block (a summary line that tallies the entries and names the
+#   lanes that re-check, what the round needed, the ruling, each judgment entry
+#   in full beside the guard's evidence for its own round, each routine entry on
+#   one line with its whole decision, an item no entry covers beside its
+#   evidence alone, the generated renders), the same shape whether or not the
+#   ruling lifts the approval and free of the clause every lift used to carry;
+#   the ask a lifting ruling opens the verdict with, empty when the approval
+#   stands, its reason clipped so its closing sentence survives; and the
+#   dismissal note that says the same ask, or the guard's own ruling told as the
+#   guard's with the entries no triage comment carries. Refuses an anchor with
+#   no record, and any other form.
 # ask: records the question and files ONE visit on the anchor composed from the
 #   entries so far and the question; resolves the anchor through anchor_bead,
 #   then the branch, then the bead itself; refuses an empty question; a visit
@@ -97,50 +103,95 @@ REC=$(jq -nc '{head: "0123456789abcdef0123456789abcdef01234567", from: "f", targ
     {covered: true, kind: "beyond", path: "c.sh", commit: "c1", detail: "changed beyond what merging x produces"},
     {covered: false, kind: "generated", path: "generated/x.md", commit: "c1", detail: "a generated render"}],
   audit: [
-    {path: "docs/a.md", collided: "main added a FAQ; the branch added a usage section at the same spot", resolution: "kept both, the FAQ first", check: "the section order", rating: "routine"},
+    {path: "docs/a.md", collided: "main added a FAQ; the branch added a usage section at the same spot", resolution: "kept both, the FAQ first. Each section reads on its own, so the order only follows the table of contents.", check: "the section order", rating: "routine"},
     {path: "b.sh", collided: "main renamed run to start; the branch added a call to run", resolution: "pointed the new call at start", check: "the new call site in b.sh", rating: "judgment"},
     {path: "c.sh", collided: "the rename broke a caller the merge did not conflict on", resolution: "renamed the caller too", check: "c.sh callers", rating: "judgment"}],
-  triage: {review: "RV1", reopen: ["correctness"], add: ["arch"], dismiss: true, reason: "the rename changes what the new call does", at: "t"}}')
+  triage: {review: "RV1", reopen: ["correctness"], add: ["arch"], dismiss: true, reason: "the merge points the new call at start, so it now starts the service; decide whether it should. Look at the call site in b.sh", at: "t"}}')
+# The same round, ruled with the approval kept.
+KEPT=$(printf '%s' "$REC" | jq -c '.triage.dismiss = false | .triage.reason = "the rename reaches b.sh and c.sh, which correctness and arch can check"')
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
 
-echo "# render --as comment: the round's account, as triage's verdict posts it"
+echo "# render --as comment: the round's account, one collapsed block in triage's verdict"
 out=$("$SUT" render --anchor AN1 --as comment); rc=$?
 eq "$rc" "0" "it exits 0"
-has "$out" "**Bringing this branch current with main**" "a heading"
-has "$out" "needed 2 conflicted files resolved by hand, and 1 edit beyond what git merges on its own" "a headline that counts what the round needed"
-has "$out" "The worker rated 1 routine and 2 judgment (\`b.sh\` and \`c.sh\`)" "…and how the worker rated it, naming the judgment calls"
-has "$out" "**Triage:** arch and correctness run again on the merged code, and the approval given before the round no longer covers what would land, so the PR needs a fresh human review. Why: the rename changes what the new call does." "triage's ruling and its reason"
-has "$out" "- \`b.sh\`, judgment. Collided: main renamed run to start; the branch added a call to run. Decided: pointed the new call at start. Check: the new call site in b.sh. Git: conflicted where the merge base had lines" "each entry: collision, decision, check, and the guard's evidence"
+eq "$(printf '%s\n' "$out" | head -1)" "<details>" "it opens a collapsed block"
+eq "$(printf '%s\n' "$out" | tail -1)" "</details>" "…and closes it"
+has "$out" "<summary>Bring-current round: 2 judgment, 1 routine; arch and correctness re-check the merged code; approval lifted</summary>" "the summary tallies the entries, names the lanes that re-check, and says the approval was lifted"
+has "$out" "needed 2 conflicted files resolved by hand, and 1 edit beyond what git merges on its own." "…what the round needed"
+has "$out" "Triage: arch and correctness run again on the merged code, and the approval is lifted. Why: the merge points the new call at start" "…triage's ruling and its reason"
+hasnt "$out" "no longer covers what would land" "…without the clause every lift used to carry"
+hasnt "$out" "fresh human review" "…in any form"
+has "$out" "- \`b.sh\`, judgment. Collided: main renamed run to start; the branch added a call to run. Decided: pointed the new call at start. Check: the new call site in b.sh. Git: conflicted where the merge base had lines" "a judgment entry in full: collision, decision, check, and the guard's evidence"
+has "$out" "- \`docs/a.md\`, routine: kept both, the FAQ first. Each section reads on its own, so the order only follows the table of contents."$'\n' "a routine entry on one line: its whole decision"
+hasnt "$out" "Check: the section order" "…with no check or evidence"
 first=$(printf '%s\n' "$out" | grep -n '^- `' | head -1)
 has "$first" "judgment" "judgment entries come first"
 has "$out" "Generated files the merge re-rendered, which need no entry: \`generated/x.md\`." "the generated renders are named"
 
-echo "# render --as dismissal: one paragraph a dismissed approver reads"
+echo "# render --as comment: a ruling that keeps the approval writes the same account and never says it was removed"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$KEPT" | jq -Rc .)")]"
+kept=$("$SUT" render --anchor AN1 --as comment)
+has "$kept" "<summary>Bring-current round: 2 judgment, 1 routine; arch and correctness re-check the merged code</summary>" "the summary names no lift"
+has "$kept" "Triage: arch and correctness run again on the merged code. Why: the rename reaches b.sh and c.sh" "…nor does the ruling"
+hasnt "$kept" "approval" "…and no line mentions the approval"
+eq "$(printf '%s\n' "$kept" | grep -E '^- ' )" "$(printf '%s\n' "$out" | grep -E '^- ')" "the file-by-file account is the same, lifted or not"
+eq "$(printf '%s\n' "$kept" | grep -c '<details>')" "1" "…in the same one collapsed block"
+
+echo "# render --as ask: what a lift needs from the operator, and nothing when the approval stands"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as ask); rc=$?
+eq "$rc" "0" "it exits 0"
+eq "$out" "Needs you: the merge points the new call at start, so it now starts the service; decide whether it should. Look at the call site in b.sh. Your approval is lifted until you decide." "the ask names triage's decision and what happens to the approval"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$KEPT" | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as ask); rc=$?
+eq "$rc" "0" "a ruling that keeps the approval exits 0"
+eq "$out" "" "…and asks nothing"
+
+echo "# render --as dismissal: one paragraph a dismissed approver reads, saying the same ask"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
+ask=$("$SUT" render --anchor AN1 --as ask)
 out=$("$SUT" render --anchor AN1 --as dismissal)
-has "$out" "Bringing this branch current with main (pushed head 0123456789ab) took judgment this approval did not see." "it opens with what happened"
-has "$out" "b.sh: pointed the new call at start." "…names each decision"
-has "$out" "Triage: the rename changes what the new call does." "…carries triage's reason"
+eq "$out" "$ask The triage comment on this PR has the round in full." "it is the ask, then where the round is told in full"
 eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "…in one paragraph"
+hasnt "$out" "did not see" "…and never says the approval predates the round"
+
+echo "# render --as comment: a routine entry keeps a later decision, and an abbreviation does not end it"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit[0].resolution = "kept both sections. Also dropped the --legacy flag."
+  | .audit += [{path: "lib/retry.sh", collided: "c", resolution: "Kept the base retry, e.g. the 3x backoff, and dropped the branch.", check: "k", rating: "routine"}]' | jq -Rc .)")]"
+out=$("$SUT" render --anchor AN1 --as comment)
+has "$out" "- \`docs/a.md\`, routine: kept both sections. Also dropped the --legacy flag."$'\n' "a decision after the first sentence is in the line"
+has "$out" "- \`lib/retry.sh\`, routine: Kept the base retry, e.g. the 3x backoff, and dropped the branch."$'\n' "…and an abbreviation does not cut the line short"
+
+echo "# render --as ask: a long reason is clipped, so the ask's closing sentence and the dismissal note's pointer survive"
+LONG="the merge points the new call at start$(printf ', and start now reads the retry settings from the merged config%.0s' $(seq 1 32))"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c --arg r "$LONG" '.triage.reason = $r' | jq -Rc .)")]"
+ask=$("$SUT" render --anchor AN1 --as ask)
+has "$ask" "… Your approval is lifted until you decide." "the reason is clipped before the ask's closing sentence"
+hasnt "$ask" "…." "…with no period after the clip mark"
+out=$("$SUT" render --anchor AN1 --as dismissal)
+eq "$out" "$ask The triage comment on this PR has the round in full." "the dismissal note is the clipped ask, then its pointer"
+eq "$([ "${#out}" -lt 1990 ] && echo under)" "under" "…well inside the length the guard cuts a dismissal note to"
+has "$("$SUT" render --anchor AN1 --as comment)" "Why: $LONG." "the account's ruling line carries the reason whole"
 
 echo "# render: an item no entry covers is listed with the guard's evidence alone"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -c '.audit |= map(select(.path != "c.sh"))' | jq -Rc .)")]"
 out=$("$SUT" render --anchor AN1 --as comment)
-has "$out" "No entry from the worker covers 1 item, so only the evidence from git describes it." "the headline counts the item no entry covers"
+has "$out" "<summary>Bring-current round: 1 judgment, 1 routine, 1 without an entry;" "the summary counts the item no entry covers"
 has "$out" "- \`c.sh\`, no entry from the worker. Git: changed beyond what merging x produces." "…and the account lists it with the guard's evidence"
-has "$("$SUT" render --anchor AN1 --as dismissal)" "No entry from the worker covers c.sh." "…and the dismissal note names it"
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$REC" | jq -Rc .)")]"
 hasnt "$("$SUT" render --anchor AN1 --as comment)" "no entry from the worker" "a round every entry covers lists no such item"
 
 echo "# render: an entry carried from an earlier round is shown beside that round's evidence"
 # Both rounds touched docs/a.md, so only the round tells the two pieces of
-# evidence apart.
+# evidence apart. Both entries are judgment calls, which the account shows in
+# full with their evidence.
 EARLY="abcdefabcdefabcdefabcdefabcdefabcdefabcd"
 CARRY=$(jq -nc --arg e "$EARLY" '{head: "0123456789abcdef0123456789abcdef01234567", from: "f", target: "main", bead: "B1", class: "conflicted",
   evidence: [
     {covered: true, kind: "conflict", path: "docs/a.md", commit: "c2", detail: "conflicted where both sides only added lines; the resolution keeps both additions whole"},
     {covered: true, kind: "conflict", path: "docs/a.md", commit: "c1", detail: "conflicted where the merge base had lines that one or both sides changed", round: $e}],
   audit: [
-    {path: "docs/a.md", collided: "main added a FAQ", resolution: "kept both", check: "the FAQ", rating: "routine"},
+    {path: "docs/a.md", collided: "main added a FAQ", resolution: "kept both", check: "the FAQ", rating: "judgment"},
     {path: "docs/a.md", collided: "main reworded the intro", resolution: "took main wording", check: "the intro", rating: "judgment", round: $e}],
   triage: null}')
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$CARRY" | jq -Rc .)")]"
@@ -153,20 +204,26 @@ GREC=$(printf '%s' "$REC" | jq -c --arg why "no triage lane is declared on this 
   '.triage = {by: "guard", reopen: ["correctness"], add: [], dismiss: true, reason: $why, at: "t"}')
 store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$GREC" | jq -Rc .)")]"
 out=$("$SUT" render --anchor AN1 --as comment)
-has "$out" "**Ruling:** correctness runs again on the merged code, and the approval given before the round no longer covers what would land, so the PR needs a fresh human review. Why: no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed." "the comment carries the guard's ruling and its reason"
-hasnt "$out" "**Triage:**" "…crediting nothing to triage"
+has "$out" "Ruling: correctness runs again on the merged code, and the approval is lifted. Why: no triage lane is declared on this anchor (check_set 'correctness'), so no review weighs what the round changed." "the comment carries the guard's ruling and its reason"
+hasnt "$out" "Triage:" "…crediting nothing to triage"
 out=$("$SUT" render --anchor AN1 --as dismissal)
-has "$out" "(pushed head 0123456789ab) changed code by hand that this approval did not see." "the dismissal note says what happened"
+has "$out" "Needs you: check what bringing this branch current with main changed by hand (pushed head 0123456789ab)." "the dismissal note opens with what it needs from the operator"
 has "$out" " No triage lane is declared on this anchor (check_set 'correctness')" "…and why, as a sentence of its own"
+has "$out" "Your approval is lifted until you have checked it. Where to look: b.sh: pointed the new call at start." "…then the entries, judgment first, since no triage comment carries them"
 hasnt "$out" "Triage:" "…crediting no ruling to triage"
 hasnt "$out" "triage comment" "…and pointing at no triage comment, since none is posted"
+eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "…in one paragraph"
+store "[$(anchorrow AN1 ",\"bring_current_record\":$(printf '%s' "$GREC" | jq -c --arg r "$LONG" '.triage.reason = $r' | jq -Rc .)")]"
+has "$("$SUT" render --anchor AN1 --as dismissal)" "… Your approval is lifted until you have checked it. Where to look:" "a long reason of the guard's is clipped before the ask's closing sentence too"
 
 echo "# render: an anchor with no record is refused"
 store "[$(anchorrow AN1)]"
 "$SUT" render --anchor AN1 --as comment >/dev/null 2>&1; rc=$?
 eq "$rc" "1" "it exits 1"
+"$SUT" render --anchor AN1 --as ask >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "…the ask form too"
 "$SUT" render --anchor AN1 --as visit >/dev/null 2>&1; rc=$?
-eq "$rc" "2" "a form other than comment or dismissal is a usage error"
+eq "$rc" "2" "a form other than comment, dismissal or ask is a usage error"
 
 # --- ask ---------------------------------------------------------------------------
 echo "# ask: the question is recorded, and one visit composed from the audit asks it on the anchor"

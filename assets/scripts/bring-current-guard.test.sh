@@ -49,9 +49,10 @@
 # coverage: lists each item and whether the audit covers it, writing nothing.
 # decide: refuses with no conflicted round, a lane the anchor does not declare,
 #   or a round another review already ruled on; records the ruling, unions the
-#   reopened lanes, supersedes each, renders the round's account; a dismissal
-#   draws the lift line at the round's time FIRST and files no visit, then
-#   re-requests and dismisses with a note composed from the audit; it
+#   reopened lanes, supersedes each, renders the round's account and the ask
+#   a lifting ruling opens the verdict with, empty when the approval stands; a
+#   dismissal draws the lift line at the round's time FIRST and files no visit,
+#   then re-requests and dismisses with a note that says the same ask; it
 #   dismisses every standing approval given before the round, every one of an
 #   account that approved twice and one behind a later CHANGES_REQUESTED,
 #   re-requesting each account once; an approval given after the round stands;
@@ -499,7 +500,7 @@ eq "$(meta AN1 bring_current_round_at)" "2026-10-01T00:00:00Z" "the round keeps 
 eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "the lift line is drawn at the round's time"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "…and the one given after it stands"
-has "$(cat "$STUB_GH_LOG")" "changed code by hand that this approval did not see" "the dismissal note tells the ruling as the guard's"
+has "$(cat "$STUB_GH_LOG")" "Needs you: check what bringing this branch current with main changed by hand" "the dismissal note tells the ruling as the guard's"
 hasnt "$(cat "$STUB_GH_LOG")" "triage comment" "…and points at no triage comment, since none is posted"
 eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
 fresh
@@ -576,7 +577,7 @@ eq "$(meta AN1 bring_current_lifted_at)" "$ROUND_AT" "…and the lift line is dr
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=human1" "the approver is asked to review again"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "the approval given before the round is dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/502/dismissals" "…and the one given after it stands"
-has "$(cat "$STUB_GH_LOG")" "changed code by hand that this approval did not see" "the dismissal note tells the ruling as the guard's"
+has "$(cat "$STUB_GH_LOG")" "Needs you: check what bringing this branch current with main changed by hand" "the dismissal note tells the ruling as the guard's"
 eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
 
 echo "# guard: the off opt-out is read with case and blanks ignored, and a re-run finishes a lift that stopped half-way"
@@ -777,12 +778,13 @@ eq "$rc" "1" "a ruling with no reason is refused"
 echo "# decide: nothing reopens"
 store "[$(round_anchor)]"
 fresh
-out=$(decide --anchor AN1 --review-bead RV1 --reopen none --reason "adjacent edits, both kept" --body-out "$TMP/body1"); rc=$?
+out=$(decide --anchor AN1 --review-bead RV1 --reopen none --reason "adjacent edits, both kept" --body-out "$TMP/body1" --ask-out "$TMP/ask1"); rc=$?
 eq "$rc" "0" "it exits 0"
 eq "$(rec_of AN1 | jq -c '.triage | {review, reopen, dismiss, reason}')" '{"review":"RV1","reopen":[],"dismiss":false,"reason":"adjacent edits, both kept"}' "the ruling is recorded in the anchor's record"
 eq "$(meta AN1 bring_current_reopened)" "triage" "no lane is added"
 eq "$(cat "$STUB_RO_LOG")$(cat "$STUB_GH_LOG")" "" "…nothing is superseded and GitHub is not touched"
-has "$(cat "$TMP/body1")" "**Triage:** nothing reopens. Why: adjacent edits, both kept." "the rendered account carries the ruling"
+has "$(cat "$TMP/body1")" "Triage: nothing reopens. Why: adjacent edits, both kept." "the rendered account carries the ruling"
+eq "$(tr -d '[:space:]' < "$TMP/ask1")" "" "a ruling that keeps the approval asks the operator nothing"
 has "$(cat "$TMP/body1")" "Collided: main set x to 3 for the new default while the branch set it to 2 for its feature." "…and each entry's collision"
 has "$(cat "$TMP/body1")" "Decided: kept 2 because the feature reads it." "…what was decided"
 has "$(cat "$TMP/body1")" "Check: the feature path that reads x." "…what to check"
@@ -812,8 +814,9 @@ echo "# decide: a dismissal lifts the approval at the round's time first, files 
 store "[$(round_anchor)]"
 reviews "$(approve human1 501),$(approve human2 502),$(approve gc-city-bot 503)"
 fresh
-out=$(decide --anchor AN1 --review-bead RV1 --reopen correctness --dismiss-approval --reason "the merge chose the branch value over main's new default"); rc=$?
+out=$(decide --anchor AN1 --review-bead RV1 --reopen correctness --dismiss-approval --reason "the merge chose the branch value over main's new default" --ask-out "$TMP/ask2"); rc=$?
 eq "$rc" "0" "it exits 0"
+eq "$(cat "$TMP/ask2")" "Needs you: the merge chose the branch value over main's new default. Your approval is lifted until you decide." "the ask names triage's call, for the verdict to open with"
 eq "$(meta AN1 bring_current_lifted_at)" "2026-10-01T00:00:00Z" "the lift line is the round's time"
 has "$out" "the approval on PR#1 is lifted at 2026-10-01T00:00:00Z: the approvals from human1 and human2 dismissed, and each approver asked to review again" "…and the outcome says so"
 eq "$(cat "$STUB_ESC_LOG")" "" "no visit is filed"
@@ -823,9 +826,8 @@ has "$(cat "$STUB_GH_LOG")" "reviewers[]=human2" "…and human2"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/501/dismissals" "human1's approval is dismissed"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/1/reviews/502/dismissals" "…and human2's"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/503/dismissals" "the city's own approval is never touched"
-has "$(cat "$STUB_GH_LOG")" "v.txt: kept 2 because the feature reads it." "the dismissal note is composed from the audit"
-has "$(cat "$STUB_GH_LOG")" "Triage: the merge chose the branch value" "…and carries triage's reason"
-has "$(cat "$STUB_GH_LOG")" "Please review the change and approve again." "…and asks for a fresh approval"
+has "$(cat "$STUB_GH_LOG")" "$(cat "$TMP/ask2") The triage comment on this PR has the round in full." "the dismissal note says the same ask, then where the round is told in full"
+hasnt "$(cat "$STUB_GH_LOG")" "did not see" "…and never says the approval predates the round"
 order_ok "requested_reviewers" "reviews/501/dismissals" && ok "the re-request comes before the dismissal" || bad "the re-request must come before the dismissal"
 eq "$(rec_of AN1 | jq -r '.triage.dismiss')" "true" "the ruling records the dismissal"
 
