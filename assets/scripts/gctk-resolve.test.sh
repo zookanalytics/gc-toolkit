@@ -192,18 +192,18 @@ gctk_require rig "$@"
 printf 'RETURNED %s\n' "$*"
 RIG_SH
     chmod +x "$RIGREQ"
-    # --check reads only git and the record store, so a clean clone with no
-    # record answers it with no gc and no rig named.
+    # --check needs no command and reads only git and the record store, so a
+    # clean clone with no record answers it.
     CLONE="$TMP/clean-clone"
     git init -q "$CLONE"
     git -C "$CLONE" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false \
         commit -q --allow-empty -m one
-    out=$(cd "$CLONE" && env -u GCTK_FALLBACK -u GC_RIG -u GC_RIG_ROOT GCTK_BIN="$GCTK_BUILT" "$RIGREQ" test --check 2>&1); rc=$?
-    eq "$rc" "3" "gctk_require rig test --check runs the built binary's gate: nothing is recorded, exit 3"
+    out=$(cd "$CLONE" && env -u GCTK_FALLBACK GCTK_BIN="$GCTK_BUILT" "$RIGREQ" test --check 2>&1); rc=$?
+    eq "$rc" "3" "gctk_require rig test --check reaches the built binary's rig: nothing is recorded, exit 3"
     has "$out" "gctk rig test: nothing is recorded at $(git -C "$CLONE" rev-parse HEAD)" "…which names the commit it read"
     hasnt "$out" "RETURNED" "…and the script never runs past the call"
     out=$(cd "$CLONE" && env -u GCTK_FALLBACK GCTK_BIN="$GCTK_BUILT" "$RIGREQ" deploy 2>&1); rc=$?
-    eq "$rc" "2" "a verb the gate does not know is the binary's usage error, exit 2"
+    eq "$rc" "2" "a verb rig does not know is the binary's usage error, exit 2"
 else
     bad "${GCTK_BUILD_ERR:-gctk was not built}"
 fi

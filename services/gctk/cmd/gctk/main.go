@@ -1,31 +1,25 @@
-// Command gctk is the pack's compiled data plane.
+// Command gctk is gc-toolkit's command-line interface: the documented,
+// structured surface through which agents act on a city. Agents are its users.
+// A person can run any command and it should make sense, but no command is
+// shaped for ad-hoc human use.
 //
-// SCOPE (services/gctk/README.md). Shell stays the pack's lingua franca:
-// anything an agent pastes, anything that must read as documentation, anything
-// under ~150 lines. gctk takes the merge-cadence cluster — highest stakes, pure
-// data-plane, and already invoked by its callers as an opaque CLI, so the
-// language behind the command is invisible to them — plus the PR-status
-// tri-state, the derivation the status: label and the helm board must share
-// from one code path, plus `rig`, the gate that runs a rig's declared checks
-// and records each result against the commit it ran at.
+// SCOPE (services/gctk/README.md). gctk is where gc-toolkit's logic for acting
+// on a city belongs, and each command is built for the long-term shape of the
+// CLI. Logic gctk does not hold yet runs as shell scripts, among them the rest
+// of the merge cadence: gate-ensure, pr-open, pr-facts, convoy-graduate and
+// signoff. A dependency is taken or declined on its merits; keeping the binary
+// free of them is not a goal.
 //
-// Each port keeps the byte-identical CLI of the script it replaces: same
-// flags, same exit codes, same stdout grammar. The scripts' own .test.sh
-// stub-harness suites are the acceptance bar, and they pass unmodified because
-// gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
-// the beads library. Same observability, same stubs, same permissions surface.
-//
-// Ported so far: lifecycle, merge and pr-status. rig is not a port: no script
-// carried its logic, and its CLI is its own (services/gctk/README.md). The rest
-// of the merge-cadence cluster (gate-ensure, pr-open, pr-facts,
-// convoy-graduate, signoff) still runs as shell. lifecycle and merge have no
-// shell fallback:
-// assets/scripts/lifecycle.sh and assets/scripts/merge.sh only exec this
-// binary, and refuse the call when there is none to run. pr-status has none by
-// design — its tri-state lives only in gctk so the status: label and the helm
-// board share one code path, so when the binary is absent or stale
-// pr-status-label.sh leaves the label unchanged rather than deriving it in
-// shell.
+// A shell script that only execs a gctk command is a bridge for callers that
+// do not call gctk yet, and it goes away once they do. A bridge is not a
+// contract gctk keeps: matching a script's flags and output byte for byte is
+// not a goal, and neither are tests that pin usage text.
+// assets/scripts/lifecycle.sh and assets/scripts/merge.sh are bridges: they
+// only exec this binary, and refuse the call when there is none to run.
+// pr-status-label.sh writes the status: label in shell and takes its value from
+// `gctk pr-status`, the one derivation the label and the helm board share, so
+// when the binary is absent or stale it leaves the label unchanged rather than
+// deriving one in shell.
 package main
 
 import (
