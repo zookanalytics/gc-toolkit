@@ -1,12 +1,13 @@
 ---
 name: Review workspace
-description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing how a review runs its tests or how review leftovers in /tmp are reclaimed.
+description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit or runs a suite, or how review leftovers in /tmp are reclaimed.
 ---
 
 # Review workspace
 
-A review runs the suites at its pinned commit in a detached worktree, and the
-reviewer may also write logs, probe output, or a second worktree at the base.
+A review reads its pinned commit in a detached worktree and runs there any
+suite its check calls for. The reviewer may also write logs, probe output, or a
+second worktree at the base.
 All of it lives in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it

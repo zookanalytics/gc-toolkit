@@ -1,30 +1,146 @@
 ---
-name: Steering — how the operator decides when work runs
-description: The model the operator steers polecat capacity with. A park is an ordinary blocker on a bead, which holds work under the bead that has not started while work in flight finishes. Covers the moves that make and release a park, what a park holds and what it leaves running. Read it before parking or releasing work, or before changing a reader that must see a park.
+name: Steering — how the operator steers the city's work
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. Read it before writing anything that files, routes or arms new work, before parking or releasing work, or before changing a reader that must see a park.
 ---
 
 # Steering
 
-The operator steers polecat capacity by deciding when work runs. An epic is an
-ordinary bead, and each move acts on a bead and everything under it, with no
-logic for epics alone. A park holds work under a bead that has not started and
-leaves work already in flight running. Which work it holds, and which it does
-not, is [below](#what-a-park-holds).
+The operator steers the city's capacity by deciding which work runs, and when.
+New work reaches a work pool once the operator has placed it, and not on its
+own. An epic is an ordinary bead, and each move acts on a bead and everything
+under it, with no logic for epics alone. A park holds work under a bead that
+has not started and leaves work already in flight running. Which work it holds,
+and which it does not, is [below](#what-a-park-holds).
 
 ## Scope
 
-**Mandate.** How the operator decides when work runs: the steering moves, the
-state each move writes, what that state holds and what it leaves running, and
-how each move is released.
+**Mandate.** Which beads may enter a work pool and what holds the rest: the
+intake rule, the `placement=pending` marker and the writers that set it, the
+emergency check, the placement sitting's queue, and how a bead is placed. How
+the operator decides when work runs: the steering moves, the state each move
+writes, what that state holds and what it leaves running, and how each move is
+released.
 
-**Boundaries.** How bd's blocked flag cascades, and how a pool reads it, is
+**Boundaries.** The design that decides how work is steered by epic, with the
+alternatives it rejected and the units that build it, is
+[specs/tk-rl8gz4b.2/steer-by-epic.md](../specs/tk-rl8gz4b.2/steer-by-epic.md);
+this page states what runs. What an epic is, what it carries, and when it
+closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
+blocked flag cascades and a pool reads it, is
 [gascity-routing-model.md](gascity-routing-model.md). The hold, the demand and
 the shape law a park follows are invariant I1 in
 [component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law).
-Who may make each move is [authority-map.md](authority-map.md). What an epic is,
-and when it closes, is [epics.md](epics.md). The design behind this model, with
-the alternatives it rejected and the work it still owes, is
-[the steer-by-epic design](../specs/tk-rl8gz4b.2/steer-by-epic.md).
+The first reaction's method is `agents/proactive/prompt.template.md`, and who
+may route, arm or hold a bead, or make each steering move, is
+[authority-map.md](authority-map.md).
+
+## The intake rule
+
+A bead may be routed or armed to a work pool only when one of these holds:
+
+- it is a member of an epic, which means it has a parent-child parent;
+- it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
+- it is an emergency, a red main or a broken gate, checked rather than asserted;
+- the operator routed it, through a sitting, a hand sling or an Accept.
+
+Every other bead waits for placement. A bead held this way carries
+`placement=pending` and no route and no arm, so no pool is offered it.
+
+## The writers that hold new work
+
+Each writer that files or disposes new work follows the rule.
+
+- **The first reaction** (`assets/scripts/first-reaction-dispose.sh`). It still
+  reacts to every finding, because its card is the placement sitting's triage.
+  Its actionable exit routes a member, PR-finishing work or a confirmed
+  emergency. It marks any other bead `placement=pending` and releases it with no
+  route. The blocked exit's `--then-route` arms a dispatch only for a bead the
+  rule admits. Any other bead it marks, and arms nothing, while its wait still
+  lands as a `blocks` edge. The close exit keeps its validating closer, because a
+  close shrinks the queue. Work that is a named agent's own (`--assign`,
+  `--then-assign`) is not pool work, so the rule does not read it.
+- **The witness** files mail about a pack defect as a bug marked
+  `placement=pending` and routed to no pool (`formulas/mol-witness-patrol.toml`,
+  the `bug-file` block).
+- **The feedback distiller** files each prompt-update and engineering bead
+  marked `placement=pending` and routed to no pool
+  (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step). The
+  operator still reviews each one at its PR once a polecat builds it.
+
+No held bead is ever readable without its marker. The witness and the
+distiller write it in the create, and the first reaction writes it and reads
+it back before the release.
+
+A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
+a pour leaves, after the pour's workflow has ended. The queue reads that stamp
+as a live pour, so the release that holds the bead clears it. When the stamp
+survives on a held bead, `gc-helm.sh takeaway` fails the release, and the first
+reaction stops without recording its disposition, so a re-run finishes the hold.
+
+## The emergency check
+
+The first reaction claims an emergency with `--emergency <check>`, on the
+actionable exit or on the blocked exit with `--then-route`. The claim names the
+check on main whose failure the bead is about: a check run's name or a commit
+status's context. It is checked against the head of the default branch of the
+subject's repository, read from GitHub through the rig checkout's origin. A
+check run by that name that concluded `failure`, `timed_out` or
+`startup_failure`, or a commit status with that context of `failure` or
+`error`, confirms it. A run still going, or one cancelled by a newer push, does
+not. Another check failing on main confirms nothing, so a flaky or unrelated red
+check cannot carry a routine bead past placement at P0. Every check run and
+commit status on the head is read, across all their pages. Each GitHub read is
+bounded in time, and a read that does not answer confirms nothing.
+
+A confirmed emergency is written P0, the priority is read back, and then the
+bead is routed or armed. A claim the check does not confirm, including one the
+check cannot run, is held for placement like any other bead, and the note it
+leaves on the bead says what the check found, naming any other check that fails
+there. A broken gate counts when it shows as a failing check on main. A latent
+hazard, a doctor finding marked blocking, or a failure on one PR's branch does
+not.
+
+## The placement sitting's queue
+
+`gc-helm.sh unplaced` lists the queue. It reads every rig store the city has,
+skips a suspended rig's store and says so, and orders the beads by priority,
+then age. It writes nothing. When a store does not answer, it names that store
+and exits 4 after printing the rest. A skipped rig leaves the exit at 0,
+because a suspended rig is the operator's choice. `--json` prints one object
+for a caller: the queue as `beads`, the suspended rigs it skipped as `skipped`,
+and the rigs whose store did not answer as `unread`, so a caller can tell a
+partial queue from the whole one.
+
+`assets/scripts/placement.sh` is the one definition of a bead in the queue: it
+carries `placement=pending`, and nothing has placed it since. A parent, a route,
+an arm, an assignee or a live pour each places a bead, whether or not the marker
+was cleared. The same definition serves the queue's other readers:
+
+- the liveness sweep names such a bead's wait, so it does not report the bead as
+  an unnamed wait;
+- the claim-time re-check of a sweep visit (`liveness-recheck.sh`) names the
+  same wait, so a visit filed before intake held the bead does not put it on
+  that sitting's agenda as well;
+- `doctor/check-blocked-work-armed` owes such a bead no arm, because its
+  dispatch is the route the sitting gives it;
+- the proactive scan files no first reaction for such a bead, because its next
+  move is the sitting's.
+
+## Placing a bead
+
+For each bead in the queue, the sitting does one of three things.
+
+- **Place it under an epic.** Give it the epic as its parent
+  (`gc bd update <bead> --parent <epic>`), then route it to its pool
+  (`gc sling <rig>/gc-toolkit.polecat <bead>`). A park on the epic holds it from
+  then on, through bd's parent-child cascade.
+- **Route it on its own.** Route it to its pool with the same sling, and give it
+  no parent.
+- **Close it**, when the work is not wanted.
+
+A placed bead leaves the queue as soon as it has a parent or a route. Clearing
+the marker (`gc bd update <bead> --unset-metadata placement`) keeps the bead's
+record honest, and nothing waits on it.
 
 ## A park
 

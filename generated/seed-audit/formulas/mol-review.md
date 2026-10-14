@@ -26,8 +26,8 @@ Hard rules, in force for every step:
   and how, and one party's code read is not that. When the dispatch says not
   to re-raise something and you find it, report it and say in the verdict
   that you are contradicting the dispatch and why.
-- Single honest pass. Read the diff yourself, run the tests yourself, write
-  your findings yourself. No subagents doing the review, no persona
+- Single honest pass. Read the diff yourself and write your findings
+  yourself. No subagents doing the review, no persona
   reviewers. The review may run as a two-provider quorum instead: two lanes
   each do one honest pass, and one synthesizer combines their findings into
   the single verdict (the mol-review-quorum-signoff formula). One verdict per
@@ -42,6 +42,6 @@ track the current step.
 
 Steps (4):
   ├── mol-review.load-dispatch: Read the dispatch and pin what you are reviewing
-  ├── mol-review.review: Read the diff, run the tests, write the verdict body [needs: mol-review.load-dispatch]
+  ├── mol-review.review: Read the diff and its test evidence, write the verdict body [needs: mol-review.load-dispatch]
   ├── mol-review.verdict-and-drain: Hand the verdict to signoff.sh — once — then drain [needs: mol-review.review]
   └── mol-review.workflow-finalize: Finalize workflow [needs: mol-review.verdict-and-drain]

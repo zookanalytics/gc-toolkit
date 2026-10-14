@@ -1670,10 +1670,12 @@ case "${2:-}" in
         case "$id" in
             v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
                     --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
+                    --arg rl "$(cat "$SOST/v-x.ruling" 2>/dev/null)" \
                     '[{id:"v-x",metadata:(({"task_kind":"visit"}
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
-                        +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)))}
+                        +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)
+                        +(if $rl=="" then {} else {"gc.ruling":$rl} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
             # SO_MERGE_RESULT puts the subject in a lifecycle state (pull_request
             # is an open PR); SO_SUBJECT_UNREADABLE makes it a read that fails.
@@ -1701,7 +1703,21 @@ case "${2:-}" in
     close) printf 'GC: %s\n' "$*" >>"$SOGC"
            [ "${SO_CLOSE_RC:-0}" = 0 ] && land_close "${3:-}"
            exit "${SO_CLOSE_RC:-0}" ;;
-    update) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
+    # The visit keeps its gc.ruling in $SOST/v-x.ruling, so the sign-off's
+    # read-back sees what landed. SO_RULING_DROP loses the write while the
+    # update still exits 0.
+    update) printf 'GC: %s\n' "$*" >>"$SOGC"
+            if [ "${3:-}" = v-x ] && [ -z "${SO_RULING_DROP:-}" ]; then
+                prev=""
+                for a in "$@"; do
+                    case "$prev:$a" in
+                        --set-metadata:gc.ruling=*) printf '%s' "${a#gc.ruling=}" >"$SOST/v-x.ruling" ;;
+                        --unset-metadata:gc.ruling) rm -f "$SOST/v-x.ruling" ;;
+                    esac
+                    prev="$a"
+                done
+            fi
+            exit 0 ;;
     *) exit 2 ;;
 esac
 STUB
@@ -1738,13 +1754,15 @@ chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
 # non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
 # a case dials SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
 # GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs, and the
-# store's closes too unless SO_KEEP=1 (a re-run against the store a first run
-# left behind).
+# store's closes and the visit's gc.ruling too unless SO_KEEP=1 (a re-run against
+# the store a first run left behind). SO_SEED_RULING, set on the call, seeds the
+# visit with a ruling an earlier run left.
 SOARGS=()
 SO_OUT=""; SO_RC=0; SO_KEEP=0
 run_so() {
     : >"$SOLOG"; : >"$SOGC"
-    [ "$SO_KEEP" = 1 ] || rm -f "$SOST"/*.closed
+    [ "$SO_KEEP" = 1 ] || rm -f "$SOST"/*.closed "$SOST/v-x.ruling"
+    [ -z "${SO_SEED_RULING:-}" ] || printf '%s' "$SO_SEED_RULING" >"$SOST/v-x.ruling"
     SO_OUT="$(cd "$SOBARE" && env PATH="$SOBIN:$PATH" \
         GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" GIT_CEILING_DIRECTORIES="$TMPD" \
         SOLOG="$SOLOG" SOGC="$SOGC" SOST="$SOST" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
@@ -1778,6 +1796,30 @@ eq "$SO_RC" "0" "the cut-short discharge exits 0"
 have "an unruled sitting re-states the demand on the subject" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
 if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
 if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
+
+# A review finding deferred to the visit (finding.sh needs-you) is released only
+# by a visit that closed carrying gc.ruling, so the ruling is recorded on the
+# visit and read back, and a cut-short sign-off leaves none behind.
+echo "── the ruling is recorded on the visit; a cut-short sign-off leaves none ──"
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling "keep the sweep" --route "gc-toolkit/gc-toolkit.polecat")
+run_so
+eq "$SO_RC" "0" "a ruled sign-off exits 0 once its ruling reads back"
+have "the ruling is stamped on the visit as gc.ruling" 'bd update v-x --set-metadata gc.ruling=keep the sweep' "$SOGC"
+eq "$(cat "$SOST/v-x.ruling" 2>/dev/null)" "keep the sweep" "…and the visit reads it back"
+run_so SO_RULING_DROP=1
+eq "$SO_RC" "1" "a ruling that does not read back stops the sign-off (exit 1)"
+case "$SO_OUT" in *"gc.ruling"*"NOT SIGNED OFF"*) ok "…naming gc.ruling, so the visit is not closed without it" ;;
+                  *) bad "…naming gc.ruling, so the visit is not closed without it" "got: $SO_OUT" ;; esac
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+SO_SEED_RULING="an earlier attempt" run_so
+eq "$SO_RC" "0" "a cut-short sign-off on a visit an earlier run ruled exits 0"
+have "…and clears that ruling" 'bd update v-x --unset-metadata gc.ruling' "$SOGC"
+eq "$(cat "$SOST/v-x.ruling" 2>/dev/null)" "" "…so the visit closes carrying no ruling"
+SO_SEED_RULING="an earlier attempt" run_so SO_RULING_DROP=1
+eq "$SO_RC" "1" "a stale ruling that does not clear stops the cut-short sign-off"
+run_so
+lacks "a cut-short sign-off on a visit with no ruling writes none" 'gc.ruling' "$SOGC" \
+      "a gc.ruling write reached a visit that carries none"
 
 # Under a standing scope two sittings share one bucket subject and each
 # holds its own topic-keyed demand on it. The discharge must resolve the exact

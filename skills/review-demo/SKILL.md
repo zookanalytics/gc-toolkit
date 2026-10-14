@@ -118,17 +118,21 @@ reports whether the `gh` it needs is present.
   Deliver the one you pick:
 
   ```bash
-  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --oid "$REVIEWED_OID" --subject <anchor>
+  "$SCRIPTS/demo-repo-artifact.sh" deliver --path <path> --base "origin/$BASE" --oid "$REVIEWED_OID" --subject <anchor>
   ```
 
   It attaches the file as the reviewed commit stores it, through
-  `demo-deliver.sh`.
+  `demo-deliver.sh`. The comment says where the visual came from: whether this
+  change adds, edits, moves or copies it, or leaves it unchanged, and the commit
+  that last changed it. The delivery's last line says the same, and the verdict
+  body repeats it.
 - `screenshot`: this pack has no production path for it. Record the modality
   you picked and approve with the note that it fits and was not delivered.
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
-stands.
+stands. The verdict records a delivered fallback as one: `--visual` names the
+modality delivered, and `--visual-fallback-from` names the one that fits.
 
 A rig can name its own visual surfaces, and how to serve its app for a capture,
 in `docs/review-demo.md`. The dispatch note appends that file from the reviewed
@@ -167,18 +171,29 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve --visual screenshot \
 `signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with
 `request-changes`, because a check that found no visual needed has nothing to
 block on. It stamps the decision on the review bead as `visual` and names it on
-the posted comment.
+the posted comment's `Visual:` line. That line says what kind of visual the
+verdict rests on. A `repo-artifact` reads `author-committed` there, because a
+committed visual is what an author recorded, not a capture of the reviewed
+commit. A fallback adds `--visual-fallback-from <the modality that fits>`,
+stamped as `visual_fallback_from`, and the line then reads, for example,
+`Visual: repo-artifact (author-committed; fallback from video)`. `signoff.sh`
+refuses a fallback that is not cheaper than the modality it stands in for.
 
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
 and where the visual was delivered, or what stopped it. A delivered video's
-sentence also says whether the clip is narrated or silent.
+sentence also says whether the clip is narrated or silent. A delivered
+repo-artifact's sentence also says where the visual came from, as its delivery
+comment does.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
 - **Delivered, and it shows the change working.** Approve with its modality.
 - **Delivered, and it shows the change failing.** Request changes with its
   modality. The finding goes in `findings.json`.
+- **Delivered as a fallback.** Judge what it shows the same way. Record the
+  modality delivered with `--visual` and the one that fits with
+  `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: no production path in this
   pack, a capture toolchain that does not resolve, or no running app to capture.
