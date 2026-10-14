@@ -87,8 +87,9 @@ one (a rig value outranks the routed one in a pour), else the branch
   ruling's own phrase was "for a full-suite record". A full-suite fail
   withdraws the tree's entry, so the last write wins for the tree as well as
   for the commit. The entry changes before the commit's record is written, and
-  a pass's entry is withdrawn again when the commit's record cannot be written,
-  so a write the store does not take leaves no record of its result.
+  a pass's entry is withdrawn again when the commit's record cannot be written.
+  So a write the store does not take leaves no record of its result, unless
+  that withdrawal fails too, and the gate's line then says so.
 - **Exit codes.** 0 pass, 1 fail, 2 usage, 3 nothing recorded (`--check`, and
   `--pre-existing` with no fail to mark), 4 machine failure, 128+N stopped by
   signal N. A fresh run exits 1 on any fail, whatever status the command
