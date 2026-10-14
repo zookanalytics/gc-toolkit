@@ -16,8 +16,8 @@
 #                review-test-evidence block and the Verification line.
 #   (QUORUM)     the quorum's lanes apply the check's method, naming the
 #                correctness method, and not mol-review's review step.
-#   (SPECIALIST) no other check's method file asks for test results or runs a
-#                suite.
+#   (SPECIALIST) no other check's dispatch note or method file asks for a test
+#                run or its result, or runs a suite.
 #   (KEEPALIVE)  every long command a method runs goes through hb: the
 #                correctness suites and the demo capture.
 #   (RUBRIC)     the learning loop's review-rubric anchors sit above the
@@ -135,12 +135,27 @@ for lane in review-lane-one review-lane-two; do
 done
 
 echo "# no other check is asked for test results"
+: > "$TMP/specialists"
 "$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name method _; do
   [ "$name" = correctness ] && continue
+  printf '%s\n' "$name" >> "$TMP/specialists"
   printf '%s\n' "$method" | awk '{n = split($0, m, / [+] /); for (i = 1; i <= n; i++) print m[i]}'
 done | sort -u > "$TMP/specialist-methods"
 [ -s "$TMP/specialist-methods" ] && ok "(SPECIALIST) the index declares other checks" || bad "(SPECIALIST) no other check is declared"
+# A specialist's method may name tests as part of what a diff carries, so its
+# texts are held to the words that ask for a run or its result: a test run,
+# result, evidence, command or output, a suite, or running tests.
+ASKS='(^|[^[:alnum:]_])(tests? (runs?|results?|evidence|commands?|output)|suites?|(run|runs|running|ran)( [[:alpha:]]+)? (tests?|suites?))([^[:alnum:]_]|$)'
+# A specialist reviewer reads its dispatch note, under either review formula,
+# and its method files.
+while IFS= read -r name; do
+  for formula in mol-review mol-review-quorum-signoff; do
+    bash "$BODY" --formula "$formula" --check-name "$name" > "$TMP/note.$formula.$name"
+    notE "$TMP/note.$formula.$name" "$ASKS" "(SPECIALIST) the $name dispatch note under $formula asks for no test run or result" -i
+  done
+done < "$TMP/specialists"
 while IFS= read -r f; do
+  notE "$ROOT/$f" "$ASKS" "(SPECIALIST) $f asks for no test run or result" -i
   notF "$ROOT/$f" 'review-test-evidence' "(SPECIALIST) $f carries no evidence block"
   notF "$ROOT/$f" 'hb bash -c' "(SPECIALIST) $f runs no suite"
   notF "$ROOT/$f" 'Verification:' "(SPECIALIST) $f asks for no Verification line"
