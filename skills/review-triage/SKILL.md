@@ -99,6 +99,10 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
   you added and what in the diff warranted it, in your verdict body.
 - **Adding nothing needs no flag** — approve on its own is the full verdict.
 
+Your verdict body is the triage trail, collapsed under the line `signoff.sh`
+opens the comment with: what you read, each check you added or left out and
+why, and any test runs. Triage files no findings, so it has no findings block.
+
 ## A bring-current round that conflicted
 
 Bringing the branch current means merging its base in. When that took
@@ -136,16 +140,21 @@ reopens:
   merged code needs a fresh look in that lane. A check the anchor does not yet
   declare is added the usual way, with `--add-gates`, and it runs on the merged
   code too.
-- **The approval is lifted** (`--dismiss-approval`). The resolution took
-  material judgment: an inferred intent, a choice between two live designs, or
-  something new the approver never saw. No approval given at or before the
-  round counts toward the merge from then on, and the operator is asked to
-  review again; the dismissal note and your posted verdict carry the round's
-  account, and a new approval lands the PR.
+- **The approval is lifted** (`--dismiss-approval`). The round made a call
+  that is the operator's to make: it changed what the PR does, by inferring
+  one side's intent or by choosing between two live designs. A round that only
+  changed how the approved behavior is achieved does not lift: reopen the lanes
+  that can check it, and the approval stands. A lift names its decision in
+  `--round-reason`: the call, what it means for the PR, and where to look. That
+  text opens your posted verdict and the dismissal note. When you cannot name
+  such a call, do not lift. No approval given at or before the round counts
+  toward the merge from then on, and a new approval lands the PR.
 
 Lanes and the lift combine. Say why in `--round-reason`, one line a person can
-act on; it heads the dismissal note when there is one. The ruling rides the
-one verdict call:
+act on; on a lift it is the decision above. Never give the approval predating
+the round as the reason for a lift: every round postdates the approval it would
+lift, so that tells the operator nothing. The ruling rides the one verdict
+call:
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
@@ -156,9 +165,10 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
 record and sends each reopened lane back to unreviewed. On a lift it first
 stores the round's time on the anchor as `bring_current_lifted_at`, the line the
 approval rule reads, then re-requests each approver and dismisses the approvals
-the line covers. The verdict it posts opens with the round's account and your
-ruling, both rendered from the record, so the PR says what collided, what was
-decided, and what reopened.
+the line covers. The verdict it posts opens with your verdict and, on a lift,
+your decision. The round's account sits collapsed under that line, rendered
+from the record the same way whether or not you lifted: what collided, what
+was decided, and what reopened.
 
 ## The index gap
 
