@@ -981,8 +981,9 @@ keys = ["rig_check.test", "rig_check.lint", "rig_check.typecheck"]
 #   publishing call answered with, as one JSON object: check, result, method,
 #   commit, tree, exit_code, duration_ms, runner, recorded_at and command, and
 #   on a fail a caller marked pre-existing, disposition and tracker. The gate
-#   writes it after a run, after answering from a record, and after marking a
-#   fail pre-existing, and reads it back once to confirm the write. No other
+#   writes it only once the record store holds the result it copies: after
+#   recording a result, after answering from a record, and after marking a fail
+#   pre-existing. It reads the copy back once to confirm the write. No other
 #   pack path reads it. Absent means no call published that check to the bead.
 #   Never cleared: the next publish replaces it. Its commit is the one the check
 #   ran at: the head the call answered for, or, for a full-suite test pass

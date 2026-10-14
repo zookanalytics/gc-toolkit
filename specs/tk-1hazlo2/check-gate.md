@@ -86,7 +86,9 @@ one (a rig value outranks the routed one in a pour), else the branch
   `origin/main`, so two commits with one tree can lint different files. The
   ruling's own phrase was "for a full-suite record". A full-suite fail
   withdraws the tree's entry, so the last write wins for the tree as well as
-  for the commit.
+  for the commit. The entry changes before the commit's record is written, and
+  a pass's entry is withdrawn again when the commit's record cannot be written,
+  so a write the store does not take leaves no record of its result.
 - **Exit codes.** 0 pass, 1 fail, 2 usage, 3 nothing recorded (`--check`, and
   `--pre-existing` with no fail to mark), 4 machine failure, 128+N stopped by
   signal N. A fresh run exits 1 on any fail, whatever status the command
@@ -96,9 +98,11 @@ one (a rig value outranks the routed one in a pour), else the branch
   a fail at every commit for a typo in city.toml. Exits 126 and 127, which the
   shell gives a command it cannot execute or find. A command ended by a
   signal: killed outright, or 128+N from its shell, so an OOM kill under load
-  never records a sticky fail. A timeout. A suite that exits 126, 127 or
-  129-192 on its own is misread as a machine failure. That costs a re-run,
-  never a false record.
+  never records a sticky fail. A timeout. A result the record store does not
+  take, pass or fail: the gate's answer is its record, so a result with no
+  record behind it neither sets the exit nor is published. A suite that exits
+  126, 127 or 129-192 on its own is misread as a machine failure. That costs a
+  re-run, never a false record.
 - **`--pre-existing <tracker>`.** It annotates the fail recorded at HEAD with
   `disposition: pre-existing` and the tracker, and runs nothing. The cutover
   (tk-b0ww25t) makes no gate changes, and the refinery's pre-existing-failure
@@ -119,7 +123,8 @@ one (a rig value outranks the routed one in a pour), else the branch
   `gcbd.Client.Update`, and reads it back with `ShowDirect`. gcbd's API path
   is for reads only. Its writes fork `gc bd update`, so the publish does too.
   The gate publishes the record that answered the call, whether it ran or read
-  it. A failed publish warns and changes no exit.
+  it, so it publishes only a record the store holds. A failed publish warns and
+  changes no exit.
 - **The process group and the relay** follow `gitIn` from PR #1212 (Setpgid,
   TERM to the group, SIGTERM/SIGINT relayed, exit 128+N). That PR had not
   merged when the gate was built, so the runner lives in `internal/rig`, and no

@@ -81,8 +81,9 @@ check. A record holds the result (`pass` or `fail`), the method (`full`,
 tree, the command's exit status, the duration, the runner, the time and the
 command line. A fail can also carry `disposition: pre-existing` and a tracker
 bead, which a caller that judged the fail to be red on the base too attaches
-with `--pre-existing <tracker>`. Each write is a whole file renamed into place.
-Two runners at one commit may both run and both write, and the last write wins.
+with `--pre-existing <tracker>`. Each write is a whole file renamed into place,
+and a result the store does not take leaves no record behind. Two runners at
+one commit may both run and both write, and the last write wins.
 
 **What answers for HEAD.** The commit's own record answers whatever its method:
 a pass passes and a fail fails, without running. A pass made with `--affected`
@@ -108,12 +109,12 @@ and changes no exit.
 **Exit codes.** 0 pass, 1 fail, 2 usage, 3 nothing recorded (`--check`, or
 `--pre-existing` with no fail to mark), 4 machine failure, 128+N stopped by
 signal N. A machine failure says nothing about the code, and nothing is
-recorded for it. These are the machine failures: a checkout with changes HEAD
-does not hold, a command bash cannot parse, a command not found or not
-executable (126, 127), a command ended by a signal (killed outright, or 128+N
-from its shell), a timeout, and vars that could not be read. Any other non-zero
-status is the code's fail, and it stays recorded until `--force` runs the check
-again.
+recorded or published for it. These are the machine failures: a checkout with
+changes HEAD does not hold, a command bash cannot parse, a command not found or
+not executable (126, 127), a command ended by a signal (killed outright, or
+128+N from its shell), a timeout, vars that could not be read, and a result the
+record store did not take. Any other non-zero status is the code's fail, and it
+stays recorded until `--force` runs the check again.
 
 `setup` and `build` run their command the same way and record nothing. Setup
 leaves environment state behind, and a build makes itself current.
