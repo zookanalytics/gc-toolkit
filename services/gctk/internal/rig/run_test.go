@@ -156,7 +156,6 @@ func TestRunWithNoTimeoutWaits(t *testing.T) {
 // returns Interrupted. The test's own Notify keeps a build without the relay
 // from killing the test binary: such a build fails the assertions instead.
 func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
-	shortGrace(t)
 	held := make(chan os.Signal, 4)
 	signal.Notify(held, syscall.SIGTERM)
 	defer signal.Stop(held)
@@ -186,6 +185,80 @@ func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("the command's group never received the relayed SIGTERM")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// sigtermWhenReady sends this process SIGTERM once the command has written
+// path. The caller's own Notify keeps a build without the relay from killing
+// the test binary.
+func sigtermWhenReady(path string) {
+	go func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(path); err == nil {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+}
+
+// A relayed signal stops the command, and Run returns only once the command
+// has stopped: what it writes while it stops is in the caller's writer by then,
+// and nothing writes to that writer afterwards.
+func TestRunReturnsFromARelayedSignalOnceTheCommandHasStopped(t *testing.T) {
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	sigtermWhenReady(filepath.Join(dir, "ready"))
+	var out bytes.Buffer
+	o := Run(dir, `trap 'sleep 0.5; echo stopped; exit 143' TERM; touch ready; sleep 30 & wait $!`, time.Minute, &out, &out)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	if got := out.String(); got != "stopped\n" {
+		t.Fatalf("output when Run returned = %q, want the command's last line, written as it stopped", got)
+	}
+}
+
+// A command that ignores the relayed SIGTERM is killed after StopGrace, as at
+// a timeout.
+func TestRunKillsARelayedGroupThatIgnoresSIGTERM(t *testing.T) {
+	shortGrace(t)
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	sigtermWhenReady(filepath.Join(dir, "ready"))
+	start := time.Now()
+	var out bytes.Buffer
+	o := Run(dir, `trap '' TERM; echo $$ > ready; sleep 30 & wait; sleep 30`, time.Minute, &out, &out)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("a group that ignores SIGTERM held the run for %s", time.Since(start))
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "ready"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A member killed outright can stay in the group until it is reaped.
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(-pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			t.Fatalf("the command's group %d outlived the relayed stop", pid)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

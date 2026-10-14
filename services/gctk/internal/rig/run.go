@@ -23,7 +23,7 @@ const (
 	// nothing about the code. Nothing is recorded.
 	Machine
 	// Interrupted: this process was sent SIGTERM or SIGINT during the run. The
-	// signal went on to the command's process group, and nothing is recorded.
+	// command's process group was stopped, and nothing is recorded.
 	Interrupted
 )
 
@@ -68,18 +68,23 @@ func Parses(command string) (bool, string) {
 // for it. The command's output goes to stdout and stderr; an *os.File is handed
 // to the command as it is, so nothing it leaves running holds the wait open.
 //
-// The command leads a process group of its own, and every stop is a signal to
-// that group, so a suite's children stop with it. With a timeout above zero, a
-// run still going at the timeout is sent SIGTERM, then SIGKILL after StopGrace,
-// and is a Machine outcome.
+// The command leads a process group of its own, and Run stops a run by stopping
+// that group: SIGTERM, then SIGKILL if the command is still running after
+// StopGrace. The stop reaches every child that stays in the group. A child the
+// command starts in a group of its own, as a runner under bash's `set -m` does,
+// is the command's to stop. With a timeout above zero, a run still going at the
+// timeout is stopped and is a Machine outcome.
 //
 // Its own group also puts the command out of reach of a signal sent to this
 // process's group, which is how an order runner stops a job that outlives its
 // timeout and how a terminal delivers Ctrl-C. So a SIGTERM or SIGINT that
-// reaches this process during the run is passed on to the command's group as
-// SIGTERM, and Run returns Interrupted without waiting; the caller records
-// nothing and exits with 128 plus the signal. A signal this process inherited
-// as ignored stays ignored.
+// reaches this process during the run stops the command's group, and Run
+// returns Interrupted; the caller records nothing and exits with 128 plus the
+// signal. A signal this process inherited as ignored stays ignored.
+//
+// Run returns only once the command has been waited for, however the run
+// ended, so nothing the command started writes to stdout or stderr after Run
+// returns.
 func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) Outcome {
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Dir = dir
@@ -117,22 +122,10 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	select {
 	case <-waited:
 	case got = <-stop:
-		_ = syscall.Kill(group, syscall.SIGTERM)
+		stopGroup(group, waited, stop)
 	case <-expired:
 		timedOut = true
-		_ = syscall.Kill(group, syscall.SIGTERM)
-		grace := time.NewTimer(StopGrace)
-		select {
-		case <-waited:
-		case got = <-stop:
-		case <-grace.C:
-			_ = syscall.Kill(group, syscall.SIGKILL)
-			select {
-			case <-waited:
-			case got = <-stop:
-			}
-		}
-		grace.Stop()
+		got = stopGroup(group, waited, stop)
 	}
 	elapsed := time.Since(start)
 	// A signal that arrived as the command finished is still this process's to
@@ -145,9 +138,6 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 		}
 	}
 	if got != nil {
-		if timedOut {
-			_ = syscall.Kill(group, syscall.SIGKILL)
-		}
 		sig, _ := got.(syscall.Signal)
 		return Outcome{Kind: Interrupted, Signal: sig, Duration: elapsed}
 	}
@@ -158,6 +148,32 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	o := classify(cmd.ProcessState)
 	o.Duration = elapsed
 	return o
+}
+
+// stopGroup stops the command's process group: SIGTERM, then SIGKILL if the
+// command is still running after StopGrace. It returns once the command has
+// been waited for, which WaitDelay bounds once the command has exited, and
+// returns the first SIGTERM or SIGINT that reached this process while it
+// waited, if one did.
+func stopGroup(group int, waited <-chan error, stop <-chan os.Signal) os.Signal {
+	_ = syscall.Kill(group, syscall.SIGTERM)
+	grace := time.NewTimer(StopGrace)
+	defer grace.Stop()
+	var got os.Signal
+	for {
+		select {
+		case <-waited:
+			return got
+		case s := <-stop:
+			if got == nil {
+				got = s
+			}
+		case <-grace.C:
+			_ = syscall.Kill(group, syscall.SIGKILL)
+			<-waited
+			return got
+		}
+	}
 }
 
 // classify reads a finished command's status. A status the shell gives to a

@@ -64,10 +64,13 @@ the supervisor or the bead store. The rig is `--rig`, else `$GC_RIG`. When
 worktree of that clone.
 
 Each command runs in a `bash -c` of its own at the checkout's top level, with
-stdin closed, leading a process group of its own. A SIGTERM or SIGINT the gate
-receives goes on to that group, and the gate exits 128 plus the signal with
-nothing recorded. A run still going at `--timeout`, two hours unless the caller
-names another bound, is sent SIGTERM, then SIGKILL, as a group.
+stdin closed, leading a process group of its own. The gate stops a run by
+stopping that group: SIGTERM, then SIGKILL if the command is still running ten
+seconds later. A run still going at `--timeout`, two hours unless the caller
+names another bound, is stopped. So is a run during which the gate receives
+SIGTERM or SIGINT, and the gate then exits 128 plus the signal with nothing
+recorded. A process the command starts in a group of its own is outside that
+stop, so the command has to stop it.
 
 **The record.** One JSON file per check and commit,
 `gc-rig-checks/<check>/commits/<commit>.json` under the clone's git common

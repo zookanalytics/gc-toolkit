@@ -312,7 +312,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	out := rig.Run(co.Top, command, o.timeout, stdout, stderr)
 	switch out.Kind {
 	case rig.Interrupted:
-		say("stopped by signal %d (%s); the command's process group was sent SIGTERM, and nothing was recorded", int(out.Signal), out.Signal)
+		say("stopped by signal %d (%s); the command's process group was stopped, and nothing was recorded", int(out.Signal), out.Signal)
 		return 128 + int(out.Signal)
 	case rig.Machine:
 		return machine("%s, after %s", out.Reason, out.Duration.Round(time.Millisecond))
@@ -436,7 +436,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	out := rig.Run(co.Top, command, o.timeout, stdout, stderr)
 	switch out.Kind {
 	case rig.Interrupted:
-		say("stopped by signal %d (%s); the command's process group was sent SIGTERM", int(out.Signal), out.Signal)
+		say("stopped by signal %d (%s); the command's process group was stopped", int(out.Signal), out.Signal)
 		return 128 + int(out.Signal)
 	case rig.Machine:
 		return machine("%s, after %s", out.Reason, out.Duration.Round(time.Millisecond))
