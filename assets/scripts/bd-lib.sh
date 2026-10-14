@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, and the gating-PR read's field set. Sourced, never executed.
+# queries it, the one-write create every script files a stamped bead through,
+# the metadata read-back that gates handing such a bead on, the close that
+# unmakes a bead no reader can find, the validation pass's work order, and the
+# gating-PR read's field set. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -376,6 +379,278 @@ bd_live_children() {
     | group_by(.a)[]
     | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
     | @tsv' 2>/dev/null
+}
+
+# bd_create [--select <keys>] [--child-of <anchor>] <metadata-json>
+#   <gc-bd-create-args...> — file one bead with its metadata in the same write,
+#   and print its id.
+#
+# The metadata a bead is born with is what its readers select it by: its
+# task_kind, the anchor it hangs on, the key its producer dedups on. Written in
+# a second `update --set-metadata`, it is missing whenever that write fails or
+# the create's id never comes back. No reader can see such a bead, so nothing
+# closes it, and the producer's next run files a stamped twin beside it.
+# `gc bd create --metadata` lands the payload in the bead's own row insert, so
+# the bead exists with its metadata or not at all.
+#
+# <metadata-json> must be a JSON object with at least one key. Anything else is
+# refused before a create runs, so this helper never files a bead with no
+# metadata. The other arguments are `gc bd create`'s own: the title, -t, -d or
+# --body-file - (stdin reaches the create), --status, --notes, --deps, --db and
+# the rest. The helper adds --metadata and --json.
+#
+# --child-of files the bead as a child of <anchor>, which the payload must name
+# as its anchor_bead. A child's membership edge stands no later than its
+# anchor_bead, and here anchor_bead lands with the create, so the edge rides the
+# create too: it goes through bd_create_child, and the child is born joined to
+# its anchor or not filed at all. An empty <anchor>, or one the payload's
+# anchor_bead does not name, is refused before a create runs.
+#
+# The bead is read back from the store the create wrote, and every key must
+# read back with the value written. A bead short of a key is written the whole
+# payload once more and read back again (bd_meta_ensure). That write carries
+# only the values the create carried, onto a bead filed a moment before.
+#
+# --select names, comma-joined, the payload keys the caller's own probe finds
+# the bead by, and the caller keeps that list beside the probe. A bead still
+# short of one of them after the second write is one no later run can find,
+# while an edge it carries can still hold its anchor, so it is closed
+# (bd_unmake) and reported as nothing filed. With no --select, a bead is closed
+# only when it is still short of every key. A --select key the payload does not
+# carry is refused before a create runs.
+#
+# Returns:
+#   0  filed, and every key read back. Prints the id.
+#   1  nothing a reader can find was filed. Either the payload, --select or
+#      --child-of was refused, or bd refused the create (its reason goes to
+#      stderr: a --child-of anchor that does not resolve is one), or no id
+#      came back, or the bead stayed short of a --select key, or of every key,
+#      and was closed (gc.outcome=abandoned) so that no reader meets it. A
+#      create whose reply was lost can still have landed whole, so a caller
+#      that files again first looks for the bead the way its own dedup does.
+#   2  filed, but the read-back could not be made or did not show every key as
+#      written. Prints the id. The bead carries every --select key, or some key
+#      with no --select, so the caller's next run can find it, and a caller
+#      hands it on only once bd_meta_ensure has made it whole.
+bd_create() {
+  local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
+  while :; do
+    case "${1:-}" in
+      --select) sel="${2:-}" ;;
+      --child-of) child=1; anchor="${2:-}" ;;
+      *) break ;;
+    esac
+    shift 2 || { echo "bd_create: $1 takes a value; nothing filed" >&2; return 1; }
+  done
+  if [ -n "$child" ] && [ -z "$anchor" ]; then
+    echo "bd_create: --child-of names no anchor; nothing filed" >&2
+    return 1
+  fi
+  meta="${1:-}"
+  shift || true
+  printf '%s' "$meta" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1 \
+    || { echo "bd_create: refusing to file a bead without a metadata object; nothing filed" >&2; return 1; }
+  meta=$(printf '%s' "$meta" | jq -c . 2>/dev/null) \
+    || { echo "bd_create: could not normalize the metadata payload; nothing filed" >&2; return 1; }
+  if [ -n "$sel" ] && ! printf '%s' "$meta" | jq -e --arg s "$sel" \
+       '. as $m | ($s | split(",")) | all(.[]; . as $k | $m | has($k))' >/dev/null 2>&1; then
+    echo "bd_create: --select '$sel' names a key the payload does not carry; nothing filed" >&2
+    return 1
+  fi
+  if [ -n "$anchor" ] && ! printf '%s' "$meta" | jq -e --arg a "$anchor" \
+       '((.anchor_bead // "") | tostring) == $a' >/dev/null 2>&1; then
+    echo "bd_create: --child-of $anchor is not the anchor_bead the payload names; nothing filed" >&2
+    return 1
+  fi
+  # The read-back, the second write and the close go to the store the create
+  # wrote.
+  for a in "$@"; do
+    [ "$prev" = "--db" ] && db="$a"
+    case "$a" in --db=*) db="${a#--db=}" ;; esac
+    prev="$a"
+  done
+  if [ -n "$anchor" ]; then
+    reply=$(bd_create_child "$anchor" "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  else
+    reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
+  fi
+  bd_cache_clear
+  id=$(printf '%s' "$reply" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  if [ -z "$id" ] || [ "$id" = "null" ]; then
+    err=$(printf '%s' "$reply" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
+    echo "bd_create: bd create returned no id${err:+: $err}" >&2
+    return 1
+  fi
+  row=$(bd_json show "$id" ${db:+--db "$db"} </dev/null)
+  got=$(bd_meta_judge "$id" "$meta" "$row")
+  [ "${got%%$'\t'*}" = landed ] && { printf '%s\n' "$id"; return 0; }
+  if short=$(bd_meta_ensure --row "$row" "$id" "$meta" ${db:+--db "$db"}); then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  if [ "$short" != unreadable ]; then
+    if [ -n "$sel" ]; then
+      lost=$(jq -rn --arg s "$sel" --arg q "$short" \
+        '($q | split(",")) as $q | [ $s | split(",")[] | select(. as $k | any($q[]; . == $k)) ] | join(",")' 2>/dev/null)
+    elif [ "$short" = "$(printf '%s' "$meta" | jq -r 'keys_unsorted | join(",")' 2>/dev/null)" ]; then
+      lost="$short"
+    fi
+  fi
+  if [ -n "$lost" ]; then
+    if bd_unmake "$id" "Unmade by bd_create: this bead did not read back carrying $lost, which its producer finds it by, so no reader could find it. Its producer files it afresh." ${db:+--db "$db"}; then
+      echo "bd_create: $id did not read back carrying $lost, so no reader could find it; closed it, nothing filed" >&2
+    else
+      echo "bd_create: $id did not read back carrying $lost, so no reader can find it, and it would not close; whatever its edges hold stays held until it is closed by hand" >&2
+    fi
+    return 1
+  fi
+  echo "bd_create: $id was filed but its metadata did not read back as written (short: $short)" >&2
+  printf '%s\n' "$id"
+  return 2
+}
+
+# bd_meta_judge <id> <metadata-json> <show-json> — how a bead carries a metadata
+# payload, judged from a `gc bd show --json` reply the caller already holds, with
+# no read of its own. Prints one line: a verdict, a tab, and the payload's keys
+# that do not read back with the value written, comma-joined.
+#   landed      every key reads back as written
+#   bare        the bead carries none of the payload's keys
+#   partial     some key is missing, or reads back with another value
+#   unreadable  the reply does not hold the bead
+# A value compares as its text, jq's tostring of it, because bd keeps a create's
+# string values as strings while a --set-metadata write of the same key can
+# store a number, a boolean or null. So "42" matches 42 and "false" matches
+# false, while false, null and the empty string each match only themselves.
+bd_meta_judge() {
+  local id="${1:-}" meta="${2:-}" row="${3:-}" out
+  out=$(printf '%s' "$row" | jq -r --arg id "$id" --argjson m "$meta" '
+    if type == "array" and ((.[0].id // "") == $id) then
+      ((.[0].metadata // {}) | if type == "object" then . else {} end) as $got
+      | [ $m | to_entries[] | . as $e
+          | select((($got | has($e.key))
+                    and (($got[$e.key] | tostring) == ($e.value | tostring))) | not)
+          | .key ] as $short
+      | (if ($short | length) == 0 then "landed"
+         elif ($m | keys | all(.[]; . as $k | ($got | has($k)) | not)) then "bare"
+         else "partial" end) + "\t" + ($short | join(","))
+    else "unreadable\t" end' 2>/dev/null)
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else printf 'unreadable\t\n'; fi
+}
+
+# bd_meta_readback <id> <metadata-json> [gc-bd-args...] — bd_meta_judge on a
+# fresh read of the bead. The trailing arguments reach `gc bd show`, so the read
+# follows the --db a write named.
+bd_meta_readback() {
+  local id="${1:-}" meta="${2:-}"
+  shift 2 || true
+  bd_meta_judge "$id" "$meta" "$(bd_json show "$id" "$@" </dev/null)"
+}
+
+# bd_meta_ensure [--row <show-json>] <id> <metadata-json> [gc-bd-args...] — make
+# a bead that already exists carry a payload before its caller hands it on. The
+# payload is judged against the bead: against --row, a `gc bd show --json` reply
+# the caller already read, or else against a fresh read. When any key is short,
+# every key is written in one update and read back again. Returns 0 once every
+# key reads back as written. Otherwise prints the keys still short,
+# comma-joined, or "unreadable" when the bead itself did not read back, and
+# returns 1. A bead that does not read back before the write is not written:
+# nothing then shows who holds it. The trailing arguments reach the read, the
+# write and the read-back alike, so a --db sends all three to that store.
+#
+# A route or a sling makes a bead someone's work order, so a caller gates that
+# act on this check and not on the exit of the write that filed the bead:
+# bd_create prints the id of a bead whose read-back fell short (its rc 2), and
+# `gc bd update` can exit 0 without writing. The write ignores bd's claim guard,
+# so a caller runs this only on a bead nobody has taken.
+bd_meta_ensure() {
+  local row="" seen="" id meta got kv sets=()
+  if [ "${1:-}" = "--row" ]; then row="${2:-}"; seen=1; shift 2 || true; fi
+  id="${1:-}"; meta="${2:-}"
+  shift 2 || true
+  if [ -n "$seen" ]; then got=$(bd_meta_judge "$id" "$meta" "$row")
+  else got=$(bd_meta_readback "$id" "$meta" "$@"); fi
+  case "${got%%$'\t'*}" in
+    landed) return 0 ;;
+    unreadable) printf 'unreadable\n'; return 1 ;;
+  esac
+  while IFS= read -r -d '' kv; do
+    sets+=(--set-metadata "$kv")
+  done < <(printf '%s' "$meta" | jq -j 'to_entries[] | "\(.key)=\(.value | if type == "string" then . else tojson end)\u0000"' 2>/dev/null)
+  if [ "${#sets[@]}" -gt 0 ]; then
+    gc bd update "$id" "$@" "${sets[@]}" </dev/null >/dev/null 2>&1 || true
+    bd_cache_clear
+    got=$(bd_meta_readback "$id" "$meta" "$@")
+    [ "${got%%$'\t'*}" = landed ] && return 0
+  fi
+  if [ "${got%%$'\t'*}" = unreadable ]; then printf 'unreadable\n'; else printf '%s\n' "${got#*$'\t'}"; fi
+  return 1
+}
+
+# bd_unmake <id> <note> [gc-bd-args...] — close a bead its producer filed but no
+# reader can find, so that nothing it carries holds anything. The close carries
+# gc.outcome=abandoned and appends <note>, which names who unmade it and why.
+# The trailing arguments reach the close and its read-back, so a --db sends both
+# to that store. Returns 0 once the bead reads back closed, 1 otherwise: the
+# update's exit cannot say, because `gc bd update` can exit 0 without writing.
+bd_unmake() {
+  local id="${1:-}" note="${2:-}" st
+  shift 2 || true
+  gc bd update "$id" "$@" --status=closed --set-metadata gc.outcome=abandoned --append-notes "$note" \
+    </dev/null >/dev/null 2>&1 || true
+  bd_cache_clear
+  st=$(bd_json show "$id" "$@" </dev/null | jq -r --arg id "$id" '
+    if type == "array" and ((.[0].id // "") == $id)
+    then ((.[0].status // "") | tostring | ascii_downcase) else "" end' 2>/dev/null)
+  [ "$st" = closed ]
+}
+
+# bd_unmake_orphans <select-keys> <title> <note> [gc-bd-args...] — close what a
+# producer that stamped a bead in a second write after its create left behind:
+# an open bead with that producer's <title> in its own, which nobody has taken
+# (no assignee, no route, no pour) and which is short of a key in
+# <select-keys>, the comma-joined keys the producer's probe finds its beads by.
+# No probe can find such a bead, yet a blocks edge it carries still holds its
+# anchor, and the producer files a whole bead beside it. bd_create never leaves
+# one, so this finds only beads filed the older way. Each is closed through
+# bd_unmake and its id printed. Returns 1 when the listing did not answer, else
+# 0. The trailing arguments reach the listing and the closes.
+bd_unmake_orphans() {
+  local sel="${1:-}" title="${2:-}" note="${3:-}" rows oid
+  shift 3 || true
+  rows=$(bd_list --status=open --title-contains "$title" "$@") || return 1
+  while IFS= read -r oid; do
+    [ -n "$oid" ] || continue
+    bd_unmake "$oid" "$note" "$@" && printf '%s\n' "$oid"
+  done < <(printf '%s' "$rows" | jq -r --arg s "$sel" --arg t "$title" '
+    ($s | split(",")) as $sel
+    | .[]
+    | select(((.status // "") | tostring | ascii_downcase) == "open")
+    | select(((.title // "") | tostring) | contains($t))
+    | select(((.assignee // "") | tostring) == "")
+    | ((.metadata // {}) | if type == "object" then . else {} end) as $m
+    | select((($m["gc.routed_to"] // "") | tostring) == "")
+    | select((($m["gc.execution_routed_to"] // "") | tostring) == "")
+    | select(any($sel[]; (($m[.] // "") | tostring) == ""))
+    | .id' 2>/dev/null)
+  return 0
+}
+
+# The keys a validation pass is found by: signoff.sh's machine-lane probe and
+# pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
+# and its lane, so a pass short of one of them is one neither can find.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+VALIDATION_SELECT="task_kind,anchor_bead,check_name"
+
+# validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
+# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
+# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
+# rules the findings whose finding.lane matches it. reviewed_oid pins the head
+# the batch was produced at, which mol-validate needs to back a machine lane; an
+# empty <reviewed-oid> leaves the pin out.
+validation_work_order() {
+  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+    '{task_kind: "validation", anchor_bead: $a, check_name: $l}
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
 }
 
 # The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm

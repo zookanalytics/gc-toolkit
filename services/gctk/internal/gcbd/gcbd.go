@@ -7,7 +7,7 @@
 // answers when the daemon is down. The daemon read is cached and carries no
 // notes, so a write's read-back verification — which must observe the write it
 // just made and must see appended notes — takes the authoritative ShowDirect
-// path instead. Writes (Update) and the Show fallback shell out to `gc`
+// path instead. Writes (Create, Update) and the Show fallback shell out to `gc`
 // exactly as the shell scripts do, which keeps the observability, the stub
 // surface and the permissions surface of those paths identical across the
 // port: the same invocations appear in the same logs, and the same test stubs
@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -324,6 +325,281 @@ func (c *Client) List(args ...string) (rows []Bead, ok bool) {
 // failed or unreadable probe rather than reading it as "no dependencies".
 func (c *Client) DepList(id string, args ...string) (rows []Bead, ok bool) {
 	return c.array(true, append([]string{"bd", "dep", "list", id}, args...)...)
+}
+
+// ErrNotFiled reports a Create that filed nothing a reader can find. Either the
+// metadata had no key or sel named a key it does not carry, or bd refused the
+// create or answered with no id, or the bead stayed short of a sel key (of every
+// key, with no sel) after a second write and was closed. A create whose reply
+// was lost can still have landed whole, so a caller that files again first
+// looks for the bead the way its own dedup does.
+var ErrNotFiled = errors.New("gcbd: create filed nothing")
+
+// ErrUnverified reports a Create whose bead was filed but whose read-back could
+// not be made, or did not show every key as written after a second write.
+// Create returns the id with it. The bead carries every sel key (some key, with
+// no sel), so the caller's next run can find it, and a caller holds off acting
+// on it until then.
+var ErrUnverified = errors.New("gcbd: created bead did not read back as written")
+
+// Create files one bead with meta in the same write and returns its id. It is
+// bd_create in assets/scripts/bd-lib.sh, ported, and keeps that contract.
+//
+// The metadata a bead is born with is what its readers select it by: its
+// task_kind, the anchor it hangs on, the key its producer dedups on. Written in
+// a second update, it is missing whenever that write fails or the create's id
+// never comes back, so no reader can see the bead and the producer's next run
+// files a stamped twin beside it. `gc bd create --metadata` lands the payload
+// in the bead's own row insert, so the bead exists with its metadata or not at
+// all.
+//
+// args are `gc bd create`'s own: the title, -t, --status, --notes, --db and the
+// rest. A non-empty body is the bead's description, sent on stdin through
+// --body-file - so no argv limit bounds it. Create adds --metadata and --json.
+//
+// The bead is read back from the store the create wrote, through the
+// authoritative ShowDirect path, and every key must read back with the value
+// written; values compare as text (readBack). A bead short of a key is written
+// the whole payload once more and read back again. That write carries only the
+// values the create carried, onto a bead filed a moment before.
+//
+// sel names the keys the caller's own probe finds the bead by. A bead still
+// short of one of them is one no later run can find, while an edge it carries
+// can still hold its anchor, so it is closed (gc.outcome=abandoned) and Create
+// reports ErrNotFiled. With no sel, that takes being short of every key. A
+// read-back that fails, or a bead short only of other keys, returns the id with
+// ErrUnverified.
+func (c *Client) Create(meta map[string]any, sel []string, body string, args ...string) (string, error) {
+	if len(meta) == 0 {
+		return "", fmt.Errorf("%w: refusing to file a bead without metadata", ErrNotFiled)
+	}
+	for _, k := range sel {
+		if _, ok := meta[k]; !ok {
+			return "", fmt.Errorf("%w: sel names %q, a key the metadata does not carry", ErrNotFiled, k)
+		}
+	}
+	payload, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("%w: metadata does not encode: %v", ErrNotFiled, err)
+	}
+	full := append([]string{"bd", "create"}, args...)
+	if body != "" {
+		full = append(full, "--body-file", "-")
+	}
+	full = append(full, "--metadata", string(payload), "--json")
+	cmd := exec.Command(c.bin, full...)
+	if body != "" {
+		cmd.Stdin = strings.NewReader(body)
+	}
+	// The exit status is not consulted: a refusal answers with an error object
+	// and a non-zero exit, and the reply alone says which it was.
+	out, _ := cmd.Output()
+	id, reason := createdID(out)
+	if id == "" {
+		if reason != "" {
+			return "", fmt.Errorf("%w: bd create returned no id: %s", ErrNotFiled, reason)
+		}
+		return "", fmt.Errorf("%w: bd create returned no id", ErrNotFiled)
+	}
+	db := dbFlag(args)
+	var dbArgs []string
+	if db != "" {
+		dbArgs = []string{"--db", db}
+	}
+	verdict, short := c.judge(id, meta, dbArgs)
+	switch verdict {
+	case "landed":
+		return id, nil
+	case "unreadable":
+		return id, fmt.Errorf("%w: %s (unreadable)", ErrUnverified, id)
+	}
+	sets := append([]string{}, dbArgs...)
+	for _, k := range sortedKeys(meta) {
+		sets = append(sets, "--set-metadata", k+"="+setValue(meta[k]))
+	}
+	_, _ = c.Update(id, sets...)
+	verdict, short = c.judge(id, meta, dbArgs)
+	switch verdict {
+	case "landed":
+		return id, nil
+	case "unreadable":
+		return id, fmt.Errorf("%w: %s (unreadable)", ErrUnverified, id)
+	}
+	lost := lostKeys(meta, sel, short)
+	if len(lost) == 0 {
+		return id, fmt.Errorf("%w: %s (short: %s)", ErrUnverified, id, strings.Join(short, ","))
+	}
+	note := "Unmade by gctk Create: this bead did not read back carrying " + strings.Join(lost, ",") +
+		", which its producer finds it by, so no reader could find it. Its producer files it afresh."
+	if !c.unmake(id, note, dbArgs) {
+		return "", fmt.Errorf("%w: %s did not read back carrying %s and would not close", ErrNotFiled, id, strings.Join(lost, ","))
+	}
+	return "", fmt.Errorf("%w: %s did not read back carrying %s and was closed", ErrNotFiled, id, strings.Join(lost, ","))
+}
+
+// judge reads id back from the store dbArgs name and judges it against meta
+// (readBack), or reports "unreadable" when the read does not hold the bead.
+func (c *Client) judge(id string, meta map[string]any, dbArgs []string) (string, []string) {
+	rows, ok := c.array(false, append(append([]string{"bd", "show", id}, dbArgs...), "--json")...)
+	if !ok || len(rows) == 0 || rows[0].ID != id {
+		return "unreadable", nil
+	}
+	return readBack(meta, rows[0].Metadata)
+}
+
+// unmake closes a bead no reader can find, so that nothing it carries holds
+// anything, and reports whether it read back closed: an update's exit cannot
+// say, because `gc bd update` can exit 0 without writing. It is bd_unmake in
+// assets/scripts/bd-lib.sh.
+func (c *Client) unmake(id, note string, dbArgs []string) bool {
+	closeArgs := append(append([]string{}, dbArgs...), "--status=closed",
+		"--set-metadata", "gc.outcome=abandoned", "--append-notes", note)
+	_, _ = c.Update(id, closeArgs...)
+	rows, ok := c.array(false, append(append([]string{"bd", "show", id}, dbArgs...), "--json")...)
+	if !ok || len(rows) == 0 || rows[0].ID != id || rows[0].Status == nil {
+		return false
+	}
+	return strings.EqualFold(*rows[0].Status, "closed")
+}
+
+// lostKeys is what makes a bead short of short keys unfindable: the sel keys
+// among them, or with no sel, every key when every key is short.
+func lostKeys(meta map[string]any, sel, short []string) []string {
+	in := map[string]bool{}
+	for _, k := range short {
+		in[k] = true
+	}
+	if len(sel) == 0 {
+		if len(short) == len(meta) {
+			return short
+		}
+		return nil
+	}
+	var lost []string
+	for _, k := range sel {
+		if in[k] {
+			lost = append(lost, k)
+		}
+	}
+	return lost
+}
+
+// setValue is the text a --set-metadata write carries for v: a string as it
+// is, anything else as its JSON, the way bd_meta_ensure writes it.
+func setValue(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// createdID reads the id out of a `gc bd create --json` reply: the bead as an
+// object, or an array holding it. A refusal is a bare {"error": ...} object,
+// whose message comes back as the reason.
+func createdID(out []byte) (id, reason string) {
+	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", ""
+	}
+	if arr, ok := v.([]any); ok {
+		if len(arr) == 0 {
+			return "", ""
+		}
+		v = arr[0]
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	if s, ok := obj["id"].(string); ok && s != "" && s != "null" {
+		return s, ""
+	}
+	if s, ok := obj["error"].(string); ok {
+		return "", s
+	}
+	return "", ""
+}
+
+// dbFlag returns the store a create's args name with --db, in either spelling,
+// so the read-back and the close go to the store the create wrote.
+func dbFlag(args []string) string {
+	db := ""
+	for i, a := range args {
+		if a == "--db" && i+1 < len(args) {
+			db = args[i+1]
+		}
+		if strings.HasPrefix(a, "--db=") {
+			db = strings.TrimPrefix(a, "--db=")
+		}
+	}
+	return db
+}
+
+// readBack judges a created bead's metadata against the payload: "landed" when
+// every key is present with its value as text, "bare" when none is present, and
+// "partial" otherwise, with the keys that are short, sorted. A value's text is
+// jq's tostring of it (tostringText), as bd_meta_judge compares them, so false
+// and null read back as themselves and never as an absent or empty value.
+func readBack(meta, got map[string]any) (string, []string) {
+	present := 0
+	var short []string
+	for _, k := range sortedKeys(meta) {
+		g, ok := got[k]
+		if ok {
+			present++
+		}
+		if !ok || tostringText(g) != tostringText(meta[k]) {
+			short = append(short, k)
+		}
+	}
+	switch {
+	case len(short) == 0:
+		return "landed", nil
+	case present == 0:
+		return "bare", short
+	default:
+		return "partial", short
+	}
+}
+
+// tostringText reproduces jq's `tostring` with no `//` ahead of it: a string is
+// itself, null is "null", a boolean is "true" or "false", and anything else is
+// its JSON. jqString, the `(v // "") | tostring` the accessors read, folds
+// false and null into "", which a read-back must not do.
+func tostringText(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case string:
+		return t
+	case json.Number:
+		return t.String()
+	default:
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return ""
+		}
+		return string(raw)
+	}
 }
 
 // Update runs one `gc bd update`, returning its combined output. Callers pass
