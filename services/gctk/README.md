@@ -7,7 +7,11 @@ results. A port is not a redesign: it keeps the byte-identical CLI of the script
 it replaces, so no formula, order, prompt, or doctor check changes when a port
 lands. `rig` is not a port. No script carried its logic, and its CLI is its own.
 
-Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
+This README states everything gctk holds, and the language rule below says why
+each part is compiled. `specs/2026-08-review-gates/gctk-promotion.md` scopes
+the ports: which scripts port, in what order, and the contract each keeps.
+`specs/tk-1hazlo2/check-gate.md` records why `rig`, which ports nothing, sits
+in gctk.
 
 ## The language rule
 
@@ -17,7 +21,7 @@ Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
 
 Shell stays the pack's lingua franca. Formula steps and prompt fragments can
 only carry shell, and it fits the small glue that remains. The merge-cadence
-cluster is the exception: highest stakes, pure data-plane, no cross-media
+cluster is one exception: highest stakes, pure data-plane, no cross-media
 sharing, and its callers already treat it as an opaque CLI. `pr-status` is
 compiled for the opposite reason: the `status:` label (shell) and the helm
 board (Go) must derive the tri-state from one code path, and only a shared
@@ -35,7 +39,7 @@ to be the exit status of a command the gate ran itself.
 | `rig` | nothing; it is not a port | no formula or script calls it yet |
 
 Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
-`signoff`. The spec's port order is `lifecycle` first (everything else calls
+`signoff`. The port spec's order is `lifecycle` first (everything else calls
 it), then `merge`, then the rest — one subcommand per PR.
 
 `pr-status` is not a cadence port: it is the working | needs-review |

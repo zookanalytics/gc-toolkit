@@ -1,13 +1,13 @@
 // Command gctk is the pack's compiled data plane.
 //
-// SCOPE (specs/2026-08-review-gates/gctk-promotion.md). Shell stays the pack's
-// lingua franca: anything an agent pastes, anything that must read as
-// documentation, anything under ~150 lines. gctk takes the merge-cadence
-// cluster — highest stakes, pure data-plane, and already invoked by its callers
-// as an opaque CLI, so the language behind the command is invisible to them —
-// plus the PR-status tri-state, the derivation the status: label and the helm
-// board must share from one code path, plus `rig`, the gate that runs a rig's
-// declared checks and records each result against the commit it ran at.
+// SCOPE (services/gctk/README.md). Shell stays the pack's lingua franca:
+// anything an agent pastes, anything that must read as documentation, anything
+// under ~150 lines. gctk takes the merge-cadence cluster — highest stakes, pure
+// data-plane, and already invoked by its callers as an opaque CLI, so the
+// language behind the command is invisible to them — plus the PR-status
+// tri-state, the derivation the status: label and the helm board must share
+// from one code path, plus `rig`, the gate that runs a rig's declared checks
+// and records each result against the commit it ran at.
 //
 // Each port keeps the byte-identical CLI of the script it replaces: same
 // flags, same exit codes, same stdout grammar. The scripts' own .test.sh

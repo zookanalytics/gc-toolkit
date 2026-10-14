@@ -1,14 +1,52 @@
 ---
 name: gctk rig check gate, as built
-description: What building the gctk rig gate settled beyond its bead. Covers which formula the check vars resolve through and why that matches a polecat pour, the decisions the bead left open, the measured cost of a record write and a --check read, and what the call-site cutover inherits.
+description: What building the gctk rig gate settled beyond its bead. Covers why the gate sits in gctk although it ports no script, which formula the check vars resolve through and why that matches a polecat pour, the decisions the bead left open, the measured cost of a record write and a --check read, and what the call-site cutover inherits.
 ---
 
 # The `gctk rig` check gate, as built
 
 The bead (tk-1hazlo2) and its ruling (tk-kpanfqm, sitting tk-gxh5whl) fix the
-gate's surface and its record. This records what the build had to find out or
-decide on top of them. The gate's reference is the "The check gate" section of
-`services/gctk/README.md`.
+gate's surface and its record. This records why the gate sits in gctk, and what
+the build had to find out or decide on top of them. The gate's reference is the
+"The check gate" section of `services/gctk/README.md`.
+
+## Why the gate sits in gctk
+
+The ruling put the gate in gctk under a `rig` namespace that is always spelled
+out: agents call it, so its name says that it runs the rig's declared commands.
+It is the first gctk subcommand that ports no script. The port project,
+`specs/2026-08-review-gates/gctk-promotion.md`, scopes the merge-cadence
+cluster, and the gate is outside it. What places the gate is the language rule
+that project set down, which `services/gctk/README.md` carries for everything
+the binary holds:
+
+> Shell for anything an agent pastes, anything that must read as
+> documentation, or anything under ~150 lines. The compiled tool for
+> data-plane logic that writes ledger state.
+
+The gate falls on the compiled side of that rule:
+
+- It writes ledger state. A later call at the commit answers from the gate's
+  record instead of running the check, unless it passes `--force` or the
+  record ran nothing. For `test`, a full-suite pass also answers for every
+  commit with the same tree. `--publish-bead` copies the record onto a bead's
+  `rig_check.<check>` key.
+- The record is machine truth. It holds the exit status of a command the gate
+  ran itself, where the self-review stamp the cutover retires holds an agent's
+  word that its checks passed.
+- An agent pastes the call, never the logic. A caller runs one command and
+  reads its exit code, or the one JSON line `--check` prints.
+- It is well past the size the rule leaves to shell: var resolution, a runner
+  that stops a process group on a timeout or a relayed signal and waits for
+  it, and a record store that writes each file whole and renames it into
+  place.
+
+It keeps the binary's subprocess seams. It reads the vars through
+`gc formula show` and publishes through gcbd, which forks `gc bd update`, and
+links no beads library. The port contract does not bind it, because nothing was
+ported: its CLI is its own, and so is its acceptance bar, the Go tests under
+`services/gctk/internal/rig` and `services/gctk/internal/cli` and the
+`gctk-resolve.test.sh` case that reaches it through `gctk_require`.
 
 ## Var resolution
 
