@@ -233,22 +233,21 @@ A park holds this work that has not started, in the bead and under it:
 - the bead itself and every pool-routed member, because the pool offers only
   what `bd ready` returns;
 - a member placed under the bead later, through the same cascade;
+- an armed member, because deferred dispatch slings an armed bead only when no
+  blocker holds it or any of its ancestors (`assets/scripts/hold-lib.sh`);
 - a sling of the parked bead itself. mol-polecat-work's load-context refuses a
   work bead that has an open blocker of its own: it holds the molecule and arms
   a re-dispatch that fires once the bead's blockers close.
 
-A park does not hold these members:
+An armed member in flight keeps running, such as a rejected handoff armed for a
+retry: once a bead carries `branch`, `merge_result` or `rejection_reason`,
+deferred dispatch reads only its own blockers.
 
-- an armed member, because deferred dispatch slings an armed bead once its own
-  blockers close, without reading its ancestors;
-- a member slung by hand, or a workflow poured before the park, because
-  `gc sling --on` pours without reading any edge and load-context reads no
-  ancestor's blockers.
-
-`park` names the armed members and the poured workflows it leaves unheld. A
-member that must not start gets a park of its own: deferred dispatch waits on an
-armed bead's own blockers, and mol-polecat-work's load-context refuses a bead
-with an open blocker of its own.
+A park does not hold a member slung by hand, or a workflow poured before the
+park, because `gc sling --on` pours without reading any edge and load-context
+reads no ancestor's blockers. `park` names the poured workflows it leaves
+unheld. A member that must not start gets a park of its own, since
+mol-polecat-work's load-context refuses a bead with an open blocker of its own.
 
 ### Releasing a park
 
@@ -257,7 +256,8 @@ waits on it, as closing any blocker does. To release one bead from a gate that
 holds several, remove that bead's edge (`gc bd dep remove <bead> <gate>`). The
 operator closes a park gate once it holds nothing. A released bead returns to
 `bd ready` on the next read, so the pool offers it again if it is routed, and
-its arm fires if it is armed and its other blockers are closed.
+its arm fires if it is armed and no other blocker holds it or any of its
+ancestors.
 
 ### What reads a park as a fault
 
@@ -265,7 +265,8 @@ These readers report a held bead as a fault:
 
 - `doctor/check-blocked-work-armed` reads `bd blocked`, which lists each member
   a park holds, and flags one that has neither a route nor an arm. Its remedy,
-  arming the member, would dispatch it past the park.
+  arming the member, leaves the member held until the park is released, since
+  deferred dispatch reads its ancestors' blockers.
 - The helm board files an epic whose open children sit idle, with nothing in
   flight, under STALLED, so a parked epic reads as stalled. The board's word
   "parked" means a bead carrying a takeaway, not a park.

@@ -29,7 +29,10 @@
 #     at load-context: a pour never claims its bead, so the claim is a run.
 #   - an edge that never reads back fails the verb (exit 4) with the repair; a
 #     create whose answer is lost is recovered from the edge it was born with.
-#   - the summary names what the park holds and what it leaves running.
+#   - the summary names what the park holds and what it leaves running. An
+#     armed member is held, since deferred dispatch reads its ancestors'
+#     blockers, unless it is in flight; no member is reported as armed and
+#     unheld.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped) against a stateful stub
 # `gc`: a JSON store that `bd show`, `bd list`, `bd create` and `bd dep add`
@@ -247,13 +250,16 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
 #   tk-epic          an epic; its members:
 #     tk-epic.1      held
 #     tk-epic.2      in flight: it carries a branch
-#     tk-epic.3      armed
+#     tk-epic.3      armed, so held
 #     tk-epic.4      in flight: claimed (in_progress) and worked with no branch
+#     tk-epic.5      armed and in flight: a rejected handoff armed for a retry
 #     tk-done        closed, so not part of what the park holds
 #     tk-feat        a feature, with members of its own:
 #       tk-feat.1    held, two levels down
 #       tk-feat.2    poured: its workflow tk-r1 waits at load-context
 #       tk-feat.3    in flight: its workflow tk-r2 is past load-context
+#       tk-feat.4    armed, with the workflow tk-r6 that load-context held for
+#                    it (its load-context step blocked): held, as its arm is
 #   tk-solo          a loose task to park
 #   tk-pr            in flight: merge_result=pull_request
 #   tk-rej           in flight: a rejected handoff
@@ -276,6 +282,7 @@ reset_store() {
  {"id":"tk-epic.2","status":"open","issue_type":"task","title":"member on a branch","description":"","metadata":{"branch":"polecat/tk-epic.2"},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-epic.3","status":"open","issue_type":"task","title":"armed member","description":"","metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-epic.4","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.crew","issue_type":"task","title":"member worked inline","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
+ {"id":"tk-epic.5","status":"open","issue_type":"task","title":"rejected handoff, armed for a retry","description":"","metadata":{"rejection_reason":"stale base at head abc123","gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-done","status":"closed","issue_type":"task","title":"closed member","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-feat","status":"open","issue_type":"feature","title":"a feature","description":"","metadata":{},"deps":[{"on":"tk-epic","type":"parent-child"}]},
  {"id":"tk-feat.1","status":"open","issue_type":"task","title":"held two down","description":"","metadata":{},"deps":[{"on":"tk-feat","type":"parent-child"}]},
@@ -288,6 +295,10 @@ reset_store() {
  {"id":"tk-r2","status":"in_progress","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv2"},"deps":[]},
  {"id":"tk-s2a","status":"closed","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r2","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r2","type":"tracks"}]},
  {"id":"tk-s2b","status":"in_progress","issue_type":"task","title":"Implement","description":"","metadata":{"gc.root_bead_id":"tk-r2","gc.step_ref":"mol-polecat-work.implement"},"deps":[{"on":"tk-r2","type":"tracks"}]},
+ {"id":"tk-feat.4","status":"open","issue_type":"task","title":"armed, its workflow held at load-context","description":"","metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},"deps":[{"on":"tk-feat","type":"parent-child"}]},
+ {"id":"tk-cv6","status":"open","issue_type":"convoy","title":"input convoy for tk-feat.4","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-feat.4","type":"tracks"}]},
+ {"id":"tk-r6","status":"open","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv6"},"deps":[]},
+ {"id":"tk-s6","status":"blocked","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r6","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r6","type":"tracks"}]},
  {"id":"tk-solo","status":"open","issue_type":"task","title":"a loose task","description":"","metadata":{},"deps":[]},
  {"id":"tk-pr","status":"open","issue_type":"task","title":"an anchor with a PR","description":"","metadata":{"branch":"polecat/tk-pr","merge_result":"pull_request"},"deps":[]},
  {"id":"tk-rej","status":"open","issue_type":"task","title":"a rejected handoff","description":"","metadata":{"rejection_reason":"Conflicts with main"},"deps":[]},
@@ -375,14 +386,16 @@ grep -q "^bd show tk-epic --db $STUB_RIG_TK/.beads --json" <<< "$(grep -A99 '^bd
   && ok "(TEXT) the edge is read back off the bead after the create" || bad "(TEXT) no read-back after the create (calls: $CALLS)"
 has "$OUT" "park $GATE holds tk-epic: $TEXT" "(TEXT) prints park <gate> holds <bead>"
 HELD="$(grep '^held, not started:' <<< "$OUT" || true)"
-for b in tk-epic tk-epic.1 tk-feat tk-feat.1; do has "$HELD" " $b" "(TEXT) holds $b"; done
-for b in tk-epic.2 tk-epic.3 tk-epic.4 tk-feat.2 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
+for b in tk-epic tk-epic.1 tk-epic.3 tk-feat tk-feat.1 tk-feat.4; do has "$HELD " " $b " "(TEXT) holds $b"; done
+for b in tk-epic.2 tk-epic.4 tk-epic.5 tk-feat.2 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
 has "$OUT" "in flight, keeps running: " "(TEXT) names what stays in flight"
 has "$OUT" "tk-epic.2 (branch polecat/tk-epic.2)" "(TEXT) a member on a branch stays in flight"
 has "$OUT" "tk-epic.4 (in_progress under gc-toolkit/gc-toolkit.crew)" "(TEXT) a claimed member with no branch stays in flight, named with its claimant"
 has "$OUT" "tk-feat.3 (workflow tk-r2 past load-context)" "(TEXT) a member whose workflow passed load-context stays in flight, two levels down"
-has "$OUT" "armed, not held by this park: tk-epic.3" "(TEXT) an armed member is named as not held"
+has "$OUT" "tk-epic.5 (rejection_reason set)" "(TEXT) an armed member in flight stays in flight: only its own blockers hold work that has started"
+hasnt "$OUT" "armed, not held" "(TEXT) no armed member is named as left unheld: deferred dispatch reads its ancestors' blockers"
 has "$OUT" "poured before the park, not held by it: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named as not held"
+hasnt "$(grep '^poured before the park' <<< "$OUT" || true)" "tk-feat.4" "(TEXT) an armed member whose workflow load-context held is not named as poured"
 hasnt "$OUT" "tk-done" "(TEXT) a closed member is not part of the park"
 
 # --- (AGAIN) re-running the same park files no second gate ---------------------
