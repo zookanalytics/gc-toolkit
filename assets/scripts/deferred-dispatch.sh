@@ -780,6 +780,7 @@ reconcile_until() {
     # The candidates are read on fd 3, so no command in the loop can consume them
     # through an inherited stdin.
     local disposed=0 live=0 held=0 waiting=0 blocked=0 left=0 ufailed=0
+    local -a left_ids=()
     local store="" store_rc="" id state succ detail marks fresh verdict rc
     # The owed-since, until-target and blocker columns are the doctor's to report.
     while IFS=$'\t' read -r id state succ _ _ _ detail marks <&3; do
@@ -805,7 +806,7 @@ reconcile_until() {
         fi
         if [ "$DRY_RUN" != 1 ] && ! dispose_fits_budget; then
             [ "$left" -gt 0 ] || echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a disposal needs ${DISPOSE_ALLOWANCE_SECS}s) — starting no further disposals this pass"
-            left=$((left + 1)); continue
+            left=$((left + 1)); left_ids+=("$id"); continue
         fi
         if ! fresh="$(until_fresh bd_ "$id" "$succ")" || [ -z "$fresh" ]; then
             echo "$PROG: WARN could not re-read $id and its edges before disposing it — leaving it for the next pass" >&2
@@ -854,6 +855,11 @@ reconcile_until() {
         esac
     done 3< "$rows"
 
+    if [ "$left" -gt 0 ]; then
+        echo "$PROG: left $left until-resolved bead(s) for the next pass to dispose: ${left_ids[*]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$left until-resolved bead(s) left for the next pass to dispose"
+        for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "disposal left for the next pass"); done
+    fi
     echo "$PROG: until-resolved: $disposed disposed, $live live, $held held, $waiting waiting, $blocked blocked, $left left for the next pass (of $total until-gated)"
     [ "$ufailed" = 0 ]
 }
@@ -1107,23 +1113,16 @@ reconcile_dispatch() {
         !($1 in arms) { order[++n] = $1; arms[$1] = $2; next }
         { arms[$1] = arms[$1] " " $2 }
         END { for (i = 1; i <= n; i++) printf "%s: HELD by %s: %s\n", prog, order[i], arms[order[i]] }' "$heldf"
-    local esc_left="${#esc_left_ids[@]}" reason=""
-    local -a scopes=()
+    local esc_left="${#esc_left_ids[@]}"
     if [ "$left" -gt 0 ]; then
         echo "$PROG: left $left ready bead(s) armed for the next pass: ${left_ids[*]}"
-        reason="$left ready bead(s) left armed for the next pass"
-        for id in "${left_ids[@]}"; do scopes+=("$id" "sling left for the next pass"); done
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$left ready bead(s) left armed for the next pass"
+        for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "sling left for the next pass"); done
     fi
     if [ "$esc_left" -gt 0 ]; then
         echo "$PROG: left the escalation of $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
-        reason="${reason:+$reason, }$esc_left capped bead(s) left for the next pass to escalate"
-        for id in "${esc_left_ids[@]}"; do scopes+=("$id" "escalation left for the next pass"); done
-    fi
-    # The controller reads a declaration only after a run that exits 0, so a pass
-    # with a failure declares nothing. The controller keeps a failed run's output,
-    # and the lines above are in it.
-    if [ -n "$reason" ] && [ "$failed" = 0 ]; then
-        declare_outcome partial "pass budget spent: $reason" "${scopes[@]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to escalate"
+        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "escalation left for the next pass"); done
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
@@ -1164,9 +1163,20 @@ cmd_reconcile() {
     # Each half enumerates on its own, so a half that cannot read its set, or
     # stops short of it, still lets the other run. A failure in either fails the
     # pass.
+    # LEFT_REASON and LEFT_SCOPES gather what the halves leave for the next pass:
+    # the reason's clauses, and the bead and what was left on it, in the pairs
+    # declare_outcome takes.
     local dispatch_rc=0 until_rc=0
+    LEFT_REASON=""; LEFT_SCOPES=()
     reconcile_dispatch || dispatch_rc=1
     reconcile_until || until_rc=1
+    # The pass declares what both halves left in one declaration. The controller
+    # reads a declaration only after a run that exits 0, so a pass with a failure
+    # in either half declares nothing. The controller keeps a failed run's output,
+    # and the lines each half printed about what it left are in it.
+    if [ -n "$LEFT_REASON" ] && [ "$dispatch_rc" = 0 ] && [ "$until_rc" = 0 ]; then
+        declare_outcome partial "pass budget spent: $LEFT_REASON" "${LEFT_SCOPES[@]}"
+    fi
     [ "$dispatch_rc" = 0 ] && [ "$until_rc" = 0 ]
 }
 

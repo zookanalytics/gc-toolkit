@@ -2020,6 +2020,54 @@ has "$out" "2 left for the next pass, 2 failed" "and its summary counts both"
 [ -s "$TMP/outcome-failed.json" ] && bad "a failed pass wrote an outcome declaration: $(cat "$TMP/outcome-failed.json")" \
     || ok "and it writes no declaration the controller would not read"
 
+# The until half spends the same budget, so the disposals it leaves are as much
+# a part of what the pass did not do as the slings, and the one declaration a
+# pass makes names both. A failure in either half fails the pass, so a failed
+# until half leaves no declaration of the slings the dispatch half left.
+echo "# a pass that leaves a disposal declares it, naming the bead"
+store "$THREE_OWED"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-until.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_REHOME_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-until.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+has "$out" "left 1 until-resolved bead(s) for the next pass to dispose: u-3" "its output names the bead it left"
+eq "$(jq -r '.outcome' "$TMP/outcome-until.json" 2>/dev/null)" "partial" "the pass declares itself partial"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-until.json" 2>/dev/null)" "u-3: disposal left for the next pass" \
+    "naming the bead and the disposal left on it"
+
+echo "# a pass whose halves both leave work declares all of it once"
+# 140s, a 30s sling allowance and a 10s disposal allowance: three 40s slings
+# start and the fourth would begin with 20s left, then one 40s disposal starts
+# with 20s left and the other two find the budget gone.
+store "$(jq -cn --argjson a "$FOUR_READY" --argjson b "$THREE_OWED" '$a + $b')"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-both.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 STUB_REHOME_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=140 \
+    DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=10 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-both.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(slings)" "3" "it starts three slings"
+eq "$(rehomes)" "1" "and one disposal"
+eq "$(jq -r '.outcome' "$TMP/outcome-both.json" 2>/dev/null)" "partial" "the pass declares itself partial"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-both.json" 2>/dev/null)" \
+    "b-4: sling left for the next pass,u-2: disposal left for the next pass,u-3: disposal left for the next pass" \
+    "naming every bead either half left, and what it left there"
+has "$(jq -r '.reason' "$TMP/outcome-both.json" 2>/dev/null)" "1 ready bead(s) left armed for the next pass, 2 until-resolved bead(s) left for the next pass to dispose" \
+    "and giving both halves' counts as its reason"
+
+echo "# a pass whose until half fails declares nothing, though its dispatch half left slings"
+store "$(jq -cn --argjson a "$FOUR_READY" --argjson b "$ONE_OWED" '$a + $b')"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-until-failed.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 STUB_REHOME_RC=1 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 \
+    DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=10 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-until-failed.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass whose disposal failed exits 1"
+has "$out" "left 2 ready bead(s) armed for the next pass: b-3 b-4" "its output still names the slings it left"
+[ -s "$TMP/outcome-until-failed.json" ] && bad "a failed pass wrote an outcome declaration: $(cat "$TMP/outcome-until-failed.json")" \
+    || ok "and it writes no declaration the controller would not read"
+
 # --- positive control over the shipped cadence -------------------------------
 # The arm is only half the mechanism: without the order nothing consumes these
 # records and the hold is stranded one layer down instead of in an agent's head.

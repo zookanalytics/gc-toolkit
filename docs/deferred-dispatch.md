@@ -397,8 +397,10 @@ before it prints its summary. So the until half starts a disposal only while
 one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
 left in the same pass budget (`DEFERRED_DISPATCH_PASS_BUDGET_SECS`, 420s from the
 start of the pass, 0 for unpaced). The owed beads past that point wait,
-untouched, for the next pass, and the summary counts them as left for the next
-pass. The budget counts from the start of the pass, so the until half spends
+untouched, for the next pass. The pass names them, its summary counts them as
+left for the next pass, and its `partial` declaration names each one beside
+the slings and escalations the dispatch half left. A failure in either half
+fails the pass, which then declares nothing. The budget counts from the start of the pass, so the until half spends
 only what the dispatch half left, and with nothing left it does not list the
 store at all. The budget sits at least one disposal allowance below the order's
 timeout, so the last disposal a pass starts can run for twice its allowance, and
