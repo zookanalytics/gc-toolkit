@@ -10,6 +10,13 @@ converse-fable and converse-codex sittings — declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
 and no agent patches to wire.
 
+The host needs `flock(1)` on the `PATH` the controller runs orders with. The
+merge cadence (`refinery-reconcile`) and `deferred-dispatch` each take a
+per-rig pass lock with it and refuse to run a pass without one, so on a host
+that lacks it nothing merges and no armed dispatch fires. Linux distributions
+ship it in util-linux; on macOS, run `brew install flock`.
+`check-cadence-live` reports it missing (see [Verification](#5-verification)).
+
 Covered here:
 
 1. [Importing gc-toolkit](#1-importing-gc-toolkit)
@@ -184,7 +191,7 @@ The pack's checks, and what a failure means:
 | `check-gate-marker-provenance` | every green lane on an open gating anchor rests on a verdict `signoff.sh` recorded — a closed approve review bead marked `gc.outcome=recorded`, or an APPROVED GitHub review (I7 depth) | a `check.<lane>=green` that resolves to no backing verdict, or an approve verdict whose outcome was never recorded |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | a running molecule executes the formula text that is current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref, or a formula edited after a live molecule was poured |
-| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), and a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec (I10) | order not registered for a rig, the controller is down, or the `gctk-build` order has never published a binary |
+| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec, and `flock` resolves for the pass locks `refinery-reconcile` and `deferred-dispatch` take (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
