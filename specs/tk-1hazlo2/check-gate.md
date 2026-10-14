@@ -143,12 +143,14 @@ files), timed with bash `EPOCHREALTIME`.
 | `git rev-parse` for the checkout's four facts | median 42 ms (min 10) |
 | `git status --porcelain` | median 53 ms (min 30) |
 | `gctk rig test --check`, end to end | median 182 ms (min 53), n=31 |
-| `gctk rig test --force` with command `true`, end to end | median 308 ms (min 224), n=11 |
+| `gctk rig test --force` with command `true` and a stub `gc`, end to end | median 308 ms (min 224), n=11 |
+| the real `gc formula show mol-polecat-work --rig gc-toolkit --json` | median 234 ms (211-288), n=7 |
 
 A `--check` costs about one gctk start, one `git rev-parse` and one
-`git status`, and the record read adds under a tenth of a millisecond. The gate
-adds about a third of a second around any command it runs: those git calls plus
-`gc formula show`, `bash -n` and the record write.
+`git status`, and the record read adds under a tenth of a millisecond. A run
+the gate makes costs those plus the real `gc formula show`, `bash -n` and the
+record write, about half a second around the command itself. An answer from a
+record skips everything after the lookup.
 
 ## What the cutover inherits
 
