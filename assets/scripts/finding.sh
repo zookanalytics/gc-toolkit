@@ -662,10 +662,10 @@ cmd_set_disposition() {
   # The finding keeps what its current disposition holds until the commit, too. An
   # arm that replaces a must-fix ruling releases that ruling's hold on the anchor
   # only after its own commit lands, so a failure anywhere before the commit leaves
-  # the finding must-fix and still holding the merge. A deferral or decline closes
-  # the finding in its commit, and the edge left on a closed finding holds nothing:
-  # bd refuses a close only on a live blocker, and the merge counts only live
-  # blockers.
+  # the finding must-fix and still holding the merge. A deferral, decline or
+  # restates ruling closes the finding in its commit, and the edge left on a
+  # closed finding holds nothing: bd refuses a close only on a live blocker, and
+  # the merge counts only live blockers.
   case "$disp" in
     must-fix)
       # The hold merge.sh's blocker probe already reads. Idempotent: a re-run
@@ -855,15 +855,16 @@ cmd_set_disposition() {
     restates)
       # No point of its own: the inline comments it frames are each ruled, and
       # this closes holding nothing and owing no answer, like a no-objection
-      # decline, but it reads as neither a refusal nor a second hold.
-      if edge_exists "$finding" "$anchor"; then
-        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 || true
-      fi
+      # decline, but it reads as neither a refusal nor a second hold. As with a
+      # decline, every blocker wired INTO it goes just before the close, and its
+      # own must-fix hold on the anchor once the close lands.
       strip_inbound_blocks "$finding"
       local rnote="restates its review's inline comments"
       [ -n "$reason" ] && rnote="$rnote: $reason"
       gc bd update "$finding" --set-metadata finding.disposition=restates ${words[@]+"${words[@]}"} --status=closed --append-notes "$rnote" >/dev/null 2>&1 \
         || { warn "could not close restates finding $finding"; exit 2; }
+      release_hold "$finding" "$anchor" \
+        || warn "restates $finding still blocks $anchor after its close; the edge on a closed finding holds nothing"
       ;;
     needs-you)
       # The objection turns on a call only the operator can make, so this ruling

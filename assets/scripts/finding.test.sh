@@ -1223,6 +1223,22 @@ eq "$(meta "$FRB" 'finding.reply')" "<absent>" "…owing no answer"
 hasnt "$(deps)" "$FRB|blocks|" "…and holding nothing"
 has "$(notes "$FRB")" "restates its review's inline comments: it lists the inline finding" "…with its reason in the notes"
 eq "$(meta "$FRB" 'finding.label')" "Summary of the inline points" "…and the label the ruling gave it"
+# A body ruled must-fix, then restates, gives up that hold only once its close
+# has landed: a refused close leaves it must-fix, open and still blocking the
+# anchor. The clean re-run strips a blocker wired onto it before the close, which
+# bd would refuse while that blocker is open.
+store "$(jq -c '. + [{"id":"fuRb","status":"open","assignee":"","title":"a bead that blocks a finding","notes":"","metadata":{}}]' "$STUB_STORE")"
+FRM=$(human_finding tk-ancR "PR review" "Two issues; both are in the inline comments." 9300 9300)
+human_finding tk-ancR "c.sh:1" "The retry files a second follow-up." 9301 9300 >/dev/null
+"$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition must-fix >/dev/null
+has " $(probe_blockers tk-ancR) " " $FRM " "a review body ruled must-fix holds the anchor"
+STUB_CLOSE_FAIL="$FRM" "$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(meta "$FRM" 'finding.disposition')|$(bstatus "$FRM")" "2|must-fix|open" "a restates ruling whose close is refused exits 2 and leaves the finding must-fix and open"
+has " $(probe_blockers tk-ancR) " " $FRM " "…still blocking the anchor through the probe the merge runs"
+gc bd dep fuRb --blocks "$FRM" >/dev/null
+STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition restates; rc=$?
+eq "$rc|$(meta "$FRM" 'finding.disposition')|$(bstatus "$FRM")" "0|restates|closed" "the clean re-run commits restates"
+hasnt "$(deps)" "$FRM|blocks|tk-ancR" "…and releases the hold once it has"
 
 # The words a review's living answer shows ride the ruling's own write.
 "$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition declined --reason "already handled" \
