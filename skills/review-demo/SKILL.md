@@ -24,7 +24,8 @@ Triage adds `demo` when the diff changes a surface a person looks at:
 - a rendered page, component, board, or dashboard;
 - a layout or styling change;
 - a new or changed interactive flow;
-- output a person reads in a terminal, such as a command's report.
+- output a person reads in a terminal, such as a command's report;
+- markdown the city posts on GitHub, such as a review comment or a PR body.
 
 Logic, refactors, internal plumbing, tests, and docs read as text need no
 visual, and triage adds nothing for them. That is the common case. The default
@@ -62,7 +63,7 @@ When a visual helps, pick the cheapest one that conveys the change.
 | Modality | What it shows | Pick it when |
 |---|---|---|
 | `repo-artifact` | a visual the repo already carries: a diagram, an image, or a clip in the diff or named by the change | a committed visual already shows what changed, so nothing needs capturing |
-| `screenshot` | one rendered state | a single frame carries the change: a page, a board, a layout |
+| `screenshot` | one rendered state of an app page, of a command's output in a terminal, or of markdown as GitHub renders it | a single frame carries the change: a page or a board, a report a command prints, a comment the city posts |
 | `video` | motion, or a flow across several steps, with narration | the change happens over time: an interaction or a sequence |
 
 Prefer the cheaper modality unless the change needs the richer one. A static
@@ -126,8 +127,45 @@ reports whether the `gh` it needs is present.
   change adds, edits, moves or copies it, or leaves it unchanged, and the commit
   that last changed it. The delivery's last line says the same, and the verdict
   body repeats it.
-- `screenshot`: this pack has no production path for it. Record the modality
-  you picked and approve with the note that it fits and was not delivered.
+- `screenshot`: render the one state that shows the change and capture it with
+  `assets/scripts/demo-screenshot.sh`, which saves a PNG from the headless
+  browser the video capture drives. Its subcommand is the kind of surface the
+  change affects:
+
+  ```bash
+  cd "$(dirname "$REVIEW_WT")"
+  # An app page: a demo:capture script drives the app to the state.
+  hb "$SCRIPTS/demo-screenshot.sh" page --script shot.md --output <name>.png <app target>
+  # A command's output, as a terminal shows it.
+  hb "$SCRIPTS/demo-screenshot.sh" terminal --command "<command>" --cwd "$REVIEW_WT" --output <name>.png
+  # Markdown, such as a comment the city posts, as GitHub shows it.
+  "$SCRIPTS/demo-screenshot.sh" markdown --file comment.md --output <name>.png
+  ```
+
+  For a page, write the script as you would for a video
+  (`skills/gc-demo-script/SKILL.md`). Its steps drive the app to the state, the
+  capture is the state the last step leaves, and the app target is the one a
+  video takes. `--selector <css>` captures one element instead of the viewport,
+  and `--full-page` captures the whole page. For a terminal, the command runs
+  with bash from `--cwd`, so a relative path runs the reviewed commit's script.
+  The capture shows the command after a `$` prompt, then what it printed. Run
+  only a command that reads, because one that files, routes or closes anything
+  does it in the live city. `--text <file>` renders output captured earlier
+  instead. For markdown, write the markdown the reviewed commit composes to the
+  file. GitHub's own markdown renderer turns it into HTML in the context of the
+  rig's origin, so the capture shows it as the PR would. GitHub shows a
+  `<details>` block collapsed, and `--expand` opens every one, for a second
+  capture of what the collapsed blocks hold.
+
+  Keep the PNG beside the script, and name it for what it shows, because the
+  file's name is the image's alt text on the PR. Exit 0 is a capture. For a
+  page, exit 3 is a capture in which at least one step failed its proof. Exit 1
+  is no capture. The last line names the PNG and its size, and for a command it
+  gives the command's exit status. Open the PNG before you deliver it:
+
+  ```bash
+  "$SCRIPTS/demo-deliver.sh" --file <name>.png --subject <anchor> --body "<what it shows, and what it was rendered from>"
+  ```
 
 When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
@@ -145,13 +183,14 @@ in which the surface errors, a flow breaks, or a step fails against what the
 change claims is a finding against the change. Request changes, and name the
 visual as the evidence.
 
-A video capture that exits 3 recorded a step whose proof failed. The engine's
-step lines name that step and the assertion that did not hold. A capture run
-with `--mode proof` also keeps a screenshot of every step in the working
-directory its last line names. Read them to tell whether the change fails or
-the script asserted the wrong thing. A change that fails is the finding above,
-and the clip is its evidence to deliver. A script that asserted the wrong thing
-is yours to correct before you capture again.
+A video capture or a page screenshot that exits 3 recorded a step whose proof
+failed. The step lines name that step and the assertion that did not hold. A
+video capture run with `--mode proof` also keeps a screenshot of every step in
+the working directory its last line names, and a page screenshot shows the
+state its steps left. Read them to tell whether the change fails or the script
+asserted the wrong thing. A change that fails is the finding above, and the clip
+or the screenshot is its evidence to deliver. A script that asserted the wrong
+thing is yours to correct before you capture again.
 
 A capture that cannot run for a reason outside the change is not a finding. The
 capture toolchain may not resolve, the rig may have no app to serve, or no
@@ -184,7 +223,8 @@ a visual helps, the modality and why it is the cheapest that conveys the change;
 and where the visual was delivered, or what stopped it. A delivered video's
 sentence also says whether the clip is narrated or silent. A delivered
 repo-artifact's sentence also says where the visual came from, as its delivery
-comment does.
+comment does. A delivered screenshot's sentence also says what it was rendered
+from: the reviewed commit, and any fixture that stands in for live data.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
@@ -195,8 +235,9 @@ comment does.
   modality delivered with `--visual` and the one that fits with
   `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
-  say that a visual is warranted and what stopped it: no production path in this
-  pack, a capture toolchain that does not resolve, or no running app to capture.
+  say that a visual is warranted and what stopped it: a surface none of these
+  captures renders, a capture toolchain that does not resolve, or no running app
+  to capture.
   This never blocks. A rework child cannot build the city's capture capability,
   and a red lane would keep the PR in draft, away from the human who would judge
   it.
