@@ -1,27 +1,38 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How new work reaches a work pool under the operator's steering. It states the intake rule for which beads may be routed or armed to a pool, the placement=pending marker that holds every other bead, the writers that follow the rule, how an emergency is checked, the placement sitting's queue (gc-helm.sh unplaced), and how the sitting places a bead. Read it before writing anything that files, routes or arms new work.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. Read it before writing anything that files, routes or arms new work, before parking or releasing work, or before changing a reader that must see a park.
 ---
 
 # Steering
 
-The operator steers the city's capacity by deciding which work runs. New work
-reaches a work pool once the operator has placed it, and not on its own.
+The operator steers the city's capacity by deciding which work runs, and when.
+New work reaches a work pool once the operator has placed it, and not on its
+own. An epic is an ordinary bead, and each move acts on a bead and everything
+under it, with no logic for epics alone. A park holds work under a bead that
+has not started and leaves work already in flight running. Which work it holds,
+and which it does not, is [below](#what-a-park-holds).
 
 ## Scope
 
 **Mandate.** Which beads may enter a work pool and what holds the rest: the
 intake rule, the `placement=pending` marker and the writers that set it, the
-emergency check, the placement sitting's queue, and how a bead is placed.
+emergency check, the placement sitting's queue, and how a bead is placed. How
+the operator decides when work runs: the steering moves, the state each move
+writes, what that state holds and what it leaves running, and how each move is
+released.
 
 **Boundaries.** The design that decides how work is steered by epic, with the
-units that build it, is
+alternatives it rejected and the units that build it, is
 [specs/tk-rl8gz4b.2/steer-by-epic.md](../specs/tk-rl8gz4b.2/steer-by-epic.md);
-this page states what runs. What an epic is, and what it carries, is
-[epics.md](epics.md). How a pool claims routed work is
-[gascity-routing-model.md](gascity-routing-model.md). The first reaction's
-method is `agents/proactive/prompt.template.md`, and who may route, arm or hold
-a bead is [authority-map.md](authority-map.md).
+this page states what runs. What an epic is, what it carries, and when it
+closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
+blocked flag cascades and a pool reads it, is
+[gascity-routing-model.md](gascity-routing-model.md). The hold, the demand and
+the shape law a park follows are invariant I1 in
+[component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law).
+The first reaction's method is `agents/proactive/prompt.template.md`, and who
+may route, arm or hold a bead, or make each steering move, is
+[authority-map.md](authority-map.md).
 
 ## The intake rule
 
@@ -130,3 +141,140 @@ For each bead in the queue, the sitting does one of three things.
 A placed bead leaves the queue as soon as it has a parent or a route. Clearing
 the marker (`gc bd update <bead> --unset-metadata placement`) keeps the bead's
 record honest, and nothing waits on it.
+
+## A park
+
+A park is an ordinary blocker: a `blocks` edge from the parked bead onto an open
+bead in the same store. bd marks a bead blocked when it, or any of its
+parent-child ancestors, has an open blocker, and `bd ready` leaves a blocked
+bead out. So a park on an epic takes the epic and every member under it out of
+`bd ready`. No reader tells a park from any other blocker, and none needs to.
+
+### Parking a bead
+
+```
+gc-helm.sh park <bead-id> "<text>" [--body "<detail>"]
+gc-helm.sh park <bead-id> --waiting-on <bead-id>
+```
+
+The text form files a gate of its own and makes the bead wait on it. The gate is
+`issue_type=gate`, titled with the text, which says why the bead is parked and
+what releases it. The text is required. It is one line of at most 140
+characters, refused over the cap rather than cut, the rule a demand's title
+follows. `--body` is the gate's description. The gate carries no await type, no
+`gc.demand_for` and no hold marker, so no sweep closes or visits it. It is filed
+in the bead's own store, because bd resolves an edge only within one store, and
+it is born with the bead's edge in one write. Who parked the bead, and when, are
+the gate's creator and creation time. Re-running the text form with the same
+text files no second gate. A `--body` on the re-run becomes that gate's
+description, which is how the detail of a park is corrected.
+
+`--waiting-on` parks the bead behind a bead that already exists and files no
+gate. Naming another park's gate parks one more bead for the same reason.
+Naming a task parks the bead until the task closes. A park takes one form or the
+other, never both.
+
+Either form reads the edge back off the bead before it reports success, and then
+prints what the park holds and what it leaves running.
+
+`park` refuses:
+
+- a bead in flight, because its own edge would hold its merge and its close
+  (next section);
+- a demand gate as the bead to wait on. A demand gate is a wait on the
+  operator's decision, and the operator ruled that such a wait does not hold
+  armed work. The refusal names the text form, whose gate can name the decision
+  the park waits for;
+- a closed bead to park or to wait on, a bead in another store to wait on, and
+  one of the bead's own parts to wait on, since each edge would hold nothing or
+  bd refuses it.
+
+### In flight
+
+A bead is in flight once work on it has started, which any of these shows:
+
+- someone has claimed it, so its status is `in_progress` or `hooked`, bd's
+  claim statuses;
+- it carries `branch`, `merge_result` or `rejection_reason`;
+- a workflow poured for it has passed load-context. A pour sets its own root
+  `in_progress` and never claims the bead it was poured for, so the bead's
+  status does not show that run.
+
+A park leaves work in flight running:
+
+- A claimed bead stays with whoever claimed it. `bd ready` never offers a
+  claimed bead, so the cascade, which works by keeping beads out of `bd ready`,
+  changes nothing for it.
+- A poured workflow is out of the cascade's reach. Its root has no parent, and
+  its steps hang off the root by `tracks` edges, which bd does not cascade.
+- PR-finishing work, such as a review rework, a merge-in, a red-check fix or a
+  validation pass, carries `anchor_bead` and a `blocks` edge to its anchor,
+  never a parent edge.
+- An anchor under a parked epic still merges and closes. `merge.sh` reads the
+  anchor's own blockers, its children and the beads that name its PR, never its
+  parent. bd refuses a close only for open children or a live direct blocker.
+
+That is why `park` refuses a bead in flight. The bead's own edge would be a live
+direct blocker, so `merge.sh` would hold its merge and bd would refuse its close.
+Parking its parent instead holds the rest of the parent's work and leaves the PR
+landing.
+
+A park leaves a rejected handoff running too. When the refinery rejects a
+handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
+dispatches the rebuild as a fresh `mol-polecat-work` pour. The cascade does not
+reach a poured workflow, and load-context reads only the bead's own blockers,
+so the rebuild runs. When that sling fails, the script arms a retry, which
+deferred dispatch slings once the bead's own blockers close.
+
+### What a park holds
+
+A park holds this work that has not started, in the bead and under it:
+
+- the bead itself and every pool-routed member, because the pool offers only
+  what `bd ready` returns;
+- a member placed under the bead later, through the same cascade;
+- an armed member, because deferred dispatch slings an armed bead only when no
+  blocker holds it or any of its ancestors (`assets/scripts/hold-lib.sh`);
+- a sling of the parked bead itself. mol-polecat-work's load-context refuses a
+  work bead that has an open blocker of its own: it holds the molecule and arms
+  a re-dispatch that fires once the bead's blockers close.
+
+An armed member in flight keeps running, such as a rejected handoff armed for a
+retry: once a bead carries `branch`, `merge_result` or `rejection_reason`,
+deferred dispatch reads only its own blockers.
+
+A park does not hold a member slung by hand, or a workflow poured before the
+park, because `gc sling --on` pours without reading any edge and load-context
+reads no ancestor's blockers. `park` names the poured workflows it leaves
+unheld. A member that must not start gets a park of its own, since
+mol-polecat-work's load-context refuses a bead with an open blocker of its own.
+
+### Releasing a park
+
+Unparking closes the gate (`gc bd close <gate>`), which releases every bead that
+waits on it, as closing any blocker does. To release one bead from a gate that
+holds several, remove that bead's edge (`gc bd dep remove <bead> <gate>`). The
+operator closes a park gate once it holds nothing. A released bead returns to
+`bd ready` on the next read, so the pool offers it again if it is routed, and
+its arm fires if it is armed and no other blocker holds it or any of its
+ancestors.
+
+### What reads a park as a fault
+
+These readers report a held bead as a fault:
+
+- `doctor/check-blocked-work-armed` reads `bd blocked`, which lists each member
+  a park holds, and flags one that has neither a route nor an arm. Its remedy,
+  arming the member, leaves the member held until the park is released, since
+  deferred dispatch reads its ancestors' blockers.
+- The helm board files an epic whose open children sit idle, with nothing in
+  flight, under STALLED, so a parked epic reads as stalled. The board's word
+  "parked" means a bead carrying a takeaway, not a park.
+
+### Where a park goes
+
+A blocker on a bead with children holds every part of it, so such a bead carries
+one only for a wait that belongs to all of its parts: a park on an epic, or a
+prerequisite of all of an epic's work. A wait that belongs to one part goes on
+that part. This is I1's shape law in
+[component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law).
