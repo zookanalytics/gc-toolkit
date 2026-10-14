@@ -18,7 +18,8 @@
 // Ported so far: lifecycle, merge and pr-status. rig is not a port: no script
 // carried its logic, and its CLI is its own (services/gctk/README.md). The rest
 // of the merge-cadence cluster (gate-ensure, pr-open, pr-facts,
-// convoy-graduate, signoff) still runs as shell. lifecycle and merge have no shell fallback:
+// convoy-graduate, signoff) still runs as shell. lifecycle and merge have no
+// shell fallback:
 // assets/scripts/lifecycle.sh and assets/scripts/merge.sh only exec this
 // binary, and refuse the call when there is none to run. pr-status has none by
 // design — its tri-state lives only in gctk so the status: label and the helm

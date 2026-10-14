@@ -965,14 +965,16 @@ keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
 # the bead.
 keys = ["rig_check.test", "rig_check.lint", "rig_check.typecheck"]
 # rig_check.test, rig_check.lint, rig_check.typecheck — the record the
-#   publishing call answered with, as one JSON object: result, method, commit,
-#   tree, exit_code, duration_ms, runner, recorded_at and command, and on a fail
-#   a caller marked pre-existing, disposition and tracker. The gate writes it
-#   after a run, after answering from a record, and after marking a fail
-#   pre-existing, and reads it back once to confirm the write. No other pack
-#   path reads it. Absent means no call published that check to the bead. Never
-#   cleared: the next publish replaces it, and its commit names the head it
-#   describes. A JSON object stored as a string.
+#   publishing call answered with, as one JSON object: check, result, method,
+#   commit, tree, exit_code, duration_ms, runner, recorded_at and command, and
+#   on a fail a caller marked pre-existing, disposition and tracker. The gate
+#   writes it after a run, after answering from a record, and after marking a
+#   fail pre-existing, and reads it back once to confirm the write. No other
+#   pack path reads it. Absent means no call published that check to the bead.
+#   Never cleared: the next publish replaces it. Its commit is the one the check
+#   ran at: the head the call answered for, or, for a full-suite test pass
+#   answered through the tree, an earlier commit with the same tree. A JSON
+#   object stored as a string.
 
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
