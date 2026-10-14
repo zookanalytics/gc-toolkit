@@ -61,6 +61,7 @@ GC
 cat > "$BIN/lifecycle" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
+echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
 chmod +x "$BIN/gc" "$BIN/lifecycle"
 export PATH="$BIN:$PATH"
@@ -175,7 +176,7 @@ git init -q -b main "$C/cwd"; commit "$C/cwd" "control cwd" >/dev/null
 eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered in the cwd repo"
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
-# --- 3. mol-review: the review's test worktree. --------------------------------
+# --- 3. mol-review: the review's worktree. -------------------------------------
 # The worktree lives in the review's workspace, made by review-workspace.sh add
 # and removed by the verdict step's remove line.
 echo "── mol-review: review-workspace-add and review-workspace-remove ──"
@@ -310,6 +311,11 @@ block "$PATROL_TOML" shared-branch-push-mode "$TMP/push.sh"
 eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its repo with -C"
 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
+# The pack, where the prep block finds detached-job.sh to stop a gate left
+# running in the prep worktree. It is named by path, so the cwd plays no part.
+PACK_CITY="$TMP/pack-city"
+mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/detached-job.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -320,7 +326,7 @@ prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   git -C "$d/seed" push -q "$d/origin.git" polecat/wb
   STALE=$(git -C "$d/rig" rev-parse origin/polecat/wb)
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET_BRANCH_DEFAULT=main \
+  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" GC_CITY_PATH="$PACK_CITY" WORK=wb TARGET_BRANCH_DEFAULT=main \
       FAKE_META="$TMP/meta.json" FAKE_LOG="$d/gc.log" bash "$TMP/prep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
@@ -370,6 +376,9 @@ for mode in env roster; do
       ok "direct-merge/$mode: recorded and closed through one lifecycle transition" ;;
     *) bad "direct-merge/$mode: recorded and closed through one lifecycle transition" "$(cat "$D/lc.log" 2>/dev/null || true)" ;;
   esac
+  # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
+  # gets the rig this block resolved, from the roster too.
+  eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
   eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: the merge worktree is unregistered on exit; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
   eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: the scratch directory is removed on exit"

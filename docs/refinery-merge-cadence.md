@@ -71,10 +71,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    request and times out on about a hundred at once, so the read pages 25 PRs at
    a time. The arm keeps, in `pr-posture.seen` in the pass state dir, the facts
    each posture was last derived from: those PR facts with the anchor's
-   watermarks, its provenance cutover, the acting login, and a checksum of the
-   script and of the city's own-post definition. An anchor whose facts all read
-   the same, and whose bead still carries that posture at that head, keeps it
-   with no per-PR read, and its merge state is recorded from the batched read.
+   watermarks, its provenance cutover, its lift line (`bring_current_lifted_at`),
+   the acting login, and a checksum of the script and of the city's own-post
+   definition. An anchor whose facts all read the same, and whose bead still
+   carries that posture at that head, keeps it with no per-PR read, and its
+   merge state is recorded from the batched read.
    Any other anchor is read whole, as every anchor is when the batched read
    fails. A `commented` posture keeps no basis, because a routing or a visit can
    release it with nothing on the PR moving, and neither does a posture an
@@ -131,7 +132,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
    validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
-   that the merge result keeps `generated/seed-audit` current, re-read the full
+   that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record in one lifecycle
    transition, which `gctk merge` runs in-process. The posture it validates is
@@ -193,21 +194,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    branch-local, a rebase replays commits without running it, and `-diff` in
    `.gitattributes` keeps the clobber out of the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
-   `render-seed-audit.sh --check-merge` re-hashes the merged tree's inputs and
-   compares them against `generated/seed-audit/SOURCES.txt` in that same tree.
-   That costs hashes rather than a render, and needs no `gc` binary. A drifting
-   input, or a probe that cannot answer, holds the merge and files one visit per
-   PR under `seed-audit-merge-gate.<n>`, naming the inputs that moved. Nothing
-   is routed from here: the way out is to bring the head branch current with
-   its base, re-render, and push.
+   `render-seed-audit.sh --check-merge` renders the tree `git merge-tree`
+   writes, with the renderer that tree carries. A file passes when the merge
+   commits it exactly as rendered. A file that fails that test still passes
+   when the merge leaves it as the base commits it and it renders the same on
+   the base as on the merge: the base was already stale there, so the check
+   reports it as the base's own staleness and holds nothing on it. That second
+   test needs a render of the base too, which runs only when some file fails
+   the first, so a check costs one render or two, and needs `gc` on the
+   refinery's host. Any other file, or a probe that cannot answer, holds the
+   merge and files one visit per PR under `seed-audit-merge-gate.<n>`, naming
+   each file and why it failed. Nothing is routed from here: the way out is to
+   bring the head branch current with its base, re-render, and push.
 
-   That manifest is one record per input rather than one digest over all of
-   them, and the shape is what keeps this artifact out of the queue's way. A
-   repo-global value in a per-branch committed file moves on every seed-input
-   edit, so two PRs touching two unrelated agents collide on it whatever else
-   they do; per-input records move only where the input moved. The record is
-   two lines, path then hash, because git needs one unchanged line between two
-   changes to merge them and neighbouring entries in a flat list leave none.
+   What the artifact commits is chosen to stay out of the queue's way. A line
+   that moves on every edit to one agent's prompt, committed beside the lines
+   of every other agent, collides two PRs that touched two unrelated agents
+   whatever else they do. So `generated/seed-audit/` holds the renders and an
+   `INDEX.md` that moves only when the pack's composition moves, and byte and
+   token counts print on request (`render-seed-audit.sh --sizes`).
 3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
    and ahead of every other arm, because it is what puts a green branch in
    front of the operator for the approval merge waits on. merge reads none of
@@ -388,8 +393,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    approved PR only, by the approval rule merge.sh lands on; the child's
    handoff runs `bring-current-guard.sh`, which refuses it until the worker's
    audit covers every conflict and, when the round conflicted, reopens triage
-   to rule on what it reopens and whether the approval stands, or rules closed
-   itself on an anchor that declares no triage lane
+   to rule on what it reopens and whether the approval stands, adding triage
+   to an anchor whose `check_set` declares no triage lane, or, on the `none`
+   or `off` opt-out, lifting the approval itself; a ruling that lifts the
+   approval draws `bring_current_lifted_at`, before which no approval counts,
+   and files no visit
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting or rewriting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
@@ -450,8 +458,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    those only the ones naming the comment when any do. It says Fixed when the
    comment's must-fix finding closed with that rework. It never names the PR
    head for being the head, since the head can be a merge of the base. A
-   finding ruled needs-you keeps its comment awaiting a person, and its owed
-   reply is the answer, leading with the question mark. A declined or deferred
+   finding ruled needs-you keeps its comment awaiting a person while it is
+   open, and its owed reply is the answer, leading with the question mark. A
+   declined or deferred
    finding's owed reply is its comment's answer too. That reply leads with the
    ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
    the PR tells a fix from a pushback, and the comment trades EYES for
@@ -461,7 +470,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A review
+   accept or overrule, as a needs-you finding's does until they rule. A
+   needs-you finding closes once the visit holding its question, followed
+   through any fold, has closed carrying the operator's ruling and no fix unit
+   on its lane, nor a ruling's rework child, is in flight, and its comment then
+   resolves through its batch's bead like any other. A visit closed moot,
+   benign, dismissed or cut short carries no ruling and releases nothing. A review
    body or a Conversation comment has no thread, so a Conversation comment of
    the city's links to the
    comments one bead answers and carries their answer. The routing arm leaves
@@ -803,10 +817,23 @@ never invisible.
 The live `rigs/*` checkouts are what the runtime executes, and `merge.sh`
 lands PRs via GitHub — so a merged PR is **not live** until
 `orders/reconcile-rig-checkouts.toml` (every 15m, city-scoped) fast-forwards
-each rig checkout: `git fetch origin && git merge --ff-only origin/<default>`.
-`--ff-only` mutates nothing on divergence or a conflicting dirty file; on a
-refusal the script files one idempotent visit per blocked rig (via
-`escalate.sh`, carrying `git status` + `git log <remote>..HEAD`) and
-auto-closes it once the rig fast-forwards cleanly. The 15-minute window is
-also the exposure behind component-model I9, watched by
-`doctor/check-pour-text-current`.
+each rig checkout:
+`git fetch origin && git merge --ff-only --no-overwrite-ignore origin/<default>`.
+`--ff-only` mutates nothing on divergence, on a local change to a path the
+incoming commits rewrite, or on untracked content in the way of what they write,
+and `--no-overwrite-ignore` makes that include an ignored file, which git
+otherwise overwrites. A refusal gets one heal first, and each heal acts only
+when nothing is lost. A checkout that is only behind sets aside the local
+changes on those paths and fast-forwards, when each working copy is absent,
+committed, upstream or on a pushed branch. It pins the staged and working-tree
+state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
+a dirty path the fast-forward does not rewrite, such as local bd config, as it
+is. Untracked content in the way of the fast-forward, an ignored file included,
+goes only when it is a file that already holds the incoming bytes on its own
+path. A diverged checkout resets to the remote when its content is provably
+upstream, with `git checkout --no-overwrite-ignore -B`, which refuses rather
+than overwrites or deletes untracked content in its way, ignored or not.
+Anything else files one idempotent visit per blocked rig (via `escalate.sh`,
+carrying what blocked it and `git status`), which auto-closes once the rig
+fast-forwards cleanly. The 15-minute window is also the exposure behind
+component-model I9, watched by `doctor/check-pour-text-current`.

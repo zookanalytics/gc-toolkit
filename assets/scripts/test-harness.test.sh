@@ -171,6 +171,31 @@ eq "$(jq 'length' "$STUB_STORE")" "3" "…and creates nothing"
 if STUB_CREATE_GARBAGE=1 gc bd create "lost" --json | jq -e . >/dev/null 2>&1; then bad "STUB_CREATE_GARBAGE answered parseable JSON"; else ok "STUB_CREATE_GARBAGE answers a reply no JSON reader parses"; fi
 eq "$(jq -r '.[] | select(.id == "new-4") | .title' "$STUB_STORE")" "lost" "…while the create still lands"
 
+# --deps lands its edges with the bead, oriented the way real bd orients each
+# spelling (probed against bd 1.3.1): blocks:<id> makes <id> depend on the new
+# bead; a bare id, depends-on:<id> and blocked-by:<id> make the new bead depend
+# on <id> through a blocks edge; any other <type>:<id> makes the new bead depend
+# on <id> with that type. The rows read back through the dep stub's own queries.
+store '[{"id":"tk-anc","status":"open","assignee":"","title":"a","notes":"","metadata":{}},{"id":"tk-sub","status":"open","assignee":"","title":"s","notes":"","metadata":{}}]'
+: > "$STUB_DEPS"
+gc bd create "review" -t task --metadata '{"task_kind":"review"}' --deps "blocks:tk-anc" --json >/dev/null
+eq "$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | join(",")')" "new-3" \
+  "create --deps blocks:<id>: the new bead blocks <id>"
+gc bd create "visit" -t task --deps "tracks:tk-sub" --json >/dev/null
+eq "$(gc bd dep list new-4 --direction=down -t tracks --json | jq -r '[.[].id] | join(",")')" "tk-sub" \
+  "create --deps tracks:<id>: the new bead tracks <id>"
+gc bd create "waits" -t task --deps "tk-sub" --json >/dev/null
+gc bd create "waits2" -t task --deps "blocked-by:tk-sub" --json >/dev/null
+gc bd create "waits3" -t task --deps="depends-on:tk-sub" --json >/dev/null
+eq "$(gc bd dep list tk-sub --direction=up -t blocks --json | jq -r '[.[].id] | sort | join(",")')" "new-5,new-6,new-7" \
+  "create --deps <id>, blocked-by:<id> and depends-on:<id>: each new bead is blocked by <id>"
+gc bd create "two" -t task --deps "blocks:tk-anc,discovered-from:tk-sub" --json >/dev/null
+eq "$(gc bd dep list new-8 --direction=down -t discovered-from --json | jq -r '[.[].id] | join(",")')|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" \
+  "tk-sub|new-3,new-8" "create --deps takes a comma list, each entry its own edge"
+STUB_DEP_FAIL="new-9" gc bd create "edgeless" -t task --deps "blocks:tk-anc" --json >/dev/null
+eq "$(bstatus new-9)|$(gc bd dep list tk-anc --direction=down -t blocks --json | jq -r '[.[].id] | sort | join(",")')" "open|new-3,new-8" \
+  "STUB_DEP_FAIL naming the minted id lands the bead without its --deps edges"
+
 # The gc bd update stub lands every flag of one call in one pass over the store:
 # the sets in order (a later value for a key wins), the unsets, the assignee,
 # the status, the appended note and the description. A value that parses as a
@@ -271,6 +296,13 @@ mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
+# A copy of deferred-dispatch.sh without hold-lib.sh beside it exits before any
+# verb runs.
+mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
+[ -f "$TMP/sut-dd/hold-lib.sh" ] && ok "mk_sut_dir copies hold-lib.sh beside the SUT" || bad "mk_sut_dir left hold-lib.sh out"
+out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
+eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
+hasnt "$out" "cannot source hold-lib.sh" "a copied deferred-dispatch.sh sources hold-lib.sh from its private dir"
 
 # The partial-read knobs model a store error that still printed an array: a
 # matching list, or any dep probe, prints [] and exits 1.

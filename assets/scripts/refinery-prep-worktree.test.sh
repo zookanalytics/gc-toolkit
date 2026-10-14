@@ -11,9 +11,13 @@
 # dedicated DETACHED worktree, so the root's HEAD is untouched no matter where
 # the session sits, and a root already stranded on `temp` cannot block staging.
 #
+# The merge block also stops a gate an interrupted run left running in the prep
+# worktree before it rebuilds the worktree, and drains without rebuilding it
+# when that gate will not stop or no detached-job.sh is reachable.
+#
 # Runs the REAL blocks extracted verbatim from the formula against a real git
-# repo (worktrees need one) and a stub `gc`. cwd is deliberately the rig root —
-# the exact case that used to strand it.
+# repo (worktrees need one), the real detached-job.sh, and a stub `gc`. cwd is
+# deliberately the rig root — the exact case that used to strand it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,7 +28,15 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-prep-worktree-test.XXXXXX")"
 # path is built on a resolved root and compares to git's as a string, a TMPDIR
 # behind a symlink or ending in a slash (as macOS's is) included.
 TMP="$(cd "$TMP" && pwd -P)"
-trap 'rm -rf "$TMP"' EXIT
+# A gate a failed assertion left running is stopped before the record goes.
+cleanup() {
+  local g
+  for g in "$TMP"/*/rig/.git/gc-refinery-gate; do
+    [ -f "$g/pid" ] && "$HERE/detached-job.sh" stop "$g" >/dev/null 2>&1
+  done
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
@@ -82,6 +94,13 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/drain.log"
 
+# The pack, where the merge block finds detached-job.sh to stop a gate left
+# running in the prep worktree: $GC_CITY_PATH/rigs/gc-toolkit.
+CITY="$TMP/city"
+mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/detached-job.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
+export DETACHED_JOB_POLL=1 DETACHED_JOB_STOP_GRACE=2
+
 # --- Build a synthetic origin + rig, with the base advanced under the branch. --
 build_repo() {
   local d="$1" feature_branch="$2"
@@ -100,9 +119,10 @@ build_repo() {
   ( cd "$d/rig"; git config user.email r@r; git config user.name r; git checkout -q -B main origin/main )
 }
 
-# Run an extracted block from INSIDE the rig root (the stranding case).
+# Run an extracted block from INSIDE the rig root (the stranding case). RUN_CITY
+# names another pack to find detached-job.sh in.
 run_block() { # <rig> <block-file>
-  ( cd "$1" && GC_RIG_ROOT="$1" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
+  ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="${RUN_CITY:-$CITY}" WORK=wb TARGET_BRANCH_DEFAULT=main bash "$2" ) >/dev/null 2>&1
 }
 head_of()  { git -C "$1" rev-parse --abbrev-ref HEAD; }
 prep_of()  { echo "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"; }
@@ -141,6 +161,47 @@ eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HE
 # --- 4. idempotency: a leftover prep worktree from an interrupted run. ---------
 run_block "$R/rig" "$TMP/merge.sh" && ok "merge block re-runs cleanly over a leftover prep worktree" || bad "merge block re-runs cleanly over a leftover prep worktree"
 eq "$(head_of "$R/rig")" "main" "idempotent re-run: rig root still on main"
+
+# --- 4b. a gate the interrupted run left running is stopped before the rebuild.
+# Rebuilding the prep worktree under a gate that still runs in it either fails
+# the add or stages the next branch under the old gate's writes.
+GATE_R="$(git -C "$R/rig" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
+"$CITY/rigs/gc-toolkit/assets/scripts/detached-job.sh" start "$GATE_R" -- bash -c 'cd "$1" && sleep 63' _ "$PW" >/dev/null
+OLD=$(cat "$GATE_R/pid")
+kill -0 "$OLD" 2>/dev/null && ok "precondition: a gate runs in the prep worktree" || bad "precondition: a gate runs in the prep worktree"
+run_block "$R/rig" "$TMP/merge.sh" && ok "merge block over a running gate exits 0" || bad "merge block over a running gate exits 0"
+kill -0 -- "-$OLD" 2>/dev/null && bad "the old gate's process group is gone before the rebuild" "it survived" \
+  || ok "the old gate's process group is gone before the rebuild"
+git -C "$PW" cat-file -e HEAD:g 2>/dev/null && ok "the prep worktree is rebuilt" || bad "the prep worktree is rebuilt"
+
+# A launcher whose stop reports the gate still running, as detached-job.sh does
+# when the gate's process group survives TERM and KILL.
+STUCK="$TMP/stuck-city"
+mkdir -p "$STUCK/rigs/gc-toolkit/assets/scripts"
+cat > "$STUCK/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = stop ] || exit 0
+printf "state=running\ndetail=the job's process group survived TERM and KILL\ndir=%s\n" "$2"
+exit 1
+STUB
+chmod +x "$STUCK/rigs/gc-toolkit/assets/scripts/detached-job.sh"
+: > "$PW/left-by-the-gate"
+: > "$FAKE_LOG"
+RUN_CITY="$STUCK" run_block "$R/rig" "$TMP/merge.sh" && bad "a gate that will not stop: the merge block exits non-zero" \
+  || ok "a gate that will not stop: the merge block exits non-zero"
+[ -e "$PW/left-by-the-gate" ] && ok "a gate that will not stop: the prep worktree is not rebuilt under it" \
+  || bad "a gate that will not stop: the prep worktree is not rebuilt under it"
+grep -q DRAIN "$FAKE_LOG" && ok "a gate that will not stop: the refinery drains, leaving the work to retry" \
+  || bad "a gate that will not stop: the refinery drains, leaving the work to retry"
+
+: > "$FAKE_LOG"
+mkdir -p "$TMP/empty-city"
+RUN_CITY="$TMP/empty-city" run_block "$R/rig" "$TMP/merge.sh" && bad "no detached-job.sh: the merge block exits non-zero" \
+  || ok "no detached-job.sh: the merge block exits non-zero"
+[ -e "$PW/left-by-the-gate" ] && ok "no detached-job.sh: the prep worktree is not rebuilt" \
+  || bad "no detached-job.sh: the prep worktree is not rebuilt"
+grep -q DRAIN "$FAKE_LOG" && ok "no detached-job.sh: the refinery drains, leaving the work to retry" \
+  || bad "no detached-job.sh: the refinery drains, leaving the work to retry"
 
 # --- 5. merge mode (shared branch is brought current by merge, not rebase). ----
 M="$TMP/merge"; build_repo "$M" "integration/conv"

@@ -5,7 +5,9 @@
 # lifecycle transition closing with merged_sha); every validate hold in order
 # (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, the universal approval
-# rule + veto, CLEAN/UNSTABLE handling, BLOCKED naming its cause from
+# rule + veto and the lift line a bring-current ruling draws on it, which the
+# visit order and the terminal re-read read too, CLEAN/UNSTABLE handling,
+# BLOCKED naming its cause from
 # reviewThreads + reviewDecision, an UNKNOWN merge state read again within one
 # budget per pass so one pass lands every approved clean PR); the check
 # resolver, whose crash holds the merge and whose absence holds the pass; a
@@ -527,6 +529,42 @@ store "[$(anchor A1 20), $(rev A1)]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "a self-approval by the city account never counts"
 
+echo "# an approval a bring-current ruling lifted no longer counts, whether or not GitHub dismissed it"
+# The ruling stamps the round's time as bring_current_lifted_at before the guard
+# dismisses anything. Here GitHub refused the dismissal, so the approval still
+# reads APPROVED, and the line alone holds the merge.
+store "[$(anchor LF1 301 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z"'), $(rev LF1)]"
+printf '%s' "$(prview 301 OPEN CLEAN)" > "$GH_DIR/pr_view_301.json"
+approved 301
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#301 the approval from 'human1' was given at or before the bring-current round whose ruling lifted it (2026-08-20T01:00:00Z), so it no longer counts and a new approval lands the PR; merge held (anchor LF1)" "an approval submitted at the line no longer counts, and the hold names it"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 301" "…and nothing merged"
+has "$(meta LF1 pr.machine)" "settled@sha-301@" "…the PR waits on a person, settled"
+# The approver approves again after the round, and nothing else changes.
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1},{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-301","submitted_at":"2026-08-20T01:00:01Z","id":2}]' > "$GH_DIR/reviews_301.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded LF1" "an approval submitted after the line lands the PR with no human step beyond it"
+has "$(cat "$STUB_GH_LOG")" "pr merge 301 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-301" "…pinned to the live head"
+
+echo "# a later round whose ruling keeps the approval leaves the lift line where it was"
+# bring_current_round_at moved to a later round that kept the approval; the
+# rule reads the lift line, so the approval given after the lift and before that
+# later round still counts, and the one given before the lift still does not.
+store "[$(anchor LF2 302 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z","bring_current_round_at":"2026-08-22T00:00:00Z"'), $(rev LF2)]"
+printf '%s' "$(prview 302 OPEN CLEAN)" > "$GH_DIR/pr_view_302.json"
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-302","submitted_at":"2026-08-21T00:00:00Z","id":1}]' > "$GH_DIR/reviews_302.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded LF2" "an approval given after the lift and before the later round counts"
+store "[$(anchor LF2 302 ',"bring_current_lifted_at":"2026-08-20T01:00:00Z","bring_current_round_at":"2026-08-22T00:00:00Z"'), $(rev LF2)]"
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-302","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_302.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "PR#302 the approval from 'human1' was given at or before the bring-current round whose ruling lifted it" "…and one given before the lift still does not"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 302" "…so nothing merged"
+
 echo "# the universal rule arms for every PR with no check_set token and no opt-out"
 store "[$(anchor A2 21), $(rev A2)]"
 printf '%s' "$(prview 21 OPEN CLEAN)" > "$GH_DIR/pr_view_21.json"
@@ -1013,6 +1051,28 @@ out=$(STUB_SHOW_HOOK="$TMP/hook.sh" "$SUT" 2>&1)
 has "$out" "merge_hold was set after validation; merge held" "the terminal re-read caught the mid-pass hold"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
 eq "$(bstatus T2)" "open" "the anchor was not closed"
+
+echo "# terminal re-read HOLDS when a bring-current ruling lifts the approval mid-pass"
+# The lift line is anchor-local and moves no head, so --match-head-commit cannot
+# catch a ruling recorded between validation and the merge; the re-read does.
+store "[$(anchor LF3 303), $(rev LF3)]"
+printf '%s' "$(prview 303 OPEN CLEAN)" > "$GH_DIR/pr_view_303.json"
+approved 303
+: > "$HOOK_COUNT"
+cat > "$TMP/hooklf.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "LF3" ] || exit 0
+n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
+  jq -c 'map(if .id == "LF3" then .metadata.bring_current_lifted_at = "2026-08-21T00:00:00Z" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/hooklf.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hooklf.sh" "$SUT" 2>&1)
+has "$out" "changed between validation and the merge — a bring-current ruling lifted the approval after validation; merge held" "the terminal re-read catches the lift"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 303" "…and the merge is withheld"
 
 echo "# a signoff_dismissed stamp landing mid-pass does NOT hold the merge"
 # The marker records a dismissal; approval is a universal rule no dismissal arms or
@@ -1698,6 +1758,19 @@ rm -f "$MCUR"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
 has "$out" "visited 0 landing-first and 1 of 3 other anchors" "an approval from the acting login does not put a PR first"
+# An approval at or before the anchor's lift line does not put it first either,
+# the rule the approval gate applies; one after the line does.
+store "[$(anchor PU1 291 ',"pr_merge_state":"UNKNOWN@sha-291"'), $(anchor PU2 292 ',"pr_merge_state":"UNKNOWN@sha-292"'), $(anchor PU3 293 ',"pr_merge_state":"UNKNOWN@sha-293","bring_current_lifted_at":"2026-08-20T01:00:00Z"')]"
+openprs "$(openpr 291)" "$(openpr 292)" "$(openpr 293 human1:APPROVED)"
+rm -f "$MCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
+has "$out" "visited 0 landing-first and 1 of 3 other anchors" "an approval the lift line set aside does not put a PR first"
+store "[$(anchor PU1 291 ',"pr_merge_state":"UNKNOWN@sha-291"'), $(anchor PU2 292 ',"pr_merge_state":"UNKNOWN@sha-292"'), $(anchor PU3 293 ',"pr_merge_state":"UNKNOWN@sha-293","bring_current_lifted_at":"2026-08-20T00:59:59Z"')]"
+rm -f "$MCUR"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --deadline 1 --cursor "$MCUR" 2>&1)
+has "$out" "visited 1 landing-first and 1 of 2 other anchors" "…and one given after the line does"
 
 echo "# what the merge holds for sure is paced, not visited first"
 # Every PR here is approved, and PH4 is also vetoed by a second reviewer. PH1 to
@@ -1926,26 +1999,38 @@ rcf_case 309 "a branch read that fails" "unknown" - - "repos/zook/gc-toolkit/bra
 
 echo "# the approval rule: review-verdict.sh and gctk merge reach one verdict"
 # gctk merge shows its verdict at its approval gate: it merges an approved,
-# green, CLEAN PR, holds a vetoed one naming the reviewer, and holds one with no
-# outside approval. The review histories are review-verdict.test.sh's cases.
+# green, CLEAN PR, holds a vetoed one naming the reviewer, holds one with no
+# outside approval, and holds one whose only approval the anchor's lift line
+# set aside, naming that approval. The review histories are
+# review-verdict.test.sh's cases. A case with a lift line puts it on the anchor
+# as bring_current_lifted_at and judges by the two-argument review_verdict,
+# which pr-facts.sh's conflict arm applies.
 # shellcheck source=review-verdict.sh
 . "$HERE/review-verdict.sh" || bad "review-verdict.sh sources beside this suite"
 rvw() { # id login state submitted_at
   printf '{"id":%s,"user":{"login":"%s"},"state":"%s","commit_id":"sha-0","submitted_at":"%s"}' "$1" "$2" "$3" "$4"
 }
-verdict_case() { # <num> <label> <want: veto:<login> | approver:<login> | none> <reviews-json>
-  local num="$1" label="$2" want="$3" reviews="$4" id="AV$1" v veto approver got line
-  v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" "$REVIEW_VERDICT_DEF"'review_verdict($self)')
+verdict_case() { # <num> <label> <want: veto:<login> | approver:<login> | lifted:<login> | none> <reviews-json> [<lift line>]
+  local num="$1" label="$2" want="$3" reviews="$4" lift="${5:-}" id="AV$1" v veto approver setaside got line extra=""
+  if [ -n "$lift" ]; then
+    v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" --arg lifted "$lift" "$REVIEW_VERDICT_DEF"'review_verdict($self; $lifted)')
+    extra=",\"bring_current_lifted_at\":\"$lift\""
+  else
+    v=$(printf '%s' "$reviews" | jq -c --arg self "$STUB_SELF_LOGIN" "$REVIEW_VERDICT_DEF"'review_verdict($self)')
+  fi
   veto=$(printf '%s' "$v" | jq -r '.veto // ""')
   approver=$(printf '%s' "$v" | jq -r '.approver // ""')
-  if [ -n "$veto" ]; then got="veto:$veto"; elif [ -n "$approver" ]; then got="approver:$approver"; else got="none"; fi
+  setaside=$(printf '%s' "$v" | jq -r '.lifted // ""')
+  if [ -n "$veto" ]; then got="veto:$veto"; elif [ -n "$approver" ]; then got="approver:$approver"
+  elif [ -n "$setaside" ]; then got="lifted:$setaside"; else got="none"; fi
   eq "$got" "$want" "review-verdict.sh judges $label as $want"
   case "$got" in
     veto:*)     line="merge: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED" ;;
     approver:*) line="merge: merged + recorded $id" ;;
+    lifted:*)   line="merge: PR#$num the approval from '$setaside' was given at or before the bring-current round whose ruling lifted it ($lift)" ;;
     *)          line="merge: PR#$num no external APPROVED review stands" ;;
   esac
-  store "[$(anchor "$id" "$num"), $(rev "$id")]"
+  store "[$(anchor "$id" "$num" "$extra"), $(rev "$id")]"
   printf '%s' "$(prview "$num" OPEN CLEAN)" > "$GH_DIR/pr_view_$num.json"
   printf '%s' "$reviews" > "$GH_DIR/reviews_$num.json"
   out=$("$SUT" 2>&1)
@@ -1971,6 +2056,27 @@ verdict_case 320 "a tie on the timestamp, which the higher review id breaks" "ap
   "[$(rvw 2 human1 APPROVED $T0),$(rvw 1 human1 CHANGES_REQUESTED $T0)]"
 verdict_case 321 "two accounts requesting changes" "veto:human2" \
   "[$(rvw 1 human3 CHANGES_REQUESTED $T0),$(rvw 2 human2 CHANGES_REQUESTED $T0)]"
+LIFT=2026-08-21T00:00:00Z; T2=2026-08-22T00:00:00Z
+verdict_case 322 "an approval submitted before the lift line" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $T0)]" "$LIFT"
+verdict_case 323 "an approval submitted at the lift line itself" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $LIFT)]" "$LIFT"
+verdict_case 324 "an approval submitted one second after the lift line" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED 2026-08-21T00:00:01Z)]" "$LIFT"
+verdict_case 325 "an approval after the line beside one it set aside" "approver:human2" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human2 APPROVED $T2)]" "$LIFT"
+verdict_case 326 "an account that approved again after the line" "approver:human1" \
+  "[$(rvw 1 human1 APPROVED $T0),$(rvw 2 human1 APPROVED $T2)]" "$LIFT"
+verdict_case 327 "two approvals the line set aside, named in login order" "lifted:human1" \
+  "[$(rvw 1 human2 APPROVED $T0),$(rvw 2 human1 APPROVED $T0)]" "$LIFT"
+verdict_case 328 "a veto given before the line, beside an approval after it" "veto:human2" \
+  "[$(rvw 1 human1 APPROVED $T2),$(rvw 2 human2 CHANGES_REQUESTED $T0)]" "$LIFT"
+verdict_case 329 "the city's own approval after the line" "none" \
+  "[$(rvw 1 "$STUB_SELF_LOGIN" APPROVED $T2)]" "$LIFT"
+verdict_case 330 "a dismissed approval with a line" "none" \
+  "[$(rvw 1 human1 DISMISSED $T0)]" "$LIFT"
+verdict_case 331 "a lift line that is not YYYY-MM-DDTHH:MM:SSZ" "lifted:human1" \
+  "[$(rvw 1 human1 APPROVED $T2)]" "2026-08-21"
 
 fi # part gates
 

@@ -50,9 +50,11 @@ stateDiagram-v2
     filed --> routed: gc sling / deferred-dispatch.sh
     routed --> claimed: gc hook --claim (runtime)
     claimed --> routed: witness patrol — dead session
+    state "poured (gc.execution_routed_to)" as poured
   }
 
   claimed --> handed_off: mol-polecat-work submit (one atomic bd update)
+  poured --> handed_off: the pour's mol-polecat-work submit
   handed_off --> pre_open_gate: mol-refinery-patrol merge-push (lifecycle.sh)
   handed_off --> pull_request: merge-push, post-open path (lifecycle.sh)
   handed_off --> merged: merge-push, direct strategy (lifecycle.sh)
@@ -60,7 +62,7 @@ stateDiagram-v2
   pull_request --> merged: merge.sh
   merged --> [*]
 
-  handed_off --> routed: mol-refinery-patrol — rejection_reason
+  handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
   handed_off --> refused_false_completion: mol-refinery-patrol — no commits
@@ -79,11 +81,26 @@ stateDiagram-v2
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
-(branch recorded, assignee = refinery, `merge_result` still absent); the
-anchored states are the `merge_result` values. `merged` is the only state with
+(branch recorded, assignee = refinery, `merge_result` still absent). `poured`
+is an unanchored bead a `mol-polecat-work` workflow is driving: it carries no
+assignee and no `gc.routed_to`, only the pour's `gc.execution_routed_to`, which
+no queue reads (`assets/scripts/dispatch-path.sh`). The anchored states are the
+`merge_result` values. `merged` is the only state with
 `status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
 `merged_sha`, the landing the state names; the human states stay open, routed
 to human.
+
+The write that enters `merged` also records what the landing shipped, which is
+the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
+`gc.work_commit` set to the `merged_sha`, and `gc.work_branch` set to
+`merged_target`. A landing that names no commit id, such as the
+`unverified:PR#<n>` sentinel, or no `merged_target` records none of the three,
+and the bead keeps the record it already had. The gate asks the rig's checkout
+whether that commit is on `origin/<merged_target>`. A squash GitHub made is not
+there until the checkout fetches it, so the transition fetches that branch into
+`$GC_RIG_ROOT` first whenever the commit is missing from it. With no
+`GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
+nothing and prints one WARN line naming the landing.
 
 `held` is the one human state a sitting writes rather than the refinery, and it
 is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
@@ -143,7 +160,8 @@ route, one carrying an assignee, and one that has left `status=open`.
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
-| handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
+| handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
+| poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
 | held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
@@ -232,10 +250,14 @@ nor vetoes, and it does not hide its author's older approval. A small fix after
 an approval lands on it. An outside approval is dismissed when the code that
 would land is not the code the approver saw: by `bring-current-guard.sh` when
 the ruling on a conflicted [bring-current round](#bringing-a-branch-current)
-withdraws it, and by `approval-withdraw.sh` when the validator rules a fresh
+lifts it, and by `approval-withdraw.sh` when the validator rules a fresh
 whole-diff review warranted. Each dismisses every approval an account has not
 had dismissed (the guard, every one given before the round), not only its
-latest, because an older approval would otherwise count again. No
+latest, because an older approval would otherwise count again. A ruling that
+lifts the approval also draws a line on the anchor, `bring_current_lifted_at`,
+at the round's time, and no approval submitted at or before it counts, so a
+dismissal GitHub refuses cannot land the PR and an approval given after the
+round lands it. No
 `check.approval` marker and no `check_set` token arms it or opts out, and GitHub
 branch protection is an extra layer, not the authority.
 `lifecycle/lifecycle.toml` records the rule.
@@ -300,15 +322,28 @@ The validator rules each finding in that batch, and every ruling ends the
 finding closed or converts it to a visit: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. Only a fix's thread is
+the operator can judge — files a visit and stays open. A comment whose question
+an open visit on the anchor's feedback already carries is `needs-you` on that
+visit: the rework minted for its batch may have put the question to the operator
+before the validator ran, and `finding.sh` refuses every other ruling of the
+finding while such a visit tracks or holds that rework. Only a fix's thread is
 resolved behind its answer: the thread of a declined or deferred finding stays
 open for the operator to accept or overrule. A `CHANGES_REQUESTED`
-that is feedback is auto-dismissed once every finding it raised has closed, and
+that is feedback is auto-dismissed once every finding it raised has closed and
+every answer one of them owes its raiser (a decline's reason, a deferral's
+follow-up, a `needs-you` finding's visit) is on the PR, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
-review open until the operator rules its visit while the others let it clear.
-The review the operator reads on the PR therefore always matches what is still
-owed.
+review open until the operator rules the visit holding its question and the work
+the ruling calls for lands, while the others let it clear. The ruling is
+recorded on the visit (`gc.ruling`), and a fold hands the question on to the
+visit it folds into (`gc.folded_into`), so a visit closed moot, benign,
+dismissed or cut short releases nothing. Such a finding stays open until its
+anchor closes, and the review it holds stays changes-requested until the
+operator's own approval replaces it. A sitting cut short is one such close: its
+wait moves to the subject, and the later sitting that rules on it closes a visit
+of its own, which the finding does not follow. The review the operator reads on
+the PR therefore always matches what is still owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -360,9 +395,10 @@ than silently releasing a park a human is relying on.
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
 an unnormalized anchor holds); every check named in `check_set` reads `green`; a
-latest APPROVED review from a non-city account, given at any commit and not
-dismissed since, with no standing CHANGES_REQUESTED (the universal approval
-rule); no unclosed rework or review
+latest APPROVED review from a non-city account, given at any commit, not
+dismissed since and not given at or before the anchor's
+`bring_current_lifted_at`, with no standing CHANGES_REQUESTED (the universal
+approval rule); no unclosed rework or review
 child; PR base equals `merged_target`; GitHub reports CLEAN; no holds
 (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
@@ -394,8 +430,8 @@ The postures, in the precedence the derivation applies:
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
 | `commented` | an unanswered review comment sits above its watermark, and no veto stands | holds |
-| `approved` | GitHub reports `APPROVED` | none |
-| `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
+| `approved` | GitHub reports `APPROVED`, and an approval stands that the anchor's `bring_current_lifted_at` did not set aside | none |
+| `review_required` | GitHub reports `REVIEW_REQUIRED`, or reports `APPROVED` while every standing approval was given at or before `bring_current_lifted_at` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
 
 A comment outranks an approval on purpose: one reviewer's approval does not
@@ -658,10 +694,14 @@ apart. A review bead carries `task_kind=review`. An anchor carries
 also narrows by `task_kind=review` or by title, so a marked child joins no
 review's result set.
 
-- **Rejection** (refinery judgment): the anchor's branch is not accepted —
-  `mol-refinery-patrol` writes `rejection_reason` and re-routes the bead to
-  the polecat pool. Back to `routed`; the next claimant starts from the
-  recorded reason.
+- **Rejection** (refinery judgment): the anchor's branch is not accepted.
+  `mol-refinery-patrol` hands the bead back through `rejection-repool.sh`: one
+  lifecycle transition writes `rejection_reason`, then a fresh
+  `mol-polecat-work` pour dispatches the rebuild. It is a pour, not a route on
+  the bead, because the bead is a member of its epic and bd's blocked flag
+  cascades down parent-child edges, while a poured workflow's root has no
+  parent, so a hold on the epic leaves the rebuild running. The bead rests
+  `poured`, and the polecat running the pour starts from the recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh` and clears the
   check marker, returning the lane to `unreviewed`, so gate-ensure re-arms the
@@ -709,8 +749,7 @@ review's result set.
   bring-current costs a polecat round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is.
   The child's handoff runs `bring-current-guard.sh`, which holds the round to
-  the worker's audit. A round that conflicted goes to triage, or, on an anchor
-  that declares no triage lane, the guard rules on it closed
+  the worker's audit. A round that conflicted goes to triage
   ([Bringing a branch current](#bringing-a-branch-current)).
   A live child on the branch — dispatched or
   parked — stands a second dispatch down, so re-runs never duplicate it; a
@@ -760,9 +799,8 @@ review's result set.
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
   sling --on`, read the pour back) — and a lane that already reads `green`
   keeps reading it however far the branch advances. Re-review is a judgement
-  the validator or an operator ruling makes, or the ruling on a bring-current
-  round that conflicted (triage's, or the guard's closed ruling), not a trigger
-  a push pulls.
+  the validator or an operator ruling makes, or triage's ruling on a
+  bring-current round that conflicted, not a trigger a push pulls.
   gate-ensure holds dispatch rather than pouring a second review while an open
   rework child is already in flight for the lane — a `blocks`-dep bead on the
   anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
@@ -811,7 +849,19 @@ review to keep current (its anchor is gating, or a PR stands on it):
   `bring_current_record` with the guard's evidence beside each entry (what git's
   replay of the conflict shows the resolution kept), and the triage lane is
   reopened: it is added to `bring_current_reopened` with the round's time,
-  `bring_current_round_at`, and its standing review is superseded.
+  `bring_current_round_at`, and its standing review is superseded. An anchor
+  whose `check_set` declares no triage lane (`correctness` alone, say) gains
+  `triage` in the same write, with a note saying why, so triage rules on its
+  conflicted round and the merge, which waits on every declared lane, waits
+  for that ruling.
+- **Conflicted, on an opt-out anchor**: the `none` and `off` opt-outs are the
+  one case where the guard rules on a round itself. Only a person sets or
+  widens an opt-out, so the guard leaves the `check_set` as it is, and no
+  review weighs the round. Approval is the one merge rule the opt-out leaves,
+  so nothing reopens and the approval given before the round is lifted, the
+  lift line drawn as for triage's ruling below, with no visit. The ruling is
+  stored in the record marked `by: guard`, and a re-run of the same hand-off
+  carries it out again, so a lift that stopped half-way is finished.
 
 Generated renders (linguist-generated) owe no entry. A hand-off with no
 `bring_current_from` stamp that pushed nothing past the origin head it started
@@ -827,36 +877,34 @@ verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
 [--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
 that run again on the merged code (any the anchor declares, and any it adds with
 `--add-gates`); and whether the human approval still covers what would land.
-`bring-current-guard.sh decide` records the ruling in the anchor's record,
-supersedes each reopened lane, and on a dismissal files the re-ask visit first,
-then re-requests and dismisses each standing approval given before the round;
-one submitted after `bring_current_round_at` saw the merged code and stands. A
-lane in `bring_current_reopened` is backed by a GitHub approval only when the
-approval was submitted after `bring_current_round_at` (`lane-state.sh`), so a
-standing approval neither lets the merge skip a reopened lane nor keeps its
-review from being dispatched. A routine round can therefore keep the approval
-while its lanes re-run, and material judgment removes it.
-
-**With no triage lane, the guard rules closed.** An anchor whose `check_set`
-declares no triage lane (`correctness` alone, say, or the `none` opt-out) has no
-review to rule on the round, and approval is a merge rule no `check_set` opts
-out of. So the guard rules on the round itself and assumes the worst: every lane
-the anchor declares runs again on the merged code (the lanes `review-checks.sh`
-resolves for the merge, none for `none`), and where a PR stands, each approval
-given before the round is dismissed the way a triage dismissal is, re-ask visit
-first. The ruling is stored in the record where triage's goes, marked
-`by: guard`, so gate-ensure and `signoff.sh` read the round as ruled, and a
-re-run of the hand-off carries it out again. The lanes it reopens are added to
-`bring_current_reopened` with the round's time, so `lane-state.sh` lets no
-approval given before the round back them. A person who adds the triage lane
-to the anchor's `check_set` gives the next round to triage.
+`bring-current-guard.sh decide` records the ruling in the anchor's record and
+supersedes each reopened lane. A ruling that lifts the approval first draws the
+lift line: the round's time is stored as `bring_current_lifted_at` and read
+back, and from then on the approval rule counts no approval submitted at or
+before it. Each approver is then re-requested and each standing approval given
+before the round is dismissed; one submitted after the round saw the merged
+code and stands. When GitHub refuses a dismissal, the line still holds the
+merge, the failure is noted on the anchor, and an approval given after the
+round lands the PR with nothing else to clear. A later round whose ruling keeps
+the approval leaves the line where it was. A lane in `bring_current_reopened`
+is backed by a GitHub approval only when the approval was submitted after
+`bring_current_round_at` (`lane-state.sh`), so a standing approval neither lets
+the merge skip a reopened lane nor keeps its review from being dispatched. A
+routine round can therefore keep the approval while its lanes re-run, and
+material judgment removes it.
 
 **Every message is composed from the audit.** The round section that opens
-triage's posted verdict, the dismissal note and the re-ask visit render from
-the stored record with `bring-current-audit.sh`: a headline of what the round
+triage's posted verdict and the note on a dismissed approval render from the
+stored record with `bring-current-audit.sh`: a headline of what the round
 needed, then per entry what collided, what was decided and why, and what to
-check. An item no entry covers is listed with the guard's evidence alone. The
-question visit renders from the worker's entries so far and its question.
+check. An item no entry covers is listed with the guard's evidence alone. A
+lifted approval files no visit: the re-request, the dismissal note and
+triage's posted verdict are what a person reads, and the PR's posture reads
+`review_required` until a new approval stands, so the board shows the approval
+as owed. A ruling the guard made itself posts no verdict, so its dismissal note
+tells it as the guard's and points at no triage comment. The one visit a round
+files is the question the worker could not resolve, rendered from its entries
+so far and its question.
 
 What no guard reaches: the refinery's own prepare merge, which aborts on any
 conflict and so only ever pushes git's own result; and a merge the worker ran
