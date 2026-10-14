@@ -1,0 +1,205 @@
+package rig
+
+import (
+	"bytes"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func shortGrace(t *testing.T) {
+	t.Helper()
+	old := StopGrace
+	StopGrace = 300 * time.Millisecond
+	t.Cleanup(func() { StopGrace = old })
+}
+
+func run(t *testing.T, command string, timeout time.Duration) (Outcome, string, string) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	o := Run(t.TempDir(), command, timeout, &out, &errb)
+	return o, out.String(), errb.String()
+}
+
+func TestRunClassifiesTheCommandsStatus(t *testing.T) {
+	shortGrace(t)
+	dir := t.TempDir()
+	noexec := filepath.Join(dir, "noexec.sh")
+	if err := os.WriteFile(noexec, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		command string
+		kind    Kind
+		code    int
+		reason  string
+	}{
+		{"exit 0 is a pass", "true", Passed, 0, ""},
+		{"exit 1 is a fail", "exit 1", Failed, 1, ""},
+		{"exit 2 is a fail, whatever printed it", "echo broken >&2; exit 2", Failed, 2, ""},
+		{"exit 125 is a fail", "exit 125", Failed, 125, ""},
+		{"a command not found is a machine failure", "gctk-no-such-command-anywhere", Machine, 0, "not found (exit 127)"},
+		{"a command not executable is a machine failure", noexec, Machine, 0, "could not be executed (exit 126)"},
+		{"a shell ended by SIGKILL is a machine failure", "kill -KILL $$", Machine, 0, "killed by signal 9"},
+		{"a child ended by a signal, reported as 128+N, is a machine failure", "sleep 30 & kill -KILL $!; wait $!", Machine, 0, "ended by signal 9 (exit 137)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o, _, _ := run(t, c.command, time.Minute)
+			if o.Kind != c.kind || o.ExitCode != c.code || !strings.Contains(o.Reason, c.reason) {
+				t.Fatalf("Run(%q) = %+v, want kind %d, exit %d, reason containing %q", c.command, o, c.kind, c.code, c.reason)
+			}
+		})
+	}
+}
+
+func TestRunRunsInDirWithStdinClosedAndPassesOutputThrough(t *testing.T) {
+	dir := t.TempDir()
+	var out, errb bytes.Buffer
+	o := Run(dir, `pwd -P; echo to-stderr >&2; if read -r line; then echo "read: $line"; else echo "stdin at EOF"; fi`, time.Minute, &out, &errb)
+	if o.Kind != Passed {
+		t.Fatalf("Run = %+v, want a pass", o)
+	}
+	want, _ := filepath.EvalSymlinks(dir)
+	if got := out.String(); got != want+"\nstdin at EOF\n" {
+		t.Fatalf("stdout = %q, want the run's directory and stdin at EOF", got)
+	}
+	if errb.String() != "to-stderr\n" {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+func TestRunHandsAFileToTheCommandAsItIs(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	// The command leaves a child holding its stdout. Handed the file itself,
+	// the run ends when the command does, not when the child does.
+	dir := t.TempDir()
+	start := time.Now()
+	o := Run(dir, "echo hello; sleep 30 & echo $! > child.pid", time.Minute, f, f)
+	elapsed := time.Since(start)
+	if raw, err := os.ReadFile(filepath.Join(dir, "child.pid")); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+	if o.Kind != Passed || elapsed > 5*time.Second {
+		t.Fatalf("Run = %+v after %s, want a prompt pass", o, elapsed)
+	}
+	raw, _ := os.ReadFile(f.Name())
+	if !strings.HasPrefix(string(raw), "hello\n") {
+		t.Fatalf("the file holds %q", raw)
+	}
+}
+
+func TestRunTimeoutStopsTheWholeGroup(t *testing.T) {
+	shortGrace(t)
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	start := time.Now()
+	var out bytes.Buffer
+	o := Run(dir, `sleep 30 & echo $! > child.pid; wait`, 300*time.Millisecond, &out, &out)
+	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out after 300ms") {
+		t.Fatalf("Run = %+v, want a timeout", o)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("the timed-out run took %s to return", time.Since(start))
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the command never wrote its child's pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the command's child %d outlived the timeout", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestRunKillsAGroupThatIgnoresSIGTERM(t *testing.T) {
+	shortGrace(t)
+	var out bytes.Buffer
+	start := time.Now()
+	o := Run(t.TempDir(), `trap '' TERM; sleep 30 & wait; sleep 30`, 200*time.Millisecond, &out, &out)
+	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out") {
+		t.Fatalf("Run = %+v, want a timeout", o)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("a group that ignores SIGTERM held the run for %s", time.Since(start))
+	}
+}
+
+func TestRunWithNoTimeoutWaits(t *testing.T) {
+	o, _, _ := run(t, "sleep 0.3; exit 4", 0)
+	if o.Kind != Failed || o.ExitCode != 4 || o.Duration < 300*time.Millisecond {
+		t.Fatalf("Run with no timeout = %+v, want exit 4 after the sleep", o)
+	}
+}
+
+// A SIGTERM to this process during the run reaches the command's group and
+// returns Interrupted. The test's own Notify keeps a build without the relay
+// from killing the test binary: such a build fails the assertions instead.
+func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
+	shortGrace(t)
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "got-term")
+	pidFile := filepath.Join(dir, "ready")
+	go func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(pidFile); err == nil {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	var out bytes.Buffer
+	o := Run(dir, `trap 'touch got-term; exit 143' TERM; echo $$ > ready; sleep 30 & wait $!`, time.Minute, &out, &out)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the command's group never received the relayed SIGTERM")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestParsesTellsASyntaxErrorFromARunnableCommand(t *testing.T) {
+	if ok, why := Parses("tools/run-tests.sh $(git diff --name-only origin/main...HEAD)"); !ok {
+		t.Fatalf("a well-formed command did not parse: %s", why)
+	}
+	if ok, _ := Parses("gctk-no-such-command-anywhere --flag"); !ok {
+		t.Fatal("a command that is not installed failed to parse; parsing runs nothing")
+	}
+	ok, why := Parses("echo (")
+	if ok || !strings.Contains(why, "syntax error") {
+		t.Fatalf("Parses(%q) = (%v, %q), want a syntax error", "echo (", ok, why)
+	}
+}

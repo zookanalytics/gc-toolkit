@@ -1,4 +1,4 @@
-// Command gctk is the compiled data plane of the merge cadence.
+// Command gctk is the pack's compiled data plane.
 //
 // SCOPE (specs/2026-08-review-gates/gctk-promotion.md). Shell stays the pack's
 // lingua franca: anything an agent pastes, anything that must read as
@@ -6,17 +6,19 @@
 // cluster — highest stakes, pure data-plane, and already invoked by its callers
 // as an opaque CLI, so the language behind the command is invisible to them —
 // plus the PR-status tri-state, the derivation the status: label and the helm
-// board must share from one code path.
+// board must share from one code path, plus `rig`, the gate that runs a rig's
+// declared checks and records each result against the commit it ran at.
 //
-// Each subcommand keeps the byte-identical CLI of the script it replaces: same
+// Each port keeps the byte-identical CLI of the script it replaces: same
 // flags, same exit codes, same stdout grammar. The scripts' own .test.sh
 // stub-harness suites are the acceptance bar, and they pass unmodified because
 // gctk shells out to gc/bd/gh exactly as the scripts did rather than linking
 // the beads library. Same observability, same stubs, same permissions surface.
 //
-// Ported so far: lifecycle, merge and pr-status. The rest of the merge-cadence
-// cluster (gate-ensure, pr-open, pr-facts, convoy-graduate, signoff) still runs
-// as shell. lifecycle and merge have no shell fallback:
+// Ported so far: lifecycle, merge and pr-status. rig is not a port: no script
+// carried its logic, and its CLI is its own (services/gctk/README.md). The rest
+// of the merge-cadence cluster (gate-ensure, pr-open, pr-facts,
+// convoy-graduate, signoff) still runs as shell. lifecycle and merge have no shell fallback:
 // assets/scripts/lifecycle.sh and assets/scripts/merge.sh only exec this
 // binary, and refuse the call when there is none to run. pr-status has none by
 // design — its tri-state lives only in gctk so the status: label and the helm
@@ -37,9 +39,10 @@ const topUsage = `Usage:
   gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
   gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
   gctk pr-status <verb> [flags]   PR status tri-state working|needs-review|needs-attention (services/gctk/prstatus)
+  gctk rig <verb> [flags]         run the rig's declared checks and record their results against the commit
   gctk version                    the revision this binary was built from
 
-Run "gctk lifecycle" or "gctk pr-status" for that subcommand's verbs.
+Run "gctk lifecycle", "gctk pr-status" or "gctk rig" for that subcommand's verbs.
 `
 
 func main() {
@@ -58,6 +61,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return cli.Merge(args[1:], stdout, stderr)
 	case "pr-status":
 		return cli.PRStatus(args[1:], stdout, stderr)
+	case "rig":
+		return cli.Rig(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version())
 		return 0
