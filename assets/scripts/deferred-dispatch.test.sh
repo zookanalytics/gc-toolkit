@@ -71,9 +71,9 @@
 #   * the PASS LOCK — a pass that overlaps one in flight exits 0 having read and
 #     slung nothing, so two overlapping passes make one sling; a holder past the
 #     stall bound fails the pass, and a lock that cannot be taken refuses it;
-#     only the pass process holds it, so no gc or escalate.sh call, and no
-#     process one leaves running, carries it past the pass; with no GC_RIG it is
-#     keyed by the rig root;
+#     only the pass process holds it, so no gc, escalate.sh or bead-rehome.sh
+#     call, and no process one leaves running, carries it past the pass; with no
+#     GC_RIG it is keyed by the rig root;
 #   * the PASS BUDGET — a pass starts a sling or an escalation only while a full
 #     allowance is left, on a clock the test controls, and reports the beads it
 #     left armed and untouched; a pass that fails declares nothing; a dry run
@@ -397,6 +397,10 @@ ESC
 cat > "$BIN/bead-rehome.sh" <<'RH'
 #!/usr/bin/env bash
 set -u
+if [ -n "${STUB_FD9_LOG:-}" ]; then
+    if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
+    printf 'rehome fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
+fi
 origin=""; successor=""; kind=""; ostore="-"; sstore="-"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -426,7 +430,8 @@ RH
 # date stub: the epoch form the pass budget reads comes from $STUB_CLOCK when a
 # test sets it; every other form reaches the real date. The pass reads the clock
 # from its own shell, so under STUB_FD9_LOG the stub also records that the pass
-# holds fd 9: the positive control for the gc and escalate.sh records above.
+# holds fd 9: the positive control for the gc, escalate.sh and bead-rehome.sh
+# records above.
 export STUB_REAL_DATE; STUB_REAL_DATE="$(command -v date)"
 cat > "$BIN/date" <<'DATE'
 #!/usr/bin/env bash
@@ -1826,6 +1831,24 @@ for call in "gc bd" "gc sling" "escalate"; do
 done
 leaked="$(grep -F 'fd9=open' "$FD9" | grep -v -F 'date fd9=' || true)"
 eq "$leaked" "" "no gc or escalate.sh call was handed fd 9"
+n="$(grep -c -F 'date fd9=open' "$FD9")"
+if [ "$n" -gt 0 ]; then ok "while the pass itself held it (its clock reads saw fd 9 open $n time(s))"; else bad "the pass never held fd 9, so the closed records prove nothing"; fi
+
+echo "# the until half's gc and bead-rehome.sh calls run without the lock's descriptor too"
+# A pinned pass reads the rig roster to name its store to bead-rehome.sh, and a
+# disposal runs bead-rehome.sh, whose own store reads and writes inherit what it
+# was handed.
+store "$ONE_OWED"
+FD9="$TMP/fd9-until.log"; : > "$FD9"
+out="$(STUB_FD9_LOG="$FD9" STUB_RIGS_JSON="$TMP/rigs.json" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "the pass completes"
+eq "$(rehomes)" "1" "it disposes the owed bead"
+for call in "gc rig" "rehome"; do
+    n="$(grep -c -F "$call fd9=" "$FD9")"
+    if [ "$n" -gt 0 ]; then ok "the until half made $n '$call' call(s)"; else bad "the until half made no '$call' call, so nothing about it was proven"; fi
+done
+leaked="$(grep -F 'fd9=open' "$FD9" | grep -v -F 'date fd9=' || true)"
+eq "$leaked" "" "no gc or bead-rehome.sh call was handed fd 9"
 n="$(grep -c -F 'date fd9=open' "$FD9")"
 if [ "$n" -gt 0 ]; then ok "while the pass itself held it (its clock reads saw fd 9 open $n time(s))"; else bad "the pass never held fd 9, so the closed records prove nothing"; fi
 

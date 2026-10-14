@@ -131,13 +131,13 @@ DISPOSE_ALLOWANCE_SECS=$((10#$DISPOSE_ALLOWANCE_SECS))
 # anything and holds it for its whole life. The lock depends on no bead
 # surviving, and the kernel releases it when the pass exits, however it exits,
 # SIGKILL included.
-# Only the pass process holds the descriptor: every gc and escalate.sh child
-# runs with fd 9 closed. A process that a gc call starts can outlive the pass (a
-# store read can bring up a Dolt server, and gc hands the descriptors it was
-# given to what it starts), and one that kept fd 9 would hold the lock against
-# every later pass. The order's timeout kills the pass's whole process group,
-# its gc sling with it, and the next pass re-attempts the unconfirmed sling
-# through the slinging@ recovery below.
+# Only the pass process holds the descriptor: every gc, escalate.sh and
+# bead-rehome.sh child runs with fd 9 closed. A process that a gc call starts
+# can outlive the pass (a store read can bring up a Dolt server, and gc hands
+# the descriptors it was given to what it starts), and one that kept fd 9 would
+# hold the lock against every later pass. The order's timeout kills the pass's
+# whole process group, its gc sling with it, and the next pass re-attempts the
+# unconfirmed sling through the slinging@ recovery below.
 # It is keyed per rig like the order: by GC_RIG, else by GC_RIG_ROOT, the root
 # the store resolves from, so two rigs never share a lock. It lives in the pack
 # state dir the order's env names; the override lets the hermetic test point it
@@ -734,7 +734,7 @@ until_store_ref() {
     local want rigs name path
     want="$(cd "$BD_DB" 2>/dev/null && pwd -P)" || return 1
     [ -n "$want" ] || return 1
-    rigs="$(gc rig list --json 2>/dev/null)" || return 1
+    rigs="$(gc rig list --json 2>/dev/null 9>&-)" || return 1
     while IFS=$'\t' read -r name path; do
         [ -n "$name" ] && [ -n "$path" ] || continue
         if [ "$(cd "$path/.beads" 2>/dev/null && pwd -P)" = "$want" ]; then
@@ -844,7 +844,7 @@ reconcile_until() {
         fi
         "$REHOME" --origin "$id" --successor "$succ" --kind "$UNTIL_KIND" \
             ${store:+--origin-store "$store" --successor-store "$store"} \
-            --note "resolved by its 'until' dependency on $succ, which has closed (deferred-dispatch until-consumer)" </dev/null >/dev/null 2>&1
+            --note "resolved by its 'until' dependency on $succ, which has closed (deferred-dispatch until-consumer)" </dev/null >/dev/null 2>&1 9>&-
         rc=$?
         case "$rc" in
             0) echo "$PROG: disposed $id — its until target $succ closed"; disposed=$((disposed + 1)) ;;
