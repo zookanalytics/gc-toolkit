@@ -1020,7 +1020,11 @@ done
 # A call is found by what it runs, not by how it names the script: a variable
 # of any name bound to the script's path, the path itself, or a wrapper such as
 # bash in front of either, with its words read across continued lines and
-# inside substitutions. CALL_SCAN prints one tab-separated line per finding:
+# inside substitutions. It reads the fences tagged bash, sh or shell, which is
+# where the formulas put the shell an agent runs. Text that a command runs as
+# shell, such as a quoted string after bash -c or eval, or a heredoc fed to
+# bash, is not read as commands. CALL_SCAN prints one tab-separated line per
+# finding:
 #   call <line> named|unnamed <words>  a command that runs step-close.sh, and
 #                                      whether it passes --convoy {{convoy_id}}
 #   unread <line> <words>              a --step with no script named before it
@@ -1091,12 +1095,16 @@ function toml_text(s,   out, i, n, c, d) {
     }
     return out
 }
+# A heredoc body is input to the command that opened it. An unquoted body is
+# scanned for the substitutions in it, which run, and the word below it is
+# restored when the body ends, so the body text never starts the first word of
+# the command after it.
 function body_begin() {
     hb = 1; hbt = HT[hi]; hbq = HQ[hi]; hbd = HD[hi]; hbsp = sp
-    if (!hbq) push("H", 0)
+    if (!hbq) { hbw = WD[lvl()]; push("H", 0) }
 }
 function body_end() {
-    if (!hbq) sp = hbsp
+    if (!hbq) { sp = hbsp; WD[lvl()] = hbw }
     if (++hi <= hn) body_begin(); else { hb = 0; hn = 0; hi = 0 }
 }
 function scan(s,   n, i, c, t, rest, w, dash, tok) {
@@ -1350,6 +1358,10 @@ NOTE
   --convoy {{convoy_id}}
 "$STEP_CLOSE" --step mol-fx.d\
   --convoy {{convoy_id}}
+cat <<NOTE
+an unquoted heredoc body
+NOTE
+"$STEP_CLOSE" --step mol-fx.e --convoy {{convoy_id}}
 ```
 ```
 "$STEP_CLOSE" --step mol-fx.a, quoted in a fence that is not shell
@@ -1381,15 +1393,16 @@ fx 'call|19|unnamed|$STEP_CLOSE --step mol-fx.a' "a call in an unquoted heredoc 
 fx 'unread|27|$UNBOUND --step mol-fx.a --convoy {{convoy_id}}' "a --step with no script named before it is reported unread"
 fx 'call|28|named|$STEP_CLOSE --step mol-fx.c --convoy {{convoy_id}}' "a call the shell continues over a TOML-escaped backslash is read as one command"
 fx 'call|30|unnamed|$STEP_CLOSE --step mol-fx.d--convoy {{convoy_id}}' "a TOML backslash joins lines without the space between them, so the call it glues to --convoy is read unnamed"
-fx 'unlexed|36|the fence opened here ends inside a double-quoted string' "a fence left inside an open string is reported unlexed"
-eq "$(grep -c . <<< "$FXSCAN")" "16" "(SCAN) nothing else reads as a finding: prose, a comment, a test, dirname, a quoted heredoc body, molecule-hold's --step, or a fence not tagged as shell"
+fx 'call|35|named|$STEP_CLOSE --step mol-fx.e --convoy {{convoy_id}}' "a call after an unquoted heredoc is read at its own line, with none of the body's text"
+fx 'unlexed|40|the fence opened here ends inside a double-quoted string' "a fence left inside an open string is reported unlexed"
+eq "$(grep -c . <<< "$FXSCAN")" "17" "(SCAN) nothing else reads as a finding: prose, a comment, a test, dirname, a quoted heredoc body, molecule-hold's --step, or a fence not tagged as shell"
 
 # A mutant of the shipped tree: mol-review's review-step close rewritten in the
 # "$SCRIPTS/step-close.sh" spelling with --convoy dropped. The check fails it,
 # where it passes the unmutated formula above.
 MUT="$TMP/mol-review.toml"
-if awk -v want='--step mol-review.review --convoy {{convoy_id}}' '
-     index($0, want) { print "\"$SCRIPTS/step-close.sh\" --step mol-review.review --outcome pass"; n++; next }
+if awk '
+     index($0, "--step mol-review.review ") && index($0, "--convoy {{convoy_id}}") { print "\"$SCRIPTS/step-close.sh\" --step mol-review.review --outcome pass"; n++; next }
      { print }
      END { exit (n == 1 ? 0 : 1) }' "$ROOT/formulas/mol-review.toml" > "$MUT"; then
   MUTLINE=$(grep -n -F -- '"$SCRIPTS/step-close.sh" --step mol-review.review --outcome pass' "$MUT" | cut -d: -f1)
