@@ -70,14 +70,21 @@ a card or disposing:
 
 `first-reaction-dispose.sh --stand-down` reads both markers and closes `R` the
 way every exit does. It exits 0 when it closed `R`, and you drain. It exits 3
-when neither marker is on `S`, and you go on to react. Exit 2 is a usage error:
-fix the call and re-run it before you react.
+when neither marker is on `S`, and only that status sends you on to react. Any
+other status, such as 2 for a usage error, means the stand-down did not answer,
+and the block stops there. Fix what its message names and re-run the block
+before you read anything else.
 
 ```bash
-if "$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R>; then
-    gc runtime drain-ack
-    exit
-fi
+STAND_DOWN_RC=0
+"$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R> || STAND_DOWN_RC=$?
+case "$STAND_DOWN_RC" in
+    0) gc runtime drain-ack
+       exit ;;
+    3) ;;
+    *) echo "the stand-down exited $STAND_DOWN_RC without an answer, so do not react: fix what its message names and re-run this block" >&2
+       exit "$STAND_DOWN_RC" ;;
+esac
 ```
 
 ## The First Reaction

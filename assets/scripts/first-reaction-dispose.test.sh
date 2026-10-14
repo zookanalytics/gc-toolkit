@@ -1326,6 +1326,56 @@ else
   bad "(ONECLOSE) the proactive prompt is missing at $PROMPT_MD"
 fi
 
+# ── The prompt reacts only when the stand-down says to ───────────────────────
+# --stand-down answers 0 when it closed R, and the worker drains, or 3 when the
+# reaction goes ahead. Any other status means it did not answer, and a reaction
+# run on one skips the marker check. The prompt's stand-down block runs here the
+# way a worker runs it: R filled in, a stand-in for this script that exits each
+# status, a gc that only logs, and a line after the block standing for the
+# reaction.
+#   (SDGATE) 0 drains and 3 goes on to react; every other status stops the block
+#            with a failure, before the reaction and with no drain
+SD_BLOCK="$(awk '/^### Before you react/{f=1} f && /^```bash$/{b=1; next} b && /^```$/{exit} b' "$PROMPT_MD" 2>/dev/null || true)"
+SD_BLOCK="${SD_BLOCK//<R>/$R}"
+mkdir -p "$TMP/sdbin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sdbin/gc" <<'SDGC'
+printf 'GC %s\n' "$*" >> "$FAKE_LOG"
+SDGC
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sd-dispose" <<'SDD'
+printf 'DISPOSE %s\n' "$*" >> "$FAKE_LOG"
+exit "$FAKE_SD_RC"
+SDD
+chmod +x "$TMP/sdbin/gc" "$TMP/sd-dispose"
+sd_block() {
+  : > "$FAKE_LOG"
+  RC=0
+  OUT="$(FAKE_SD_RC="$1" DISPOSE="$TMP/sd-dispose" SUBJECT=tk-sub PATH="$TMP/sdbin:$PATH" \
+    bash -c "$SD_BLOCK"$'\n''echo REACTING' 2>"$TMP/err")" || RC=$?
+  ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"
+}
+if [ -n "$SD_BLOCK" ]; then
+  sd_block 0
+  has "DISPOSE tk-sub --stand-down --reaction-bead $R" "$LOG" "(SDGATE) the prompt's block asks the stand-down about S and R"
+  has "GC runtime drain-ack" "$LOG" "(SDGATE) exit 0, R closed, drains"
+  hasnt "REACTING" "$OUT" "(SDGATE) …and does not go on to react"
+  eq "$RC" "0" "(SDGATE) …and the block succeeds"
+
+  sd_block 3
+  has "REACTING" "$OUT" "(SDGATE) exit 3, neither marker, goes on to react"
+  hasnt "drain-ack" "$LOG" "(SDGATE) …without draining"
+  eq "$RC" "0" "(SDGATE) …and the block succeeds"
+
+  for SD_RC in 1 2 4 127; do
+    sd_block "$SD_RC"
+    hasnt "REACTING" "$OUT" "(SDGATE) exit $SD_RC is no answer, so the block does not go on to react"
+    hasnt "drain-ack" "$LOG" "(SDGATE) …and does not drain, since R is still open"
+    [ "$RC" -ne 0 ] && ok "(SDGATE) …and the block fails" || bad "(SDGATE) …and the block fails (got $RC)"
+    has "exited $SD_RC" "$ERR" "(SDGATE) …naming the status it stopped on"
+  done
+else
+  bad "(SDGATE) no stand-down block under 'Before you react' in $PROMPT_MD"
+fi
+
 # ── A failed act refers to the cause ─────────────────────────────────────────
 # gc-helm.sh exits non-zero for a release that did not write AND for a release
 # whose route would not stamp, and only it knows which — so this refers to its
