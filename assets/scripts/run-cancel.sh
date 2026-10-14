@@ -10,8 +10,8 @@
 # cancel closes the root and every member that is not closed, a `blocked` one
 # included, with gc.outcome=canceled, blockers first, and runs none of them. A
 # session mid-step finishes that step and idles. This script writes no member of
-# the molecule. In --step mode it appends the reason to the step this session
-# holds, which is the one bead a worker writes.
+# the molecule. In --step mode, once the run has ended, it appends the reason to
+# the step this session holds, which is the one bead a worker writes.
 #
 # --step names the run by the step this shell is executing: this session's bead
 # for that gc.step_ref, found by assignee (in_progress first, then open, then
@@ -20,7 +20,8 @@
 # for a caller that holds no step of it.
 #
 # A run whose root is already closed is not cancelled, because gascity's cancel
-# leaves a terminal run's members as they are and answers 409. A member still
+# leaves a terminal run's members as they are and answers 409. A 409 for a root
+# that read live counts only once the root reads closed. A member still
 # open under a closed root, which a root closed by hand leaves behind, is closed
 # by gascity's `gc convoy delete <root> --force`. That close is refused when
 # such a member carries `branch` or `merge_result`, because that member is a
@@ -56,8 +57,8 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [-
   --step     the gc.step_ref of the step this shell is executing, e.g.
              mol-polecat-work.load-context. The run is that step's molecule.
   --root     the run's root bead, for a caller that holds no step of it.
-  --reason   why the run ends; appended to the held step in --step mode and
-             printed on the result line (required)
+  --reason   why the run ends; appended to the held step in --step mode once
+             the run has ended, and printed on the result line (required)
   --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
              HINT: used only if it verifies as this session's bead for --step.
   --ended    the caller read the root as closed: close only what the run left
@@ -66,8 +67,8 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [-
   --dry-run  resolve and report; write nothing and send nothing.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session in --step mode.
-     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city; GC_HOME holds
-     supervisor.toml and cities.toml.
+     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city, else `gc status`
+     does; GC_HOME holds supervisor.toml and cities.toml.
 
 exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 USAGE
@@ -276,11 +277,14 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 WHO="${GC_SESSION_NAME:-${GC_SESSION_ID:-${GC_ALIAS:-unknown session}}}"
-if [ -n "$TARGET" ]; then
+# The reason lands on the held step once the run has ended, so the note records
+# what happened to the run, and an attempt that does not end it writes nothing.
+note_step() { # <what happened to the run>
+  [ -n "$TARGET" ] || return 0
   # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
-  gc bd update "$TARGET" ${DB:+--db "$DB"} --append-notes "Declined at $STEP by $WHO: $REASON. Cancelling run $ROOT through gascity." >/dev/null 2>&1 \
-    || echo "$PROG: NOTE: the reason did not land on $TARGET; the result line below still records it" >&2
-fi
+  gc bd update "$TARGET" ${DB:+--db "$DB"} --append-notes "Declined at $STEP by $WHO: $REASON. $1" >/dev/null 2>&1 \
+    || echo "$PROG: NOTE: the reason did not land on $TARGET; the result line still records it" >&2
+}
 
 # The address the supervisor serves, derived as gctk's internal/daemon derives
 # it: [supervisor] bind and port in $GC_HOME/supervisor.toml, defaulting to
@@ -305,11 +309,15 @@ api_base() {
   esac
   printf 'http://%s:%s' "$bind" "$port"
 }
-# The city the supervisor registered at this path in $GC_HOME/cities.toml, else
-# the path's basename, the name the supervisor gives an unnamed city.
+# The city the supervisor registered at the city's path in $GC_HOME/cities.toml,
+# else the path's basename, the name the supervisor gives an unnamed city. A
+# session carries the path as GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT). A caller
+# outside one, such as an operator's shell running gc-helm.sh, asks `gc status`,
+# which finds the city the way every other gc command does.
 city_name() {
   local path name
   path="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+  [ -n "$path" ] || path=$(gc status --json 2>/dev/null </dev/null | scrub | jq -r '.city_path // empty' 2>/dev/null)
   path="${path%/}"
   [ -n "$path" ] || return 1
   name=$(awk -v want="$path" '
@@ -325,7 +333,7 @@ city_name() {
 TERMINAL=$ROOT_CLOSED
 if [ "$TERMINAL" = 0 ]; then
   if ! CITY=$(city_name); then
-    echo "$PROG: no city path in the environment (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT all unset), so there is no city to send the cancel to; run $ROOT is not cancelled" >&2
+    echo "$PROG: no city path in the environment (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT all unset) and none from gc status, so there is no city to send the cancel to; run $ROOT is not cancelled" >&2
     exit 1
   fi
   URL="$(api_base)/v0/city/$CITY/runs/$ROOT/cancel"
@@ -346,9 +354,24 @@ if [ "$TERMINAL" = 0 ]; then
     case "$CODE" in
       200|202)
         CLOSED=$(scrub < "$BODY" | jq -r '.closed // empty' 2>/dev/null)
+        note_step "Run $ROOT cancelled through gascity${CLOSED:+ ($CLOSED beads closed)}."
         echo "$PROG: cancelled run $ROOT${CLOSED:+ ($CLOSED beads closed)}: $REASON"
         exit 0 ;;
       409)
+        # gascity answers 409 when the root it finds is already closed. The root
+        # read live before the request, so it is read again, and only a root
+        # that now reads closed is a run that ended, whose leftovers are closed
+        # below. Any other 409 leaves the run as it is.
+        # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
+        if ! AGAIN=$(bd_json_array show "$ROOT" ${DB:+--db "$DB"}); then
+          echo "$PROG: the supervisor answered 409 ${DETAIL:+($DETAIL) }and root $ROOT could not be read again, so the run is not proven over; it is not cancelled, and nothing was closed" >&2
+          exit 1
+        fi
+        AGAIN_STATUS=$(printf '%s' "$AGAIN" | jq -r '.[0].status // ""' 2>/dev/null)
+        if [ "$AGAIN_STATUS" != closed ]; then
+          echo "$PROG: the supervisor answered 409 ${DETAIL:+($DETAIL) }but root $ROOT still reads '${AGAIN_STATUS:-unreadable}', so the run is not proven over; it is not cancelled, and nothing was closed" >&2
+          exit 1
+        fi
         TERMINAL=1
         break ;;
       404)
@@ -380,6 +403,7 @@ if ! LEFT=$(bd_json_array list --metadata-field "gc.root_bead_id=$ROOT" --status
 fi
 NLEFT=$(printf '%s' "$LEFT" | jq 'length' 2>/dev/null)
 if [ "${NLEFT:-0}" = "0" ]; then
+  note_step "Run $ROOT had already ended."
   echo "$PROG: run $ROOT had already ended: $REASON"
   exit 0
 fi
@@ -397,5 +421,6 @@ if ! LEFT=$(bd_json_array list --metadata-field "gc.root_bead_id=$ROOT" --status
   echo "$PROG: gc convoy delete $ROOT --force ran, but members of run $ROOT still read open" >&2
   exit 1
 fi
+note_step "Run $ROOT had already ended; gascity closed the $NLEFT member(s) it left open."
 echo "$PROG: run $ROOT had already ended; gascity closed the $NLEFT member(s) it left open: $REASON"
 exit 0

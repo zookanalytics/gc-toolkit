@@ -14,11 +14,15 @@
 #   * --step resolves the run from this session's step (in_progress, then open,
 #     then blocked; --bead a verified hint) and --root takes it as given;
 #   * NO MEMBER WRITE: the one bd write on any path is the reason appended to
-#     the held step in --step mode;
-#   * the ANSWERS: 202 ends the run; 409 is a run already terminal, whose open
-#     leftovers gascity's `gc convoy delete --force` closes, unless one carries
-#     a branch or a merge_result; 404 is not ended; a 5xx or a failed connection
-#     is retried and then not ended;
+#     the held step in --step mode, once the run has ended, so an attempt that
+#     does not end it writes nothing;
+#   * the ANSWERS: 202 ends the run; 409 is a run already terminal once its root
+#     reads closed again, whose open leftovers gascity's `gc convoy delete
+#     --force` closes, unless one carries a branch or a merge_result; a 409 for
+#     a root that still reads live ends nothing and closes nothing; 404 is not
+#     ended; a 5xx or a failed connection is retried and then not ended;
+#   * the CITY: GC_CITY_PATH names it, else `gc status`, so a caller outside a
+#     session (an operator's shell running gc-helm.sh) reaches the same city;
 #   * refusals with no request and no write: no identity, an ambiguous step, a
 #     step naming no root, a bead that is not a workflow root, usage errors;
 #   * the SUBSTRING trap: session lx-zzk must not own lx-zzk9's bead.
@@ -55,6 +59,7 @@ mkdir -p "$TMP/bin" "$TMP/home"
 #               because this script writes nothing but a note.
 # `convoy delete <root> --force` : closes every live bead whose
 #               gc.root_bead_id is <root>, or exits $FAKE_DELETE_RC.
+# `status`    : answers $FAKE_STATUS, or fails when it is unset.
 # Every invocation is appended verbatim to $GC_LOG.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
@@ -66,6 +71,10 @@ if [ "${1:-}" = "convoy" ] && [ "${2:-}" = "delete" ]; then
   jq -c --arg r "${3:-}" 'map(if (.metadata["gc.root_bead_id"] // "") == $r and .status != "closed"
                               then .status = "closed" | .metadata["gc.outcome"] = "skipped" else . end)' "$S" > "$S.n" && mv "$S.n" "$S"
   exit 0
+fi
+if [ "${1:-}" = "status" ]; then
+  [ -n "${FAKE_STATUS:-}" ] || { echo "gc: no city here (stub)" >&2; exit 1; }
+  printf '%s\n' "$FAKE_STATUS"; exit 0
 fi
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift
@@ -115,6 +124,8 @@ chmod +x "$TMP/bin/gc"
 # one "<code> <json body>" per line, consumed in order; an exhausted queue
 # repeats its last line. Code 000 is a failed connection: no body, exit 7. A
 # request without the X-GC-Request header is answered 403, as gascity answers it.
+# With $FAKE_409_CLOSES set, a 409 also closes that root in the store, the way a
+# run that ended between the script's read and its request looks.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/curl" <<'CURL'
 set -u
 out=""; fmt=""; method="GET"; hdr=""; url=""
@@ -137,6 +148,10 @@ line=$(head -n 1 "$Q")
 code="${line%% *}"; body="${line#* }"
 case "$hdr" in *"X-GC-Request:"*) ;; *) code=403; body='{"title":"Forbidden","status":403,"detail":"csrf: X-GC-Request header required on mutation endpoints"}' ;; esac
 if [ "$code" = "000" ]; then printf '000'; exit 7; fi
+# A 409 for a run that ended between the script's read and its request.
+if [ "$code" = "409" ] && [ -n "${FAKE_409_CLOSES:-}" ]; then
+  jq -c --arg r "$FAKE_409_CLOSES" 'map(if .id == $r then .status = "closed" else . end)' "$FAKE_STORE" > "$FAKE_STORE.c" && mv "$FAKE_STORE.c" "$FAKE_STORE"
+fi
 [ -n "$out" ] && printf '%s' "$body" > "$out"
 [ "$fmt" = '%{http_code}' ] && printf '%s' "$code"
 exit 0
@@ -195,8 +210,8 @@ eq "$(calls)" 1 "--step: exactly one request"
 has "$(cat "$CURL_LOG")" "POST $URL " "--step: POST to the run cancel of the step's root, in the city cities.toml names"
 has "$(cat "$CURL_LOG")" "X-GC-Request:" "--step: the request carries gascity's anti-CSRF header"
 has "$OUT" "cancelled run tk-root (4 beads closed): duplicate dispatch" "--step: the result line names the run, the count and the reason"
-eq "$(writes)" "bd update tk-lc --append-notes Declined at $STEP by $MINE: duplicate dispatch: tk-work already in flight. Cancelling run tk-root through gascity." \
-  "--step: the only write is the reason on the held step"
+eq "$(writes)" "bd update tk-lc --append-notes Declined at $STEP by $MINE: duplicate dispatch: tk-work already in flight. Run tk-root cancelled through gascity (4 beads closed)." \
+  "--step: the only write is the reason on the held step, naming what the cancel did"
 for b in tk-root tk-ws tk-fin tk-work; do eq "$(bnotes "$b")" "" "--step: $b is not written"; done
 eq "$(bstatus tk-lc)" "in_progress" "--step: the script closes nothing itself; gascity's cancel does"
 
@@ -294,10 +309,31 @@ eq "$(bstatus tk-work)" "open" "leftovers: the work bead, which names no root, i
 eq "$(writes)" "" "leftovers: the script itself writes nothing"
 
 reset "$TERMINAL"
-run --root tk-root --reason r
-eq "$RC" 0 "a root that reads live but answers 409 (it ended in the meantime): its leftovers are closed"
+OUT=$(FAKE_409_CLOSES=tk-root "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 0 "a root that read live and answers 409 having ended in the meantime: its leftovers are closed"
 eq "$(calls)" 1 "a 409: one request, not retried"
 has "$(cat "$GC_LOG")" "convoy delete tk-root --force" "a 409: the members left open are closed through gascity"
+
+# A 409 that the root does not bear out is not read as an ended run.
+reset "$TERMINAL"
+run --root tk-root --reason r
+eq "$RC" 1 "a 409 for a root that still reads live: not ended"
+has "$OUT" "still reads 'in_progress'" "a 409 for a live root: names what the root reads"
+has "$OUT" "already terminal; nothing to cancel" "a 409 for a live root: gascity's detail is reported"
+hasnt "$(cat "$GC_LOG")" "convoy delete" "a 409 for a live root: nothing is closed by hand"
+eq "$(bstatus tk-root) $(bstatus tk-lc) $(bstatus tk-ws) $(bstatus tk-fin)" "in_progress in_progress open open" \
+  "a 409 for a live root: the root and every step keep their status"
+reset "$TERMINAL"
+run --step "$STEP" --reason r
+eq "$RC" 1 "--step, a 409 for a live root: not ended"
+eq "$(writes)" "" "--step, a 409 for a live root: no note, since the run did not end"
+
+# In --step mode the note lands once a run already over has its leftovers closed.
+reset; close_root
+run --step "$STEP" --reason "work already delivered"
+eq "$RC" 0 "--step on a closed root with leftovers: ended"
+eq "$(writes)" "bd update tk-lc --append-notes Declined at $STEP by $MINE: work already delivered. Run tk-root had already ended; gascity closed the 3 member(s) it left open." \
+  "--step on a closed root: the note says the run had already ended"
 
 reset; close_root
 jq -c 'map(if .id == "tk-ws" then .metadata.merge_result = "pull_request" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
@@ -337,6 +373,11 @@ eq "$RC" 0 "a 503 then a 202: ended on the retry"
 eq "$(calls)" 2 "503 then 202: two requests"
 
 reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
+run --step "$STEP" --reason r
+eq "$RC" 1 "--step, 503 on every attempt: not ended"
+eq "$(writes)" "" "--step, 503 on every attempt: no note, so a retry adds none either"
+
+reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
 run --root tk-root --reason r
 eq "$RC" 1 "503 on every attempt: not ended"
 eq "$(calls)" 3 "503: three attempts by default"
@@ -367,8 +408,13 @@ reset
 OUT=$(GC_CITY_PATH=/srv/unlisted/ "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
 has "$(cat "$CURL_LOG")" "/v0/city/unlisted/runs/" "an unregistered city path falls back to its basename"
 reset
+OUT=$(env -u GC_CITY_PATH FAKE_STATUS='{"city_path":"/srv/town","city_name":"ignored"}' "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 0 "no city path in the environment: gc status names it"
+has "$(cat "$CURL_LOG")" "POST $URL " "gc status's city path is named as cities.toml registers it"
+reset
 OUT=$(env -u GC_CITY_PATH "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
-eq "$RC" 1 "no city path: not ended"
+eq "$RC" 1 "no city path and none from gc status: not ended"
+has "$OUT" "none from gc status" "no city: says where it looked"
 eq "$(calls)" 0 "no city path: no request"
 
 # ── 10. dry run and usage ────────────────────────────────────────────────────
