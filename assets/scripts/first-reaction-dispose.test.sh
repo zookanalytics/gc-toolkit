@@ -1107,7 +1107,8 @@ unset FAKE_SHOW_JSON
 #   (SDNONE)      neither marker: nothing is written, and the exit says react
 #   (SDREAD)      an unreadable subject carries neither marker
 #   (SDDRY)       --dry-run names the close it would make and writes nothing
-#   (SDARGS)      no R, an exit's flags, or R as the subject are refused
+#   (SDARGS)      no R, an exit's flag, or R as the subject is refused; the
+#                 common flags pass
 #   (SDPIN)       the read and the close carry the subject's store pin
 #   (SDCLOSEFAIL) a refused close still stands down, naming the full hand repair
 export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.reacted_by":"tk-react"}}]'
@@ -1165,6 +1166,16 @@ run tk-sub --stand-down --reaction-bead "$R" --disposition actionable --reason "
 eq "$RC" "2" "(SDARGS) a stand-down carrying an exit's flags is refused"
 eq "$LOG" "" "(SDARGS) …and nothing was read or written"
 has "--stand-down takes --reaction-bead only" "$ERR" "(SDARGS) …naming the one flag it takes"
+# The subject carries this R's marker, so a flag the check let through would
+# stand down and close R instead of being refused.
+run tk-sub --stand-down --reaction-bead "$R" --emergency "test-macos"
+eq "$RC" "2" "(SDARGS) a stand-down carrying --emergency is refused, as every exit flag is"
+eq "$LOG" "" "(SDARGS) …and nothing was read or written"
+has "was given --emergency" "$ERR" "(SDARGS) …naming the flag it does not take"
+run tk-sub --stand-down --reaction-bead "$R" --by proactive --db "$TMP/sd.beads"
+eq "$RC" "0" "(SDARGS) the common flags pass the stand-down's check"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/sd.beads" "$LOG" \
+    "(SDARGS) …and the stand-down closes R in the store --db names"
 run tk-sub --stand-down --reaction-bead tk-sub
 eq "$RC" "2" "(SDARGS) the reaction bead cannot be the subject itself"
 

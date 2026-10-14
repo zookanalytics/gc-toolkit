@@ -185,8 +185,10 @@ ASSIGN=""; THEN_ASSIGN=""; EMERGENCY=""; EMERGENCY_SET=""
 DB=""; DRY=""; AFTER_WORKFLOW=""; RECOMMENDED_FORMULA=""; REACTION_BEAD=""
 STAND_DOWN=""
 WAITING=""          # space-separated bead ids
+FLAGS_GIVEN=""      # each flag by name, for the stand-down's check of what it takes
 
 while [ $# -gt 0 ]; do
+    case "$1" in -?*) FLAGS_GIVEN="$FLAGS_GIVEN ${1%%=*}" ;; esac
     case "$1" in
         --disposition) shift; [ $# -gt 0 ] || usage_die "--disposition needs a value"; DISPOSITION="$1"; shift ;;
         --disposition=*) DISPOSITION="${1#--disposition=}"; shift ;;
@@ -235,9 +237,15 @@ done
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
 if [ -n "$STAND_DOWN" ]; then
     # The stand-down decides whether a reaction runs at all, so it names no
-    # exit, and the one write it can make is R's close.
-    [ -z "$DISPOSITION$REASON$TAKEAWAY$ROUTE$ASSIGN$WAITING$BLOCKER_TITLE$BLOCKER_KEY$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
-        || usage_die "--stand-down takes --reaction-bead only: it decides whether the reaction runs, so --disposition and the exits' flags belong to the call that disposes"
+    # exit, and the one write it can make is R's close. Each flag given is
+    # checked against the ones it takes, the common flags, so a flag any exit
+    # takes is refused here rather than dropped unread.
+    for f in $FLAGS_GIVEN; do
+        case "$f" in
+            --stand-down|--reaction-bead|--by|--db|--dry-run|-n) : ;;
+            *) usage_die "--stand-down takes --reaction-bead only, and was given $f: it decides whether the reaction runs, so --disposition and the exits' flags belong to the call that disposes" ;;
+        esac
+    done
     [ -n "$REACTION_BEAD" ] \
         || usage_die "--stand-down needs --reaction-bead <R>: a subject that takes no reaction is answered by closing R"
 else
