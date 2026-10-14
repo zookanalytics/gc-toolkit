@@ -1,10 +1,11 @@
 # gctk — the compiled data plane
 
 `gctk` is the pack's compiled data plane as one Go binary: the merge cadence's
-logic, plus the PR-status tri-state that the `status:` label and the helm board
-must share. It is a port, not a redesign: each subcommand keeps the
-byte-identical CLI of the script it replaces, so no formula, order, prompt, or
-doctor check changes when a port lands.
+logic, the PR-status tri-state that the `status:` label and the helm board must
+share, and the gate that runs a rig's declared checks and records their
+results. A port is not a redesign: it keeps the byte-identical CLI of the script
+it replaces, so no formula, order, prompt, or doctor check changes when a port
+lands. `rig` is not a port. No script carried its logic, and its CLI is its own.
 
 Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
 
@@ -20,15 +21,18 @@ cluster is the exception: highest stakes, pure data-plane, no cross-media
 sharing, and its callers already treat it as an opaque CLI. `pr-status` is
 compiled for the opposite reason: the `status:` label (shell) and the helm
 board (Go) must derive the tri-state from one code path, and only a shared
-compiled package keeps them from diverging.
+compiled package keeps them from diverging. `rig` writes the record every later
+run of a check at that commit reads in place of running it, and that record has
+to be the exit status of a command the gate ran itself.
 
-## Ported so far
+## Subcommands
 
 | Subcommand | Replaces | State |
 |---|---|---|
 | `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script only execs the binary, with no fallback — a call with no binary to run is refused |
 | `merge` | `assets/scripts/merge.sh` | ported; the script only execs the binary, with no fallback — a pass with no binary to run is refused |
 | `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
+| `rig` | nothing; it is not a port | no formula or script calls it yet |
 
 Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
 `signoff`. The spec's port order is `lifecycle` first (everything else calls
@@ -42,6 +46,74 @@ lives in gctk, and it has no shell fallback (see below).
 `refinery-reconcile.sh` stays a thin shell driver: identity discovery, arm
 ordering, the posture interlock, the arm budgets. The cadence has to remain
 readable as a script.
+
+## The check gate: `rig`
+
+`gctk rig test|lint|typecheck|setup|build` runs the command the rig declares
+for that check. For test, lint and typecheck, whose results are properties of a
+commit, it also records the result against HEAD. A rig declares its commands as
+formula vars under `[rigs.formula_vars]` in city.toml: `test_command`,
+`affected_tests_command`, `lint_command`, `typecheck_command`, `build_command`
+and `setup_command`. The gate reads them when it runs, with one `gc formula show
+mol-polecat-work --rig <rig> --json`. The rig's own value wins even when it is
+empty, and the formula's default applies otherwise. That is the value a
+polecat's pour pastes into its steps, and the gate runs it as written, as the
+pour does. The read touches only the city's config and the formula files, never
+the supervisor or the bead store. The rig is `--rig`, else `$GC_RIG`. When
+`$GC_RIG` names it and `$GC_RIG_ROOT` names its clone, the checkout must be a
+worktree of that clone.
+
+Each command runs in a `bash -c` of its own at the checkout's top level, with
+stdin closed, leading a process group of its own. A SIGTERM or SIGINT the gate
+receives goes on to that group, and the gate exits 128 plus the signal with
+nothing recorded. A run still going at `--timeout`, two hours unless the caller
+names another bound, is sent SIGTERM, then SIGKILL, as a group.
+
+**The record.** One JSON file per check and commit,
+`gc-rig-checks/<check>/commits/<commit>.json` under the clone's git common
+directory. Every worktree of the clone shares that directory, and it outlives
+any one of them. A re-clone loses the records, which costs one run of each
+check. A record holds the result (`pass` or `fail`), the method (`full`,
+`affected`, or `none` when nothing was declared to run), the commit and its
+tree, the command's exit status, the duration, the runner, the time and the
+command line. A fail can also carry `disposition: pre-existing` and a tracker
+bead, which a caller that judged the fail to be red on the base too attaches
+with `--pre-existing <tracker>`. Each write is a whole file renamed into place.
+Two runners at one commit may both run and both write, and the last write wins.
+
+**What answers for HEAD.** The commit's own record answers whatever its method:
+a pass passes and a fail fails, without running. A pass made with `--affected`
+counts as a pass, and its method says how it was made. For `test`, a full-suite
+pass also answers for every commit with the same tree, through
+`gc-rig-checks/test/trees/<tree>.json`, and a full-suite fail withdraws that
+entry. An affected subset depends on the commit's diff against its base, and a
+lint command can too, so neither crosses commits. A record of nothing run
+answers only `--check`. Every other call works out again what to run, so a
+command the rig declares later does run.
+
+**Modes.** With no record, the gate runs the command, records the result and
+exits with it. `--force` runs whatever is recorded. `--check` prints the record
+on stdout as one JSON line and runs nothing. It reads no var and calls no `gc`,
+so it works where only git is on PATH. `--affected` runs
+`affected_tests_command`, or `test_command` when that is empty or the diff
+against `origin/<base>` names no file. `--base` names the base. Without it the
+base is the rig's own `base_branch`, else the branch `origin/HEAD` names.
+`--publish-bead <bead>` copies the result onto the bead's `rig_check.<check>`
+key through `gc bd update` and reads it back. A publish that fails is reported
+and changes no exit.
+
+**Exit codes.** 0 pass, 1 fail, 2 usage, 3 nothing recorded (`--check`, or
+`--pre-existing` with no fail to mark), 4 machine failure, 128+N stopped by
+signal N. A machine failure says nothing about the code, and nothing is
+recorded for it. These are the machine failures: a checkout with changes HEAD
+does not hold, a command bash cannot parse, a command not found or not
+executable (126, 127), a command ended by a signal (killed outright, or 128+N
+from its shell), a timeout, and vars that could not be read. Any other non-zero
+status is the code's fail, and it stays recorded until `--force` runs the check
+again.
+
+`setup` and `build` run their command the same way and record nothing. Setup
+leaves environment state behind, and a build makes itself current.
 
 ## Subprocess seams, not a linked library
 
@@ -164,8 +236,9 @@ it against the TOML.
 ```
 cmd/gctk/            dispatch and `version`
 internal/lifecycle/  the state machine — states, classifications, edges
-internal/cli/        one file per subcommand, each a contract-preserving port
+internal/cli/        one file per subcommand; each port keeps its script's contract
 internal/gcbd/       the `gc bd` subprocess seam and its jq-equivalent accessors
+internal/rig/        the check gate: var resolution, the runner, the commit-keyed record store
 ```
 
 `internal/gcbd`'s accessors reproduce the jq expressions the scripts used,

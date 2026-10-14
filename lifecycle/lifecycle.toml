@@ -957,6 +957,23 @@ keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
 #   written in the same handback. No pack path reads it back. Absent means no
 #   handback has run. Never cleared. An integer string.
 
+[metadata.rig_checks]
+# The published copy of a check's result, which `gctk rig <check>
+# --publish-bead <bead>` writes on the bead its caller names. The result that
+# answers the gate is the record under the rig clone's git common directory
+# (services/gctk/README.md, "The check gate"); this copy is for whoever reads
+# the bead.
+keys = ["rig_check.test", "rig_check.lint", "rig_check.typecheck"]
+# rig_check.test, rig_check.lint, rig_check.typecheck — the record the
+#   publishing call answered with, as one JSON object: result, method, commit,
+#   tree, exit_code, duration_ms, runner, recorded_at and command, and on a fail
+#   a caller marked pre-existing, disposition and tracker. The gate writes it
+#   after a run, after answering from a record, and after marking a fail
+#   pre-existing, and reads it back once to confirm the write. No other pack
+#   path reads it. Absent means no call published that check to the bead. Never
+#   cleared: the next publish replaces it, and its commit names the head it
+#   describes. A JSON object stored as a string.
+
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
