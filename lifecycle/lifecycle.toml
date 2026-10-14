@@ -1188,7 +1188,9 @@ keys = ["placement"]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
 # a successor bead or a duplicate is folded into a survivor. The pointer is how a
 # closed bead names where its work went; pr-dispose.sh reads gc.superseded_by to
-# treat an already-disposed anchor as a no-op, and the helm board renders it.
+# treat an already-disposed anchor as a no-op, preexisting-failure.sh follows it
+# from a closed tracker to the live bead that carries its failure, and the helm
+# board renders it.
 keys = [
   "gc.superseded_by", "gc.superseded_by_store",
   "superseded_by", "superseded_by_store",
@@ -1394,9 +1396,11 @@ keys = ["failure_key"]
 # failure_key — the failure's dedup identity, as the script's `key` derives it:
 #   a test function, a repo-relative path, or a linter and a path. `file` writes
 #   it in the create and reads it back; `find` matches it exactly, over the live
-#   statuses for both gates' lookup and over closed beads for the pre-flight's
-#   landed-fix check. `find` reads no title, so a bug without it is no tracker.
-#   Never cleared, so a retitle leaves it in place. A string.
+#   statuses for both gates' lookup, then over closed beads when no live tracker
+#   holds it, to follow the most recently closed tracker's gc.superseded_by
+#   chain to a live bead, and over closed beads for the pre-flight's landed-fix
+#   check. `find` reads no title, so a bug without it is no tracker. Never
+#   cleared, so a retitle or a fold leaves it in place. A string.
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
