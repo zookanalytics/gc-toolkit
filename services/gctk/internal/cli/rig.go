@@ -62,11 +62,10 @@ A checkout with changes HEAD does not hold is refused, except by setup and
 build: a record certifies a commit.
 
 exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
-      4 machine failure: nothing is recorded or published, because the run
-        says nothing about the code. That is a refused checkout, a command bash
-        cannot parse, not found or not executable (126, 127), ended by a
-        signal, or still running at the timeout, and a result the record store
-        did not take.
+      4 machine failure, nothing recorded or published: a refused checkout, a
+        command bash cannot parse, find or execute (126, 127), a command ended
+        by a signal or still running at the timeout, or a result the record
+        store did not take. Such a run says nothing about the code.
       128+N stopped by signal N
 `
 
