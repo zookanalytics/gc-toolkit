@@ -223,7 +223,7 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # you), not on the review bead. Scope the lane lookup by it: lane_ids are
 # constant across pours, so gc.review_quorum_lane alone would also match lanes
 # from every other quorum molecule.
-SYNTH_BEAD="<the bead_id from your gc hook --claim --json>"
+SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
 ROOT=$(gc bd show "$SYNTH_BEAD" --json | jq -r '.[0].metadata["gc.root_bead_id"] // empty')
 [ -n "$ROOT" ] || { echo "cannot resolve workflow root from the synthesis step bead $SYNTH_BEAD" >&2; exit 1; }
 ```
@@ -252,7 +252,18 @@ exactly as `formulas/mol-review.toml`'s `review` step 2 does
 (`review-workspace.sh add`; anything else you write to disk goes in the same
 workspace). The lanes did not run tests; this is the quorum's single
 verification. A failure that also fails on the base is pre-existing
-context, not this branch's defect.
+context, not this branch's defect. Run each suite under `hb`, this step's
+claim-lease keepalive:
+```bash
+SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
+# >>> quorum-lease-keepalive
+# A claim's lease has a fixed five-minute TTL, and a synthesizer whose lease
+# lapses during a long command reads as dead. `hb <command>` refreshes
+# $SYNTH_BEAD while it runs, and runs it plain when no wrapper resolves.
+LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
+hb() { if [ -n "$LHB" ]; then "$LHB" "$SYNTH_BEAD" -- "$@"; else "$@"; fi; }
+# <<< quorum-lease-keepalive
+```
 
 **4. Synthesize the verdict body.** UNION the lanes' findings — two providers
 catch more than one, which is the point — then dedupe findings that are the
@@ -316,7 +327,7 @@ gc runtime drain-ack
 ```
 
 **Exit criteria:** both lanes read (or reduced coverage recorded), suite run
-once at the pinned commit, findings.md + findings.json written, exactly one
+once at the pinned commit under `hb`, findings.md + findings.json written, exactly one
 signoff.sh call succeeded (or findings appended and the route restored), step
 chain closed forward, the workspace removed unless the bead went back to the
 pool, drain acknowledged.
