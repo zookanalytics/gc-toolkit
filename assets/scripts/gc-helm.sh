@@ -1356,7 +1356,7 @@ cmd_takeaway() {
         fi
     fi
     # The executor identity the unassign takes with it is read back like the route
-    # and the proof above, and fails the verb the same way: both keys have readers.
+    # above, and fails the verb the same way: both keys have readers.
     # A gc.session_name left on the now-open bead is the residue
     # doctor/executor-identity-residue reports the moment the bead next carries a
     # route its stamp does not match — the finding this release exists to close. It

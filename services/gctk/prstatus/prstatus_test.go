@@ -23,6 +23,15 @@ func TestDerive(t *testing.T) {
 		{"approved + BLOCKED + live work is working", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", InFlightCount: 1}, Working},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
+
+		// The open-as-draft stage: the city opened the PR as a draft and owes the
+		// checks that flip it ready, so nothing asks a human to review it yet.
+		{"draft the city opened, not yet readied", Facts{OpenedAsDraft: "abc"}, Working},
+		{"draft readied, nothing in flight", Facts{OpenedAsDraft: "abc", DraftReadied: "abc"}, NeedsReview},
+		{"draft readied at a later head", Facts{OpenedAsDraft: "abc", DraftReadied: "def"}, NeedsReview},
+		{"draft stage under a hold", Facts{OpenedAsDraft: "abc", MergeHold: "true"}, NeedsAttention},
+		{"draft stage with live work", Facts{OpenedAsDraft: "abc", InFlightCount: 1}, Working},
+		{"readied marker alone is not the stage", Facts{DraftReadied: "abc"}, NeedsReview},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := Derive(tc.f); got != tc.want {
@@ -47,6 +56,28 @@ func TestIsSetMatchesTheShellTruthiness(t *testing.T) {
 	for _, v := range []string{"true", "held", "1", "yes", "anything"} {
 		if !isSet(v) {
 			t.Errorf("isSet(%q) = false, want true (a set value)", v)
+		}
+	}
+}
+
+// The stage test is presence, the prefilter pr-open.sh and gate-ensure.sh run on
+// the same two oid markers, not the hold truthiness rule: any non-empty
+// opened_as_draft opens the stage and any non-empty draft_readied ends it.
+func TestInDraftStageIsMarkerPresence(t *testing.T) {
+	for _, tc := range []struct {
+		opened, readied string
+		want            bool
+	}{
+		{"", "", false},
+		{"abc", "", true},
+		{"abc", "abc", false},
+		{"", "abc", false},
+		{"0", "", true},
+		{"false", "", true},
+		{"abc", "false", false},
+	} {
+		if got := inDraftStage(tc.opened, tc.readied); got != tc.want {
+			t.Errorf("inDraftStage(%q, %q) = %v, want %v", tc.opened, tc.readied, got, tc.want)
 		}
 	}
 }

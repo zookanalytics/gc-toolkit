@@ -119,6 +119,19 @@ eq "$("$SUT" derive --anchor tk-a)" "working" "approved + BLOCKED + an open rewo
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"commented@abc@t"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "posture commented, no rework => needs-review"
 
+# working — a draft the city opened (opened_as_draft, no draft_readied) still owes
+# the checks that flip it ready, so it is not up for review with nothing in flight.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a draft the city opened, not yet readied => working"
+
+# needs-review — once pr-open.sh records draft_readied, the draft is up for review.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","draft_readied":"abc123"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a readied draft with nothing in flight => needs-review"
+
+# needs-attention — a hold outranks the draft stage, as it does live work.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","merge_hold":"true"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a held draft => needs-attention"
+
 # precedence — a hold outranks an open rework child.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'

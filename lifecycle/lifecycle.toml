@@ -584,15 +584,17 @@ keys = [
 #   draft it created, or on an adopted draft only when the city's own login
 #   authored it and its timeline carries no conversion to draft. Its PRESENCE is
 #   what tells the draft-to-ready arm this is a draft the refinery owns the flip
-#   of (not an operator's manual draft or re-draft) and tells gate-ensure.sh the
+#   of (not an operator's manual draft or re-draft), and tells gate-ensure.sh
+#   and services/gctk/prstatus (the status: label and the board's PR phase) the
 #   anchor is still in the open-as-draft stage. Absent means the PR opened ready,
 #   or is a draft someone else owns. Never cleared. An oid.
 # draft_readied — the head oid a PR was read ready at (pr-open.sh): the head the
 #   draft-to-ready arm flipped it at, or the head it already read ready at,
 #   whatever holds the anchor. Its PRESENCE stops that arm re-reading the PR
 #   every pass and stops it ever re-flipping a PR an operator later re-drafted,
-#   and tells gate-ensure.sh the anchor reached the ready-for-review stage.
-#   Absent means the arm has not read it ready. Never cleared. An oid.
+#   and tells gate-ensure.sh and services/gctk/prstatus the anchor reached the
+#   ready-for-review stage. Absent means the arm has not read it ready. Never
+#   cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
@@ -1080,9 +1082,9 @@ keys = [
 # gc.reacted_by — on the SUBJECT S, the reaction bead R whose write-back landed.
 #   Written by first-reaction-dispose.sh LAST, after the disposition act and any
 #   edge, so its presence proves the whole write-back landed. Read by that
-#   script's re-offer recovery and the reaction worker's
-#   (agents/proactive/prompt.template.md), to close a re-claimed R without
-#   re-disposing S, and shown by bead-context.sh. It
+#   script's re-offer recovery and by its --stand-down, which the reaction worker
+#   (agents/proactive/prompt.template.md) runs before it reacts, to close a
+#   re-claimed R without re-disposing S, and shown by bead-context.sh. It
 #   is not a guard progress is refused on — the write-backs are idempotent — and it
 #   is keyed to R's id, so a marker left by a closed R does not block a later
 #   re-reaction by a different R. Never cleared. A bead id.
@@ -1125,7 +1127,8 @@ keys = [
 #   that subject unmarked. tools/gc-proactive.sh drops a marked bead from its
 #   scan and refuses to file a reaction for one, and a reaction that reaches one
 #   anyway closes its reaction bead without acting and leaves the marker
-#   (agents/proactive/prompt.template.md). A frozen mol-first-reaction
+#   (first-reaction-dispose.sh --stand-down, which
+#   agents/proactive/prompt.template.md runs). A frozen mol-first-reaction
 #   molecule's advance-and-drain still consumes it: it writes
 #   gc.proactive_reaction=1, reads it back, and only then unsets this key.
 #   Absent means no live owner. Cleared only by that frozen consume.
