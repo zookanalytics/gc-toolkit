@@ -863,9 +863,12 @@ keys = [
   # answer. A finding carrying it costs the write-back no GitHub read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
-  # set by finding.sh as the deferral runs. It carries the objection, the deferral
-  # reason, and a --discovered-from edge to the finding for provenance; the anchor
-  # --blocks it until the merge.
+  # set by finding.sh as the deferral runs. It carries the objection and the
+  # deferral reason, and the create that files it carries both its edges: the
+  # anchor --blocks it until the merge, and it is --discovered-from the finding.
+  # The same create stamps it source_finding, below. A deferral retried after a
+  # failure finds the follow-up the failed attempt filed by that stamp, so the
+  # retry files no second one.
   "finding.follow_up",
   # The visit that carries a needs-you finding's decision, set by finding.sh as
   # the ruling runs: one it filed, or one already open on the anchor's feedback
@@ -898,6 +901,14 @@ keys = [
   # child's edge too. A finding filed without one falls back to the lane-level
   # match. A bead id.
   "finding.fix_unit",
+  # On the follow-up a deferred finding files, the finding it carries forward,
+  # stamped by finding.sh in the create that files the follow-up. finding.sh reads
+  # it when a deferral is retried: of the finding's live discovered-from
+  # dependents, only one carrying the stamp is the follow-up to reuse. Other
+  # beads are discovered-from a finding too, such as the bug scaffolding-sweep.sh
+  # files to carry a disposed anchor's finding forward, and none is taken for the
+  # follow-up. A bead id. Never cleared.
+  "source_finding",
 ]
 
 [metadata.review_quorum]
