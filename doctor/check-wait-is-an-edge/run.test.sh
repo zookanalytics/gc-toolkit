@@ -216,9 +216,9 @@ held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
 held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
 held '{"dispatch_backstop.codex":"5@abc123"}'    "dispatch_backstop.<g>"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
-# No lane state is a hold: each is one some actor moves the anchor on from, and
-# an operator's hold is merge_hold, asserted through blocked_reason and
-# gc.takeaway.
+# No lane state is a hold: each is one some actor moves the anchor on from.
+# merge_hold is not a marker either: a hold that must show as an edge asserts it
+# through blocked_reason or gc.takeaway beside it.
 notheld '{"check.codex":"green"}'                "a green lane"
 notheld '{"check.codex":"fixing"}'               "a fixing lane"
 notheld '{"check.codex":"unreviewed"}'           "an unreviewed lane"

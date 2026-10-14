@@ -3080,9 +3080,10 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 //
 // A merge anchor routed to a person carries `gc.routed_to=human` AND
 // `merge_result`, so the gather admits it under both kinds and hands BuildBoard
-// two anchors with one id. Both rows read the same metadata, so they band the same and tie on
-// rank_score — which means the stable sort, not the band, decides which
-// survives, and the gather's ordering is load-bearing rather than incidental.
+// two anchors with one id. Both rows read the same metadata, so they band the
+// same and tie on rank_score — which means the stable sort, not the band,
+// decides which survives, and the gather's ordering is load-bearing rather than
+// incidental.
 //
 // The row that survives has to keep both halves: the `human` kind every
 // human-gate rule keys on, and the PR axes, which are what this surface adds.

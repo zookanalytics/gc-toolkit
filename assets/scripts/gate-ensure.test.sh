@@ -11,13 +11,13 @@
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
 # nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
 # exception@<oid> marker is read as nothing, so the lane derives from the graph;
-# the live-head read, which
-# decides only the dispatch pin and the machine axis (a deleted ref, a body
-# without .sha, and a failed read are all unanswerable); the stray-marker sweep
-# (undeclared and outside the lane vocabulary is cleared, the retired green@ and
-# exception@ grammar included; a declared or well-formed one is not; an
-# unpersisted clear is reported); a multi-check check_set split per check rather than joined
-# into one name; in-flight dedup (routed, poured, claimed) + stranded repair
+# the live-head read, which decides only the dispatch pin and the machine axis
+# (a deleted ref, a body without .sha, and a failed read are all unanswerable);
+# the stray-marker sweep (undeclared and outside the lane vocabulary is cleared,
+# the retired green@ and exception@ grammar included; a declared or well-formed
+# one is not; an unpersisted clear is reported); a multi-check check_set split
+# per check rather than joined into one name; in-flight dedup (routed, poured,
+# claimed) + stranded repair
 # (root probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died before
 # the root drives nothing and must not hold the anchor in flight forever; and
@@ -31,10 +31,9 @@
 # gc.execution_routed_to read-back, never retried in-pass; no dispatch tally is
 # written, and there is no dispatch ceiling); merge_hold, which holds the
 # dispatch while the machine axis still reads the lanes; and the review-wedge
-# escalation, shared by both
-# reach shapes (an exec-stamp-only poured review, and a no-stamp review a
-# tracking convoy's root drives) -> a spent workflow is one deduped visit, held
-# one pass first.
+# escalation, shared by both reach shapes (an exec-stamp-only poured review, and
+# a no-stamp review a tracking convoy's root drives) -> a spent workflow is one
+# deduped visit, held one pass first.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
