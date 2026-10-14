@@ -78,6 +78,9 @@ case "$1 $2" in
 esac
 GC
 chmod +x "$TMP/bin/gc"
+# Arm 4 asks only whether flock resolves, so every case runs with this stub on
+# PATH and the host's own flock decides nothing; case 14 takes it away.
+printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/flock"; chmod +x "$TMP/bin/flock"
 export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
 # against. Local and never pushed; the identity is scaffolding. The identity is
@@ -489,6 +492,30 @@ if grep -qE '^[[:space:]]*FLOOR=[0-9]' "$CHECK"; then
 else ok "the check carries no floor constant of its own"; fi
 grep -qF 'assets/scripts/order-cadence.sh' "$CHECK" && ok "the check sources assets/scripts/order-cadence.sh" \
     || bad "the check sources assets/scripts/order-cadence.sh"
+
+# --- 14. the pass lock's tool resolves -------------------------------------------
+# refinery-reconcile and deferred-dispatch refuse every pass without flock, while
+# their orders keep firing, so arms 1 and 2 read healthy through it. This PATH
+# carries every command the test's own PATH does except flock, so the check runs
+# exactly as it would on a host that lacks it.
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the healthy registry is OK with flock on PATH"
+hasnt "$OUT" "flock:" "and arm 4 adds nothing"
+NOFLOCK="$TMP/noflock"; mkdir -p "$NOFLOCK"
+IFS=: read -r -a PATH_DIRS <<< "$PATH"
+for d in "${PATH_DIRS[@]}"; do
+    [ -d "$d" ] && ln -s "$d"/* "$NOFLOCK/" 2>/dev/null
+done
+rm -f "$NOFLOCK/flock"
+if [ -e "$NOFLOCK/bash" ] && [ -e "$NOFLOCK/jq" ] && [ -e "$NOFLOCK/git" ]; then
+    OUT=$(PATH="$NOFLOCK" run_check); RC=$?
+    eq "$RC" "2" "no flock on PATH is an ERROR"
+    has "$OUT" "flock: not found on PATH" "naming the missing tool"
+    has "$OUT" "refinery-reconcile and deferred-dispatch" "and the orders that refuse every pass without it"
+    hasnt "$OUT" "has NOT fired" "while every order still reads as firing"
+else
+    bad "the flock-less PATH lacks the tools the check needs (fixture broken)"
+fi
 
 echo
 echo "check-cadence-live: $PASS passed, $FAIL failed"
