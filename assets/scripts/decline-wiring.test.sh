@@ -15,6 +15,10 @@
 #     run-cancel.sh and reads or writes no bead itself;
 #   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
 #     decline cancels the run this shell is executing and no other;
+#   * OPEN VISIT: every await-ruling.sh call follows an escalation that runs
+#     with escalate.sh's verdict window off, or bring-current-audit.sh's ask,
+#     because a wait needs an open visit and the window files none for a
+#     situation a person already closed moot or benign;
 #   * ORDER, executed: workspace-setup's missing-branch arm files the visit,
 #     records the wait, cancels, then drains, and stops at the first part that
 #     does not land;
@@ -92,6 +96,47 @@ else
   echo "skip - own-step check: $TOML_PY"
 fi
 
+# --- 2b. A wait sits on an open visit. ------------------------------------------
+# escalate.sh files nothing for a situation a person closed moot or benign inside
+# its verdict window, and the wait needs an open visit. So the escalation each
+# await-ruling.sh call follows runs with GC_ESCALATE_VERDICT_WINDOW set, or is
+# bring-current-audit.sh's ask, which turns the window off itself
+# (bring-current-audit.test.sh holds it to that).
+if TOML_PY="$(tomllib_python)"; then
+  for f in mol-polecat-work mol-validate mol-rig-demo; do
+    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+bad = []
+waits = 0
+for st in d.get("steps", []):
+    lines = st.get("description", "").splitlines()
+    for i, line in enumerate(lines):
+        if not re.search(r'await-ruling\.sh" "', line):
+            continue
+        waits += 1
+        filer = None
+        for j in range(i - 1, -1, -1):
+            if re.search(r'escalate\.sh" --subject', lines[j]) or re.search(r'"\$BCA" ask', lines[j]):
+                filer = lines[j]
+                break
+        if filer is None:
+            bad.append("%s: a wait with no escalation before it" % st["id"])
+        elif 'escalate.sh"' in filer and "GC_ESCALATE_VERDICT_WINDOW=" not in filer:
+            bad.append("%s: the escalation before a wait keeps the verdict window" % st["id"])
+print("%d|%s" % (waits, "; ".join(bad)))
+PY
+)
+    case "$out" in
+      0\|) ok "$f: no wait to check" ;;
+      *\|) ok "$f: each of its ${out%%|*} waits follows an escalation with the verdict window off" ;;
+      *) bad "$f: ${out#*|}" ;;
+    esac
+  done
+else
+  echo "skip - open-visit check: $TOML_PY"
+fi
+
 # --- Fakes for the executed blocks. -------------------------------------------
 # gc: `runtime drain-ack` records DRAIN; `bd show` answers $FAKE_SHOW; every
 # other call exits 0. The pack stubs record their verb and argv and exit with a
@@ -109,6 +154,7 @@ for v in escalate:ESCALATE await-ruling:AWAIT run-cancel:CANCEL; do
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
     printf 'printf %s "$*" >> "$TMP_ARGS/%s"\n' "'%s\\n'" "$name"
+    printf 'printf %s "${GC_ESCALATE_VERDICT_WINDOW-<unset>}" >> "$TMP_ARGS/%s.window"\n' "'%s\\n'" "$name"
     printf 'exit "${FAKE_%s_RC:-0}"\n' "$verb"; } > "$TMP/pack/assets/scripts/$name.sh"
 done
 chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
@@ -140,6 +186,7 @@ eq "$(run "$TMP/missing.sh" "$@")" "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "missing branch: visit, wait, cancel, drain, exit 1"
 has "$(args escalate)" "--key polecat-missing-branch" "missing branch: the visit's key"
 has "$(args escalate)" "closing it re-slings tk-work" "missing branch: the visit says closing it re-slings the work"
+eq "$(args escalate.window)" "0" "missing branch: the visit is filed with escalate.sh's verdict window off"
 eq "$(args await-ruling)" "tk-work --key polecat-missing-branch --formula mol-polecat-work" \
    "missing branch: the work bead waits on that visit"
 has "$(args run-cancel)" "--step mol-polecat-work.workspace-setup --bead st-setup" \

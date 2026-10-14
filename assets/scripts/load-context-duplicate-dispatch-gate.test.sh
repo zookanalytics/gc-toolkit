@@ -28,7 +28,11 @@
 #      pinned), which nothing re-slings when it is released, and a tree no
 #      check could rule out, which also waits on its visit through
 #      await-ruling.sh so closing the visit re-slings the work. Each situation
-#      has its own key.
+#      has its own key. The escalation a wait follows runs with escalate.sh's
+#      verdict window off, so a situation a person already closed moot still
+#      gets an open visit to wait on, and the wait releases the claim the owner
+#      check let through (this session's, or a crashed owner's) with
+#      --release-from.
 #   4. FAIL CLOSED — a visit or a wait that did not land means no cancel and no
 #      drain, and a cancel that did not land means no drain: the step stays
 #      claimed for the next worker. A note the store refuses is reported, and
@@ -146,6 +150,7 @@ cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf 'ESCALATE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_ESC:-/dev/null}"
+printf '%s\n' "${GC_ESCALATE_VERDICT_WINDOW-<unset>}" >> "${FAKE_ESC_WINDOW:-/dev/null}"
 exit "${FAKE_ESC_RC:-0}"
 ESC
 cat > "$TMP/pack/assets/scripts/work-tree-holder.sh" <<'TREE'
@@ -177,7 +182,7 @@ SESS_REAL='{"sessions":[{"session_name":"lx-busy","id":"sess-busy","alias":"rig/
 #   from $RUN_DIR, a directory outside any repository unless a case sets one, so
 #   the pack lookup's `git rev-parse --show-toplevel` candidate finds nothing.
 run() {
-  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/esc"; : > "$TMP/tree-args"
+  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/esc"; : > "$TMP/esc-window"; : > "$TMP/tree-args"
   local rc=0
   ( cd "${RUN_DIR:-$TMP}" || exit 97
     WORK_BEAD_ID=tk-work \
@@ -185,7 +190,7 @@ run() {
     CLAIMED_STEP_BEAD_ID=st-load \
     GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
     GC_PACK_DIR="$GC_PACK_DIR" GC_RIG_ROOT="$GC_RIG_ROOT" GC_DIR="$GC_DIR" \
-    FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_ESC="$TMP/esc" \
+    FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_ESC="$TMP/esc" FAKE_ESC_WINDOW="$TMP/esc-window" \
     FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" FAKE_BEADS="${FAKE_BEADS:-[]}" \
     FAKE_TREE_ARGS="$TMP/tree-args" FAKE_TREE_RC="${FAKE_TREE_RC:-0}" FAKE_TREE_OUT="${FAKE_TREE_OUT:-}" \
     FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" FAKE_AWAIT_RC="${FAKE_AWAIT_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_UPDATE_RC="${FAKE_UPDATE_RC:-0}" \
@@ -510,6 +515,33 @@ eq "$(FAKE_TREE_RC=127 run '[{"status":"open","assignee":"","metadata":{}}]')" \
    "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "a tree check that dies with no finding: fails closed, escalates, waits, cancels"
 has "$(cat "$TMP/cancel")" "work-tree-holder.sh exited 127 with no finding" "dead tree check: the cancel reason says what failed"
+
+# A wait needs an open visit: the escalation it follows runs with escalate.sh's
+# verdict window off, and an escalation no wait follows keeps the caller's.
+FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" run '[{"status":"open","assignee":"","metadata":{}}]' >/dev/null
+eq "$(cat "$TMP/esc-window")" "0" "undecided tree: the escalation the wait follows has the verdict window off"
+run '[{"status":"deferred","assignee":"","metadata":{}}]' >/dev/null
+eq "$(cat "$TMP/esc-window")" "" "parked: no wait follows, so escalate.sh keeps its default window"
+GC_ESCALATE_VERDICT_WINDOW=600 run '[{"status":"deferred","assignee":"","metadata":{}}]' >/dev/null
+eq "$(cat "$TMP/esc-window")" "600" "parked: a window the caller set passes through"
+
+# The re-sling fires only for an open, unassigned bead, so the wait releases
+# the claim the owner check let through: a crashed owner's, or this session's.
+eq "$(FAKE_SESSIONS="$SESS_EMPTY" FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" \
+      run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]')" \
+   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "undecided tree, in_progress under a crashed foreign owner: escalates, waits, cancels"
+eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work --release-from lx-dead" \
+   "undecided tree under a crashed owner: the wait releases that owner's claim"
+for self in "$SELF_NAME" "$SELF_ID" "$SELF_AGENT" "$SELF_ALIAS"; do
+  for st in open in_progress; do
+    eq "$(FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" run "[{\"status\":\"$st\",\"assignee\":\"$self\",\"metadata\":{}}]")" \
+       "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+       "undecided tree, $st under this session's '$self': escalates, waits, cancels"
+    eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work --release-from $self" \
+       "undecided tree, $st under '$self': the wait releases this session's claim"
+  done
+done
 
 # Adoptable: a foreign tree no live session is working. The finding is printed.
 eq "$(FAKE_TREE_OUT="worktree /w/x (uncommitted paths: 0) is adoptable: no listed session works in /w/slots/p" \

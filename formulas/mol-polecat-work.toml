@@ -212,9 +212,16 @@ if [ -n "$WHY" ]; then
   # applies, before the cancel: a cancelled run with no record behind it leaves
   # work that nothing re-offers. Any part that does not land leaves this step
   # claimed and undrained, so the next worker it goes to retries.
-  if [ -n "$ESCALATE_KEY" ] && ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --message "$ESCALATE_MESSAGE"; then
+  # A wait needs an open visit to sit on, and escalate.sh files nothing for a
+  # situation a person closed moot or benign inside its verdict window, so the
+  # escalation a wait follows runs with the window off. The claim the owner
+  # check let through is this session's or a crashed owner's, and the wait
+  # releases it, because the re-sling fires only for an open, unassigned bead.
+  ESCALATE_WINDOW="${GC_ESCALATE_VERDICT_WINDOW:-}"
+  [ -z "$AWAIT" ] || ESCALATE_WINDOW=0
+  if [ -n "$ESCALATE_KEY" ] && ! GC_ESCALATE_VERDICT_WINDOW="$ESCALATE_WINDOW" "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --message "$ESCALATE_MESSAGE"; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
-  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --formula mol-polecat-work; then
+  elif [ -n "$AWAIT" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$ESCALATE_KEY" --formula mol-polecat-work ${WORK_OWNER:+--release-from "$WORK_OWNER"}; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
   elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "$CANCEL_LABEL: $WORK_BEAD_ID $WHY"; then
     gc runtime drain-ack
@@ -253,9 +260,14 @@ it when it is released, so its visit asks for the re-sling. A POSSIBLE
 duplicate is a tree no check could rule out, and its visit asks a person to
 look at the tree. For that one, `await-ruling.sh` makes the work bead wait on
 the visit with a `blocks` edge and arms its re-sling, so closing the visit
-re-slings the work. When `escalate.sh` or `await-ruling.sh` cannot record its
-part, the gate neither cancels nor drains. The step stays claimed, and the next
-worker it goes to retries.
+re-slings the work. The re-sling fires only for an open, unassigned bead, so the
+wait first releases the claim the owner check let through, this session's or a
+crashed owner's. The escalation before it runs with `escalate.sh`'s verdict
+window off, because a wait needs an open visit, and `escalate.sh` files none
+for a situation a person closed `moot` or `benign` inside the window. When
+`escalate.sh` or `await-ruling.sh` cannot record its part, the gate neither
+cancels nor drains. The step stays claimed, and the next worker it goes to
+retries.
 
 `run-cancel.sh` exits non-zero when it cannot prove which step this shell is
 executing, or when gascity does not confirm the cancel. The gate then does not
@@ -489,7 +501,9 @@ if [ "$GUARD_KIND" != "pass" ]; then
   gc bd update "$WORK_BEAD_ID" --append-notes "Convoy target guard: $GUARD_STAKE. Its run is cancelled before any worktree was poured. To release, $GUARD_RELEASE." || echo "The guard's note did not land on $WORK_BEAD_ID; the cancel reason on this step still records it." >&2
   SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
   : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$GUARD_KEY" --message "$GUARD_STAKE. Its run is cancelled; nothing was poured or pushed. To release, $GUARD_RELEASE."; then
+  GUARD_WINDOW="${GC_ESCALATE_VERDICT_WINDOW:-}"
+  [ "$GUARD_KIND" = "unreadable" ] || GUARD_WINDOW=0
+  if ! GC_ESCALATE_VERDICT_WINDOW="$GUARD_WINDOW" "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key "$GUARD_KEY" --message "$GUARD_STAKE. Its run is cancelled; nothing was poured or pushed. To release, $GUARD_RELEASE."; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
   elif [ "$GUARD_KIND" != "unreadable" ] && ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key "$GUARD_KEY" --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -578,7 +592,7 @@ if [ -n "$BRANCH" ]; then
         echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
         SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
         : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-        if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+        if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Its run is cancelled and nothing was touched. Reconcile them, then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
           echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
         elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-divergence --formula mol-polecat-work; then
           echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -599,7 +613,7 @@ if [ -n "$BRANCH" ]; then
 # >>> workspace-setup-missing-branch-decline
     SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Its run is cancelled and nothing was touched. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
       echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-missing-branch --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1417,7 +1431,7 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     fi
     SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
       echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-branch-shape --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1471,7 +1485,7 @@ else
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
     SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
       echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-no-landing-target --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1505,7 +1519,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
     echo "LANDING_TARGET unset — run step 1b before this arm."
     SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was pushed. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
       echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1717,7 +1731,7 @@ if [ -z "${LANDING_TARGET:-}" ]; then
   echo "LANDING_TARGET unset — run step 1b before this arm."
   SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
   : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+  if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Its run is cancelled and nothing was handed off. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
     echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
   elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-landing-target-unset --formula mol-polecat-work; then
     echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2
@@ -1759,7 +1773,7 @@ if [ "$HANDOFF_OK" != "1" ]; then
     echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_BEAD_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed, and this run is cancelled after the wait below lands."
     SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
     : "${SCRIPTS:?run-cancel.sh, await-ruling.sh and escalate.sh not found in the pack}"
-    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
+    if ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-handoff-refused --message "Refinery handoff for $WORK_BEAD_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled. Then close this visit: $WORK_BEAD_ID waits on it, and closing it re-slings $WORK_BEAD_ID. To stand down instead, close $WORK_BEAD_ID first."; then
       echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
     elif ! "$SCRIPTS/await-ruling.sh" "$WORK_BEAD_ID" --key polecat-handoff-refused --formula mol-polecat-work; then
       echo "the wait did not land on $WORK_BEAD_ID; NOT cancelling or draining, so the next worker retries." >&2

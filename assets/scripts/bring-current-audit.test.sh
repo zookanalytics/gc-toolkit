@@ -32,10 +32,12 @@ SUT="$SD/bring-current-audit.sh"
 cat > "$SD/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
+printf '%s\n' "${GC_ESCALATE_VERDICT_WINDOW-<unset>}" >> "${STUB_ESC_WINDOW_LOG:?}"
 exit "${STUB_ESC_RC:-0}"
 ESC
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
+export STUB_ESC_WINDOW_LOG="$TMP/esc-window.log"
 export STUB_ESC_RC=0
 
 bead() { # id [extra-metadata]
@@ -170,7 +172,7 @@ eq "$rc" "2" "a form other than comment or dismissal is a usage error"
 echo "# ask: the question is recorded, and one visit composed from the audit asks it on the anchor"
 ENTRY=$(jq -nc '[{path: "docs/a.md", collided: "c", resolution: "kept both", check: "k", rating: "routine"}]')
 store "[$(bead B2 ",\"conflict_audit\":$(printf '%s' "$ENTRY" | jq -Rc .)"), $(anchorrow AN1)]"
-: > "$STUB_ESC_LOG"
+: > "$STUB_ESC_LOG"; : > "$STUB_ESC_WINDOW_LOG"
 out=$("$SUT" ask --bead B2 --path lib/retry.sh --collided "main deleted the retry loop; the branch extended it" \
   --question "keep the retry loop with the branch's extension, or drop both?" 2>&1); rc=$?
 eq "$rc" "0" "it exits 0"
@@ -178,6 +180,7 @@ has "$out" "visit filed on AN1 (bring-current-question.B2)" "…naming the visit
 eq "$(meta B2 conflict_question | jq -r '.paths[0] + "|" + .question')" "lib/retry.sh|keep the retry loop with the branch's extension, or drop both?" "the question is recorded on the bead"
 esc=$(cat "$STUB_ESC_LOG")
 has "$esc" "--subject AN1 --key bring-current-question.B2" "the visit is filed on the anchor"
+eq "$(cat "$STUB_ESC_WINDOW_LOG")" "0" "…with escalate.sh's verdict window off, since the caller waits on an open visit"
 has "$esc" "PR#7 needs a decision before it can be brought current with main" "…titled by what it needs"
 has "$esc" "Nothing was pushed" "…saying nothing was pushed"
 has "$esc" "The question: keep the retry loop with the branch's extension, or drop both?" "…asking the question"

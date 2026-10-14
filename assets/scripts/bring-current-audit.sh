@@ -306,7 +306,11 @@ bca_cmd_ask() {
   msg=$(bca_render_question "$audit" "$q" "$bead" "$anchor" "$branch" "$target" "$head" "$num" "$url")
   [ -n "$msg" ] || { echo "bring-current-audit: the visit could not be composed; nothing filed" >&2; return 1; }
   key="bring-current-question.$bead"
-  if ! "$BCA_DIR/escalate.sh" --subject "$anchor" --key "$key" --message "$msg"; then
+  # The visit is what the caller waits on, so it has to be open. escalate.sh
+  # files nothing for a key a person closed moot or benign inside its verdict
+  # window, and an earlier round's question shares this key, so the window is
+  # off.
+  if ! GC_ESCALATE_VERDICT_WINDOW=0 "$BCA_DIR/escalate.sh" --subject "$anchor" --key "$key" --message "$msg"; then
     echo "bring-current-audit: the visit on $anchor did not land; the question is recorded on $bead, and nothing is held until a visit asks it" >&2
     return 1
   fi

@@ -3,7 +3,8 @@
 # and re-sling it when the ruling is "proceed".
 #
 #   await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
-#                   [--subject <bead>] [--target <pool>] [--dry-run]
+#                   [--subject <bead>] [--target <pool>] [--release-from <owner>]
+#                   [--dry-run]
 #
 # A worker that declines work it cannot finish without a person files the
 # question with escalate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -21,20 +22,40 @@
 #     clears and the next reconcile pass pours a fresh molecule. A ruling not to
 #     proceed closes the work bead first, and a closed bead's arm retires
 #     without a sling.
+# The visit has to be open. Once a person has closed a visit moot or benign,
+# escalate.sh answers a repeat of that situation inside its verdict window from
+# the closed visit and files nothing, and the re-slung run can meet the same
+# situation again. So a caller runs the escalate.sh this waits behind with
+# GC_ESCALATE_VERDICT_WINDOW=0.
 # The pool is --target, else the work bead's gc.execution_routed_to (the pool
 # its last pour ran on), else its gc.routed_to, else the target of an arm
 # already recorded, else resling_target. The arm refuses a routed bead, so the
 # route keys a pour leaves behind are cleared before it, and the update that
 # clears them records the pool as resling_target. One update lands whole or not
 # at all, so whatever stops a run after the clear, the pool is still on the
-# bead for the next run, and nothing has to be rolled back.
+# bead for the next run, and nothing has to be rolled back. The same update
+# drops the session pins (gc.session_id, gc.session_name) a claim stamps:
+# gascity's detached-handoff orphan sweep restores a pool route from a pin on an
+# open, unassigned, unrouted bead that carries a branch, and a pool would then
+# claim the bare bead instead of the re-sling pouring a fresh molecule.
 #
-# The edge and the arm are read back. Either one not landing exits 1, and the
-# caller does not cancel its run: a cancelled run with no recorded wait leaves
-# the work bead open, unrouted and unarmed, which nothing re-offers.
-# Re-running converges, with or without --target: an edge already in place and
-# an arm already recorded count as landed, and after an arm that did not land,
-# the re-run arms to the pool the earlier run recorded.
+# The re-sling fires only for an open, unassigned bead: the arm refuses an
+# in_progress one, and reconcile never slings over an assignee. So a claim the
+# work bead still carries is released after the edge lands and before the arm,
+# when no live worker holds it: a claim in this session's name, or the one
+# --release-from names, which the caller has proven gone. The release is
+# `gc bd unclaim --if-assignee`, which reopens the bead and clears its assignee
+# in one write, and only while that claim is still the one this run read. Any
+# other claim exits 1 before anything is written, because its worker may be
+# live.
+#
+# The edge, the release and the arm are read back. Any of them not landing exits
+# 1, and the caller does not cancel its run: a cancelled run with no recorded
+# wait leaves the work bead open, unrouted and unarmed, which nothing
+# re-offers. Re-running converges, with or without --target: an edge already in
+# place, a claim already released and an arm already recorded count as landed,
+# and after an arm that did not land, the re-run arms to the pool the earlier
+# run recorded.
 #
 # Callers: the decline arms of mol-polecat-work that wait for a person.
 # exit: 0 the work bead waits on the visit and is armed, or is closed and needs
@@ -54,16 +75,23 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'USAGE'
 usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
-                       [--subject <bead>] [--target <pool>] [--dry-run]
+                       [--subject <bead>] [--target <pool>]
+                       [--release-from <owner>] [--dry-run]
 
-  <work-bead>  the bead the declined run was poured for
-  --key        the situation key escalate.sh filed the visit under (required)
-  --formula    the formula the re-sling pours, e.g. mol-polecat-work (required)
-  --subject    the bead the visit was filed on; default the work bead
-  --target     the pool to re-sling to; default the bead's
-               gc.execution_routed_to, else its gc.routed_to, else the pool
-               an earlier run armed or recorded as resling_target
-  --dry-run    resolve and report; write nothing
+  <work-bead>     the bead the declined run was poured for
+  --key           the situation key escalate.sh filed the visit under (required)
+  --formula       the formula the re-sling pours, e.g. mol-polecat-work
+                  (required)
+  --subject       the bead the visit was filed on; default the work bead
+  --target        the pool to re-sling to; default the bead's
+                  gc.execution_routed_to, else its gc.routed_to, else the pool
+                  an earlier run armed or recorded as resling_target
+  --release-from  the assignee of a claim the caller has proven no live worker
+                  holds; it is released before the arm. A claim in this
+                  session's name is released without it.
+  --dry-run       resolve and report; write nothing
+
+env: GC_SESSION_NAME, GC_SESSION_ID, GC_AGENT, GC_ALIAS name this session.
 
 exit: 0 waiting and armed, or the bead is closed · 1 the wait did not land · 2 usage
 USAGE
@@ -74,18 +102,19 @@ require_value() {
     echo "$PROG: $1 requires a value" >&2; usage; exit 2
   fi
   case "$2" in
-    --key|--formula|--subject|--target|--dry-run|-h|--help)
+    --key|--formula|--subject|--target|--release-from|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2; usage; exit 2 ;;
   esac
 }
 
-WORK=""; KEY=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
+WORK=""; KEY=""; FORMULA=""; SUBJECT=""; TARGET=""; RELEASE_FROM=""; DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)     require_value "$@"; KEY="$2";     shift 2 ;;
     --formula) require_value "$@"; FORMULA="$2"; shift 2 ;;
     --subject) require_value "$@"; SUBJECT="$2"; shift 2 ;;
     --target)  require_value "$@"; TARGET="$2";  shift 2 ;;
+    --release-from) require_value "$@"; RELEASE_FROM="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 2 ;;
     -*)        echo "$PROG: unknown argument '$1'" >&2; usage; exit 2 ;;
@@ -98,9 +127,11 @@ if [ -z "$WORK" ] || [ -z "$KEY" ] || [ -z "$FORMULA" ]; then
   echo "$PROG: a work bead, --key and --formula are all required" >&2; usage; exit 2
 fi
 [ -n "$SUBJECT" ] || SUBJECT="$WORK"
-case "$WORK$KEY$FORMULA$SUBJECT" in
+case "$WORK$KEY$FORMULA$SUBJECT$RELEASE_FROM" in
   *'{{'*|*'}}'*)
-    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
+    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$FORMULA' '$SUBJECT' '$RELEASE_FROM'); the pour did not render it" >&2; exit 2 ;;
+esac
+case "$WORK$KEY$FORMULA$SUBJECT" in
   *[!A-Za-z0-9._-]*)
     echo "$PROG: the work bead, --key, --formula and --subject must contain only [A-Za-z0-9._-]" >&2; exit 2 ;;
 esac
@@ -122,15 +153,32 @@ if ! WORK_JSON=$(bd_json_array show "$WORK") || [ "$(printf '%s' "$WORK_JSON" | 
   exit 1
 fi
 STATUS=$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)
+ASSIGNEE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].assignee // ""' 2>/dev/null)
 case "$STATUS" in
   closed)
     echo "$PROG: $WORK is closed, so nothing waits on a ruling and nothing re-slings"
     exit 0 ;;
-  open) ;;
+  open|in_progress) ;;
   *)
-    echo "$PROG: $WORK is status=${STATUS:-unreadable}; a re-sling can be armed on an open bead only, so no wait was recorded" >&2
+    echo "$PROG: $WORK is status=${STATUS:-unreadable}; a re-sling can be armed on an open or claimed bead only, so no wait was recorded" >&2
     exit 1 ;;
 esac
+
+# RELEASE says how the bead becomes open and unassigned before the arm:
+# `unclaim` a claim no live worker holds, `reopen` an in_progress bead that
+# names no assignee, or nothing for a bead already open and unassigned.
+RELEASE=""
+if [ -n "$ASSIGNEE" ]; then
+  for me in "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_AGENT:-}" "${GC_ALIAS:-}" "$RELEASE_FROM"; do
+    if [ -n "$me" ] && [ "$me" = "$ASSIGNEE" ]; then RELEASE=unclaim; break; fi
+  done
+  if [ -z "$RELEASE" ]; then
+    echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim neither in this session's name nor proven gone by --release-from. Reconcile never slings an assigned bead, and that worker may be live, so the claim is not released and no wait was recorded" >&2
+    exit 1
+  fi
+elif [ "$STATUS" = in_progress ]; then
+  RELEASE=reopen
+fi
 
 # The visit escalate.sh files for a durable subject, matched the way its own
 # dedup matches: the situation key and the subject's continuation group.
@@ -161,7 +209,7 @@ case "$TARGET" in
 esac
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "$PROG: DRY RUN: $WORK would wait on visit $VISIT, armed to re-sling to $TARGET --on $FORMULA"
+  echo "$PROG: DRY RUN: $WORK would wait on visit $VISIT, armed to re-sling to $TARGET --on $FORMULA${RELEASE:+, after releasing its claim (status $STATUS${ASSIGNEE:+, assignee $ASSIGNEE})}"
   exit 0
 fi
 
@@ -179,6 +227,22 @@ if ! blocks_on_visit; then
   fi
 fi
 
+# The edge already keeps the bead out of `bd ready`, so releasing its claim
+# offers it to no pool. The unclaim is a compare-and-swap on the assignee read
+# above, so a claim that changed hands since is left alone.
+case "$RELEASE" in
+  unclaim)
+    if ! gc bd unclaim "$WORK" --if-assignee "$ASSIGNEE" </dev/null >/dev/null 2>&1; then
+      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on visit $VISIT unarmed" >&2
+      exit 1
+    fi ;;
+  reopen)
+    if ! gc bd update "$WORK" --status=open </dev/null >/dev/null 2>&1; then
+      echo "$PROG: $WORK is in_progress with no assignee and was not reopened; it waits on visit $VISIT unarmed" >&2
+      exit 1
+    fi ;;
+esac
+
 # A pour retires gc.routed_to onto gc.execution_routed_to, and the arm refuses a
 # routed bead, so the route keys are cleared before it. From the clear until the
 # arm lands, nothing else on the bead names the pool, so the same update records
@@ -186,7 +250,8 @@ fi
 # arm, leaves the next run a pool to arm to.
 if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" \
     --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" \
-    --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" </dev/null >/dev/null 2>&1; then
+    --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" \
+    --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null >/dev/null 2>&1; then
   echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on visit $VISIT unarmed" >&2
   exit 1
 fi
@@ -195,9 +260,12 @@ if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sli
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on visit $VISIT unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1
 fi
-ARMED=$(bd_json show "$WORK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
-if [ "$ARMED" != "$TARGET" ]; then
-  echo "$PROG: the re-sling arm on $WORK reads back as '${ARMED}', not $TARGET" >&2
+BACK=$(bd_json show "$WORK")
+ARMED=$(printf '%s' "$BACK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
+BACK_STATUS=$(printf '%s' "$BACK" | jq -r '.[0].status // empty' 2>/dev/null)
+BACK_ASSIGNEE=$(printf '%s' "$BACK" | jq -r '.[0].assignee // empty' 2>/dev/null)
+if [ "$ARMED" != "$TARGET" ] || [ "$BACK_STATUS" != open ] || [ -n "$BACK_ASSIGNEE" ]; then
+  echo "$PROG: $WORK reads back armed to '${ARMED}', status '${BACK_STATUS}', assignee '${BACK_ASSIGNEE}'; the re-sling fires only for an open, unassigned bead armed to $TARGET" >&2
   exit 1
 fi
 echo "$PROG: $WORK waits on visit $VISIT ($KEY); closing the visit re-slings it to $TARGET --on $FORMULA"
