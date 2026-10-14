@@ -203,3 +203,27 @@ func TestMarkPreExistingAnnotatesOnlyAFail(t *testing.T) {
 		t.Fatal("an annotation with no tracker was accepted")
 	}
 }
+
+// The cost of one record write (a full-suite test pass, which writes the
+// commit's file and the tree's) and of one lookup that finds it.
+func BenchmarkPutFullPass(b *testing.B) {
+	s := NewStore(b.TempDir())
+	r := rec(CheckTest, ResultPass, MethodFull, commitA, treeT)
+	for b.Loop() {
+		if err := s.Put(r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLookupHit(b *testing.B) {
+	s := NewStore(b.TempDir())
+	if err := s.Put(rec(CheckTest, ResultPass, MethodFull, commitA, treeT)); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		if f, err := s.Lookup(CheckTest, commitA, treeT); err != nil || f.Record == nil {
+			b.Fatal(err)
+		}
+	}
+}
