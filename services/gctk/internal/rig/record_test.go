@@ -16,11 +16,15 @@ const (
 	treeU   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-func rec(check, result, method, commit, tree string) *Record {
-	r := &Record{Check: check, Result: result, Method: method, Commit: commit, Tree: tree,
+// rec is a run of command "true", or of nothing when scope is ScopeNone.
+func rec(check, result, scope, commit, tree string) *Record {
+	r := &Record{Check: check, Result: result, Scope: scope, Commit: commit, Tree: tree,
 		Runner: "test", RecordedAt: "2026-10-13T00:00:00Z", Command: "true", DurationMS: 5}
 	if result == ResultFail {
 		r.ExitCode = 1
+	}
+	if scope == ScopeNone {
+		r.Command = ""
 	}
 	return r
 }
@@ -41,30 +45,64 @@ func mustLookup(t *testing.T, s *Store, check, commit, tree string) Found {
 	return f
 }
 
-func TestLookupAnswersFromTheCommitsOwnRecord(t *testing.T) {
+func TestTheCommitsOwnRecordAnswersTheRunItRecords(t *testing.T) {
 	s := NewStore(t.TempDir())
-	if f := mustLookup(t, s, CheckTest, commitA, treeT); f.Record != nil {
-		t.Fatalf("an empty store answered %+v", f.Record)
+	if f := mustLookup(t, s, CheckTest, commitA, treeT); f.Commit != nil || f.Tree != nil {
+		t.Fatalf("an empty store read %+v", f)
 	}
-	mustPut(t, s, rec(CheckTest, ResultPass, MethodAffected, commitA, treeT))
+	mustPut(t, s, rec(CheckTest, ResultPass, ScopeAffected, commitA, treeT))
 	f := mustLookup(t, s, CheckTest, commitA, treeT)
-	if f.Record == nil || f.Source != FromCommit || f.Record.Method != MethodAffected || f.Record.Result != ResultPass {
-		t.Fatalf("Lookup = %+v from %q, want the affected pass from the commit", f.Record, f.Source)
+	r, src := f.Answer(ScopeAffected, "true")
+	if r == nil || src != FromCommit || r.Scope != ScopeAffected || r.Result != ResultPass {
+		t.Fatalf("Answer = %+v from %q, want the affected pass from the commit", r, src)
 	}
-	if f := mustLookup(t, s, CheckLint, commitA, treeT); f.Record != nil {
-		t.Fatalf("a test record answered for lint: %+v", f.Record)
+	if r, _ := f.Recorded(); r == nil || r.Scope != ScopeAffected {
+		t.Fatalf("Recorded = %+v, want the affected pass", r)
+	}
+	if f := mustLookup(t, s, CheckLint, commitA, treeT); f.Commit != nil {
+		t.Fatalf("a test record answered for lint: %+v", f.Commit)
+	}
+}
+
+func TestARecordAnswersOnlyItsOwnCommandAndScope(t *testing.T) {
+	s := NewStore(t.TempDir())
+	mustPut(t, s, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT))
+	f := mustLookup(t, s, CheckTest, commitA, treeT)
+	for _, c := range []struct{ scope, command string }{
+		{ScopeFull, "false"},
+		{ScopeFull, "true "},
+		{ScopeAffected, "true"},
+		{ScopeNone, ""},
+	} {
+		if r, src := f.Answer(c.scope, c.command); r != nil {
+			t.Errorf("Answer(%q, %q) = %+v from %q, want no answer", c.scope, c.command, r, src)
+		}
+	}
+	// What is recorded is still there for --check, whatever run asks.
+	if r, src := f.Recorded(); r == nil || src != FromCommit {
+		t.Fatalf("Recorded = %+v from %q", r, src)
 	}
 }
 
 func TestFullSuitePassAnswersForEveryCommitWithItsTree(t *testing.T) {
 	s := NewStore(t.TempDir())
-	mustPut(t, s, rec(CheckTest, ResultPass, MethodFull, commitA, treeT))
+	mustPut(t, s, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT))
 	f := mustLookup(t, s, CheckTest, commitB, treeT)
-	if f.Record == nil || f.Source != FromTree || f.Record.Commit != commitA {
-		t.Fatalf("a new commit with the same tree read %+v from %q, want commit A's full pass from the tree", f.Record, f.Source)
+	if r, src := f.Answer(ScopeFull, "true"); r == nil || src != FromTree || r.Commit != commitA {
+		t.Fatalf("a new commit with the same tree read %+v from %q, want commit A's full pass from the tree", r, src)
 	}
-	if f := mustLookup(t, s, CheckTest, commitB, treeU); f.Record != nil {
-		t.Fatalf("a commit with another tree read %+v", f.Record)
+	if r, src := f.Recorded(); r == nil || src != FromTree {
+		t.Fatalf("Recorded = %+v from %q, want the tree's pass", r, src)
+	}
+	// The tree's pass answers only a full-suite call with its own command.
+	if r, _ := f.Answer(ScopeFull, "false"); r != nil {
+		t.Fatalf("the tree's pass answered another command: %+v", r)
+	}
+	if r, _ := f.Answer(ScopeAffected, "true"); r != nil {
+		t.Fatalf("the tree's pass answered an affected call: %+v", r)
+	}
+	if f := mustLookup(t, s, CheckTest, commitB, treeU); f.Tree != nil {
+		t.Fatalf("a commit with another tree read %+v", f.Tree)
 	}
 }
 
@@ -73,18 +111,19 @@ func TestOnlyAFullSuiteTestPassCrossesCommits(t *testing.T) {
 		name string
 		r    *Record
 	}{
-		{"an affected pass", rec(CheckTest, ResultPass, MethodAffected, commitA, treeT)},
-		{"a full fail", rec(CheckTest, ResultFail, MethodFull, commitA, treeT)},
-		{"a run of nothing", rec(CheckTest, ResultPass, MethodNone, commitA, treeT)},
-		{"a lint pass", rec(CheckLint, ResultPass, MethodFull, commitA, treeT)},
-		{"a typecheck pass", rec(CheckTypecheck, ResultPass, MethodFull, commitA, treeT)},
+		{"an affected pass", rec(CheckTest, ResultPass, ScopeAffected, commitA, treeT)},
+		{"a full fail", rec(CheckTest, ResultFail, ScopeFull, commitA, treeT)},
+		{"a run of nothing", rec(CheckTest, ResultPass, ScopeNone, commitA, treeT)},
+		{"a lint pass", rec(CheckLint, ResultPass, "", commitA, treeT)},
+		{"a typecheck pass", rec(CheckTypecheck, ResultPass, "", commitA, treeT)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := NewStore(t.TempDir())
 			mustPut(t, s, c.r)
-			if f := mustLookup(t, s, c.r.Check, commitB, treeT); f.Record != nil {
-				t.Fatalf("commit B read %+v from %q", f.Record, f.Source)
+			f := mustLookup(t, s, c.r.Check, commitB, treeT)
+			if r, src := f.Recorded(); r != nil {
+				t.Fatalf("commit B read %+v from %q", r, src)
 			}
 		})
 	}
@@ -92,14 +131,14 @@ func TestOnlyAFullSuiteTestPassCrossesCommits(t *testing.T) {
 
 func TestFullFailWithdrawsTheTreesPass(t *testing.T) {
 	s := NewStore(t.TempDir())
-	mustPut(t, s, rec(CheckTest, ResultPass, MethodFull, commitA, treeT))
-	mustPut(t, s, rec(CheckTest, ResultFail, MethodFull, commitA, treeT))
+	mustPut(t, s, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT))
+	mustPut(t, s, rec(CheckTest, ResultFail, ScopeFull, commitA, treeT))
 	f := mustLookup(t, s, CheckTest, commitA, treeT)
-	if f.Record == nil || f.Record.Result != ResultFail {
-		t.Fatalf("commit A read %+v, want its latest record, the fail", f.Record)
+	if f.Commit == nil || f.Commit.Result != ResultFail {
+		t.Fatalf("commit A read %+v, want its latest record, the fail", f.Commit)
 	}
-	if f := mustLookup(t, s, CheckTest, commitB, treeT); f.Record != nil {
-		t.Fatalf("commit B still read the tree's withdrawn pass: %+v", f.Record)
+	if f := mustLookup(t, s, CheckTest, commitB, treeT); f.Tree != nil {
+		t.Fatalf("commit B still read the tree's withdrawn pass: %+v", f.Tree)
 	}
 	if _, err := os.Stat(s.TreePath(CheckTest, treeT)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the tree entry survived the fail: %v", err)
@@ -108,11 +147,11 @@ func TestFullFailWithdrawsTheTreesPass(t *testing.T) {
 
 func TestPutIsALastWriteWinsUpsert(t *testing.T) {
 	s := NewStore(t.TempDir())
-	mustPut(t, s, rec(CheckLint, ResultFail, MethodFull, commitA, treeT))
-	mustPut(t, s, rec(CheckLint, ResultPass, MethodFull, commitA, treeT))
+	mustPut(t, s, rec(CheckLint, ResultFail, "", commitA, treeT))
+	mustPut(t, s, rec(CheckLint, ResultPass, "", commitA, treeT))
 	f := mustLookup(t, s, CheckLint, commitA, treeT)
-	if f.Record == nil || f.Record.Result != ResultPass {
-		t.Fatalf("Lookup after two writes = %+v, want the second", f.Record)
+	if f.Commit == nil || f.Commit.Result != ResultPass {
+		t.Fatalf("Lookup after two writes = %+v, want the second", f.Commit)
 	}
 	left, err := filepath.Glob(filepath.Join(s.Root(), CheckLint, "commits", ".*.tmp"))
 	if err != nil || len(left) != 0 {
@@ -145,12 +184,13 @@ func TestAPutTheStoreDoesNotTakeLeavesNoRecordOfTheResult(t *testing.T) {
 		// refused is the directory under the check's own that takes no writes.
 		refused string
 	}{
-		{"a lint pass", nil, rec(CheckLint, ResultPass, MethodFull, commitA, treeT), "commits"},
-		{"an affected pass", nil, rec(CheckTest, ResultPass, MethodAffected, commitA, treeT), "commits"},
-		{"a full pass whose tree entry cannot be written", nil, rec(CheckTest, ResultPass, MethodFull, commitA, treeT), "trees"},
-		{"a full pass whose commit record cannot be written", nil, rec(CheckTest, ResultPass, MethodFull, commitA, treeT), "commits"},
-		{"a full fail that cannot withdraw the tree's pass", rec(CheckTest, ResultPass, MethodFull, commitB, treeT), rec(CheckTest, ResultFail, MethodFull, commitA, treeT), "trees"},
-		{"a full fail whose commit record cannot be written", rec(CheckTest, ResultPass, MethodFull, commitB, treeT), rec(CheckTest, ResultFail, MethodFull, commitA, treeT), "commits"},
+		{"a lint pass", nil, rec(CheckLint, ResultPass, "", commitA, treeT), "commits"},
+		{"an affected pass", nil, rec(CheckTest, ResultPass, ScopeAffected, commitA, treeT), "commits"},
+		{"a run of nothing", nil, rec(CheckTest, ResultPass, ScopeNone, commitA, treeT), "commits"},
+		{"a full pass whose tree entry cannot be written", nil, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT), "trees"},
+		{"a full pass whose commit record cannot be written", nil, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT), "commits"},
+		{"a full fail that cannot withdraw the tree's pass", rec(CheckTest, ResultPass, ScopeFull, commitB, treeT), rec(CheckTest, ResultFail, ScopeFull, commitA, treeT), "trees"},
+		{"a full fail whose commit record cannot be written", rec(CheckTest, ResultPass, ScopeFull, commitB, treeT), rec(CheckTest, ResultFail, ScopeFull, commitA, treeT), "commits"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -165,8 +205,9 @@ func TestAPutTheStoreDoesNotTakeLeavesNoRecordOfTheResult(t *testing.T) {
 			// No commit reads the result: not its own, not one the tree answers
 			// for.
 			for _, commit := range []string{commitA, commitB, commitC} {
-				if f := mustLookup(t, s, c.r.Check, commit, treeT); f.Record != nil && *f.Record == *c.r {
-					t.Fatalf("commit %s reads the result Put refused, from %q", commit, f.Source)
+				f := mustLookup(t, s, c.r.Check, commit, treeT)
+				if r, src := f.Recorded(); r != nil && *r == *c.r {
+					t.Fatalf("commit %s reads the result Put refused, from %q", commit, src)
 				}
 			}
 		})
@@ -174,25 +215,32 @@ func TestAPutTheStoreDoesNotTakeLeavesNoRecordOfTheResult(t *testing.T) {
 }
 
 func TestADamagedRecordReadsAsAbsent(t *testing.T) {
-	cases := map[string]string{
-		"not json":            "{",
-		"no result":           `{"check":"test","method":"full","commit":"` + commitA + `","tree":"` + treeT + `"}`,
-		"filed under another": `{"check":"test","result":"pass","method":"full","commit":"` + commitB + `","tree":"` + treeT + `"}`,
-		"a failed none":       `{"check":"test","result":"fail","method":"none","commit":"` + commitA + `","tree":"` + treeT + `"}`,
+	head := `{"check":"test","result":"pass","scope":"full","commit":"` + commitA + `","tree":"` + treeT + `"`
+	cases := map[string]struct {
+		check, body string
+	}{
+		"not json":                        {CheckTest, "{"},
+		"no result":                       {CheckTest, `{"check":"test","scope":"full","commit":"` + commitA + `","tree":"` + treeT + `","command":"true"}`},
+		"filed under another":             {CheckTest, `{"check":"test","result":"pass","scope":"full","commit":"` + commitB + `","tree":"` + treeT + `","command":"true"}`},
+		"a test run with no scope":        {CheckTest, `{"check":"test","result":"pass","commit":"` + commitA + `","tree":"` + treeT + `","command":"true"}`},
+		"a run with no command":           {CheckTest, head + `}`},
+		"a failed run of nothing":         {CheckTest, `{"check":"test","result":"fail","scope":"none","commit":"` + commitA + `","tree":"` + treeT + `"}`},
+		"a run of nothing with a command": {CheckTest, `{"check":"test","result":"pass","scope":"none","commit":"` + commitA + `","tree":"` + treeT + `","command":"true"}`},
+		"a lint record with a test scope": {CheckLint, `{"check":"lint","result":"pass","scope":"full","commit":"` + commitA + `","tree":"` + treeT + `","command":"true"}`},
 	}
-	for name, body := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := NewStore(t.TempDir())
-			path := s.CommitPath(CheckTest, commitA)
+			path := s.CommitPath(c.check, commitA)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(c.body), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			f := mustLookup(t, s, CheckTest, commitA, treeT)
-			if f.Record != nil {
-				t.Fatalf("a damaged record answered: %+v", f.Record)
+			f := mustLookup(t, s, c.check, commitA, treeT)
+			if r, _ := f.Recorded(); r != nil {
+				t.Fatalf("a damaged record answered: %+v", r)
 			}
 			if len(f.Ignored) != 1 || f.Ignored[0] != path {
 				t.Fatalf("Ignored = %v, want [%s]", f.Ignored, path)
@@ -206,7 +254,7 @@ func TestAnUnreadableStoreIsAnError(t *testing.T) {
 		t.Skip("root reads a mode-000 directory")
 	}
 	s := NewStore(t.TempDir())
-	mustPut(t, s, rec(CheckTest, ResultPass, MethodFull, commitA, treeT))
+	mustPut(t, s, rec(CheckTest, ResultPass, ScopeFull, commitA, treeT))
 	dir := filepath.Join(s.Root(), CheckTest, "commits")
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatal(err)
@@ -227,34 +275,8 @@ func TestLookupRefusesANameThatIsNotAnObjectID(t *testing.T) {
 	if _, err := s.Lookup("setup", commitA, treeT); err == nil {
 		t.Error("Lookup accepted check setup, which records nothing")
 	}
-	if err := s.Put(rec(CheckTest, ResultPass, MethodFull, "../x", treeT)); err == nil {
+	if err := s.Put(rec(CheckTest, ResultPass, ScopeFull, "../x", treeT)); err == nil {
 		t.Error("Put accepted a commit that is not an object id")
-	}
-}
-
-func TestMarkPreExistingAnnotatesOnlyAFail(t *testing.T) {
-	s := NewStore(t.TempDir())
-	if _, err := s.MarkPreExisting(CheckTest, commitA, "tk-x"); !errors.Is(err, ErrNoFail) {
-		t.Fatalf("annotating with no record = %v, want ErrNoFail", err)
-	}
-	mustPut(t, s, rec(CheckTest, ResultPass, MethodFull, commitA, treeT))
-	if _, err := s.MarkPreExisting(CheckTest, commitA, "tk-x"); !errors.Is(err, ErrNoFail) {
-		t.Fatalf("annotating a pass = %v, want ErrNoFail", err)
-	}
-	mustPut(t, s, rec(CheckTest, ResultFail, MethodAffected, commitA, treeT))
-	got, err := s.MarkPreExisting(CheckTest, commitA, "tk-x")
-	if err != nil {
-		t.Fatalf("annotating a fail: %v", err)
-	}
-	if got.Disposition != DispositionPreExisting || got.Tracker != "tk-x" || got.Result != ResultFail {
-		t.Fatalf("annotated record = %+v", got)
-	}
-	f := mustLookup(t, s, CheckTest, commitA, treeT)
-	if f.Record.Disposition != DispositionPreExisting || f.Record.Tracker != "tk-x" {
-		t.Fatalf("the annotation did not persist: %+v", f.Record)
-	}
-	if _, err := s.MarkPreExisting(CheckTest, commitA, ""); err == nil {
-		t.Fatal("an annotation with no tracker was accepted")
 	}
 }
 
@@ -262,7 +284,7 @@ func TestMarkPreExistingAnnotatesOnlyAFail(t *testing.T) {
 // commit's file and the tree's) and of one lookup that finds it.
 func BenchmarkPutFullPass(b *testing.B) {
 	s := NewStore(b.TempDir())
-	r := rec(CheckTest, ResultPass, MethodFull, commitA, treeT)
+	r := rec(CheckTest, ResultPass, ScopeFull, commitA, treeT)
 	for b.Loop() {
 		if err := s.Put(r); err != nil {
 			b.Fatal(err)
@@ -272,11 +294,11 @@ func BenchmarkPutFullPass(b *testing.B) {
 
 func BenchmarkLookupHit(b *testing.B) {
 	s := NewStore(b.TempDir())
-	if err := s.Put(rec(CheckTest, ResultPass, MethodFull, commitA, treeT)); err != nil {
+	if err := s.Put(rec(CheckTest, ResultPass, ScopeFull, commitA, treeT)); err != nil {
 		b.Fatal(err)
 	}
 	for b.Loop() {
-		if f, err := s.Lookup(CheckTest, commitA, treeT); err != nil || f.Record == nil {
+		if f, err := s.Lookup(CheckTest, commitA, treeT); err != nil || f.Commit == nil {
 			b.Fatal(err)
 		}
 	}

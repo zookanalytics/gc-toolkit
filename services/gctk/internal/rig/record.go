@@ -1,5 +1,6 @@
-// Package rig runs a rig's declared check commands and keeps the record of
-// what each run found, keyed to the commit it ran at.
+// Package rig carries the actions gctk takes on a rig. The first are its
+// checks: a check runs the command its caller passes and keeps the record of
+// what the run found, keyed to the commit it ran at.
 //
 // A record certifies a commit, not a session's word: it is written by the
 // process that ran the command and captured its exit status, and only for a
@@ -37,34 +38,31 @@ const (
 	ResultFail = "fail"
 )
 
-// A record's method: what the run covered.
+// A record's scope: what the run covered, as its caller declared it. Only test
+// has two commands to tell apart. A lint or typecheck run has one, and records
+// no scope.
 const (
-	// MethodFull ran the check's whole declared command.
-	MethodFull = "full"
-	// MethodAffected ran affected_tests_command, the subset the commit's diff
-	// against its base selects.
-	MethodAffected = "affected"
-	// MethodNone ran nothing, because the rig declares no command for the
-	// check, or the affected subset was empty and the rig declares no full
-	// suite to fall back to. Its result is a pass, because nothing declared
-	// failed, and the method says that nothing ran.
-	MethodNone = "none"
+	// ScopeFull is a test run of the whole suite. Its result is a property of
+	// the tree, so its pass also answers for every commit with the same tree.
+	ScopeFull = "full"
+	// ScopeAffected is a test run of the subset the commit's diff selects. The
+	// command works out that diff itself, so its result answers only for the
+	// commit it ran at.
+	ScopeAffected = "affected"
+	// ScopeNone is a pass that ran nothing, recorded when the caller declares
+	// that the rig declares no command for the check.
+	ScopeNone = "none"
 )
-
-// DispositionPreExisting marks a fail that the caller judged to be red on the
-// base branch as well. The gate never writes it on its own judgment.
-const DispositionPreExisting = "pre-existing"
 
 // dirName is the record directory under the git common directory, beside the
 // refinery's gc-refinery-gate and gc-refinery-prep.
 const dirName = "gc-rig-checks"
 
-// Record is one check's result at one commit. Every field but the disposition
-// and its tracker is written by the run itself.
+// Record is one check's result at one commit, written by the run itself.
 type Record struct {
 	Check  string `json:"check"`
 	Result string `json:"result"`
-	Method string `json:"method"`
+	Scope  string `json:"scope,omitempty"`
 	Commit string `json:"commit"`
 	Tree   string `json:"tree"`
 	// ExitCode is the command's own exit status: 0 for a pass, and for a fail
@@ -73,15 +71,12 @@ type Record struct {
 	DurationMS int64  `json:"duration_ms"`
 	Runner     string `json:"runner"`
 	RecordedAt string `json:"recorded_at"`
-	// Command is the command line that ran, empty when the method is none.
+	// Command is the command line the caller passed, empty for a run of
+	// nothing.
 	Command string `json:"command"`
-	// Disposition and Tracker annotate a fail: DispositionPreExisting and the
-	// tracker bead that carries the failure on the base.
-	Disposition string `json:"disposition,omitempty"`
-	Tracker     string `json:"tracker,omitempty"`
 }
 
-// Where a lookup found the record that answers for a commit.
+// Where the record that answers for a commit was found.
 const (
 	// FromCommit is the commit's own record.
 	FromCommit = "commit"
@@ -90,16 +85,46 @@ const (
 	FromTree = "tree"
 )
 
-// Found is what a lookup returned.
+// Found is what a lookup read for one commit.
 type Found struct {
-	// Record is nil when no record answers for the commit.
-	Record *Record
-	// Source is FromCommit or FromTree, empty with no record.
-	Source string
+	// Commit is the commit's own record, nil when it has none.
+	Commit *Record
+	// Tree is the full-suite test pass the commit's tree answers with, nil when
+	// there is none. Only a test lookup reads it.
+	Tree *Record
 	// Ignored lists record files that exist but did not parse as a record for
 	// the commit or tree they are filed under. A lookup reads each one as
 	// absent, so a damaged file costs a run and never certifies anything.
 	Ignored []string
+}
+
+// Answer returns the record that answers a call declaring scope and command,
+// and where it was found, or nil when no record answers. A record answers only
+// the run it records: the same command line, byte for byte, and the same
+// scope. The commit's own record is read first. A full-suite test pass recorded
+// at another commit with the same tree answers a call that declares the full
+// suite with the same command.
+func (f Found) Answer(scope, command string) (*Record, string) {
+	if r := f.Commit; r != nil && r.Scope == scope && r.Command == command {
+		return r, FromCommit
+	}
+	if r := f.Tree; r != nil && scope == ScopeFull && r.Command == command {
+		return r, FromTree
+	}
+	return nil, ""
+}
+
+// Recorded returns what is recorded for the commit whatever run made it, and
+// where it was found: the commit's own record, else the full-suite pass its
+// tree answers with.
+func (f Found) Recorded() (*Record, string) {
+	if f.Commit != nil {
+		return f.Commit, FromCommit
+	}
+	if f.Tree != nil {
+		return f.Tree, FromTree
+	}
+	return nil, ""
 }
 
 // Store is the record directory of one rig clone.
@@ -134,14 +159,12 @@ func (s *Store) TreePath(check, tree string) string {
 	return filepath.Join(s.root, check, "trees", tree+".json")
 }
 
-// Lookup returns the record that answers for commit. That is the commit's own
-// record, whatever its method or result. For the test check with no record of
-// its own, it is a full-suite pass recorded at any commit with the same tree,
-// because a full suite's result is a property of the tree it ran on. Lint and
-// typecheck commands may be scoped by the commit's diff against its base, which
-// two commits with one tree need not share, so they answer only for their own
-// commit. An error is a read that failed for a reason other than the record's
-// absence.
+// Lookup reads what is recorded for commit: its own record, and for the test
+// check the full-suite pass its tree answers with. Only a full-suite test pass
+// crosses commits. A test subset depends on the commit's diff against its base,
+// and so can a lint or typecheck command, and two commits with one tree need
+// not share that diff. An error is a read that failed for a reason other than
+// the record's absence.
 func (s *Store) Lookup(check, commit, tree string) (Found, error) {
 	var f Found
 	if !validCheck(check) || !git.IsObjectID(commit) || !git.IsObjectID(tree) {
@@ -151,8 +174,7 @@ func (s *Store) Lookup(check, commit, tree string) (Found, error) {
 	rec, err := readRecord(path)
 	switch {
 	case err == nil && rec.Check == check && rec.Commit == commit:
-		f.Record, f.Source = rec, FromCommit
-		return f, nil
+		f.Commit = rec
 	case err == nil, errors.Is(err, errMalformed):
 		f.Ignored = append(f.Ignored, path)
 	case !errors.Is(err, fs.ErrNotExist):
@@ -164,8 +186,8 @@ func (s *Store) Lookup(check, commit, tree string) (Found, error) {
 	path = s.TreePath(check, tree)
 	rec, err = readRecord(path)
 	switch {
-	case err == nil && rec.Check == check && rec.Tree == tree && rec.Result == ResultPass && rec.Method == MethodFull:
-		f.Record, f.Source = rec, FromTree
+	case err == nil && rec.Check == check && rec.Tree == tree && rec.Result == ResultPass && rec.Scope == ScopeFull:
+		f.Tree = rec
 	case err == nil, errors.Is(err, errMalformed):
 		f.Ignored = append(f.Ignored, path)
 	case !errors.Is(err, fs.ErrNotExist):
@@ -192,7 +214,7 @@ func (s *Store) Put(rec *Record) error {
 		return err
 	}
 	commit := s.CommitPath(rec.Check, rec.Commit)
-	if rec.Check != CheckTest || rec.Method != MethodFull {
+	if rec.Check != CheckTest || rec.Scope != ScopeFull {
 		return writeRecord(commit, rec)
 	}
 	tree := s.TreePath(rec.Check, rec.Tree)
@@ -212,39 +234,6 @@ func (s *Store) Put(rec *Record) error {
 		return err
 	}
 	return nil
-}
-
-// ErrNoFail reports an annotation with no fail recorded at the commit to
-// annotate.
-var ErrNoFail = errors.New("no fail recorded at this commit")
-
-// MarkPreExisting annotates the fail recorded at commit as red on the base too,
-// carried by tracker, and returns the annotated record. Only the commit's own
-// record is annotated: fails are never read across commits.
-func (s *Store) MarkPreExisting(check, commit, tracker string) (*Record, error) {
-	if !validCheck(check) || !git.IsObjectID(commit) {
-		return nil, fmt.Errorf("annotate: invalid check %q or commit %q", check, commit)
-	}
-	if tracker == "" {
-		return nil, errors.New("annotate: a pre-existing fail needs its tracker bead")
-	}
-	path := s.CommitPath(check, commit)
-	rec, err := readRecord(path)
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errMalformed) {
-		return nil, ErrNoFail
-	}
-	if err != nil {
-		return nil, err
-	}
-	if rec.Check != check || rec.Commit != commit || rec.Result != ResultFail {
-		return nil, ErrNoFail
-	}
-	rec.Disposition = DispositionPreExisting
-	rec.Tracker = tracker
-	if err := writeRecord(path, rec); err != nil {
-		return nil, err
-	}
-	return rec, nil
 }
 
 // Runner names who ran a check: the session, else the agent, else the user and
@@ -291,10 +280,14 @@ func (r *Record) valid() error {
 		return fmt.Errorf("check %q is not test, lint or typecheck", r.Check)
 	case r.Result != ResultPass && r.Result != ResultFail:
 		return fmt.Errorf("result %q is not pass or fail", r.Result)
-	case r.Method != MethodFull && r.Method != MethodAffected && r.Method != MethodNone:
-		return fmt.Errorf("method %q is not full, affected or none", r.Method)
-	case r.Method == MethodNone && r.Result != ResultPass:
-		return fmt.Errorf("a run of nothing cannot fail")
+	case r.Check == CheckTest && r.Scope != ScopeFull && r.Scope != ScopeAffected && r.Scope != ScopeNone:
+		return fmt.Errorf("a test record's scope %q is not full, affected or none", r.Scope)
+	case r.Check != CheckTest && r.Scope != "" && r.Scope != ScopeNone:
+		return fmt.Errorf("a %s record's scope %q is not none", r.Check, r.Scope)
+	case r.Scope == ScopeNone && (r.Result != ResultPass || r.Command != ""):
+		return fmt.Errorf("a run of nothing is a pass with no command")
+	case r.Scope != ScopeNone && r.Command == "":
+		return fmt.Errorf("a run's record names its command")
 	case !git.IsObjectID(r.Commit):
 		return fmt.Errorf("commit %q is not a full object name", r.Commit)
 	case !git.IsObjectID(r.Tree):

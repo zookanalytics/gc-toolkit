@@ -2,11 +2,8 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,54 +12,65 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
-// `gctk rig` is the one gate that runs a rig's declared check commands and
-// keeps the record of their results. A rig declares its commands as formula
-// vars under [rigs.formula_vars] in city.toml, and the gate reads them when it
-// runs, so a value changed after a molecule was poured is the value that runs.
+// `gctk rig` carries the actions gctk takes on a rig, and its first are the
+// checks. test, lint and typecheck run the command their caller passes and
+// record the result against the commit it ran at (internal/rig). setup and
+// build run the command their caller passes and record nothing: setup leaves
+// environment state behind, and a build makes itself current.
 //
-// test, lint and typecheck are properties of a commit. Each run is recorded
-// against the commit it ran at (internal/rig), and a recorded result answers
-// for that commit without running again: a pass passes and a fail fails. A
-// full-suite test pass also answers for any commit with the same tree. --force
-// runs regardless, and --check only reports. setup and build record nothing:
-// setup leaves environment state behind, and a build makes itself current.
+// gctk reads no formula var and works out no diff. The caller passes the
+// command, a test caller declares which of the two test runs it is, and a
+// caller whose rig declares no command for a check says so with
+// --nothing-declared. A command that works out its own subset, such as an
+// affected test command, takes its diff where it runs.
 //
-// The gate's own lines go to stderr; the command's output passes through
-// untouched. --check prints the record it found on stdout as one JSON line.
+// The command's output passes through untouched. rig's own lines go to
+// stderr, and --check prints the record it found on stdout as one JSON line.
 
 const rigUsage = `usage:
-  gctk rig test [--affected [--base <branch>]] [--check | --force | --pre-existing <tracker>]
-                [--publish-bead <id>] [--rig <rig>] [--timeout <duration>]
-  gctk rig lint|typecheck [--check | --force | --pre-existing <tracker>]
-                [--publish-bead <id>] [--rig <rig>] [--timeout <duration>]
-  gctk rig setup|build [--rig <rig>] [--timeout <duration>]
+  gctk rig test --scope full|affected --command <command> [--force]
+                [--publish-bead <id>] [--timeout <duration>]
+  gctk rig lint|typecheck --command <command> [--force]
+                [--publish-bead <id>] [--timeout <duration>]
+  gctk rig test|lint|typecheck --nothing-declared [--publish-bead <id>]
+  gctk rig test|lint|typecheck --check
+  gctk rig setup|build --command <command> [--timeout <duration>]
 
-Runs the rig's declared check command in the checkout the current directory
-sits in, and records the result against HEAD. A recorded result answers for
-HEAD without running again.
+Runs <command> with bash at the top of the checkout the current directory sits
+in. test, lint and typecheck record the result against HEAD; setup and build
+record nothing.
 
-  --affected         run affected_tests_command, or test_command when that is
-                     empty or the diff against origin/<base> names no file
-  --base <branch>    the base the affected diff is taken against; default: the
-                     rig's base_branch, else the branch origin/HEAD names
-  --check            report the recorded result and run nothing
-  --force            run even when a result is recorded, and record the new one
-  --pre-existing <tracker>
-                     mark the fail recorded at HEAD as red on the base too,
-                     carried by the tracker bead
-  --publish-bead <id>  copy the result onto the bead's rig_check.<check> key
-  --rig <rig>        the rig whose vars to read; default: $GC_RIG
-  --timeout <duration>  stop a run still going after this long; 0 never
-                     (default 2h)
+  --command <command>    the command line to run
+  --scope full|affected  which test run the command is: the whole suite, or the
+                         subset the commit's diff selects
+  --nothing-declared     the rig declares no command for this check: record a
+                         pass that ran nothing
+  --check                print the result recorded at HEAD and run nothing
+  --force                run even when a result is already recorded
+  --publish-bead <id>    copy the result onto the bead's rig_check.<check> key
+  --timeout <duration>   stop a run still going after this long; 0 never
+                         (default 2h)
 
-exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check, --pre-existing)
-      4 machine failure, nothing recorded · 128+N stopped by signal N
+A recorded result answers a call that declares the same run, without running
+it again: the same command line and, for test, the same scope. A full-suite
+pass also answers for every commit with the same tree. A pass passes and a fail
+fails. A call that declares another run runs, and its result replaces the
+record. --check needs no command: it reports whatever is recorded at HEAD, and
+calls nothing but git.
+
+A checkout with changes HEAD does not hold is refused, except by setup and
+build: a record certifies a commit.
+
+exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
+      4 machine failure: nothing is recorded or published, because the run
+        says nothing about the code. That is a refused checkout, a command bash
+        cannot parse, not found or not executable (126, 127), ended by a
+        signal, or still running at the timeout, and a result the record store
+        did not take.
+      128+N stopped by signal N
 `
 
-// The gate's exit codes. A machine failure is any outcome the gate does not
-// record as the code's result: a dirty tree, a command that could not run, a
-// timeout, a kill, vars that could not be read, a result the record store did
-// not take.
+// The exit codes rigUsage states.
 const (
 	rigExitPass    = 0
 	rigExitFail    = 1
@@ -76,22 +84,14 @@ const (
 // answering.
 const rigDefaultTimeout = 2 * time.Hour
 
-// rigCheckVar is the var each recorded check runs.
-var rigCheckVar = map[string]string{
-	rig.CheckTest:      rig.VarTest,
-	rig.CheckLint:      rig.VarLint,
-	rig.CheckTypecheck: rig.VarTypecheck,
-}
-
 type rigOpts struct {
-	affected    bool
-	check       bool
-	force       bool
-	preExisting string
-	publish     string
-	base        string
-	rigName     string
-	timeout     time.Duration
+	command string
+	scope   string
+	nothing bool
+	check   bool
+	force   bool
+	publish string
+	timeout time.Duration
 	// set records which flags were given, for the checks of what goes with
 	// what.
 	set map[string]bool
@@ -128,43 +128,44 @@ func Rig(args []string, stdout, stderr io.Writer) int {
 // parseRigArgs reads verb's flags, or returns why they do not parse.
 func parseRigArgs(verb string, args []string) (rigOpts, string) {
 	o := rigOpts{timeout: rigDefaultTimeout, set: map[string]bool{}}
-	value := func(i int) (string, string) {
-		if i+1 >= len(args) {
-			return "", "flag " + args[i] + " needs a value"
-		}
-		return args[i+1], ""
-	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if o.set[a] {
 			return o, "flag " + a + " given twice"
 		}
 		o.set[a] = true
-		var v, msg string
 		switch a {
-		case "--affected":
-			o.affected = true
+		case "--nothing-declared":
+			o.nothing = true
+			continue
 		case "--check":
 			o.check = true
+			continue
 		case "--force":
 			o.force = true
-		case "--pre-existing", "--publish-bead", "--base", "--rig", "--timeout":
-			if v, msg = value(i); msg != "" {
-				return o, msg
-			}
-			i++
+			continue
+		case "--command", "--scope", "--publish-bead", "--timeout":
 		default:
 			return o, fmt.Sprintf("unknown argument %q", a)
 		}
+		if i+1 >= len(args) || args[i+1] == "" {
+			if a == "--command" {
+				return o, "--command needs a command line; when the rig declares none, pass --nothing-declared"
+			}
+			return o, "flag " + a + " needs a value"
+		}
+		i++
+		v := args[i]
 		switch a {
-		case "--pre-existing":
-			o.preExisting = v
+		case "--command":
+			o.command = v
+		case "--scope":
+			if v != rig.ScopeFull && v != rig.ScopeAffected {
+				return o, fmt.Sprintf("--scope %q is not full or affected", v)
+			}
+			o.scope = v
 		case "--publish-bead":
 			o.publish = v
-		case "--base":
-			o.base = v
-		case "--rig":
-			o.rigName = v
 		case "--timeout":
 			d, err := time.ParseDuration(v)
 			if err != nil || d < 0 {
@@ -172,38 +173,46 @@ func parseRigArgs(verb string, args []string) (rigOpts, string) {
 			}
 			o.timeout = d
 		}
-		if v == "" && (a == "--pre-existing" || a == "--publish-bead" || a == "--base" || a == "--rig") {
-			return o, "flag " + a + " needs a value"
-		}
 	}
-	allowed := map[string]bool{"--rig": true, "--timeout": true}
+	allowed := map[string]bool{"--command": true, "--timeout": true}
 	if verb != "setup" && verb != "build" {
-		for _, f := range []string{"--check", "--force", "--pre-existing", "--publish-bead"} {
+		for _, f := range []string{"--nothing-declared", "--check", "--force", "--publish-bead"} {
 			allowed[f] = true
 		}
 	}
 	if verb == rig.CheckTest {
-		allowed["--affected"] = true
-		allowed["--base"] = true
+		allowed["--scope"] = true
 	}
 	for f := range o.set {
 		if !allowed[f] {
 			return o, fmt.Sprintf("%s does not take %s", verb, f)
 		}
 	}
+	if verb == "setup" || verb == "build" {
+		if !o.set["--command"] {
+			return o, verb + " needs --command"
+		}
+		return o, ""
+	}
 	modes := 0
-	for _, f := range []string{"--check", "--force", "--pre-existing"} {
+	for _, f := range []string{"--command", "--nothing-declared", "--check"} {
 		if o.set[f] {
 			modes++
 		}
 	}
 	switch {
+	case modes == 0:
+		return o, "pass --command, --nothing-declared or --check"
 	case modes > 1:
-		return o, "--check, --force and --pre-existing exclude one another"
+		return o, "--command, --nothing-declared and --check exclude one another"
 	case o.check && o.publish != "":
 		return o, "--check runs no gc, so it publishes nothing; drop --publish-bead"
-	case o.set["--base"] && !o.affected:
-		return o, "--base names the base of the affected diff, so it needs --affected"
+	case o.check && (o.force || o.set["--scope"] || o.set["--timeout"]):
+		return o, "--check runs nothing, so it takes no --force, --scope or --timeout"
+	case o.nothing && (o.force || o.set["--scope"] || o.set["--timeout"]):
+		return o, "--nothing-declared runs nothing, so it takes no --force, --scope or --timeout"
+	case verb == rig.CheckTest && o.command != "" && o.scope == "":
+		return o, "test --command needs --scope full or --scope affected"
 	}
 	return o, ""
 }
@@ -229,22 +238,6 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 		return machine("the checkout has changes HEAD does not hold, so no result here certifies %s:\n%s", co.Commit, firstLines(dirty, 10))
 	}
 	store := rig.NewStore(co.Common)
-
-	if o.preExisting != "" {
-		rec, err := store.MarkPreExisting(check, co.Commit, o.preExisting)
-		if errors.Is(err, rig.ErrNoFail) {
-			say("no fail is recorded at %s, so nothing was marked pre-existing", co.Commit)
-			return rigExitNone
-		}
-		if err != nil {
-			return machine("cannot mark the recorded fail: %v", err)
-		}
-		printRecord(stdout, rec)
-		say("the fail recorded at %s is marked pre-existing, carried by %s", co.Commit, o.preExisting)
-		rigPublish(check, o.publish, rec, say)
-		return rigExitPass
-	}
-
 	found, err := store.Lookup(check, co.Commit, co.Tree)
 	if err != nil {
 		return machine("cannot read the record store %s: %v", store.Root(), err)
@@ -254,64 +247,47 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	}
 
 	if o.check {
-		if found.Record == nil {
+		rec, src := found.Recorded()
+		if rec == nil {
 			say("nothing is recorded at %s", co.Commit)
 			return rigExitNone
 		}
-		printRecord(stdout, found.Record)
-		say("%s", describeRecord(found, co.Commit))
-		return resultExit(found.Record)
+		printRecord(stdout, rec)
+		say("%s", describeRecord(rec, src, co.Commit))
+		return resultExit(rec)
 	}
 
-	// A record of nothing run is not reused: what to run is cheap to work out
-	// again, and the rig may declare a command now.
-	if !o.force && found.Record != nil && found.Record.Method != rig.MethodNone {
-		say("%s; not run again%s", describeRecord(found, co.Commit), forceHint(found.Record))
-		rigPublish(check, o.publish, found.Record, say)
-		return resultExit(found.Record)
+	scope := o.scope
+	if o.nothing {
+		scope = rig.ScopeNone
 	}
-
-	rigName, msg := resolveRigName(o, co)
-	if msg != "" {
-		return machine("%s", msg)
-	}
-	vars, err := rig.Resolve(rigName)
-	if err != nil {
-		return machine("cannot read rig %s's check commands: %v", rigName, err)
-	}
-	command, method, why, msg := selectCommand(check, o, vars, co)
-	if msg != "" {
-		return machine("%s", msg)
-	}
-
-	if command == "" {
-		own := found.Record != nil && found.Source == rig.FromCommit
-		switch {
-		case own && found.Record.Method != rig.MethodNone:
-			// A run of nothing never replaces the record of a run, and that
-			// record is not this call's answer, so it is not published either.
-			say("nothing to run: %s. The record of the last run stands, and nothing was published: %s", why, describeRecord(found, co.Commit))
-			return rigExitPass
-		case own:
-			say("nothing to run: %s. %s", why, describeRecord(found, co.Commit))
-			rigPublish(check, o.publish, found.Record, say)
-			return rigExitPass
+	if !o.force {
+		if rec, src := found.Answer(scope, o.command); rec != nil {
+			say("%s; not run again%s", describeRecord(rec, src, co.Commit), forceHint(rec))
+			rigPublish(check, o.publish, rec, say)
+			return resultExit(rec)
 		}
-		rec := newRecord(check, rig.ResultPass, rig.MethodNone, co, "", 0, 0)
+		if r := found.Commit; r != nil {
+			say("%s is another run's, so this call runs and records its own", describeRecord(r, rig.FromCommit, co.Commit))
+		}
+	}
+
+	if o.nothing {
+		rec := newRecord(check, rig.ResultPass, rig.ScopeNone, co, "", 0, 0)
 		if err := store.Put(rec); err != nil {
-			say("machine failure: nothing to run (%s), and the record store did not take the pass with method none: %v", why, err)
+			say("machine failure: the record store did not take the pass that ran nothing at %s: %v", co.Commit, err)
 			return rigExitMachine
 		}
-		say("nothing to run: %s. Recorded at %s as a pass with method none", why, co.Commit)
+		say("nothing declared to run; recorded at %s as a pass that ran nothing", co.Commit)
 		rigPublish(check, o.publish, rec, say)
 		return rigExitPass
 	}
 
-	if ok, reason := rig.Parses(command); !ok {
-		return machine("%s; the command is %s's %q", reason, rigName, command)
+	if ok, reason := rig.Parses(o.command); !ok {
+		return machine("%s; the command is %q", reason, o.command)
 	}
-	say("running %s (method %s) at %s", command, method, co.Commit)
-	out := rig.Run(co.Top, command, o.timeout, stdout, stderr)
+	say("running %s at %s", runLabel(scope, o.command), co.Commit)
+	out := rig.Run(co.Top, o.command, o.timeout, stdout, stderr)
 	switch out.Kind {
 	case rig.Interrupted:
 		say("stopped by signal %d (%s); the command's process group was stopped, and nothing was recorded", int(out.Signal), out.Signal)
@@ -323,82 +299,14 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	if out.Kind == rig.Failed {
 		result = rig.ResultFail
 	}
-	rec := newRecord(check, result, method, co, command, out.ExitCode, out.Duration)
+	rec := newRecord(check, result, scope, co, o.command, out.ExitCode, out.Duration)
 	if err := store.Put(rec); err != nil {
-		say("machine failure: the record store did not take the %s at %s (method %s, exit %d, %s): %v", result, co.Commit, method, out.ExitCode, out.Duration.Round(time.Millisecond), err)
+		say("machine failure: the record store did not take the %s at %s (%s): %v", result, co.Commit, outcomeLabel(rec), err)
 		return rigExitMachine
 	}
-	say("%s at %s (method %s, exit %d, %s); recorded", result, co.Commit, method, out.ExitCode, out.Duration.Round(time.Millisecond))
+	say("%s at %s (%s); recorded", result, co.Commit, outcomeLabel(rec))
 	rigPublish(check, o.publish, rec, say)
 	return resultExit(rec)
-}
-
-// selectCommand picks what a run of check executes, the method it records,
-// and, when the command is empty, why there is nothing to run. msg is a
-// machine failure.
-func selectCommand(check string, o rigOpts, vars rig.Vars, co *git.Checkout) (command, method, why, msg string) {
-	full := vars.Value(rigCheckVar[check])
-	if check != rig.CheckTest || !o.affected {
-		return full, methodOf(full, rig.MethodFull), rigCheckVar[check] + " is not set", ""
-	}
-	affected := vars.Value(rig.VarAffected)
-	if affected == "" {
-		return full, methodOf(full, rig.MethodFull), rig.VarAffected + " and " + rig.VarTest + " are not set", ""
-	}
-	base := o.base
-	if base == "" {
-		base = rig.DefaultBase(co, vars)
-	}
-	empty, err := rig.DiffScopeEmpty(co, base)
-	if err != nil {
-		return "", "", "", fmt.Sprintf("cannot work out the affected subset: %v", err)
-	}
-	if empty {
-		return full, methodOf(full, rig.MethodFull), "the diff against origin/" + base + " names no file and " + rig.VarTest + " is not set", ""
-	}
-	return affected, rig.MethodAffected, "", ""
-}
-
-func methodOf(command, method string) string {
-	if command == "" {
-		return rig.MethodNone
-	}
-	return method
-}
-
-// resolveRigName is the rig whose vars the gate reads: --rig, else $GC_RIG.
-// $GC_RIG and $GC_RIG_ROOT describe one rig, so when both name it the checkout
-// must be a worktree of the clone at $GC_RIG_ROOT: one rig's commands are never
-// run against another rig's checkout and recorded there.
-func resolveRigName(o rigOpts, co *git.Checkout) (string, string) {
-	if o.rigName != "" {
-		return o.rigName, ""
-	}
-	name := strings.TrimSpace(os.Getenv("GC_RIG"))
-	if name == "" {
-		return "", "no rig named: pass --rig <rig>, or run where $GC_RIG names one"
-	}
-	root := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
-	if root == "" {
-		return name, ""
-	}
-	clone, err := git.Open(root)
-	if err != nil {
-		return "", fmt.Sprintf("$GC_RIG_ROOT %s is not a checkout of rig %s, so this checkout cannot be matched to it: %v", root, name, err)
-	}
-	if !samePath(clone.Common, co.Common) {
-		return "", fmt.Sprintf("this checkout belongs to the clone at %s, not to rig %s's clone at %s; pass --rig to name the rig whose commands to run", co.Common, name, clone.Common)
-	}
-	return name, ""
-}
-
-func samePath(a, b string) bool {
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
-	if errA != nil || errB != nil {
-		return filepath.Clean(a) == filepath.Clean(b)
-	}
-	return ra == rb
 }
 
 // rigRunOnly runs setup or build, which record nothing.
@@ -414,28 +322,11 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	if err != nil {
 		return machine("%v", err)
 	}
-	rigName, msg := resolveRigName(o, co)
-	if msg != "" {
-		return machine("%s", msg)
+	if ok, reason := rig.Parses(o.command); !ok {
+		return machine("%s; the command is %q", reason, o.command)
 	}
-	vars, err := rig.Resolve(rigName)
-	if err != nil {
-		return machine("cannot read rig %s's check commands: %v", rigName, err)
-	}
-	name := rig.VarSetup
-	if verb == "build" {
-		name = rig.VarBuild
-	}
-	command := vars.Value(name)
-	if command == "" {
-		say("nothing to run: %s is not set", name)
-		return rigExitPass
-	}
-	if ok, reason := rig.Parses(command); !ok {
-		return machine("%s; the command is %s's %q", reason, rigName, command)
-	}
-	say("running %s", command)
-	out := rig.Run(co.Top, command, o.timeout, stdout, stderr)
+	say("running %s", o.command)
+	out := rig.Run(co.Top, o.command, o.timeout, stdout, stderr)
 	switch out.Kind {
 	case rig.Interrupted:
 		say("stopped by signal %d (%s); the command's process group was stopped", int(out.Signal), out.Signal)
@@ -450,11 +341,11 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	return rigExitPass
 }
 
-func newRecord(check, result, method string, co *git.Checkout, command string, exit int, d time.Duration) *rig.Record {
+func newRecord(check, result, scope string, co *git.Checkout, command string, exit int, d time.Duration) *rig.Record {
 	return &rig.Record{
 		Check:      check,
 		Result:     result,
-		Method:     method,
+		Scope:      scope,
 		Commit:     co.Commit,
 		Tree:       co.Tree,
 		ExitCode:   exit,
@@ -472,22 +363,40 @@ func resultExit(rec *rig.Record) int {
 	return rigExitFail
 }
 
-// describeRecord says what a found record holds, for the gate's own lines.
-func describeRecord(f rig.Found, commit string) string {
-	r := f.Record
+// runLabel names the run a call makes, for the line that starts it.
+func runLabel(scope, command string) string {
+	if scope == "" {
+		return command
+	}
+	return command + " (scope " + scope + ")"
+}
+
+// outcomeLabel says how a run a call just made came out.
+func outcomeLabel(r *rig.Record) string {
+	var b strings.Builder
+	if r.Scope != "" {
+		fmt.Fprintf(&b, "scope %s, ", r.Scope)
+	}
+	fmt.Fprintf(&b, "exit %d, %s", r.ExitCode, (time.Duration(r.DurationMS) * time.Millisecond).Round(time.Millisecond))
+	return b.String()
+}
+
+// describeRecord says what a found record holds, for rig's own lines. head is
+// the commit the call is at.
+func describeRecord(r *rig.Record, src, head string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s recorded at %s", r.Result, r.Commit)
-	if f.Source == rig.FromTree {
-		fmt.Fprintf(&b, ", whose tree %s is HEAD's (%s)", r.Tree, commit)
+	if src == rig.FromTree {
+		fmt.Fprintf(&b, ", whose tree %s is HEAD's (%s)", r.Tree, head)
 	}
-	fmt.Fprintf(&b, " (method %s", r.Method)
+	b.WriteString(" (")
+	if r.Scope != "" {
+		fmt.Fprintf(&b, "scope %s, ", r.Scope)
+	}
 	if r.Result == rig.ResultFail {
-		fmt.Fprintf(&b, ", exit %d", r.ExitCode)
+		fmt.Fprintf(&b, "exit %d, ", r.ExitCode)
 	}
-	if r.Disposition != "" {
-		fmt.Fprintf(&b, ", %s, carried by %s", r.Disposition, r.Tracker)
-	}
-	fmt.Fprintf(&b, ", %s, by %s at %s)", (time.Duration(r.DurationMS) * time.Millisecond).Round(time.Millisecond), r.Runner, r.RecordedAt)
+	fmt.Fprintf(&b, "%s, by %s at %s)", (time.Duration(r.DurationMS) * time.Millisecond).Round(time.Millisecond), r.Runner, r.RecordedAt)
 	return b.String()
 }
 
@@ -510,7 +419,7 @@ func printRecord(w io.Writer, rec *rig.Record) {
 // rigPublish copies rec onto the bead's rig_check.<check> key through the gcbd
 // write path and reads it back. rec is a record the store holds: one it just
 // took, or one a lookup returned. The copy is for whoever reads the bead; the
-// record in the store is what answers the gate, so a publish that fails is
+// record in the store is what answers a later call, so a publish that fails is
 // reported and changes nothing else.
 func rigPublish(check, bead string, rec *rig.Record, say func(string, ...any)) {
 	if bead == "" {
