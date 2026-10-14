@@ -196,7 +196,8 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 Further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
-(generated-artifact freshness; warn-only when absent),
+(the generated seed audit is present and its pre-commit hook is wired;
+warn-only),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
@@ -474,7 +475,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key` and its subject. A new bead that shares either with a live finding in its scope is refused unless the caller passes `--distinct`. A proactive first reaction disposes it: routed to a pool, held for the placement sitting, held on an edge, or put to the operator as a human gate. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
-| `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. `doctor/check-seed-audit-current` reports its freshness in a checkout; its `--check-merge` mode is what `merge.sh` gates a landing on. |
+| `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. Its `--check` mode re-renders a checkout, and its `--check-merge` mode, which renders the merge result, is what `merge.sh` gates a landing on. `doctor/check-seed-audit-current` reports whether the artifact is present and its hook wired. |
 | `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
 | `assets/scripts/preexisting-failure.sh` | shared primitive | One tracker per failure already red on a base branch, keyed on the `failure_key` it derives from the failing test, target or linted file and stamps in the create, so a retitle cannot hide the tracker. A tracker that a fold closed answers through the live bead its failure moved to, so a fold cannot hide it either. The refinery's merge gate (merge) and a polecat's pre-flight (work) look trackers up and file them through it. |
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
