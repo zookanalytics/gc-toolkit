@@ -1243,8 +1243,9 @@ echo "# a pass killed by itself mid-sling leaves the lock held until its sling e
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 LOCKF="$TMP/state/_unscoped/pass.lock"
 HOLD="$TMP/hold-kill"; rm -f "$HOLD".*
-# Launched as a simple command, so $! is the pass itself.
-STUB_SLING_HOLD="$HOLD" "$SUT" reconcile > /dev/null 2>&1 &
+# Launched as a simple command, so $! is the pass itself. A SIGKILL runs no EXIT
+# trap, so the pass stages its files under $TMP, which the suite removes.
+TMPDIR="$TMP" STUB_SLING_HOLD="$HOLD" "$SUT" reconcile > /dev/null 2>&1 &
 first=$!
 if await "$HOLD.started"; then
     kill -9 "$first" 2>/dev/null; wait "$first" 2>/dev/null
