@@ -660,7 +660,7 @@ rev_lane() { # id anchor lane oid
 store "[$(pre DR1 polecat/dr1 '' 'correctness,demo'), $(rev DR1)]"
 echo "sha-dr1" > "$GH_DIR/head_polecat_dr1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/70"
-printf '%s' "$(prrow 70 OPEN polecat/dr1 sha-dr1 main)" > "$GH_DIR/pr_view_70.json"
+printf '%s' "$(prrow 70 OPEN polecat/dr1 sha-dr1 main)" | jq -c '. + {isDraft:true, labels:[]}' > "$GH_DIR/pr_view_70.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "opened PR#70" "a demo-bearing anchor opens once its pre-open gate is green"
@@ -668,16 +668,21 @@ eq "$(meta DR1 merge_result)" "pull_request" "the anchor flips to pull_request"
 has "$(cat "$STUB_GH_LOG")" "pr create --repo github.com/zook/gc-toolkit --base main --head polecat/dr1" "the create is pinned to origin"
 has "$(cat "$STUB_GH_LOG")" "--draft" "it opens as a draft because demo is open-as-draft"
 eq "$(meta DR1 opened_as_draft)" "sha-dr1" "the flip records opened_as_draft at the reviewed head"
+eq "$(pv_labels 70)" "status: working" "…and the draft is labelled working: the city still owes its ready flip, so no human is asked to review it"
+eq "$(meta DR1 draft_readied)" "<absent>" "…and the same pass leaves it a draft: its demo gate is not green yet"
 
 # draft -> ready: a draft the refinery opened (opened_as_draft set), every
 # open-as-draft gate green, is flipped out of draft AND records draft_readied.
+# It carried status: working through its draft stage; the label is reconciled
+# after the stamp, so it leaves the flip up for review.
 store "[$(pr_anchor DR2 polecat/dr2 71 'correctness,demo' sha-dr2), $(rev_lane rev-DR2-c DR2 correctness sha-dr2), $(rev_lane rev-DR2-d DR2 demo sha-dr2)]"
-printf '%s' "$(prrow 71 OPEN polecat/dr2 sha-dr2 main)" | jq -c '. + {isDraft:true}' > "$GH_DIR/pr_view_71.json"
+printf '%s' "$(prrow 71 OPEN polecat/dr2 sha-dr2 main)" | jq -c '. + {isDraft:true, labels:[{name:"status: working"}]}' > "$GH_DIR/pr_view_71.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 has "$out" "flipped draft -> ready for review" "the draft is surfaced once its open-as-draft gates are green"
 has "$(cat "$STUB_GH_LOG")" "pr ready 71" "gh pr ready flips it out of draft"
 eq "$(meta DR2 draft_readied)" "sha-dr2" "the flip records draft_readied so the arm never re-reads it"
+eq "$(pv_labels 71)" "status: needs-review" "the label is reconciled after draft_readied lands, so the readied draft is up for review"
 
 # draft -> ready HOLDS while an open-as-draft gate is not yet green.
 store "[$(pr_anchor DR3 polecat/dr3 72 'correctness,demo' sha-dr3), $(rev_lane rev-DR3-c DR3 correctness sha-dr3)]"
@@ -735,12 +740,15 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr ready 77" "…gh pr ready is never called over
 
 # A PR already out of draft (surfaced externally, or adopted ready) records
 # draft_readied so the arm stops reading it every pass, and is not re-flipped.
+# It carried status: working through its draft stage, and the label reads the
+# same marker, so the stamp re-derives it: the PR is up for review.
 store "[$(pr_anchor DR9 polecat/dr9 78 'correctness,demo' sha-dr9), $(rev_lane rev-DR9-c DR9 correctness sha-dr9), $(rev_lane rev-DR9-d DR9 demo sha-dr9)]"
-printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" > "$GH_DIR/pr_view_78.json"
+printf '%s' "$(prrow 78 OPEN polecat/dr9 sha-dr9 main)" | jq -c '. + {labels:[{name:"status: working"}]}' > "$GH_DIR/pr_view_78.json"
 : > "$STUB_GH_LOG"
 out=$(GC_REVIEW_CHECKS_INDEX="$DR_IDX" "$SUT" 2>&1)
 eq "$(meta DR9 draft_readied)" "sha-dr9" "an already-ready draft records draft_readied"
 hasnt "$(cat "$STUB_GH_LOG")" "pr ready 78" "…and is not re-flipped"
+eq "$(pv_labels 78)" "status: needs-review" "…and its label is re-derived from the stamp, working to needs-review"
 
 echo "# adoption stamps opened_as_draft only on a draft the refinery opened as one"
 # The marker hands the ready flip to the draft-to-ready arm, so it goes only on a
