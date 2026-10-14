@@ -312,7 +312,7 @@ it never enters the liveness loop and is never marked.
 Two states name work that is not the pool's to recover:
 - an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
 - a human gate — `gc.routed_to=human`, the city's "no agent will take it" marker
-  (a signoff cap, a merge gate, an operator approval).
+  (a merge gate, an operator approval).
 
 `pr.machine` is deliberately not read here. A `progressing` stamp is written only
 alongside an anchor `merge_result` (`merge.sh` and `gate-ensure.sh` gate the write

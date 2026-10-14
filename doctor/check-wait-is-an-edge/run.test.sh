@@ -211,13 +211,14 @@ notheld() { # <metadata-json> <label>
   eq "$RC" "0" "$2 is not a hold"
 }
 held '{"triage.hold":"x"}'                       "triage.hold"
-held '{"blocked_reason":"the cap fired"}'        "blocked_reason"
+held '{"blocked_reason":"a person must rule"}'  "blocked_reason"
 held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
 held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
 held '{"dispatch_backstop.codex":"5@abc123"}'    "dispatch_backstop.<g>"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
 # No lane state is a hold: each is one some actor moves the anchor on from, and
-# the cap's park is merge_hold, asserted through blocked_reason and gc.takeaway.
+# an operator's hold is merge_hold, asserted through blocked_reason and
+# gc.takeaway.
 notheld '{"check.codex":"green"}'                "a green lane"
 notheld '{"check.codex":"fixing"}'               "a fixing lane"
 notheld '{"check.codex":"unreviewed"}'           "an unreviewed lane"
@@ -312,7 +313,7 @@ eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 mkdir -p "$TMP/pack5/lifecycle"
 { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
   echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
-for m in '{"dispatch_backstop.codex":"5@abc"}' '{"blocked_reason":"the cap fired"}' '{"gc.routed_to":"human"}'; do
+for m in '{"dispatch_backstop.codex":"5@abc"}' '{"blocked_reason":"a person must rule"}' '{"gc.routed_to":"human"}'; do
   store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
   OUT=$(PACK="$TMP/pack5" run_check); RC=$?
   eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"

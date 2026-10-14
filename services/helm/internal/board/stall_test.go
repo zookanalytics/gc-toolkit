@@ -320,8 +320,8 @@ func TestCheckLanes(t *testing.T) {
 
 // TestPreOpenCheckStallYieldsToStrongerSurfacing: a takeaway or a human route
 // already carries the row's NEEDS, so the stall defers rather than renaming it.
-// A human-routed signoff-cap park and a converse takeaway each carry their own
-// NEEDS, and the human route also owns the band.
+// An operator hold routed to a person and a converse takeaway each carry their
+// own NEEDS, and the human route also owns the band.
 func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	// A converse sitting parked it: gathered as the parked kind, carrying its
 	// takeaway as the NEEDS sentence.
@@ -329,10 +329,10 @@ func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	parked.Kind, parked.Source = "parked", "parked"
 	parked.Takeaway = "waiting on the upstream decision"
 
-	// Routed to a person after the signoff cap: humanGated owns it.
+	// Held for a person and routed to them: humanGated owns it.
 	human := preOpenGateAnchor("tk-human", 5, map[string]string{
 		"gc.routed_to": "human",
-		"merge_hold":   "signoff_cap",
+		"merge_hold":   "true",
 	})
 	human.Kind, human.Source = "human", "human"
 

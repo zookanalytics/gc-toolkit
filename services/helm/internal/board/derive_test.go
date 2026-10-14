@@ -2213,7 +2213,6 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"non-merge row has no phase", Anchor{Metadata: map[string]string{}}, 0, ""},
 		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
-		{"cap park needs attention", merge(map[string]string{mdMergeHold: "signoff_cap", mdSignoffCap: "3"}), 0, PhaseNeedsAttention},
 		{"approved but blocked with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), 0, PhaseNeedsAttention},
 		{"approved and blocked but reworking is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), 1, PhaseWorking},
 		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
@@ -3123,33 +3122,32 @@ func TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	}
 }
 
-// TestCappedAnchorBlockerIsADemandToday is the one case where the demand test
-// is wider than the `decision` issue type.
+// TestHumanRoutedBlockerIsADemand is the one case where the demand test is
+// wider than the `decision` issue type.
 //
-// The shape it is built from: an anchor blocks on a `bug` at pre_open_gate that
-// the convergence cap routed to a person and left open for days. It is not a
-// `decision` and not a visit, so a narrow reading calls it an ordinary
-// prerequisite and the waiting row stays out of the queue — banded LOW, under a
-// takeaway saying the work was finished and only an operator could open its PR.
+// The shape it is built from: an anchor blocks on a `bug` that was routed to a
+// person and left open for days. It is not a `decision` and not a visit, so a
+// narrow reading calls it an ordinary prerequisite and the waiting row stays
+// out of the queue — banded LOW, under a takeaway saying the work was finished
+// and only an operator could open its PR.
 //
 // The route is what makes it a demand: nothing but a person closes a bead held
 // by a person, whether or not that wait has been expressed as a decision bead.
-func TestCappedAnchorBlockerIsADemandToday(t *testing.T) {
-	cappedAt := fixtureNow.Add(-13 * 24 * time.Hour)
+func TestHumanRoutedBlockerIsADemand(t *testing.T) {
+	routedAt := fixtureNow.Add(-13 * 24 * time.Hour)
 	a := mergeAnchor("tk-waiter", map[string]string{"pr_number": "473"},
 		Blocker{
-			ID: "tk-capped", Title: "the fix its PR cannot open", Status: "open",
-			// The shape signoff.sh's cap arm leaves behind: routed to a person,
-			// no pool route, an ordinary work type.
-			RoutedTo: "human", IssueType: "bug", CreatedAt: cappedAt,
+			ID: "tk-held", Title: "the fix its PR cannot open", Status: "open",
+			// Routed to a person, no pool route, an ordinary work type.
+			RoutedTo: "human", IssueType: "bug", CreatedAt: routedAt,
 		})
 	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-waiter")
 
 	if !tile.Owed {
 		t.Error("an anchor whose only blocker no automated actor will close is waiting on a person")
 	}
-	if !tile.PROwedSince.Equal(cappedAt) {
-		t.Errorf("pr_owed_since = %v, want the blocker's own created_at %v", tile.PROwedSince, cappedAt)
+	if !tile.PROwedSince.Equal(routedAt) {
+		t.Errorf("pr_owed_since = %v, want the blocker's own created_at %v", tile.PROwedSince, routedAt)
 	}
 	// Two rows in the queue can share one cause, so the waiting row has to name
 	// the bead it is waiting on rather than just asserting that it waits.
@@ -3161,7 +3159,7 @@ func TestCappedAnchorBlockerIsADemandToday(t *testing.T) {
 	// claim it, so nothing is owed.
 	b := mergeAnchor("tk-busy", nil, Blocker{
 		ID: "tk-rework", Title: "rework in flight", Status: "open",
-		RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "bug", CreatedAt: cappedAt,
+		RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "bug", CreatedAt: routedAt,
 	})
 	if mustTile(t, BuildBoard([]Anchor{b}, fixtureNow, false, nil, Facts{}), "tk-busy").Owed {
 		t.Error("a pool-routed blocker of the same shape is the city's move, not the operator's")

@@ -109,9 +109,9 @@ family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
 level deep.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
-that are one template (a visit family, a signoff cap); a renderer folds them
-into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
-the band taxonomy and the wrapper fold.
+that are one template (a visit family, a run of PRs green and waiting on
+review); a renderer folds them into one entry while the wire keeps every
+member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 

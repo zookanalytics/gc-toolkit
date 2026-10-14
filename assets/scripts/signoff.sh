@@ -63,8 +63,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 REWORK_CHILD="$HERE/rework-child.sh"
 # The single writer of the workflow-owned `status:` PR label. A verdict is the
 # event-precise flip: request-changes sets the PR working (a rework child now
-# stands on it), the cap park sets needs-attention, and an approve reconciles to
-# the current state. Post-open only.
+# stands on it), and an approve reconciles to the current state. Post-open only.
 PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # The dispatch note carried by the validation pass a request-changes verdict
 # opens, so the validator polecat that claims it names the method. Same builder

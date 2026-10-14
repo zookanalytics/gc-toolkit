@@ -533,7 +533,7 @@ is extensible: one value is set at a time, and setting one removes any other
 |---|---|---|
 | `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
 | `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
+| `status: needs-attention` | a human weighs in | a hold stands — an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 

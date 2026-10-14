@@ -1041,7 +1041,6 @@ const (
 	mdPRURL           = "pr_url"
 	mdBranch          = "branch"
 	mdMergeHold       = "merge_hold"
-	mdSignoffCap      = "signoff_cap"
 	mdRebaseHold      = "rebase_hold"
 	mdPRMergeState    = "pr_merge_state"
 
@@ -2358,7 +2357,6 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	}
 	return prstatus.Facts{
 		MergeHold:     a.Metadata[mdMergeHold],
-		SignoffCap:    a.Metadata[mdSignoffCap],
 		RebaseHold:    a.Metadata[mdRebaseHold],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
@@ -2626,7 +2624,8 @@ func applyFold(t *Tile, folded []foldedAsk, subjectInFlight bool) {
 // takeaway is per-bead content the operator has to read one at a time, and
 // folding those rows into a count-plus-id-list loses it. This holds whether the
 // takeaway is a unique LLM sentence or a deterministic one a script templated
-// across anchors (a signoff-cap headline) that recurs identically across beads.
+// across anchors (the bring-current question's headline) that recurs
+// identically across beads.
 // Only a deterministic STATE phrase, which no bead authored, clusters; those the
 // renderer folds with per-bead context, not an id soup.
 func tagClusters(tiles []Tile) {
