@@ -86,6 +86,62 @@ func TestDirtyListsWhatHEADDoesNotHold(t *testing.T) {
 	}
 }
 
+// gitIn runs git in dir and fails the test on an error.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestDirtyListsAChangeConfigWouldHide(t *testing.T) {
+	// hidden checks that plain `git status` leaves the change out, so the case
+	// is one the flags have to catch.
+	hidden := func(t *testing.T, dir string) {
+		t.Helper()
+		if got := gitIn(t, dir, "status", "--porcelain"); got != "" {
+			t.Fatalf("plain git status listed %q; the config did not hide the change", got)
+		}
+	}
+	t.Run("an untracked file under status.showUntrackedFiles=no", func(t *testing.T) {
+		dir := repo(t)
+		gitIn(t, dir, "config", "status.showUntrackedFiles", "no")
+		if err := os.WriteFile(filepath.Join(dir, "foo_test.go"), []byte("package foo\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		hidden(t, dir)
+		c, err := Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := c.Dirty(); err != nil || got != "?? foo_test.go" {
+			t.Fatalf("Dirty = %q, %v; want the untracked file", got, err)
+		}
+	})
+	for _, key := range []string{"diff.ignoreSubmodules", "submodule.sub.ignore"} {
+		t.Run("a submodule's change under "+key+"=all", func(t *testing.T) {
+			inner := repo(t)
+			dir := repo(t)
+			gitIn(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub")
+			gitIn(t, dir, "commit", "-q", "-m", "sub")
+			gitIn(t, dir, "config", key, "all")
+			if err := os.WriteFile(filepath.Join(dir, "sub", "a.txt"), []byte("two\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			hidden(t, dir)
+			c, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := c.Dirty(); err != nil || got != " M sub" {
+				t.Fatalf("Dirty = %q, %v; want the submodule's change", got, err)
+			}
+		})
+	}
+}
+
 func TestOutputCarriesGitsOwnMessage(t *testing.T) {
 	dir := repo(t)
 	_, err := Output(dir, "rev-parse", "--verify", "no-such-ref")

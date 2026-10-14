@@ -475,6 +475,10 @@ func TestRigRefusesADirtyTree(t *testing.T) {
 		"a staged change":     func(f *rigFixture) { f.write("a.txt", "changed\n"); f.git("add", "a.txt") },
 		"a deleted file":      func(f *rigFixture) { os.Remove(filepath.Join(f.repo, "a.txt")) },
 		"an untracked subdir": func(f *rigFixture) { os.Mkdir(filepath.Join(f.repo, "d"), 0o755); f.write("d/x", "x\n") },
+		"an untracked file config hides": func(f *rigFixture) {
+			f.git("config", "status.showUntrackedFiles", "no")
+			f.write("foo_test.go", "package foo\n")
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newRigFixture(t)

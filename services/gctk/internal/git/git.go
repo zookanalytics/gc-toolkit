@@ -74,8 +74,14 @@ func Open(dir string) (*Checkout, error) {
 // Dirty returns what `git status --porcelain` lists: tracked changes, staged
 // or not, and untracked files that are not ignored. Empty means HEAD is
 // exactly the tree in the worktree.
+//
+// Its flags overrule the config that would leave a change out of that list:
+// status.showUntrackedFiles hides untracked files, and diff.ignoreSubmodules
+// and submodule.<name>.ignore hide a submodule's changes. A file git is told
+// to skip with update-index --assume-unchanged or --skip-worktree is still
+// left out.
 func (c *Checkout) Dirty() (string, error) {
-	out, err := Output(c.Top, "status", "--porcelain")
+	out, err := Output(c.Top, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none")
 	if err != nil {
 		return "", fmt.Errorf("cannot read the checkout's status: %w", err)
 	}
