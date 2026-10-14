@@ -38,6 +38,16 @@
 # review stays live, and gets its comment, while a finding is open, its
 # changes-requested block stands, or the comment owes it an answer or a mark.
 #
+# A point cites the commits that made its fix only once the fix has landed. The
+# rendering holds a token for them, which the writer expands as it posts, and
+# the writer edits only when the rendering changes, so a token rendered before
+# its commits reached the PR would stay uncited until some other change edited
+# the comment. A must-fix point cites them once its finding closes, which waits
+# on every fix unit answering it. A declined point its fix unit flagged, for
+# code the ruling declined, cites them once that fix unit closes, because a
+# decline closes its finding at the ruling, before any fix is pushed. A flagged
+# deferral keeps its follow-up.
+#
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
 # defs to a jq program. No comment or string inside the program may carry an
 # apostrophe, since the program is one single-quoted shell word.
@@ -97,8 +107,10 @@ REVIEW_ANSWER_DEF='
         (first($view.threads[]? | (.comments.nodes // [])[] | select(((.databaseId // 0) | tostring) == $c)
           | (if ((.url // "") | tostring) != "" then .url else $prurl + "#discussion_r" + $c end)) // "")
       end;
-  # A human finding bead row as the record the points are made from.
-  def ra_record($view; $prurl):
+  # A human finding bead row as the record the points are made from. $beads
+  # maps a bead id to what was read of it (ra_models). A rework child closes
+  # when its branch lands, so a fix unit read closed has its commits on the PR.
+  def ra_record($view; $prurl; $beads):
     (.metadata // {}) as $m
     | ((.description // "") | tostring) as $desc
     | { id: ((.id // "") | tostring),
@@ -120,7 +132,7 @@ REVIEW_ANSWER_DEF='
         cid: (($m["finding.comment_id"] // "") | tostring),
         rid: (($m["finding.review_id"] // "") | tostring) }
     | . + { body: (.rid != "" and .rid == .cid) }
-    | . + { url: ra_url($view; $prurl) };
+    | . + { url: ra_url($view; $prurl), fix_landed: (($beads[.fix_unit] // {}).closed == true) };
   # A review body finding whose ruling owes its raiser an answer, which the
   # living comment delivers: the set WB_OWED_REPLY_DEF names, for a comment
   # that sits in no thread.
@@ -140,7 +152,11 @@ REVIEW_ANSWER_DEF='
           ref: .visit, answered: false }
       elif $flag then
         { section: "worth", sentence: $fa,
-          ref: (if $d == "must-fix" and (.open | not) then $commits else "" end), answered: (.open | not) }
+          ref: (if $d == "must-fix" then (if .open then "" else $commits end)
+                elif $d == "declined" then (if .fix_landed then $commits else "" end)
+                elif $d == "deferred" then .follow_up
+                else "" end),
+          answered: (.open | not) }
       elif $d == "must-fix" and .open then
         { section: "progress", sentence: (if $fa != "" then $fa else "Ruled must-fix; the fix is in progress." end),
           ref: "", answered: false }
@@ -171,11 +187,11 @@ REVIEW_ANSWER_DEF='
   # visits waiting on the operator, the fix notes, the mark lines the plan owes
   # it, and the comment already on the PR. $vl maps a review id to the mark lines
   # and batch visits the write-back plan asks of it ({marks, visits, swaps}),
-  # and $beads maps a bead id to the title and fix notes read for it.
+  # and $beads maps a bead id to the title, fix notes and close read for it.
   def ra_models($view; $prurl; $self; $head; $vl; $beads; $marker):
     [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
            | select(((.metadata["finding.lane"] // "") | tostring) == "human")
-           | ra_record($view; $prurl) | select(.rid != "") ]
+           | ra_record($view; $prurl; $beads) | select(.rid != "") ]
     | group_by(.rid)
     | map(
         .[0].rid as $rid

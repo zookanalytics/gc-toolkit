@@ -67,11 +67,12 @@
 # The living answer: one Conversation comment per human review, posted at pickup
 # once the pickup reactions land and edited in place, never posted again, when
 # its rendering changes; a summary body ruled restates is no point and no
-# count; a decision made for the operator and a wider fix are worth a look; an
-# open visit leads it; a hand-written comment is labelled by its first sentence;
-# a label links only to a comment the PR holds; a review body's decline is
-# delivered in it, not in a post of its own; no check-mark ack is posted for a
-# review body; and the review's dismissal is one line linking it.
+# count; a decision made for the operator and a wider fix are worth a look; a
+# decline its fix unit flagged cites the fix's commits once that fix unit lands;
+# an open visit leads it; a hand-written comment is labelled by its first
+# sentence; a label links only to a comment the PR holds; a review body's
+# decline is delivered in it, not in a post of its own; no check-mark ack is
+# posted for a review body; and the review's dismissal is one line linking it.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -6102,6 +6103,30 @@ eq "$(lcount 606 6007)" "1" "once the batch lands, the living answer is posted"
 has "$(lanswer 606 6007)" "<!-- gc-writeback-mark:resolved r6007 -->" "…carrying the mark that records the body answered"
 eq "$(thumbed 606 RV-606),$(reacted 606 RV-606)" "true,false" "…so the body trades its pickup EYES for THUMBS_UP"
 eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_606.json")" "1" "…and no check-mark ack is posted beside it"
+
+echo "# a decline its fix unit flagged cites the fix's commits once that fix unit lands, in an edit"
+# The decline closed its finding at the ruling, before the fix unit that changed
+# the code anyway had pushed. The point needing the operator keeps the head out
+# of the count line, so the landing alone has to change the rendering for the
+# writer to edit the comment and cite the commit.
+store "[$(anchor LA8 607 "$(lmeta rework:KL8 6802 6008)"), $(fixunit KL8 open),
+  $(lfind LI1 LA8 6801 6008 declined closed '**Rename the cap to budget.**' '{"finding.fix_unit":"KL8","finding.reply":"the name matches the config key it reads.","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it: the config key was renamed in the same change."}'),
+  $(lfind LI2 LA8 6802 6008 needs-you open 'Should the cap apply to retries too?' '{"finding.fix_unit":"KL8","finding.visit":"tk-v607","finding.answer":"Should the cap apply to retries too?","finding.reply":"This comment needs your decision — opened visit tk-v607."}')]"
+printf '%s' "$(prview 607 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_607.json"
+threads 607 "$(lreview 607 6008 COMMENTED '' 6801 6802)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(lanswer 607 6008)" "**Worth a look**
+- **[Rename the cap to budget.](https://github.com/zook/gc-toolkit/pull/607#discussion_r6801)** Renamed anyway, though the ruling declined it: the config key was renamed in the same change.
+
+<!-- gc-writeback -->" "the decline its fix unit flagged is worth a look in the fix unit's words, citing no commit while that fix unit is in flight"
+bmut KL8 '.status = "closed"'
+commits 607 '[{"oid":"7a7a7a7aaaaa","message":"fix: rename the cap to budget (KL8)\n\nReview comment 6801."}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the living answer in place"
+has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
+eq "$(lcount 607 6008)" "1" "…still in the one living answer"
 
 fi # part living
 

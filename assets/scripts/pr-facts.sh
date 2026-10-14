@@ -3704,9 +3704,11 @@ wb_expand() { # <body>
   done
   WB_BODY="$body"
 }
-# A batch bead's title and fix notes, keyed by its id, for the living answers.
+# A batch bead's title, fix notes and whether it has closed, keyed by its id, for
+# the living answers.
 WB_BEAD_EXTRA_JQ='{ ($b): { title: ((.[0].title // "") | tostring),
-                            fix_notes: ((.[0].metadata.fix_notes // "") | tostring) } }'
+                            fix_notes: ((.[0].metadata.fix_notes // "") | tostring),
+                            closed: (((.[0].status // "") | tostring | ascii_downcase) == "closed") } }'
 # Trade a resolved comment's EYES for THUMBS_UP: <node-id>:<add>:<remove>,
 # comma-joined, or "-". THUMBS_UP goes on first, so a pass that stops between the
 # two writes leaves both reactions on the comment, never neither.
@@ -4091,9 +4093,10 @@ while IFS= read -r wtagged; do
   # not read back is neither open nor closed, so its comments are acknowledged
   # and nothing more. Answering on the filing rather than the landing would mark
   # a comment resolved while its fix is still unwritten.
-  # The same read also keeps each bead's title and fix notes (wbxl, one object a
-  # line), which the living answers below show: a visit's title as the question
-  # it holds, a fix unit's notes under "Notes from the fix". They stay out of
+  # The same read also keeps each bead's title, fix notes and close (wbxl, one
+  # object a line), which the living answers below show: a visit's title as the
+  # question it holds, a fix unit's notes under "Notes from the fix", and its
+  # close as the landing a flagged decline's commits wait on. They stay out of
   # the plan's arguments, which carry no free text.
   wled='{"c":[],"r":[],"i":[]}'
   wbxl=""
@@ -4720,8 +4723,9 @@ WB_DECLINES
      && wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
     wvl=$(printf '%s\n' "$wplan" | awk -F'\t' '$1 == "W" { print $2; exit }')
     [ -n "$wvl" ] || wvl='{}'
-    # The titles and fix notes a living answer shows: those of the batch beads
-    # read above, and of any fix unit a finding names that no batch record did.
+    # The titles, fix notes and closes a living answer reads: those of the batch
+    # beads read above, and of any fix unit a finding names that no batch record
+    # did.
     wbx=$(printf '%s' "$wbxl" | jq -sc 'add // {}' 2>/dev/null) || wbx='{}'
     [ -n "$wbx" ] || wbx='{}'
     while IFS= read -r wfu; do

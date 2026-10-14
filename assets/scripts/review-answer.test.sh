@@ -6,14 +6,16 @@
 #   (LABEL)   a point's label: the comment's bold lead stripped of severity marks
 #             and boilerplate, else the validator's label, else the comment's
 #             first sentence cut at a word boundary; brackets escaped
-#   (SECTION) each ruling's section and sentence, a flagged fix worth a look, and
-#             no point for a body ruled restates
+#   (SECTION) each ruling's section and sentence, a flagged fix worth a look, the
+#             reference each carries, its fix's commits only once the fix has
+#             landed, and no point for a body ruled restates
 #   (URL)     a label links only to a comment the read of the PR holds
 #   (RENDER)  the visit callout on top, the count line, the sections in order,
 #             the entries, the folded notes and the trailing mark lines
 #   (MODEL)   one model per review: the comment already on the PR found by its
 #             key, its digest and dismissed mark read back, what keeps it live,
-#             the review body answers it delivers, and the marks it keeps
+#             the review body answers it delivers, the marks it keeps, and each
+#             fix unit's landing read from its close
 #   (DISMISS) the one-line dismissal note
 #   (READERS) pr-facts.sh is the one writer and sources this file
 # Reads the repo only; no gc, no city, no network.
@@ -46,7 +48,7 @@ PRURL="https://github.com/o/r/pull/7"
 # A finding record as ra_record builds it, from a few overrides.
 rec() { jq -cn --argjson o "${1:-}" '{ id: "F", open: false, disp: "must-fix", message: "", title: "", label: "",
     answer: "", fix_answer: "", fix_flag: "", reply: "", posted: false, follow_up: "", visit: "",
-    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "" } + $o'; }
+    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", fix_landed: false } + $o'; }
 label() { rec "$1" | jq -r "$REVIEW_ANSWER_DEF"'ra_label'; }
 point() { rec "$1" | jq -c "$REVIEW_ANSWER_DEF"'[ ra_point ] | .[0] // "none"'; }
 pfield() { point "$1" | jq -r --arg k "$2" 'if type == "object" then (if has($k) then (.[$k] | tostring) else "" end) else . end'; }
@@ -86,6 +88,15 @@ eq "$(pfield '{"disp":"must-fix","fix_unit":"tk-k","fix_answer":"Fixed as you su
 eq "$(pfield '{"disp":"must-fix","fix_answer":"Chose your option (b).","fix_flag":"1"}' section)" "worth" "(SECTION) a fix the fix unit flagged is worth a look"
 eq "$(pfield '{"disp":"declined","fix_answer":"Changed anyway, though the ruling declined it.","fix_flag":"1"}' sentence)" \
   "Changed anyway, though the ruling declined it." "(SECTION) …in the fix unit's words, even over a decline"
+FLAGGED='"fix_unit":"tk-k","fix_answer":"Changed anyway, though the ruling declined it.","fix_flag":"1"'
+eq "$(pfield '{"disp":"must-fix",'"$FLAGGED"'}' ref)" "{{gc-commits:tk-k|11}}" "(SECTION) a flagged must-fix cites its fix unit's commits once its finding closes"
+eq "$(pfield '{"disp":"must-fix","open":true,"fix_landed":true,'"$FLAGGED"'}' ref)" "" \
+  "(SECTION) …and none while the finding is open, even once the fix unit it names has closed"
+eq "$(pfield '{"disp":"declined","fix_landed":true,'"$FLAGGED"'}' ref)" "{{gc-commits:tk-k|11}}" \
+  "(SECTION) a flagged decline cites its fix unit's commits once that fix unit has landed"
+eq "$(pfield '{"disp":"declined",'"$FLAGGED"'}' ref)" "" \
+  "(SECTION) …and none before, though the decline closed its finding at the ruling"
+eq "$(pfield '{"disp":"deferred","follow_up":"tk-fu","fix_landed":true,'"$FLAGGED"'}' ref)" "tk-fu" "(SECTION) a flagged deferral keeps its follow-up"
 eq "$(pfield '{"disp":"needs-you","ruling_visit":"tk-v"}' sentence)" "Settled by your ruling on visit tk-v." "(SECTION) a needs-you finding the ruling settled is done"
 eq "$(pfield '{"disp":"unvalidated","open":true}' section),$(pfield '{"disp":"unvalidated","open":true}' ruled)" "progress,false" "(SECTION) an unruled point is in progress"
 eq "$(point '{"disp":"restates","body":true,"cid":"10"}')" '"none"' "(SECTION) a body ruled restates is no point"
@@ -182,6 +193,15 @@ eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq 
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "CHANGES_REQUESTED"')" \
   --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; {}; $m) | .[0].live')" "true" \
   "(MODEL) a standing changes-requested block keeps it live"
+FL_ROWS='[{"id":"D","status":"closed","title":"finding[human]: d","description":"Locus: a.sh:2\n\n**Rename the cap.**\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10",
+              "finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it."}}]'
+flref() { printf '%s' "$FL_ROWS" | jq -r --argjson v "$VIEW2" --argjson b "$1" --arg m "$MARKER" \
+  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; $b; $m) | .[0].points[0].ref'; }
+eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":true}}')" "{{gc-commits:K|11}}" \
+  "(MODEL) a flagged decline reads its fix unit's landing from the close read for it"
+eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":false}}')" "" "(MODEL) …so a fix unit still open cites nothing"
+eq "$(flref '{}')" "" "(MODEL) …and neither does one that did not read back"
 
 echo "# (DISMISS)"
 N=$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')
