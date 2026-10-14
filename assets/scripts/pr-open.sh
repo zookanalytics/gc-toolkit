@@ -237,6 +237,18 @@ city_draft() { # <num> <author-login>
   return 0
 }
 
+# The verdict a review bead's notes carry, read from stdin. Before a PR is open,
+# signoff.sh appends the body it composes to the notes, which can already hold
+# other text, such as the findings a failed attempt appended before the retry
+# signed off. So the verdict starts at the last line in the shape signoff.sh
+# opens every verdict with: the check and its verdict, then "Nothing needs you."
+# or the decision. Notes with no such line are the verdict whole.
+verdict_body() {
+  awk '{ line[NR] = $0 }
+    /^[A-Z][A-Za-z0-9_-]*: (approve|request-changes)\. (Nothing needs you\.|Needs you: )/ { start = NR }
+    END { for (i = (start ? start : 1); i <= NR; i++) print line[i] }'
+}
+
 # --- branch heads: one fetch for the pass ----------------------------------------
 # The create gate resolves its check index at the head the PR opens at, so an
 # anchor's head is read before its lanes are judged. One glob fetch of origin's
@@ -655,7 +667,7 @@ GATES
              | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
   VERDICT=""
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
-    | jq -r '.[0].notes // ""' 2>/dev/null)
+    | jq -r '.[0].notes // ""' 2>/dev/null | verdict_body)
   if [ -n "$VERDICT" ]; then
     "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$PR_NUMBER" \
       --body "$(printf '%s\n\nPre-open signoff (comment-only — not an approval).' "$VERDICT")" >/dev/null 2>&1 || true
