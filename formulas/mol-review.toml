@@ -247,24 +247,38 @@ id. Say so in the verdict rather than filing blind, and the next round
 re-probes.
 
 **6. Write the verdict body** to `findings.md` in your working directory so
-it travels verbatim to the next step. Every check writes this envelope, and
-the check's method adds its own lines below it:
+it travels verbatim to the next step. `signoff.sh` opens the posted comment
+with one line, the check and its verdict and then what needs the operator, so
+the body is the trail under that line, collapsed. Every check writes this
+envelope, and the check's method adds its own lines to it:
 
 ```
-VERDICT: <approve|request-changes>
+<details>
+<summary>Findings: <none, or how many the check's method found></summary>
+
+<every finding, each with its location, impact, and the fix>
+
+</details>
+
+<details>
+<summary><Check> trail: <what it holds, e.g. scope and files read></summary>
+
 Reviewed branch: <branch>
 Reviewed base:   <base>
 Reviewed commit: <REVIEWED_OID>
 
 Scope checked: <what you actually read>
 
-Findings: <every finding, each with its location, impact, and the fix>
-
 Filed: <bug ids for findings out of scope for this diff, or "none">
+
+</details>
 ```
 
-Say what you did **not** check — an honest coverage line is worth more than
-an implied "I read everything".
+A check that files no findings leaves that block out. Say what you did **not**
+check — an honest coverage line is worth more than an implied "I read
+everything". When a decision is the operator's to make, pass it on the verdict
+call as `--needs-you "<the decision, what it means, where to look>"`; a finding
+is not one, because the city fixes it.
 
 **6b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
 array, one object per finding the check's method counts as blocking, each
@@ -333,7 +347,8 @@ Do not post the review yourself, do not touch `check.*`, do not file rework
 beads or finding beads (signoff.sh files the findings from your
 `findings.json`), and never run `gh pr review --approve`.
 
-Pass on this same call every flag the check's method names for the verdict.
+Pass on this same call every flag the check's method names for the verdict,
+and `--needs-you` when the review step named a decision for the operator.
 When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.

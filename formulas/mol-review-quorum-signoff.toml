@@ -268,11 +268,12 @@ same defect at the same locus, keeping lane provenance. A finding either lane
 raises as blocking under the check's method that survives your own judgment is
 blocking for the quorum. `approve` iff no blocking finding stands across both
 lanes and your own run; otherwise `request-changes`. Write the verdict body to
-`findings.md` in the mol-review verdict envelope (VERDICT, reviewed
-branch/base/commit, scope checked, findings with location+impact+fix, filed)
-with the lines the check's method adds below it, self-contained because
-pre-open it is replayed verbatim as the opening PR comment. Note which lanes
-covered what, and any reduced coverage.
+`findings.md` in mol-review's verdict envelope (the findings with
+location+impact+fix, and the trail of reviewed branch/base/commit, scope
+checked and filed, each in a collapsed block under the line `signoff.sh` opens
+the comment with) with the lines the check's method adds to it, self-contained
+because pre-open it is replayed verbatim as the opening PR comment. Note in the
+trail which lanes covered what, and any reduced coverage.
 
 **5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
 per blocking finding, `[]` on approve — exactly as
@@ -290,7 +291,8 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework or
 finding beads, and never run `gh pr review --approve`.
 
-Pass on this same call every flag the check's method names for the verdict.
+Pass on this same call every flag the check's method names for the verdict,
+and `--needs-you` when a decision is the operator's to make.
 When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.

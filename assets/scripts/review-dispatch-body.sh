@@ -162,9 +162,13 @@ and only a triage verdict may add one. See `skills/review-triage/SKILL.md` for
 the method. Correctness findings are the `correctness` check's, not yours.
 
 When bringing the branch current conflicted, the same verdict also rules on
-that round: read its account (`bring-current-audit.sh render --anchor <anchor>
---as comment`), then decide which lanes run again on the merged code and
-whether the human approval still covers it, on the same call:
+that round. Read its account (`bring-current-audit.sh render --anchor <anchor>
+--as comment`) and its raw record
+(`bring-current-audit.sh show --anchor <anchor>`), which keeps what a routine
+entry's one line leaves out: what collided, what to check, and git's evidence.
+Then decide which lanes run again on the merged code, and lift the human
+approval only when the round made a call that is the operator's to make,
+naming that call in `--round-reason`, on the same call:
 
     signoff.sh ... --reopen <lanes>|none --round-reason <why> [--dismiss-approval]
 
