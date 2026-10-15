@@ -24,8 +24,9 @@
 #                note borrows no other check's method.
 #   (KEEPALIVE)  every long command a method runs goes through hb: the
 #                correctness suites and the demo capture.
-#   (RUBRIC)     the learning loop's review-rubric anchors sit above the
-#                dimension each amends, and the inventory reads every one.
+#   (RUBRIC)     the learning loop's review-rubric anchors each sit above a
+#                dimension, an anchor whose dimension was recorded at adoption
+#                above that one, and the inventory reads every one.
 #   (EVIDENCE)   the review-test-evidence block counts the anchor's self-review
 #                stamp only on an exact match in a rig that declares a test
 #                command, in bash and in zsh.
@@ -209,6 +210,17 @@ awk '
 ' "$METHOD" > "$TMP/anchors"
 read -r ANCHORS MISPLACED < "$TMP/anchors"
 eq "$MISPLACED" "0" "(RUBRIC) every adopted anchor sits immediately above a dimension"
+# The dimension each of these anchors amends, as recorded at its adoption: each
+# is held to that dimension, not to any.
+while read -r rule dim; do
+  got=$(awk -v a="<!-- rule:$rule " 'index($0, a) == 1 {f = 1; next} f && /^- \*\*/ {sub(/^- \*\*/, ""); sub(/\*\*.*/, ""); print; exit}' "$METHOD")
+  eq "$got" "$dim" "(RUBRIC) $rule's anchor sits on $dim, the dimension it amends"
+done <<'MAP'
+tk-wamr3 Comments
+tk-v32d2u Comments
+tk-0rhvews Testing
+tk-prvea Contract
+MAP
 INV=$(bash "$ROOT/assets/scripts/learning-recurrence.sh" --inventory --repo "$ROOT" | grep -c "^$METHOD_REL	" || true)
 eq "$INV" "$ANCHORS" "(RUBRIC) the inventory reads every anchor in the correctness method"
 
