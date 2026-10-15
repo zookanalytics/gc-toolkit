@@ -1269,7 +1269,7 @@ against no predicate — is spawned straight back, fresh, on a new
 epoch. The config loader flags the pairing rather than rejecting it —
 `IsAlwaysFreshWakeModeWarning` (`internal/config/config.go`), *"use
 only for a deliberate restart-per-cycle actor"* — and in gc-toolkit
-the deacon, mechanik and every witness run it.
+the deacon and every witness run it.
 
 A queued nudge is stamped with the target's session id **and** its
 epoch, so any nudge that outlives one recycle meets a moved fence at

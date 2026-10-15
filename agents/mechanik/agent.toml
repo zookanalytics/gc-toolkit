@@ -1,7 +1,10 @@
 # mechanik — city-scoped structural engineer (named singleton, always;
 # stanza in pack.toml). Dispatches pack edits to polecats; direct-edits city.toml.
 scope = "city"
-wake_mode = "fresh"
+# mechanik holds the operator's standing conversation. resume brings it back
+# after a restart the pin does not prevent, such as the process exiting on its
+# own. `gc handoff` still starts a fresh conversation.
+wake_mode = "resume"
 work_dir = ".gc/agents/mechanik"
 nudge = "Check mail (gc mail inbox) and assigned work (gc hook), then act accordingly."
 idle_timeout = "2h"
