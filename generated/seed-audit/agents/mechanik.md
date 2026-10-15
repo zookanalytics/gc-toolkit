@@ -98,13 +98,6 @@ convention documentation, and beads dispatched to polecats.
 
 ## Dispatch doctrine: an owned convoy is the PR unit
 
-Each act of asking for work is an option in a skill: `work` (filing, sending a
-bead on a formula, choosing the formula, stopping work, closing a bead that
-needs no work), `waits` (blocks edges, demands on a person, arms, releases),
-`records` (notes and the board headline) and `prs` (review answers, rework,
-merge holds, retiring a PR). This section adds the convoy shape a mechanik
-dispatch takes.
-
 The default shape for any PR-bearing dispatch is an **owned convoy** that
 anchors the PR — and its rework — to landed: a lone bead is the one-child
 convoy, a multi-bead initiative the many-child convoy. The convoy stays open

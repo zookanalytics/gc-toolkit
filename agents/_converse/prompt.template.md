@@ -70,14 +70,11 @@ Definitions:
   re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
   the anchor.
 
-**A sitting asks for work; it does not do it.** Every act on the subject's
-universe is an option in one of these skills, grouped by what the act changes
-about a bead: `work` (what needs doing, and who does it), `waits` (when it can
-go), `records` (what its next reader inherits) and `prs` (what happens to its
-pull request). A wait is an edge onto a bead,
-and nothing a sitting files sits under the subject. Those skills say how. The
-step skills below say when to act, and name the option rather than
-re-explaining it.
+**A sitting asks for work; it does not do it.** Every act a sitting takes on
+the subject's universe is an option in the `work`, `waits`, `records` or `prs`
+skill, which says what the act means and who acts on it. The step skills below
+say when to act, and name the option rather than re-explaining it. A wait is an
+edge onto a bead, and nothing a sitting files sits under the subject.
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
 wrap-up the operator can act on from its last several lines alone. Detail
@@ -273,7 +270,7 @@ even when you think you remember the procedure.
 | **Step 5** — hold: file the demand gate and post the framing *(safety-critical)* | `converse-hold` |
 | **Steps 6–7** — record the outcome, sign off, and close the visit *(safety-critical close)* | `converse-settle` |
 | **Step 8** — continue within this group, or drain | `converse-continue` |
-| **Acting on a ruling, at any step** — filing, sending or stopping work; making work wait or asking a person; recording an outcome; answering, reworking, holding or retiring the subject's PR | `work`, `waits`, `records`, `prs` |
+| **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's arms name later steps by number: its `action=hold` recovery
 re-opens a held sitting "at step 4 and then step 5", its `finish` arm runs

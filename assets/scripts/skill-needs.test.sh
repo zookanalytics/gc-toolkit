@@ -210,6 +210,8 @@ lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-
 lacks "the settle step no longer re-explains the arm" 'deferred-dispatch.sh arm' "$SETTLE" \
     "the arm is the waits skill's option; the step names it"
 have "the settle step points routed work at the work skill" 'as the `work` skill says' "$SETTLE"
+lacks "the mechanik prompt does not restate the skills" 'Each act of asking for work is an option in a skill' "$MECHANIK" \
+    "the skill descriptions reach the mechanik at session start"
 lacks "the mechanik prompt does not single out a design-first initiative" 'design-first initiative' "$MECHANIK" \
     "choosing a formula is the work skill's option"
 lacks "the converse prompt does not single out a design-convoy" 'design-convoy included' "$PROMPT" \
