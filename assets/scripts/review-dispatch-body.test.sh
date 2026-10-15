@@ -16,8 +16,10 @@
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
-#               triage, demo, arch, pm, and a no-method note for an undeclared
-#               check that falls back to the correctness method).
+#               triage, demo, arch, pm, and a neutral no-method note for an
+#               undeclared check, which no other check's method stands in for).
+#   (READ)      every declared check's section reads its method file from the
+#               pack, never from the reviewing shell's own checkout.
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
@@ -123,7 +125,9 @@ hasF "$TMP/arch.out" 'skills/review-arch/SKILL.md' "(CHECK) arch points at its m
 notF "$TMP/arch.out" 'No generic method is declared' "(CHECK) a declared check gets its method, not the no-method note"
 bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
-hasF "$TMP/undeclared.out" 'skills/review-correctness/SKILL.md' "(CHECK) …which falls back to the correctness method, since the lifecycle judges nothing itself"
+notF "$TMP/undeclared.out" 'review-correctness' "(CHECK) …which no other check's method stands in for"
+hasF "$TMP/undeclared.out" 'judge the check'"'"'s stated purpose only' "(CHECK) …so the reviewer judges the check's stated purpose only"
+hasF "$TMP/undeclared.out" 'coverage line that the check had no declared method' "(CHECK) …and says so in the coverage line"
 RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
 
@@ -137,6 +141,40 @@ for c in plain tri demo pm arch undeclared; do
   notF "$TMP/$c.out" 'review-test-evidence' "(EVIDENCE) the $c note carries no evidence block"
   notF "$TMP/$c.out" 'hb bash -c' "(EVIDENCE) the $c note runs no suite"
 done
+
+echo "# every declared check reads its method file from the pack"
+# block <note> : the review-method-read block a note carries, as a script.
+block() { awk '/^# >>> review-method-read$/ {f = 1} f {print} /^# <<< review-method-read$/ {f = 0}' "$1"; }
+for c in correctness triage demo arch pm; do
+  for formula in mol-review mol-review-quorum-signoff; do
+    bash "$SCRIPT" --formula "$formula" --check-name "$c" > "$TMP/read.$formula.$c.out" 2>/dev/null
+    block "$TMP/read.$formula.$c.out" > "$TMP/read.$formula.$c.sh"
+    grep -qF -- "/skills/review-$c/SKILL.md" "$TMP/read.$formula.$c.sh" \
+      && ok "(READ) the $c note under $formula reads its method file from the pack" \
+      || bad "(READ) the $c note under $formula carries no read block for skills/review-$c/SKILL.md"
+  done
+done
+[ -z "$(block "$TMP/undeclared.out")" ] && ok "(READ) an undeclared check names no method file to read" \
+  || bad "(READ) the undeclared note carries a read block"
+# The block runs from a reviewed worktree that holds the branch's own copy of
+# the method: the copy the pack installs is the one read, wherever it sits.
+RW="$TMP/reviewed"; PACK="$TMP/pack"; RIG="$TMP/rig"; OTHER="$TMP/other-rig"; CITY="$TMP/city"
+mkdir -p "$RW/skills/review-correctness" "$PACK/skills/review-correctness" "$RIG/skills/review-correctness" "$OTHER" "$CITY/rigs/gc-toolkit/skills/review-correctness"
+git -C "$RW" init -q
+echo 'BRANCH-COPY' > "$RW/skills/review-correctness/SKILL.md"
+echo 'PACK-COPY' > "$PACK/skills/review-correctness/SKILL.md"
+echo 'RIG-COPY' > "$RIG/skills/review-correctness/SKILL.md"
+echo 'CITY-COPY' > "$CITY/rigs/gc-toolkit/skills/review-correctness/SKILL.md"
+READ_SH="$TMP/read.mol-review.correctness.sh"
+# read_in <GC_RIG_ROOT> <GC_CITY_PATH> : what the block prints, run from the reviewed worktree.
+read_in() { ( cd "$RW" && env -u GC_PACK_DIR GC_RIG_ROOT="$1" GC_CITY_PATH="$2" bash "$READ_SH" 2>/dev/null ) || true; }
+eq "$(read_in "$RIG" "$CITY")" "RIG-COPY" "(READ) in gc-toolkit the rig checkout's copy is read, not the reviewed worktree's"
+eq "$(read_in "$OTHER" "$CITY")" "CITY-COPY" "(READ) under another rig the city's pack copy is read, not the reviewed worktree's"
+eq "$(cd "$RW" && GC_PACK_DIR="$PACK" GC_RIG_ROOT="$RIG" GC_CITY_PATH="$CITY" bash "$READ_SH" 2>/dev/null)" "PACK-COPY" \
+  "(READ) GC_PACK_DIR, where it is set, is read first"
+RCR=0; ( cd "$RW" && env -u GC_PACK_DIR GC_RIG_ROOT="$OTHER" GC_CITY_PATH="$TMP/no-city" bash "$READ_SH" ) > "$TMP/read.miss.out" 2>&1 || RCR=$?
+[ "$RCR" -ne 0 ] && ok "(READ) a pack with no copy fails the read" || bad "(READ) a pack with no copy read something"
+notF "$TMP/read.miss.out" 'BRANCH-COPY' "(READ) …and never falls back to the reviewed worktree's copy"
 
 echo "# both axes coexist: a quorum formula plus a named check emits both sections"
 bash "$SCRIPT" --formula mol-review-quorum-signoff --check-name triage > "$TMP/both.out" 2>/dev/null

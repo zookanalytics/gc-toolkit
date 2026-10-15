@@ -134,8 +134,11 @@ exactly once; never `gh pr review`, because the city does not approve its own PR
 S
     ;;
 esac
+# A declared arm sets METHOD_FILE, the pack path the read block below resolves.
+METHOD_FILE=""
 case "$CHECK_NAME" in
   correctness)
+    METHOD_FILE=skills/review-correctness/SKILL.md
     cat <<'M'
 `skills/review-correctness/SKILL.md`. The standing correctness review: judge
 whether the change is correct and safe as merged. The method reads the whole
@@ -145,6 +148,7 @@ verdict. This is the concern, not a tool — no reviewer is presumed.
 M
     ;;
   triage)
+    METHOD_FILE=skills/review-triage/SKILL.md
     cat <<'M'
 Classify, do not judge. Whether the change is correct is the `correctness`
 check's question and it is dispatched separately. Yours is narrower: which
@@ -176,6 +180,7 @@ naming that call in `--round-reason`, on the same call:
 M
     ;;
   demo)
+    METHOD_FILE=skills/review-demo/SKILL.md
     cat <<'M'
 `skills/review-demo/SKILL.md`. The visual review: decide whether this change
 needs a visual to be understood, then deliver the cheapest one that conveys it.
@@ -197,6 +202,7 @@ the operator decide, is `pm`'s.
 M
     ;;
   arch)
+    METHOD_FILE=skills/review-arch/SKILL.md
     cat <<'M'
 The Architect — steward and gatekeeper of the repo's high-level architecture.
 Read the architecture reference docs before you judge: `docs/architecture.md`
@@ -211,6 +217,7 @@ would not have needed). `skills/review-arch/SKILL.md` carries the full method.
 M
     ;;
   pm)
+    METHOD_FILE=skills/review-pm/SKILL.md
     cat <<'M'
 `skills/review-pm/SKILL.md`. The product lens: judge whether the change is the
 right thing for the people the product serves — the outcome its anchor named,
@@ -224,19 +231,45 @@ M
   *)
     cat <<M
 No generic method is declared for the \`$CHECK_NAME\` check in the dispatching
-pack. Follow the \`mol-review\` steps as written, which carry no check's
-judgment of their own. Hold the diff to the reviewed repo's own method for this
-check where one exists, and otherwise to the correctness method
-(\`skills/review-correctness/SKILL.md\`). Say in your verdict's coverage line
-that the check had no declared method — an undeclared method is a gap worth an
+pack, and no other check's method stands in for one. Follow the review
+formula's steps as written; they carry no check's judgment. Hold the diff to
+the reviewed repo's own method for this check where one exists, its
+\`docs/review-$CHECK_NAME.md\` at the reviewed commit, appended below when
+present. Where none exists, judge the check's stated purpose only: the
+\`purpose\` line of its row in \`review-checks.toml\` at the reviewed commit.
+Say in your verdict's coverage line that the check had no declared method, and
+what you held the diff to instead. An undeclared method is a gap worth an
 observation.
 M
     ;;
 esac
 
+if [ -n "$METHOD_FILE" ]; then
+  sed "s|__METHOD__|$METHOD_FILE|g" <<'R'
+
+**The method is pack content.** Read it from the pack this city installs,
+never from the review worktree:
+
+```bash
+# >>> review-method-read
+# The pack's script candidates, less the shell's own checkout: in a review
+# shell that is the reviewed worktree, which holds the branch's own copy of the
+# method in gc-toolkit and no copy in another rig.
+METHOD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -r "$c/__METHOD__" ] && { METHOD="$c/__METHOD__"; break; }
+done
+cat "${METHOD:?__METHOD__ not found in the pack}"
+# <<< review-method-read
+```
+
+A rig's extension to this method is read from the reviewed commit instead, and
+is appended below when that commit carries one.
+R
+fi
+
 # The rig's local extension, appended to the generic method — read from the
 # COMMIT UNDER REVIEW, never the working tree, so a branch is judged against the
-# method its own commit declared. Absent is the common case and changes nothing.
+# extension its own commit declared. Absent is the common case and changes nothing.
 if [ -n "$REVIEWED_OID" ]; then
   EXT=""
   for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do

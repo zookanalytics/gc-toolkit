@@ -97,11 +97,18 @@ it is named for its function, `review-checks.toml`, not for any one check.
 
 Every file here is read pinned to the commit under review, through
 `git show <reviewed_oid>:<path>`, never from the working tree or the installed
-skill catalog. A branch is judged against the index and the methods its own
-commit declares, so a rig that tightens a check's method tightens it for the
-commits made after the change, not for work already in flight. This is also why
-a method extension is a plain repository file rather than a skill: a skill loads
-from the installed catalog, which cannot be pinned to the diff's commit.
+skill catalog. A branch is judged against the index and the method extensions
+its own commit carries, so a rig that tightens a check's extension tightens it
+for the commits made after the change, not for work already in flight. This is
+also why a method extension is a plain repository file rather than a skill: a
+skill loads from the installed catalog, which cannot be pinned to the diff's
+commit.
+
+The method file an index row names is not read from the reviewed commit. It is
+pack content, and the dispatch note's `review-method-read` block reads it from
+the pack the city installs. Read at the reviewed commit, a change to a method
+would be judged by the change itself, and a rig other than gc-toolkit would
+find no method at all.
 
 ## Summary
 

@@ -17,7 +17,8 @@
 #   (QUORUM)     the quorum's lanes apply the check's method, naming the
 #                correctness method, and not mol-review's review step.
 #   (SPECIALIST) no other check's dispatch note or method file asks for a test
-#                run or its result, or runs a suite.
+#                run or its result, or runs a suite, and an undeclared check's
+#                note borrows no other check's method.
 #   (KEEPALIVE)  every long command a method runs goes through hb: the
 #                correctness suites and the demo capture.
 #   (RUBRIC)     the learning loop's review-rubric anchors sit above the
@@ -154,6 +155,15 @@ while IFS= read -r name; do
     notE "$TMP/note.$formula.$name" "$ASKS" "(SPECIALIST) the $name dispatch note under $formula asks for no test run or result" -i
   done
 done < "$TMP/specialists"
+# A check the pack declares no method for borrows none: it is judged on its
+# stated purpose, with no test run, grade or Verification line of another check's.
+for formula in mol-review mol-review-quorum-signoff; do
+  bash "$BODY" --formula "$formula" --check-name nonesuch > "$TMP/note.$formula.nonesuch"
+  notE "$TMP/note.$formula.nonesuch" "$ASKS" "(SPECIALIST) an undeclared check's note under $formula asks for no test run or result" -i
+  notF "$TMP/note.$formula.nonesuch" 'review-correctness' "(SPECIALIST) …under $formula it points at no other check's method"
+  notE "$TMP/note.$formula.nonesuch" '(^|[^[:alnum:]_])P[0-2]([^[:alnum:]_]|$)' "(SPECIALIST) …under $formula it names no P0/P1/P2 grade"
+  notF "$TMP/note.$formula.nonesuch" 'Verification' "(SPECIALIST) …under $formula it asks for no Verification line"
+done
 while IFS= read -r f; do
   notE "$ROOT/$f" "$ASKS" "(SPECIALIST) $f asks for no test run or result" -i
   notF "$ROOT/$f" 'review-test-evidence' "(SPECIALIST) $f carries no evidence block"
