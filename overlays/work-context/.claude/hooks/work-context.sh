@@ -5,7 +5,9 @@
 # runs load-context, so without this hook the spec silently degrades to
 # title-only. Runs as a Claude `PostToolUse` hook on Bash: after every claim
 # it resolves the claimed bead to its work bead and injects the description
-# as `additionalContext`. Full derivation: specs/tk-osf13/.
+# as `additionalContext`. Full derivation: specs/tk-osf13/. A claim that hands
+# the session the workflow root of a molecule another session is running is
+# released instead, and the session is told why (guard_workflow_root).
 #
 # Invariants:
 #   * ALWAYS exit 0 — never block the polecat's tool call.
@@ -13,6 +15,7 @@
 #   * Idempotent per (session, work bead); best-effort — the load-context
 #     instruction stays the fallback.
 #   * The common case (not a claim) stays cheap: one jq, then exit.
+#   * The one store write is the release of a claimed workflow root.
 
 set -u
 
@@ -53,6 +56,95 @@ show_bead() {
   run_bounded gc bd show "$1" --json 2>/dev/null | scrub
 }
 
+# emit_notice prints <text> as the hook's one JSON object and ends the hook.
+emit_notice() {
+  printf '%s\n' "$1" \
+    | jq -Rs '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: .}}' 2>/dev/null
+  exit 0
+}
+
+# --- A claimed workflow root ---------------------------------------------
+# A pool can hand a session the root (gc.kind=workflow) of a molecule that is
+# still running. Gascity's default on_boot hook reopens every in_progress,
+# unassigned bead routed to the pool at each city start, roots included, and
+# order dispatch leaves the root it pours open and routed. The root's
+# description is the formula body, and a session that ran it would run the
+# molecule a second time beside its own steps: a second worktree on the same
+# branch, or a second sweep of the same window. So while the molecule is live
+# the claim is released here, before any step runs, and no formula is injected.
+#
+# The molecule is live while a step of it that has not closed is in progress,
+# is held by a session, or waits in the pool the root was claimed from. Its
+# steps carry the work, and its workflow-finalize step closes the root once
+# they finish. A root with no such step returns to the injection below
+# unchanged.
+#
+# The release is one update guarded on the assignee and status read here, so a
+# root that changed hands or closed since is never written. It clears the
+# route, because an open, unassigned and routed root is pool demand again, and
+# it touches no step.
+guard_workflow_root() {
+  formula="$(printf '%s' "$claimed_json" | jq -r '.[0].metadata["gc.formula_name"] // .[0].title // "workflow"' 2>/dev/null)"
+  route="$(printf '%s' "$response" | grep -o '"route":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')"
+  [ -n "$route" ] || route="$(printf '%s' "$claimed_json" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)"
+  steps="$(run_bounded gc bd list --metadata-field="gc.root_bead_id=$claimed" --json --limit=0 2>/dev/null | scrub)"
+  # Prints {verdict, held}: verdict is live, orphan or unreadable, and held
+  # names up to three live steps, the ones in progress first.
+  assessed="$(printf '%s' "$steps" | jq -c --arg route "$route" '
+    def live: type == "object" and (.status // "") != "closed"
+      and ((.status // "") == "in_progress"
+           or (.assignee // "") != ""
+           or ($route != "" and ((.metadata // {})["gc.routed_to"] // "") == $route));
+    def rank: if .status == "in_progress" then 0 elif (.assignee // "") != "" then 1 else 2 end;
+    def phrase:
+      ((.metadata // {})["gc.step_ref"] // "") as $ref
+      | (.assignee // "") as $who
+      | (if $ref != "" then "\($ref) (\(.id))" else (.id // "a step") end)
+        + (if .status == "in_progress" then (if $who != "" then " in progress under \($who)" else " in progress" end)
+           elif $who != "" then " held by \($who)"
+           else " waiting in the pool" end);
+    if type != "array" then {verdict: "unreadable"}
+    else [ .[] | select(live) ] | sort_by(rank) as $live
+      | if ($live | length) == 0 then {verdict: "orphan"}
+        else {verdict: "live",
+              held: (($live[0:3] | map(phrase) | join("; "))
+                     + (if ($live | length) > 3 then "; and \(($live | length) - 3) more" else "" end))}
+        end
+    end' 2>/dev/null)"
+  verdict="$(printf '%s' "$assessed" | jq -r '.verdict // empty' 2>/dev/null)"
+  dont="Do not run its formula, and do not touch its steps, branch or worktree."
+  case "$verdict" in
+    live) : ;;
+    orphan) return 0 ;;
+    *) emit_notice "Claimed bead $claimed is the workflow root of a $formula molecule, not a work bead. The work-context hook could not read its steps, so it cannot tell whether another session is running the molecule, and it did not release the claim. $dont Read the steps first: gc bd list --metadata-field gc.root_bead_id=$claimed --json" ;;
+  esac
+
+  held="$(printf '%s' "$assessed" | jq -r '.held // ""' 2>/dev/null)"
+  about="Claimed bead $claimed is the workflow root of a running $formula molecule, not work. Its live steps: $held."
+  me="$(printf '%s' "$response" | grep -o '"assignee":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')"
+  [ -n "$me" ] || me="${GC_SESSION_ID:-}"
+  holder="$(printf '%s' "$claimed_json" | jq -r '.[0].assignee // empty' 2>/dev/null)"
+  read_status="$(printf '%s' "$claimed_json" | jq -r '.[0].status // empty' 2>/dev/null)"
+  case "$read_status" in
+    open|in_progress) status="$read_status" ;;
+    *) status="" ;;
+  esac
+  if [ -z "$me" ] || [ "$holder" != "$me" ] || [ -z "$status" ]; then
+    emit_notice "$about The work-context hook did not release it, because the root does not read as this claim: its assignee is ${holder:-empty} and its status ${read_status:-unknown}. $dont Read it (gc bd show $claimed --json) before acting on it."
+  fi
+
+  note="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] work-context hook: gc hook --claim handed this workflow root to $me while its molecule ran. Live steps: $held. A root is not work while its steps run, so the hook released the claim before any step ran, leaving the root open, unassigned and unrouted. The molecule's workflow-finalize step closes it."
+  run_bounded gc bd update "$claimed" --if-assignee="$holder" --if-status="$status" \
+    --set-metadata=gc.routed_to= --status=open --assignee= --append-notes="$note" \
+    </dev/null >/dev/null 2>&1
+  rc=$?
+  case "$rc" in
+    0) emit_notice "$about The work-context hook released the claim: the root is open, unassigned and unrouted again, with a note saying why, so no pool offers it, and the molecule's workflow-finalize step closes it. $dont Run gc hook --claim --json again for your own work." ;;
+    13) emit_notice "$about The work-context hook wrote nothing, because the root changed after the claim: its assignee or status no longer matches what the hook read. $dont Read it (gc bd show $claimed --json) before acting on it." ;;
+    *) emit_notice "$about The work-context hook could not release the claim (gc bd update exited $rc). $dont Release only the root, then claim again: gc bd update $claimed --if-assignee=$holder --if-status=$status --set-metadata=gc.routed_to= --status=open --assignee= --append-notes=\"<why>\"" ;;
+  esac
+}
+
 # --- 2. Is this tool call a claim? ---------------------------------------
 payload="$(cat 2>/dev/null)" || exit 0
 [ -n "$payload" ] || exit 0
@@ -87,9 +179,15 @@ claimed="$(printf '%s' "$response" \
 # --- 4. Claimed bead -> work bead ----------------------------------------
 # A claimed formula step carries gc.root_bead_id; the root carries the input
 # convoy; the convoy's single tracked member is the work bead. A bead claimed
-# outside a formula IS the work bead.
+# outside a formula IS the work bead, unless it is a workflow root, which the
+# guard above releases while its molecule runs.
 work="$claimed"
-root="$(show_bead "$claimed" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)"
+claimed_json="$(show_bead "$claimed")"
+root="$(printf '%s' "$claimed_json" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)"
+if [ -z "${root:-}" ] \
+  && [ "$(printf '%s' "$claimed_json" | jq -r '.[0].metadata["gc.kind"] // empty' 2>/dev/null)" = "workflow" ]; then
+  guard_workflow_root
+fi
 if [ -n "${root:-}" ]; then
   convoy="$(show_bead "$root" | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null)"
   if [ -n "${convoy:-}" ]; then
