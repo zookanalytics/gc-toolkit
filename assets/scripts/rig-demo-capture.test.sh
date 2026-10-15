@@ -202,8 +202,9 @@ has "does not exist" "$out" "it says the script is missing"
 # PATH stand in for node, npx, npm and gc, and a host ffmpeg is on PATH only for
 # a case that names HOST_FFMPEG=1. jq is the real one, because the library reads
 # the rig list and the engine's package.json with it. npm and npx log every call
-# to $CALLLOG in order and hand lint and run to the engine stub; $FFMPEG_RC fails
-# the fetch.
+# to $CALLLOG in order and hand lint and run to the engine stub. The fetch prints
+# npm's header line to the stdout it was given, as npm does, and $FFMPEG_RC
+# fails it.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 RBIN="$TMPD/resolve-bin"; mkdir -p "$RBIN"
 ln -s "$JQ" "$RBIN/jq"
@@ -218,8 +219,9 @@ GC
 cat >"$RBIN/npm" <<'NPM'
 #!/usr/bin/env bash
 printf 'npm %s (in %s)\n' "$*" "$PWD" >>"${CALLLOG:?}"
-if [ "$*" = "run provision:ffmpeg" ] && [ "${FFMPEG_RC:-0}" != 0 ]; then
-  printf 'ffmpeg-static: download failed\n'; exit "$FFMPEG_RC"
+if [ "$*" = "run provision:ffmpeg" ]; then
+  printf '> node node_modules/ffmpeg-static/install.js\n'
+  if [ "${FFMPEG_RC:-0}" != 0 ]; then printf 'ffmpeg-static: download failed\n'; exit "$FFMPEG_RC"; fi
 fi
 exit 0
 NPM
@@ -240,16 +242,23 @@ ENGINE="$(cd "$TMPD" && pwd)/sprintshow"; mkdir -p "$ENGINE/node_modules"
 printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
 CALLLOG="$TMPD/calls.log"
 # resolve_run [VAR=VAL ...] -- <sut args...>; the stubs above, never $SPRINTSHOW_BIN.
+# Stderr joins stdout, unless STDERR_FILE=<path> keeps it apart in that file.
 resolve_run() {
-  local envs=() path="$RBIN:$FARM"
+  local envs=() path="$RBIN:$FARM" errf=""
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-    case "$1" in HOST_FFMPEG=1) path="$HOSTBIN:$path" ;; *) envs+=("$1") ;; esac
+    case "$1" in
+      HOST_FFMPEG=1) path="$HOSTBIN:$path" ;;
+      STDERR_FILE=*) errf="${1#STDERR_FILE=}" ;;
+      *) envs+=("$1") ;;
+    esac
     shift
   done
   [ $# -gt 0 ] && shift
   : >"$RUNLOG"; : >"$CALLLOG"; rm -f "$OUT"
-  ( cd "$TMPD" && env -i PATH="$path" RUNLOG="$RUNLOG" CALLLOG="$CALLLOG" ENGINE_STUB="$STUB" \
-      ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" 2>&1 )
+  ( cd "$TMPD" || exit 1
+    if [ -n "$errf" ]; then exec 2>"$errf"; else exec 2>&1; fi
+    env -i PATH="$path" RUNLOG="$RUNLOG" CALLLOG="$CALLLOG" ENGINE_STUB="$STUB" \
+      ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" )
 }
 # line_of <substring> — the first $CALLLOG line holding it, or 0 when none does.
 line_of() { awk -v s="$1" 'index($0, s) { print NR; found = 1; exit } END { if (!found) print 0 }' "$CALLLOG"; }
@@ -261,6 +270,13 @@ has "npm run provision:ffmpeg (in $ENGINE)" "$(cat "$CALLLOG")" "it fetches ffmp
 B=$(line_of "provision:browser"); F=$(line_of "provision:ffmpeg"); L=$(line_of "lint $SCRIPT")
 ok "ffmpeg is fetched after the browser is provisioned and before the engine runs (browser line $B, ffmpeg line $F, lint line $L)" "[ '$B' -gt 0 ] && [ '$F' -gt '$B' ] && [ '$L' -gt '$F' ]"
 has "run $SCRIPT" "$(cat "$RUNLOG")" "the capture runs after the fetch"
+
+echo "# the fetch writes to stderr, so stdout carries only the capture's report"
+out="$(resolve_run SS_RIG="$ENGINE" STDERR_FILE="$TMPD/stderr" -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?
+ok "a capture that fetched ffmpeg exits 0" "[ '$rc' = 0 ]"
+has "ffmpeg-static/install.js" "$(cat "$TMPD/stderr")" "the fetch's output reaches stderr"
+hasnt "ffmpeg-static/install.js" "$out" "the fetch writes nothing to stdout"
+has "captured $OUT" "$(printf '%s\n' "$out" | tail -n 1)" "the last line on stdout is the capture's report"
 
 echo "# a host ffmpeg, or a checkout's ffmpeg-static already fetched, is used as it is"
 out="$(resolve_run SS_RIG="$ENGINE" HOST_FFMPEG=1 -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR")"; rc=$?

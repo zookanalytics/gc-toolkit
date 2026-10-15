@@ -292,14 +292,15 @@ done
 echo "# NO-COPY: no other script finds the engine or provisions its browser"
 # One grep finds the files that name a step anywhere; only those are read again
 # without their comment lines, so a script that names a step in prose passes.
+# The steps are the browser install, by either installer, and the rig lookup's
+# select, however a copy spaces them.
+STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac
   code="$(grep -vE '^[[:space:]]*(#|//)' "$f")"
-  case "$code" in
-    *'provision:browser'*|*'playwright install'*|*'.name=="sprintshow"'*) COPIES="$COPIES ${f##*/}" ;;
-  esac
-done <<<"$(grep -lE 'provision:browser|playwright install|\.name=="sprintshow"' "$HERE"/*.sh "$HERE"/*.mjs 2>/dev/null)"
+  grep -qE "$STEPS" <<<"$code" && COPIES="$COPIES ${f##*/}"
+done <<<"$(grep -lE "$STEPS" "$HERE"/*.sh "$HERE"/*.mjs 2>/dev/null)"
 eq "${COPIES# }" "" "(NO-COPY) no script in assets/scripts outside demo-engine-lib.sh finds the engine or provisions its browser"
 
 echo
