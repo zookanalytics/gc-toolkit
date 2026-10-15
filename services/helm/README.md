@@ -548,8 +548,14 @@ yet green and nothing advancing it, meaning no review or rework a live session i
 working. Its checks are the lanes its `check_set` declares, split by the rule
 `merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
 and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
-is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
-like any other, and a `check_set` that declares no lane is never a stalled check.
+is green when a review backs it the way `lane-state.sh` reads a local backing
+(`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the
+lane in `check_name`, carrying a `reviewed_oid` and `signoff_verdict=approve`
+and not superseded, with no review for the lane still open. The library backend
+gathers a live pre-open anchor's reviews through its inbound edges; the
+supervisor backend reads no closed bead, so it marks them unread and fires no
+stall. A legacy `codex` lane counts like any other, and a `check_set` that
+declares no lane is never a stalled check.
 Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
 stale `progressing` marker) or `position unknown`, so it sinks with no age; the
 signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its

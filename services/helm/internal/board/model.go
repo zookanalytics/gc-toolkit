@@ -196,6 +196,20 @@ type Anchor struct {
 	// readers apply only to rows [humanGated] accepts, and for an epic or a
 	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
+
+	// Reviews is the anchor's review beads, open and closed: each carries
+	// task_kind=review and names this anchor in anchor_bead. A lane's green
+	// derives from them ([laneGreen]). The beads source gathers them for a live
+	// merge anchor at pre_open_gate, the one row whose stall signal reads a
+	// lane's green, through the anchor's inbound edges, the read bd-lib.sh makes
+	// for an anchor's closed children ([source.BeadsSource.attachEdges]).
+	//
+	// ReviewsUnknown says the source could not read them, so an empty Reviews
+	// is an absence of knowledge, not a lane no review backs. The beads source
+	// sets it when the edge read or its hydration fails; the supervisor backend
+	// reads no closed bead and sets it on every metadata-keyed row it serves.
+	Reviews        []Child `json:"reviews,omitempty"`
+	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.

@@ -665,6 +665,13 @@ func needsParentChildren(kind string) bool {
 	return false
 }
 
+// needsReviews reports whether an anchor's review beads are gathered: a live
+// merge anchor at pre_open_gate, the one row whose stall signal derives a lane's
+// green from them (board.preOpenCheckStall).
+func needsReviews(p pendingAnchor) bool {
+	return p.kind == "merge" && p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] == "pre_open_gate"
+}
+
 // needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
 // The readers that spend them: board.ruled and the merge row's PR axes
 // (decision, human, parked, merge), and the dependency-family grouping, which
@@ -682,23 +689,29 @@ func needsWaitingEdges(kind string) bool {
 
 // attachEdges resolves the relations of every anchor in pending with at most
 // three store reads for the whole set, never one per anchor: one batched
-// INBOUND read (parent-child children), one batched OUTBOUND read (a convoy's
-// `tracks`, everything else's `blocks`), and one SearchIssues that hydrates
-// every far-end issue both name. The read count is fixed by the rig+status
-// pass, so it does not scale with the number of anchors.
+// INBOUND read (parent-child children, and the review beads of an anchor whose
+// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
+// everything else's `blocks`), and one SearchIssues that hydrates every far-end
+// issue both name. The read count is fixed by the rig+status pass, so it does
+// not scale with the number of anchors.
 //
 // The two batched reads fail INDEPENDENTLY, and each failure degrades only the
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
-// parent-child roll-ups empty and notes partial. A failed dependencies read
+// parent-child roll-ups empty, marks every gathered anchor's reviews UNKNOWN,
+// and notes partial. A failed dependencies read
 // leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
 // waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
 // "every recorded wait has landed" and would stand a row down on a graph it
 // could not read.
 func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor) {
 	var dependentIDs, dependencyIDs []string
+	reviewed := map[string]bool{}
 	for i := range pending {
 		id := pending[i].anchor.ID
-		if needsParentChildren(pending[i].kind) {
+		if needsReviews(pending[i]) {
+			reviewed[id] = true
+		}
+		if needsParentChildren(pending[i].kind) || reviewed[id] {
 			dependentIDs = append(dependentIDs, id)
 		}
 		if pending[i].kind == "convoy" || needsWaitingEdges(pending[i].kind) {
@@ -718,14 +731,15 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	}
 
 	// Hydrate the far-end issues the two reads reference — the children on the
-	// parent-child edges, the members and blockers on the tracks/blocks ones — in
-	// one SearchIssues. Only the edge types actually spent are hydrated; a
-	// `related` edge that shares a target is never fetched.
+	// parent-child edges, the members and blockers on the tracks/blocks ones, and
+	// every dependent of an anchor whose reviews are gathered — in one
+	// SearchIssues. Only the edges actually spent are hydrated; a `related` edge
+	// into any other anchor is never fetched.
 	farEnds := map[string]struct{}{}
 	if depnErr == nil {
-		for _, recs := range depnRecs {
+		for target, recs := range depnRecs {
 			for _, d := range recs {
-				if d != nil && string(d.Type) == "parent-child" {
+				if d != nil && (string(d.Type) == "parent-child" || reviewed[target]) {
 					farEnds[d.IssueID] = struct{}{}
 				}
 			}
@@ -762,6 +776,13 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 			}
 		} else if needsParentChildren(p.kind) && dependentsOK {
 			p.anchor.Children = childrenFromEdges(depnRecs[p.anchor.ID], "parent-child", inboundFarEnd, issueByID)
+		}
+		if reviewed[p.anchor.ID] {
+			if dependentsOK {
+				p.anchor.Reviews = reviewsFromEdges(depnRecs[p.anchor.ID], p.anchor.ID, issueByID)
+			} else {
+				p.anchor.ReviewsUnknown = true
+			}
 		}
 		// The `blocks` waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
@@ -839,6 +860,43 @@ func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, i
 			Assignee:  iss.Assignee,
 			UpdatedAt: iss.UpdatedAt,
 			Metadata:  decodeMetadata(iss.Metadata),
+		})
+	}
+	return out
+}
+
+// reviewsFromEdges is the anchor's review beads among the far ends of its
+// inbound edges, of any type: bd-lib.sh joins a child to its anchor with a
+// `related` edge, or by an edge the pair already carried, and the child names
+// the anchor in anchor_bead, the key that makes it this anchor's. A far end
+// whose issue did not hydrate is dropped.
+//
+// It reads the edges alone, as bd-lib.sh reads an anchor's closed children in
+// a store marked joined. lane-state.sh reads the open ones by anchor_bead
+// besides, so an open review filed with no edge, which no pack writer files,
+// holds its lane there and not here.
+func reviewsFromEdges(recs []*beads.Dependency, anchorID string, issueByID map[string]*beads.Issue) []board.Child {
+	var out []board.Child
+	seen := map[string]bool{}
+	for _, d := range recs {
+		if d == nil || seen[d.IssueID] {
+			continue
+		}
+		iss, ok := issueByID[d.IssueID]
+		if !ok {
+			continue
+		}
+		md := decodeMetadata(iss.Metadata)
+		if md["task_kind"] != "review" || md["anchor_bead"] != anchorID {
+			continue
+		}
+		seen[d.IssueID] = true
+		out = append(out, board.Child{
+			ID:        iss.ID,
+			Status:    string(iss.Status),
+			Assignee:  iss.Assignee,
+			UpdatedAt: iss.UpdatedAt,
+			Metadata:  md,
 		})
 	}
 	return out

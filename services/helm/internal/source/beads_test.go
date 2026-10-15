@@ -2349,6 +2349,87 @@ func mergeStore() *fakeStore {
 	}
 }
 
+// TestPreOpenMergeAnchorGathersItsReviews: a live merge anchor at pre_open_gate
+// carries its review beads, open and closed, read through its inbound edges of
+// any type (bd-lib.sh joins a child to its anchor with a `related` edge) and
+// kept only when the far end is a review naming this anchor in anchor_bead. They
+// are not roll-up children. A pull_request anchor gathers none, and a failed
+// inbound read marks the reviews unknown rather than empty.
+func TestPreOpenMergeAnchorGathersItsReviews(t *testing.T) {
+	store := func() *fakeStore {
+		return &fakeStore{
+			issues: map[string][]*beads.Issue{
+				"task": {
+					issue("tk-gate", "pre-open, reviewed", "task", 2, testNow, `{"merge_result":"pre_open_gate","check_set":"correctness,triage"}`),
+					issue("tk-pr", "an open PR", "task", 2, testNow, `{"merge_result":"pull_request","pr_number":"9"}`),
+				},
+			},
+			depsUp: map[string][]*beads.IssueWithDependencyMetadata{
+				"tk-gate": {
+					withDepType(child("rv-ok", "closed", testNow, `{"task_kind":"review","anchor_bead":"tk-gate","check_name":"correctness","reviewed_oid":"abc","signoff_verdict":"approve","gc.outcome":"recorded"}`), "related"),
+					withDepType(child("rv-live", "open", testNow, `{"task_kind":"review","anchor_bead":"tk-gate","check_name":"triage"}`), "related"),
+					withDepType(child("rv-moved", "closed", testNow, `{"task_kind":"review","anchor_bead":"tk-other","check_name":"triage"}`), "related"),
+					withDepType(child("rw-1", "closed", testNow, `{"task_kind":"rework","anchor_bead":"tk-gate"}`), "related"),
+					withDepType(child("vi-1", "open", testNow, `{"task_kind":"visit"}`), "tracks"),
+				},
+				"tk-pr": {
+					withDepType(child("rv-pr", "closed", testNow, `{"task_kind":"review","anchor_bead":"tk-pr","check_name":"correctness"}`), "related"),
+				},
+			},
+		}
+	}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	res, err := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store()}).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-gate")
+	if !ok {
+		t.Fatal("the pre-open anchor is missing")
+	}
+	gate := res.Anchors[i]
+	var ids []string
+	for _, r := range gate.Reviews {
+		ids = append(ids, r.ID+"/"+r.Status)
+	}
+	slices.Sort(ids)
+	if want := []string{"rv-live/open", "rv-ok/closed"}; !slices.Equal(ids, want) {
+		t.Errorf("reviews = %v, want %v: the anchor's own reviews, open and closed, and nothing else", ids, want)
+	}
+	for _, r := range gate.Reviews {
+		if r.ID == "rv-ok" && r.Metadata["signoff_verdict"] != "approve" {
+			t.Errorf("a review carries the metadata its lane derives from: %v", r.Metadata)
+		}
+	}
+	if gate.ReviewsUnknown {
+		t.Error("a read that answered is not unknown")
+	}
+	if len(gate.Children) != 0 {
+		t.Errorf("reviews joined by a related edge are no roll-up children: %+v", gate.Children)
+	}
+	j, ok := findAnchor(res, "tk-pr")
+	if !ok {
+		t.Fatal("the PR anchor is missing")
+	}
+	if pr := res.Anchors[j]; len(pr.Reviews) != 0 || pr.ReviewsUnknown {
+		t.Errorf("a pull_request anchor gathers no reviews: %+v unknown=%v", pr.Reviews, pr.ReviewsUnknown)
+	}
+
+	failing := store()
+	failing.failDeps = map[string]error{"tk-gate": errors.New("dependents unreadable")}
+	res, err = newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": failing}).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok = findAnchor(res, "tk-gate")
+	if !ok {
+		t.Fatal("the pre-open anchor is missing")
+	}
+	if gate := res.Anchors[i]; !gate.ReviewsUnknown || len(gate.Reviews) != 0 {
+		t.Errorf("a failed inbound read marks the reviews unknown, not empty: unknown=%v reviews=%v", gate.ReviewsUnknown, gate.Reviews)
+	}
+}
+
 func TestMergeAnchorsAreGathered(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": mergeStore()})

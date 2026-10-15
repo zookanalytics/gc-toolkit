@@ -708,7 +708,9 @@ func anchorCandidate(b apiBead) bool {
 // human-gated row DOWN on evidence nobody read.
 //
 // Children are the OPEN ones only, so n_closed reads 0 and `complete` never
-// fires from this backend.
+// fires from this backend. ReviewsUnknown is set for the same reason: a lane's
+// green derives from the anchor's closed review beads, which the scan never
+// reads.
 func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[string]string, kind string, children []board.Child) board.Anchor {
 	rig, prefix := g.rigOf(b.ID)
 	return board.Anchor{
@@ -730,5 +732,6 @@ func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[s
 		// The primary BeadsSource reads it; this is the same degraded-read shape
 		// as WaitingUnknown below.
 		WaitingUnknown: true,
+		ReviewsUnknown: true,
 	}
 }
