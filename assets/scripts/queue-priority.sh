@@ -15,9 +15,11 @@
 #       of each), and read it all back.
 #   reconcile [--dry-run] [--pool <target>] [--db <path>]
 #       one pass of orders/queue-priority.toml: read the beads `bd ready` offers
-#       the polecat pool and settle each one queued at a priority other than its
-#       own, for the raw writes no writer sees, such as a hand
-#       `bd update --priority` on an epic or a hand re-parent.
+#       the rig's polecat pool and settle each one queued at a priority other
+#       than its own, for the raw writes no writer sees, such as a hand
+#       `bd update --priority` on an epic or a hand re-parent. The pool is
+#       --pool, else the one agent the roster (`gc agent list`) places in the
+#       rig under the name polecat.
 #
 # A claimed bead (in_progress or hooked) keeps the priority it was claimed at: a
 # claim already made stands. Two writes reach one anyway. A live workflow root
@@ -39,7 +41,8 @@
 # Callers: gc-helm.sh priority (move), orders/queue-priority.toml (reconcile),
 # and the writers that route, sling or release a bead (settle).
 # Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
-# or a move refused before anything was written.
+# a move refused before anything was written, or a pass that finds no one
+# polecat pool to read.
 set -u
 
 # >>> control-char-scrub
@@ -117,8 +120,11 @@ Verbs:
              whole store. --dry-run takes no lock and writes nothing.
 
 The bead's store is --db, else the rig its id prefix names (gc rig list), else
-$GC_RIG_ROOT/.beads; reconcile reads $GC_RIG_ROOT/.beads and the pool
-$GC_RIG/gc-toolkit.polecat unless --db and --pool name others.
+$GC_RIG_ROOT/.beads. reconcile reads $GC_RIG_ROOT/.beads unless --db names
+another, and the queue of --pool, else of the one agent gc agent list places in
+$GC_RIG under the name polecat. That agent's name carries the binding the rig
+imports the pack under, so a pass that finds no such agent, or several, reads
+nothing and exits 2.
 EOF
 }
 
@@ -558,6 +564,33 @@ settle_fits_budget() {
     [ $(( PASS_T0 + PASS_BUDGET_SECS - $(now_epoch) )) -ge "$SETTLE_ALLOWANCE_SECS" ]
 }
 
+# resolve_pool <rig> — the rig's polecat pool, in REPLY: the qualified name of
+# the one agent the roster places in the rig under the name polecat. gascity
+# names an imported agent <rig>/<binding>.<name>, and the binding is the key the
+# city imports the pack under, so only the roster knows the name the pool's work
+# is routed to. Returns 1 when the roster cannot be read or lists no agents, and
+# 2 when it names no such agent in the rig or several. POOL_NOTE says which.
+POOL_NOTE=""
+resolve_pool() {
+    local rig="$1" raw found n
+    REPLY=""; POOL_NOTE=""
+    raw="$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc agent list --json; else gc agent list --json; fi 2>/dev/null 9>&-)" \
+        || { POOL_NOTE="gc agent list failed"; return 1; }
+    found="$(printf '%s' "$raw" | scrub | jq -c --arg rig "$rig" '
+        if ((.agents // null) | type) != "array" or (.agents | length) == 0 then error("no agents listed")
+        else [ .agents[] | objects
+               | select(((.dir // "") | tostring) == $rig and ((.name // "") | tostring) == "polecat")
+               | (.qualified_name // "") | tostring | select(. != "") ] | unique end' 2>/dev/null)"
+    [ -n "$found" ] || { POOL_NOTE="gc agent list answered with no readable agent list"; return 1; }
+    n="$(printf '%s' "$found" | jq 'length')"
+    case "$n" in
+        1) REPLY="$(printf '%s' "$found" | jq -r '.[0]')"; return 0 ;;
+        0) POOL_NOTE="no agent in rig $rig is named polecat" ;;
+        *) POOL_NOTE="$n agents in rig $rig are named polecat: $(printf '%s' "$found" | jq -r 'join(", ")')" ;;
+    esac
+    return 2
+}
+
 cmd_reconcile() {
     local pool=""
     while [ $# -gt 0 ]; do
@@ -571,10 +604,22 @@ cmd_reconcile() {
     done
     [ -n "$BD_DB" ] || BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
     [ -n "$BD_DB" ] || { echo "$PROG: reconcile: no store to read: GC_RIG_ROOT is unset and no --db was given" >&2; return 2; }
-    [ -n "$pool" ] || pool="${GC_RIG:+$GC_RIG/gc-toolkit.polecat}"
-    [ -n "$pool" ] || { echo "$PROG: reconcile: no pool to read: GC_RIG is unset and no --pool was given" >&2; return 2; }
+    [ -n "$pool" ] || [ -n "${GC_RIG:-}" ] || { echo "$PROG: reconcile: no pool to read: GC_RIG is unset and no --pool was given" >&2; return 2; }
 
     PASS_T0="$(now_epoch)"
+    if [ -z "$pool" ]; then
+        local pool_rc=0
+        resolve_pool "$GC_RIG" || pool_rc=$?
+        case "$pool_rc" in
+            0) pool="$REPLY" ;;
+            1)
+                echo "$PROG: reconcile: could not read the agent roster to find the polecat pool of rig $GC_RIG ($POOL_NOTE); NOT treating its queue as empty" >&2
+                return 1 ;;
+            *)
+                echo "$PROG: reconcile: cannot tell which queue to read: $POOL_NOTE. Name the pool with --pool <rig>/<binding>.polecat" >&2
+                return 2 ;;
+        esac
+    fi
     if [ "$DRY_RUN" != 1 ]; then
         local lock_rc=0
         take_lock nowait reconcile || lock_rc=$?

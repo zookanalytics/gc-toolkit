@@ -32,9 +32,12 @@
 #               follows, never the whole store, and settles a queued bead's
 #               whole workflow in one pass after a raw edit on its epic, and a
 #               queued step whose root lost its input convoy with that root; it
-#               skips a tick while the lock is held, fails on a wedged lock or an
-#               unreadable queue, writes nothing on --dry-run, and leaves what
-#               its budget cannot cover for the next pass.
+#               finds the rig's polecat pool in the roster under whatever
+#               binding the rig imports the pack, and fails, reading no queue,
+#               when the roster names no such pool or several, or cannot be
+#               read; it skips a tick while the lock is held, fails on a wedged
+#               lock or an unreadable queue, writes nothing on --dry-run, and
+#               leaves what its budget cannot cover for the next pass.
 #   (CROSSING)  a pass that read the old priority before a move cannot write it
 #               back after the move: the move waits for the pass's lock.
 #   (ORDER)     orders/queue-priority.toml runs reconcile per rig every fifteen
@@ -81,6 +84,8 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 # depends_on_id, type}]}. Every call's argv, less its --db pin, is logged to
 # $STUB_CALLS.
 #   rig list           one rig, tk, at $STUB_RIG_TK, with a .beads store.
+#   agent list         the roster in $STUB_AGENTS, in the shape
+#                      `gc agent list --json` prints. STUB_AGENTS_FAIL fails it.
 #   bd list            --id (comma list), --all, --status, --metadata-field
 #                      (repeatable, ANDed) and --has-metadata-key filter the
 #                      store; with neither --all nor --status it leaves out
@@ -112,6 +117,12 @@ case "$sub" in
   rig)
     printf 'rig %s\n' "$*" >> "${STUB_CALLS:?}"
     jq -n --arg tk "$STUB_RIG_TK" '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}]}'
+    exit 0 ;;
+  agent)
+    printf 'agent %s\n' "$*" >> "${STUB_CALLS:?}"
+    [ "${1:-}" = list ] || { echo "gc stub: unsupported 'agent ${1:-}'" >&2; exit 2; }
+    [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: simulated agent list failure" >&2; exit 1; }
+    cat "${STUB_AGENTS:?}"
     exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
@@ -247,6 +258,18 @@ export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls" STUB_RIG_TK="$TMP/rig-tk"
 DB="$TMP/rig-tk/.beads"
 POOL="gc-toolkit/gc-toolkit.polecat"
+
+# roster <rig/binding.name>... -> a `gc agent list --json` answer listing each
+# agent, its dir the rig before the slash and its name the part after the last
+# dot. A name with no slash is a city agent, with no dir.
+roster() {
+  printf '%s\n' "$@" | jq -Rsc '{schema_version: "1", agents: [ split("\n")[] | select(length > 0)
+    | (if test("/") then {dir: split("/")[0], scope: "rig"} else {scope: "city"} end)
+      + {qualified_name: ., name: (split("/") | last | split(".") | last)} ]}'
+}
+export STUB_AGENTS="$TMP/agents.json"
+roster gc-toolkit/gc-toolkit.polecat gc-toolkit/gc-toolkit.polecat-codex gc-toolkit/gc-toolkit.refinery \
+  signal-loom/gc-toolkit.polecat gc-toolkit.mechanik > "$STUB_AGENTS"
 
 # run <cmd...> -> RC, OUT, ERR; CALLS is the stub's argv log for the run.
 run() {
@@ -586,6 +609,7 @@ has "$CALLS" "bd ready --metadata-field gc.routed_to=$POOL --unassigned --json -
 store_wide="$(printf '%s\n' "$CALLS" | grep '^bd list' | grep -v -e '--id ' -e '--metadata-field ' || true)"
 eq "$store_wide" "" "(PASS) the pass reads only the queue and what it follows, never the whole store"
 has "$OUT" "settled tk-w1 at P0: parent tk-e1 P0, shift 0 (queued tk-s1a was P1)" "(PASS) the pass names what it settled and why"
+hasnt "$CALLS" "agent list" "(PASS) a pass given --pool reads no roster"
 
 qp reconcile --db "$DB" --pool "$POOL"
 eq "$(updates)" 0 "(PASS) a queue at its priorities writes nothing"
@@ -609,11 +633,53 @@ eq "$(prio tk-rs)" 1 "(PASS) and the root keeps its own"
 qp reconcile --db "$DB" --pool "$POOL"
 has "$OUT" "0 at a stale priority" "(PASS) so the next pass finds nothing stale"
 
+# The order passes no --pool, so the pass finds the rig's polecat pool in the
+# roster.
 reset_store
 GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
-eq "$RC" 0 "(PASS) the order's environment names the store and the pool"
+eq "$RC" 0 "(PASS) the order's environment names the store and the rig"
 eq "$(prio tk-s1a)" 1 "(PASS) and the pass settles the queue from it"
-has "$CALLS" "gc.routed_to=gc-toolkit/gc-toolkit.polecat" "(PASS) reading the rig's polecat pool"
+has "$CALLS" "agent list --json" "(PASS) finding the rig's polecat pool in the roster"
+has "$CALLS" "bd ready --metadata-field gc.routed_to=gc-toolkit/gc-toolkit.polecat --unassigned" "(PASS) and reading that pool's queue"
+
+# A city that imports the pack under another binding names its pool after that
+# binding, and the pass reads that pool's queue.
+reset_store
+jq -c 'map(if ((.metadata // {})["gc.routed_to"] // "") == "gc-toolkit/gc-toolkit.polecat"
+           then .metadata["gc.routed_to"] = "gc-toolkit/maintenance.polecat" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+roster gc-toolkit/maintenance.polecat gc-toolkit/maintenance.polecat-codex gc-toolkit/maintenance.refinery \
+  signal-loom/gc-toolkit.polecat > "$TMP/agents-renamed.json"
+STUB_AGENTS="$TMP/agents-renamed.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
+eq "$RC" 0 "(PASS) a pass in a rig that imports the pack under another binding exits 0"
+has "$CALLS" "bd ready --metadata-field gc.routed_to=gc-toolkit/maintenance.polecat --unassigned" "(PASS) and reads the queue of the pool that binding names"
+hasnt "$CALLS" "gc.routed_to=gc-toolkit/gc-toolkit.polecat" "(PASS) not one named after the pack"
+eq "$(prio tk-s1a)" 1 "(PASS) and settles the bead queued there"
+has "$OUT" "queued for gc-toolkit/maintenance.polecat" "(PASS) naming the pool it read"
+
+# A roster that names no polecat in the rig, or several, names no one queue, so
+# the pass reads none and asks for the pool.
+reset_store
+roster gc-toolkit/gc-toolkit.polecat-codex gc-toolkit/gc-toolkit.refinery signal-loom/gc-toolkit.polecat > "$TMP/agents-none.json"
+STUB_AGENTS="$TMP/agents-none.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
+eq "$RC" 2 "(PASS) a rig with no agent named polecat fails the pass"
+has "$ERR" "no agent in rig gc-toolkit is named polecat" "(PASS) saying so"
+has "$ERR" "--pool" "(PASS) and naming the flag that names the pool"
+eq "$(printf '%s\n' "$CALLS" | grep -c '^bd ' || true)" 0 "(PASS) reading no queue"
+roster gc-toolkit/gc-toolkit.polecat gc-toolkit/maintenance.polecat > "$TMP/agents-two.json"
+STUB_AGENTS="$TMP/agents-two.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
+eq "$RC" 2 "(PASS) a rig with two agents named polecat fails the pass"
+has "$ERR" "gc-toolkit/gc-toolkit.polecat, gc-toolkit/maintenance.polecat" "(PASS) naming both"
+eq "$(printf '%s\n' "$CALLS" | grep -c '^bd ' || true)" 0 "(PASS) and reading no queue"
+
+# An unreadable roster is a failed read, never a rig without a pool.
+STUB_AGENTS_FAIL=1 GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
+eq "$RC" 1 "(PASS) a roster that cannot be read fails the pass"
+has "$ERR" "NOT treating its queue as empty" "(PASS) and is never read as an empty queue"
+eq "$(printf '%s\n' "$CALLS" | grep -c '^bd ' || true)" 0 "(PASS) reading no queue"
+printf '{"agents":[]}\n' > "$TMP/agents-empty.json"
+STUB_AGENTS="$TMP/agents-empty.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
+eq "$RC" 1 "(PASS) a roster that lists no agents is an unreadable one"
+eq "$(prio tk-s1a)" 2 "(PASS) and the queue keeps its old priorities"
 
 reset_store
 qp reconcile --db "$DB" --pool "$POOL" --dry-run

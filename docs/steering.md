@@ -384,6 +384,12 @@ waits for its own writer, or for the pass once it is queued. A pass settles the
 most urgent beads first and leaves what its time budget cannot cover for the
 next pass.
 
+The pool is the agent that `gc agent list` places in the rig under the name
+`polecat`. That agent's name carries the binding the city imports the pack
+under, which the pack cannot know, and a queue read under any other name reads
+back empty. So a pass that cannot read the roster, or finds no such agent in
+the rig, or finds several, fails and reads no queue.
+
 ### The lock
 
 The move, settle and the pass take one lock per store, a `flock` on
