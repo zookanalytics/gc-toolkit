@@ -3851,13 +3851,14 @@ finding_answer() { # <owed-record-json>
 # its rendering no longer matches the digest the comment carries. Once the
 # comment carries this rendering, it delivers what the rendering holds: each
 # review body answer it owes is stamped finding.reply_posted, and a review body
-# it marks resolved trades its reaction. Records the comment in WRURL and the
-# model, with the comment as it now stands, in WRMODEL. Returns 1 when the PR
+# it marks resolved trades its reaction, the one place that body's trade is
+# made. Records the comment in WRURL and the model, with the comment as it now
+# stands and its trade already dealt with, in WRMODEL. Returns 1 when the PR
 # holds no comment carrying this rendering. Like wb_expand, it runs in the
 # caller's shell, never in a command substitution.
 rposted=0; redited=0; wrstamped=0
 wr_write() { # <model-json>
-  local m="$1" rid body digest full hdb hurl hdig out wrf_id
+  local m="$1" rid body digest full hdb hurl hdig out wrf_id wrsw
   rid=$(printf '%s' "$m" | jq -r '.rid // empty' 2>/dev/null)
   [ -n "$rid" ] || return 1
   WRMODEL["$rid"]="$m"
@@ -3902,7 +3903,8 @@ wr_write() { # <model-json>
   fi
   [ -z "$hurl" ] || WRURL["$rid"]="$hurl"
   WRMODEL["$rid"]=$(printf '%s' "$m" | jq -c --arg db "$hdb" --arg url "$hurl" --arg d "$digest" \
-    '.existing = { db: $db, url: $url, digest: $d, dismissed: (.dismissed == "requeued" or .dismissed == "self") }' 2>/dev/null)
+    '.existing = { db: $db, url: $url, digest: $d, dismissed: (.dismissed == "requeued" or .dismissed == "self") }
+     | .swaps = "-"' 2>/dev/null)
   while IFS= read -r wrf_id; do
     [ -n "$wrf_id" ] || continue
     if gc bd update "$wrf_id" --set-metadata finding.reply_posted=1 >/dev/null 2>&1; then
@@ -3913,7 +3915,22 @@ wr_write() { # <model-json>
   done <<WR_STAMPS
 $(printf '%s' "$m" | jq -r '.unstamped[]?' 2>/dev/null)
 WR_STAMPS
-  wb_swaps "$(printf '%s' "$m" | jq -r '.swaps // "-"' 2>/dev/null)"
+  # The trade is a reaction write like the pickup's: it waits until the pass's
+  # pickup reactions are all on, and draws on the same per-pass cap, so a
+  # trade the cap defers is made by the next pass. The S lines leave a covered
+  # review body its batch resolved to this answer, and the model WRMODEL keeps
+  # names no trade, so the edit the dismissal makes later in the pass does not
+  # repeat it.
+  if [ "$wack_ok" = 1 ]; then
+    while IFS= read -r wrsw; do
+      [ -n "$wrsw" ] || continue
+      [ "$wdone" -lt "$WB_REACT_CAP" ] || break
+      wdone=$((wdone + 1))
+      wb_swaps "$wrsw"
+    done <<WR_SWAPS
+$(printf '%s' "$m" | jq -r '.swaps // "-" | select(. != "-") | split(",")[]' 2>/dev/null)
+WR_SWAPS
+  fi
   return 0
 }
 WB_CURSOR="${CURSOR:+$CURSOR.writeback}"
@@ -4445,7 +4462,10 @@ WB_LONG_THREADS
                                           swaps: ([ .[].swap | select(. != null) | select(endswith(":0:0") | not) ]
                                                   | if length > 0 then join(",") else "-" end) } })
           | from_entries | tojson) ]
-      + [ $items[] | select(.st == "resolved") | select(answered) | swap | select(endswith(":0:0") | not) | "S\t" + . ]
+      # A covered review body its batch resolved trades its reaction through its
+      # living answer (the W line), never here as well.
+      + [ $items[] | select(.st == "resolved") | select(answered) | select((covered and .by == "batch") | not)
+          | swap | select(endswith(":0:0") | not) | "S\t" + . ]
       + [ "K\t" + ([ "c", "r", "i" ] | map(. as $s | ($led[$s] | length) as $n
           | if $n == 0 then "-" else
               [ range(0; $n) | . as $k
@@ -4563,7 +4583,9 @@ WB_POSTS
   # A comment whose answer is already posted but which still carries EYES or
   # lacks THUMBS_UP: its swap failed, or its answer was posted without one.
   # These are reaction writes like the pickup's, so they draw on the same
-  # per-pass cap, and the comments it defers are swapped by the next pass.
+  # per-pass cap, and the comments it defers are swapped by the next pass. A
+  # covered review body its batch resolved is its living answer's to swap
+  # (wr_write).
   while IFS="$(printf '\t')" read -r act a1; do
     [ "${act:-}" = "S" ] || continue
     [ "$wack_ok" = 1 ] || continue

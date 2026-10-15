@@ -6113,6 +6113,35 @@ has "$(lanswer 606 6007)" "<!-- gc-writeback-mark:resolved r6007 -->" "…carryi
 eq "$(thumbed 606 RV-606),$(reacted 606 RV-606)" "true,false" "…so the body trades its pickup EYES for THUMBS_UP"
 eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_606.json")" "1" "…and no check-mark ack is posted beside it"
 
+echo "# a covered review body trades its reaction once a pass, through its living answer, after the pickup reactions"
+# The first pass posts the living answer with the body's resolved mark, and its
+# EYES removal is refused, so the trade is still owed with the mark on the PR.
+store "[$(anchor LA10 609 "$(lmeta rework:KL10 7001 6010)"), $(fixunit KL10 closed),
+  $(lfind LK0 LA10 6010 6010 restates closed 'Summary: one point, inline.' '{"finding.fix_unit":"KL10"}'),
+  $(lfind LK1 LA10 7001 6010 declined closed 'Nice cleanup.' '{"finding.fix_unit":"KL10"}')]"
+printf '%s' "$(prview 609 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_609.json"
+threads 609 "$(lreview 609 6010 COMMENTED 'Summary: one point, inline.' 7001)"
+: > "$STUB_GH_LOG"
+out=$(STUB_UNREACT_RC=1 run)
+has "$(lanswer 609 6010)" "<!-- gc-writeback-mark:resolved r6010 -->" "the living answer carries the body's resolved mark"
+eq "$(thumbed 609 RV-609),$(reacted 609 RV-609)" "true,true" "…and the refused removal leaves the body's trade owed"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^UNREACT RV-609 EYES$' "$STUB_GH_LOG")" "1" "the next pass makes the trade once, through the living answer alone"
+eq "$(thumbed 609 RV-609),$(reacted 609 RV-609)" "true,false" "…leaving the body with THUMBS_UP and no EYES"
+# The trade is owed again, and an inline comment has lost its pickup reaction.
+# A pass whose pickup reaction is refused answers nothing, the trade included,
+# though the living answer's rendering is unchanged.
+jq -c '.reviews |= map(if .id == "RV-609" then .reactionGroups += [{content: "EYES", viewerHasReacted: true}] else . end)
+       | .threads |= map(.comments.nodes |= map(if .id == "NC-609-7001" then .reactionGroups = [] else . end))' \
+  "$GH_DIR/threads_609.json" > "$TMP/t609.json" && mv "$TMP/t609.json" "$GH_DIR/threads_609.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_REACT_RC=1 run)
+eq "$(grep -c '^UNREACT RV-609 ' "$STUB_GH_LOG")" "0" "a pass whose pickup reaction is refused makes no trade, not even through an unchanged living answer"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^UNREACT RV-609 EYES$' "$STUB_GH_LOG")" "1" "…and the pass after it makes the trade"
+
 echo "# a decline its fix unit flagged cites the fix's commits once that fix unit lands, in an edit"
 # The decline closed its finding at the ruling, before the fix unit that changed
 # the code anyway had pushed, so the landing alone has to change the rendering
