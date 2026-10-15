@@ -688,9 +688,13 @@ if [ -n "$REJECTION" ]; then
         echo "bring_current_from=$RESUME_FROM and bring_current_scope=$RESUME_SCOPE did not both read back on $WORK_BEAD_ID; NOT merging, since the guard reads the round from the start, and a start with no scope beside it as a resume that owes no audit. Re-run this block." >&2
         exit 1
     fi
-    git merge --no-edit origin/{{base_branch}}
+    # The rejection is cleared once the merge concludes: here when git merges
+    # on its own, else at the commit below. A stop before then, such as a
+    # question for a person, leaves it, so the next run merges again.
+    if git merge --no-edit origin/{{base_branch}}; then
+        gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
+    fi
     # Conflicts: resolve each, record its audit entry, then commit (below).
-    gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
 # <<< rejected-branch-resume-mode
 ```
@@ -715,7 +719,7 @@ git diff --name-only --diff-filter=U   # the files git could not merge
   --collided "<the two intents that met: what the base changed and why, what the branch changed and why>" \
   --resolution "<what you kept or wrote, and why>" \
   --check "<what a reviewer should look at to confirm it>"
-git commit --no-edit
+git commit --no-edit && gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 # <<< bring-current-audit-entry
 ```
 Rate an entry `routine` for an adjacent-line collision, an overlapping comment

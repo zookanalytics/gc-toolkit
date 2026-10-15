@@ -535,8 +535,11 @@ keys = [
 #   later pass can tell which head it spoke for. Written by the refinery
 #   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
-#   already covering a head. Cleared with `--unset` on the merged transition and
-#   by the polecat once it has resumed. Freeform instruction text.
+#   already covering a head. Cleared with `--unset` by the refinery's
+#   merge-push in each transition it makes on a hand-back (merged, unanchored,
+#   pre_open_gate, pull_request), and by the polecat once the merge its resume
+#   runs concludes. A stop before then, such as a question for a person, leaves
+#   it, so the bead's next run resumes again. Freeform instruction text.
 # graduation — `true`, set on the convoy bead by convoy-graduate.sh when an
 #   integration branch is carried to the default branch. prepare_mode is `merge`
 #   for every branch shape, so this flag does not change how the branch is

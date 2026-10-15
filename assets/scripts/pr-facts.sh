@@ -3328,9 +3328,9 @@ GATES
             rc_urls=$(printf '%s' "$rc_code_json" | jq -r '[ .[] | .url | select(. != "") ] | join(" ")' 2>/dev/null)
             # Every red-check child names the head it was sent to fix twice: in the
             # title it is minted with ("$RC_TITLE required check red at head <oid>")
-            # and in its rejection_reason ("... at head <oid>"). Two writers unset
-            # rejection_reason: resuming a rework (mol-polecat-work's
-            # rejected-branch-resume block) and the refinery's landed-on-branch close
+            # and in its rejection_reason ("... at head <oid>"). mol-polecat-work
+            # unsets rejection_reason once the merge a rework's resume runs
+            # concludes, and the refinery unsets it at its landed-on-branch close
             # (mol-refinery-patrol's one-anchor-per-pr-terminal). A child that has
             # been worked keeps its head only in the title, so rc_heads reads both.
             # The same-head park and the attempt cap below read a child's head

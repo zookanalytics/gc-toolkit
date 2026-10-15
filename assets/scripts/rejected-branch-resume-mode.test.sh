@@ -19,17 +19,26 @@
 #   - it merges only once bring_current_from and bring_current_scope both read
 #     back from the bead, and when either does not, the block exits 1 having
 #     merged nothing;
-#   - it unsets rejection_reason;
+#   - it unsets rejection_reason once the merge concludes: here when git merges
+#     on its own, else at the commit of the bring-current-audit-entry block. A
+#     merge that stops on a conflict, or that git refuses to start, leaves it,
+#     and so does the bring-current-unresolvable block's stop to ask a person,
+#     whether it holds the molecule or parks the bead. The bead's next run then
+#     starts a new round: it stamps the start again, clears the question and
+#     the entries recorded before it, and merges again;
 #   - with no rejection_reason it does nothing.
 #
-# It EXECUTES the block extracted verbatim from the formula against a real git
+# It EXECUTES the blocks extracted verbatim from the formula against a real git
 # repository with a real bare origin. A gc stub keeps the bead in a JSON store
 # that its reads serve and its writes change, and a wrapper runs the real git.
 # Both record each call in one log, so a case can read which commands ran, and
 # the wrapper copies the store when a merge starts, so a case can read what the
-# bead carried before the merge moved HEAD. The block's base is rendered as an
-# integration branch, which is not main, so a block that merged a fixed main
-# would merge nothing here. No live city, Dolt, network, or PRs.
+# bead carried before the merge moved HEAD. The two blocks a conflicted merge
+# reaches next run against stubs of the pack scripts they call, which record
+# an entry or a question on the bead the way the real ones do. The resume
+# block's base is rendered as an integration branch, which is not main, so a
+# block that merged a fixed main would merge nothing here. No live city, Dolt,
+# network, or PRs.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,6 +86,16 @@ sed "s#{{base_branch}}#$BASE#g" "$TMP/raw.sh" > "$TMP/block.sh"
 VARS="$(grep -o '{{[^}]*}}' "$TMP/block.sh" | sort -u | tr '\n' ' ')"
 eq "$VARS" "" "every formula var in the block is rendered"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block is valid bash" "bash -n failed"
+# The audit-entry block concludes a conflicted merge, and the stop-and-ask
+# block stops one to ask a person.
+for b in bring-current-audit-entry bring-current-unresolvable; do
+  awk -v m="$b" '$0 == "# >>> " m {f=1; next} $0 == "# <<< " m {f=0} f' "$TOML" > "$TMP/$b.sh"
+  if [ -s "$TMP/$b.sh" ] && [ -z "$(grep -o '{{[^}]*}}' "$TMP/$b.sh")" ] && bash -n "$TMP/$b.sh"; then
+    ok "the $b block is extracted, needs no formula var, and is valid bash"
+  else
+    bad "the $b block is extracted, needs no formula var, and is valid bash"
+  fi
+done
 
 # --- Stubs. ---------------------------------------------------------------------
 # The gc stub keeps the beads in $STORE. `bd show <id>` serves that bead, and
@@ -118,6 +137,25 @@ esac
 exit 0
 SH
 chmod +x "$BIN/git" "$BIN/gc"
+# The pack scripts the audit-entry and stop-and-ask blocks call, found through
+# GC_PACK_DIR. bring-current-audit.sh writes an entry (add) or a question (ask)
+# to the bead through the gc stub, and molecule-hold.sh records its call.
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
+cat > "$PACK/assets/scripts/bring-current-audit.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'bca %s\n' "$*" >> "$CALLS"
+verb="${1:-}"; shift; bead=""
+while [ $# -gt 0 ]; do case "$1" in --bead) bead="${2:-}"; shift 2 ;; *) shift ;; esac; done
+case "$verb" in
+  add) gc bd update "$bead" --set-metadata 'conflict_audit=[{"path":"shared.txt"}]' ;;
+  ask) gc bd update "$bead" --set-metadata 'conflict_question={"paths":["shared.txt"]}' ;;
+esac
+SH
+cat > "$PACK/assets/scripts/molecule-hold.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'hold %s\n' "$*" >> "$CALLS"
+SH
+chmod +x "$PACK/assets/scripts/bring-current-audit.sh" "$PACK/assets/scripts/molecule-hold.sh"
 
 # --- Histories. -----------------------------------------------------------------
 # A bare origin whose main holds the merge base. polecat/w1 adds a file of its
@@ -163,6 +201,19 @@ run_block() {
   printf '%s' "$1" > "$STORE"
   ( cd "$C" && PATH="$BIN:$PATH" WORK_BEAD_ID=tk-w bash "$TMP/block.sh" ) > "$TMP/out" 2>&1
   RC=$?
+}
+# again <block-file> [<VAR=value>...] — a block run in $C against the store as
+# the last run left it, the way the bead's next step or next run reaches it.
+# Sets RC.
+again() {
+  local f="$1"; shift
+  rm -f "$AT_MERGE"
+  ( cd "$C" && env PATH="$BIN:$PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
+  RC=$?
+}
+# set_meta <key> <value> — what another writer put on the bead between runs.
+set_meta() {
+  jq -c --arg k "$1" --arg v "$2" 'map(.metadata[$k] = $v)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
 }
 bead() { # <branch> [<metadata json>]
   jq -nc --arg b "$1" --argjson m "${2:-null}" '[{id: "tk-w", metadata: ({branch: $b} + ($m // {}))}]'
@@ -220,6 +271,7 @@ GITDIR="$(g "$C" rev-parse --absolute-git-dir)"
 { [ ! -e "$GITDIR/rebase-merge" ] && [ ! -e "$GITDIR/rebase-apply" ]; } \
   && ok "(4) no rebase is in progress" || bad "(4) no rebase is in progress"
 eq "$(rewrites)" "0" "(4) nothing rebases, resets, commits, cherry-picks or pushes"
+eq "$(meta rejection_reason)" "$CONFLICTS" "(4) the rejection stays while the merge is unconcluded"
 
 echo "# a local commit origin has not seen leaves the stamp at origin's copy of the branch"
 clone polecat/w1
@@ -277,6 +329,54 @@ eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 <absent>" "(10)
 eq "$(grep -c '^git merge' "$CALLS")" "0" "(10) git merge is not run"
 eq "$(g "$C" rev-parse HEAD)" "$W1" "(10) HEAD stays at the PR head"
 eq "$(grep -c -- '--unset-metadata rejection_reason' "$CALLS")" "0" "(10) rejection_reason is not cleared, so a re-run resumes the same rejection"
+
+echo "# the commit that concludes a conflicted merge clears the rejection"
+clone polecat/w2
+run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r}')")"
+printf 'both sides\n' > "$C/shared.txt"; g "$C" add shared.txt
+again "$TMP/bring-current-audit-entry.sh"
+eq "$RC" "0" "(11) the audit-entry block exits 0"
+eq "$(parents)" "$W2 $BASE_TIP" "(11) its commit concludes the merge"
+eq "$(meta rejection_reason)" "<absent>" "(11) …and clears the rejection"
+
+echo "# a merge that does not conclude leaves the rejection"
+clone polecat/w2
+run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r}')")"
+again "$TMP/bring-current-audit-entry.sh"
+[ "$RC" != "0" ] && ok "(12) a commit git refuses, the conflict unresolved, fails the audit-entry block" \
+  || bad "(12) a commit git refuses, the conflict unresolved, fails the audit-entry block" "it exited 0"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(12) the merge is still in progress"
+eq "$(meta rejection_reason)" "$CONFLICTS" "(12) …and the rejection stays"
+clone polecat/w2
+printf 'an edit nobody committed\n' > "$C/shared.txt"
+run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r}')")"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "" "(13) git refuses to start a merge over an uncommitted edit"
+eq "$(meta rejection_reason)" "$CONFLICTS" "(13) …and the rejection stays"
+
+echo "# a stop to ask a person leaves the rejection, so the next run merges again"
+for how in molecule bare; do
+  clone polecat/w2
+  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r}')")"
+  set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
+  if [ "$how" = molecule ]; then
+    again "$TMP/bring-current-unresolvable.sh" CLAIMED_STEP_BEAD_ID=tk-step
+    grep -q '^hold --step ' "$CALLS" && ok "(14) molecule: the molecule is held" || bad "(14) molecule: the molecule is held"
+  else
+    again "$TMP/bring-current-unresolvable.sh"
+    eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
+  fi
+  eq "$RC" "0" "(14) $how: the stop-and-ask block exits 0"
+  eq "$(g "$C" rev-parse HEAD) $(g "$C" rev-parse -q --verify MERGE_HEAD)" "$W2 " "(14) $how: the merge is aborted, HEAD at the PR head"
+  eq "$(meta rejection_reason)" "$CONFLICTS" "(14) $how: the rejection stays on the bead"
+  [ "$(meta conflict_question)" != "<absent>" ] && ok "(14) $how: …beside the question" || bad "(14) $how: …beside the question"
+  again "$TMP/block.sh"
+  eq "$RC" "0" "(15) $how: the next run's resume exits 0"
+  eq "$(at_merge bring_current_from) $(at_merge bring_current_scope)" "$W2 merge-only" "(15) $how: it starts a new round from the PR head"
+  eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" \
+    "(15) $how: …clearing the question and the entries recorded before it, before it merges"
+  eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(15) $how: …and merges the base in again"
+  eq "$(meta rejection_reason)" "$CONFLICTS" "(15) $how: the rejection stays until that merge concludes"
+done
 
 echo
 echo "rejected-branch-resume-mode: $PASS passed, $FAIL failed"
