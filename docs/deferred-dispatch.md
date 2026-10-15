@@ -106,6 +106,53 @@ deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatc
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
+## Work assigned to a named agent owes a notice
+
+A named session takes its work by assignee, never by route
+([gascity-routing-model.md](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery)).
+Its hook offers it a bead assigned to it once `bd` reports the bead ready,
+and nothing else wakes an idle named session when that happens. The
+controller's claim, continuation and execution backstops govern pool
+sessions only, the agent's `nudge` text is typed at launch, and the
+controller restarts an alive named session onto a new assignment only under
+`wake_mode = "fresh"`. So the dispatch an assignment owes is a notice to the
+agent:
+
+```bash
+"$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \
+    --agent gc-toolkit.mechanik --reason "<why the bead is the agent's>"
+```
+
+The notice is `gc mail send <agent> --notify`, naming the bead. `--notify`
+requests the agent's turn and wakes it when it is not running, and the mail
+stays in the agent's inbox. When `bd` already reports the bead ready, the
+mail goes at once. Otherwise `notify` records the notice on the bead as
+`gc.notify_when_ready=<agent>`, and the reconcile pass sends it once `bd`
+does, because a notice sent while the bead still waits would wake the agent
+for a bead its hook does not offer yet. The notice waits on `bd`'s readiness,
+the predicate the hook reads, and not on what `hold-lib.sh` calls a hold: a
+bead `bd` keeps unready is not offered to the agent, whatever holds it.
+
+`notify` refuses a bead that is not assigned to the agent, since that
+agent's hook would never offer it, so assign the bead first. A closed bead,
+or one the agent already claimed, owes no notice, and `notify` writes
+nothing and exits 0. Once the record is down the notice is owed: a send, or a
+readiness read, that fails leaves the record for the pass, and `notify` still
+exits 0.
+
+Each pass sends the notices whose beads `bd` reports ready, ahead of its
+slings, and retires a notice unsent on a bead that closed, that its agent
+claimed, or that is no longer assigned to that agent. A send that fails
+keeps the record and fails the pass. The mail's dedup key,
+`ready-notice:<bead>`, collapses a resend while the first notice is still
+unread, so a pass that dies between the send and the retire costs no second
+message. `list` shows each notice owed and what decides it, and `disarm`
+clears one with the rest of the record.
+
+`first-reaction-dispose.sh` asks for the notice on both of its named-agent
+exits: `--assign`, whose bead is normally ready, and `--then-assign`, whose
+bead waits on its blocker.
+
 ## What performs it
 
 `orders/deferred-dispatch.toml` — a `cooldown` exec order at `scope =
@@ -114,6 +161,9 @@ one pass at a time (see
 [One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
 Each pass runs `deferred-dispatch.sh reconcile`, which:
 
+- **notifies** first: it sends every notice owed whose bead `bd` reports
+  ready, and retires the notices no longer owed (see
+  [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also the ones bd keeps unready only through an ancestor that
   waits on a demand gate, or through any held ancestor of a bead in flight
@@ -287,15 +337,16 @@ The order's `timeout` kills a pass wherever it stands. A sling killed
 mid-flight has already minted its input convoy, leaves it with no
 workflow, and spends one of the bead's attempts. So a pass measures a
 budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
-0 = unpaced), and starts a sling only while at least
+0 = unpaced), and starts a notice or a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
-point it starts no sling and files no escalation, since `escalate.sh` is
-store work the timeout can cut short too. Each remaining ready bead keeps
-its arm with no marker on it, this pass counts no attempt against it, and
-the next pass slings it. A capped bead stays capped and armed, and the next
-pass files its escalation. The pass names the beads it left, counts the
-ready ones as `left for the next pass` in its summary, and declares the run
-`partial`, naming each bead and what it left there. The controller reads a
+point it sends no notice, starts no sling and files no escalation, since
+`escalate.sh` is store work the timeout can cut short too. Each remaining
+ready bead keeps its arm with no marker on it, this pass counts no attempt
+against it, and the next pass slings it. A notice it leaves keeps its record,
+and the next pass sends it. A capped bead stays capped and armed, and the next
+pass files its escalation. The pass names the beads and notices it left,
+counts them as `left for the next pass` in its summaries, and declares the
+run `partial`, naming each bead and what it left there. The controller reads a
 declaration only after a run that exits 0, so a pass that also had a
 failure declares nothing. It exits 1, and its output, which the controller
 keeps for a failed run, names what it left. The retires and reports for the
@@ -310,9 +361,9 @@ these numbers from the files that set them and asserts both pairs. A city
 override that lowers the order's `timeout` has to lower the budget in its
 `env` as well.
 
-`--dry-run` writes nothing and slings nothing, so it takes no lock and
-spends no budget. It lists every bead a pass would sling, whether or not a
-pass is in flight.
+`--dry-run` writes, sends and slings nothing, so it takes no lock and
+spends no budget. It lists every notice a pass would send or retire and
+every bead it would sling, whether or not a pass is in flight.
 
 ## What this does not do
 

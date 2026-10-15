@@ -1452,7 +1452,7 @@ keys = [
   "gc.dispatch_when_ready", "gc.dispatch_when_ready_args",
   "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
-  "gc.dispatch_when_ready_fail_count",
+  "gc.dispatch_when_ready_fail_count", "gc.notify_when_ready",
   "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
   "gc.deferred_assignee", "resling_target",
 ]
@@ -1477,6 +1477,13 @@ keys = [
 #   the escalation already surfaced it. An integer string; absent or non-numeric
 #   reads as 0. Cleared with the rest of the family by disarm, which ends a
 #   proven dispatch. Clearing it by hand restarts a capped retry.
+# gc.notify_when_ready — a notice owed to the named agent the bead is assigned
+#   to; its PRESENCE means owed, and its value is the agent. `deferred-dispatch.sh
+#   notify` writes it, then mails the agent (gc mail send --notify) and clears it
+#   at once when bd already reports the bead ready. Otherwise reconcile does both
+#   once bd does. A pass clears it unsent on a bead that closed, that the agent
+#   claimed, or that is no longer assigned to that agent, and disarm clears it
+#   with the family.
 # gc.deferred_routed_to / gc.deferred_execution_routed_to / gc.deferred_assignee —
 #   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
 #   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready

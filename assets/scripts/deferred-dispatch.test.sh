@@ -39,6 +39,14 @@
 #     the store does not return holds nothing. A backslash in a title prints
 #     as stored;
 #   * list --json prints the listing alone, with no hold walk;
+#   * notify, the dispatch a named agent's work owes: a mail at once when bd
+#     reports the bead ready, otherwise a notice recorded for the pass; it
+#     refuses a bead not assigned to the agent, owes nothing on a closed or
+#     claimed one, and keeps the record when its send or its readiness read
+#     fails. The pass sends a notice once bd reports its bead ready, retires one
+#     on a closed, claimed or reassigned bead, fails on a send it cannot make or
+#     a notice listing it cannot read while its slings still run, leaves one
+#     past its budget, and list shows them; disarm clears one;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -128,6 +136,11 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # A listing by one metadata key that fails while every other answers: the
+    # notice listing failing on its own.
+    if [ -n "${STUB_BD_LIST_FAIL_KEY:-}" ] && [ "$key" = "$STUB_BD_LIST_FAIL_KEY" ]; then
+      echo "bd: simulated listing failure for $key" >&2; exit 1
+    fi
     # Real bd refuses this combination outright:
     #   "validation failed: --ready cannot filter on IDFilter (--id); the
     #    blocker-aware ready query cannot be narrowed to specific ids"
@@ -295,6 +308,12 @@ if [ "${1:-}" = "sling" ]; then
     fi
     exit "${STUB_SLING_RC:-0}"
 fi
+# A notice is a `gc mail send`: one line per call, and STUB_MAIL_RC is its exit.
+if [ "${1:-}" = "mail" ]; then
+    shift
+    printf '%s\n' "$*" >> "${STUB_MAIL_LOG:?}"
+    exit "${STUB_MAIL_RC:-0}"
+fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
 STUB
 # escalate.sh stub: records each call (subject + key) so the retry-cap test can
@@ -339,6 +358,7 @@ chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/date"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
+export STUB_MAIL_LOG="$TMP/mail.log"
 export ESC_CALLS="$TMP/escalate.log"
 export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export BEADS_ACTOR="test-actor"
@@ -352,10 +372,16 @@ export DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
 unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE \
     DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS DEFERRED_DISPATCH_LOCK_STALL_SECS 2>/dev/null || true
 
-store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; }
+store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$ESC_CALLS"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
+mails() { wc -l < "$STUB_MAIL_LOG" | tr -d ' '; }
+# A pass's list reads, split by half. The notices half of every pass reads its
+# listing, plus bd's readiness when a notice is owed; a bound on the arms' reads
+# leaves those out.
+arm_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -v -F -e 'gc.notify_when_ready'; }
+notice_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -F -e 'gc.notify_when_ready'; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
 await() { # <file> — bounded wait for a sentinel to appear
     local i=0
@@ -761,7 +787,7 @@ eq "$(slings)" "1" "an arm in flight is slung though its epic is parked"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
 has "$out" "nothing holds b-1: it is in flight (rejection_reason set), so a hold on an ancestor leaves it running" "the pass log says why it slung a bead under a parked epic"
 hasnt "$out" "HELD by" "the park is not named as holding it"
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker)"
+eq "$(arm_list_reads)" "3" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker)"
 unset STUB_BD_LOG
 
 echo "# reconcile holds an arm in flight whose own blocker is open"
@@ -861,7 +887,8 @@ eq "$rc" 0 "a bulk pass over four arms held out of --ready is a clean pass"
 eq "$(slings)" "4" "all four arms nothing holds dispatch in one pass"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
+eq "$(arm_list_reads)" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
+eq "$(notice_list_reads)" "1" "and a pass that owes no notice reads the notice listing once"
 
 # The same bound with ancestors: four arms under one parked epic cost one more
 # read, for the epic, however many arms sit under it.
@@ -877,7 +904,7 @@ has "$out" "4 held" "all four are counted held"
 has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: a-1 a-2 a-3 a-4' "the pass log names the park once, with every arm it keeps"
 eq "$(printf '%s\n' "$out" | grep -c 'HELD by')" "1" "one line for one park, however many arms it keeps"
 eq "$(grep -c '^dep list\|^show' "$STUB_BD_LOG")" "0" "the walk makes no per-bead call"
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "four arms under one epic cost four list reads (all + ready + the epic + its blocker), not one per arm"
+eq "$(arm_list_reads)" "4" "four arms under one epic cost four list reads (all + ready + the epic + its blocker), not one per arm"
 unset STUB_BD_LOG
 
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
@@ -1078,6 +1105,158 @@ eq "$(meta b-1 gc.dispatch_when_ready_reason)" "<absent>" "disarm clears the rea
 eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "disarm clears the slung marker"
 has "$(notes b-1)" "keep me" "disarm appends to notes rather than replacing"
 has "$(notes b-1)" "superseded" "disarm records why"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
+"$SUT" disarm n-1 >/dev/null 2>&1
+eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "disarm clears a notice owed too"
+
+# --- notify: the dispatch a named agent's work owes ---------------------------
+# A named session's hook offers it a bead by assignee once bd reports the bead
+# ready, and nothing wakes an idle named session when that happens. So notify
+# mails the agent: at once when bd already reports the bead ready, and otherwise
+# it records the notice for the reconcile pass.
+echo "# notify"
+store '[{"id":"n-1","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"card: a city.toml edit","_ready":true}]'
+out="$("$SUT" notify n-1 --agent gc-toolkit.mechanik --reason "first reaction: r" 2>&1)"; rc=$?
+eq "$rc" 0 "notify exits 0"
+eq "$(mails)" "1" "notify on a bead bd reports ready mails the agent at once"
+has "$(cat "$STUB_MAIL_LOG")" "send gc-toolkit.mechanik --notify" "the mail goes to the agent and asks for its turn"
+has "$(cat "$STUB_MAIL_LOG")" "-s Ready for you: n-1" "the mail names the bead"
+has "$(cat "$STUB_MAIL_LOG")" "n-1 (Edit city.toml) is assigned to you" "with its title"
+has "$(cat "$STUB_MAIL_LOG")" "run gc hook" "and says how to pick it up"
+has "$(cat "$STUB_MAIL_LOG")" "--dedup ready-notice:n-1" "a resend about the same bead collapses onto the first"
+eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "a notice sent at once leaves no record behind"
+has "$(notes n-1)" "card: a city.toml edit" "notify APPENDS to notes (prior note survives)"
+has "$(notes n-1)" "first reaction: r" "the note carries the reason"
+has "$(notes n-1)" "notice sent to gc-toolkit.mechanik" "and records that the agent was told"
+has "$out" "notified gc-toolkit.mechanik that n-1 is ready" "notify says what it did"
+eq "$(slings)" "0" "a notice slings nothing"
+
+store '[{"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+        {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" notify n-2 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "notify on a bead that still waits exits 0"
+eq "$(mails)" "0" "and sends nothing while bd does not report the bead ready"
+eq "$(meta n-2 gc.notify_when_ready)" "gc-toolkit.mechanik" "it records the notice for the reconcile pass"
+has "$(notes n-2)" "notice armed by test-actor" "with a note saying who armed it"
+has "$out" "armed a notice on n-2 -> gc-toolkit.mechanik" "and says it armed the notice"
+
+store '[{"id":"n-3","status":"open","assignee":"someone-else","metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" notify n-3 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 1 "notify refuses a bead assigned to someone else"
+has "$out" "its assignee is someone-else" "naming who holds it"
+eq "$(mails)" "0" "and sends nothing"
+eq "$(meta n-3 gc.notify_when_ready)" "<absent>" "and records nothing"
+store '[{"id":"n-3","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" notify n-3 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 1 "notify refuses an unassigned bead"
+has "$out" "Assign it first" "naming the write that comes first"
+
+store '[{"id":"n-4","status":"closed","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false}]'
+out="$("$SUT" notify n-4 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a closed bead owes no notice, and notify exits 0"
+eq "$(mails)" "0" "sending nothing"
+eq "$(meta n-4 gc.notify_when_ready)" "<absent>" "and recording nothing"
+store '[{"id":"n-5","status":"in_progress","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false}]'
+out="$("$SUT" notify n-5 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a bead its agent already claimed owes no notice"
+eq "$(mails)" "0" "and gets none"
+has "$out" "already claimed" "notify says why"
+out="$("$SUT" notify n-5 2>&1)"; rc=$?
+eq "$rc" 2 "notify without --agent is a usage error"
+out="$("$SUT" notify nope --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 1 "notify on a bead the store does not hold fails"
+
+# Once the record is down the notice is owed, so a send that fails, or a
+# readiness read that fails, leaves it for the pass and still exits 0.
+store '[{"id":"n-6","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_MAIL_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a send that fails still exits 0, since the notice is recorded"
+eq "$(meta n-6 gc.notify_when_ready)" "gc-toolkit.mechanik" "and the record stays for the pass"
+has "$out" "the next reconcile pass sends it" "notify says who sends it"
+store '[{"id":"n-7","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" notify n-7 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a readiness read that fails still exits 0"
+eq "$(mails)" "0" "sending nothing it could not prove ready"
+eq "$(meta n-7 gc.notify_when_ready)" "gc-toolkit.mechanik" "and leaving the record for the pass"
+has "$out" "could not read whether bd reports it ready" "notify says so"
+
+echo "# reconcile sends a notice once bd reports its bead ready"
+NOTICES='[
+ {"id":"n-1","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+ {"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
+ {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""},
+ {"id":"n-3","status":"closed","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":""},
+ {"id":"n-4","status":"in_progress","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":""},
+ {"id":"n-5","status":"open","assignee":"gc-toolkit/gc-toolkit.witness","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+ {"id":"n-6","status":"open","assignee":"","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+ {"id":"n-8","status":"deferred","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
+store "$NOTICES"
+export STUB_BD_LOG="$TMP/bd-notice.log"; : > "$STUB_BD_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass with notices owed exits 0"
+eq "$(notice_list_reads)" "2" "the notices cost two list reads, the notices owed and those bd reports ready, however many there are"
+eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "and no per-bead read"
+unset STUB_BD_LOG
+eq "$(mails)" "1" "exactly the notice whose bead bd reports ready is sent"
+has "$(cat "$STUB_MAIL_LOG")" "send gc-toolkit.mechanik --notify --dedup ready-notice:n-1" "to its agent, deduped on its bead"
+has "$(cat "$STUB_MAIL_LOG")" "n-1 (Edit city.toml) is assigned to you" "naming the bead and its title"
+eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "a sent notice retires"
+has "$(notes n-1)" "notice sent to gc-toolkit.mechanik" "with a note that the agent was told"
+eq "$(meta n-2 gc.notify_when_ready)" "gc-toolkit.mechanik" "a notice whose bead still waits stays armed"
+eq "$(meta n-8 gc.notify_when_ready)" "gc-toolkit.mechanik" "and so does one at a status bd never reports ready"
+eq "$(meta n-3 gc.notify_when_ready)" "<absent>" "a closed bead's notice retires unsent"
+eq "$(meta n-4 gc.notify_when_ready)" "<absent>" "a claimed bead's notice retires unsent"
+eq "$(meta n-5 gc.notify_when_ready)" "<absent>" "a reassigned bead's notice retires unsent"
+eq "$(meta n-6 gc.notify_when_ready)" "<absent>" "an unassigned bead's notice retires unsent"
+has "$(notes n-5)" "no longer assigned to gc-toolkit.mechanik (its assignee is gc-toolkit/gc-toolkit.witness)" "the note says why"
+has "$out" "notices: 1 sent, 4 retired, 2 waiting, 0 left for the next pass, 0 failed (of 7)" "the pass counts its notices"
+eq "$(slings)" "0" "a notice slings nothing"
+# The wait lifts: the next pass sends the notice it held.
+jq -c 'map(if .id == "n-2" then ._ready = true else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+: > "$STUB_MAIL_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(mails)" "1" "once bd reports the waiting bead ready, the next pass sends its notice"
+has "$(cat "$STUB_MAIL_LOG")" "Ready for you: n-2" "naming that bead"
+eq "$(meta n-2 gc.notify_when_ready)" "<absent>" "and retires it"
+
+echo "# a notice whose send fails stays armed and fails the pass, and the slings still run"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+        {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$(STUB_MAIL_RC=1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a notice that cannot be sent fails the pass"
+eq "$(meta n-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "and stays armed for the next pass"
+has "$out" "could not notify gc-toolkit.mechanik that n-1 is ready" "the pass names it"
+eq "$(slings)" "1" "the armed sling still runs"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+        {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "an unreadable notice listing fails the pass, not reading as no notices owed"
+has "$out" "could not enumerate the notices owed" "and says so"
+eq "$(slings)" "1" "the armed sling still runs"
+eq "$(mails)" "0" "and no notice is sent from a listing that was never read"
+
+echo "# a dry run of the notices sends and retires nothing"
+store "$NOTICES"
+out="$("$SUT" reconcile --dry-run 2>&1)"; rc=$?
+eq "$(mails)" "0" "a dry run sends no notice"
+has "$out" "DRY-RUN would notify gc-toolkit.mechanik that n-1 is ready" "it lists the notice a pass would send"
+has "$out" "DRY-RUN would retire the notice on n-3" "and the notice it would retire"
+eq "$(meta n-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "the ready notice stays armed"
+eq "$(meta n-3 gc.notify_when_ready)" "gc-toolkit.mechanik" "and the closed bead's too"
+
+echo "# list shows the notices owed"
+store "$NOTICES"
+out="$("$SUT" list 2>&1)"; rc=$?
+eq "$rc" 0 "list exits 0 with notices owed"
+has "$out" "n-1 -> notice to gc-toolkit.mechanik [READY — the next pass notifies gc-toolkit.mechanik]" "list shows a notice the next pass sends"
+has "$out" "n-2 -> notice to gc-toolkit.mechanik [WAITING — bd does not report it ready yet]" "and one that waits on bd"
+has "$out" "n-8 -> notice to gc-toolkit.mechanik [WAITING — status=deferred, which bd never reports ready]" "and one at a status bd never reports ready"
+has "$out" "n-3 -> notice to gc-toolkit.mechanik [CLOSED" "and a closed bead's"
+has "$out" "n-4 -> notice to gc-toolkit.mechanik [CLAIMED" "and a claimed bead's"
+has "$out" "n-5 -> notice to gc-toolkit.mechanik [MOOT — no longer assigned to gc-toolkit.mechanik" "and a reassigned bead's"
+hasnt "$out" "no pending dispatches" "a store with notices owed is not an empty queue"
+out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" list 2>&1)"; rc=$?
+eq "$rc" 1 "list fails loudly when the notices cannot be read"
 
 # --- the store the reads are pinned to ---------------------------------------
 # `gc bd` resolves its ledger from the invoking rig and ignores BEADS_DIR, so a
@@ -1336,6 +1515,21 @@ eq "$(slings)" "0" "and slings nothing"
 has "$out" "1 left for the next pass" "it counts the bead it left"
 eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "with no attempt counted against its cap"
 
+echo "# past the budget, a ready notice waits for the next pass, which the pass declares"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true}]'
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-notice.json"
+out="$(STUB_CLOCK="$CLOCK" DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-notice.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(mails)" "0" "and sends no notice past its budget"
+eq "$(meta n-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "the notice stays armed"
+has "$out" "left 1 ready notice(s) armed for the next pass: n-1" "the pass names the notice it left"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-notice.json" 2>/dev/null)" "n-1: notice left for the next pass" \
+    "and declares it to the controller"
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(mails)" "1" "the next pass, unpaced, sends it"
+
 echo "# a bead a dead pass left mid-sling, reached past the budget, waits for the next pass's re-attempt"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_slung":"slinging@2026-01-01T00:00:00Z","gc.dispatch_when_ready_fail_count":"1"},"notes":"","_ready":true}]'
 printf '1000\n' > "$CLOCK"
@@ -1486,6 +1680,8 @@ TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
+TMPDIR="$SCRATCH" "$SUT" notify n-1 --agent gc-toolkit.mechanik >/dev/null 2>&1
 LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
