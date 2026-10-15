@@ -234,9 +234,9 @@ noise.
 before/after pairs, resolved on demand during a review rather than injected
 into any prompt. For lessons that are a shape rather than a statement.
 
-Every adopted entry carries an anchor comment, immediately above it in the
-four fragment carriers and in the ledger for `review-rubric`, where its line
-ends with the dimension it amends:
+Every adopted entry carries an anchor comment. In the four fragment carriers
+it sits immediately above the entry. For `review-rubric` it sits in the
+ledger, on a line that ends with the dimension it amends:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
