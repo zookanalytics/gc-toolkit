@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -407,11 +408,18 @@ func unengagedVisit(subject string, sittings []Sitting) bool {
 	// The absence of any open sitting is not un-engagement — there is nothing to
 	// accept-and-dismiss — so it does not restore Accept.
 	for _, s := range sittings {
-		if s.Subject == subject && s.Status == sittingOpen {
+		if s.covers(subject) && s.Status == sittingOpen {
 			return true
 		}
 	}
 	return false
+}
+
+// covers reports whether the sitting's visit covers subject by the shared visit
+// identity: subject is one of [Sitting.Subjects], or is [Sitting.Subject], which
+// Subjects contains whenever the gather resolved it.
+func (s Sitting) covers(subject string) bool {
+	return subject != "" && (s.Subject == subject || slices.Contains(s.Subjects, subject))
 }
 
 // engagedVisit reports whether a live sitting is holding subject's visit right
@@ -423,7 +431,7 @@ func unengagedVisit(subject string, sittings []Sitting) bool {
 // [Tile.VisitState] a row shows are decided by one predicate and cannot drift.
 func engagedVisit(subject string, sittings []Sitting) bool {
 	for _, s := range sittings {
-		if s.Subject != subject {
+		if !s.covers(subject) {
 			continue
 		}
 		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
@@ -2354,10 +2362,13 @@ func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 // anchor — prstatus splits the '@' and applies the hold truthiness itself, so
 // the stored values pass through as they are. An open visit is the visit fact
 // the row's held marker reads ([Facts.Visits]), so the phase and the marker
-// agree. The in-flight count is the one input that differs by row shape: a
-// merge anchor counts its open review/rework children (each names it in
-// [mdAnchorBead]), the set prPhase has always fed; any other bead reads the
-// live-workflow signal standing over its own bead ([Facts.anchorInFlight]).
+// agree. That fact finds a visit's subjects by the shared visit identity, as
+// `gctk pr-status derive` does for the status label, so the phase and the
+// label count the same visits. The in-flight count is the one input that
+// differs by row shape: a merge anchor counts its open review/rework children
+// (each names it in [mdAnchorBead]), the set prPhase has always fed; any other
+// bead reads the live-workflow signal standing over its own bead
+// ([Facts.anchorInFlight]).
 func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	inFlight := openReworkKids
 	if !isMergeAnchor(a) {
@@ -2382,11 +2393,11 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 // only the RENDER collapses, so nothing tooling reads is lost.
 const clusterThreshold = 3
 
-// foldWrappers collapses row-doubling. A visit bead (task_kind=visit, tracking
-// its subject in gc.continuation_group) and a demand bead (gc.demand_for naming
-// the work it gates) each carry gc.routed_to=human, so each is gathered as its
-// OWN human anchor — a second row for an attention item its subject already
-// carries. The doubling is deliberate graph structure (a tracks edge keeps the
+// foldWrappers collapses row-doubling. A visit bead (task_kind=visit, naming
+// its subject by its tracks edge, with the gc.continuation_group stamp as the
+// fallback) and a demand bead (gc.demand_for naming the work it gates) each
+// carry gc.routed_to=human, so each is gathered as its OWN human anchor — a
+// second row for an attention item its subject already carries. The doubling is deliberate graph structure (a tracks edge keeps the
 // visit claimable; beads refuses a parent->descendant blocks edge, forcing the
 // demand to be a sibling), so it cannot be fixed in the graph; the renderer
 // recognises the edges instead.
@@ -2419,11 +2430,17 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	for i := range tiles {
 		idx[tiles[i].ID] = i
 	}
+	// A visit's subject is the one its sitting resolved by the shared visit
+	// identity, so a visit folds onto the bead it holds (Facts.Visits).
+	visitSubject := make(map[string]string, len(f.Sittings))
+	for _, s := range f.Sittings {
+		visitSubject[s.ID] = s.Subject
+	}
 	// A wrapper whose subject is itself a wrapper must not fold onto a row that is
 	// about to be dropped, so decide every drop first, then apply the folds.
 	isWrapper := func(id string) bool {
 		if a, ok := anchorByID[id]; ok {
-			_, _, _, w := wrapperTarget(a)
+			_, _, _, w := wrapperTarget(a, visitSubject)
 			return w
 		}
 		return false
@@ -2437,7 +2454,7 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		seen := map[string]bool{}
 		for cur := start; !seen[cur]; {
 			seen[cur] = true
-			subj, _, _, _ := wrapperTarget(anchorByID[cur])
+			subj, _, _, _ := wrapperTarget(anchorByID[cur], visitSubject)
 			if subj == start {
 				return true
 			}
@@ -2456,7 +2473,7 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		if !ok {
 			continue
 		}
-		subj, ask, kind, ok := wrapperTarget(a)
+		subj, ask, kind, ok := wrapperTarget(a, visitSubject)
 		if !ok {
 			continue
 		}
@@ -2511,15 +2528,21 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 
 // wrapperTarget reports the subject a wrapper row concerns, the ask it carries,
 // and its kind (wrapperVisit or wrapperDemand), or ok=false for an ordinary row.
-// A visit points at its subject through gc.continuation_group; a demand through
-// gc.demand_for. The kind matters at the fold: a demand is not visit presence,
-// so it must not stamp Tile.Held.
-func wrapperTarget(a Anchor) (subject, ask, kind string, ok bool) {
+// A visit's subject is the one its sitting resolved by the shared visit identity
+// (visitSubject, keyed by visit id), and the gc.continuation_group stamp for a
+// visit the gather recorded no sitting for. A demand points at its subject
+// through gc.demand_for. The kind matters at the fold: a demand is not visit
+// presence, so it must not stamp Tile.Held.
+func wrapperTarget(a Anchor, visitSubject map[string]string) (subject, ask, kind string, ok bool) {
 	if a.Metadata == nil {
 		return "", "", "", false
 	}
 	if a.Metadata["task_kind"] == "visit" {
-		if subj := a.Metadata[mdContinuationGroup]; subj != "" {
+		subj, gathered := visitSubject[a.ID]
+		if !gathered {
+			subj = a.Metadata[mdContinuationGroup]
+		}
+		if subj != "" {
 			return subj, visitAsk(a.Title), wrapperVisit, true
 		}
 		return "", "", "", false
@@ -2541,8 +2564,8 @@ const (
 	wrapperDemand = "demand"
 )
 
-// mdContinuationGroup is the visit metadata key naming the subject a visit holds
-// — the same field Facts.Visits keys Tile.Held on.
+// mdContinuationGroup is the visit metadata key stamping the subject a visit
+// holds. The shared visit identity reads it only for a visit with no tracks edge.
 const mdContinuationGroup = "gc.continuation_group"
 
 // visitAsk recovers the human ask from a visit's title. escalate.sh titles a
