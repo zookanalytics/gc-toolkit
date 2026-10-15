@@ -914,9 +914,15 @@ type reviewReads struct {
 // whole closed ledger, and the board would pay for that scan on every render.
 // Its reviews are reported unknown instead, and an anchor whose reviews are
 // unknown fires no stall. A mark read that fails reads as no mark, as it does in
-// bd-lib.sh.
+// bd-lib.sh. The failure is noted partial, where a store without the mark is
+// not, because it silences these anchors' stalls in a store that may be marked.
 func (s *BeadsSource) readReviews(ctx context.Context, g *gatherState, st beadStore, r rigRef, reviewed map[string]bool) reviewReads {
-	if v, err := st.GetConfig(ctx, anchorJoinedKey); err != nil || v == "" {
+	v, err := st.GetConfig(ctx, anchorJoinedKey)
+	if err != nil {
+		g.note(true, []string{"reviews@" + r.name + ": " + err.Error()})
+		return reviewReads{}
+	}
+	if v == "" {
 		return reviewReads{}
 	}
 	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{

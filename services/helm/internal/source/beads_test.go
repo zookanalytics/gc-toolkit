@@ -2549,8 +2549,9 @@ func TestPreOpenLiveReviewWithNoEdgeHoldsItsLane(t *testing.T) {
 // scan its closed ledger to find them, so its reviews are unknown, and an
 // anchor whose reviews are unknown fires no stall. A closed approve that names
 // the anchor and has no edge backs its lane through lane-state.sh, and the board
-// does not report that anchor as a check no review has run. A mark that cannot be
-// read reads as no mark.
+// does not report that anchor as a check no review has run. A store without the
+// mark is a state the gather reads, not a failed read. A mark that cannot be read
+// reads as no mark and is noted partial.
 func TestPreOpenReviewsInAnUnmarkedStore(t *testing.T) {
 	store := func() *fakeStore {
 		return &fakeStore{
@@ -2568,6 +2569,9 @@ func TestPreOpenReviewsInAnUnmarkedStore(t *testing.T) {
 	if !gate.ReviewsUnknown || len(gate.Reviews) != 0 {
 		t.Errorf("an unmarked store's reviews are unknown, not empty: unknown=%v reviews=%v", gate.ReviewsUnknown, reviewIDs(gate))
 	}
+	if res.Partial {
+		t.Errorf("partial errors = %v: a store without the mark is not a failed read", res.PartialErrors)
+	}
 	if got := preOpenNeeds(t, res, "tk-gate"); got == neverReviewed {
 		t.Errorf("needs = %q: the board cannot tell the lane has no review", got)
 	}
@@ -2582,8 +2586,12 @@ func TestPreOpenReviewsInAnUnmarkedStore(t *testing.T) {
 	unreadable := store()
 	unreadable.kv = joinedMark
 	unreadable.failKV = errors.New("config unreadable")
-	if _, gate := gatherPreOpen(t, unreadable, "tk-gate"); !gate.ReviewsUnknown || len(gate.Reviews) != 0 {
+	res, gate = gatherPreOpen(t, unreadable, "tk-gate")
+	if !gate.ReviewsUnknown || len(gate.Reviews) != 0 {
 		t.Errorf("an unreadable mark reads as no mark: unknown=%v reviews=%v", gate.ReviewsUnknown, reviewIDs(gate))
+	}
+	if want := "reviews@gc-toolkit: config unreadable"; !res.Partial || !slices.Contains(res.PartialErrors, want) {
+		t.Errorf("partial=%v errors=%v, want %q among them", res.Partial, res.PartialErrors, want)
 	}
 }
 
