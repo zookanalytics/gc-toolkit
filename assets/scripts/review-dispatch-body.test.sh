@@ -17,7 +17,7 @@
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
 #               triage, demo, arch, pm, and a neutral no-method note for an
-#               undeclared check, which no other check's method stands in for).
+#               undeclared check, judged on its stated purpose).
 #   (READ)      every declared check's section reads its method file from the
 #               pack, never from the reviewing shell's own checkout.
 #   (BOTH)      the formula and check axes coexist in one note.
@@ -122,11 +122,12 @@ hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
 hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
 hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
 hasF "$TMP/arch.out" 'skills/review-arch/SKILL.md' "(CHECK) arch points at its method skill, the way demo and triage do"
-notF "$TMP/arch.out" 'No generic method is declared' "(CHECK) a declared check gets its method, not the no-method note"
+notF "$TMP/arch.out" 'The pack declares no method' "(CHECK) a declared check gets its method, not the no-method note"
 bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
-hasF "$TMP/undeclared.out" 'No generic method is declared' "(CHECK) an undeclared check gets the no-method note, never a guess"
-notF "$TMP/undeclared.out" 'review-correctness' "(CHECK) …which no other check's method stands in for"
-hasF "$TMP/undeclared.out" 'judge the check'"'"'s stated purpose only' "(CHECK) …so the reviewer judges the check's stated purpose only"
+hasF "$TMP/undeclared.out" 'The pack declares no method for the `nonesuch` check' "(CHECK) an undeclared check gets the no-method note, never a guess"
+notF "$TMP/undeclared.out" 'review-correctness' "(CHECK) …and names no other check's method"
+hasF "$TMP/undeclared.out" 'against the check'"'"'s stated purpose: the `purpose` line' "(CHECK) …so the reviewer judges the check's stated purpose"
+notF "$TMP/undeclared.out" 'docs/review-' "(CHECK) …and is not pointed at a rig extension, which a rig need not keep"
 hasF "$TMP/undeclared.out" 'coverage line that the check had no declared method' "(CHECK) …and says so in the coverage line"
 RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"

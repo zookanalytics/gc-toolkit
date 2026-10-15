@@ -230,16 +230,11 @@ M
     ;;
   *)
     cat <<M
-No generic method is declared for the \`$CHECK_NAME\` check in the dispatching
-pack, and no other check's method stands in for one. Follow the review
-formula's steps as written; they carry no check's judgment. Hold the diff to
-the reviewed repo's own method for this check where one exists, its
-\`docs/review-$CHECK_NAME.md\` at the reviewed commit, appended below when
-present. Where none exists, judge the check's stated purpose only: the
-\`purpose\` line of its row in \`review-checks.toml\` at the reviewed commit.
-Say in your verdict's coverage line that the check had no declared method, and
-what you held the diff to instead. An undeclared method is a gap worth an
-observation.
+The pack declares no method for the \`$CHECK_NAME\` check, so judge the diff
+against the check's stated purpose: the \`purpose\` line of its row in
+\`review-checks.toml\` at the reviewed commit. Say in your verdict's
+coverage line that the check had no declared method. An undeclared method is
+a gap worth an observation.
 M
     ;;
 esac
