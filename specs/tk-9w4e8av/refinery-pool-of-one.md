@@ -631,7 +631,7 @@ one. There are four exit classes:
 | **Outcome** | The bead left the refinery's queue for good: merged, gated (pre_open_gate or pull_request), handed back to its anchor, rejected to the polecat pool, or parked by its lifecycle state. | The transition as today, which already clears the claim's pins (section 2), plus an unset of `refinery_attempts` where the bead stays open (below). |
 | **Transient** | Nothing is shown to be wrong with the bead or the rig. A read or write did not land, a branch moved under a race, or the harness refused a command. | Release. The status goes to open, the assignee is cleared, the pins are unset, and the route, which the claim made the refinery's (section 2), is kept. A note names the exit. The queue offers the bead again. |
 | **Person** | The bead asks for a decision only a person can make. | A demand. `gc-helm.sh demand <bead> "<question>" --topic refinery-<exit>` files a native human gate the bead is blocked by (`gc-helm.sh:1525-1555`), and the board shows the question. |
-| **Rig** | Something outside the bead stops it, and would stop the next bead the same way: a pack defect, a rig setup fault, or a process on the host. | A finding. `patrol-finding.sh --scope refinery-findings --key refinery-<exit>` files one bead per fault, deduped on the key. The bead blocks on it. The finding's first reaction routes the fix to a pool, or puts it to the operator. |
+| **Rig** | Something outside the bead stops it, and would stop the next bead the same way: a pack defect, a rig setup fault, or a process on the host. | A finding. `patrol-finding.sh --scope refinery-findings --key refinery-<exit>` files one bead per fault, or one per bead for the two keys that name a bead's own state ("One writer for the waits", below). The bead blocks on it. The finding's first reaction routes the fix to a pool, or puts it to the operator. |
 
 A parked bead keeps its route, which the claim made the refinery's. Its wait is
 an open blocker of its own, which holds it under the shared hold (section 2), so
@@ -710,6 +710,32 @@ block lives in a script, and the step calls it by name.
 The helper refuses to block a bead on itself. The usual fix for a refinery fault
 is the finding bead, and a polecat reworking that finding hands the finding itself
 to the refinery. If its own fault stops it, its wait becomes a demand.
+
+A Rig wait files its finding through `patrol-finding.sh`, which dedups on the key
+and, when `--about` is given, on the bead the finding is about. It refuses a new
+finding that shares its key with a live finding about another bead, unless
+`--distinct` is passed (`siblings`, `patrol-finding.sh:257-273`, applied at
+`:372-396`). Each key takes the flags that give it one finding per thing to fix:
+
+| Key | Flags | One finding per |
+|---|---|---|
+| `refinery-rig-root-unresolved`, `refinery-pack-script-missing`, `refinery-gate-unstoppable`, `refinery-repool-refused` | No `--about` | Fault on the rig. A second bead that meets the fault records an occurrence on the live finding and blocks on the same finding. No refinery filing of these keys names a bead, so the sibling refusal never meets one. Closing the finding offers every bead that waits on it again, which is what fixing a rig fault should do. |
+| `refinery-repeat-unresolved`, `refinery-repool-unfinished` | `--about <bead> --distinct` | Bead. Each names one bead's own state: its exits so far, or the command that finishes its repool. `--distinct` passes the sibling refusal, which would otherwise refuse every bead after the first, and the first reaction has that bead as its subject. Closing a repeat finding offers only its own bead again. An unfinished repool's finding takes no edge (the exit table below). |
+
+The alarm's two keys, `refinery-offers-untaken` and `refinery-offer-unread`, are
+filed without `--about` as well, one finding per rig, and no bead waits on them
+(section 5).
+
+The helper needs the finding's id to write the edge, and `patrol-finding.sh`
+prints the id only inside a sentence (`:362-364`, `:482-484`). Unit 1 gives the
+script a `--print-id` flag, under which its stdout on exit 0 is only the id of
+the bead that tracks the finding, the one it filed or the one it recorded the
+occurrence on. Its other callers, `mol-deacon-patrol`, `mol-witness-patrol`,
+`merge-tail-report.sh` and `pr-facts.sh`, do not pass the flag, so their output
+does not change. A wait the helper cannot write, because the finding or the
+demand does not file or its edge does not read back, becomes a release instead,
+with a note naming the wait it could not write. The attempt count still bounds
+the bead.
 
 ### Every exit and its wait
 
@@ -1104,10 +1130,14 @@ where one speaks the old shape to the other.
    covers release, demand and finding, the attempt count, the edge read-back, the
    self-block refusal, pin clearing, and the unfinished repool's finding, which
    takes no edge. Register `refinery_attempts` in `lifecycle/lifecycle.toml`,
-   naming its writer and the writes that clear it. The test covers each class
-   against a bead held in progress under the alias, a crash count reaching two,
-   a release that keeps the count and a park that clears it, and an edge that
-   fails to land.
+   naming its writer and the writes that clear it. Give `patrol-finding.sh` its
+   `--print-id` flag, with a case in `patrol-finding.test.sh` for a filed
+   finding and for an occurrence. The test covers each class against a bead held
+   in progress under the alias, a crash count reaching two, a release that keeps
+   the count and a park that clears it, and an edge that fails to land. It also
+   covers a second bead that meets a rig fault whose finding is live, which
+   records an occurrence and blocks on that finding, and two beads that reach
+   `refinery-repeat-unresolved`, which get one finding each.
 2. **The refinery pool.** This changes `agents/refinery/agent.toml` (min 0, max 1,
    the claim nudge that runs `assets/scripts/refinery-claim.sh`, and the
    `work_query` and `scale_check` that call `assets/scripts/refinery-offers.sh`),
