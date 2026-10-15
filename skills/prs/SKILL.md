@@ -1,6 +1,6 @@
 ---
 name: prs
-description: Use when something has to happen to an open pull request. Covers answering its review comments (posting a comment, replying in a thread, resolving a thread), sending it back for rework so its branch changes, holding its merge until something is settled, and retiring it (closing the PR because the work moved, is not needed, or is wrong). For work that is not a pull request yet, use work; for a bead that must wait on another, use waits.
+description: Use when something has to happen to an open pull request or its anchor bead. Covers answering its review comments (posting a comment, replying in a thread, resolving a thread), sending it back for rework so its branch changes, holding its merge until something is settled, and retiring it (closing the PR and disposing of its anchor because the work moved, is not needed, or is wrong). For work that is not a pull request yet, use work; for a bead that must wait on another, use waits.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
