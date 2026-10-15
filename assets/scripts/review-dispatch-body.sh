@@ -65,11 +65,11 @@ check method named below governs what you read and judge inside them.
 is no input convoy: REVIEW_BEAD is this bead itself — substitute its id
 wherever the steps derive REVIEW_BEAD from the convoy.
 
-**Do not substitute any other review method.** Do not match a review-shaped
-skill out of your catalog, and do not improvise one. **One agent, single
-pass. No fan-out**: read the diff yourself and write the verdict
-yourself — no subagents, no persona reviewers,
-no parallel review pass.
+**Do not substitute any other review method.** Load the method skill the
+check section below names, and no other review-shaped skill out of your
+catalog; do not improvise one. **One agent, single pass. No fan-out**: read
+the diff yourself and write the verdict yourself — no subagents,
+no persona reviewers, no parallel review pass.
 
 **What to review** is on this bead's metadata: `pr_number` (post-open) or
 `review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
@@ -87,10 +87,11 @@ cat <<'H' | sed "s|__FORMULA__|$FORMULA|g"
 This is a **dispatched signoff review** conducted by the `__FORMULA__`
 formula, attached to this bead at dispatch (`gc sling --on __FORMULA__`). The
 formula's step descriptions ARE the frame — follow the step you hold, in
-order — and the check method named below governs what you read and judge. Do
-not substitute a review-shaped skill from your catalog, and do not improvise a
-verdict path: the formula decides how the review is conducted, how many lanes
-read the diff, and which of its steps makes the single verdict.
+order — and the check method named below governs what you read and judge.
+Load the method skill the check section names and no other review-shaped
+skill from your catalog, and do not improvise a verdict path: the formula
+decides how the review is conducted, how many lanes read the diff, and
+which of its steps makes the single verdict.
 
 **Recovery:** if you hold this bead with no poured workflow, run
 `gc formula show __FORMULA__` and follow its steps in order.
@@ -135,21 +136,22 @@ exactly once; never `gh pr review`, because the city does not approve its own PR
 S
     ;;
 esac
-# A declared arm sets METHOD_FILE, the pack path the read block below resolves.
-METHOD_FILE=""
+# A declared arm names its method skill, which the reviewer loads from its
+# skill catalog (below).
+METHOD_SKILL=""
 case "$CHECK_NAME" in
   correctness)
-    METHOD_FILE=skills/review-correctness/SKILL.md
+    METHOD_SKILL=review-correctness
     cat <<'M'
-`skills/review-correctness/SKILL.md`. The standing correctness review: judge
-whether the change is correct and safe as merged. The method reads the whole
-diff, settles its test evidence, works its What to check list, grades every
-finding P0, P1 or P2 with its location, and adds a Verification line to the
-verdict. This is the concern, not a tool — no reviewer is presumed.
+The standing correctness review: judge whether the change is correct and safe
+as merged. The method reads the whole diff, settles its test evidence, works
+its What to check list, grades every finding P0, P1 or P2 with its location,
+and adds a Verification line to the verdict. This is the concern, not a tool —
+no reviewer is presumed.
 M
     ;;
   triage)
-    METHOD_FILE=skills/review-triage/SKILL.md
+    METHOD_SKILL=review-triage
     cat <<'M'
 Classify, do not judge. Whether the change is correct is the `correctness`
 check's question and it is dispatched separately. Yours is narrower: which
@@ -163,8 +165,8 @@ the anchor's check_set:
     signoff.sh --review-bead <this bead> --verdict approve --add-gates <check>[,<check>]
 
 Widening is monotonic and `signoff.sh` enforces it: you cannot remove a check,
-and only a triage verdict may add one. See `skills/review-triage/SKILL.md` for
-the method. Correctness findings are the `correctness` check's, not yours.
+and only a triage verdict may add one. Correctness findings are the
+`correctness` check's, not yours.
 
 When bringing the branch current conflicted, the same verdict also rules on
 that round. Read its account (`bring-current-audit.sh render --anchor <anchor>
@@ -181,10 +183,10 @@ naming that call in `--round-reason`, on the same call:
 M
     ;;
   demo)
-    METHOD_FILE=skills/review-demo/SKILL.md
+    METHOD_SKILL=review-demo
     cat <<'M'
-`skills/review-demo/SKILL.md`. The visual review: decide whether this change
-needs a visual to be understood, then deliver the cheapest one that conveys it.
+The visual review: decide whether this change needs a visual to be understood,
+then deliver the cheapest one that conveys it.
 Need comes first. Triage added this check because the diff touches a surface a
 person sees; confirm that seeing the change explains it better than reading the
 diff. When it does not, approve with a one-line note and attach nothing. When it
@@ -203,7 +205,7 @@ the operator decide, is `pm`'s.
 M
     ;;
   arch)
-    METHOD_FILE=skills/review-arch/SKILL.md
+    METHOD_SKILL=review-arch
     cat <<'M'
 The Architect — steward and gatekeeper of the repo's high-level architecture.
 Read the architecture reference docs before you judge: `docs/architecture.md`
@@ -214,16 +216,16 @@ architecture — if so, whether that move is justified and recorded in the
 architecture docs in this same PR. The verdict is binary: approve when the
 change fits, request changes otherwise (a moved architecture whose matching doc
 update is not in the PR, or a move a design fitting the current architecture
-would not have needed). `skills/review-arch/SKILL.md` carries the full method.
+would not have needed).
 M
     ;;
   pm)
-    METHOD_FILE=skills/review-pm/SKILL.md
+    METHOD_SKILL=review-pm
     cat <<'M'
-`skills/review-pm/SKILL.md`. The product lens: judge whether the change is the
-right thing for the people the product serves — the outcome its anchor named,
-not a proxy — against the product goals (`docs/product-goals.md`, which names
-who they are), then whether the PR lets the operator decide. Push back when the
+The product lens: judge whether the change is the right thing for the people
+the product serves — the outcome its anchor named, not a proxy — against the
+product goals (`docs/product-goals.md`, which names who they are), then
+whether the PR lets the operator decide. Push back when the
 diff does what its bead said but not what those people need. Whether the change
 needs a visual, and delivering it, is `demo`'s; your only visual concern is a
 change the operator must see to trust that the PR gives them nothing to look at.
@@ -263,26 +265,14 @@ M
     ;;
 esac
 
-if [ -n "$METHOD_FILE" ]; then
-  sed "s|__METHOD__|$METHOD_FILE|g" <<'R'
+if [ -n "$METHOD_SKILL" ]; then
+  cat <<R
 
-**The method is pack content.** Read it from the pack this city installs,
-never from the review worktree:
-
-```bash
-# >>> review-method-read
-# The pack's script candidates, less the shell's own checkout: in a review
-# shell that is the reviewed worktree, which holds the branch's own copy of the
-# method in gc-toolkit and no copy in another rig.
-METHOD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -r "$c/__METHOD__" ] && { METHOD="$c/__METHOD__"; break; }
-done
-cat "${METHOD:?__METHOD__ not found in the pack}"
-# <<< review-method-read
-```
-
-A rig's extension to this method is read from the reviewed commit instead, and
-is appended below when that commit carries one.
+**Your method is the \`$METHOD_SKILL\` skill.** Load it from your skill catalog,
+which links the copy in the pack this city installs. A copy in the review
+worktree is the change under review, not your method. A rig's extension to the
+method comes from the reviewed commit instead, and is appended below when that
+commit carries one.
 R
 fi
 

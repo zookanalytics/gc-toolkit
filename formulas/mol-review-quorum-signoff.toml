@@ -94,17 +94,17 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the file
-the check section of the review bead's dispatch note names, read from the pack
-by that note's `review-method-read` block; for the correctness check it is
-`skills/review-correctness/SKILL.md`. A lane has the pins from step 1 and the
-diff, `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the
-frame the method's blocks assume: no review workspace and no keepalive. So a
-lane reads what the method reads and judges as the method does, and runs
-nothing the method runs, anywhere: not at the reviewed commit and not against
-the pre-change code. The synthesis step runs all of that once for the quorum,
-and a finding that depends on its result is the synthesis's to confirm. Record
-a mutation baseline with `git status --porcelain=v1 -z` before and after and
+**2. Apply the check's method to the diff, read-only.** The method is the skill
+the check section of the review bead's dispatch note names, loaded from your
+skill catalog; for the correctness check it is the `review-correctness` skill.
+A lane has the pins from step 1 and the diff,
+`git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
+the method's blocks assume: no review workspace and no keepalive. So a lane
+reads what the method reads and judges as the method does, and runs nothing the
+method runs, anywhere: not at the reviewed commit and not against the
+pre-change code. The synthesis step runs all of that once for the quorum, and a
+finding that depends on its result is the synthesis's to confirm. Record a
+mutation baseline with `git status --porcelain=v1 -z` before and after and
 report any delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
@@ -161,17 +161,17 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the file
-the check section of the review bead's dispatch note names, read from the pack
-by that note's `review-method-read` block; for the correctness check it is
-`skills/review-correctness/SKILL.md`. A lane has the pins from step 1 and the
-diff, `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the
-frame the method's blocks assume: no review workspace and no keepalive. So a
-lane reads what the method reads and judges as the method does, and runs
-nothing the method runs, anywhere: not at the reviewed commit and not against
-the pre-change code. The synthesis step runs all of that once for the quorum,
-and a finding that depends on its result is the synthesis's to confirm. Record
-a mutation baseline with `git status --porcelain=v1 -z` before and after and
+**2. Apply the check's method to the diff, read-only.** The method is the skill
+the check section of the review bead's dispatch note names, loaded from your
+skill catalog; for the correctness check it is the `review-correctness` skill.
+A lane has the pins from step 1 and the diff,
+`git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
+the method's blocks assume: no review workspace and no keepalive. So a lane
+reads what the method reads and judges as the method does, and runs nothing the
+method runs, anywhere: not at the reviewed commit and not against the
+pre-change code. The synthesis step runs all of that once for the quorum, and a
+finding that depends on its result is the synthesis's to confirm. Record a
+mutation baseline with `git status --porcelain=v1 -z` before and after and
 report any delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as

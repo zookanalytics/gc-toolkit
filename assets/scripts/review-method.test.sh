@@ -80,6 +80,8 @@ echo "# the correctness method is its own file, beside the other checks' methods
 METHOD_REL=$("$CHECKS" --file "$INDEX" --check correctness | cut -f2)
 eq "$METHOD_REL" "skills/review-correctness/SKILL.md" "(METHOD) the correctness row points at its own method file"
 METHOD="$ROOT/$METHOD_REL"
+# The skill a reviewer loads from its catalog: the method file's directory name.
+METHOD_SKILL=$(basename "$(dirname "$METHOD_REL")")
 [ -r "$METHOD" ] && ok "(METHOD) the correctness method ships" || bad "(METHOD) $METHOD_REL is missing"
 eq "$(sed -n 's/^name: //p' "$METHOD" | head -1)" "review-correctness" "(METHOD) its skill name matches its directory"
 hasF "$METHOD" '## What to check' "(METHOD) it carries the What to check list"
@@ -138,10 +140,11 @@ echo "# the quorum's lanes apply the check's method"
 # flat <file> : the file's prose on one line, so a pinned phrase may wrap.
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 for lane in review-lane-one review-lane-two; do
-  hasF "$TMP/quorum.$lane.txt" "$METHOD_REL" "(QUORUM) $lane names the correctness method"
+  hasF "$TMP/quorum.$lane.txt" "\`$METHOD_SKILL\` skill" "(QUORUM) $lane names the correctness method skill"
   notF "$TMP/quorum.$lane.txt" "'s \`review\` step" "(QUORUM) $lane points at no mol-review review step"
   flat "$TMP/quorum.$lane.txt" > "$TMP/quorum.$lane.flat"
-  hasF "$TMP/quorum.$lane.flat" 'read from the pack by that note'"'"'s `review-method-read` block' "(QUORUM) $lane reads the method from the pack"
+  hasF "$TMP/quorum.$lane.flat" 'loaded from your skill catalog' "(QUORUM) $lane loads the method skill from its catalog"
+  notF "$TMP/quorum.$lane.txt" 'review-method-read' "(QUORUM) …and names no read block"
   hasF "$TMP/quorum.$lane.flat" 'no review workspace and no keepalive' "(QUORUM) $lane names what of the frame a lane lacks"
   hasF "$TMP/quorum.$lane.flat" 'runs nothing the method runs, anywhere: not at the reviewed commit and not against the pre-change code' \
     "(QUORUM) $lane runs nothing anywhere"

@@ -104,11 +104,11 @@ also why a method extension is a plain repository file rather than a skill: a
 skill loads from the installed catalog, which cannot be pinned to the diff's
 commit.
 
-The method file an index row names is not read from the reviewed commit. It is
-pack content, and the dispatch note's `review-method-read` block reads it from
-the pack the city installs. Read at the reviewed commit, a change to a method
-would be judged by the change itself, and a rig other than gc-toolkit would
-find no method at all.
+The method an index row names is not read from the reviewed commit. It is a
+pack skill, and the dispatch note has the reviewer load it from its skill
+catalog, where gascity links every pack skill from the pack the city installs.
+Read at the reviewed commit, a change to a method would be judged by the
+change itself, and a rig other than gc-toolkit would find no method at all.
 
 ## Summary
 

@@ -2,7 +2,7 @@
 # Hermetic test for review-dispatch-body.sh — the dispatch note carried by
 # every signoff review bead. No live city, Dolt, network, or PRs.
 # The lifecycle lives in formulas/mol-review.toml, attached at dispatch, and
-# each check's method in the file its check section names; the note's job is
+# each check's method in the skill its check section names; the note's job is
 # to NAME both, state the recovery path for a bead with no poured workflow, and
 # forbid substituting any other method — the fan-out drift a bare title invites
 # (a bead with only a title lets the reviewer pick a method out of its own
@@ -10,7 +10,8 @@
 # Covered:
 #   (NAME)      names mol-review and its formula file path.
 #   (RECOVER)   states the no-poured-workflow recovery (gc formula show).
-#   (NOOTHER)   forbids substituting another review method.
+#   (NOOTHER)   forbids substituting another review method: the one skill to
+#               load is the method the check section names.
 #   (NOFANOUT)  forbids subagents / persona reviewers / parallel passes.
 #   (GATE)      one signoff.sh call; never gh pr review --approve.
 #   (RC)        exits 0: a dispatch is never blocked on prose.
@@ -20,8 +21,10 @@
 #               this pack has no arm for: its purpose, printed from the
 #               reviewed commit's index, or the declared-nowhere note when
 #               no row declares it).
-#   (READ)      every declared check's section reads its method file from the
-#               pack, never from the reviewing shell's own checkout.
+#   (SKILL)     every declared check's section names its method skill, which
+#               the reviewer loads from its skill catalog, and names no method
+#               path to read from a checkout; the pack ships each named skill
+#               under that name.
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
@@ -57,6 +60,8 @@ hasF "$OUT" 'formulas/mol-review.toml' "(NAME) names the formula's file path"
 hasF "$OUT" 'gc formula show mol-review' "(RECOVER) states the no-poured-workflow recovery command"
 hasF "$OUT" 'REVIEW_BEAD is this bead itself' "(RECOVER) tells the recovery agent the bead IS the review bead (no convoy to derive from)"
 hasF "$OUT" 'Do not substitute any other review method' "(NOOTHER) forbids substituting another method"
+hasF "$OUT" 'Load the method skill the' "(NOOTHER) …so the one skill to load is the method the check section names"
+hasF "$OUT" 'no other review-shaped skill out of your' "(NOOTHER) …and no other review-shaped skill from the catalog"
 hasF "$OUT" 'No fan-out' "(NOFANOUT) forbids fan-out"
 hasF "$OUT" 'no persona reviewers' "(NOFANOUT) forbids persona reviewers"
 hasF "$OUT" 'no parallel review pass' "(NOFANOUT) forbids a parallel review pass"
@@ -103,7 +108,7 @@ hasF "$TMP/tri.out" 'only when the round made a call that is the operator' "(CHE
 notF "$TMP/tri.out" 'whether the human approval still covers it' "(CHECK) …not whenever the approval predates the round"
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
-hasF "$TMP/demo.out" 'skills/review-demo/SKILL.md' "(CHECK) demo names its method skill"
+hasF "$TMP/demo.out" 'Your method is the `review-demo` skill.' "(CHECK) demo names its method skill"
 hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides need first"
 hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
 hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
@@ -115,7 +120,7 @@ notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an u
   || bad "(CHECK) skills/review-demo/SKILL.md missing — the note names a method the pack does not ship"
 bash "$SCRIPT" --check-name pm > "$TMP/pm.out" 2>/dev/null
 hasF "$TMP/pm.out" '## Check: `pm`' "(CHECK) --check-name pm names the pm check"
-hasF "$TMP/pm.out" 'skills/review-pm/SKILL.md' "(CHECK) pm names its method skill"
+hasF "$TMP/pm.out" 'Your method is the `review-pm` skill.' "(CHECK) pm names its method skill"
 hasF "$TMP/pm.out" 'product lens' "(CHECK) pm carries the product lens"
 hasF "$TMP/pm.out" 'needs a visual, and delivering it, is `demo`'"'"'s' "(CHECK) pm leaves the visual decision to demo"
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
@@ -123,7 +128,7 @@ hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arc
 hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
 hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
 hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
-hasF "$TMP/arch.out" 'skills/review-arch/SKILL.md' "(CHECK) arch points at its method skill, the way demo and triage do"
+hasF "$TMP/arch.out" 'Your method is the `review-arch` skill.' "(CHECK) arch names its method skill, the way demo and triage do"
 notF "$TMP/arch.out" 'this pack ships no method' "(CHECK) a declared check gets its method, not the no-method note"
 notF "$TMP/arch.out" 'declared nowhere' "(CHECK) …nor the declared-nowhere note"
 # Run outside any repository, so no index declares the check.
@@ -136,7 +141,7 @@ RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
 
 echo "# correctness names its method file, which carries the test evidence and every suite run"
-hasF "$OUT" 'skills/review-correctness/SKILL.md' "(CHECK) correctness names its method skill, the way the other checks do"
+hasF "$OUT" 'Your method is the `review-correctness` skill.' "(CHECK) correctness names its method skill, the way the other checks do"
 [ -r "$ROOT/skills/review-correctness/SKILL.md" ] \
   && ok "(CHECK) the correctness method skill ships where the note points" \
   || bad "(CHECK) skills/review-correctness/SKILL.md missing — the note names a method the pack does not ship"
@@ -146,39 +151,21 @@ for c in plain tri demo pm arch undeclared; do
   notF "$TMP/$c.out" 'hb bash -c' "(EVIDENCE) the $c note runs no suite"
 done
 
-echo "# every declared check reads its method file from the pack"
-# block <note> : the review-method-read block a note carries, as a script.
-block() { awk '/^# >>> review-method-read$/ {f = 1} f {print} /^# <<< review-method-read$/ {f = 0}' "$1"; }
+echo "# every declared check names its method skill, loaded from the skill catalog"
 for c in correctness triage demo arch pm; do
   for formula in mol-review mol-review-quorum-signoff; do
-    bash "$SCRIPT" --formula "$formula" --check-name "$c" > "$TMP/read.$formula.$c.out" 2>/dev/null
-    block "$TMP/read.$formula.$c.out" > "$TMP/read.$formula.$c.sh"
-    grep -qF -- "/skills/review-$c/SKILL.md" "$TMP/read.$formula.$c.sh" \
-      && ok "(READ) the $c note under $formula reads its method file from the pack" \
-      || bad "(READ) the $c note under $formula carries no read block for skills/review-$c/SKILL.md"
+    bash "$SCRIPT" --formula "$formula" --check-name "$c" > "$TMP/skill.$formula.$c.out" 2>/dev/null
+    hasF "$TMP/skill.$formula.$c.out" "Your method is the \`review-$c\` skill." "(SKILL) the $c note under $formula names its method skill"
+    hasF "$TMP/skill.$formula.$c.out" 'Load it from your skill catalog,' "(SKILL) …which the reviewer loads from its skill catalog"
+    notF "$TMP/skill.$formula.$c.out" 'skills/review-' "(SKILL) …and names no method path a reviewer would read from a checkout"
+    notF "$TMP/skill.$formula.$c.out" '>>> review-method-read' "(SKILL) …and carries no read block"
   done
+  # The catalog lists a pack skill by its frontmatter name and links it by its
+  # directory name, so the pack ships the named skill under both.
+  name=$(awk '/^---$/ {n++; next} n == 1 && /^name:/ {sub(/^name:[[:space:]]*/, ""); print; exit}' "$ROOT/skills/review-$c/SKILL.md" 2>/dev/null)
+  eq "$name" "review-$c" "(SKILL) the pack ships skills/review-$c under the name the note gives it"
 done
-[ -z "$(block "$TMP/undeclared.out")" ] && ok "(READ) an undeclared check names no method file to read" \
-  || bad "(READ) the undeclared note carries a read block"
-# The block runs from a reviewed worktree that holds the branch's own copy of
-# the method: the copy the pack installs is the one read, wherever it sits.
-RW="$TMP/reviewed"; PACK="$TMP/pack"; RIG="$TMP/rig"; OTHER="$TMP/other-rig"; CITY="$TMP/city"
-mkdir -p "$RW/skills/review-correctness" "$PACK/skills/review-correctness" "$RIG/skills/review-correctness" "$OTHER" "$CITY/rigs/gc-toolkit/skills/review-correctness"
-git -C "$RW" init -q
-echo 'BRANCH-COPY' > "$RW/skills/review-correctness/SKILL.md"
-echo 'PACK-COPY' > "$PACK/skills/review-correctness/SKILL.md"
-echo 'RIG-COPY' > "$RIG/skills/review-correctness/SKILL.md"
-echo 'CITY-COPY' > "$CITY/rigs/gc-toolkit/skills/review-correctness/SKILL.md"
-READ_SH="$TMP/read.mol-review.correctness.sh"
-# read_in <GC_RIG_ROOT> <GC_CITY_PATH> : what the block prints, run from the reviewed worktree.
-read_in() { ( cd "$RW" && env -u GC_PACK_DIR GC_RIG_ROOT="$1" GC_CITY_PATH="$2" bash "$READ_SH" 2>/dev/null ) || true; }
-eq "$(read_in "$RIG" "$CITY")" "RIG-COPY" "(READ) in gc-toolkit the rig checkout's copy is read, not the reviewed worktree's"
-eq "$(read_in "$OTHER" "$CITY")" "CITY-COPY" "(READ) under another rig the city's pack copy is read, not the reviewed worktree's"
-eq "$(cd "$RW" && GC_PACK_DIR="$PACK" GC_RIG_ROOT="$RIG" GC_CITY_PATH="$CITY" bash "$READ_SH" 2>/dev/null)" "PACK-COPY" \
-  "(READ) GC_PACK_DIR, where it is set, is read first"
-RCR=0; ( cd "$RW" && env -u GC_PACK_DIR GC_RIG_ROOT="$OTHER" GC_CITY_PATH="$TMP/no-city" bash "$READ_SH" ) > "$TMP/read.miss.out" 2>&1 || RCR=$?
-[ "$RCR" -ne 0 ] && ok "(READ) a pack with no copy fails the read" || bad "(READ) a pack with no copy read something"
-notF "$TMP/read.miss.out" 'BRANCH-COPY' "(READ) …and never falls back to the reviewed worktree's copy"
+notF "$TMP/undeclared.out" 'Your method is the' "(SKILL) an undeclared check names no method skill"
 
 echo "# both axes coexist: a quorum formula plus a named check emits both sections"
 bash "$SCRIPT" --formula mol-review-quorum-signoff --check-name triage > "$TMP/both.out" 2>/dev/null
