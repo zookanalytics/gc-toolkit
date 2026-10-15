@@ -5,8 +5,8 @@
 # operator's steering moves. The board itself is `helm-svc board`
 # (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
-# write verbs open, engage, react, takeaway, demand, park, dismiss, accept, and
-# the read-only resolve and unplaced. open, engage and react take a <subject>
+# write verbs open, engage, react, takeaway, demand, park, priority, dismiss,
+# accept, and the read-only resolve and unplaced. open, engage and react take a <subject>
 # (a bead id, a PR number or URL, or a superseded id) and resolve it to the
 # live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
@@ -14,13 +14,14 @@
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
 # converse and the proactive worker (takeaway), converse (demand), the
-# placement sitting (unplaced), operators by hand.
+# placement sitting (unplaced), operators by hand (park, priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
 # pour stamp a release leaves on a bead held for placement / an unplaced list
-# missing a store that did not answer),
+# missing a store that did not answer / a priority move that did not read
+# back),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own visit instead of
@@ -57,6 +58,8 @@ Usage:
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
+  gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
+  gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
@@ -152,6 +155,19 @@ load-context), because the bead's own edge would hold its merge, and it
 refuses a demand gate as the bead to wait on. Closing the gate releases the
 park; removing one bead's edge (gc bd dep remove <bead> <gate>) releases that
 bead alone.
+
+priority moves where work queues (docs/steering.md). A bead's priority is the
+priority of the bead it follows plus its own shift: a member follows its most
+urgent parent, PR-finishing work its anchor, and a workflow's convoy, root and
+steps the bead they were poured for. A P-value sets a bead that follows
+nothing, and is refused on a bead that follows something, naming the shift
+that would land it there; --shift sets a bead that follows a parent or an
+anchor, and is refused on a bead that follows nothing. A workflow's convoy,
+root or step takes no priority of its own. The move then writes every bead
+that follows the bead, held beads included, their live workflows and their
+anchors' PR-finishing work, leaves claimed beads as they are, and reads it
+all back (assets/scripts/queue-priority.sh move). --dry-run prints what it
+would write.
 
 dismiss is the operator's explicit "end this sitting". It closes the subject's
 open visit, which is what holds a converse sitting's pane up; converse-reap
@@ -325,6 +341,9 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 . "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
     || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# The priority move's writer, which owns the priority function and the store's
+# priority lock.
+QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
 # from what `gc session new converse-<model>` resolves. Both are overridable so
@@ -1956,6 +1975,37 @@ cmd_park() {
     echo "held, not started: ${held:-$bead}"
     [ -z "$flight" ] || echo "in flight, keeps running: $flight"
     [ -z "$poured" ] || echo "poured before the park, not held by it: $poured. Load-context reads no ancestor's blockers, so each workflow runs."
+}
+
+# ── Verb: priority ───────────────────────────────────────────────────
+# priority <bead-id> <P0-P4> | --shift <±n> [--dry-run] — the operator's
+# priority move (docs/steering.md). queue-priority.sh move does the work under
+# the store's priority lock: it sets the bead's own input, writes every bead
+# that follows it, held ones included, their live workflows and their anchors'
+# PR-finishing work, leaves claimed beads as they are, and reads it all back.
+# This verb names the store the bead lives in and relays the answer: a refusal
+# exits 2 with nothing written, and a write that did not land exits 4. A move
+# that fails can fail after it wrote some of its beads, so every exit but a
+# refusal busts the board cache.
+cmd_priority() {
+    [ $# -gt 0 ] || { echo "$PROG: priority needs <bead-id> and a priority, P0 to P4, or --shift <±n>" >&2; usage; exit 2; }
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -*) echo "$PROG: priority needs <bead-id> first, then P0 to P4 or --shift <±n>" >&2; exit 2 ;;
+    esac
+    bead="$1"
+    path=$(rig_path_for_bead "$bead")
+    if [ -z "$path" ] || [ ! -d "$path/.beads" ]; then
+        echo "$PROG: priority: no rig's store holds '$bead': its prefix names no rig with a .beads store. Nothing was written." >&2
+        exit 4
+    fi
+    _pr_rc=0
+    "$QUEUE_PRIORITY_TOOL" move "$@" --db "$path/.beads" || _pr_rc=$?
+    case "$_pr_rc" in
+        0) bust_cache; exit 0 ;;
+        2) exit 2 ;;
+        *) bust_cache; exit 4 ;;
+    esac
 }
 
 # ── Verb: resolve ────────────────────────────────────────────────────
@@ -4362,9 +4412,10 @@ case "${1:-}" in
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     park)          shift; cmd_park "$@" ;;
+    priority)      shift; cmd_priority "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, priority, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

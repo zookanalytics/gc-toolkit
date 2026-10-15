@@ -1203,6 +1203,23 @@ keys = ["placement"]
 #   marker left on a placed bead names no wait. Absent means intake never held
 #   the bead. No pack writer clears it. A string.
 
+[metadata.priority]
+# The priority flow (docs/steering.md): a bead's priority is the priority of the
+# bead it follows plus its own shift, computed by assets/scripts/priority-lib.sh,
+# and the bd priority field holds the result, because a claim reads that field
+# and a pour copies it once.
+keys = ["priority_shift"]
+# priority_shift — the bead's shift from the bead it follows: +1 is one level
+#   later and -1 one level sooner, and each level stops at P0 and P4. Written by
+#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
+#   back there. Read by priority-lib.sh wherever a priority is computed:
+#   queue-priority.sh settle, its move and its reconcile pass. Read only on a
+#   bead that follows a parent or an anchor: a workflow's convoy, root and steps
+#   carry no shift, and a bead that follows nothing has nothing to shift from.
+#   Absent or empty reads as 0. A value that is not a signed integer makes the
+#   bead unreadable, and every bead that follows it, so no priority is computed
+#   from it. No pack writer clears it. A signed integer, stored as a number.
+
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
 # a successor bead or a duplicate is folded into a survivor. The pointer is how a
