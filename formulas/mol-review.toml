@@ -13,7 +13,7 @@ Hard rules, in force for every step:
   after one succeeded.
 - Never close the review bead by hand — signoff.sh disposes of it.
 - Never close, edit, or route the anchor bead; signoff.sh owns every write
-  your verdict implies (artifact, check.<gate> marker, rework child).
+  your verdict implies (artifact, the review bead's close, rework child).
 - No code fixes, however small: a fix belongs in the rework child a
   request-changes verdict files.
 - A pre-open verdict is replayed verbatim as the PR's opening comment, so
@@ -448,9 +448,10 @@ and human). **request-changes** — at least one P0 or P1, each with its
 required fix.
 
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
-past your judgment: posting the artifact, stamping `check.<gate>` with
-read-back, filing the finding set from `findings.json` beside one slung rework
-child on request-changes, and refusing a pin the branch no longer carries:
+past your judgment: posting the artifact, closing the review bead with your
+verdict and reading it back, filing the finding set from `findings.json` beside
+one slung rework child on request-changes, and refusing a pin the branch no
+longer carries:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')

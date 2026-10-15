@@ -207,8 +207,8 @@ needs = ["review-lane-one", "review-lane-two"]
 description = """
 Combine the two lanes into one verdict and hand it to signoff.sh — once — then
 close the chain and drain. This is the ONE verdict per claim: signoff.sh owns
-the artifact, the check.<gate> marker, the finding beads from findings.json,
-the rework child, and the COMMENT-only posting. You add none of that; you
+the artifact, the review bead's close with the verdict, the finding beads from
+findings.json, the rework child, and the COMMENT-only posting. You add none of that; you
 decide the verdict and call signoff.sh exactly once.
 
 **1. Re-derive the review bead and its pins** (each step is its own shell),
