@@ -1465,10 +1465,10 @@ have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
 have "…and re-states the wait on the SUBJECT when it does not (cut-short consolidation)" \
      '"$HELM" demand "$SUBJECT" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
-have "the work skill states the sibling rule for everything a sitting files" \
-     'beside the bead it came from, never under it' "$SK_WORK"
+have "the work skill states that new work is never filed under the bead it came from" \
+     'Never file it under the bead it came from' "$SK_WORK"
 have "…and the prompt names it where it points every act at the skills" \
-     'sits beside the subject, never under it' "$PROMPT"
+     'nothing a sitting files sits under the subject' "$PROMPT"
 
 # THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
 # it requires someone to come back, read a sentence, and hand-clear a field.

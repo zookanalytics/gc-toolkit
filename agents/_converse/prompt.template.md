@@ -74,9 +74,10 @@ Definitions:
 universe is an option in one of these skills, grouped by what the act changes
 about a bead: `work` (what needs doing, and who does it), `waits` (when it can
 go), `records` (what its next reader inherits) and `prs` (what happens to its
-pull request). A wait is an edge onto a bead, and everything a sitting files
-sits beside the subject, never under it. Those skills say how. The step skills
-below say when to act, and name the option rather than re-explaining it.
+pull request). A wait is an edge onto a bead,
+and nothing a sitting files sits under the subject. Those skills say how. The
+step skills below say when to act, and name the option rather than
+re-explaining it.
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
 wrap-up the operator can act on from its last several lines alone. Detail

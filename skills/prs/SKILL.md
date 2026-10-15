@@ -79,7 +79,7 @@ The gate-visit sweep then files a visit, so the operator is asked.
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
 needs the PR on main to do its own work. Make the follow-up wait on the anchor
-instead (the waits skill), and file it beside the anchor (the work skill).
+instead (the waits skill), and never file it under the anchor (the work skill).
 
 ## Retire it
 

@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig, as a sibling of the bead it came from, sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent, never under the bead it came from, sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -21,11 +21,15 @@ written in a fresh shell.
 A new bead says that work needs doing. Filing it starts nothing: send it, make
 it wait, or leave it for placement.
 
-- **File it beside the bead it came from, never under it.** Give it that bead's
-  own parent, or no parent when it has none. `"$(gc gc-toolkit scripts-dir)/converse-parent.sh" <bead>`
-  prints the parent, or an empty line. bd refuses a `blocks` edge from a parent
-  to its own descendant, so a child could never gate the bead it came from.
-  Work already filed under the bead it came from stays where it is.
+- **Never file it under the bead it came from.** bd refuses a `blocks` edge
+  from a parent to its own descendant, so a child could never gate the bead it
+  came from. Work already filed under the bead it came from stays where it is.
+- **Give it a parent only when one applies.** A parent makes the bead a member
+  of that epic: a park on the epic holds it, and the epic's priority ranks it.
+  The parent of the bead it came from applies only when the new work serves the
+  same epic. This prints that parent, or an empty line:
+  `"$(gc gc-toolkit scripts-dir)/converse-parent.sh" <bead>`. When no epic
+  applies, give the bead no parent.
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig with `--rig <rig>`.
 - **Hold it for placement unless intake admits it.** A bead may be routed or
@@ -34,9 +38,15 @@ it wait, or leave it for placement.
   by hand or by Accept. Any other bead carries `placement=pending` in its create
   and no route or arm, and the placement sitting places it (`docs/steering.md`).
 
-Writer: `gc bd create "<title>" -t task --parent <parent> -d "<what needs doing, why, and what done looks like>" --json`,
-with `--metadata '{"placement":"pending"}'` added when intake does not admit it.
-The description is the contract the worker reads.
+Writer:
+
+```bash
+gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
+```
+
+Add `--parent <epic>` when an epic applies, and
+`--metadata '{"placement":"pending"}'` when intake does not admit it. The
+description is the contract the worker reads.
 
 ## Send a bead to a pool on a formula
 
@@ -68,8 +78,8 @@ carries the work:
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then sling the subject. The sling clears that human route.
   `--route <rig>/<pool>` would route the subject raw as well, a second dispatch.
-- **New work carries it, and the subject waits for it.** File the work beside
-  the subject, send it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
+- **New work carries it, and the subject waits for it.** File the work, send
+  it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
   The board shows the subject as a ruling in flight until the work lands, then
   as settled. A `--route <rig>/<pool>` here would have that pool claim the
   subject itself once the work lands, a conversation seed no worker can close.
