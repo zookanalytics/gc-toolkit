@@ -14,7 +14,9 @@
 #     text from an earlier version of a formula calls: it hands the call to
 #     run-cancel.sh and reads or writes no bead itself;
 #   * OWN STEP: every run-cancel.sh --step call names the step it sits in, so a
-#     decline cancels the run this shell is executing and no other;
+#     decline cancels the run this shell is executing and no other, and every
+#     held-work-gate.sh call names the step it sits in and re-pours the formula
+#     it sits in;
 #   * OPEN VISIT: every await-ruling.sh call follows an escalation that runs
 #     with escalate.sh's verdict window off, or bring-current-audit.sh's ask,
 #     because a wait needs an open visit and the window files none for a
@@ -96,6 +98,40 @@ PY
   done
 else
   echo "skip - own-step check: $TOML_PY"
+fi
+
+# The held-work gate cancels the run of the step it is handed and arms a re-sling
+# of the formula it is handed, so each call names its own step and formula.
+if TOML_PY="$(tomllib_python)"; then
+  for f in mol-polecat-work mol-design-convoy; do
+    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY2'
+import re, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+formula = d.get("formula", "")
+bad = []
+calls = 0
+for st in d.get("steps", []):
+    for line in st.get("description", "").splitlines():
+        if not re.search(r'held-work-gate\.sh" --', line):
+            continue
+        calls += 1
+        step = re.search(r'--step "?([^"` ,]+)', line)
+        form = re.search(r'--formula "?([^"` ,]+)', line)
+        if not step or step.group(1) != formula + "." + st["id"]:
+            bad.append("%s names step %s" % (st["id"], step.group(1) if step else "none"))
+        if not form or form.group(1) != formula:
+            bad.append("%s re-pours %s" % (st["id"], form.group(1) if form else "nothing"))
+print("%d|%s" % (calls, "; ".join(bad)))
+PY2
+)
+    case "$out" in
+      0\|*) bad "$f: no held-work-gate.sh call found" ;;
+      *\|) ok "$f: each of its ${out%%|*} held-work-gate.sh calls names the step and formula it sits in" ;;
+      *) bad "$f: a held-work gate names another step or formula: ${out#*|}" ;;
+    esac
+  done
+else
+  echo "skip - held-work gate own-step check: $TOML_PY"
 fi
 
 # --- 2b. A wait sits on an open visit. ------------------------------------------
