@@ -118,10 +118,15 @@ echo "── every required field is checked (fail closed on a missing one) ─�
 ( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x bash "$SUT" "reason" >/dev/null 2>&1 ); is "a missing SUBJECT is refused" "$?" "2"
 ( PATH="$BIN:$PATH" LOG="$LOG" VISIT=v-x SUBJECT=tk-sub bash "$SUT" >/dev/null 2>&1 ); is "a missing reason is refused" "$?" "2"
 
-echo "── the converse role prompt wires this script (doctrine and tool do not drift) ──"
+echo "── the work skill wires this script (doctrine and tool do not drift) ──"
+# Withdrawing a recommendation is an option in the pack-wide work skill, and the
+# converse prompt's rule points there for it.
+WORK_SKILL="$REPO/skills/work/SKILL.md"
 PROMPT="$REPO/agents/_converse/prompt.template.md"
-has "the prompt names converse-invalidate-recommendation.sh" \
-    'converse-invalidate-recommendation.sh' "$PROMPT"
+has "the work skill names converse-invalidate-recommendation.sh" \
+    'converse-invalidate-recommendation.sh' "$WORK_SKILL"
+has "the prompt's recommendation rule points at the work skill" \
+    'withdraw it (the `work` skill' "$PROMPT"
 
 echo
 echo "converse-invalidate-recommendation: $PASS passed, $FAIL failed"

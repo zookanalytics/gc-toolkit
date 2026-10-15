@@ -66,6 +66,9 @@ SK_PREP="$REPO/skills/converse-prep/SKILL.md"                # steps 3–4
 SK_HOLD="$REPO/skills/converse-hold/SKILL.md"                # step 5
 SK_SETTLE="$REPO/skills/converse-settle/SKILL.md"            # steps 6–7
 SK_CONTINUE="$REPO/skills/converse-continue/SKILL.md"        # step 8
+# The acts a sitting performs on a ruling are options in the pack-wide skills
+# the step table points at; a pin on an act reads the skill that carries it.
+SK_WORK="$REPO/skills/work/SKILL.md"
 
 PASS=0
 FAIL=0
@@ -98,7 +101,7 @@ eq() {
 }
 
 for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" \
-    "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
+    "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE" "$SK_WORK"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
         exit 1
@@ -1462,8 +1465,10 @@ have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
 have "…and re-states the wait on the SUBJECT when it does not (cut-short consolidation)" \
      '"$HELM" demand "$SUBJECT" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
-have "the prompt states the sibling rule for everything a sitting files" \
-     'SIBLING of the subject, never a' "$PROMPT"
+have "the work skill states the sibling rule for everything a sitting files" \
+     'beside the bead it came from, never under it' "$SK_WORK"
+have "…and the prompt names it where it points every act at the skills" \
+     'sits beside the subject, never under it' "$PROMPT"
 
 # THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
 # it requires someone to come back, read a sentence, and hand-clear a field.

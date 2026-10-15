@@ -5,18 +5,14 @@ description: Converse's record, sign-off, and visit close (safety-critical).
 
 # Steps 6–7 — Record, sign off, and close the visit
 
-`$CONV`, `$VISIT`, and `$SUBJECT` are resolved in step 1's claim block;
-`$PARENT` is the subject's own parent, read with `converse-parent.sh` as the
-prompt's opening Definitions describe. Run these once the operator has
-replied to the held sitting (step 5).
+`$CONV`, `$VISIT`, and `$SUBJECT` are resolved in step 1's claim block. Run
+these once the operator has replied to the held sitting (step 5).
 
 ## 6. Record
 
-Append the sitting's outcome to the subject:
-`gc bd update $SUBJECT --append-notes "<decision, rationale, what
-changed>"`. If the notes have grown past a quick read, refresh a
-`## Current state` block at the top: current position, decisions in
-force, open questions.
+Record the sitting's outcome on the subject: the decision, its rationale, and
+what changed, with a current-state block once the notes run past a quick read
+(the `records` skill).
 
 ## 7. Sign off, then close the visit — only when nothing important is still pending
 
@@ -76,12 +72,10 @@ that one is theirs to close.
 
 **On a `--ruled yes` sign-off whose subject is an open PR
 (`merge_result=pull_request`), answer whether the ruling changes what the
-branch must contain.** Pass `--rework` when it does: the PR still reads
-review-ready against a head that predates the ruling. It files the rework
-demand a review verdict would file, a fix unit that blocks the subject
-anchor and resumes its branch, sourced by this visit, and returns every
-review lane to unreviewed, so the whole branch is re-reviewed once the
-rework lands. Pass `--no-rework` when the branch stands as it is. Given neither on an open-PR subject, the
+branch must contain.** Pass `--rework` when it does, since the PR still reads
+review-ready against a head that predates the ruling (the `prs` skill,
+sending it back for rework). Pass `--no-rework` when the branch stands as it
+is. Given neither on an open-PR subject, the
 sign-off refuses and writes nothing, because a ruling whose rework is
 never filed lands only in notes nothing reads while the stale PR keeps
 reading ready. The rework files before the sign-off writes
@@ -90,8 +84,8 @@ and the script exits non-zero. No trace is written and every demand this
 sitting filed still stands, so a merge hold you took still holds the PR.
 Re-run once the cause is repaired, and the re-run adopts a child an
 earlier attempt filed. `--rework` applies only to an open-PR subject. On
-any other subject, file the ruling's consequence as work the way the
-routing rule below says, and re-run without `--rework`.
+any other subject, file the ruling's consequence as work (the `work`
+skill), and re-run without `--rework`.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),
@@ -125,24 +119,18 @@ what it settled.
 # refuses while the visit is not closed, so the reminder never leads the close.
 "$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
 ```
-**If this sitting ROUTED work, file that work as a SIBLING of the
-subject** (`--parent "$PARENT"`, read as at the top of the prompt)
-**and pass `--waiting-on <work-bead>` to the sign-off for each bead it
-slung.** The takeaway alone cannot carry it: *waiting and holding are
+**If this sitting ROUTED work, file and send it as the `work` skill says,
+and pass `--waiting-on <work-bead>` to the sign-off for each bead it
+sent.** The takeaway alone cannot carry it: *waiting and holding are
 graph states, not comments.* An edge that will not take warns on stderr
 and the takeaway still lands.
 
-**A follow-up you file that is itself BLOCKED — it cannot run until
-another bead lands — is ARMED, not left unrouted.** Slinging it now is
-wrong (it is blocked), and leaving it unrouted to route once the blocker
-closes is the come-back-later that keeps you or a person on the hook.
-Wire its blocker as a `blocks` edge, then arm it so the blocker closing
-routes it for you:
-`deferred-dispatch.sh arm <follow-up> --target <rig>/<agent> --reason
-"waits for <blocker>"` (resolve the script the way the blocks in step 1
-resolve `gc-helm.sh`). Then the sitting can queue everything and close.
-A blocked work bead left with no route and no arm is the debt
-`doctor/check-blocked-work-armed` flags.
+**A follow-up that cannot run until another bead lands is ARMED, not left
+unrouted** (the `waits` skill). Slinging it now is wrong, because it is
+blocked, and leaving it to route once the blocker closes is the
+come-back-later that keeps you or a person on the hook. Armed, it routes
+itself when the blocker closes, and the sitting can queue everything and
+close.
 
 **A recorded wait is also the return trip.** Once every recorded wait
 closes, the subject returns through the liveness sweep

@@ -98,6 +98,13 @@ convention documentation, and beads dispatched to polecats.
 
 ## Dispatch doctrine: an owned convoy is the PR unit
 
+Each act of asking for work is an option in a skill: `work` (filing, sending a
+bead on a formula, choosing the formula, stopping work, closing a bead that
+needs no work), `waits` (blocks edges, demands on a person, arms, releases),
+`records` (notes and the board headline) and `prs` (review answers, rework,
+merge holds, retiring a PR). This section adds the convoy shape a mechanik
+dispatch takes.
+
 The default shape for any PR-bearing dispatch is an **owned convoy** that
 anchors the PR — and its rework — to landed: a lone bead is the one-child
 convoy, a multi-bead initiative the many-child convoy. The convoy stays open
@@ -159,7 +166,7 @@ branch. A child slung without the stamp, whose reported parent is not the
 convoy, is held at workspace-setup before any branch is cut.
 
 A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
-and "Choosing a design-convoy" below is the test for one. The molecule runs the
+and choosing the formula in the `work` skill is the test for one. The molecule runs the
 same branch cut from a pool session, then files the design child and, under the
 design-gated default, arms implementation behind the design's approval. Sling it
 on an initiative bead in the rig's store:
@@ -185,29 +192,6 @@ own target or, when it names none, from its convoy's target.
 branch by itself, with no convoy above it. Catching this shape is a dispatch
 judgment here, not a downstream gate, so seed the artifact on the convoy's
 integration branch as above.
-
-
-## Choosing a design-convoy
-
-A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
-one initiative. A design child lands its doc on the convoy's integration branch,
-implementation builds there, and the whole unit graduates to the default branch
-as one reviewed PR. Choose the route for a follow-up by asking, in order:
-
-1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
-   or decision the operator owns, with nothing to build, has nothing to
-   dispatch.
-2. Does the work need a design settled before or beside the build, and is it
-   large or high-blast-radius enough that one holistic review beats scattered
-   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
-   unit and the design gate catches a wrong shape before it is built. No: a
-   plain work bead on the default one-child convoy, one PR to the default
-   branch.
-
-`design_gated` defaults to `true`, which holds implementation until the operator
-approves the design's PR. `docs/design-convoy.md` describes the gates and when
-all-in-one (`--var design_gated=false`) fits.
-
 
 ## Scope-miss recovery: amend the open PR
 
