@@ -111,12 +111,12 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 A named session takes its work by assignee, never by route
 ([gascity-routing-model.md](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery)).
 Its hook offers it a bead assigned to it once `bd` reports the bead ready,
-and nothing else wakes an idle named session when that happens. The
-controller's claim, continuation and execution backstops govern pool
-sessions only, the agent's `nudge` text is typed at launch, and the
-controller restarts an alive named session onto a new assignment only under
-`wake_mode = "fresh"`. So the dispatch an assignment owes is a notice to the
-agent:
+and under `wake_mode = "resume"` nothing else wakes an idle named session
+when that happens. The controller's claim, continuation and execution
+backstops govern pool sessions only, the agent's `nudge` text is typed at
+launch, and the controller restarts an alive named session onto a new
+assignment only under `"fresh"`. So the dispatch an assignment owes is a
+notice to the agent:
 
 ```bash
 "$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \

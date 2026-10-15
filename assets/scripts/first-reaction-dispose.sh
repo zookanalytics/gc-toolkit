@@ -161,10 +161,10 @@ Usage:
   route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
   it takes --assign gc-toolkit.mechanik. Refused unless the agent is a
   registered named session whose hook reads this bead's store
-  (tools/gc-proactive.sh assignable). The agent is then told, because nothing
-  else wakes an idle named session for a new assignee: deferred-dispatch.sh
-  notify mails it the bead id at once when bd reports the bead ready, and
-  otherwise arms the notice to go when bd does.
+  (tools/gc-proactive.sh assignable). The agent is then told, because under
+  wake_mode = "resume" nothing else wakes an idle named session for a new
+  assignee: deferred-dispatch.sh notify mails it the bead id at once when bd
+  reports the bead ready, and otherwise arms the notice to go when bd does.
   --then-assign (blocked) assigns the held bead to a named agent in the same
   release. Its hook offers the bead once the wait lifts, and the notice
   deferred-dispatch.sh notify arms tells the agent then, not before.
@@ -906,13 +906,15 @@ stamp_landed() {
 }
 
 # ── A named agent hears about the bead it was assigned ───────────────
-# An assignment wakes nobody. A named session's hook offers it a bead by its
-# assignee once bd reports the bead ready, and nothing restarts or nudges an
-# idle named session for a new assignee: the controller's claim, continuation
-# and execution backstops govern pool sessions only, and the agent's own nudge
-# text is typed at launch. So the exit that assigns asks deferred-dispatch.sh
-# notify to tell the agent, by the identity gc-proactive.sh assignable checked
-# above. The mail goes at once when bd reports the bead ready, the actionable
+# An assignment by itself wakes nobody. A named session's hook offers it a
+# bead by its assignee once bd reports the bead ready, and the agent reads its
+# hook only in a turn: at launch, when the operator types, or when a nudge
+# arrives. The controller's claim, continuation and execution backstops govern
+# pool sessions only, and its restart of an alive named session onto a new
+# assignment runs only under wake_mode = "fresh", so under "resume" nothing
+# gives an idle agent that turn. So the exit that assigns asks
+# deferred-dispatch.sh notify to tell the agent, by the identity
+# gc-proactive.sh assignable checked above. The mail goes at once when bd reports the bead ready, the actionable
 # exit's case. Otherwise the notice is recorded for the deferred-dispatch pass
 # to send once bd does, the blocked exit's case, since a notice sent while the
 # bead still waits would wake the agent for a bead its hook does not offer yet.

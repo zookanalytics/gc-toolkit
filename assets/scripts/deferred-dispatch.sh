@@ -21,12 +21,13 @@
 #
 # Work assigned to a named agent owes a notice, not a sling (`notify`). A named
 # session's hook offers it a bead by the bead's assignee once bd reports the
-# bead ready, and nothing wakes an idle named session into that hook when a wait
-# lifts. So `notify` mails the agent at once when bd already reports the bead
-# ready, and otherwise records the notice on the bead for `reconcile` to send
-# when bd does. A notice waits on bd's readiness, the predicate the hook reads,
-# and not on hold-lib.sh's: a bead bd keeps unready is one the hook does not
-# offer, and a notice then would wake the agent for nothing.
+# bead ready, and under wake_mode = "resume" nothing wakes an idle named session
+# into that hook when a wait lifts. So `notify` mails the agent at once when bd
+# already reports the bead ready, and otherwise records the notice on the bead
+# for `reconcile` to send when bd does. A notice waits on bd's readiness, the
+# predicate the hook reads, and not on hold-lib.sh's: a bead bd keeps unready is
+# one the hook does not offer, and a notice then would wake the agent for
+# nothing.
 #
 # `arm` is the default move for a blocked follow-up you file or keep back by
 # hand: arm it instead of leaving it unrouted for someone to route once its
@@ -35,8 +36,8 @@
 # The bead resolves by id, so the arm lands from any seat, rig-scoped or not.
 # Callers: agents sequencing dependent work; first-reaction-dispose.sh
 # --then-route (arm) and --assign/--then-assign (notify); the deferred-dispatch
-# order. doctor/check-blocked-work-armed
-# flags a blocked work bead that was never armed and carries no route.
+# order. doctor/check-blocked-work-armed flags a blocked work bead that was
+# never armed and carries no route.
 #
 # Per-bead best-effort (one bad bead never skips the rest; the next cooldown
 # retries), but a failure to ENUMERATE exits non-zero — an unreadable queue
@@ -202,11 +203,12 @@ Verbs:
   notify     Tell <named-agent> that <bead>, assigned to it, is ready for its
              hook: gc mail send --notify, which requests the agent's turn and
              wakes it when it is not running, with the bead id in the mail.
-             Nothing else wakes an idle named session for a new assignee. The
-             mail goes at once when bd reports the bead ready; otherwise the
-             notice is recorded on the bead and reconcile sends it once bd
-             does. The bead must be assigned to <named-agent>. A closed bead,
-             or one the agent already claimed, owes no notice and exits 0.
+             Under wake_mode = "resume" nothing else wakes an idle named
+             session for a new assignee. The mail goes at once when bd
+             reports the bead ready; otherwise the notice is recorded on the
+             bead and reconcile sends it once bd does. The bead must be
+             assigned to <named-agent>. A closed bead, or one the agent
+             already claimed, owes no notice and exits 0.
   disarm     Remove a pending dispatch, and any notice owed. The bead is left
              otherwise untouched.
   list       Show every armed bead in this store and whether it is held (and
@@ -782,9 +784,9 @@ sling_bead() { # id target args_json -> rc
 # Any other notice waits for bd to report its bead ready. A notice starts under
 # the bound a sling starts under, only while the pass budget has a sling's
 # allowance left. Notices run ahead of the slings, because a send is one mail
-# and a sling can take a minute. Sets NOTICE_FAILED and NOTICE_LEFT_IDS for the pass's exit and its outcome
-# declaration; an enumeration that fails counts as a failure, so the pass still
-# slings and then exits non-zero.
+# and a sling can take a minute. Sets NOTICE_FAILED and NOTICE_LEFT_IDS for the
+# pass's exit and its outcome declaration; an enumeration that fails counts as a
+# failure, so the pass still slings and then exits non-zero.
 NOTICE_FAILED=0
 NOTICE_LEFT_IDS=()
 reconcile_notices() {
