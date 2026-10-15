@@ -53,17 +53,25 @@ blocks the anchor, which holds the merge, and a polecat resumes the PR's own
 branch, so the PR keeps its history.
 
 Writer: `rework-child.sh`, the one writer of a rework child that a ruling or a
-review verdict sends. A sitting reaches it through the sign-off,
-`converse-signoff.sh --ruled yes --rework` (the converse-settle step), which
-also returns every review lane to unreviewed so the whole branch is reviewed
-again once the rework lands. A review verdict reaches it through the reviewer's
-own sign-off.
+review verdict sends. A sitting reaches it through its sign-off, by adding
+`--rework` to the `--ruled yes` call (the converse-settle step), which also
+returns every review lane to unreviewed so the whole branch is reviewed again
+once the rework lands. A review verdict reaches it through the reviewer's own
+sign-off.
 
 Scope found while the PR is open, with no ruling behind it, rides a supplement
-bead instead. It carries the PR's `branch`, `existing_pr` and `target`, written
-before it is routed to the polecat pool, so the polecat commits onto the PR's
-branch and the PR gains the commits. Replace a PR only when its implementation
-is wrong, never because it is incomplete.
+bead instead. Its create carries the PR's `branch`, `existing_pr` and `target`,
+so they are set before it is sent to the polecat pool, and the polecat commits
+onto the PR's branch and the PR gains the commits:
+
+```bash
+SUP=$(gc bd create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
+  --metadata '{"branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id')
+gc sling <rig>/<pool> "$SUP"
+```
+
+Replace a PR only when its implementation is wrong, never because it is
+incomplete.
 
 ## Hold its merge
 
@@ -97,7 +105,12 @@ closed with no disposition recorded reads as abandoned, and the reconcile files
 a visit asking what to do with it.
 
 In a sitting, retire a PR only on the operator's ruling, after the sign-off,
-and close the visit right after it
-(`"$(gc gc-toolkit scripts-dir)/pr-dispose.sh" ... && "$(gc gc-toolkit scripts-dir)/visit-close.sh" ...`). The sitting's open
-visit holds the anchor's close (`docs/finalize-gate.md`), so the reconcile
-closes the anchor once the visit is closed.
+and close the visit right after it:
+
+```bash
+"$(gc gc-toolkit scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <visit> --kind not-needed --note "<why, one sentence>" \
+  && "$(gc gc-toolkit scripts-dir)/visit-close.sh" --visit <visit> --outcome "<one-word-outcome>" --reason "<one line: why this sitting closed>"
+```
+
+The sitting's open visit holds the anchor's close (`docs/finalize-gate.md`), so
+the reconcile closes the anchor once the visit is closed.

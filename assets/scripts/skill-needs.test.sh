@@ -22,8 +22,8 @@
 # The same file pins the skills' shape: each names its neighbors, keeps
 # converse's vocabulary out of its description, and calls every writer as the
 # pack's own copy through the pack command `gc gc-toolkit scripts-dir`. It pins
-# that command, and that the converse steps name its options rather than
-# re-explain them.
+# that command, and that the converse steps give the exact command for each act
+# they name while the skills explain the act once.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc.
@@ -195,7 +195,7 @@ for sh_ in $shells; do
     fi
 done
 
-echo "── the converse steps name an option and leave its how to the skill ──"
+echo "── a step that names an act gives its exact command, and the skill explains it once ──"
 lacks() {
     if grep -qF -- "$2" "$3"; then bad "$1" "$4"; else ok "$1"; fi
 }
@@ -203,19 +203,33 @@ have() {
     if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi
 }
 have "the step table points acting on a ruling at the skills" '`work`, `waits`, `records`, `prs`' "$PROMPT"
-lacks "the prompt no longer re-explains the disposition writer" 'bead-rehome.sh --origin' "$PROMPT" \
-    "closing a no-work bead is the work skill's option; the prompt names it"
-lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-routing' "$PROMPT" \
-    "choosing the formula is the work skill's option"
-lacks "the settle step no longer re-explains the arm" 'deferred-dispatch.sh arm' "$SETTLE" \
-    "the arm is the waits skill's option; the step names it"
-have "the settle step points routed work at the work skill" 'as the `work` skill says' "$SETTLE"
+have "the record step gives the append it runs" 'gc bd update "$SUBJECT" --append-notes' "$SETTLE"
+have "the settle step gives the create and the sling for routed work" 'gc sling <rig>/<pool> "$WORK" --on <formula>' "$SETTLE"
+have "the settle step gives the subject's parent lookup" 'converse-parent.sh" "$SUBJECT"' "$SETTLE"
+have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
+have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
+have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
+have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
+have "the prompt gives the call that asks for a visit" 'gc-helm.sh" open <bead>' "$PROMPT"
+have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
+for f in "$PROMPT" "$SETTLE"; do
+    missing=""
+    for w in $(grep -oE '"\$CONV/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u); do
+        [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
+    done
+    [ -z "$missing" ] && ok "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" \
+        || bad "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" "missing:$missing"
+done
+# The skill descriptions every agent sees already say what each skill covers,
+# so a prompt says it once or not at all, and no prompt singles out one formula.
 lacks "the mechanik prompt does not restate the skills" 'Each act of asking for work is an option in a skill' "$MECHANIK" \
     "the skill descriptions reach the mechanik at session start"
 lacks "the mechanik prompt does not single out a design-first initiative" 'design-first initiative' "$MECHANIK" \
     "choosing a formula is the work skill's option"
 lacks "the converse prompt does not single out a design-convoy" 'design-convoy included' "$PROMPT" \
     "choosing a formula is the work skill's option"
+lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-routing' "$PROMPT" \
+    "choosing the formula is the work skill's option"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
 lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
     "a formula's own doc says when it fits and how to tune it"

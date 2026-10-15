@@ -27,10 +27,16 @@ Writer: `gc bd update <bead> --append-notes "<decision or finding, the reason, w
 Notes are append-only. `--notes` replaces the whole field and erases every
 note other writers left there, so never use it.
 
-When the notes have grown past a quick read, append a block headed
-`## Current state (<date>)`: where things stand, the decisions in force, and the
-open questions. The newest current-state block is the one in force, so a reader
-starts there.
+When the notes have grown past a quick read, append a current-state block:
+where things stand, the decisions in force, and the open questions. The newest
+current-state block is the one in force, so a reader starts there:
+
+```bash
+gc bd update <bead> --append-notes "## Current state ($(date -u +%Y-%m-%d))
+<where things stand>
+Decisions in force: <each decision in force>
+Open questions: <each open question, or none>"
+```
 
 A bead's notes are operational state. A durable document, such as a spec, an
 analysis or a decision record, is a file in a repo, filed through the

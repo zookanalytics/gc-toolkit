@@ -72,8 +72,8 @@ Definitions:
 
 **A sitting asks for work; it does not do it.** Every act a sitting takes on
 the subject's universe is an option in the `work`, `waits`, `records` or `prs`
-skill, which says what the act means and who acts on it. The step skills below
-say when to act, and name the option rather than re-explaining it. A wait is an
+skill, which says what the act means and who acts on it. Wherever this prompt
+or a step skill names an act, it gives the exact command to run. A wait is an
 edge onto a bead, and nothing a sitting files sits under the subject.
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
@@ -286,8 +286,12 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. Every post on the PR carries the city's mark, as
-  the `prs` skill says. What you never do is change a repository. Never
+  threads; and retire it. Every post on the PR goes through `pr-post.sh`,
+  which adds the city's mark (the `prs` skill):
+  `"$CONV/pr-post.sh" reply --host github.com --thread <PRRT_ id> --body-file <file>`
+  in a review thread, and
+  `"$CONV/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`
+  on the conversation. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.
@@ -344,18 +348,38 @@ Rules:
   have agreed, in this sitting, that the subject should close; what the ruling
   licenses then follows the subject's state. A **no-work** subject closes
   through the disposition writer (the `work` skill, closing a bead that needs
-  no work). A subject whose **in-flight PR** the ruling is to close is
+  no work), with this sitting's visit as the evidence:
+
+  ```bash
+  gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op
+  "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>"
+  ```
+
+  While this visit is open, the writer records the pointer and exits 5. Run
+  the same `bead-rehome.sh` line again once step 7 has closed the visit, and
+  it closes the subject. When another bead carries the work, that bead is the
+  successor, under `--kind duplicate`, `folded`, `re-homed` or
+  `fixed-upstream`. A subject whose **in-flight PR** the ruling is to close is
   **retired**: the PR is closed and the anchor disposed as superseded in one
-  act (the `prs` skill). A non-closed `merge_result` such as `pull_request` or
-  `pre_open_gate` does not bar the ruling; the only bar is a repo change, which
-  routes to a molecule.
+  act (the `prs` skill). Retire it after the sign-off, and close the visit
+  right after it:
+
+  ```bash
+  "$CONV/pr-dispose.sh" --anchor "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>" \
+    && "$CONV/visit-close.sh" --visit "$VISIT" --outcome "<one-word-outcome>" --reason "<one line: why this sitting closed>"
+  ```
+
+  A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does
+  not bar the ruling; the only bar is a repo change, which routes to a
+  molecule.
 - **Invalidating a recommendation: strip it, never edit it in place.** A
   first-reaction visit can carry a recommendation, `gc.recommended_formula` on
   the subject. When the sitting judges that recommendation no longer the right
   course but the subject still needs discussion, withdraw it (the `work` skill,
-  stopping or redirecting work). Where the ruling is that the subject itself
-  should go, dispose of it instead, which closes its gate, and a closed gate
-  offers no Accept.
+  stopping or redirecting work):
+  `SUBJECT="$SUBJECT" VISIT="$VISIT" "$CONV/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
+  Where the ruling is that the subject itself should go, dispose of it
+  instead, which closes its gate, and a closed gate offers no Accept.
 - **What reaches the operator is the point where the OPERATOR is needed
   for a judgment — not judgment as such, and never work.** Driving a
   judgment is yours: gather the evidence, do the analysis, frame the
@@ -368,11 +392,12 @@ Rules:
   see it — that gap is a bead to file in its own right, and filing it is
   the sitting's output. Handing a person something a mol could have done
   spends the attention this role exists to protect.
-- **Action needed: route it through a formula.** Choose the formula and send
-  the work on it as the `work` skill says, naming the formula you chose when
-  you frame the choice. Wire the wait as step 7 says.
+- **Action needed: route it through a formula.** Choose the formula (the
+  `work` skill), name it when you frame the choice, and send the work on it:
+  `gc sling <rig>/<pool> <bead> --on <formula>`. Wire the wait as step 7 says.
 - **Another subject needs a sitting:** ask for a visit on it (the `waits`
-  skill).
+  skill):
+  `"$CONV/gc-helm.sh" open <bead> --reason "<what this visit needs>" --body "<the brief the sitting reads>"`.
 
 
 ## Context discipline

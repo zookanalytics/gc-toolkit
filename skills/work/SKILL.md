@@ -31,7 +31,8 @@ it wait, or leave it for placement.
   `"$(gc gc-toolkit scripts-dir)/converse-parent.sh" <bead>`. When no epic
   applies, give the bead no parent.
 - **File it in the store of the pool that will work it.** A pool reads only its
-  own rig's store, so a city-scoped session names the rig with `--rig <rig>`.
+  own rig's store, so a city-scoped session names the rig:
+  `gc bd --rig <rig> create`.
 - **Send it now when intake admits it, and hold only the rest.** Epics are how
   the operator steers which work runs, and membership is one of four ways in
   (`docs/steering.md`). A bead goes to a pool now when it is a member of an
@@ -82,8 +83,9 @@ its wait is released (the converse-settle step), so first decide which bead
 carries the work:
 
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
-  then sling the subject. The sling clears that human route.
-  `--route <rig>/<pool>` would route the subject raw as well, a second dispatch.
+  then send the subject: `gc sling <rig>/<pool> <subject> --on <formula>`. The
+  sling clears that human route. `--route <rig>/<pool>` would route the
+  subject raw as well, a second dispatch.
 - **New work carries it, and the subject waits for it.** File the work, send
   it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
   The board shows the subject as a ruling in flight until the work lands, then
@@ -145,8 +147,10 @@ The message is that work already sent should stop, or go somewhere else.
   stops the run beneath the bead and leaves the bead open, unassigned and
   routed to no pool, with that sentence as its headline. When the bead now
   waits on something, pass `--waiting-on <bead>` in place of `--no-wait`.
-- **Send it elsewhere.** The same release with `--route <rig>/<pool>` hands it
-  to a pool, or with `--assign <named-agent>` to a named agent, in one write.
+- **Send it elsewhere.** The same release names where it goes, in one write:
+  `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
+  For a named agent, pass `--assign <named-agent>` in place of
+  `--route <rig>/<pool>`.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
   `SUBJECT=<bead> VISIT=<visit> "$(gc gc-toolkit scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
@@ -183,7 +187,7 @@ already closed by hand, the same writer adds the missing pointer.
   `gc bd close` on a bead whose `merge_result` is not a closed state leaves its
   PR unlanded. Check the shape yourself: the doctor exempts a disposed bead, so
   nothing downstream checks it again.
-- Disarm an armed bead first, with `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead>`,
-  so a wait released before the close lands cannot send it.
+- Disarm an armed bead first, so a wait released before the close lands cannot
+  send it: `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 
 `docs/state-machine.md` ("Disposition") is the doctrine.

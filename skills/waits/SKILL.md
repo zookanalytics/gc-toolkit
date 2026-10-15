@@ -101,8 +101,9 @@ limits arming too (the work skill).
   sign-off's `--ruled yes` resolves the demands its hold filed and releases a
   `held` bead (the converse-settle step).
 - **An arm no longer wanted:** `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
-- **A park** (`gc-helm.sh park`) is released by closing its gate, or for one
-  bead by `gc bd dep remove <bead> <gate>` (`docs/steering.md`).
+- **A park** (`gc-helm.sh park`) is released by closing its gate,
+  `gc bd close <gate>`, or for one bead by `gc bd dep remove <bead> <gate>`
+  (`docs/steering.md`).
 
 Release a bead's wait before you send it (the work skill): a worker builds
 nothing that still waits.

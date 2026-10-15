@@ -10,9 +10,20 @@ these once the operator has replied to the held sitting (step 5).
 
 ## 6. Record
 
-Record the sitting's outcome on the subject: the decision, its rationale, and
-what changed, with a current-state block once the notes run past a quick read
-(the `records` skill).
+Append the sitting's outcome to the subject's notes: the decision, its
+rationale, and what changed (the `records` skill). Notes are append-only, so
+never pass `--notes`, which replaces them:
+```bash
+gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
+```
+When the notes have grown past a quick read, append a current-state block too.
+The newest one is the one in force, and step 4 primes from it:
+```bash
+gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
+<where things stand>
+Decisions in force: <each decision in force>
+Open questions: <each open question, or none>"
+```
 
 ## 7. Sign off, then close the visit — only when nothing important is still pending
 
@@ -37,7 +48,7 @@ demands the hold filed — the conversation wait on the visit, and any explicit
 merge hold on the anchor; you tell it what this sitting settled. It resolves
 each demand gate when the sitting settled the question (`--ruled yes`, with the
 `--ruling` it resolves with and the `--route` the subject itself is released
-to, which the `work` skill helps you choose)
+to, chosen as below)
 and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
@@ -71,6 +82,13 @@ starts shut, so `--ruled no` re-states the wait rather than dropping it;
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
 
+**On `--ruled yes`, the `--route` follows which bead carries the work** (the
+`work` skill says why):
+- **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
+  then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
+- **New work carries it.** File and send that work (below), then sign off
+  with `--ruled yes --route human --waiting-on <the work>`.
+
 **On a `--ruled yes` sign-off whose subject is an open PR
 (`merge_result=pull_request`), answer whether the ruling changes what the
 branch must contain.** Pass `--rework` when it does, since the PR still reads
@@ -85,8 +103,8 @@ and the script exits non-zero. No trace is written and every demand this
 sitting filed still stands, so a merge hold you took still holds the PR.
 Re-run once the cause is repaired, and the re-run adopts a child an
 earlier attempt filed. `--rework` applies only to an open-PR subject. On
-any other subject, file the ruling's consequence as work (the `work`
-skill), and re-run without `--rework`.
+any other subject, file and send the ruling's consequence as work (below),
+and re-run without `--rework`.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),
@@ -120,18 +138,31 @@ what it settled.
 # refuses while the visit is not closed, so the reminder never leads the close.
 "$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
 ```
-**If this sitting ROUTED work, file and send it as the `work` skill says,
-and pass `--waiting-on <work-bead>` to the sign-off for each bead it
-sent.** The takeaway alone cannot carry it: *waiting and holding are
-graph states, not comments.* An edge that will not take warns on stderr
-and the takeaway still lands.
+**If this sitting ROUTED work, file and send it, then pass
+`--waiting-on <work-bead>` to the sign-off for each bead it sent.** The
+`work` skill says which bead carries the work and how to choose its formula:
+```bash
+WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -r '.id')
+gc sling <rig>/<pool> "$WORK" --on <formula>
+```
+Never file it under the subject. Add `--parent <epic>` to the create only when
+the work belongs to that epic. The subject's own parent,
+`"$CONV/converse-parent.sh" "$SUBJECT"`, applies only when the new work serves
+the same epic. Run the create as `gc bd --rig <rig> create` when the pool's
+rig is not this session's. The takeaway alone cannot carry the wait: *waiting
+and holding are graph states, not comments.* An edge that will not take warns
+on stderr and the takeaway still lands.
 
 **A follow-up that cannot run until another bead lands is ARMED, not left
 unrouted** (the `waits` skill). Slinging it now is wrong, because it is
 blocked, and leaving it to route once the blocker closes is the
-come-back-later that keeps you or a person on the hook. Armed, it routes
-itself when the blocker closes, and the sitting can queue everything and
-close.
+come-back-later that keeps you or a person on the hook. Make it wait on the
+blocker, then arm it, so it routes itself when the blocker closes and the
+sitting can queue everything and close:
+```bash
+gc bd dep add <follow-up> <blocker> --type=blocks
+"$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+```
 
 **A recorded wait is also the return trip.** Once every recorded wait
 closes, the subject returns through the liveness sweep
