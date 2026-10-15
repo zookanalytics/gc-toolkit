@@ -23,7 +23,7 @@
 #     on its own, else at the commit of the bring-current-audit-entry block. A
 #     merge that stops on a conflict, or that git refuses to start, leaves it,
 #     and so does the bring-current-unresolvable block's stop to ask a person,
-#     whether it holds the molecule or parks the bead. The bead's next run then
+#     whether it cancels the run or parks the bead. The bead's next run then
 #     starts a new round: it stamps the start again, clears the question and
 #     the entries recorded before it, and merges again;
 #   - with no rejection_reason it does nothing.
@@ -139,7 +139,8 @@ SH
 chmod +x "$BIN/git" "$BIN/gc"
 # The pack scripts the audit-entry and stop-and-ask blocks call, found through
 # GC_PACK_DIR. bring-current-audit.sh writes an entry (add) or a question (ask)
-# to the bead through the gc stub, and molecule-hold.sh records its call.
+# to the bead through the gc stub and prints the bead's anchor (anchor), and
+# await-ruling.sh and run-cancel.sh record their calls.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
 cat > "$PACK/assets/scripts/bring-current-audit.sh" <<'SH'
 #!/usr/bin/env bash
@@ -149,13 +150,19 @@ while [ $# -gt 0 ]; do case "$1" in --bead) bead="${2:-}"; shift 2 ;; *) shift ;
 case "$verb" in
   add) gc bd update "$bead" --set-metadata 'conflict_audit=[{"path":"shared.txt"}]' ;;
   ask) gc bd update "$bead" --set-metadata 'conflict_question={"paths":["shared.txt"]}' ;;
+  anchor) gc bd show "$bead" | jq -r '.[0] | .metadata.anchor_bead // .id' ;;
 esac
 SH
-cat > "$PACK/assets/scripts/molecule-hold.sh" <<'SH'
+cat > "$PACK/assets/scripts/await-ruling.sh" <<'SH'
 #!/usr/bin/env bash
-printf 'hold %s\n' "$*" >> "$CALLS"
+printf 'await %s\n' "$*" >> "$CALLS"
 SH
-chmod +x "$PACK/assets/scripts/bring-current-audit.sh" "$PACK/assets/scripts/molecule-hold.sh"
+cat > "$PACK/assets/scripts/run-cancel.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'cancel %s\n' "$*" >> "$CALLS"
+SH
+chmod +x "$PACK/assets/scripts/bring-current-audit.sh" "$PACK/assets/scripts/await-ruling.sh" \
+  "$PACK/assets/scripts/run-cancel.sh"
 
 # --- Histories. -----------------------------------------------------------------
 # A bare origin whose main holds the merge base. polecat/w1 adds a file of its
@@ -204,11 +211,13 @@ run_block() {
 }
 # again <block-file> [<VAR=value>...] — a block run in $C against the store as
 # the last run left it, the way the bead's next step or next run reaches it.
-# Sets RC.
+# The blocks look for the pack under GC_RIG_ROOT and GC_CITY_PATH after
+# GC_PACK_DIR, and in a city those lead to a real checkout, so both are unset and
+# only the stub pack can answer. Sets RC.
 again() {
   local f="$1"; shift
   rm -f "$AT_MERGE"
-  ( cd "$C" && env PATH="$BIN:$PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
+  ( cd "$C" && env -u GC_RIG_ROOT -u GC_CITY_PATH PATH="$BIN:$PATH" GC_PACK_DIR="$PACK" WORK_BEAD_ID=tk-w "$@" bash "$f" ) > "$TMP/out" 2>&1
   RC=$?
 }
 # set_meta <key> <value> — what another writer put on the bead between runs.
@@ -356,11 +365,15 @@ eq "$(meta rejection_reason)" "$CONFLICTS" "(13) …and the rejection stays"
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
 for how in molecule bare; do
   clone polecat/w2
-  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r}')")"
+  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
   set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
   if [ "$how" = molecule ]; then
     again "$TMP/bring-current-unresolvable.sh" CLAIMED_STEP_BEAD_ID=tk-step
-    grep -q '^hold --step ' "$CALLS" && ok "(14) molecule: the molecule is held" || bad "(14) molecule: the molecule is held"
+    grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a ' "$CALLS" \
+      && ok "(14) molecule: the bead waits on the question's visit on its anchor" \
+      || bad "(14) molecule: the bead waits on the question's visit on its anchor"
+    grep -q '^cancel .*--bead tk-step ' "$CALLS" && ok "(14) molecule: …and its run is cancelled" \
+      || bad "(14) molecule: …and its run is cancelled"
   else
     again "$TMP/bring-current-unresolvable.sh"
     eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
