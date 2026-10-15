@@ -206,7 +206,7 @@ names the bead that stops it, with one of these reasons:
 | `held` | has any status but open, in progress or hooked: blocked, deferred, pinned, or a status its store adds |
 | `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
 | `merge-hold` | carries an operator merge or rebase hold |
-| `wedged`, `merge-blocked` | is an anchor whose machine axis says no automated actor can move it |
+| `merge-blocked` | is an anchor whose machine axis says no automated actor can move it |
 | `unread` | is an anchor whose machine axis, or whose PR posture at that axis's head, is not recorded |
 | `capped` | is armed, but its dispatch hit the sling-failure cap and went to a person |
 | `cycle` | waits, through its blockers, on itself |

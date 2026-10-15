@@ -447,7 +447,7 @@ has "$OUT" "result=disposed" "stale-progressing source is recovered"
 
 echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
 # A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
-# a signoff cap, a merge gate, an operator approval) — is not lost work, even with no
+# a merge gate, an operator approval) — is not lost work, even with no
 # merge_result and no progressing machine. It still names its dead session, so orphan
 # recovery classes it source and would delete-source + reopen-source it back to the
 # pool. mol-witness-patrol's downstream-court-skip filter drops it upstream, but a bead

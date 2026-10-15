@@ -161,11 +161,11 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"merge_result":"merged
 # host-bead-skip keeps it because it names an owner, so downstream-court-skip is
 # what must drop it, leaving the composed candidate set with nothing to offer the
 # loop. Two in-flight shapes drop: an open PR (merge_result pull_request, on a
-# human gate, its merge machine wedged) and a pre-open gate (merge_result
+# human gate, its merge machine blocked) and a pre-open gate (merge_result
 # pre_open_gate). The genuine orphan beside them (a dead session, a pushed branch,
 # but NO PR) survives to be recovered.
 FIX5='[
-  {"id":"tk-owned-pr","assignee":null,"metadata":{"gc.session_name":"polecat-1-pool","merge_result":"pull_request","gc.routed_to":"human","pr.machine":"wedged-exception@c142@ts"}},
+  {"id":"tk-owned-pr","assignee":null,"metadata":{"gc.session_name":"polecat-1-pool","merge_result":"pull_request","gc.routed_to":"human","pr.machine":"blocked@c142@ts"}},
   {"id":"tk-owned-gate","assignee":null,"metadata":{"gc.session_name":"polecat-2-pool","merge_result":"pre_open_gate","gc.routed_to":"human"}},
   {"id":"tk-lost","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","branch":"polecat/tk-lost"}}
 ]'
