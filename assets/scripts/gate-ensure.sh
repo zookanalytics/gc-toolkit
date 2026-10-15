@@ -6,13 +6,11 @@
 # onto it burns a pool slot on a diff no one ships, and the validation pass hangs a
 # blocks edge on the very close it awaits.
 # For every other open pre_open_gate/pull_request anchor: canonicalize check_set
-# (empty -> stamp the declared default; a list or `none` is left alone), clear
-# any check.<g> that both fails the marker grammar and names a check check_set
-# does not declare (nothing else reads it, so nothing else could ever rewrite
-# it), then ensure every declared unsettled check is RAISABLE. A lane's state is
-# DERIVED from the finding and review-outcome graph through lane-state.sh, the
-# one helper merge.sh and pr-open.sh derive green through — never a stored
-# check.<g> marker. A lane that derives green is settled; otherwise the lane
+# (empty -> stamp the declared default; a list or `none` is left alone), then
+# ensure every declared unsettled check is RAISABLE. A lane's state is DERIVED
+# from the finding and review-outcome graph through lane-state.sh, the one
+# helper merge.sh and pr-open.sh derive green through. A lane that derives
+# green is settled; otherwise the lane
 # owes a review, has one in flight, or the anchor is mid-change, and a fresh
 # dispatch goes out only when QUIESCENCE holds: no review is dispatched while
 # anything is acting on the anchor — a fix unit in flight (including one
@@ -261,12 +259,12 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 # An open rework child already filed under <anchor>? Echoes its id. A rework
 # child here is a blocks-dep bead whose metadata carries a source key, which
 # rework-child.sh stamps on each child it files: source_review_bead on the one a
-# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
-# one an operator ruling files. Either is changing the branch, so a review that
-# read it now would read a mid-change diff, and a lane back to unreviewed with
-# one still open is owed the rework landing, not a fresh review. Non-zero rc =
-# the ledger could not answer; the caller holds the dispatch, the same as an
-# unreadable in-flight-review lookup.
+# request-changes verdict files, source_ruling_bead on the one an operator
+# ruling files. Either is changing the branch, so a review that read it now
+# would read a mid-change diff, and a lane back to unreviewed with one still
+# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
+# could not answer; the caller holds the dispatch, the same as an unreadable
+# in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -319,8 +317,8 @@ open_validation_pass() { # <anchor-id>
 #   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
-# with inflight_review at the dispatch site. Each clause is an open-bead query;
-# none reads a check.<g> marker, and each hold names a bead that is open.
+# with inflight_review at the dispatch site. Each clause is an open-bead query,
+# and each hold names a bead that is open.
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
@@ -588,7 +586,7 @@ total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 # records them all and puts first only the anchors that owe a stamp or have no
 # verdict. A child list that does not read leaves those two rules and records
 # no marks. Unpaced, the walk keeps the enumerated order.
-stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
+stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; disposed=0
 pace_start "$CURSOR" "$DEADLINE"
 pace_seen_start "${CURSOR:+$CURSOR.seen}"
 first_rows=""; rest_rows=""; first_n=0
@@ -696,38 +694,6 @@ while IFS= read -r tagged; do
     canon=$(cs_canon "$checkset")
     echo "$PROG: $id had no normalized check_set; stamped '$DEFAULT_CHECK_SET'"
   fi
-  # --- retire markers no arm of the cadence can ever rewrite ------------------
-  # merge.sh and the checks loop below both read only the checks named in
-  # check_set, so a check.<g> outside it governs nothing and nothing rewrites
-  # it. Clear it when it also fails the marker grammar: a word no lane state
-  # names is not a state, and check-gate-integrity errors on it forever.
-  # A well-formed marker survives — a narrowed check_set keeps its history.
-  declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
-  stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
-    (.metadata // {}) | to_entries[]
-    | select(.key | test("^check\\.[^.]+$"))
-    | select((.value | type) == "string")
-    | select((.value | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not)
-    | (.key | sub("^check\\."; "")) as $g
-    | select(($d | contains("," + $g + ",")) | not)
-    | .key' 2>/dev/null)
-  while IFS= read -r k; do
-    [ -n "${k:-}" ] || continue
-    was=$(meta_of "$row" "$k")
-    gc bd update "$id" --unset-metadata "$k" \
-      --append-notes "gate-ensure: cleared $k=\"$was\" — check_set '$checkset' does not declare that check and the marker is not a well-formed verdict, so no signoff or merge could ever act on it." \
-      >/dev/null 2>&1 </dev/null
-    still=$(gc bd show "$id" --json </dev/null 2>/dev/null | scrub \
-      | jq -r --arg k "$k" '.[0].metadata[$k] // empty' 2>/dev/null)
-    if [ -n "$still" ]; then
-      echo "$PROG: WARN $id $k still reads '$still' after the clear; retry next pass" >&2
-    else
-      cleared=$((cleared + 1))
-      echo "$PROG: $id cleared undeclared malformed check marker $k=\"$was\" (check_set '$checkset')"
-    fi
-  done <<STRAY
-$stray
-STRAY
 
   # --- dispatch the validator onto every open, undispatched validation pass -----
   # A lane enters validating when an open task_kind=validation bead sits on the
@@ -1190,7 +1156,7 @@ if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
   [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
 fi
 echo "$PROG: $paced"
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
   exit "$UNSAFE_RC"

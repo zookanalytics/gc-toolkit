@@ -13,11 +13,9 @@
 # exception@<oid> marker is read as nothing, so the lane derives from the graph;
 # the live-head read, which decides only the dispatch pin and the machine axis
 # (a deleted ref, a body without .sha, and a failed read are all unanswerable);
-# the stray-marker sweep (undeclared and outside the lane vocabulary is cleared,
-# the retired green@ and exception@ grammar included; a declared or well-formed
-# one is not; an unpersisted clear is reported); a multi-check check_set split
-# per check rather than joined into one name; in-flight dedup (routed, poured,
-# claimed) + stranded repair
+# a stored marker's residue, which nothing reads or clears; a multi-check
+# check_set split per check rather than joined into one name; in-flight dedup
+# (routed, poured, claimed) + stranded repair
 # (root probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died before
 # the root drives nothing and must not hold the anchor in flight forever; and
@@ -192,7 +190,7 @@ judged_rc() { # <id> <anchor> <head-oid> [oc=recorded] [lane=codex]
 
 # ==== part dispatch: the default stamp, settled lanes, the operator hold,
 # quiescence, the per-head bar, the validation-pass dispatch, disposed anchors,
-# the live-head read and the stray-marker sweep ====
+# the live-head read and stored-marker residue ====
 if part dispatch; then
 
 echo "# every section sits inside a part"
@@ -548,34 +546,19 @@ out=$(run); rc=$?
 eq "$rc" 0 "malformed-head pass exits 0"
 eq "$(pinned C7)" "<absent>" "a non-SHA answer at rc=0 is unanswerable, and records nothing"
 
-echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
-# The declared correctness lane derives green from a backing review; the stray
-# check.refinery is what the sweep clears. A declared well-formed marker is left
-# alone (it is history, and this design's readers ignore it).
+echo "# a stored marker's residue is neither read nor cleared"
+# A check.<g> key a stored-marker writer left behind is inert: the declared lane
+# derives green from its backing review whatever the key says, and a key outside
+# check_set is left as it is, in any grammar.
 store "[$(anchor N1 pull_request correctness green polecat/n1 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n1 N1)]"
 oid n1 > "$GH_DIR/head_polecat_n1"
+: > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the sweep pass exits 0"
-eq "$(meta N1 check.refinery)" "<absent>" "the undeclared legacy marker is cleared"
-eq "$(meta N1 check.correctness)" "green" "…and the declared lane state is untouched"
-has "$out" "cleared undeclared malformed check marker check.refinery" "the clear is reported"
-has "$out" "1 stray markers cleared" "…and counted"
-has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
-has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that check" "the anchor records why it was cleared"
-
-echo "# …a WELL-FORMED undeclared lane state is history, not damage"
-store "[$(anchor N2 pull_request correctness green polecat/n2 ',"check.refinery":"fixing"'), $(backed rev-n2 N2)]"
-oid n2 > "$GH_DIR/head_polecat_n2"
-out=$(run)
-eq "$(meta N2 check.refinery)" "fixing" "a narrowed check_set keeps its well-formed history"
-has "$out" "0 stray markers cleared" "…and nothing was swept"
-
-echo "# …an undeclared exception@ is swept like the rest of the retired grammar"
-store "[$(anchor N3 pull_request correctness green polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"'), $(backed rev-n3 N3)]"
-oid n3 > "$GH_DIR/head_polecat_n3"
-out=$(run)
-eq "$(meta N3 check.refinery)" "<absent>" "an exception@ outside check_set is cleared"
-has "$out" "1 stray markers cleared" "…and counted"
+eq "$rc" 0 "the pass exits 0"
+eq "$(meta N1 check.refinery)" "green@$SHORT" "an undeclared key is left as it is"
+eq "$(meta N1 check.correctness)" "green" "…and so is a declared one"
+has "$out" "0 reviews dispatched" "…and the backed lane settles on its review alone"
+hasnt "$(cat "$STUB_GC_LOG")" "-metadata check." "…with no check.<g> key written or cleared"
 
 echo "# …a DECLARED lane's exception@ marker is not read: the lane derives from the graph"
 store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b)]"
@@ -587,13 +570,7 @@ has "$out" "1 reviews dispatched" "an unbacked lane is owed its review whatever 
 has "$out" "0 operator-held" "…and nothing holds it"
 eq "$(pinned N3b)" "progressing@$(oid n3b)" "…and the machine axis reads progressing"
 
-echo "# …the none opt-out does not exempt an anchor from the sweep"
-store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
-out=$(run)
-eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
-has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
-
-echo "# …nor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
+echo "# the none opt-out does not exempt an anchor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
 # pr-facts.sh opens a human feedback pass without consulting check_set, so a
 # check_set=none anchor can carry one. The dispatch that releases its blocks edge
 # runs before the none|off opt-out; after it, the pass would hold the merge with
@@ -604,15 +581,6 @@ has "$out" "dispatched validation pass vp-n4v to $VALP" "a checkless anchor's op
 eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
 has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
 has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
-
-echo "# …a clear that does not persist is reported, not counted"
-store "[$(anchor N5 pull_request correctness green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"
-oid n5 > "$GH_DIR/head_polecat_n5"
-out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
-eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
-eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
-has "$out" "still reads" "the failed clear is reported"
-has "$out" "0 stray markers cleared" "…and not counted"
 
 fi # part dispatch
 
