@@ -376,28 +376,45 @@ witness's source arm give the bead back to the refinery. A transient release
 leaves an offer, and a wait leaves one when its blocker closes.
 
 When the read-back does not match, the script writes once more. If the write
-still does not land, the script neither works the bead nor releases it, because a
-release would leave the bead unrouted. It puts the bead back as it arrived:
-status `open`, the pins cleared, and the assignee left as it is. That write
-changes no assignee, so bd's claim guard does not refuse it ("Ending a claim",
-below). A tier-2 claim is held under `<rig>/gc-toolkit.refinery`, so the bead is
-an old-style handoff again. Tier 2 returns it, the demand count wakes the pool
-for it, and the next claim routes it first. No attempt is counted, so a route
-write that keeps failing leaves the bead waiting with an unchanged count, which
-is what the alarm's third condition looks for (section 5).
+still does not land, the script does not work the bead. It puts the bead back
+with the pins cleared and no attempt counted, and the route the bead carries
+decides how.
 
-An unrouted claim outlives its session only if the put-back fails too, or if the
-session dies between the claim and the route write. The claim then stays in
-progress under the alias, which drain-ack leaves alone (the release table
-below), and the next session's first tier resumes it and routes it first. The
-stranded repair can reach a dead session's claim first. It gives the claim back
-on a `gc.run_target` the bead carries, or otherwise on the seat's route,
-`<rig>/gc-toolkit.refinery`, which route recovery restores. After a failed
-put-back the witness can reach the claim first instead, once the drained
-session's row is gone, and its restore step would route the claim by
-`gc.execution_routed_to`. So a misroute needs either a crash inside the one write
-before the route, on a bead that carries an archived `gc.run_target`, or three
-failed writes on the bead in a row.
+- A bead with no refinery route is an old-style handoff, held under
+  `<rig>/gc-toolkit.refinery` because the hook claims tier 2's beads under the
+  assignee they carry. A release would leave it unrouted, so the script sets its
+  status back to `open` and leaves the assignee as it is. That write changes no
+  assignee, so bd's claim guard does not refuse it ("Ending a claim", below). The
+  bead is an old-style handoff again. Tier 2 returns it, the demand count wakes
+  the pool for it, and the next claim routes it first.
+- A bead from tier 3 already carries the refinery's route, and only its
+  `gc.run_target` did not clear. The script releases it as a transient exit
+  does (section 3): open and unassigned, with the route kept. It is an offer
+  again, and nothing routes it by that `gc.run_target` while it waits. Only
+  `reopen-source` writes a carried `gc.run_target` over a present route. The
+  pack runs it on a bead that names an owner, in the witness's source arm, or on
+  a bead the refinery is rejecting, whose route `rejection-repool.sh` then
+  clears. Left assigned, the bead would be served only by the tier 2 of a
+  session that holds its assignee, and none does once a session that claimed
+  under its session id drains.
+
+Either way, a route write that keeps failing leaves the bead waiting with an
+unchanged count, which is what the alarm's third condition looks for
+(section 5).
+
+A claim the script has not settled outlives its session only if the put-back
+fails too, or if the session dies between the claim and the route write. An
+unrouted claim then stays in progress under the alias, which drain-ack leaves
+alone (the release table below), and the next session's first tier resumes it
+and routes it first. The stranded repair can reach a dead session's claim first.
+It gives the claim back on a `gc.run_target` the bead carries, or otherwise on
+the seat's route, `<rig>/gc-toolkit.refinery`, which route recovery restores.
+After a failed put-back the witness can reach the claim first instead, once the
+drained session's row is gone. Its restore step would route an unrouted claim by
+`gc.execution_routed_to`, and its `reopen-source` would route a tier-3 claim by
+the `gc.run_target` that did not clear. So a misroute needs either a session
+that dies between the claim and the route write, on a bead that carries an
+archived `gc.run_target`, or three failed writes on the bead in a row.
 
 ### One claim per session
 
@@ -512,8 +529,9 @@ A parked bead keeps its route, which the claim made the refinery's. Its wait is
 an open blocker of its own, so `refinery-offers.sh` reads it as not ready, and
 the pool neither counts it as demand nor serves it. When the demand or the
 finding closes, the edge clears. The bead is ready again and is offered again,
-with no deferred-dispatch arm and no re-sling. This is the raw pool routing case load-context already describes: the
-work bead itself is the routed unit, so a blocker of its own holds it.
+with no deferred-dispatch arm and no re-sling. This is the raw pool routing case
+load-context already describes: the work bead itself is the routed unit, so a
+blocker of its own holds it.
 
 ### Bounding the retry without a clock
 
@@ -677,10 +695,10 @@ cold-pool probe supplies one only for an offer its default query can see
 (section 2). So the backstop serves a refinery session woken for an ordinary
 offer, and not one woken only for an offer under a parked epic or for an
 old-style handoff. Every refinery session that sits at its prompt without
-claiming while an offer waits is caught by the alarm in section 5. That alarm files its finding at the second pass that
-sees nothing taken and nothing held, and the finding's first reaction puts the
-stopped session to whoever can act on it. gc-tj666s extends the backstop to
-every offer.
+claiming while an offer waits is caught by the alarm in section 5. That alarm
+files its finding at the second pass that sees nothing taken and nothing held,
+and the finding's first reaction puts the stopped session to whoever can act on
+it. gc-tj666s extends the backstop to every offer.
 
 So the design adds no nudge and no wake order. It deletes the polecat's step-6
 wake and nudge, and the keeper's.
@@ -907,8 +925,10 @@ where one speaks the old shape to the other.
    reads both back before it reads the attempt count. Through unit 1, it then
    proves that a transient release leaves an offer `refinery-offers.sh` lists in
    tier 3, and that a person wait and a rig wait each leave one once their
-   blocker closes. A route write that does not read back puts the bead back as it
-   arrived, still listed in tier 2, with no attempt counted. The prompt
+   blocker closes. When a route write does not read back, the old-style handoff
+   goes back open under the alias, still listed in tier 2, and a tier-3 offer
+   whose `gc.run_target` did not clear goes back open and unassigned, listed in
+   tier 3. Neither counts an attempt. The prompt
    (`agents/refinery/prompt.template.md`) describes the claim
    protocol and drops the wisp reconcile. In `mol-refinery-patrol.toml`, the loop
    steps are deleted, the claim's `$WORK` is used, every exit goes through unit 1,
