@@ -3,7 +3,11 @@
 scope = "city"
 # mechanik holds the operator's standing conversation. resume brings it back
 # after a restart the pin does not prevent, such as the process exiting on its
-# own. `gc handoff` still starts a fresh conversation.
+# own. One restart still starts fresh: after a config change moves mechanik's
+# fingerprint while it is alive, the pin defers the drift, and the next restart
+# repairs it with a new conversation. Running `gc reload --soft` after such a
+# change rebaselines started_config_hash in place, and the next restart resumes.
+# `gc handoff` always starts a fresh conversation.
 wake_mode = "resume"
 work_dir = ".gc/agents/mechanik"
 nudge = "Check mail (gc mail inbox) and assigned work (gc hook), then act accordingly."
