@@ -19,9 +19,10 @@ Under this design a handoff is an offer. The polecat routes the bead to the
 rig's refinery pool and leaves it unassigned. The refinery becomes an ordinary
 pool capped at one session. A refinery session claims one offer through `gc hook
 --claim`, the same claim every polecat makes. It works that one bead to an
-outcome and drains. Because the claim is an ordinary pool claim, gascity's
-release paths give it back to the queue when its session drains, dies or is
-retired, and the witness's orphan recovery reads it like any other claim.
+outcome and drains. Because the claim is an ordinary pool claim, gascity
+recovers it when its session drains, dies or is retired. Either the next
+refinery session resumes it or gascity gives it back to the queue (section 2),
+and the witness's orphan recovery reads it like any other claim.
 
 Every failure ends the claim, and moves only the bead it failed on:
 
