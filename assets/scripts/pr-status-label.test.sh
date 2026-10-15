@@ -94,10 +94,6 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-other"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "live work anchored to another PR does not flip this one"
 
-# needs-attention — the signoff round cap parked the anchor for a person.
-store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","signoff_cap":"codex"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a signoff-cap park => needs-attention"
-
 # needs-attention — an operator freeze is a hold the city stopped behind.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an operator freeze (merge_hold=true) => needs-attention"
@@ -136,10 +132,10 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a readied draft with nothing
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","merge_hold":"true"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a held draft => needs-attention"
 
-# precedence — a cap park outranks an open rework child.
-store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","signoff_cap":"codex"}},
+# precedence — a hold outranks an open rework child.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (cap park + open child)"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (hold + open child)"
 
 # needs-attention — an open visit on the anchor is a hold: the merge pass's finalize
 # gate holds the PR until a person answers, so an approved PR that would otherwise

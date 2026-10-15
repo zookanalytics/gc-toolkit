@@ -132,7 +132,6 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 
 	state := prstatus.Derive(prstatus.Facts{
 		MergeHold:     bead.Meta("merge_hold"),
-		SignoffCap:    bead.Meta("signoff_cap"),
 		RebaseHold:    bead.Meta("rebase_hold"),
 		OpenVisit:     openVisit,
 		PRPosture:     bead.Meta("pr_posture"),

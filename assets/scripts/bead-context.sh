@@ -214,8 +214,8 @@ bd_rows() {
 #              approval: an open PR settled and waiting on the operator's review
 #                (review required, or changes requested) at its live head.
 #              merge-hold: an operator merge or rebase hold on an anchor.
-#              wedged, merge-blocked: the anchor's machine axis says no automated
-#                actor can move it.
+#              merge-blocked: the anchor's machine axis says no automated actor
+#                can move it.
 #              unread: an anchor whose machine axis, or whose PR posture at that
 #                axis's head, is not recorded.
 #              capped: an armed dispatch that hit its sling-failure cap.
@@ -240,7 +240,6 @@ def adv_anchor($m; $mr):
   else ($m["pr.machine"] | adv_dated) as $ma | ($m["pr_posture"] | adv_dated) as $po
     | if $ma == null then {state: "stuck", why: "unread"}
       elif $ma.value == "progressing" then {state: "advancing"}
-      elif $ma.value == "wedged-exception" then {state: "stuck", why: "wedged"}
       elif $ma.value == "blocked" then {state: "stuck", why: "merge-blocked"}
       elif $ma.value != "settled" then {state: "stuck", why: "unread"}
       elif $mr == "pre_open_gate" then {state: "advancing"}

@@ -16,7 +16,8 @@ pending prompt does not:**
 - **A requirement is unclear, or another agent could answer:** mail the witness
   (`HELP:`), per Escalation.
 - **A decision only the operator can make, or work you must decline and cannot
-  close:** file the visit with `escalate.sh`, then hold the molecule and drain,
-  per Escalation. The visit is the release path a human can claim.
+  close:** file the visit with `escalate.sh`, record the wait on the work bead,
+  then cancel your run and drain, per Escalation. The visit is the release path
+  a human can claim.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 {{ end }}

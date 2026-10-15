@@ -16,23 +16,18 @@ func TestDerive(t *testing.T) {
 		{"empty in-flight set", Facts{InFlightCount: 0}, NeedsReview},
 		{"sticky changes_requested, empty in-flight set", Facts{PRPosture: "changes_requested@oid@t"}, NeedsReview},
 		{"changes_requested with live work", Facts{PRPosture: "changes_requested@oid@t", InFlightCount: 1}, Working},
-		{"signoff-cap park", Facts{MergeHold: "signoff_cap", SignoffCap: "codex"}, NeedsAttention},
 		{"operator freeze merge_hold=true", Facts{MergeHold: "true"}, NeedsAttention},
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
 		{"approved and merging (CLEAN)", Facts{PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, Working},
 		{"approved but wedged (BLOCKED), empty in-flight set", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid"}, NeedsAttention},
 		{"approved + BLOCKED + live work is working", Facts{PRPosture: "approved@oid@t", PRMergeState: "BLOCKED@oid", InFlightCount: 1}, Working},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
-		{"needs-attention outranks working (cap park + live work)", Facts{MergeHold: "signoff_cap", SignoffCap: "codex", InFlightCount: 2}, NeedsAttention},
+		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
 		{"open visit on the anchor", Facts{OpenVisit: true}, NeedsAttention},
 		{"open visit on an approved PR that conflicts (DIRTY)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, NeedsAttention},
 		{"open visit on an approved, merging PR (CLEAN)", Facts{OpenVisit: true, PRPosture: "approved@oid@t", PRMergeState: "CLEAN@oid"}, NeedsAttention},
 		{"open visit outranks live work", Facts{OpenVisit: true, InFlightCount: 2}, NeedsAttention},
 		{"approved and conflicting (DIRTY), no visit", Facts{PRPosture: "approved@oid@t", PRMergeState: "DIRTY@oid"}, Working},
-
-		// merge_hold=signoff_cap WITHOUT a cap value is not the cap park; it is a
-		// plain truthy hold, so isSet still catches it as needs-attention.
-		{"signoff_cap hold with no cap value is still a hold", Facts{MergeHold: "signoff_cap"}, NeedsAttention},
 
 		// The open-as-draft stage: the city opened the PR as a draft and owes the
 		// checks that flip it ready, so nothing asks a human to review it yet.
@@ -40,7 +35,6 @@ func TestDerive(t *testing.T) {
 		{"draft readied, nothing in flight", Facts{OpenedAsDraft: "abc", DraftReadied: "abc"}, NeedsReview},
 		{"draft readied at a later head", Facts{OpenedAsDraft: "abc", DraftReadied: "def"}, NeedsReview},
 		{"draft stage under a hold", Facts{OpenedAsDraft: "abc", MergeHold: "true"}, NeedsAttention},
-		{"draft stage under a cap park", Facts{OpenedAsDraft: "abc", MergeHold: "signoff_cap", SignoffCap: "codex"}, NeedsAttention},
 		{"draft stage with live work", Facts{OpenedAsDraft: "abc", InFlightCount: 1}, Working},
 		{"readied marker alone is not the stage", Facts{DraftReadied: "abc"}, NeedsReview},
 	} {
@@ -64,7 +58,7 @@ func TestIsSetMatchesTheShellTruthiness(t *testing.T) {
 			t.Errorf("merge_hold=%q derived %q, want needs-review (not a hold)", v, got)
 		}
 	}
-	for _, v := range []string{"true", "signoff_cap", "1", "yes", "anything"} {
+	for _, v := range []string{"true", "held", "1", "yes", "anything"} {
 		if !isSet(v) {
 			t.Errorf("isSet(%q) = false, want true (a set value)", v)
 		}

@@ -30,9 +30,9 @@
 # is the gc wrapper starting up rather than the query it runs. So the check
 # overlaps its probes instead of chaining them. The rig and order registries are
 # read while the agent roster is. Each store is then scanned by its own
-# background job, which reads its three listings at once, and the candidates it
-# must re-read go out as one batch, read together with the molecule roots they
-# may need. A listing lands in a file, never in a shell variable, because a
+# background job, no more of them at once than the fan-out cap allows, and a
+# job reads its three listings at once. The candidates it must re-read go out
+# as one batch, read together with the molecule roots they may need. A listing lands in a file, never in a shell variable, because a
 # whole-store listing held in a variable costs seconds per expansion. Every read
 # asks only for what an arm judges: --brief omits the free text, and the ready
 # read asks only for the unassigned, routed beads arm 4 looks up.
@@ -88,49 +88,88 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-# >>> probe-stderr-capture
-# The gc probes below send stderr to $PROBE_ERR, not /dev/null, so a failure the
-# check reports names the reason it failed instead of only its rc. An I3
-# transient reported as "rc=1" alone is undiagnosable and recurs. Each probe's
-# `2>"$PROBE_ERR"` truncates the file, so it never holds a prior probe's stderr.
-# probe_err returns the first non-blank line, control characters stripped to keep
-# it one line and length-capped. mktemp failing degrades to /dev/null (always
-# empty), so probe_err yields nothing and every detail reads as before.
-PROBE_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-check-routed-work-claimable.XXXXXX" 2>/dev/null) || PROBE_ERR=/dev/null
-[ "$PROBE_ERR" = /dev/null ] || trap 'rm -f "$PROBE_ERR"' EXIT
-probe_err() {
-    [ -s "$PROBE_ERR" ] || return 0
-    tr -d '\000-\010\013-\037' < "$PROBE_ERR" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+# >>> doctor-parallel-reads
+# A check that overlaps its probes runs each one as a background job, and a job
+# cannot hand its parent a variable, so every read lands in a file under one
+# scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
+# it when the check exits. It holds a file in the tree open on fd 9, because the
+# host's scratch reaper removes any gctk-* tree that no process holds open. It
+# returns non-zero when the tree cannot be made or held, and then nothing can be
+# read.
+reads_init() {
+    WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
+    trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
-# <<< probe-stderr-capture
-
-# The scratch every background read lands in. The descriptor held open on a file
-# inside it keeps the tree held for the whole run, because the host's scratch
-# reaper removes any gctk-* tree that no process holds open.
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-routed-work-claimable-scan.XXXXXX" 2>/dev/null) || WORK=""
-trap '[ -z "$WORK" ] || rm -rf "$WORK"; [ "$PROBE_ERR" = /dev/null ] || rm -f "$PROBE_ERR"' EXIT
-if [ -z "$WORK" ] || ! { exec 9>"$WORK/.hold"; } 2>/dev/null; then
-    echo "cannot determine whether routed/assigned work is claimable (I3)"
-    detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every store scan reads into; no store was checked."
-    exit 1
-fi
 # read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.
-# Concurrent probes cannot share $PROBE_ERR, so every background read takes this
-# shape, and err_of <file> is probe_err for that read.
+# err_of <file> prints the first non-blank line of that stderr, with control
+# characters stripped and cut to 200 characters, so the warning for a failed
+# read names why it failed and not only its rc. Before a `gc bd` list, ready,
+# search or show runs bd, gc writes a line naming the store that answers it,
+# whether or not the read then fails. That line never says why a read failed,
+# so err_of passes over it.
 read_to() {
     local f="$1"; shift
     run_bounded "$@" 2>"$f.err" | scrub >"$f"
     return "${PIPESTATUS[0]}"
 }
-err_of() { local PROBE_ERR="$1.err"; probe_err; }
+err_of() {
+    [ -s "$1.err" ] || return 0
+    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null \
+        | grep -v '^gc bd: answering from the .* store$' | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# fanout <command...> starts <command> as a background job once fewer than
+# FANOUT_CAP of the jobs fanout started are still running, so a check scans at
+# most that many stores at once however many rigs the city lists. FANOUT_PID is
+# the job it started. fanout_wait <pid> waits for one of those jobs and returns
+# its exit status, which the cap keeps for a job it has already waited for. The
+# cap waits only for fanout's own jobs, because a bare `wait -n` also returns
+# for the check's other background reads, and the count of running jobs would
+# drift. When `wait -n` reports no job, the cap waits for the oldest one, so
+# each wait frees a slot. GC_DOCTOR_FANOUT overrides the cap, in jobs.
+FANOUT_CAP="${GC_DOCTOR_FANOUT:-8}"
+case "$FANOUT_CAP" in ''|*[!0-9]*) FANOUT_CAP=8 ;; esac
+[ "$FANOUT_CAP" -ge 1 ] 2>/dev/null || FANOUT_CAP=8
+fanout_live=(); declare -A fanout_rc=()
+fanout_reaped() {
+    local p keep=()
+    fanout_rc["$1"]="$2"
+    for p in ${fanout_live[@]+"${fanout_live[@]}"}; do [ "$p" = "$1" ] || keep+=("$p"); done
+    fanout_live=(${keep[@]+"${keep[@]}"})
+}
+fanout() {
+    local pid rc
+    while [ "${#fanout_live[@]}" -ge "$FANOUT_CAP" ]; do
+        pid=""; wait -n -p pid "${fanout_live[@]}"; rc=$?
+        if [ -z "$pid" ]; then pid="${fanout_live[0]}"; wait "$pid"; rc=$?; fi
+        fanout_reaped "$pid" "$rc"
+    done
+    "$@" &
+    FANOUT_PID=$!
+    fanout_live+=("$FANOUT_PID")
+}
+fanout_wait() {
+    local rc
+    if [ -n "${fanout_rc[$1]+set}" ]; then return "${fanout_rc[$1]}"; fi
+    wait "$1"; rc=$?
+    fanout_reaped "$1" "$rc"
+    return "$rc"
+}
+# <<< doctor-parallel-reads
+if ! reads_init check-routed-work-claimable; then
+    echo "cannot determine whether routed/assigned work is claimable (I3)"
+    detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every probe reads into; no store was checked."
+    exit 1
+fi
 
 # The rig and order registries are read in the background while the agent
 # roster is read here.
 read_to "$WORK/rigs.json" gc rig list --json </dev/null >/dev/null 2>&1 & rigs_pid=$!
 read_to "$WORK/orders.json" gc order list --json </dev/null >/dev/null 2>&1 & orders_pid=$!
 
-agents_raw=$(run_bounded gc agent list --json 2>"$PROBE_ERR"); agents_rc=$?; agents_err=$(probe_err)
+read_to "$WORK/agents.json" gc agent list --json; agents_rc=$?; agents_err=$(err_of "$WORK/agents.json")
+agents_raw=$(cat "$WORK/agents.json")
 identities=$(printf '%s' "$agents_raw" \
     | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")] | unique' 2>/dev/null)
 if [ "$agents_rc" -ne 0 ] || [ -z "$identities" ] || [ "$identities" = "[]" ]; then
@@ -466,10 +505,10 @@ n=0
 while IFS=$'\037' read -r rig_name rig_path; do
     [ -n "$rig_path" ] || continue
     n=$((n + 1))
-    scan_job "$rig_name" "$rig_path" "$WORK/$n" </dev/null >/dev/null 2>&1 &
-    scan_pids+=("$!")
+    fanout scan_job "$rig_name" "$rig_path" "$WORK/$n" </dev/null >/dev/null 2>&1
+    scan_pids+=("$FANOUT_PID")
 done <<< "$scopes"
-for pid in "${scan_pids[@]}"; do wait "$pid"; done
+for pid in "${scan_pids[@]}"; do fanout_wait "$pid"; done
 
 # The jobs' findings, merged in rig order however the jobs interleaved.
 n=0
