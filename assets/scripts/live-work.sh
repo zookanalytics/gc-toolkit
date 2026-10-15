@@ -83,7 +83,10 @@ LIVE_WORK_JQ='
   # and status of each target. $up: what `bd dep list <id> --direction=up
   # --json` returns, the beads that depend on this one. `bd show` leaves a convoy
   # tracks edge out of its dependents, so they are read from $up, and anything
-  # but an array there is unreadable, which refuses.
+  # but an array there is unreadable, which refuses. `bd show` also leaves out
+  # an edge whose target has no row in this store, so a parent in another store
+  # never reaches the convoy mark below, and the caller rules that out first:
+  # until-resolved.sh reads every edge of the bead from its `bd list` row.
   def live_work_edge_reasons($up):
     if ($up | type) != "array" then ["dependents=unreadable"]
     else

@@ -45,7 +45,9 @@
 #     `until` disposes (a `blocks` edge to a closed target never does — the scope
 #     guard), a non-open or assigned bead is left alone, a bead its own open
 #     `blocks` blocker holds is never handed to bead-rehome, a bead whose `until`
-#     edge was removed after the listing is kept, a held close (bead-rehome
+#     edge was removed after the listing is kept, a bead given an edge after the
+#     listing to a bead this store has no row for, which `bd show` leaves out,
+#     is left undecided, a held close (bead-rehome
 #     refuses) and a hard failure are told apart, dry-run disposes nothing, the
 #     whole candidate set resolves in a bounded read count with no per-bead call
 #     and no jq process per candidate, a disposal starts only while the pass
@@ -120,6 +122,17 @@ STORE="${STUB_STORE:?}"
 # the read is pinned, which turns off the by-id routing modeled under `list`.
 pinned=0
 while [ "${1:-}" = "--db" ]; do pinned=1; shift 2 || shift || true; done
+# STUB_FRESH_STORE, when set, is the store as it stands once the until half
+# starts a fresh read: a write that lands between the pass-start listing and
+# that read. The fresh read opens with `bd show`, the only show a reconcile pass
+# makes, so from that call on every read answers from it, while the listing and
+# the status read before it answer from $STORE. "$STUB_FRESH_STORE.read" records
+# the switch, and the test's fresh_store helper empties it.
+now="$STORE"
+if [ -n "${STUB_FRESH_STORE:-}" ]; then
+    [ "${1:-}" = "show" ] && printf 'read\n' > "$STUB_FRESH_STORE.read"
+    [ -s "$STUB_FRESH_STORE.read" ] && now="$STUB_FRESH_STORE"
+fi
 if [ -n "${STUB_BD_LIST_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
     echo "bd: simulated listing failure" >&2; exit 1
 fi
@@ -156,6 +169,11 @@ case "${1:-}" in
     if [ -n "${STUB_BD_LIST_ID_FAIL:-}" ] && [ -n "$id" ]; then
       echo "bd: simulated by-id listing failure" >&2; exit 1
     fi
+    # STUB_BD_ROW_FAIL names a bead whose own row cannot be read by id, while
+    # every other by-id read answers.
+    if [ -n "${STUB_BD_ROW_FAIL:-}" ] && [ "$id" = "$STUB_BD_ROW_FAIL" ]; then
+      echo "bd: simulated row read failure" >&2; exit 1
+    fi
     # `--id` takes a comma list (the bulk blocker-status read passes many). Real
     # `bd list --json` carries each bead's own outgoing edges under `.dependencies`
     # in the list-edge shape ({issue_id: self, depends_on_id: blocker, type}); the
@@ -170,7 +188,7 @@ case "${1:-}" in
     # survive: an unpinned --id list none of whose ids has a row in this store,
     # but which another store holds (STUB_FOREIGN_STORE), is answered from that
     # other store, where the ids do have rows.
-    src="$STORE"
+    src="$now"
     if [ "$pinned" = 0 ] && [ -n "$id" ] && [ -n "${STUB_FOREIGN_STORE:-}" ] \
        && jq -e --arg id "$id" '($id | split(",")) as $ids | all(.[]; (.id as $i | $ids | index($i)) == null)' "$STORE" >/dev/null \
        && jq -e --arg id "$id" '($id | split(",")) as $ids | any(.[]; (.id as $i | $ids | index($i)) != null)' "$STUB_FOREIGN_STORE" >/dev/null; then
@@ -193,14 +211,14 @@ case "${1:-}" in
   show)
     # Real `bd show --json` renders the bead's own edges under `.dependencies`
     # in the show shape ({id, dependency_type, issue_type, status}), each target
-    # resolved in this store and one with no row left out. STUB_SHOW_STORE, when
-    # set, answers show from another fixture file: the store as it stands after
-    # the pass-start listing, so a test can land a write between the two reads.
+    # resolved in this store and one with no row left out, while its
+    # dependency_count counts every edge, the ones left out included.
     id="${2:-}"
-    src="${STUB_SHOW_STORE:-$STORE}"
+    src="$now"
     out="$(jq -c --arg id "$id" '
       . as $store
       | [ .[] | select(.id == $id) | . as $b
+          | .dependency_count = (($b._deps // []) | length)
           | .dependencies = [ ($b._deps // [])[] | . as $e
               | ($store | map(select(.id == $e.id)) | .[0]) as $t
               | select($t != null)
@@ -280,10 +298,10 @@ case "${1:-}" in
       fi
       jq -c --arg id "$depid" '
         [ .[] | . as $b | ($b._deps // [])[] | select(.id == $id)
-          | {id: $b.id, dependency_type: .dependency_type, issue_type: ($b.issue_type // "task"), status: $b.status} ]' "$STORE"
+          | {id: $b.id, dependency_type: .dependency_type, issue_type: ($b.issue_type // "task"), status: $b.status} ]' "$now"
       exit 0
     fi
-    if [ "$(jq -r --arg id "$depid" 'any(.[]; .id == $id)' "$STORE")" != "true" ]; then
+    if [ "$(jq -r --arg id "$depid" 'any(.[]; .id == $id)' "$now")" != "true" ]; then
       echo '{"error":"resolving '"$depid"': no issue found","schema_version":1}'
     else
       # _deps models the bead's own edges. Real bd hides an edge whose target
@@ -295,7 +313,7 @@ case "${1:-}" in
       jq -c --arg id "$depid" '
         . as $store
         | [ .[] | select(.id == $id) ] | .[0] as $b
-        | [ ($b._deps // [])[] | select(.id as $t | ($store | any(.[]; .id == $t))) ]' "$STORE"
+        | [ ($b._deps // [])[] | select(.id as $t | ($store | any(.[]; .id == $t))) ]' "$now"
     fi
     ;;
   *) echo "bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
@@ -473,6 +491,9 @@ unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE STUB_RIGS_JSON \
     DEFERRED_DISPATCH_LOCK_STALL_SECS 2>/dev/null || true
 
 store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$ESC_CALLS"; : > "$REHOME_CALLS"; }
+# The store as the fresh read finds it, for STUB_FRESH_STORE, with the switch
+# to it reset, so a pass reads its listing and status read from the store again.
+fresh_store() { printf '%s' "$1" > "$TMP/fresh-store.json"; : > "$TMP/fresh-store.json.read"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
@@ -1280,19 +1301,19 @@ echo "# until: the fresh read catches a route that landed after the pass-start l
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
-printf '%s' '[
+fresh_store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{"gc.routed_to":"rig/rig.polecat"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
- {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]' > "$TMP/show-store.json"
-out="$(STUB_SHOW_STORE="$TMP/show-store.json" "$SUT" reconcile 2>&1)"; rc=$?
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "the pass is clean"
 eq "$(rehomes)" "0" "a bead slung after the listing is not disposed"
 has "$out" "gc.routed_to=rig/rig.polecat" "the fresh read's mark is reported"
 
 echo "# until: a target reopened after the pass-start listing leaves the bead waiting"
-printf '%s' '[
+fresh_store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
- {"id":"x-1","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/show-store.json"
-out="$(STUB_SHOW_STORE="$TMP/show-store.json" "$SUT" reconcile 2>&1)"
+ {"id":"x-1","status":"open","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"
 eq "$(rehomes)" "0" "a bead whose until target reopened is not disposed"
 has "$out" "0 disposed, 0 live, 0 held, 1 waiting" "it counts as waiting"
 
@@ -1304,6 +1325,10 @@ out="$(STUB_DEP_UP_FAIL=g-1 "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a bead owed a disposal that could not be re-read fails the pass"
 eq "$(rehomes)" "0" "and is not disposed"
 has "$out" "could not re-read g-1" "the failure is reported"
+out="$(STUB_BD_ROW_FAIL=g-1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a bead whose own row could not be re-read by id fails the pass"
+eq "$(rehomes)" "0" "and is not disposed"
+has "$out" "could not re-read g-1" "that failure is reported too"
 
 echo "# until: without until-resolved.sh the consumer disposes nothing"
 store '[
@@ -1384,10 +1409,12 @@ eq "$rc" 0 "a bulk pass over four until-gated beads is a clean pass"
 eq "$(rehomes)" "3" "all three resolved until-gated beads are disposed in one pass"
 # No armed beads here, so armed costs two reads (all + ready, no blocker batch);
 # the until consumer costs two more (candidate scan + one target-status batch),
-# whatever the candidate count. A disposal re-reads its own bead and its
-# dependents just before the close; the waiting candidate u-4 costs nothing.
-eq "$(grep -c '^list' "$STUB_BD_LOG")" "4" "enumeration costs a bounded read count (candidate scan + one target-status batch), not one per bead"
+# whatever the candidate count. A disposal re-reads its own bead, its own row by
+# id and its dependents just before the close; the waiting candidate u-4 costs
+# nothing.
+eq "$(grep '^list' "$STUB_BD_LOG" | grep -vc '^list --id u-[0-9] ')" "4" "enumeration costs a bounded read count (candidate scan + one target-status batch), not one per bead"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "3" "each disposal re-reads its own bead once, and a waiting candidate is not read"
+eq "$(grep -c '^list --id u-[0-9] ' "$STUB_BD_LOG")" "3" "each disposal reads its own row by id once, and a waiting candidate is not read"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "3" "each disposal reads its own dependents once, and a waiting candidate is not read"
 unset STUB_BD_LOG
 
@@ -1397,10 +1424,10 @@ echo "# until: a bead whose until edge was removed after the listing is kept"
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
-printf '%s' '[
+fresh_store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[]},
- {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]' > "$TMP/show-store.json"
-out="$(STUB_SHOW_STORE="$TMP/show-store.json" "$SUT" reconcile 2>&1)"; rc=$?
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "an edge removed mid-pass is an expected state, not a pass failure"
 eq "$(rehomes)" "0" "the bead is not handed to bead-rehome"
 eq "$(meta g-1 gc.superseded_by)" "<absent>" "so no successor pointer is stamped on the work a person chose to keep"
@@ -1434,11 +1461,11 @@ store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""},
  {"id":"y-1","status":"open","assignee":"","metadata":{},"notes":""}]'
-printf '%s' '[
+fresh_store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"},{"id":"y-1","dependency_type":"blocks"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""},
- {"id":"y-1","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/show-store.json"
-out="$(STUB_SHOW_STORE="$TMP/show-store.json" "$SUT" reconcile 2>&1)"
+ {"id":"y-1","status":"open","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"
 eq "$(rehomes)" "0" "the fresh read's open blocker stops the disposal"
 has "$out" "1 blocked" "and it is counted as blocked"
 
@@ -1456,6 +1483,31 @@ store '[
 out="$("$SUT" reconcile 2>&1)"
 eq "$(rehomes)" "0" "an until edge with no target id is never disposed"
 has "$out" "names no target" "and the pass says so"
+
+echo "# until: an edge added after the listing, to a bead this store has no row for, leaves the bead undecided"
+# bd show leaves out an edge whose target has no row in the store, though its
+# dependency_count counts it, so the show alone still reads the bead as owed by
+# its one closed target. The row of the bead read by id carries the new edge.
+store '[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+fresh_store '[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"},{"id":"far-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "an edge this store cannot read is reported, not a pass failure"
+eq "$(rehomes)" "0" "the bead is not handed to bead-rehome"
+eq "$(status_of g-1)" "open" "the bead stays open"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "so no successor pointer is stamped"
+has "$out" "UNRESOLVED g-1" "the pass names the bead it cannot decide"
+has "$out" "far-1" "and the id it could not read"
+has "$out" "0 disposed, 0 live, 0 held, 1 waiting" "it counts as waiting"
+fresh_store '[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"},{"id":"far-2","dependency_type":"blocks"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"
+eq "$(rehomes)" "0" "a blocks blocker this store cannot read, added after the listing, holds the bead as well"
+has "$out" "UNRESOLVED g-1 — its edges name far-2" "and is named"
 
 # --- the disposal budget ------------------------------------------------------
 # The order's timeout kills a pass wherever it stands, and a killed pass prints

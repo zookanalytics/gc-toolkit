@@ -12,8 +12,10 @@
 #             non-array status read exits 2, printing nothing either way; a
 #             store with no candidate makes no status read
 #   (FRESH)   until_fresh finds the edge to the successor gone, a target or a
-#             blocker reopened or added, live work on the row or the edges, or
-#             nothing, and fails closed on a read that fails or does not parse
+#             blocker reopened or added, an edge `bd show` leaves out because
+#             its target has no row in the store, live work on the row or the
+#             edges, or nothing, and fails closed on a read that fails or does
+#             not parse
 #   (READERS) the until consumer and its doctor mirror source this file and
 #             call both functions
 #   (NO-COPY) no other file in the pack defines these names
@@ -40,15 +42,22 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
     || bad "(SCAN) sourcing the file exposes \$UNTIL_RESOLVED_JQ"
 
 # The reader the functions are handed, over fixture files: LISTING answers the
-# store listing, STATUSES a status read by id, SHOW_<id> a `bd show`, and
-# UP_<id> a dependents read. A FAIL_* flag fails that read; READS gets one line
-# per call.
+# store listing, STATUSES a status read by id, ROW_<id> a read by id of that one
+# bead, SHOW_<id> a `bd show`, and UP_<id> a dependents read. A FAIL_* flag
+# fails that read; READS gets one line per call.
 fake_bd() {
+    local want="" prev="" a
     printf '%s\n' "$*" >> "$TMP/reads"
     case "$1" in
         list)
             case " $* " in
-                *" --id "*) [ -z "${FAIL_STATUS:-}" ] || return 1; cat "$TMP/statuses" ;;
+                *" --id "*)
+                    for a in "$@"; do [ "$prev" = "--id" ] && want="$a"; prev="$a"; done
+                    if [ -f "$TMP/row_$want" ]; then
+                        [ -z "${FAIL_ROW:-}" ] || return 1; cat "$TMP/row_$want"
+                    else
+                        [ -z "${FAIL_STATUS:-}" ] || return 1; cat "$TMP/statuses"
+                    fi ;;
                 *) [ -z "${FAIL_LIST:-}" ] || return 1; cat "$TMP/listing" ;;
             esac ;;
         show) [ -z "${FAIL_SHOW:-}" ] || return 1; cat "$TMP/show_$2" ;;
@@ -143,10 +152,17 @@ eq "$out" "" "(FAIL) …printing nothing"
 eq "$(grep -c -- '--id' "$TMP/reads")" "0" "(FAIL) …and makes no status read"
 
 echo "# until_fresh: the bead as the store holds it now"
-fresh_case() { # name show-row up-array want
-    printf '%s' "[$2]" > "$TMP/show_g-1"
-    printf '%s' "$3" > "$TMP/up_g-1"
-    eq "$(until_fresh fake_bd g-1 x-1)" "$4" "(FRESH) $1"
+# The bead's own row from `bd list` carries every edge the show row renders, in
+# the list-edge shape, plus each edge given after <want>: an edge whose target
+# has no row in the store, which real `bd show` leaves out.
+fresh_case() { # name show-row up-array want [listed-only edge, as {depends_on_id, type}]...
+    local name="$1" show="$2" up="$3" want="$4" extra; shift 4
+    extra="$(printf '%s\n' "$@" | jq -sc .)"
+    printf '%s' "[$show]" > "$TMP/show_g-1"
+    printf '%s' "$up" > "$TMP/up_g-1"
+    printf '%s' "[$show]" | jq -c --argjson extra "$extra" \
+        '[ .[] | .dependencies = ([ (.dependencies // [])[] | {depends_on_id: .id, type: .dependency_type} ] + $extra) ]' > "$TMP/row_g-1"
+    eq "$(until_fresh fake_bd g-1 x-1)" "$want" "(FRESH) $name"
 }
 CLEAN_UNTIL='{"id":"x-1","dependency_type":"until","issue_type":"task","status":"closed"}'
 fresh_case "still owed and nothing live reads clear" \
@@ -166,6 +182,22 @@ fresh_case "a convoy tracking the bead reads live" \
 fresh_case "a claim since the listing reads live" \
     '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"rig__polecat-1","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=in_progress; assignee=rig__polecat-1')"
 
+CLEAN_ROW='{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}'
+fresh_case "an until edge bd show leaves out, to a target with no row in this store, reads unresolved" \
+    "$CLEAN_ROW" '[]' "$(printf 'unresolved\tfar-1')" '{"depends_on_id":"far-1","type":"until"}'
+fresh_case "so does a blocks edge bd show leaves out" \
+    "$CLEAN_ROW" '[]' "$(printf 'unresolved\tfar-2')" '{"depends_on_id":"far-2","type":"blocks"}'
+fresh_case "so does a parent bd show leaves out, which could be a convoy" \
+    "$CLEAN_ROW" '[]' "$(printf 'unresolved\tfar-3')" '{"depends_on_id":"far-3","type":"parent-child"}'
+fresh_case "an edge of another type bd show leaves out decides nothing" \
+    "$CLEAN_ROW" '[]' "$(printf 'clear\t-')" '{"depends_on_id":"far-4","type":"related"}'
+fresh_case "every edge bd show leaves out is named" \
+    "$CLEAN_ROW" '[]' "$(printf 'unresolved\tfar-1,far-2')" '{"depends_on_id":"far-2","type":"blocks"}' '{"depends_on_id":"far-1","type":"until"}'
+fresh_case "an until target still open reads waiting ahead of an edge bd show leaves out" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"',{"id":"x-2","dependency_type":"until","issue_type":"task","status":"open"}]}' '[]' "$(printf 'waiting\tx-2')" '{"depends_on_id":"far-1","type":"until"}'
+fresh_case "an edge to the successor that only the listed row carries reads unresolved, not gone" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":[]}' '[]' "$(printf 'unresolved\tx-1')" '{"depends_on_id":"x-1","type":"until"}'
+
 printf '%s' '[{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}]' > "$TMP/show_g-1"
 printf '%s' '[]' > "$TMP/up_g-1"
 out="$(FAIL_SHOW=1 until_fresh fake_bd g-1 x-1)"; rc=$?
@@ -181,6 +213,21 @@ printf '%s' '{"error":"simulated dependents failure"}' > "$TMP/up_g-1"
 out="$(until_fresh fake_bd g-1 x-1)"; rc=$?
 [ "$rc" != 0 ] && [ -z "$out" ] && ok "(FRESH) a dependents read that is not an array fails closed" \
     || bad "(FRESH) a dependents read that is not an array fails closed (rc=$rc out='$out')"
+printf '%s' '[]' > "$TMP/up_g-1"
+printf '%s' '[{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":[{"depends_on_id":"x-1","type":"until"}]}]' > "$TMP/row_g-1"
+: > "$TMP/reads"
+eq "$(until_fresh fake_bd g-1 x-1)" "$(printf 'clear\t-')" "(FRESH) the control: with every read answering, the bead reads clear"
+eq "$(grep -c -- '^list --id g-1 --all --include-gates --include-infra --include-templates ' "$TMP/reads")" "1" "(FRESH) the bead's own row is read once by id, with the flags of the status read"
+out="$(FAIL_ROW=1 until_fresh fake_bd g-1 x-1)"; rc=$?
+eq "$rc:$out" "1:" "(FRESH) a read of the bead's own row that fails exits 1 with nothing printed"
+printf '%s' '[]' > "$TMP/row_g-1"
+out="$(until_fresh fake_bd g-1 x-1)"; rc=$?
+[ "$rc" != 0 ] && [ -z "$out" ] && ok "(FRESH) a row read that returns no row for the bead fails closed" \
+    || bad "(FRESH) a row read that returns no row for the bead fails closed (rc=$rc out='$out')"
+printf '%s' '{"error":"simulated listing failure"}' > "$TMP/row_g-1"
+out="$(until_fresh fake_bd g-1 x-1)"; rc=$?
+[ "$rc" != 0 ] && [ -z "$out" ] && ok "(FRESH) a row read that is not an array fails closed" \
+    || bad "(FRESH) a row read that is not an array fails closed (rc=$rc out='$out')"
 
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the file in prose but no

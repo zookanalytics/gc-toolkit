@@ -364,10 +364,18 @@ mid-pass. That includes a sling the pass's own dispatch half made moments
 earlier. A bead with any mark is reported and left open, which is never a pass
 failure. The fresh read also confirms the bead is still owed: its `until` edge
 to the successor is still there, no `until` target has reopened, and no
-`blocks` blocker has opened. Removing the edge is how a person keeps a bead the
-pass would otherwise dispose, so a bead whose edge went after the listing is
-kept. A dispatch that lands after the fresh read meets a closed bead: no
-pool offers it, and `mol-polecat-work`'s load-context quiesces a pour over it.
+`blocks` blocker has opened. It takes the bead's edges from the bead's own
+`bd list` row, as the listing does, because `bd show` leaves out an edge whose
+target has no row in this store. An edge added since the listing to a bead in
+another store, or to an external reference, is such an edge. When an `until`
+or `blocks` edge, or the edge to the bead's parent, is one of them, the bead
+cannot be decided: the target's status is unknown, and an unknown parent could
+be a convoy. The pass reports the bead and leaves it waiting, as it does a
+bead whose target the status read cannot resolve. Removing the edge is how a
+person keeps a bead the pass would otherwise dispose, so a bead whose edge
+went after the listing is kept. A dispatch that lands after the fresh read
+meets a closed bead: no pool offers it, and `mol-polecat-work`'s load-context
+quiesces a pour over it.
 The guard runs before `bead-rehome` is called, because `bead-rehome` can stamp
 its successor pointer and still have the close refused. A pointer on an anchor
 reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that

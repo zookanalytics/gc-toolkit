@@ -44,16 +44,25 @@
 #   one with nothing owed.
 #
 # until_fresh <reader> <id> <successor>
-#   The bead and the beads that depend on it, as the store holds them now. A
-#   caller reads them just before it acts, because a scan ages while a pass
-#   runs. Prints "<verdict>\t<detail>", where the verdict is one of:
-#     gone     the bead has no `until` edge to <successor> any more: someone
-#              removed the edge that made it owed, which is how a person keeps it
-#     waiting  an `until` target is not closed (detail: those targets)
-#     blocked  a `blocks` blocker is not closed (detail: those blockers)
-#     live     the bead or its edges carry live work (detail: the marks)
-#     clear    still owed, and nothing marks it live
-#   Exit 1 when either read fails or does not parse.
+#   The bead, every edge it has, and the beads that depend on it, as the store
+#   holds them now. A caller reads them just before it acts, because a scan
+#   ages while a pass runs. `bd show` gives each edge with its target's status,
+#   but it leaves out an edge whose target has no row in this store, such as
+#   one in another store or an external reference. The bead's `bd list` row
+#   carries every edge it has, so the two reads together say which edges the
+#   store cannot decide. Prints "<verdict>\t<detail>", where the verdict is
+#   one of:
+#     gone        the bead has no `until` edge to <successor> any more: someone
+#                 removed the edge that made it owed, which is how a person
+#                 keeps it
+#     waiting     an `until` target is not closed (detail: those targets)
+#     unresolved  an `until`, `blocks` or `parent-child` edge names a bead this
+#                 store has no row for, so the bead cannot be decided (detail:
+#                 those ids)
+#     blocked     a `blocks` blocker is not closed (detail: those blockers)
+#     live        the bead or its edges carry live work (detail: the marks)
+#     clear       still owed, and nothing marks it live
+#   Exit 1 when a read fails or does not parse.
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -90,24 +99,33 @@ until_scan() { # reader -> one row per candidate on stdout; exit 1 listing unrea
 }
 
 until_fresh() { # reader id successor -> "<verdict>\t<detail>" on stdout; exit 1 when a read fails or does not parse
-    local reader="$1" id="$2" succ="$3" row up
+    local reader="$1" id="$2" succ="$3" row listed up
     [ -n "${UNTIL_RESOLVED_JQ:-}" ] || return 1
-    # `bd show` gives the bead's own edges with each target's status;
+    # `bd show` gives the bead's own edges with each target's status, and
+    # `bd list --id` gives the bead's row with every edge it has, including one
+    # whose target this store has no row for. The flags are the scan's status
+    # read's, so the row comes back whatever the bead's status or class.
     # `bd dep list --direction=up` gives the beads that depend on it, because
     # `bd show` leaves a convoy's tracks edge out of its dependents.
     row="$("$reader" show "$id" --json </dev/null 2>/dev/null)" || return 1
+    listed="$("$reader" list --id "$id" --all --include-gates --include-infra --include-templates --brief --json --limit 0 </dev/null 2>/dev/null)" || return 1
     up="$("$reader" dep list "$id" --direction=up --json </dev/null 2>/dev/null)" || return 1
-    [ -n "$row" ] && [ -n "$up" ] || return 1
-    { printf '%s' "$row" | scrub; printf '\n'; printf '%s' "$up" | scrub; printf '\n'; } \
-        | jq -rn --arg succ "$succ" "$UNTIL_RESOLVED_JQ"'
-            input as $row | input as $up
+    [ -n "$row" ] && [ -n "$listed" ] && [ -n "$up" ] || return 1
+    { printf '%s' "$row" | scrub; printf '\n'; printf '%s' "$listed" | scrub; printf '\n'; printf '%s' "$up" | scrub; printf '\n'; } \
+        | jq -rn --arg id "$id" --arg succ "$succ" "$UNTIL_RESOLVED_JQ"'
+            input as $row | input as $listed | input as $up
             # `bd show` answers an array on a hit and an {"error": ...} object
-            # on a miss, both at exit 0.
+            # on a miss, both at exit 0. `bd list --id` answers an array, with
+            # no row for a bead the store does not hold.
             | ($row | if type == "array" then .[0]
                       elif type == "object" and (has("error") | not) then .
                       else null end) as $b
-            | if ($b | type) == "object" and ($up | type) == "array"
-              then $b | until_fresh_verdict($up; $succ)
+            | ($listed | if type == "array"
+                         then [ .[] | objects | select(((.id // "") | tostring) == $id) ]
+                              | if length == 1 then .[0] else null end
+                         else null end) as $l
+            | if ($b | type) == "object" and ($l | type) == "object" and ($up | type) == "array"
+              then $b | until_fresh_verdict($l; $up; $succ)
               else error("unreadable") end' 2>/dev/null
 }
 
@@ -171,20 +189,35 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
       (if (.marks | length) == 0 then "-" else (.marks | join("; ")) end) ]
     | join("\t");
   # The verdict on a bead read fresh. Input: the bead row `bd show --json`
-  # returns, whose .dependencies carry the status of each target. $up: what
-  # `bd dep list <id> --direction=up --json` returns. $succ: the successor the
-  # scan named.
-  def until_fresh_verdict($up; $succ):
+  # returns, whose .dependencies carry the status of each target and leave out
+  # an edge whose target has no row in this store. $listed: the row of the same
+  # bead from `bd list --json`, whose .dependencies carry every edge it has as
+  # {depends_on_id, type}. $up: what `bd dep list <id> --direction=up --json`
+  # returns. $succ: the successor the scan named. Once the edge to the
+  # successor is found, the verdict is decided in the order until_judge decides
+  # a candidate.
+  def until_fresh_verdict($listed; $up; $succ):
     def etype: ((.dependency_type // .type // "") | tostring);
     def eid: ((.id // "") | tostring);
     def unclosed: (((.status // "") | tostring | ascii_downcase) != "closed");
     [ (.dependencies | if type == "array" then .[] else empty end) | objects ] as $d
-    | [ $d[] | select(etype == "until") ] as $u
-    | [ $u[] | select(unclosed) | eid ] as $open_u
+    # Every edge the bead has, from either read, as {id, type}.
+    | ([ $d[] | {id: eid, type: etype} ]
+       + [ ($listed.dependencies | if type == "array" then .[] else empty end) | objects
+           | {id: ((.depends_on_id // "") | tostring), type: ((.type // "") | tostring)} ]) as $all
+    | ([ $d[] | {key: eid, value: true} ] | from_entries) as $shown
+    | [ $all[] | select(.type == "until") | .id ] as $u
+    | [ $d[] | select(etype == "until") | select(unclosed) | eid ] as $open_u
+    # An edge `bd show` left out has no status to read. The verdict reads the
+    # `until` and `blocks` targets, and live work reads the parent, whose type
+    # says whether the bead is a member of a convoy.
+    | ([ $all[] | select(.type == "until" or .type == "blocks" or .type == "parent-child")
+         | .id | select(length > 0) | select($shown[.] | not) ] | unique) as $unseen
     | [ $d[] | select(etype == "blocks") | select(unclosed) | eid ] as $open_b
     | (live_work_reasons + live_work_edge_reasons($up)) as $marks
-    | if ([ $u[] | select(eid == $succ) ] | length) == 0 then "gone\t-"
+    | if ([ $u[] | select(. == $succ) ] | length) == 0 then "gone\t-"
       elif ($open_u | length) > 0 then "waiting\t\($open_u | join(","))"
+      elif ($unseen | length) > 0 then "unresolved\t\($unseen | join(","))"
       elif ($open_b | length) > 0 then "blocked\t\($open_b | join(","))"
       elif ($marks | length) > 0 then "live\t\($marks | join("; "))"
       else "clear\t-" end;

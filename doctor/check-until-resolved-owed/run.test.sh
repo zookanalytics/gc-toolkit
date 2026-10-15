@@ -18,7 +18,8 @@
 # with its minimum floor when the order registry does not read; the owed-since
 # moment, the latest of the until targets' closes, the until edges' creation and
 # the blocks blockers' closes; and the fresh read through until-resolved.sh, so
-# a bead whose edge was removed or that a new blocker holds is not reported.
+# a bead whose edge was removed or that a new blocker holds is not reported, and
+# one given an edge to a bead with no row in the store is reported unchecked.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -67,8 +68,12 @@ GC
 #   * `bd list --id <csv> --all ...`       → the referenced target/blocker beads
 #     (<name>.refs.json), DROPPING ids with no row (real --id is silent about a
 #     miss) and hiding a gate/infra/template row unless the matching --include
-#     flag was passed. BD_FAIL_REFS fails it. ID_CALLS, when set, gets one line
-#     per --id listing, so a test can assert it runs once per store.
+#     flag was passed. An id with no row there that names an open bead answers
+#     that bead's row as `bd show` reads it now, from <name>.show.json when that
+#     file names it, else from the open listing, with every edge it carries in
+#     the list-edge shape: the fresh read's read of the bead by id. BD_FAIL_REFS
+#     fails it. ID_CALLS, when set, gets one line per --id listing, so a test
+#     can assert it runs once per store.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
@@ -96,18 +101,23 @@ case "$sub" in
     if [ -n "$id_csv" ]; then
       [ -n "${ID_CALLS:-}" ] && echo "$name $id_csv" >> "$ID_CALLS"
       [ "$name" = "${BD_FAIL_REFS:-}" ] && exit 3
-      f="$STORES/$name.refs.json"
-      if [ -f "$f" ]; then
-        want=$(printf '%s' "$id_csv" | tr ',' '\n' | jq -R . | jq -sc .)
-        jq -c --argjson want "$want" --argjson ig "$inc_gates" --argjson ii "$inc_infra" --argjson it "$inc_templates" '
-          [ .[]
-            | select(.id as $i | $want | index($i))
+      refs="$STORES/$name.refs.json"; [ -f "$refs" ] || refs=/dev/null
+      now="$STORES/$name.show.json"; [ -f "$now" ] || now=/dev/null
+      open="$STORES/$name.open.json"; [ -f "$open" ] || open=/dev/null
+      want=$(printf '%s' "$id_csv" | tr ',' '\n' | jq -R . | jq -sc .)
+      jq -nc --argjson want "$want" --argjson ig "$inc_gates" --argjson ii "$inc_infra" --argjson it "$inc_templates" \
+          --slurpfile refs "$refs" --slurpfile now "$now" --slurpfile open "$open" '
+        ($refs[0] // []) as $r
+        | [ $r[] | select(.id as $i | $want | index($i)) ]
+          + [ $want[] as $i | select(any($r[]; .id == $i) | not)
+              | (((($now[0] // []) | map(select(.id == $i)) | .[0])
+                  // (($open[0] // []) | map(select(.id == $i)) | .[0])) // empty) ]
+        | [ .[]
             | select( (.issue_type // "task") as $t
                       | if   $t == "gate"                                     then $ig
                         elif ($t == "agent" or $t == "role" or $t == "message") then $ii
                         elif $t == "template"                                 then $it
-                        else true end ) ]' "$f"
-      else printf '[]'; fi
+                        else true end ) ]'
     else
       [ "$name" = "${BD_FAIL_LIST:-}" ] && exit 3
       f="$STORES/$name.open.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
@@ -312,8 +322,9 @@ eq "$RC" "1" "three owed candidates warn (exit 1)"
 has "$OUT" "alpha bead m-1" "the first owed candidate is reported"
 has "$OUT" "alpha bead m-2" "the second owed candidate is reported"
 has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
-IDN=$( [ -f "$IDLOG" ] && wc -l < "$IDLOG" | tr -d ' ' || echo 0 )
-eq "$IDN" "1" "the store's target statuses are read in ONE batch, not one call per candidate"
+# Each owed candidate's fresh read reads its own row by id; the rest are status reads.
+eq "$(grep -vc '^alpha m-[0-9]$' "$IDLOG" 2>/dev/null)" "1" "the store's target statuses are read in ONE batch, not one call per candidate"
+eq "$(grep -c '^alpha m-[0-9]$' "$IDLOG" 2>/dev/null)" "3" "each owed candidate's own row is read once by id, at its fresh read"
 
 # --- 17. LIVE WORK on the row: an anchor mid-PR is a decision, not a stall ---
 open_store alpha "$(o_until_meta l-1 task '{"branch":"polecat/l-1","merge_result":"pull_request","pr_url":"https://github.com/o/r/pull/7"}' x-0)"
@@ -458,6 +469,20 @@ refs_store alpha "$(r_closed x-0 "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a candidate whose blocks blocker does not resolve warns (exit 1)"
 has "$OUT" "could not resolve its until target(s)/blocker(s) [ghost-blk]" "…naming the blocker it could not read"
+hasnt "$OUT" "owed but not firing" "…and is not reported as owed"
+clear_stores
+
+# --- 28. FAIL CLOSED: an edge the fresh read finds to a bead with no row here --
+# The listing finds the bead owed by its one closed target. By the fresh read it
+# has an until edge to a bead in another store, which `bd show` leaves out, so
+# the pass cannot decide it and leaves it. It is reported unchecked, never owed.
+open_store alpha "$(o_until f-3 x-0)"
+refs_store alpha "$(r_closed x-0 "$OLD")"
+printf '%s' '[{"id":"f-3","issue_type":"task","status":"open","assignee":"","dependencies":[{"depends_on_id":"x-0","type":"until"},{"depends_on_id":"far-9","type":"until"}]}]' > "$TMP/stores/alpha.show.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an owed bead whose fresh read finds an edge to a bead with no row here warns (exit 1)"
+has "$OUT" "alpha bead f-3: its edges name [far-9]" "…naming the bead it could not read"
+has "$OUT" "NOT checked" "…as a bead left unchecked"
 hasnt "$OUT" "owed but not firing" "…and is not reported as owed"
 clear_stores
 

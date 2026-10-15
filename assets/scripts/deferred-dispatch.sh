@@ -744,18 +744,30 @@ until_store_ref() {
     return 1
 }
 
+# A bead whose edges name a bead this store did not return cannot be decided, so
+# it is reported and left waiting, never disposed on a guess. The scan and the
+# fresh read report it alike.
+report_unresolved() { # id detail ("-" when an until edge names no target)
+    if [ "$2" = "-" ]; then
+        echo "$PROG: UNRESOLVED $1 — an until edge on it names no target; it is never disposed while that edge stands" >&2
+    else
+        echo "$PROG: UNRESOLVED $1 — its edges name $2, which this store did not return; it is never disposed while one stays unread" >&2
+    fi
+}
+
 # Dispose every owed candidate that carries no live work, through bead-rehome so
 # the close carries a successor pointer. bead-rehome can stamp that pointer and
 # still have the close refused, and a pointer on an anchor reads as a disposed
 # anchor to scaffolding-sweep, so a bead reaches it only once the scan and a
 # fresh read just before the call both find it owed: every `until` target closed,
 # the edge to its successor still in place, no open `blocks` blocker of its own,
-# and no live-work mark. Anything else is an expected state, reported and left
-# open, never a pass failure. A held close (an open visit on the bead;
-# bead-rehome refuses rather than force-closing) and an already-recorded
-# different successor are reported and retried. Returns non-zero on a hard
-# dispose failure, when a bead owed a disposal could not be re-read, and when an
-# owed bead's store cannot be named for bead-rehome.
+# no edge naming a bead this store cannot read, and no live-work mark. Anything
+# else is an expected state, reported and left open, never a pass failure. A
+# held close (an open visit on the bead; bead-rehome refuses rather than
+# force-closing) and an already-recorded different successor are reported and
+# retried. Returns non-zero on a hard dispose failure, when a bead owed a
+# disposal could not be re-read, and when an owed bead's store cannot be named
+# for bead-rehome.
 reconcile_until() {
     [ -n "${UNTIL_RESOLVED_JQ:-}" ] || {
         echo "$PROG: reconcile: cannot source until-resolved.sh (and the live-work.sh it reads) beside this script — disposing no until-gated bead, since nothing could tell what is owed or live work from a pure wait" >&2
@@ -789,13 +801,7 @@ reconcile_until() {
             owed) ;;
             waiting) waiting=$((waiting + 1)); continue ;;
             blocked) blocked=$((blocked + 1)); continue ;;
-            unresolved)
-                if [ "$detail" = "-" ]; then
-                    echo "$PROG: UNRESOLVED $id — an until edge on it names no target; it is never disposed while that edge stands" >&2
-                else
-                    echo "$PROG: UNRESOLVED $id — its edges name $detail, which this store did not return; it is never disposed while one stays unread" >&2
-                fi
-                waiting=$((waiting + 1)); continue ;;
+            unresolved) report_unresolved "$id" "$detail"; waiting=$((waiting + 1)); continue ;;
             *)
                 echo "$PROG: WARN $id came back from the until scan as '$state' — leaving it" >&2
                 ufailed=$((ufailed + 1)); continue ;;
@@ -819,6 +825,7 @@ reconcile_until() {
                 echo "$PROG: KEPT $id — its until edge to $succ was removed after this pass listed it; not disposing"
                 waiting=$((waiting + 1)); continue ;;
             waiting) waiting=$((waiting + 1)); continue ;;
+            unresolved) report_unresolved "$id" "$detail"; waiting=$((waiting + 1)); continue ;;
             blocked) blocked=$((blocked + 1)); continue ;;
             live)
                 echo "$PROG: LEFT $id — its until target $succ closed, but it carries live work ($detail); this pass never disposes live work" >&2

@@ -957,9 +957,13 @@ targets have all closed, whose `until` edge to the successor still stands, that
 no open `blocks` blocker of its own holds, and that carries no live work as
 `assets/scripts/live-work.sh` defines it. The pass checks them on its
 pass-start listing and again on a fresh read of the bead and what depends on
-it, made just before the call. It leaves a bead that fails any of them as it
-is and never calls `bead-rehome.sh` on it
-([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
+it, made just before the call. Both reads take the bead's edges from its
+`bd list` row, because `bd show` leaves out an edge whose target has no row in
+this store, so an `until` target, a `blocks` blocker or a parent the store
+cannot read leaves its condition unproven. It leaves a bead that fails any of
+them, or that it cannot prove meets one, as it is and never calls
+`bead-rehome.sh` on it ([deferred-dispatch.md](deferred-dispatch.md), "The
+resolved-by consumer").
 Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
 close.
 

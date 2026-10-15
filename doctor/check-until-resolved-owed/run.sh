@@ -187,7 +187,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         # A clean row still needs the fresh read the pass makes before a close:
         # a convoy tracking the bead or an open child under it is live work no
         # row field shows, and an edge removed or a blocker added since the
-        # listing means the pass would not dispose it either.
+        # listing means the pass would not dispose it either. An edge added
+        # since then to a bead this store has no row for leaves the pass unable
+        # to decide it, so it is reported unchecked, as the scan reports one.
         if [ "$marks" = "-" ]; then
             if ! fresh=$(until_fresh rig_bd "$cid" "$succ") || [ -z "$fresh" ]; then
                 warnings+=("$label bead $cid: could not read it and its dependents in $RIG_DB, so live work on its edges cannot be ruled out — NOT checked")
@@ -196,6 +198,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             case "${fresh%%$'\t'*}" in
                 clear) ;;
                 live) marks="${fresh#*$'\t'}" ;;
+                unresolved)
+                    warnings+=("$label bead $cid: its edges name [${fresh#*$'\t'}], which $RIG_DB has no row for, so whether the pass would dispose it cannot be told — NOT checked")
+                    continue ;;
                 *) continue ;;   # gone, waiting or blocked at the fresh read: not owed now
             esac
         fi
