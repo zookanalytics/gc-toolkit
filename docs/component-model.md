@@ -125,11 +125,15 @@ The edge answers for the closed children only in a store marked joined.
 `--mark` records the store joined (`anchor_edges.joined` in `gc bd kv`) after a
 run that found no child missing its edge. A store without the mark reads its
 closed children by `anchor_bead` too. `assets/scripts/bd-lib.sh` holds the read
-(`bd_anchor_children`) and both writes. A child is created joined to its anchor,
-the edge riding the create (`bd_create_child`), and an existing bead is joined
-before `anchor_bead` is stamped on it (`bd_anchor_link`), so a marked store
-stays joined. `related` holds nothing: it gates neither `bd ready` nor a close,
-and the merge hold stays on the `blocks` edges read down from the anchor.
+(`bd_anchor_children`) and both writes. The helm board makes the same read in Go
+for a pre-open anchor's review beads (`services/helm/internal/source/beads.go`),
+batched over a rig's anchors because it derives every anchor in one gather. In a
+store without the mark it reports those reviews unread rather than read the
+closed ledger on every render. A child is created joined to its anchor, the edge
+riding the create (`bd_create_child`), and an existing bead is joined before
+`anchor_bead` is stamped on it (`bd_anchor_link`), so a marked store stays
+joined. `related` holds nothing: it gates neither `bd ready` nor a close, and
+the merge hold stays on the `blocks` edges read down from the anchor.
 
 ---
 

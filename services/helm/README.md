@@ -553,8 +553,12 @@ is green when a review backs it the way `lane-state.sh` reads a local backing
 (`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the
 lane in `check_name`, carrying a `reviewed_oid` and `signoff_verdict=approve`
 and not superseded, with no review for the lane still open. The library backend
-gathers a live pre-open anchor's reviews through its inbound edges; the
-supervisor backend reads no closed bead, so it marks them unread and fires no
+gathers a live pre-open anchor's reviews the way `bd-lib.sh` reads an anchor's
+children in a store marked joined: the live ones by `anchor_bead`, and the
+closed ones through the anchor's inbound edges. In a store without the mark,
+where only a scan of the whole closed ledger would find the closed ones, and
+when a review read fails, it marks the reviews unread. The supervisor backend
+reads no closed bead, so it marks them unread too, and unread reviews fire no
 stall. A legacy `codex` lane counts like any other, and a `check_set` that
 declares no lane is never a stalled check.
 Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a

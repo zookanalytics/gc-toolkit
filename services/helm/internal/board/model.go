@@ -201,13 +201,16 @@ type Anchor struct {
 	// task_kind=review and names this anchor in anchor_bead. A lane's green
 	// derives from them ([laneGreen]). The beads source gathers them for a live
 	// merge anchor at pre_open_gate, the one row whose stall signal reads a
-	// lane's green, through the anchor's inbound edges, the read bd-lib.sh makes
-	// for an anchor's closed children ([source.BeadsSource.attachEdges]).
+	// lane's green, the way bd-lib.sh reads an anchor's children in a store
+	// marked joined: the live ones by anchor_bead, and the closed ones through
+	// the anchor's inbound edges ([source.BeadsSource.readReviews]).
 	//
 	// ReviewsUnknown says the source could not read them, so an empty Reviews
 	// is an absence of knowledge, not a lane no review backs. The beads source
-	// sets it when the edge read or its hydration fails; the supervisor backend
-	// reads no closed bead and sets it on every metadata-keyed row it serves.
+	// sets it in a store not marked joined, where the edges do not answer for
+	// the closed reviews, and when a read the reviews come from fails. The
+	// supervisor backend reads no closed bead and sets it on every
+	// metadata-keyed row it serves.
 	Reviews        []Child `json:"reviews,omitempty"`
 	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
 }
