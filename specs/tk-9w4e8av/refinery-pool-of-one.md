@@ -276,6 +276,15 @@ Deferred dispatch reads holds through it, and `doctor/check-armed-dispatch-owed`
 reports no held arm as owed. The refinery reads readiness through the same
 definition and adds no rule of its own.
 
+steer-by-epic's unit 12 (tk-rl8gz4b.15) retires that definition's demand-gate
+exception, and its row says that deferred dispatch and the held predicate then
+"read `bd ready` alone" (`specs/tk-rl8gz4b.2/steer-by-epic.md:763`). This design
+reads the unit as retiring the exception only. It must keep `hold_in_flight`
+(`hold-lib.sh:91`, applied in `hold_chain`), because the refinery's readiness
+rests on it. A held predicate that read `bd ready` alone would hold every handoff
+under a parked epic, and `refinery-offers.test.sh`'s parked-epic case fails if
+the rule goes.
+
 So the refinery declares a `work_query` and a `scale_check`, as the proactive pool
 already does. Both call one script, `assets/scripts/refinery-offers.sh`, which
 the alarm (section 5) also calls, so the three cannot disagree. The script reads
