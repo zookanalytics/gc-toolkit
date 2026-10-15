@@ -35,8 +35,10 @@ inline-playable path and no .gitattributes LFS filter covers an MP4.
 Contract: single continuation group, run inline in one session. Derive the
 demo-request bead from the input convoy's single member; produce the script;
 capture; deliver or report; close the request bead and the step chain forward;
-drain. On any blocker, escalate.sh files one visit and molecule-hold.sh holds
-the molecule before the drain, so a declined demo is never a silent strand.
+drain. On any blocker, escalate.sh files one visit and run-cancel.sh cancels
+the run through gascity before the drain, so a declined demo is never a silent
+strand. A demo's pour carries its vars, so a person re-pours it rather than an
+arm re-slinging it.
 NEVER commit the MP4, NEVER close or route a delivered PR's anchor.
 """
 formula = "mol-rig-demo"
@@ -102,16 +104,16 @@ gc bd prime
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REQUEST_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-: "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+: "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack}"
 if [ -z "$REQUEST_BEAD" ]; then
-  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key rig-demo-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-rig-demo cannot derive its demo-request bead; the pour is malformed and must be redone. Held at prepare-script; nothing was captured or closed."; then
-    echo "escalate.sh recorded no release path; NOT holding or draining, so the step stays claimable and the next worker retries the escalation." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-rig-demo.prepare-script" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key rig-demo-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-rig-demo cannot derive its demo-request bead; the pour is malformed and must be redone. Its run is cancelled; nothing was captured."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  elif "$SCRIPTS/run-cancel.sh" --step "mol-rig-demo.prepare-script" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining — something in this molecule is still claimable." >&2
+    echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
   fi
   exit 1
 fi
@@ -128,8 +130,8 @@ SCRIPT_PATH="{{demo_script}}"
 SOURCE_BEAD="{{source_bead}}"
 if [ -n "$SCRIPT_PATH" ] && [ -n "$SOURCE_BEAD" ]; then
   echo "give exactly one of demo_script / source_bead, not both" >&2
-  "$SCRIPTS/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-scenario --message "mol-rig-demo on $REQUEST_BEAD got both demo_script and source_bead; the scenario is ambiguous. Held at prepare-script." \
-    && "$SCRIPTS/molecule-hold.sh" --step "mol-rig-demo.prepare-script" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "both demo_script and source_bead set; scenario ambiguous" \
+  "$SCRIPTS/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-scenario --message "mol-rig-demo on $REQUEST_BEAD got both demo_script and source_bead; the scenario is ambiguous. Its run is cancelled; re-pour it with one of them." \
+    && "$SCRIPTS/run-cancel.sh" --step "mol-rig-demo.prepare-script" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "both demo_script and source_bead set; scenario ambiguous" \
     && gc runtime drain-ack
   exit 1
 fi
@@ -143,7 +145,8 @@ as `SCRIPT_PATH`. Follow the skill as written — it is the method, not a script
 to call.
 
 If neither is set, this is a malformed pour: escalate (key
-`rig-demo-no-scenario`), hold `mol-rig-demo.prepare-script`, drain, exit 1.
+`rig-demo-no-scenario`), cancel the run with
+`run-cancel.sh --step mol-rig-demo.prepare-script`, drain, exit 1.
 
 **3. Record the resolved path** for the capture step and for crash recovery:
 ```bash
@@ -190,17 +193,17 @@ TARGETS=0
 [ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
 [ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
 if [ "$TARGETS" -ne 1 ]; then
-  HOLD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { HOLD="$c/assets/scripts"; break; }
+  DECLINE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { DECLINE="$c/assets/scripts"; break; }
   done
-  : "${HOLD:?molecule-hold.sh and escalate.sh not found in the pack}"
+  : "${DECLINE:?run-cancel.sh and escalate.sh not found in the pack}"
   gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: malformed pour; $TARGETS of serve_dir/serve_cmd/base_url set, need exactly one."
-  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got $TARGETS of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and exactly one names how the rig's app is reached. Held at capture; nothing was captured or closed. Re-pour with a single app target."; then
-    echo "escalate.sh recorded no release path; NOT holding or draining." >&2
-  elif "$HOLD/molecule-hold.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "malformed pour: $TARGETS of serve_dir/serve_cmd/base_url set, need exactly one"; then
+  if ! "$DECLINE/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-ambiguous-app-target --message "mol-rig-demo on $REQUEST_BEAD got $TARGETS of serve_dir / serve_cmd / base_url (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'), and exactly one names how the rig's app is reached. Its run is cancelled; nothing was captured. Re-pour with a single app target."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining." >&2
+  elif "$DECLINE/run-cancel.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "malformed pour: $TARGETS of serve_dir/serve_cmd/base_url set, need exactly one"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining." >&2
+    echo "run-cancel.sh did not end the run; NOT draining." >&2
   fi
   exit 1
 fi
@@ -231,23 +234,23 @@ else set -- "$@" --base-url "$BASE_URL"
 fi
 [ "{{narrate}}" = "false" ] && set -- "$@" --no-narrate
 # An uncaptured non-zero aborts the step under a strict shell, before the
-# escalation and hold below.
+# escalation and cancel below.
 CAPTURE_RC=0
 "$SCRIPTS/rig-demo-capture.sh" "$@" || CAPTURE_RC=$?
 if [ "$CAPTURE_RC" -ne 0 ]; then
   WHY="the engine or the app produced no MP4; a human must check the app target and the demo toolchain (doctor/check-demo-toolchain)"
   [ "$CAPTURE_RC" -eq 3 ] && WHY="the clip at $OUT recorded at least one step failing its proof; a human must judge from it whether the app or the script is wrong"
-  HOLD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { HOLD="$c/assets/scripts"; break; }
+  DECLINE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { DECLINE="$c/assets/scripts"; break; }
   done
-  : "${HOLD:?molecule-hold.sh and escalate.sh not found in the pack}"
+  : "${DECLINE:?run-cancel.sh and escalate.sh not found in the pack}"
   gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: capture failed for {{rig_name}} from $SCRIPT_PATH: $WHY."
-  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-capture-failed --message "mol-rig-demo could not capture a clean clip of {{rig_name}} from $SCRIPT_PATH (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'): $WHY. Held at capture."; then
-    echo "escalate.sh recorded no release path; NOT holding or draining." >&2
-  elif "$HOLD/molecule-hold.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "capture of {{rig_name}} failed: $WHY"; then
+  if ! "$DECLINE/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-capture-failed --message "mol-rig-demo could not capture a clean clip of {{rig_name}} from $SCRIPT_PATH (serve_dir='$SERVE_DIR' serve_cmd='$SERVE_CMD' base_url='$BASE_URL'): $WHY. Its run is cancelled; re-pour it once the cause is fixed."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining." >&2
+  elif "$DECLINE/run-cancel.sh" --step "mol-rig-demo.capture" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "capture of {{rig_name}} failed: $WHY"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining." >&2
+    echo "run-cancel.sh did not end the run; NOT draining." >&2
   fi
   exit 1
 fi
@@ -290,17 +293,17 @@ elif [ -n "{{deliver_subject}}" ]; then
   "$SCRIPTS/demo-deliver.sh" --file "$MP4" --subject "{{deliver_subject}}" && DELIVERED="the PR of {{deliver_subject}}"
 fi
 if { [ -n "{{deliver_pr}}" ] || [ -n "{{deliver_subject}}" ]; } && [ -z "$DELIVERED" ]; then
-  HOLD=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { HOLD="$c/assets/scripts"; break; }
+  DECLINE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { DECLINE="$c/assets/scripts"; break; }
   done
-  : "${HOLD:?molecule-hold.sh and escalate.sh not found in the pack}"
+  : "${DECLINE:?run-cancel.sh and escalate.sh not found in the pack}"
   gc bd update "$REQUEST_BEAD" --append-notes "rig-demo: delivery failed; clip is at $MP4."
-  if ! "$HOLD/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-delivery-failed --message "mol-rig-demo captured a clip of {{rig_name}} at $MP4 but could not deliver it to the PR (deliver_pr='{{deliver_pr}}' deliver_subject='{{deliver_subject}}'). demo-deliver.sh fails closed on a foreign PR or a missing/too-old gh; a human must check the PR reference. Held at deliver-and-finalize."; then
-    echo "escalate.sh recorded no release path; NOT holding or draining." >&2
-  elif "$HOLD/molecule-hold.sh" --step "mol-rig-demo.deliver-and-finalize" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "capture succeeded but delivery to the PR failed; the clip is at $MP4"; then
+  if ! "$DECLINE/escalate.sh" --subject "$REQUEST_BEAD" --key rig-demo-delivery-failed --message "mol-rig-demo captured a clip of {{rig_name}} at $MP4 but could not deliver it to the PR (deliver_pr='{{deliver_pr}}' deliver_subject='{{deliver_subject}}'). demo-deliver.sh fails closed on a foreign PR or a missing/too-old gh; a human must check the PR reference. Its run is cancelled; deliver the clip by hand or re-pour."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining." >&2
+  elif "$DECLINE/run-cancel.sh" --step "mol-rig-demo.deliver-and-finalize" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "capture succeeded but delivery to the PR failed; the clip is at $MP4"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining." >&2
+    echo "run-cancel.sh did not end the run; NOT draining." >&2
   fi
   exit 1
 fi

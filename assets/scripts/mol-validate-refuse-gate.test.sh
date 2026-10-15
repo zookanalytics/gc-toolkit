@@ -8,11 +8,13 @@
 # unrulable pass every cycle, and the "escalation" the worker doctrine reached for
 # was bare witness mail, a record no query returns.
 #
-# Each arm now files a tracked visit through escalate.sh and holds the molecule
-# only if that visit landed, then drains, the same contract
-# mol-polecat-work's load-context arm holds. This EXECUTES the real snippet
-# extracted verbatim from the formula against a fake `gc` and stub scripts, so the
-# test cannot drift from the shipped instruction. No live city, Dolt, or network.
+# Each arm files a tracked visit through escalate.sh and, only if that visit
+# landed, cancels the run through run-cancel.sh, then drains, the same contract
+# mol-polecat-work's load-context arm keeps. A pass closed before its run reached
+# load-dispatch was withdrawn, so its run is cancelled with no visit. This
+# EXECUTES the real snippets extracted verbatim from the formula against a fake
+# `gc` and stub scripts, so the test cannot drift from the shipped instruction.
+# No live city, Dolt, or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,19 +44,20 @@ extract() {
 }
 
 # --- Fakes shared by both arms. ----------------------------------------------
-# gc : only `runtime drain-ack` is reached (the arms write no bd notes); it
-#      records DRAIN so the ordered verb log is provable.
+# gc : `runtime drain-ack` records DRAIN so the ordered verb log is provable,
+#      and `bd show` answers the validation pass at $FAKE_PASS_STATUS.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
+  "bd show") printf '[{"id":"%s","status":"%s"}]\n' "$3" "${FAKE_PASS_STATUS:-open}"; exit 0 ;;
 esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# escalate.sh, molecule-hold.sh resolved out of $GC_PACK_DIR exactly as the arm
+# escalate.sh, run-cancel.sh resolved out of $GC_PACK_DIR exactly as the arm
 # resolves them. Each records its verb into the ordered trace and its argv where
 # the assertions can read it, and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
@@ -64,23 +67,23 @@ printf 'ESCALATE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_ESC:-/dev/null}"
 exit "${FAKE_ESC_RC:-0}"
 ESC
-cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
+cat > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
 #!/usr/bin/env bash
-printf 'HOLD\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_HOLD:-/dev/null}"
-exit "${FAKE_HOLD_RC:-0}"
-HOLD
-chmod +x "$TMP/pack/assets/scripts/escalate.sh" "$TMP/pack/assets/scripts/molecule-hold.sh"
+printf 'CANCEL\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
+exit "${FAKE_CANCEL_RC:-0}"
+CANCEL
+chmod +x "$TMP/pack/assets/scripts/escalate.sh" "$TMP/pack/assets/scripts/run-cancel.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <arm.sh> <VALIDATION_PASS> <ANCHOR> returns "<rc>|<ordered verb log>"
-#   FAKE_*_RC control each stub's exit; FAKE_ESC/HOLD capture argv.
+#   FAKE_*_RC control each stub's exit; FAKE_ESC/CANCEL capture argv.
 run() {
-  : > "$TMP/log"; : > "$TMP/esc"; : > "$TMP/hold"
+  : > "$TMP/log"; : > "$TMP/esc"; : > "$TMP/cancel"
   local rc=0
   VALIDATION_PASS="$2" ANCHOR="$3" CLAIMED_STEP_BEAD_ID=st-load \
-  FAKE_LOG="$TMP/log" FAKE_ESC="$TMP/esc" FAKE_HOLD="$TMP/hold" \
-  FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" \
+  FAKE_LOG="$TMP/log" FAKE_ESC="$TMP/esc" FAKE_CANCEL="$TMP/cancel" \
+  FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" \
     bash "$1" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -99,33 +102,47 @@ check_arm() {
   esac
   bash -n "$A" && ok "$marker: syntactically valid bash" || bad "$marker: failed bash -n"
 
-  # The case the arm exists for: a malformed dispatch. escalate, then hold, then
+  # The case the arm exists for: a malformed dispatch. escalate, then cancel, then
   # drain; exits 1.
-  eq "$(run "$A" "$fvp" "$fanc")" "1|ESCALATE;HOLD;DRAIN;" \
-     "$marker: refusal escalates, holds, drains, exits 1"
+  eq "$(run "$A" "$fvp" "$fanc")" "1|ESCALATE;CANCEL;DRAIN;" \
+     "$marker: refusal escalates, cancels the run, drains, exits 1"
   run "$A" "$fvp" "$fanc" >/dev/null
   has "$(cat "$TMP/esc")"  "--key $key"                "$marker: escalate names --key $key"
   has "$(cat "$TMP/esc")"  "--subject $subj"           "$marker: escalate --subject names the malformed unit"
-  has "$(cat "$TMP/hold")" "mol-validate.load-dispatch" "$marker: hold names THIS step"
+  has "$(cat "$TMP/cancel")" "--step mol-validate.load-dispatch --bead st-load" "$marker: the cancel names THIS step"
 
   # A well-formed dispatch is a no-op: the arm falls through and load-dispatch
   # proceeds.
   eq "$(run "$A" "$nvp" "$nanc")" "0|" "$marker: well-formed dispatch is a no-op"
 
-  # No release path recorded (escalate exits non-zero): NEVER hold or drain, so the
-  # step stays claimable and the next worker retries the escalation.
+  # No visit recorded (escalate exits non-zero): NEVER cancel or drain, so the
+  # step stays claimed and the next worker retries the escalation.
   eq "$(FAKE_ESC_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;" \
-     "$marker: escalate fails, so no hold and no drain"
-  # Release recorded but the hold did not land: do NOT drain, since the molecule can
-  # still be re-offered.
-  eq "$(FAKE_HOLD_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;HOLD;" \
-     "$marker: hold fails after escalate, so no drain"
+     "$marker: escalate fails, so no cancel and no drain"
+  # The visit landed but the cancel did not: do NOT drain, since the run is still
+  # live.
+  eq "$(FAKE_CANCEL_RC=1 run "$A" "$fvp" "$fanc")" "1|ESCALATE;CANCEL;" \
+     "$marker: cancel fails after escalate, so no drain"
 }
 
 # malformed convoy: fires on an empty VALIDATION_PASS; subject is the convoy.
 check_arm validate-malformed-convoy-refuse "" ""      "tk-vp" ""       validate-malformed-convoy "{{convoy_id}}"
 # no anchor_bead: fires on an empty ANCHOR (the pass exists); subject is the pass.
 check_arm validate-no-anchor-refuse        "tk-vp" "" "tk-vp" "tk-anch" validate-no-anchor        "tk-vp"
+
+# A pass closed before its run reached load-dispatch was withdrawn: the run is
+# cancelled with no visit, and an open pass falls through.
+W="$TMP/validate-withdrawn-pass.sh"
+extract validate-withdrawn-pass > "$W"
+[ -s "$W" ] && ok "validate-withdrawn-pass: extracted between markers" || bad "validate-withdrawn-pass: extraction EMPTY — markers missing"
+bash -n "$W" && ok "validate-withdrawn-pass: syntactically valid bash" || bad "validate-withdrawn-pass: failed bash -n"
+eq "$(FAKE_PASS_STATUS=closed run "$W" tk-vp tk-anch)" "1|CANCEL;DRAIN;" \
+   "validate-withdrawn-pass: a closed pass cancels the run with no visit, drains, exits 1"
+has "$(cat "$TMP/cancel")" "--step mol-validate.load-dispatch --bead st-load" "validate-withdrawn-pass: the cancel names THIS step"
+has "$(cat "$TMP/cancel")" "tk-vp was closed" "validate-withdrawn-pass: the reason names the pass"
+eq "$(FAKE_PASS_STATUS=open run "$W" tk-vp tk-anch)" "0|" "validate-withdrawn-pass: an open pass falls through"
+eq "$(FAKE_PASS_STATUS=closed FAKE_CANCEL_RC=1 run "$W" tk-vp tk-anch)" "1|CANCEL;" \
+   "validate-withdrawn-pass: a cancel that does not land is not drained"
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

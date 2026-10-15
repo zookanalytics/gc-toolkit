@@ -156,9 +156,9 @@ run bash 'MAIL_ID=lx-wisp-m1; KEY=held-gate-molecule'
 hasnt "$OUT" "about=" "an unset ABOUT is the same as an empty one"
 
 echo "# NOTE adds what the witness knows, under its own heading"
-run bash "$BASE; NOTE='dead-molecule-dispose.sh owns this reap'"
+run bash "$BASE; NOTE='orphan-dispose.sh owns this recovery'"
 has "$(arg --message)" "## Witness
-dead-molecule-dispose.sh owns this reap" "the note follows the mail under a witness heading"
+orphan-dispose.sh owns this recovery" "the note follows the mail under a witness heading"
 
 echo "# a subject without the prefix is the title as sent"
 mail_json "please reap held root tk-root" > "$TMP/notice.json"
