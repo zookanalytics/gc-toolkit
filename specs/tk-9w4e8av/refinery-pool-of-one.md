@@ -835,19 +835,35 @@ were considered:
 
 **Why it is not a clock.** Nothing in the predicate is a duration. The alarm
 compares two idle observations and asks whether anything was taken between
-them. The cadence decides how far apart they are. The order's interval is 60
-seconds, and passes run further apart than that, because the supervisor fires a
-short-interval order once per trip of its dispatch rotation (I10's
-description). On 2026-10-15, by the start lines of each rig's pass log, the
-gc-toolkit rig's passes started 571 to 1049 seconds apart, and the two smallest
-rigs' passes 67 to 206 seconds apart. In the same window three fresh polecat
-sessions, which run the refinery's `pre_start`, made their first claim 48 to 60
-seconds after they were created. So the interval the reset guarantees covers an
-ordinary cold start on every rig. On the smallest rigs it can be shorter than
-the 90 seconds gascity waits before its backstop first nudges a fresh slot
-(`idle_nudge.go:57`), so a slower start there can still file the finding. Its
-first reaction dismisses that false start, and the finding's occurrence count
-shows how often it happens.
+them, and the reset gives the next session at least one interval between passes
+to claim. Whether that covers an ordinary turnover depends on two measured
+times.
+
+- **A turnover.** It is the drain, the controller starting the next session,
+  the session's `pre_start`, and its claim turn. The controller acts on its
+  patrol tick, every 30 seconds in this city (`city.toml`, `[daemon]
+  patrol_interval`). On 2026-10-15 the five named refinery sessions that drained
+  for config drift at 11:09 were awake again 23 to 72 seconds later, and three
+  fresh polecat sessions, which run the refinery's `pre_start`, made their first
+  claim 12 to 29 seconds after they woke. So a turnover takes roughly 35 to 100
+  seconds. A first offer into a cold pool takes the same path without the drain.
+- **The interval between passes.** The order's interval is 60 seconds, and
+  passes run further apart than that, because the supervisor fires a
+  short-interval order once per trip of its dispatch rotation (I10's
+  description). On the same day, by the start lines of each rig's pass log,
+  passes started 571 to 1049 seconds apart on the gc-toolkit rig, 345 to 601
+  seconds apart on the gascity and signal-loom rigs, and 67 to 206 seconds apart
+  on the two smallest rigs.
+
+So on every rig but the two smallest, one interval is longer than a turnover,
+and the reset covers it. On the two smallest it covers the usual case but not
+every one: a turnover or a cold start that outlasts a short interval files the
+finding. What covers that case is the finding's first reaction. The finding's
+message carries the refinery session's state from `gc session list`, so the
+reaction reads a session that is still starting as a false start and dismisses
+it, and the occurrence count shows how often that happens. gascity itself waits
+90 seconds before its backstop first nudges a fresh slot that has not claimed
+(`idle_nudge.go:57`), the same order of time.
 
 **What notices when the host goes silent.** I10 (`doctor/check-cadence-live`)
 reports any order the pack ships that has not fired within its cadence window.
