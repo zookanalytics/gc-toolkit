@@ -325,11 +325,15 @@ steps. So the field of a bead that follows something is computed, never chosen:
 a hand edit of it is overwritten at the bead's next computation, and the way to
 rank such a bead is its shift.
 
-A writer rewrites a bead only while it is open, blocked or deferred. A claim
-already made stands, so a bead `in_progress` or `hooked` is left as it is, and a
-closed or pinned bead is never written. A workflow root is the exception: its
-pour sets it `in_progress` with no claim behind it, and work the workflow fans
-out later takes the root's priority, so the root is written while it is live.
+A writer rewrites a bead's computed priority only while the bead is open,
+blocked or deferred. A claim already made stands, so a bead `in_progress` or
+`hooked` keeps the priority it was claimed at, and a closed or pinned bead is
+never written. A workflow root is the exception: its pour sets it `in_progress`
+with no claim behind it, and work the workflow fans out later takes the root's
+priority, so the root is written while it is live. A move's input is not a
+computed priority. The move writes its P-value or its shift to the bead it
+moves even when that bead is claimed, because everything that follows the bead
+is computed from that input.
 
 ### Moving a priority
 

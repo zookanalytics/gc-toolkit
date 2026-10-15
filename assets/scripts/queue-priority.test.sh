@@ -7,18 +7,20 @@
 #               live workflow poured for it (input convoy, root, open steps) and
 #               reads it back; a claimed bead or step is left as it is, and so is
 #               a closed one; a bead that follows nothing keeps its own priority
-#               and its workflows take it; --print computes and writes nothing; a
-#               write that does not read back, an unreadable bead and a lock
-#               held past the wait each exit 1.
+#               and its workflows take it, and a workflow root that follows
+#               nothing writes its own steps; --print computes and writes
+#               nothing; a write that does not read back, an unreadable bead and
+#               a lock held past the wait each exit 1.
 #   (MOVE)      gc-helm.sh priority <bead> <P> sets a bead that follows nothing,
 #               and --shift sets a bead that follows a parent or an anchor; the
 #               move then writes every bead that follows it, held ones included,
 #               their live workflows and their anchors' PR-finishing work, and
-#               reads them back. A P-value on a member is refused naming the
-#               shift that lands it there; a shift on a bead that follows
-#               nothing, either form on a workflow's convoy, root or step, a
-#               closed bead and malformed input are refused with nothing
-#               written.
+#               reads them back. The moved bead's own input, a P-value or a
+#               shift, is written even when it is claimed. A P-value on a member
+#               is refused naming the shift that lands it there; a shift on a
+#               bead that follows nothing, either form on a workflow's convoy,
+#               root or step, a closed bead and malformed input are refused with
+#               nothing written.
 #   (RULES)     the done-when cases of the priority flow: shift -1 under a P1
 #               epic queues at P0, then P1 once the epic moves to P2; under a P0
 #               epic a feature at -1 stays P0 and a task under it at +1 is P1; two
@@ -28,8 +30,9 @@
 #               priorities, the ones its cases name.
 #   (PASS)      reconcile reads the polecat queue and what each queued bead
 #               follows, never the whole store, and settles a queued bead's
-#               whole workflow in one pass after a raw edit on its epic; it skips
-#               a tick while the lock is held, fails on a wedged lock or an
+#               whole workflow in one pass after a raw edit on its epic, and a
+#               queued step whose root lost its input convoy with that root; it
+#               skips a tick while the lock is held, fails on a wedged lock or an
 #               unreadable queue, writes nothing on --dry-run, and leaves what
 #               its budget cannot cover for the next pass.
 #   (CROSSING)  a pass that read the old priority before a move cannot write it
@@ -382,6 +385,18 @@ STUB_LIST_FAIL=1 qp settle tk-w1 --print
 eq "$RC" 1 "(SETTLE) a store that does not answer exits 1"
 has "$ERR" "could not read tk-w1" "(SETTLE) and says it could not read, not that the bead is missing"
 
+# A workflow root with no live input convoy, poured with none or left by a
+# closed one, follows nothing: it is the bead its steps were poured for, so
+# settling it writes them.
+reset_store
+jq -c '. + [{"id":"tk-rx","status":"in_progress","issue_type":"task","priority":1,"metadata":{"gc.kind":"workflow"},"dependencies":[]},
+            {"id":"tk-sx","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-rx","gc.step_ref":"mol-x.a","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]}]' \
+  "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+qp settle tk-rx
+eq "$RC" 0 "(SETTLE) settle on a workflow root that follows nothing exits 0"
+eq "$(prio tk-rx)" 1 "(SETTLE) the root keeps its own priority"
+eq "$(prio tk-sx)" 1 "(SETTLE) and its stale step takes it"
+
 # A lock another writer holds past the wait: settle gives up and writes nothing.
 reset_store
 ( exec flock -o -x "$DB/queue-priority.lock" sleep 30 ) </dev/null >/dev/null 2>&1 &
@@ -441,6 +456,20 @@ eq "$(prio tk-w2)" 2 "(MOVE) a sibling is not touched"
 helm priority tk-w1 --shift -9
 eq "$(prio tk-w1)" 0 "(MOVE) a shift past P0 stops at P0"
 eq "$(meta tk-w1 priority_shift)" "-9" "(MOVE) and keeps the shift as written"
+
+# A move's input reaches a claimed bead, because everything that follows the
+# bead is computed from it. A claimed bead's computed priority stays.
+reset_store
+jq -c 'map(if .id == "tk-solo" then .status = "in_progress" | .assignee = "polecat-3" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+helm priority tk-solo P1
+eq "$RC" 0 "(MOVE) a P-value on a claimed bead that follows nothing exits 0"
+eq "$(prio tk-solo)" 1 "(MOVE) the P-value is written, since it is the bead's own input"
+for b in tk-cvs tk-rs tk-ss; do eq "$(prio "$b")" 1 "(MOVE) $b, of the claimed bead's workflow, follows"; done
+helm priority tk-wc --shift +1
+eq "$RC" 0 "(MOVE) a shift on a claimed member exits 0"
+eq "$(meta tk-wc priority_shift)" "1" "(MOVE) the shift is written, since it is the bead's own input"
+eq "$(prio tk-wc)" 3 "(MOVE) and the claimed member keeps the priority it was claimed at"
+has "$OUT" "claimed, left as they are: tk-wc (in_progress, P2 once released)" "(MOVE) naming the priority it takes once released"
 
 reset_store
 helm priority tk-e1 --shift -1
@@ -568,6 +597,17 @@ qp reconcile --db "$DB" --pool "$POOL"
 eq "$(prio tk-srw)" 0 "(PASS) a queued step of PR-finishing work follows its anchor, shift and all"
 eq "$(prio tk-ss)" 3 "(PASS) a queued step of a bead that follows nothing takes that bead's priority"
 eq "$(prio tk-solo)" 3 "(PASS) and that bead keeps its own"
+
+# A queued step whose root's input convoy closed: the root follows nothing, so
+# the pass settles the root's own steps.
+reset_store
+jq -c 'map(if .id == "tk-cvs" then .status = "closed" elif .id == "tk-rs" then .priority = 1 else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(PASS) a pass over a step whose root lost its input convoy exits 0"
+eq "$(prio tk-ss)" 1 "(PASS) the queued step takes its root's priority"
+eq "$(prio tk-rs)" 1 "(PASS) and the root keeps its own"
+qp reconcile --db "$DB" --pool "$POOL"
+has "$OUT" "0 at a stale priority" "(PASS) so the next pass finds nothing stale"
 
 reset_store
 GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile

@@ -19,11 +19,14 @@
 #       own, for the raw writes no writer sees, such as a hand
 #       `bd update --priority` on an epic or a hand re-parent.
 #
-# A claimed bead (in_progress or hooked) is never rewritten: a claim already
-# made stands. A workflow root is the one in_progress bead that is written,
-# because a pour promotes its own root to in_progress and no claim is behind it,
-# and later fan-out takes the root's priority. A closed or pinned bead is never
-# written.
+# A claimed bead (in_progress or hooked) keeps the priority it was claimed at: a
+# claim already made stands. Two writes reach one anyway. A live workflow root
+# is rewritten, because a pour promotes its own root to in_progress with no
+# claim behind it, and later fan-out takes the root's priority. A move writes
+# the moved bead's own input whether or not the bead is claimed, because
+# everything that follows the bead is computed from it: a P-value is the bead's
+# priority field, and a shift is its priority_shift. A closed or pinned bead is
+# never written.
 #
 # One lock per store serializes the three writers, so neither a pass nor a
 # settle that read an old priority can write it back over a move. It is a flock
@@ -199,12 +202,16 @@ WRITABLE_JQ='
 # subject, printed as one JSON array of rows: each input convoy gascity made for
 # it, the live root poured over that convoy, and the root's live steps. A
 # subject that is itself a convoy, slung as it is, has its roots poured over it
-# directly. Returns 1 when a read fails, so a settle never reports a workflow it
-# could not read as settled.
+# directly. A subject that is itself a workflow root has its own steps: a root
+# whose input convoy is gone, or that a launch poured with none, follows no
+# convoy, so it is the bead its steps were poured for. Returns 1 when a read
+# fails, so a settle never reports a workflow it could not read as settled.
 workflow_rows() {
-    local row="$1" subject is_convoy raw convoys all c roots r steps
+    local row="$1" subject is_convoy raw convoys all c roots root_ids="" r steps
     subject="$(printf '%s' "$row" | jq -r '.id')"
     is_convoy="$(printf '%s' "$row" | jq -r '(.issue_type // "") == "convoy"')"
+    printf '%s' "$row" | jq -e '(((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "" | tostring) == "workflow"' >/dev/null 2>&1 \
+        && root_ids="$subject"
     raw="$(bd_ dep list "$subject" --direction up -t tracks --json 2>/dev/null)" || return 1
     convoys="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
         | select((.issue_type // "") == "convoy")
@@ -219,13 +226,14 @@ workflow_rows() {
             | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned") ]' 2>/dev/null)" || return 1
         [ -n "$roots" ] || return 1
         all="$(jq -cn --argjson a "$all" --argjson b "$roots" '$a + $b')" || return 1
-        for r in $(printf '%s' "$roots" | jq -r '.[].id'); do
-            raw="$(bd_ list --metadata-field "gc.root_bead_id=$r" --brief --json --limit 0 2>/dev/null)" || return 1
-            steps="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
-                | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned") ]' 2>/dev/null)" || return 1
-            [ -n "$steps" ] || return 1
-            all="$(jq -cn --argjson a "$all" --argjson b "$steps" '$a + $b')" || return 1
-        done
+        root_ids="$root_ids $(printf '%s' "$roots" | jq -r '.[].id')"
+    done
+    for r in $root_ids; do
+        raw="$(bd_ list --metadata-field "gc.root_bead_id=$r" --brief --json --limit 0 2>/dev/null)" || return 1
+        steps="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
+            | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned") ]' 2>/dev/null)" || return 1
+        [ -n "$steps" ] || return 1
+        all="$(jq -cn --argjson a "$all" --argjson b "$steps" '$a + $b')" || return 1
     done
     printf '%s\n' "$all"
 }
