@@ -230,7 +230,8 @@ gascity's default query can see (section 4).
   sets a minimum or a scale check. Without either it is treated as the backing of
   a named session (`internal/config/session_capacity.go:93-127`). The scale
   check below already qualifies it. The minimum makes the template a pool on its
-  own, whatever its demand query, as it does for the polecat and proactive pools.
+  own, whatever its demand query. The polecat and proactive pools set the same
+  minimum, though a cap above one already makes them pools.
 - It keeps `wake_mode = "fresh"` and the per-instance `work_dir`. A pool capped at
   one uses the canonical identity, with no `-1` suffix
   (`UsesCanonicalSingletonPoolIdentity`). So `{{.AgentBase}}` resolves to
@@ -328,10 +329,10 @@ blockers:
 - a blocker of its own that the store does not return holds it, marked unread;
 - a park on its epic, or on any other ancestor, holds nothing.
 
-A routed bead with no `branch` is not in flight. The ancestor rule applies to it,
-so a park holds it as it holds any work that has not started. Once claimed, such
-a bead has nothing to prepare, and the prepare step puts it to a person
-(section 3, line 219).
+A routed bead with no `branch`, `merge_result` or `rejection_reason` is not in
+flight. The ancestor rule applies to it, so a park holds it as it holds any work
+that has not started. Once claimed, a bead with no `branch` has nothing to
+prepare, and the prepare step puts it to a person (section 3, line 219).
 
 The shared hold reads `blocks` edges only, while `bd ready` also honors
 `waits-for` and `conditional-blocks`. Neither reaches a handoff, so the shared
@@ -358,10 +359,10 @@ that probe names a concrete trigger bead for the slot it wakes
 so it never names an offer under a parked epic. A session woken only for such an
 offer has no trigger bead, and the idle-claim backstop keys on that bead, so it
 does not serve that session (section 4). A readiness option in gascity's default
-query would not remove the cost, because its rule would be a second definition
-of a hold beside `hold-lib.sh`. gascity gc-9h08f6 asks instead for a
-`scale_check` that names the beads it counts. With it, the backstop would serve
-every offer, and readiness would stay the pack's.
+query would remove the cost only by adding a second definition of a hold beside
+`hold-lib.sh`, so the refinery would not adopt one. gascity gc-9h08f6 asks
+instead for a `scale_check` that names the beads it counts. With it, the backstop
+would serve every offer, and readiness would stay the pack's.
 
 ### The claim
 
@@ -839,8 +840,9 @@ store does not return. Such a bead is not an offer, so it never meets the alarm'
 first condition. Nothing will release it either, because the walk cannot see its
 blocker close. So the pass files it under its own key, `refinery-offer-unread`,
 through the same writer as the alarm. That is one finding per rig, whose message
-names each such bead and the ids the walk could not read. `check-armed-dispatch-owed`
-reports an arm in the same state as one it could not check.
+names each such bead and the ids the walk could not read. The doctor check
+`check-armed-dispatch-owed` reports an arm in the same state as one it could not
+check.
 
 ## 6. What the design deletes
 
@@ -939,11 +941,12 @@ inside its one claim.
   definition of a hold, so no gascity readiness option replaces them: its rule
   would be a second definition beside `hold-lib.sh`. What the refinery lacks is
   concrete demand. A custom `scale_check` prints a count (`parseScaleCheckCount`,
-  `cmd/gc/pool.go:234-247`), so a session started for one has no trigger bead and
-  no idle-claim backstop. Filed as gascity gc-9h08f6: let a `scale_check` name the
-  beads it counts. gascity gc-tj666s asks for own-blocker readiness as a pool
-  option. That is such a second definition, so the refinery would not adopt it,
-  and the bead's notes say so.
+  `cmd/gc/pool.go:234-247`), so a session started only for that count has no
+  trigger bead, and the idle-claim backstop does not serve it (section 4). Filed
+  as gascity gc-9h08f6: let a `scale_check` name the beads it counts. gascity
+  gc-tj666s asks for own-blocker readiness as a pool option. That is such a
+  second definition, so the refinery would not adopt it, and the bead's notes say
+  so.
 - **The repeated `--status` trap behind tk-cg7k9zi.** Filed as gascity gc-3zov2j.
   `gc bd list --status=open --status=in_progress` keeps only the last value. A
   live probe on the polecat route returned 4 rows that way against 57 for
@@ -1006,9 +1009,10 @@ where one speaks the old shape to the other.
    finds nothing holding it; a walk whose read fails makes the script exit
    non-zero; an old-style handoff, assigned to the alias with no route, is
    listed and counted; the session's own in-progress claim comes first; and the
-   sort is priority, then age. `refinery-claim.sh`'s test admits an old-style handoff written after the
-   named session has retired, so nothing has routed it, and another that also
-   carries an archived `gc.run_target` naming the polecat pool. For each, it
+   sort is priority, then age. `refinery-claim.sh`'s test admits an old-style
+   handoff written after the named session has retired, so nothing has routed
+   it, and another that also carries an archived `gc.run_target` naming the
+   polecat pool. For each, it
    proves that the claim writes the refinery's route, unsets `gc.run_target` and
    reads both back before it reads the attempt count. Through unit 1, it then
    proves that a transient release leaves an offer `refinery-offers.sh` lists in
@@ -1035,7 +1039,8 @@ where one speaks the old shape to the other.
    recovery prose, which keeps the refinery's alias an infrastructure owner
    (section 2).
 5. **The alarm and the deletions.** Add the refinery-reconcile alarm arm, its
-   `refinery-offer-unread` report (section 5) and their test. Delete I14, the witness's `check-refinery` step and its test
+   `refinery-offer-unread` report (section 5) and their test. Delete I14, the
+   witness's `check-refinery` step and its test
    (`refinery-stuck-escalate.test.sh`), the `witness-refinery-queue` assertion in
    `witness-escalation-wiring.test.sh`, and the run-tests wisp note.
 6. **Documents.** The central docs that describe the refinery's intake change with
