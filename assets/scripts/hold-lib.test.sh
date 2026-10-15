@@ -18,7 +18,8 @@
 #   (NO-COPY) no other file in the pack defines the predicate's jq defs
 # A reader with a private copy of the predicate drifts silently from this one.
 # The behavioral half lives beside each reader (deferred-dispatch.test.sh,
-# doctor/check-armed-dispatch-owed/run.test.sh, held-work-gate.test.sh).
+# doctor/check-armed-dispatch-owed/run.test.sh, held-work-gate.test.sh,
+# gc-helm-accept.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -158,7 +159,8 @@ echo "# every reader sources the one definition"
 # no longer calls it still fails.
 READERS="assets/scripts/deferred-dispatch.sh
 doctor/check-armed-dispatch-owed/run.sh
-assets/scripts/held-work-gate.sh"
+assets/scripts/held-work-gate.sh
+assets/scripts/gc-helm.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

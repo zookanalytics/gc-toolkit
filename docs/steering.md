@@ -242,7 +242,9 @@ A park holds this work that has not started, in the bead and under it:
   `assets/scripts/held-work-gate.sh`, which reads the same hold and declines a
   held bead: it arms a re-dispatch that deferred dispatch fires once nothing
   holds the bead, then cancels the run through gascity. A cancelled root is
-  closed, so it does not stand in the way of the re-dispatch's pour.
+  closed, so it does not stand in the way of the re-dispatch's pour;
+- an Accept. `gc-helm.sh accept` refuses a held subject and names what holds
+  it, so the operator releases the hold before the work starts.
 
 An armed member in flight keeps running, such as a rejected handoff armed for a
 retry: once a bead carries `branch`, `merge_result` or `rejection_reason`,

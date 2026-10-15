@@ -320,6 +320,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=placement.sh
 . "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
     || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one definition of a hold, shared with deferred dispatch and the held-work
+# gate a workflow's first step runs, so accept refuses exactly the subject that
+# gate would decline. Exposes $HOLD_JQ and hold_graph.
+# shellcheck source=hold-lib.sh
+. "${GC_HOLD_LIB:-$SCRIPT_DIR/hold-lib.sh}" \
+    || { echo "$PROG: cannot source hold-lib.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
@@ -2820,6 +2826,48 @@ accept_demand_refused() {
     exit 4
 }
 
+# helm_hold_read <ids-csv> — the hold walk's reader (hold-lib.sh): the named
+# beads at every status and of every class a listing hides by default, since a
+# blocker can be a gate and an ancestor can be closed. It reads the store the
+# caller pinned with BEADS_DIR.
+helm_hold_read() {
+    gc bd list --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit=0 2>/dev/null
+}
+
+# accept_hold <subject> — what holds the subject's work, as hold-lib.sh prints
+# it, leaving out the subject's own open, unassigned demands: they are the human
+# gate that put the recommendation to the operator, and accept resolves them
+# once its dispatch lands (accept_open_demands reads the same pair). The walk
+# already holds each blocker's row, so it tells such a demand by its
+# gc.demand_for and assignee. Sets ACCEPT_HOLD to the hold, empty when nothing
+# holds the subject, and returns 0. Returns 1 with ACCEPT_HOLD naming what did
+# not read, because an unread hold is not proof that nothing holds the subject.
+ACCEPT_HOLD=""
+accept_hold() {
+    ACCEPT_HOLD=""
+    _ah_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-accept-hold.XXXXXX") \
+        || { ACCEPT_HOLD="no scratch directory for the walk"; return 1; }
+    _ah_rc=0
+    if ! helm_hold_read "$1" | scrub \
+            | jq -c --arg b "$1" '[ .[]? | objects | select(((.id // "") | tostring) == $b) ]' > "$_ah_dir/seed.json" 2>/dev/null \
+        || ! jq -e 'length == 1' "$_ah_dir/seed.json" >/dev/null 2>&1; then
+        ACCEPT_HOLD="$1 did not read back"; _ah_rc=1
+    elif ! hold_graph helm_hold_read "$_ah_dir/seed.json" "$_ah_dir/graph.json"; then
+        ACCEPT_HOLD="its blockers or ancestors did not read"; _ah_rc=1
+    elif ! ACCEPT_HOLD=$(jq -r --slurpfile g "$_ah_dir/graph.json" "$HOLD_JQ"'
+            def own_demand($self): ((.metadata // {}) | if type == "object" then ((.["gc.demand_for"] // "") | tostring) else "" end) == $self
+                                   and (((.assignee // "") | tostring) == "");
+            .[0] | ((.id // "") | tostring) as $self
+            | [ hold_holds($g[0])[] | select((.on == $self and (($g[0][.by] // {}) | own_demand($self))) | not) ] as $h
+            | if ($h | length) == 0 then ""
+              else ($h[0] | hold_label($self)) + (if ($h | length) > 1 then " (+\(($h | length) - 1) more)" else "" end) end' \
+            "$_ah_dir/seed.json" 2>/dev/null); then
+        ACCEPT_HOLD="what holds it did not evaluate"; _ah_rc=1
+    fi
+    rm -rf "$_ah_dir"
+    return "$_ah_rc"
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation straight off the board: dispatch the subject's
 # gc.recommended_formula at the subject, resolve the human gate that put it to
@@ -2834,6 +2882,11 @@ accept_demand_refused() {
 # formula does not receive the subject's description. Sling FIRST: only a landed
 # dispatch dismisses the visit, so a sling that fails leaves the visit for the
 # operator to retry or Discuss.
+#
+# A held subject is refused before the sling, naming the hold: a park or a
+# prerequisite on it or on an ancestor keeps its work from starting
+# (docs/steering.md), and a pour would only reach held-work-gate.sh at its first
+# step and be declined there.
 cmd_accept() {
     bead=""; accept_reason=""
     while [ $# -gt 0 ]; do
@@ -2964,6 +3017,18 @@ cmd_accept() {
             *)       echo "$PROG: accept: could not read $bead's live visit state — $UNENGAGED_WHY. Refusing rather than dispatching on an unread state. Nothing dispatched." >&2 ;;
         esac
         exit 4
+    fi
+
+    # A resume's dispatch already ran, so only a first dispatch reads the hold.
+    if [ "$resume" != 1 ]; then
+        if ! accept_hold "$bead"; then
+            echo "$PROG: accept: could not read what holds $bead ($ACCEPT_HOLD), so accept refuses rather than start work a hold may keep from starting. Nothing dispatched." >&2
+            exit 4
+        fi
+        if [ -n "$ACCEPT_HOLD" ]; then
+            echo "$PROG: accept: $bead is held by $ACCEPT_HOLD, so its work does not start until that hold is released: close the blocker, or remove the edge that waits on it (gc bd dep remove <bead> <blocker>). Then accept again. Nothing dispatched." >&2
+            exit 2
+        fi
     fi
 
     # Dispatch the recommendation AT the subject: the subject is the routed

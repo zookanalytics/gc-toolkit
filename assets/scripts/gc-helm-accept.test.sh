@@ -24,6 +24,12 @@
 #     predicate (unengagedVisit) and fails closed on a visit state it cannot read.
 #   - a visit id resolves to its subject the way dismiss does.
 #   - fail CLOSED on an unverifiable subject.
+#   - a HELD subject is refused before the sling, naming the hold: a blocker of
+#     its own, or one on a parent-child ancestor such as a parked epic
+#     (hold-lib.sh). The subject's own open, unassigned demand is not a hold,
+#     since accept resolves it once the dispatch lands; an assigned one is. A
+#     subject in flight is held only by a blocker of its own, and a hold that
+#     does not read fails closed.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped) with a stubbed `gc` on PATH
 # — no live city, Dolt, network or sessions. Mutating calls (sling, close,
@@ -115,6 +121,20 @@ case "$sub" in
           *) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
         esac ;;
       list)
+        # The hold walk reads by id (accept_hold): it answers from the
+        # $FAKE_HOLD_STORE fixture, beads in bd's list shape, or from the subject
+        # alone, open and with no edge, when the case names no fixture.
+        # $FAKE_HOLD_LIST_FAILS fails that read alone.
+        case " $* " in
+          *" --id "*)
+            [ -n "${FAKE_HOLD_LIST_FAILS:-}" ] && exit 1
+            _ids=""; _p=""
+            for _a in "$@"; do [ "$_p" = "--id" ] && _ids="$_a"; _p="$_a"; done
+            if [ -n "${FAKE_HOLD_STORE:-}" ]; then _hs="$(cat "$FAKE_HOLD_STORE")"
+            else _hs="$(jq -nc --arg s "${FAKE_SUBJECT_ID:-}" '[{id:$s, status:"open", issue_type:"task", title:"the subject", dependencies:[]}]')"; fi
+            printf '%s' "$_hs" | jq -c --arg ids "$_ids" '($ids | split(",")) as $w | [ .[] | select(.id as $i | $w | index($i)) ]'
+            exit 0 ;;
+        esac
         # The demand read is the one list that passes --include-gates: it
         # answers the open human gate $FAKE_DEMAND on the subject until a
         # resolve or close of it is recorded, and $FAKE_DEMAND_LIST_FAILS fails
@@ -310,6 +330,78 @@ grep -q '^bd gate resolve tk-gate1' <<< "$CALLS" \
 grep -q '^sling ' <<< "$CALLS" \
   && bad "(GATERESUME) must NOT sling again (calls: $CALLS)" || ok "(GATERESUME) does not sling again"
 unset FAKE_DISPATCHED FAKE_DEMAND; export FAKE_FORMULA="$FORMULA" FAKE_VISIT=1
+
+# --- (HOLD) a held subject is refused before the sling ------------------------
+# A park or a prerequisite keeps the subject's work from starting, and a pour
+# would only be declined at its first step, so accept names the hold instead.
+hold_store() { # <file> <json>
+    printf '%s' "$2" > "$TMP/$1.json"; export FAKE_HOLD_STORE="$TMP/$1.json"
+}
+EPIC_PARKED='{"id":"tk-epic","status":"open","issue_type":"epic","title":"An epic","dependencies":[{"issue_id":"tk-epic","depends_on_id":"tk-park","type":"blocks"}]},
+ {"id":"tk-park","status":"open","issue_type":"gate","title":"Parked until the operator unparks it","dependencies":[]}'
+hold_store parked "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"issue_type\":\"task\",\"title\":\"the subject\",
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-epic\",\"type\":\"parent-child\"}]}, $EPIC_PARKED]"
+run_accept "$SUBJ"
+eq "$RC" "2" "(HOLD) a subject under a parked epic is refused (exit 2)"
+grep -q '^sling ' <<< "$CALLS" && bad "(HOLD) must NOT sling a held subject (calls: $CALLS)" || ok "(HOLD) nothing is slung"
+grep -q "bd close $VIS" <<< "$CALLS" && bad "(HOLD) must NOT dismiss the visit (calls: $CALLS)" || ok "(HOLD) the visit stays for the operator"
+grep -q "bd update $SUBJ" <<< "$CALLS" && bad "(HOLD) must NOT record a dispatch (calls: $CALLS)" || ok "(HOLD) no dispatch is recorded"
+grep -q 'is held by tk-park "Parked until the operator unparks it" on ancestor tk-epic' <<< "$ERR" \
+  && ok "(HOLD) the refusal names the park and the ancestor it sits on" || bad "(HOLD) message (err: $ERR)"
+
+hold_store own "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"title\":\"the subject\",
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-pre\",\"type\":\"blocks\"}]},
+ {\"id\":\"tk-pre\",\"status\":\"open\",\"title\":\"Land the prerequisite\",\"dependencies\":[]}]"
+run_accept "$SUBJ"
+eq "$RC" "2" "(HOLD) a subject with an open blocker of its own is refused (exit 2)"
+grep -q 'is held by tk-pre "Land the prerequisite"' <<< "$ERR" \
+  && ok "(HOLD) the refusal names the blocker" || bad "(HOLD) message (err: $ERR)"
+
+# The recommendation's own human gate blocks the subject, and accept resolves it
+# once the dispatch lands, so it is not a hold. An assigned demand is a task a
+# named person performs, which accept leaves alone, so it holds.
+export FAKE_DEMAND="tk-gate1"
+hold_store owndemand "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"title\":\"the subject\",
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-gate1\",\"type\":\"blocks\"}]},
+ {\"id\":\"tk-gate1\",\"status\":\"open\",\"issue_type\":\"gate\",\"assignee\":\"\",\"title\":\"Accept the recommendation?\",
+  \"metadata\":{\"gc.demand_for\":\"$SUBJ\"},\"dependencies\":[]}]"
+run_accept "$SUBJ"
+eq "$RC" "0" "(HOLD) the subject's own open demand is not a hold: accept dispatches and resolves it"
+grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" && ok "(HOLD) the subject held only by its own demand is slung" || bad "(HOLD) sling (calls: $CALLS)"
+grep -q '^bd gate resolve tk-gate1' <<< "$CALLS" && ok "(HOLD) …and its demand is resolved" || bad "(HOLD) gate resolved (calls: $CALLS)"
+unset FAKE_DEMAND
+hold_store assigned "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"title\":\"the subject\",
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-task1\",\"type\":\"blocks\"}]},
+ {\"id\":\"tk-task1\",\"status\":\"open\",\"issue_type\":\"gate\",\"assignee\":\"gc-toolkit.mechanik\",\"title\":\"Mechanik checks the rig\",
+  \"metadata\":{\"gc.demand_for\":\"$SUBJ\"},\"dependencies\":[]}]"
+run_accept "$SUBJ"
+eq "$RC" "2" "(HOLD) an assigned demand on the subject is a hold: accept refuses"
+grep -q 'is held by tk-task1' <<< "$ERR" && ok "(HOLD) the refusal names the assigned demand" || bad "(HOLD) message (err: $ERR)"
+
+# Work in flight under a parked epic finishes, so accept dispatches its
+# recommendation; only a blocker of its own would hold it.
+hold_store flight "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"title\":\"the subject\",\"metadata\":{\"branch\":\"polecat/$SUBJ\"},
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-epic\",\"type\":\"parent-child\"}]}, $EPIC_PARKED]"
+run_accept "$SUBJ"
+eq "$RC" "0" "(HOLD) a subject in flight under a parked epic is dispatched"
+grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" && ok "(HOLD) the in-flight subject is slung" || bad "(HOLD) sling (calls: $CALLS)"
+
+export FAKE_HOLD_LIST_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(HOLD) a hold that does not read fails closed (exit 4)"
+grep -q '^sling ' <<< "$CALLS" && bad "(HOLD) must NOT sling on an unread hold (calls: $CALLS)" || ok "(HOLD) nothing is slung on an unread hold"
+grep -q 'could not read what holds' <<< "$ERR" && ok "(HOLD) the refusal says the hold did not read" || bad "(HOLD) message (err: $ERR)"
+unset FAKE_HOLD_LIST_FAILS
+
+# A resume dispatched before the hold landed: it finishes the record and the
+# dismiss, and reads no hold, since it slings nothing.
+hold_store parked2 "[{\"id\":\"$SUBJ\",\"status\":\"open\",\"title\":\"the subject\",
+  \"dependencies\":[{\"issue_id\":\"$SUBJ\",\"depends_on_id\":\"tk-epic\",\"type\":\"parent-child\"}]}, $EPIC_PARKED]"
+export FAKE_FORMULA="" FAKE_DISPATCHED="$FORMULA"
+run_accept "$SUBJ"
+eq "$RC" "0" "(HOLD) a resume under a park finishes the dismiss"
+grep -q '^sling ' <<< "$CALLS" && bad "(HOLD) a resume must NOT sling (calls: $CALLS)" || ok "(HOLD) the resume slings nothing"
+unset FAKE_DISPATCHED FAKE_HOLD_STORE; export FAKE_FORMULA="$FORMULA"
 
 # --- (MARK) a landed Accept strips the live recommendation and records the dispatch
 # So a later open visit on the subject cannot re-offer Accept for a formula that
