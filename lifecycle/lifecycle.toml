@@ -195,12 +195,9 @@ writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.s
 # a person changes: on one, the guard lifts the approval itself.
 check_set_default = "correctness,triage"
 check_set_sentinel = "none"
-# check.<g> = <state>, one bare lane-state word never bound to a commit. green
-# written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge
-# requires every declared check to read green. No reader parses this list back
-# out (docs/state-machine.md is the vocabulary's normative source); it is kept
-# here as the declaration the state-space invariant (I2/I6) describes.
-marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
+# A lane's state is derived from its reviews (lane-state.sh) and never stored on
+# the anchor. Merge requires every declared check to derive green.
+# docs/state-machine.md holds the lane vocabulary.
 # Approval is a UNIVERSAL merge rule, not a check_set member: merge.sh requires
 # every PR to carry a latest APPROVED review by an account other than the city's,
 # standing across later pushes until it is dismissed, with a standing
@@ -208,8 +205,8 @@ marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # before each reviewer's latest is taken, so it neither approves nor vetoes, and
 # it does not hide its author's older approval. Once a ruling on a bring-current
 # round lifts the approval, no approval submitted at or before the anchor's
-# bring_current_lifted_at counts, dismissed or not. No check.approval marker
-# and no check_set token arm or opt out of it; GitHub branch protection is an
+# bring_current_lifted_at counts, dismissed or not. No check_set token arms or
+# opts out of it; GitHub branch protection is an
 # extra layer, not the authority. Declaration only, like the rest of this
 # section (the rule lives in gctk merge's reviewVerdict, and in
 # review-verdict.sh for the shell readers).
@@ -243,9 +240,7 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # and its value carries the count and the head it holds, so its presence is
 # "dispatch_count at the ceiling" as the writer itself recorded it.
 marker_prefixes = ["dispatch_backstop."]
-# No check.<g> value is a hold. A lane state says what one reviewer owes, and
-# every one of them is a state some actor moves the anchor on from. merge_hold
-# is not a marker_key either: an operator's freeze is theirs to lift, and a
+# merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
 # Leaving the two gate scalars out is what disables that arm; the check reads
@@ -258,10 +253,8 @@ route_key = "gc.routed_to"
 # by construction can hold no `blocks` edge of its own. gc-helm.sh stamps
 # gc.demand_for=<gated> on the demand it files — the gated bead blocks on the
 # demand, and the demand blocks on nothing — so the demand is exempt from I1
-# rather than a permanent unedged finding. A capped anchor gets its edge the
-# same way: signoff.sh's cap files a demand it then blocks on. Leaving this line
-# out disables the exemption; the check reads an omitted field as one the
-# declaration dropped.
+# rather than a permanent unedged finding. Leaving this line out disables the
+# exemption; the check reads an omitted field as one the declaration dropped.
 terminal_wait_key = "gc.demand_for"
 # How doctor/check-wait-is-an-edge reports a marker with no live blocker.
 # "warn" while a backlog of marker-only holds is still being converted to
@@ -529,8 +522,11 @@ keys = [
 #   later pass can tell which head it spoke for. Written by the refinery
 #   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
-#   already covering a head. Cleared with `--unset` on the merged transition and
-#   by the polecat once it has resumed. Freeform instruction text.
+#   already covering a head. Cleared with `--unset` by the refinery's
+#   merge-push in each transition it makes on a hand-back (merged, unanchored,
+#   pre_open_gate, pull_request), and by the polecat once the merge its resume
+#   runs concludes. A stop before then, such as a question for a person, leaves
+#   it, so the bead's next run resumes again. Freeform instruction text.
 # graduation — `true`, set on the convoy bead by convoy-graduate.sh when an
 #   integration branch is carried to the default branch. prepare_mode is `merge`
 #   for every branch shape, so this flag does not change how the branch is
@@ -659,14 +655,15 @@ keys = [
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
   "dispatch_count", "dispatch_backstop.<g>",
 ]
-# check_set and check.<g> carry their mechanics in [gates] above: check_set is
-# the comma list of check names (default `correctness,triage` stamped by gate-ensure.sh when
-# empty, sentinel `none` the opt-out), and
-# empty is never `none` — a reader holds the merge closed on it. check.<g> is
-# one lane marker per check, the only value the pack writes into it being `green`
-# (signoff.sh); its state is otherwise DERIVED by lane-state.sh, and it is
-# cleared with `--unset` on a request-changes verdict (signoff.sh) and on a
-# retarget (pr-facts.sh).
+# check_set carries its mechanics in [gates] above: the comma list of check
+# names (default `correctness,triage` stamped by gate-ensure.sh when empty,
+# sentinel `none` the opt-out), and empty is never `none` — a reader holds the
+# merge closed on it.
+# check.<g> — RETIRED. A lane's state is derived from its reviews
+# (lane-state.sh), and nothing writes or reads a stored lane value. Residue on a
+# bead holds a lane-state word or the older <verb>@<oid> grammar. Registered so
+# that residue reads as known, not as a stray, until the store-wide sweep
+# clears it.
 #
 # signoff_dismissed — `<github-review-id>@<oid>`: a stale GitHub review the city
 #   dismissed at that head. Written by signoff.sh and pr-facts.sh, each reading it
@@ -1205,6 +1202,23 @@ keys = ["placement"]
 #   arm, an assignee or a live pour places a bead whatever the marker says, so a
 #   marker left on a placed bead names no wait. Absent means intake never held
 #   the bead. No pack writer clears it. A string.
+
+[metadata.priority]
+# The priority flow (docs/steering.md): a bead's priority is the priority of the
+# bead it follows plus its own shift, computed by assets/scripts/priority-lib.sh,
+# and the bd priority field holds the result, because a claim reads that field
+# and a pour copies it once.
+keys = ["priority_shift"]
+# priority_shift — the bead's shift from the bead it follows: +1 is one level
+#   later and -1 one level sooner, and each level stops at P0 and P4. Written by
+#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
+#   back there. Read by priority-lib.sh wherever a priority is computed:
+#   queue-priority.sh settle, its move and its reconcile pass. Read only on a
+#   bead that follows a parent or an anchor: a workflow's convoy, root and steps
+#   carry no shift, and a bead that follows nothing has nothing to shift from.
+#   Absent or empty reads as 0. A value that is not a signed integer makes the
+#   bead unreadable, and every bead that follows it, so no priority is computed
+#   from it. No pack writer clears it. A signed integer, stored as a number.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to

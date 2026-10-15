@@ -48,8 +48,8 @@ prrow() { # num state branch head base [mergedAt] [headrepo]
 }
 
 # A closed approve review bead backing <anchor>'s <lane> (default correctness) — the
-# green record lane-state.sh derives, in place of the retired check.<lane>=green
-# marker. reviewed_oid is what a local backing bead must carry to green a lane.
+# green record lane-state.sh derives. reviewed_oid is what a local backing bead
+# must carry to green a lane.
 rev() { # anchor [lane] [oid]
   printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
     "$1" "$1" "${2:-correctness}" "${3:-sha-r}"

@@ -11,7 +11,8 @@
 #
 # It also pins the affected subset, the suites a set of changed paths selects:
 # each shape of suite a change can break outside its sibling test is a --list
-# case over a fixture repo.
+# case over a fixture repo. --affected, which reads the changed paths from the
+# fixture repo's history, is pinned the same way.
 #
 # Asserted here:
 #   - a file with parts runs once per declared part, each run handed its part
@@ -59,7 +60,16 @@
 #     the suites that name it;
 #   - with no PATH every tracked suite is listed once;
 #   - a scope other than tree, or an empty one, is a usage error in the
-#     affected run and the full run alike.
+#     affected run and the full run alike;
+#   - --affected BASE lists what the same change lists given as PATHs. The
+#     change is the files HEAD's commits change since their merge base with
+#     BASE, so neither a commit BASE made after the branch left it nor an
+#     uncommitted edit is part of it. A renamed file counts under its old path
+#     too, and a name with a space or a byte git quotes arrives whole;
+#   - a change that names no file runs no suite, not even a tree-wide one: the
+#     run prints one line saying so and exits 0, and --list prints nothing;
+#   - a BASE git cannot read, a missing BASE, an option or a range where BASE
+#     belongs, and a PATH beside --affected are usage errors.
 #
 # Hermetic: runs a copy of the runner over throwaway fixture *.test.sh files
 # whose pass/fail is driven by a per-file invocation counter, so "fails the
@@ -68,7 +78,8 @@
 # getconf, sysctl and ionice ahead of the real tools on PATH, so the counts and
 # I/O class they assert are the same on every host. The affected-subset cases
 # run a copy of the runner inside throwaway git repos whose tracked files are
-# the fixtures. No live city, no network.
+# the fixtures, committed where a case reads its change from history. No live
+# city, no network.
 
 set -u
 
@@ -769,6 +780,82 @@ eq "$RC" 2 "and the full run too"
 printf '#!/usr/bin/env bash\n# run-tests-scope:\n' > "$SREPO/typo.test.sh"
 OUT="$("$SREPO/tools/run-tests.sh" --list 2>&1)"; RC=$?
 eq "$RC" 2 "an empty scope is refused as well"
+
+echo "── 17. --affected BASE lists the subset of the change HEAD's commits make since BASE ──"
+# The affected repo's fixtures become the base commit, and each case commits
+# its change on a branch of its own. A config file whose name carries a space
+# and a byte git quotes joins them, with a suite that reads it by that name.
+gitc() { git -C "$AREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid "$@"; }
+printf 'key = 1\n' | fixture "conf/réglages locaux.toml"
+fixture c/accents.test.sh <<'F'
+#!/usr/bin/env bash
+grep -q key "$(git rev-parse --show-toplevel)/conf/réglages locaux.toml"
+F
+gitc add -A
+gitc commit -q -m base
+gitc branch base
+
+# The repo has no test floor, so a run that went past the empty change would
+# stop with a usage error rather than exit 0.
+gitc checkout -q -b same base
+OUT="$("$AREPO/tools/run-tests.sh" --affected base 2>&1)"; RC=$?
+eq "$RC" 0 "a branch with no commits of its own exits 0"
+eq "$OUT" "run-tests: base...HEAD changes no file — nothing to run" \
+  "…after one line saying its change names no file, having run nothing"
+alist --affected base
+eq "$RC" 0 "--list over an empty change exits 0"
+eq "$OUT" "" "…and lists no run, not even the tree-wide suite"
+
+gitc checkout -q -b tool base
+printf '#!/usr/bin/env bash\necho tool, changed\n' > "$AREPO/lib/tool.sh"
+gitc commit -q -am "change the tool"
+alist lib/tool.sh; WANT="$LIST"
+alist --affected base
+eq "$RC" 0 "--list over a branch's change exits 0"
+eq "$LIST" "$WANT" "…and lists what the changed path lists given as a PATH"
+alist --affected=base
+eq "$LIST" "$WANT" "--affected=BASE is the same option"
+
+gitc checkout -q base
+printf 'key = 2\n' > "$AREPO/conf/settings.toml"
+gitc commit -q -am "the base moves on"
+gitc checkout -q tool
+alist --affected base
+eq "$LIST" "$WANT" "a commit the base made after the branch left it is not part of the change"
+printf 'key = 3\n' > "$AREPO/conf/settings.toml"
+alist --affected base
+eq "$LIST" "$WANT" "nor is an uncommitted edit"
+gitc checkout -q -- conf/settings.toml
+
+gitc checkout -q -b moved base
+gitc mv a/run.sh a/start.sh
+gitc commit -q -m "rename a/run.sh"
+alist --affected base
+eq "$LIST" "a/run.test.sh c/pick.test.sh guard/scan.test.sh " \
+  "a renamed file counts under its old path too, so the suites that run a/run.sh are listed"
+
+gitc checkout -q -b accents base
+printf 'key = 4\n' > "$AREPO/conf/réglages locaux.toml"
+gitc commit -q -am "change the config with the awkward name"
+alist --affected base
+eq "$LIST" "c/accents.test.sh guard/scan.test.sh " \
+  "a name with a space and a byte git quotes arrives whole and reaches the suite that reads it"
+
+alist --affected no-such-ref
+eq "$RC" 2 "a BASE git cannot read is a usage error"
+has "$OUT" "cannot read the change from no-such-ref to HEAD" "…that names the base"
+alist --affected
+eq "$RC" 2 "a missing BASE is a usage error"
+has "$OUT" "--affected needs a base" "…that says a base is needed"
+OUT="$("$AREPO/tools/run-tests.sh" --affected --list 2>&1)"; RC=$?
+eq "$RC" 2 "an option where BASE belongs is a usage error"
+has "$OUT" "not the option '--list'" "…that names the option"
+alist --affected base...HEAD
+eq "$RC" 2 "a range where BASE belongs is a usage error"
+has "$OUT" "not the range 'base...HEAD'" "…that names the range"
+alist --affected base lib/tool.sh
+eq "$RC" 2 "a PATH beside --affected is a usage error"
+has "$OUT" "takes no PATH" "…that says why"
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

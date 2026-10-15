@@ -188,11 +188,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
-   common file still clobber each other. Every `check.<gate>` marker is a
-   bare lane state bound to no commit and settles at any head once green, so
-   it stays green while the base moves underneath, the pre-commit hook is
-   branch-local, a rebase replays commits without running it, and `-diff` in
-   `.gitattributes` keeps the clobber out of the PR diff.
+   common file still clobber each other. A lane's green derives from its
+   reviews and is bound to no commit, so it stays green while the base moves
+   underneath, the pre-commit hook is branch-local, a rebase replays commits
+   without running it, and `-diff` in `.gitattributes` keeps the clobber out of
+   the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
    `render-seed-audit.sh --check-merge` renders the tree `git merge-tree`
    writes, with the renderer that tree carries. A file passes when the merge
@@ -233,7 +233,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    state dir), because a first-group anchor this arm still holds, such as one
    whose PR a human closed at this head, stays in the group, and in a fixed
    order it would lead every pass while the anchors behind it waited.
-   For each anchor whose every `pre-open` check in `check_set` reads `green`
+   For each anchor whose every `pre-open` check in `check_set` derives `green`
    (the one resolver names that set — `none`/`off` and the universal
    `approval` rule dropped; an empty set is held, never read as ungated):
    adopt an existing PR for the branch or
@@ -335,10 +335,10 @@ the cadence — the arms run whether or not any refinery session is awake.
 6. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
    sentinel is respected), and every declared check is *raisable*: the lane
-   reads `green`, or a live routed review bead is in flight, else dispatch one
+   derives `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. An
+   back). A lane that derives `green` ends the arm's interest however far the
+   branch has advanced since — no lane's green compares to a head. An
    operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
    raises no review under a hold.
    A review whose only reach is the pour stamp is qualified before it counts
@@ -731,15 +731,30 @@ The lock:
 - The driver takes a non-blocking exclusive `flock` on
   `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
   pid and start time in `pass.holder` beside it. It depends on no bead
-  surviving.
-- The arms inherit the descriptor, so the lock is held for exactly as long as a
-  writer is live, and the kernel releases it on any exit, `SIGKILL` included.
+  surviving. The lock is `bd-lib.sh`'s `take_pass_lock`, which
+  `deferred-dispatch.sh` takes its pass lock through too.
+- `<rig>` is the rig name with each byte outside `A-Za-z0-9._-` read as `_`,
+  and `rig` for a name of `.` or `..`. Every version of the driver must derive
+  it the same way. A deploy can start a new driver while the one it replaces
+  is still running a pass, and the two passes stay apart only when both name
+  the same lock file. So the key is not `bd-lib.sh`'s `rig_state_key`, which
+  cuts a rig name past 64 bytes and adds a checksum to any name it rewrites.
+- The driver holds the descriptor, and each arm runs through `bd-lib.sh`'s
+  `pass_child`, from a subshell that holds it until the arm exits. So the lock
+  is held for exactly as long as a writer is live, and the kernel releases it
+  on any exit, `SIGKILL` included.
+- The arm itself runs with the descriptor closed, and so does the drop-tail
+  report. An arm's store read can bring up a Dolt server, and `gc` hands the
+  descriptors it was given to what it starts. A server that kept the descriptor
+  would outlive the pass and hold the lock against every later one.
 - A tick that finds it held logs one `SKIPPED` line and exits 0 — the cadence
   is firing and the pass in flight is doing the work.
 - A holder older than `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s default) is
-  not a slow pass: the driver is gone and an arm still owns the descriptor.
-  That tick exits 1, so `order.failed` names the wedge rather than letting a
-  stopped queue look like a firing one.
+  not a slow pass, because the order's timeout stops the pass's whole process
+  group well before that: a driver run by hand, or an arm still running after
+  its driver was killed by itself, holds the lock. That tick exits 1, so
+  `order.failed` names the wedge rather than letting a stopped queue look like
+  a firing one.
 - A tick that cannot take the lock at all runs no arm and exits 1. That covers
   `flock` missing from `PATH` and a lock file the driver cannot create or open.
   Nothing else carries single-flight, so a pass that ran anyway would be the
