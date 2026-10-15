@@ -38,6 +38,10 @@
 #      the arm fires once nothing holds the bead: the park is released, or the
 #      prerequisite closes. With no pool, or an arm that does not land, a visit
 #      (escalate.sh, key polecat-blocked-work) asks a person for the re-sling.
+#      The visit lands only when an open one reads back for the bead under that
+#      key. Inside escalate.sh's verdict window, a situation a person closed
+#      moot or benign is answered from the closed visit, and escalate.sh exits
+#      0 having filed nothing, so the gate runs it with the window off.
 #   3. A note on the work bead says what held it and which release landed.
 #   4. run-cancel.sh ends the run through gascity's run cancel. A cancelled root
 #      is closed, so it does not stand in the way of the re-sling's pour.
@@ -136,6 +140,21 @@ hwg_read() {
   bd_json list --id "$1" --all --include-gates --include-infra --include-templates --brief --limit 0
 }
 
+# VISIT_KEY is the situation key of the visit that asks a person for the
+# re-sling. hwg_open_visit prints the id of the open visit on $BEAD under that
+# key, or nothing. It matches the way escalate.sh's dedup does, by the key and
+# the subject's continuation group, and re-checks each row, since a listing
+# that ignored a filter would match another bead's visit.
+VISIT_KEY="polecat-blocked-work"
+hwg_open_visit() {
+  bd_json list --status=open,in_progress --metadata-field "escalation_key=$VISIT_KEY" \
+      --metadata-field "gc.continuation_group=$BEAD" --limit=20 \
+    | jq -r --arg k "$VISIT_KEY" --arg s "$BEAD" 'if type == "array" then
+        [ .[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id ]
+        | sort | .[0] // empty
+      else empty end' 2>/dev/null
+}
+
 SEED="$TMP/seed.json"; GRAPH="$TMP/graph.json"
 UNREAD=""; STATUS=""; FLIGHT=""; HOLD=""; POOL=""
 if ! hwg_read "$BEAD" > "$TMP/row.json"; then
@@ -215,8 +234,13 @@ if [ -n "$POOL" ] && [ -x "$ARM_TOOL" ]; then
     printf '%s\n' "$ARM_OUT" >&2
   fi
 fi
-if [ -z "$RELEASE" ] && "$ESCALATE" --subject "$BEAD" --key polecat-blocked-work --message "$BEAD reached $STEP while held by $HOLD, so its run is cancelled. The re-sling could not be armed (pool '${POOL:-none}'). Once nothing holds $BEAD, re-sling it: gc sling ${POOL:-<pool>} $BEAD $SLING_TEXT" </dev/null; then
-  RELEASE="no re-sling could be armed (pool '${POOL:-none}'), so a visit asks for one"
+if [ -z "$RELEASE" ]; then
+  VISIT=""
+  if GC_ESCALATE_VERDICT_WINDOW=0 "$ESCALATE" --subject "$BEAD" --key "$VISIT_KEY" --message "$BEAD reached $STEP while held by $HOLD, so its run is cancelled. The re-sling could not be armed (pool '${POOL:-none}'). Once nothing holds $BEAD, re-sling it: gc sling ${POOL:-<pool>} $BEAD $SLING_TEXT" </dev/null; then
+    VISIT="$(hwg_open_visit)"
+    [ -n "$VISIT" ] || echo "$PROG: escalate.sh exited 0, but no open visit on $BEAD under $VISIT_KEY reads back" >&2
+  fi
+  [ -z "$VISIT" ] || RELEASE="no re-sling could be armed (pool '${POOL:-none}'), so visit $VISIT asks for one"
 fi
 if [ -z "$RELEASE" ]; then
   echo "$PROG: neither the re-sling arm nor a visit landed for $BEAD; NOT cancelling or draining, so the next worker retries" >&2
