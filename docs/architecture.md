@@ -27,8 +27,8 @@ structured into epics and when an epic closes by [epics.md](epics.md).
 
 ## The boundary
 
-Four parties, one data plane. Every durable fact is a bead; the pack owns no
-storage of its own.
+Four parties, one data plane. Lifecycle transitions, routes, waits and review
+verdicts are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -72,6 +72,29 @@ flowchart LR
 paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
 `signoff.sh` is the only writer of check verdicts, and the merge cadence is the
 only thing that opens or merges a PR. Everything else reads.
+
+**Beside the ledger.** The pack also keeps files of its own. Some hold a run's
+progress, such as a paced cadence arm's cursor or the job directory of the
+refinery's merge gate. `gctk rig`'s check records differ, because a later call
+takes a record's result in place of running the check. A record holds the
+result of one of a rig's checks, such as its tests or its lint, at one commit.
+[`services/gctk/README.md`](../services/gctk/README.md#rig) states which checks
+are recorded and where the records live.
+
+- **Writer.** Only `gctk rig` writes a record, from a run it made itself, in a
+  checkout holding nothing HEAD does not.
+- **Authority.** A record answers a later `gctk rig` call that declares the
+  same run: the same command line and, for a test run, the same scope. That
+  call takes the recorded result without running the check, unless it forces a
+  run. A full-suite test pass also answers for every commit with the same tree.
+- **Lifetime.** Every worktree of a rig clone shares the records, and they
+  outlive any one worktree. A re-clone loses them, and the loss costs one run
+  of each check.
+- **What a record is not.** A record is evidence about a commit. It is neither
+  workflow state nor a review's verdict, and both of those stay on beads,
+  written by their own writers. `--publish-bead` copies a record onto a bead's
+  `rig_check.<check>` key for whoever reads that bead. The record, not the
+  copy, answers `gctk rig`.
 
 ## How work moves
 

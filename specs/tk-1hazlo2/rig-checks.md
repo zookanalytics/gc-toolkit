@@ -17,12 +17,13 @@ inherits. The behavior's reference is `gctk rig --help` and the doc comments in
 
 gctk is gc-toolkit's command-line interface, the surface through which agents
 act on a city (`services/gctk/README.md`), and `rig` holds the actions gctk
-takes on a rig. Its checks are the first of them. They write ledger state: a
-later call at the commit answers from the record instead of running the check.
-The record is machine truth, the exit status of a command `rig` ran itself,
-where the self-review stamp the cutover retires holds an agent's word that its
-checks passed. A caller pastes one call and reads its exit code, or the one
-JSON line `--check` prints.
+takes on a rig. Its checks are the first of them. They keep their records
+beside the bead ledger rather than in it (`docs/architecture.md`, "The
+boundary"), and a later call at the commit answers from the record instead of
+running the check. The record is machine truth, the exit status of a command
+`rig` ran itself, where the self-review stamp the cutover retires holds an
+agent's word that its checks passed. A caller pastes one call and reads its
+exit code, or the one JSON line `--check` prints.
 
 ## A pure executor
 
