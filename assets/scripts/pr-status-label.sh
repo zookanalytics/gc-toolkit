@@ -59,7 +59,7 @@ label_desc() { # <value> — the label's GitHub description (GitHub caps these a
   case "$1" in
     working)         printf 'Workflow: the city holds the ball — rework or merge in flight; no human input needed.' ;;
     needs-review)    printf 'Workflow: settled at the current head; awaiting a human review or re-review.' ;;
-    needs-attention) printf 'Workflow: stopped without settling (signoff cap, hold, blocked merge); needs a human to unstick.' ;;
+    needs-attention) printf 'Workflow: stopped without settling (a hold, a blocked merge); needs a human to unstick.' ;;
     *)               printf 'Workflow status label.' ;;
   esac
 }

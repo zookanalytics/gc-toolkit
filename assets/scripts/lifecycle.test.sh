@@ -166,10 +166,10 @@ OID="1111111111111111111111111111111111111111"
 OID2="2222222222222222222222222222222222222222"
 
 store '[{"id":"d-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition d-1 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" 2>&1)"; rc=$?
+out="$("$SUT" transition d-1 --to pull_request --set-dated "pr.machine=blocked@$OID" 2>&1)"; rc=$?
 eq "$rc" 0 "a first dated write exits 0"
 got="$(meta d-1 pr.machine)"
-eq "${got%@*}" "wedged-exception@$OID" "the value and oid are written as given"
+eq "${got%@*}" "blocked@$OID" "the value and oid are written as given"
 case "$got" in
   *@*@20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z) ok "…and lifecycle.sh appended an RFC 3339 UTC instant" ;;
   *) bad "no instant appended: '$got'" ;;
@@ -177,26 +177,26 @@ esac
 
 # Preserve: the reconcile cadence re-reaches the same verdict at the same head
 # every few minutes, which is the case a naive clock restarts.
-store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"wedged-exception@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" >/dev/null 2>&1
-eq "$(meta d-2 pr.machine)" "wedged-exception@$OID@2026-08-28T04:05:06Z"   "an unchanged value at an unchanged head keeps its instant"
+store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-2 --to pull_request --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
+eq "$(meta d-2 pr.machine)" "blocked@$OID@2026-08-28T04:05:06Z"   "an unchanged value at an unchanged head keeps its instant"
 
 # Restamp on a changed VALUE: a new verdict is a new turn.
 store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"progressing@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-3 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" >/dev/null 2>&1
+"$SUT" transition d-3 --to pull_request --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
 got="$(meta d-3 pr.machine)"
-eq "${got%@*}" "wedged-exception@$OID" "a changed value is written"
+eq "${got%@*}" "blocked@$OID" "a changed value is written"
 case "$got" in
   *@2026-08-28T04:05:06Z) bad "a changed value kept the old instant: '$got'" ;;
   *) ok "…and starts a fresh clock" ;;
 esac
 
-# Restamp on a moved HEAD: a wedge is released by a head move, so the old
+# Restamp on a moved HEAD: a verdict is pinned to the head it judged, so the old
 # instant dates a state that no longer holds.
-store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"wedged-exception@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-4 --to pull_request --set-dated "pr.machine=wedged-exception@$OID2" >/dev/null 2>&1
+store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-4 --to pull_request --set-dated "pr.machine=blocked@$OID2" >/dev/null 2>&1
 got="$(meta d-4 pr.machine)"
-eq "${got%@*}" "wedged-exception@$OID2" "a moved head is written"
+eq "${got%@*}" "blocked@$OID2" "a moved head is written"
 case "$got" in
   *@2026-08-28T04:05:06Z) bad "a moved head kept the old instant: '$got'" ;;
   *) ok "…and starts a fresh clock" ;;
@@ -282,7 +282,7 @@ writes_when "a moved head writes" \
   n-2 --to pull_request --set-dated "pr.machine=settled@$OID2"
 writes_when "a changed verdict writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
-  n-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID"
+  n-2 --to pull_request --set-dated "pr.machine=blocked@$OID"
 writes_when "a changed --set writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\"}}" \
   n-2 --to pull_request --set check_set=correctness,ci
@@ -631,21 +631,21 @@ eq "$(meta p-5 'gc.routed_to')" "human" "and the route survives"
 
 # Nor is naming the route the bead already rests on. gate-ensure.sh and merge.sh
 # carry gc.routed_to back on every pr.machine write so that recording a verdict
-# cannot clear a route they never looked at, and the anchors they most need to
-# record are the wedged ones a cap already parked.
+# cannot clear a route they never looked at, and an anchor parked on a person
+# still has its verdict recorded.
 store '[{"id":"p-5b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human"}}]'
-out="$("$SUT" transition p-5b --to pull_request --route human --set-dated "pr.machine=wedged-exception@sha1" 2>&1)"; rc=$?
+out="$("$SUT" transition p-5b --to pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
 eq "$rc" 0 "carrying an existing park route back needs no takeaway"
 eq "$(meta p-5b 'gc.routed_to')" "human" "and the route is unchanged"
 case "$(meta p-5b 'pr.machine')" in
-  wedged-exception@sha1@*) ok "…so the observer's verdict is recorded" ;;
+  blocked@sha1@*) ok "…so the observer's verdict is recorded" ;;
   *) bad "…so the observer's verdict is recorded (got '$(meta p-5b 'pr.machine')')" ;;
 esac
 
 # The narrowing is only for a route already there: the same call on a bead this
 # write would park is the refusal above.
 store '[{"id":"p-5c","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/mechanik"}}]'
-out="$("$SUT" transition p-5c --to pull_request --route human --set-dated "pr.machine=wedged-exception@sha1" 2>&1)"; rc=$?
+out="$("$SUT" transition p-5c --to pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
 eq "$rc" 1 "moving a bead ONTO the park route still needs a takeaway"
 has "$out" "no question recorded" "…with the same refusal"
 eq "$(meta p-5c 'gc.routed_to')" "rig/mechanik" "…and the route it had is untouched"

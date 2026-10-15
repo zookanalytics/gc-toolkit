@@ -22,15 +22,15 @@
 // metadata instead. Derive itself does no I/O.
 //
 // Derive reads only refinery-computed state off the anchor: the holds
-// (merge_hold/rebase_hold and the signoff-cap park), the pr-facts.sh posture
-// and merge state, the draft-stage markers pr-open.sh records
-// (opened_as_draft, draft_readied), and the anchor's in-flight set — any live
-// bead carrying anchor_bead, the same membership test pr-facts.sh applies in its
-// own arms. It does not consult GitHub's review posture directly — the working
-// -> needs-review flip rests on that live work, which closes as it hands back,
-// so a sticky changes_requested never traps the value in working after the set
-// empties. Nor does it read GitHub's draft flag: a draft the city opened is
-// known by its markers, and a draft someone else made reads like any other PR.
+// (merge_hold/rebase_hold), the pr-facts.sh posture and merge state, the
+// draft-stage markers pr-open.sh records (opened_as_draft, draft_readied), and
+// the anchor's in-flight set — any live bead carrying anchor_bead, the same
+// membership test pr-facts.sh applies in its own arms. It does not consult
+// GitHub's review posture directly — the working -> needs-review flip rests on
+// that live work, which closes as it hands back, so a sticky changes_requested
+// never traps the value in working after the set empties. Nor does it read
+// GitHub's draft flag: a draft the city opened is known by its markers, and a
+// draft someone else made reads like any other PR.
 package prstatus
 
 import "strings"
@@ -50,8 +50,8 @@ const (
 	// verdict.
 	NeedsReview State = "needs-review"
 	// NeedsAttention: stopped without settling — a human must weigh in before the
-	// city can settle it (a signoff-cap park, a merge or rebase hold, or an
-	// approved PR wedged at merge state BLOCKED with no rework in flight).
+	// city can settle it (a merge or rebase hold, or an approved PR wedged at
+	// merge state BLOCKED with no rework in flight).
 	NeedsAttention State = "needs-attention"
 
 	// Merged and Closed are terminal: the PR round-trip has ended, so nobody acts
@@ -69,12 +69,8 @@ const (
 // holds and read it identically.
 type Facts struct {
 	// MergeHold is metadata.merge_hold: any truthy value is an operator freeze or
-	// other merge hold, except the signoff-cap park (MergeHold == "signoff_cap"
-	// paired with a SignoffCap), which is its own case.
+	// other merge hold.
 	MergeHold string
-	// SignoffCap is metadata.signoff_cap: the round cap that, paired with
-	// MergeHold == "signoff_cap", is the cap park.
-	SignoffCap string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
 	// PRPosture is metadata.pr_posture, stored value@oid@instant; only the value
@@ -105,9 +101,6 @@ func Derive(f Facts) State {
 	mstate := before(f.PRMergeState, "@")
 
 	// needs-attention: the city stopped without settling; a human must unstick it.
-	if isCapPark(f.MergeHold, f.SignoffCap) {
-		return NeedsAttention
-	}
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) {
 		return NeedsAttention
 	}
@@ -140,13 +133,6 @@ func isSet(v string) bool {
 		return false
 	}
 	return true
-}
-
-// isCapPark is the signoff round cap's park: merge_hold names the cap and a cap
-// value stands with it. That one pairing is distinct from an operator freeze
-// (merge_hold=true), which isSet catches as a plain hold.
-func isCapPark(hold, signoffCap string) bool {
-	return hold == "signoff_cap" && signoffCap != ""
 }
 
 // inDraftStage is the open-as-draft stage: the city opened the PR as a draft and
