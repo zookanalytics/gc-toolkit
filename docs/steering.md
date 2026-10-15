@@ -222,9 +222,9 @@ landing.
 A park leaves a rejected handoff running too. When the refinery rejects a
 handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
 dispatches the rebuild as a fresh `mol-polecat-work` pour. The cascade does not
-reach a poured workflow, and load-context reads only the bead's own blockers,
-so the rebuild runs. When that sling fails, the script arms a retry, which
-deferred dispatch slings once the bead's own blockers close.
+reach a poured workflow, and the bead is in flight, so load-context reads only
+its own blockers and the rebuild runs. When that sling fails, the script arms a
+retry, which deferred dispatch slings once the bead's own blockers close.
 
 ### What a park holds
 
@@ -235,19 +235,26 @@ A park holds this work that has not started, in the bead and under it:
 - a member placed under the bead later, through the same cascade;
 - an armed member, because deferred dispatch slings an armed bead only when no
   blocker holds it or any of its ancestors (`assets/scripts/hold-lib.sh`);
-- a sling of the parked bead itself. mol-polecat-work's load-context refuses a
-  work bead that has an open blocker of its own: it holds the molecule and arms
-  a re-dispatch that fires once the bead's blockers close.
+- the bead or a member slung by hand, and a workflow poured before the park
+  that has not passed load-context. `gc sling --on` pours without reading any
+  edge, so the hold is read where such a run starts. The load-context step of
+  mol-polecat-work, and of mol-design-convoy, runs
+  `assets/scripts/held-work-gate.sh`, which reads the same hold and declines a
+  held bead: it arms a re-dispatch that deferred dispatch fires once nothing
+  holds the bead, then cancels the run through gascity. A cancelled root is
+  closed, so it does not stand in the way of the re-dispatch's pour.
 
 An armed member in flight keeps running, such as a rejected handoff armed for a
 retry: once a bead carries `branch`, `merge_result` or `rejection_reason`,
-deferred dispatch reads only its own blockers.
+deferred dispatch and load-context read only its own blockers.
 
-A park does not hold a member slung by hand, or a workflow poured before the
-park, because `gc sling --on` pours without reading any edge and load-context
-reads no ancestor's blockers. `park` names the poured workflows it leaves
-unheld. A member that must not start gets a park of its own, since
-mol-polecat-work's load-context refuses a bead with an open blocker of its own.
+A blocker of the bead's own still holds a bead in flight. mol-polecat-work's
+submit-and-exit reads the hold again before the hand-off, for a blocker that
+landed on the bead while it was built. On one, the gate keeps the pushed branch,
+arms the re-dispatch and cancels the run, so the hand-off never makes the bead
+an anchor with an open blocker of its own, whose merge `merge.sh` would hold
+and whose close bd would refuse. The re-dispatch resumes the branch once the
+blocker closes.
 
 ### Releasing a park
 

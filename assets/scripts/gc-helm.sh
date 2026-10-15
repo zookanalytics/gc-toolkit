@@ -1689,11 +1689,11 @@ cmd_demand() {
 # root whose gc.step_ref ends in .load-context is still open, so a formula with
 # no such step counts as started.
 #   flight  in flight, with why; the park leaves it running.
-#   poured  under the bead, not in flight and not armed (gc.dispatch_when_ready),
-#           with a workflow still at load-context.
 #   held    the bead, and everything else under it. An armed member is held:
 #           deferred dispatch slings an armed bead only when no blocker holds
-#           it or any of its ancestors (hold-lib.sh).
+#           it or any of its ancestors (hold-lib.sh). So is a member slung by
+#           hand or poured before the park: its workflow waits at
+#           load-context, which declines a held bead (held-work-gate.sh).
 # Rows come in either bd shape: a listing's edges are {depends_on_id, type},
 # and a `bd show` row's are {id, dependency_type}.
 # shellcheck disable=SC2016  # jq program, single-quoted on purpose
@@ -1730,19 +1730,14 @@ PARK_SURVEY_JQ='
       | [ $roots[] | select(.c as $c | $cs | has_($c)) | .r ];
     [ ([$b] + $sub)[] as $id
       | ($by[$id] // {st: "", a: "", m: {}}) as $r
-      | $r.m as $m
-      | workflows($id) as $ws
       | {id: $id,
          why: (why($r) as $w
                | if $w != "" then $w
-                 else ([ $ws[] | select(. as $x | $at_lc | has_($x) | not) ] | first // "") as $past
-                      | if $past != "" then "workflow " + $past + " past load-context" else "" end end),
-         armed: ((($m["gc.dispatch_when_ready"] // "") | tostring) != ""),
-         poured: ([ $ws[] | select(. as $x | $at_lc | has_($x)) ] | first // "")} ] as $rows
+                 else ([ workflows($id)[] | select(. as $x | $at_lc | has_($x) | not) ] | first // "") as $past
+                      | if $past != "" then "workflow " + $past + " past load-context" else "" end end)} ] as $rows
   | { self: ((first($rows[] | select(.id == $b))) // {id: $b, why: ""}),
       flight: [ $rows[] | select(.why != "") | {id, why} ],
-      poured: [ $rows[] | select(.id != $b and .why == "" and (.armed | not) and .poured != "") | {id, root: .poured} ],
-      held: [ $rows[] | select(.why == "" and (.id == $b or .armed or .poured == "")) | .id ] }'
+      held: [ $rows[] | select(.why == "") | .id ] }'
 
 # park_open_gate_titled <bead-row-json> <text> — the open gate the bead already
 # waits on under exactly this title, or empty. A re-run finds the gate it filed.
@@ -1882,7 +1877,7 @@ cmd_park() {
             echo "$PROG: park: $wait_on is a demand gate (gc.demand_for=$demand_for). It waits on the operator's decision, and the operator ruled that such a wait does not hold armed work, so a park behind it would read as that decision rather than as a park. Use the text form instead, and name the decision the park waits for: $PROG park $bead \"<why it is parked and what releases it>\". Nothing was written." >&2
             exit 2
         fi
-        if printf '%s' "$survey" | jq -e --arg w "$wait_on" '(.held + [.poured[].id] + [.flight[].id]) | any(.[]; . == $w)' >/dev/null 2>&1; then
+        if printf '%s' "$survey" | jq -e --arg w "$wait_on" '(.held + [.flight[].id]) | any(.[]; . == $w)' >/dev/null 2>&1; then
             echo "$PROG: park: $wait_on is under $bead, and bd refuses an edge that makes a bead wait on its own part. Nothing was written." >&2
             exit 2
         fi
@@ -1948,10 +1943,8 @@ cmd_park() {
     echo "park $blocker holds $bead: $blocker_title"
     held=$(printf '%s' "$survey" | jq -r '.held | join(" ")' 2>/dev/null || true)
     flight=$(printf '%s' "$survey" | jq -r '[ .flight[] | .id + " (" + .why + ")" ] | join(", ")' 2>/dev/null || true)
-    poured=$(printf '%s' "$survey" | jq -r '[ .poured[] | .id + " (workflow " + .root + ")" ] | join(", ")' 2>/dev/null || true)
     echo "held, not started: ${held:-$bead}"
     [ -z "$flight" ] || echo "in flight, keeps running: $flight"
-    [ -z "$poured" ] || echo "poured before the park, not held by it: $poured. Load-context reads no ancestor's blockers, so each workflow runs."
 }
 
 # ── Verb: resolve ────────────────────────────────────────────────────

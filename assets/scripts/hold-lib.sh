@@ -37,7 +37,10 @@
 #
 # Readers: deferred-dispatch.sh slings an armed bead only when nothing holds it,
 # and its `list` and pass log name the blocker that does.
-# doctor/check-armed-dispatch-owed counts no held arm as owed. hold-lib.test.sh
+# doctor/check-armed-dispatch-owed counts no held arm as owed. held-work-gate.sh
+# declines a run that would start work a hold holds, at the first step of
+# mol-polecat-work and mol-design-convoy and at mol-polecat-work's hand-off.
+# hold-lib.test.sh
 # fails when a reader stops sourcing this file or defines the predicate itself,
 # and it runs the predicate over hold-lib.fixture.json, the cases a copy of it
 # in another language must agree with.

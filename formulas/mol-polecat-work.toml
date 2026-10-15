@@ -22,8 +22,9 @@ Two distinct branch questions: {{base_branch}} is what the worktree is
 poured FROM (on a rework child, the reviewed branch — by design);
 metadata.target is where the work LANDS. submit-and-exit resolves the
 landing target once and fails closed; the marked submit-* blocks are
-extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
-after any edit here.
+extracted and executed by assets/scripts/submit-branch-gate.test.sh, and
+submit-held-work-decline by held-work-gate.test.sh — run them after any edit
+here.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
@@ -313,63 +314,31 @@ its work, and a failed `git worktree list` decline as a possible duplicate. The
 note and the visit name the tree and count its uncommitted paths, so the
 holder's work can be salvaged.
 
-**4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
+**4. Verify nothing holds the work bead (FAIL CLOSED):**
 
-`gc sling <target> <bead> --on <formula>` pours the formula immediately and
-reads no `blocks` deps, and under a graph.v2 dispatch the routed record is the
-freshly minted workflow root, not the work bead — so a `blocks` edge on the
-work bead gates nothing and a blocked bead reaches you as an offered claim
-(docs/gascity-routing-model.md). Raw pool routing does not have this problem:
-there the work bead itself is the routed unit and `bd ready` withholds it while
-a blocker is open. This gate is the pack-level safety net for the formula-sling
-path — if the work bead carries an open `blocks` blocker, refuse to build it,
-arm a re-dispatch so the work re-slings when the blocker closes, and cancel this
-run.
+`gc sling <target> <bead> --on <formula>` pours at once and reads no edge, and
+under a graph.v2 dispatch the routed record is the workflow root the pour mints,
+not the work bead (docs/gascity-routing-model.md). So work a hold holds still
+reaches you: slung by hand, accepted, or poured before the hold. A hold is an
+open `blocks` blocker on the work bead, or on one of its parent-child ancestors
+such as a parked epic (docs/steering.md). A bead in flight, one that carries
+`branch`, `merge_result` or `rejection_reason`, is held only by a blocker of its
+own. `held-work-gate.sh` reads the hold. On one, it arms a re-dispatch that
+re-slings the work once nothing holds it, then cancels this run and drains; its
+header says why the writes come in that order. It exits 0 when nothing holds
+the bead:
 
 ```bash
 # >>> load-context-blocked-work-decline
-OPEN_BLOCKERS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '[.[0].dependencies[]? | select((.dependency_type == "blocks") and (.status != "closed")) | .id] | join(" ")' 2>/dev/null)
-if [ -n "$OPEN_BLOCKERS" ]; then
-  POOL=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
-  gc bd update "$WORK_BEAD_ID" --append-notes "bd-ready guard: refused to build $WORK_BEAD_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Run cancelled; re-dispatch armed to '$POOL' to fire once the blocker(s) close."
-  SCRIPTS=""
-  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
-  gc bd update "$WORK_BEAD_ID" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" --set-metadata gc.deferred_assignee=""
-  RELEASE_OK=0
-  if [ -n "$POOL" ] && [ -x "$SCRIPTS/deferred-dispatch.sh" ] && "$SCRIPTS/deferred-dispatch.sh" arm "$WORK_BEAD_ID" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "bd-ready guard: blocked by $OPEN_BLOCKERS"; then
-    RELEASE_OK=1
-  elif "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-blocked-work --message "Formula-slung $WORK_BEAD_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Its run is cancelled and no workspace was touched. Auto re-dispatch could not be armed (target='$POOL'); re-sling this work once the blocker(s) close."; then
-    RELEASE_OK=1
-  fi
-  if [ "$RELEASE_OK" != "1" ]; then
-    echo "neither deferred-dispatch arm nor escalate recorded a release path; NOT cancelling or draining, so the next worker retries." >&2
-  elif "$SCRIPTS/run-cancel.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID has open blocks-blocker(s) $OPEN_BLOCKERS; re-dispatch armed to re-sling when they close"; then
-    gc runtime drain-ack
-  else
-    echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
-  fi
-  exit 1
-fi
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/held-work-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+: "${SCRIPTS:?held-work-gate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+"$SCRIPTS/held-work-gate.sh" --bead "$WORK_BEAD_ID" --formula mol-polecat-work --step mol-polecat-work.load-context --step-bead "${CLAIMED_STEP_BEAD_ID:-}" || exit 1
 # <<< load-context-blocked-work-decline
 ```
 
-The work bead carries `gc.execution_routed_to` from the pour. `arm` keys on
-`gc.routed_to`, not on that stamp, so clearing `gc.routed_to` is what makes the
-bead armable. `reconcile` keys idempotency on its own
-`gc.dispatch_when_ready_slung` marker, not on the execution stamp, so the
-re-dispatch's `--on mol-polecat-work` arm slings when the blocker closes whether
-or not the stamp is set; it is cleared alongside as hygiene, so the bead does not
-advertise a finished pour's pool. `status` stays `open` and `assignee` empty from
-the pour, so neither is written and no claim-guard rollback is possible. The open blocker keeps the bead out of `bd ready`
-throughout, so clearing the route opens no pool window. The re-dispatch is armed
-to the same pool the pour was executing on, replaying `--on mol-polecat-work`,
-so the work re-slings once the blocker closes; escalation is the fallback only
-when the arm cannot be recorded. The cancel runs only after a recorded release
-path, for the same reason as in the duplicate-dispatch gate above: a cancelled
-run with nothing recorded to re-sling it leaves work nothing re-offers.
+Any other exit means stop here, as in step 3. The gate has declined the run, or
+it could not record the re-dispatch and left this step claimed for the next
+worker.
 
 **5. Check for rejection (IMPORTANT):**
 
@@ -1272,9 +1241,9 @@ description = """
 Hand off your work and self-clean. You cease to exist after this step.
 
 The `# >>> submit-*` marked blocks below are extracted verbatim and executed
-by assets/scripts/submit-branch-gate.test.sh, so they must stay
-backslash-free (a TOML triple-quoted string eats a trailing backslash) and
-keep their markers.
+by assets/scripts/submit-branch-gate.test.sh, and submit-held-work-decline by
+held-work-gate.test.sh, so they must stay backslash-free (a TOML
+triple-quoted string eats a trailing backslash) and keep their markers.
 
 **Withdrawn work ends the run.** A work bead closed while its run was
 mid-flight was withdrawn by whoever closed it, and gascity's autoclose leaves a
@@ -1527,8 +1496,8 @@ echo "landing target: $LANDING_TARGET"
 committed (`chore: capture remaining work ($WORK_BEAD_ID)`) — never push
 with untracked work left behind.
 
-**3. auto_push=false halt arm, then push, then the bring-current guard.** The
-halt arm is a TERMINAL exit, so it carries its own copy of the chain-close
+**3. auto_push=false halt arm, then push, then the bring-current guard and the
+held-work gate.** The halt arm is a TERMINAL exit, so it carries its own copy of the chain-close
 block — `exit 0` never reaches step 5, and each fenced block is its own shell
 (the test pins the copy byte-identical to step 7's, +2 indent):
 
@@ -1608,6 +1577,11 @@ case "$BCG_RC" in
     exit 1 ;;
 esac
 # <<< submit-bring-current-guard
+# >>> submit-held-work-decline
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/held-work-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+: "${SCRIPTS:?held-work-gate.sh not found in the pack; the push stands, and nothing was handed off}"
+"$SCRIPTS/held-work-gate.sh" --bead "$WORK_BEAD_ID" --formula mol-polecat-work --step mol-polecat-work.submit-and-exit --step-bead "${CLAIMED_STEP_BEAD_ID:-}" || exit 1
+# <<< submit-held-work-decline
 ```
 
 The bring-current guard runs for every handoff and acts on a branch that
@@ -1624,6 +1598,13 @@ it, so triage rules on that round too. The none and off opt-outs are the
 exception: only a person changes one, so the guard lifts the approval itself.
 A guard that cannot finish hands nothing off: the bead stays open and still
 blocks the anchor, so nothing lands on a round nobody accounted for.
+
+The held-work gate then refuses the hand-off while a blocker of the work bead's
+own is open, such as a park or a prerequisite that landed on the bead while it
+was built. The bead is in flight, so no ancestor's blocker counts. Handed off,
+it would be an anchor with an open blocker, whose merge `merge.sh` holds and
+whose close bd refuses. The branch stays pushed: the gate arms a re-dispatch
+that resumes it once nothing holds the bead, cancels this run and drains.
 
 **4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the

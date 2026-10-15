@@ -22,8 +22,9 @@ Two distinct branch questions: {{base_branch}} is what the worktree is
 poured FROM (on a rework child, the reviewed branch — by design);
 metadata.target is where the work LANDS. submit-and-exit resolves the
 landing target once and fails closed; the marked submit-* blocks are
-extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
-after any edit here.
+extracted and executed by assets/scripts/submit-branch-gate.test.sh, and
+submit-held-work-decline by held-work-gate.test.sh — run them after any edit
+here.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a

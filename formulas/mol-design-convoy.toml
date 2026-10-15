@@ -49,6 +49,23 @@ SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 the
 [ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
 ```
 
+**1b. Decline a held subject (FAIL CLOSED).** `gc sling --on` pours without
+reading any edge, so a subject that a park or a prerequisite holds, on it or on
+one of its parent-child ancestors, still reaches you, and seed-convoy would push
+an integration branch for it. `held-work-gate.sh` reads the hold. On one, it
+arms a re-dispatch of this formula with the same `design_gated`, which fires
+once nothing holds the subject, then cancels this run and drains. A closed
+subject's run is cancelled with no re-dispatch. Exit 0 means go on; any other
+exit means stop here, without closing this step:
+```bash
+CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
+# >>> design-convoy-held-work-decline
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/held-work-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+: "${SCRIPTS:?held-work-gate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+"$SCRIPTS/held-work-gate.sh" --bead "$SUBJECT" --formula mol-design-convoy --step mol-design-convoy.load-context --step-bead "${CLAIMED_STEP_BEAD_ID:-}" --sling-arg --var --sling-arg "design_gated={{design_gated}}" || exit 1
+# <<< design-convoy-held-work-decline
+```
+
 **2. Read the subject's body and its recommendation card.** The card (in the
 subject's notes) is where converse recorded the design topic and the intended
 implementation, so read it — it is the seed for the design child's brief and the

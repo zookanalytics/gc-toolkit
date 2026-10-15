@@ -32,6 +32,8 @@
 #   - the summary names what the park holds and what it leaves running. An
 #     armed member is held, since deferred dispatch reads its ancestors'
 #     blockers, unless it is in flight; no member is reported as armed and
+#     unheld. A member whose workflow waits at load-context is held too, since
+#     load-context declines a held bead; no member is reported as poured and
 #     unheld.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped) against a stateful stub
@@ -256,7 +258,8 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
 #     tk-done        closed, so not part of what the park holds
 #     tk-feat        a feature, with members of its own:
 #       tk-feat.1    held, two levels down
-#       tk-feat.2    poured: its workflow tk-r1 waits at load-context
+#       tk-feat.2    poured: its workflow tk-r1 waits at load-context, which
+#                    declines a held bead, so held
 #       tk-feat.3    in flight: its workflow tk-r2 is past load-context
 #       tk-feat.4    armed, with the workflow tk-r6 that load-context held for
 #                    it (its load-context step blocked): held, as its arm is
@@ -386,16 +389,15 @@ grep -q "^bd show tk-epic --db $STUB_RIG_TK/.beads --json" <<< "$(grep -A99 '^bd
   && ok "(TEXT) the edge is read back off the bead after the create" || bad "(TEXT) no read-back after the create (calls: $CALLS)"
 has "$OUT" "park $GATE holds tk-epic: $TEXT" "(TEXT) prints park <gate> holds <bead>"
 HELD="$(grep '^held, not started:' <<< "$OUT" || true)"
-for b in tk-epic tk-epic.1 tk-epic.3 tk-feat tk-feat.1 tk-feat.4; do has "$HELD " " $b " "(TEXT) holds $b"; done
-for b in tk-epic.2 tk-epic.4 tk-epic.5 tk-feat.2 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
+for b in tk-epic tk-epic.1 tk-epic.3 tk-feat tk-feat.1 tk-feat.2 tk-feat.4; do has "$HELD " " $b " "(TEXT) holds $b"; done
+for b in tk-epic.2 tk-epic.4 tk-epic.5 tk-feat.3 tk-done; do hasnt "$HELD " " $b " "(TEXT) does not call $b held"; done
 has "$OUT" "in flight, keeps running: " "(TEXT) names what stays in flight"
 has "$OUT" "tk-epic.2 (branch polecat/tk-epic.2)" "(TEXT) a member on a branch stays in flight"
 has "$OUT" "tk-epic.4 (in_progress under gc-toolkit/gc-toolkit.crew)" "(TEXT) a claimed member with no branch stays in flight, named with its claimant"
 has "$OUT" "tk-feat.3 (workflow tk-r2 past load-context)" "(TEXT) a member whose workflow passed load-context stays in flight, two levels down"
 has "$OUT" "tk-epic.5 (rejection_reason set)" "(TEXT) an armed member in flight stays in flight: only its own blockers hold work that has started"
 hasnt "$OUT" "armed, not held" "(TEXT) no armed member is named as left unheld: deferred dispatch reads its ancestors' blockers"
-has "$OUT" "poured before the park, not held by it: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named as not held"
-hasnt "$(grep '^poured before the park' <<< "$OUT" || true)" "tk-feat.4" "(TEXT) an armed member whose workflow load-context held is not named as poured"
+hasnt "$OUT" "poured before the park" "(TEXT) no member is named as poured and unheld: load-context declines a held bead"
 hasnt "$OUT" "tk-done" "(TEXT) a closed member is not part of the park"
 
 # --- (AGAIN) re-running the same park files no second gate ---------------------
