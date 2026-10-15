@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # demo-screenshot.test.sh — hermetic coverage of the screenshot modality.
 #
-# demo-screenshot.sh validates its arguments, resolves the SprintShow engine and
-# provisions its browser, prepares what the driver renders (a command's captured
-# output, or GitHub's rendering of a markdown file), runs the driver, and checks
-# the PNG it leaves. Every case runs under `env -i` with a PATH of a coreutils
-# symlink farm and stubs for node, npm, npx, gc and gh, so nothing reaches the
-# network, a browser, or a city. The node stub stands in for the driver: it logs
-# its argv, keeps a copy of the file it was handed, and leaves the PNG, or the
-# failure, each case plants.
+# demo-screenshot.sh validates its arguments, holds Node to the driver's floor,
+# resolves the SprintShow engine, prepares what the driver renders (a command's
+# captured output, or GitHub's rendering of a markdown file), runs the driver,
+# and checks the PNG it leaves. demo-engine-lib.sh finds the engine and
+# provisions its browser, and demo-engine-lib.test.sh checks that through this
+# script. Every case runs under `env -i` with a PATH of a coreutils symlink farm
+# and stubs for node, npm, gc and gh, so nothing reaches the network, a
+# browser, or a city. The node stub stands in for the driver: it logs its argv,
+# keeps a copy of the file it was handed, and leaves the PNG, or the failure,
+# each case plants.
 #
 # The driver's renderers are pure functions of their input, so the last part
 # imports demo-screenshot.mjs into a real node, when the host has Node 18 or
@@ -38,9 +40,9 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git;
 done
 
 # Stubs. node answers --version with $NODE_VERSION and otherwise stands in for
-# the driver; npx stands in for the published engine and hands a driver call to
-# node; npm records what it runs and where; gc lists the sprintshow rig at
-# $SS_RIG; gh stands in for GitHub's markdown renderer. Each logs to $CALLLOG.
+# the driver; npm records what it runs and where; gc lists the sprintshow rig
+# at $SS_RIG; gh stands in for GitHub's markdown renderer. Each logs to
+# $CALLLOG.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 ln -s "$JQ" "$BIN/jq"
@@ -71,24 +73,8 @@ NODE
 cat >"$BIN/npm" <<'NPM'
 #!/usr/bin/env bash
 printf 'npm %s (in %s)\n' "$*" "$PWD" >>"${CALLLOG:?}"
-if [ "$*" = "run provision:browser" ] && [ "${INSTALL_RC:-0}" != 0 ]; then
-  printf 'Failed to install browsers\n'; exit "$INSTALL_RC"
-fi
 exit 0
 NPM
-cat >"$BIN/npx" <<'NPX'
-#!/usr/bin/env bash
-printf 'npx %s\n' "$*" >>"${CALLLOG:?}"
-[ "$1 $2 $3" = "--yes --package=@zookanalytics/sprintshow --" ] || { echo "npx stub: unexpected call: $*" >&2; exit 97; }
-shift 3
-case "$1" in
-  playwright)
-    if [ "${INSTALL_RC:-0}" != 0 ]; then printf 'Failed to install browsers\n'; exit "$INSTALL_RC"; fi
-    exit 0 ;;
-  node) shift; exec "$(dirname "$0")/node" "$@" ;;
-esac
-echo "npx stub: unexpected call: $*" >&2; exit 97
-NPX
 cat >"$BIN/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1 $2" = "rig list" ] && [ -n "${SS_RIG:-}" ]; then printf '{"rigs":[{"name":"sprintshow","path":"%s"}]}\n' "$SS_RIG"; fi
@@ -102,7 +88,7 @@ if [ "${GH_RC:-0}" != 0 ]; then echo 'HTTP 502: Bad Gateway (https://api.github.
 [ -n "${GH_EMPTY:-}" ] || printf '<p dir="auto"><strong>Approve.</strong></p>\n<details>\n<summary>trail</summary>\n<p dir="auto">x</p>\n</details>\n'
 exit 0
 GH
-chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/gh
+chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh
 
 # A local engine checkout with its deps installed.
 ENGINE="$TMPD/sprintshow"; mkdir -p "$ENGINE/node_modules"
@@ -186,18 +172,13 @@ eq "$rc" 1 "a missing --cwd exits 1"
 out="$(run -- markdown --file "$WORK/nope.md" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a missing --file exits 1"
 
-echo "# page: the local engine is provisioned, then the driver runs with every option, by absolute path"
+echo "# page: the driver runs with every option, by absolute path, on the engine checkout"
 rm -rf "$WORK/shots"
 out="$(run -- page --script demo.md --serve-dir app --output shots/shot.png --port 4321 --selector '#board' --full-page)"; rc=$?
 eq "$rc" 0 "a capture exits 0"
-has "engine = local sprintshow rig ($ENGINE)" "$out" "it resolves the local engine checkout"
-has "npm run provision:browser (in $ENGINE)" "$(calls)" "it provisions the browser through the engine's own Playwright"
-P=$(line_of "provision:browser"); D=$(line_of "node [")
-ok "the browser is provisioned before the driver runs (provision line $P, driver line $D)" "[ '$P' -gt 0 ] && [ '$D' -gt '$P' ]"
 has "[$DRIVER] [page] [--output] [$OUT] [--script] [$SCRIPT] [--serve-dir] [$APP] [--port] [4321] [--selector] [#board] [--full-page] [--engine] [$ENGINE]" "$(calls)" "the driver gets the kind, every option, absolute paths, and the engine"
 has "captured $OUT (page, 1948x1132 px, " "$out" "the last line names the PNG and its pixel size"
 ok "the PNG is on disk, in the directory --output named" "[ -s '$OUT' ]"
-hasnt "npm install" "$(calls)" "a checkout with its deps does not reinstall them"
 
 echo "# page: --serve with --cwd, and --base-url, are forwarded"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
@@ -233,35 +214,11 @@ out="$(run DRIVER_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --ou
 eq "$rc" 1 "a PNG left by an earlier run does not pass for this one"
 ok "the earlier PNG was removed before the capture" "[ ! -e '$OUT' ]"
 
-echo "# engine resolution"
-rm -rf "$ENGINE/node_modules"
-out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "a checkout without its deps captures"
-I=$(line_of "npm install (in $ENGINE)"); P=$(line_of "provision:browser")
-ok "its deps are installed before the browser is provisioned (install line $I, provision line $P)" "[ '$I' -gt 0 ] && [ '$P' -gt '$I' ]"
-mkdir -p "$ENGINE/node_modules"
-out="$(run INSTALL_RC=1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a failed browser install exits 1"
-has "could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)" "$out" "it says the browser could not be provisioned"
-has "Failed to install browsers" "$out" "the installer's own message reaches the caller"
-hasnt "node [" "$(calls)" "the driver does not run after a failed install"
-OTHER="$TMPD/other"; mkdir -p "$OTHER/node_modules"; printf '{"name":"sprintshow-notes"}\n' >"$OTHER/package.json"
-out="$(run SS_RIG="$OTHER" -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "a rig named sprintshow that is not the engine is passed over"
-has "engine = published @zookanalytics/sprintshow" "$out" "it falls back to the published engine"
-hasnt "(in $OTHER)" "$(calls)" "nothing runs in the other rig"
-out="$(run SS_RIG= -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "the published engine captures"
-has "npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell" "$(calls)" "it installs the browser through the published engine's Playwright"
-has "npx --yes --package=@zookanalytics/sprintshow -- node $DRIVER page" "$(calls)" "it runs the driver beside the published engine"
-hasnt "[--engine]" "$(calls)" "the driver finds the published engine itself"
-hasnt "npm " "$(calls)" "it runs npm in no checkout"
-out="$(run SS_RIG= INSTALL_RC=1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a failed published install exits 1"
-has "the published engine's 'playwright install chromium-headless-shell' failed" "$out" "it says which install failed"
+echo "# Node: the driver's floor, checked before anything is installed"
 out="$(run NODE_VERSION=v22.17.1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "Node below 22.18 exits 1"
 has "below the engine's floor of 22.18" "$out" "it names the floor"
+eq "$(calls)" "" "nothing is installed, and no driver runs, for a Node below the floor"
 out="$(run NODE_VERSION=v22.18.0 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 0 "Node 22.18 captures"
 mv "$BIN/node" "$BIN/node.off"

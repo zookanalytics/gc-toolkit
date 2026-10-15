@@ -11,10 +11,11 @@
 # gc-demo-script skill.
 #
 # The engine is @zookanalytics/sprintshow, consumed from the local `sprintshow`
-# rig checkout when the city has one and the published npm package otherwise,
-# per skills/demo-capture/SKILL.md. Capture is engine-driven (the engine drives
-# Playwright headlessly): the only path available to a pool session, which
-# carries no browser MCP.
+# rig checkout when the city has one and the published npm package otherwise.
+# demo-engine-lib.sh finds it and provisions its browser, as it does for the
+# screenshot capture. Capture is engine-driven (the engine drives Playwright
+# headlessly): the only path available to a pool session, which carries no
+# browser MCP.
 #
 # It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
 # script the linter rejects, a capture that errors, or an output file that never
@@ -58,6 +59,9 @@
 set -u
 
 PROG=rig-demo-capture
+HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=demo-engine-lib.sh
+. "$HERE/demo-engine-lib.sh" || { echo "$PROG: cannot source demo-engine-lib.sh beside this script" >&2; exit 1; }
 
 usage() { sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -114,42 +118,25 @@ OUTPUT=$(abspath "$OUTPUT")
 OUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'" >&2; exit 1; }
 
-# >>> rig-demo-engine-resolve
-# Resolve the SprintShow engine into a `sprintshow` shell function, mirroring
-# skills/demo-capture/SKILL.md: prefer the local `sprintshow` rig checkout
-# (guarded by package.json .name so an unrelated rig of that name is not run),
-# provisioning its deps and ffmpeg on first use; fall back to the published npm
-# package. $SPRINTSHOW_BIN overrides both. assets/scripts/rig-demo-capture.test.sh
-# extracts this block and checks the resolution order; keep the markers.
-#
-# The browser is installed through the engine's own Playwright on every
-# capture, local or published. The engine launches the chromium-headless-shell
-# revision its Playwright pins, so only that Playwright's installer knows which
-# build to fetch and where to keep it. The installer skips a build that is
-# already installed, so a capture on a provisioned host downloads nothing.
-scrub() { tr -d '\000-\037'; }
+# --- the engine ------------------------------------------------------------
+# demo-engine-lib.sh finds the engine and provisions its browser. What only a
+# clip needs stays here: ffmpeg to assemble it, which is a host ffmpeg when
+# there is one and otherwise a checkout's ffmpeg-static binary, fetched on first
+# use; and the engine's CLI, which a checkout runs from its TypeScript source
+# through `npx tsx`. $SPRINTSHOW_BIN overrides all of it.
 if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
   sprintshow() { "$SPRINTSHOW_BIN" "$@"; }
 else
   command -v node >/dev/null 2>&1 || { echo "$PROG: node not found; the SprintShow engine needs Node >= 22.18. doctor/check-demo-toolchain names this gap." >&2; exit 1; }
   command -v npx  >/dev/null 2>&1 || { echo "$PROG: npx not found; it ships with Node and runs the engine." >&2; exit 1; }
-  SS_DIR=""
-  if command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    SS_DIR=$(gc rig list --json 2>/dev/null | scrub | jq -r '.rigs[]? | objects | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -n1)
-  fi
-  if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
-    [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install ) || { echo "$PROG: 'npm install' failed in the sprintshow rig checkout" >&2; exit 1; }
-    command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg ) || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
-    ( cd "$SS_DIR" && npm run provision:browser ) || { echo "$PROG: could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)" >&2; exit 1; }
-    sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
-    echo "$PROG: engine = local sprintshow rig ($SS_DIR)" >&2
+  demo_engine_resolve || exit 1
+  if [ -n "$DEMO_ENGINE_DIR" ]; then
+    command -v ffmpeg >/dev/null 2>&1 || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg ) >&2 || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
+    sprintshow() { npx tsx "$DEMO_ENGINE_DIR/src/cli.ts" "$@"; }
   else
-    npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell || { echo "$PROG: could not provision the browser (the published engine's 'playwright install chromium-headless-shell' failed)" >&2; exit 1; }
-    sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
-    echo "$PROG: engine = published @zookanalytics/sprintshow (no local rig checkout)" >&2
+    sprintshow() { npx --yes "$DEMO_ENGINE_PACKAGE" "$@"; }
   fi
 fi
-# <<< rig-demo-engine-resolve
 
 # --- lint before capturing ----------------------------------------------
 # The linter reads the script exactly as the driver will; a script that lints

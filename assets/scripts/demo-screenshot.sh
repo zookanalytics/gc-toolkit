@@ -19,9 +19,10 @@
 #             drawn in a comment box with GitHub's comment styles.
 #
 # The browser is the SprintShow engine's: its Playwright and the
-# chromium-headless-shell build that Playwright installs, with the engine
-# resolved the way rig-demo-capture.sh resolves it. demo-screenshot.mjs, beside
-# this script, drives it. A screenshot needs neither ffmpeg nor a narration key.
+# chromium-headless-shell build that Playwright installs. demo-engine-lib.sh
+# finds the engine and installs that build, as it does for the video capture.
+# demo-screenshot.mjs, beside this script, drives it. A screenshot needs neither
+# ffmpeg nor a narration key.
 #
 # It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
 # renderer that errors, or a capture that leaves no PNG behind all exit 1,
@@ -74,18 +75,12 @@ set -u
 PROG=demo-screenshot
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 DRIVER="$HERE/demo-screenshot.mjs"
+# shellcheck source=demo-engine-lib.sh
+. "$HERE/demo-engine-lib.sh" || { echo "$PROG: cannot source demo-engine-lib.sh beside this script" >&2; exit 1; }
 
 usage() { sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 usage_err() { echo "$PROG: $1" >&2; usage >&2; exit 2; }
 fail() { echo "$PROG: $1" >&2; exit 1; }
-
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
 
 KIND="${1:-}"
 case "$KIND" in
@@ -184,15 +179,12 @@ mkdir -p "$(dirname "$OUTPUT")" || fail "cannot create the output directory '$(d
 TMPD=$(mktemp -d "${TMPDIR:-/tmp}/demo-screenshot.XXXXXX") || fail "cannot make a temp dir"
 trap 'rm -rf "$TMPD"' EXIT
 
-# >>> demo-screenshot-engine-resolve
-# The engine directory, found as rig-demo-capture.sh finds the engine: the local
-# `sprintshow` rig checkout, guarded by package.json .name so an unrelated rig of
-# that name is not used, with its deps installed on first use; else the
-# published package, run through npx. The browser is installed through the
-# engine's own Playwright on every capture, because only that Playwright knows
-# which chromium-headless-shell build it launches; its installer skips a build
-# that is already installed. The driver strips the TypeScript of a checkout
-# natively, so Node must be at least the engine's floor, 22.18.
+# --- the engine ------------------------------------------------------------
+# demo-engine-lib.sh finds the engine and provisions its browser. What only a
+# screenshot needs stays here: the driver strips the TypeScript of a checkout
+# natively, so Node must be at least the engine's floor, 22.18, before anything
+# is installed; and the driver runs with the checkout as its --engine, or under
+# npx beside the published package.
 command -v node >/dev/null 2>&1 || fail "node not found; the SprintShow engine needs Node >= 22.18. doctor/check-demo-toolchain names this gap."
 NODEVER=$(node --version 2>/dev/null | sed 's/^v//')
 NODE_MAJOR=${NODEVER%%.*}; NODE_REST=${NODEVER#*.}; NODE_MINOR=${NODE_REST%%.*}
@@ -201,23 +193,12 @@ case "$NODE_MINOR" in ''|*[!0-9]*) NODE_MINOR=0 ;; esac
 if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 18 ]; }; then
   fail "Node ${NODEVER:-unknown} is below the engine's floor of 22.18"
 fi
-SS_DIR=""
-if command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-  SS_DIR=$(gc rig list --json 2>/dev/null | scrub | jq -r '.rigs[]? | objects | select(.name=="sprintshow") | .path // empty' 2>/dev/null | head -n1)
-fi
-if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
-  [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install ) >&2 || fail "'npm install' failed in the sprintshow rig checkout"
-  ( cd "$SS_DIR" && npm run provision:browser ) >&2 || fail "could not provision the browser ('npm run provision:browser' failed in the sprintshow rig checkout)"
-  driver() { node "$DRIVER" "$@" --engine "$SS_DIR"; }
-  echo "$PROG: engine = local sprintshow rig ($SS_DIR)" >&2
+demo_engine_resolve || exit 1
+if [ -n "$DEMO_ENGINE_DIR" ]; then
+  driver() { node "$DRIVER" "$@" --engine "$DEMO_ENGINE_DIR"; }
 else
-  command -v npx >/dev/null 2>&1 || fail "npx not found; it ships with Node and runs the published engine"
-  npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell >&2 \
-    || fail "could not provision the browser (the published engine's 'playwright install chromium-headless-shell' failed)"
-  driver() { npx --yes --package=@zookanalytics/sprintshow -- node "$DRIVER" "$@"; }
-  echo "$PROG: engine = published @zookanalytics/sprintshow (no local rig checkout)" >&2
+  driver() { npx --yes --package="$DEMO_ENGINE_PACKAGE" -- node "$DRIVER" "$@"; }
 fi
-# <<< demo-screenshot-engine-resolve
 
 # --- what the driver renders ---------------------------------------------
 set -- "$KIND" --output "$OUTPUT"
