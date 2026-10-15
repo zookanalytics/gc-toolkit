@@ -149,20 +149,25 @@ PRIORITY_JQ='
         end;
     calc([]);
 
-  # The bead a workflow bead was poured for, walking its chain over $g, or the
-  # bead itself when it is not a workflow bead. A chain that leaves the graph
-  # ends at the last bead it reached.
-  def priority_subject($g):
+  # The rows of the chain of a workflow bead over $g, from the bead itself up to
+  # the bead it was poured for, which comes last. A bead that is not a workflow
+  # bead is its own subject, so its chain is itself alone. A chain that leaves
+  # the graph ends at the last bead it reached.
+  def priority_chain($g):
     def up($seen):
       ((.id // "") | tostring) as $id
-      | if ($seen | index($id)) != null or ($seen | length) >= prio_depth then .
+      | if ($seen | index($id)) != null or ($seen | length) >= prio_depth then [.]
         else prio_follows as $f
-          | if $f.kind != "workflow" then .
+          | if $f.kind != "workflow" then [.]
             else ($g[$f.on[0]] // null) as $n
-              | if $n == null or ($n | prio_live | not) then . else ($n | up($seen + [$id])) end
+              | if $n == null or ($n | prio_live | not) then [.] else [.] + ($n | up($seen + [$id])) end
             end
         end;
     up([]);
+
+  # The bead a workflow bead was poured for, or the bead itself when it is not a
+  # workflow bead: the last bead of its chain.
+  def priority_subject($g): priority_chain($g) | last;
 
   # Every bead in $g that could follow each bead, as {<id>: [<follower id>...]},
   # over the beads that are neither closed nor pinned: the index a writer walks
@@ -196,9 +201,12 @@ PRIORITY_JQ="def prio_depth: $PRIORITY_MAX_DEPTH;$PRIORITY_JQ"
 # shape `bd list --json` prints (each with its own `dependencies` and metadata),
 # into <graph-file>, an object keyed by bead id. <reader> is a command the caller
 # defines: given a comma-joined list of ids, it prints those beads as a JSON
-# array from the caller's own store, at every status (--all), and exits non-zero
-# when the read fails. An id it does not return is recorded as null, which the
-# function reads as absent from the store.
+# array from the caller's own store, at every status (--all) and of every class
+# a listing hides by default (gates, infrastructure beads, template molecules
+# and ephemeral rows), and exits non-zero when the read fails. An id it does not
+# return is recorded as null, which the function reads as absent from the
+# store, so a reader that hides a class computes every bead that follows one of
+# that class as following something else, or nothing.
 #
 # The beads the seed beads follow are read one generation per read, so the reads
 # grow with the depth of the chains, never with the number of beads. Returns

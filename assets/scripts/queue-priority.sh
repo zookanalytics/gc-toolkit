@@ -15,8 +15,9 @@
 #       of each), and read it all back.
 #   reconcile [--dry-run] [--pool <target>] [--db <path>]
 #       one pass of orders/queue-priority.toml: read the beads `bd ready` offers
-#       the rig's polecat pool and settle each one queued at a priority other
-#       than its own, for the raw writes no writer sees, such as a hand
+#       the rig's polecat pool, ephemeral ones included as the pool's claim
+#       reads them, and settle each one queued at a priority other than its
+#       own, for the raw writes no writer sees, such as a hand
 #       `bd update --priority` on an epic or a hand re-parent. The pool is
 #       --pool, else the one agent the roster (`gc agent list`) places in the
 #       rig under the name polecat.
@@ -30,6 +31,10 @@
 # priority field, and a shift is its priority_shift. A closed or pinned bead is
 # never written.
 #
+# Every listing asks for every class of bead bd hides by default (qp_list),
+# because a bead of any class can be followed, so the three writers read the
+# same beads and compute the same priority for each.
+#
 # One lock per store serializes the three writers, so neither a pass nor a
 # settle that read an old priority can write it back over a move. It is a flock
 # on queue-priority.lock in the store's own .beads directory, the one path every
@@ -37,6 +42,12 @@
 # for it (QUEUE_PRIORITY_LOCK_WAIT_SECS); a pass that finds it held skips its
 # tick. Only this process holds the descriptor: every gc child runs with fd 9
 # closed, so a process a gc call starts cannot outlive the writer holding it.
+# The holder records itself in queue-priority.holder and clears the record when
+# it exits, while it still holds the lock. A pass reports the lock wedged only
+# when the writer the record names is still running past the stall bound
+# (QUEUE_PRIORITY_LOCK_STALL_SECS). A record whose writer has exited names no
+# holder: the lock is held by a writer that has not recorded itself yet, or the
+# record was left by one that was killed, so the pass skips its tick.
 #
 # Callers: gc-helm.sh priority (move), orders/queue-priority.toml (reconcile),
 # and the writers that route, sling or release a bead (settle).
@@ -85,7 +96,15 @@ BD_DB=""
 DRY_RUN=0
 
 TMPFILES=()
-cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
+# The exit releases the lock, and the holder record is cleared before it, while
+# this process still holds the lock, so no later reader takes this writer's
+# record for the next holder's.
+LOCK_HELD=0
+cleanup() {
+    [ "$LOCK_HELD" = 1 ] && { : > "$BD_DB/queue-priority.holder"; } 2>/dev/null
+    [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"
+    return 0
+}
 trap cleanup EXIT
 # Answers in $REPLY, so the allocation lands in this shell's registry rather than
 # a command substitution's copy of it.
@@ -141,10 +160,10 @@ resolve_db() {
 
 # take_lock <wait|nowait> <verb> — take the store's lock on fd 9 and record this
 # process as its holder. Returns 0 holding it, 1 when another holder keeps it
-# (past the wait, or at once for nowait), 2 when that holder is past the stall
-# bound, and 3 when no lock can be taken: no flock on PATH, or a lock file this
-# process cannot create or open. LOCK_NOTE names the holder for 1 and 2 and the
-# cause for 3.
+# (past the wait, or at once for nowait), 2 when the writer the holder record
+# names is still running past the stall bound, and 3 when no lock can be taken:
+# no flock on PATH, or a lock file this process cannot create or open.
+# LOCK_NOTE names the holder for 1 and 2 and the cause for 3.
 take_lock() {
     local mode="$1" verb="$2" lock="$BD_DB/queue-priority.lock" holder="$BD_DB/queue-priority.holder"
     local held_pid="" held_since="" held_verb="" elapsed=""
@@ -161,9 +180,20 @@ take_lock() {
     fi
     if [ "$got" = 1 ]; then
         printf '%s %s %s\n' "$$" "$(now_epoch)" "$verb" > "$holder" 2>/dev/null || true
+        LOCK_HELD=1
         return 0
     fi
     [ -r "$holder" ] && read -r held_pid held_since held_verb < "$holder"
+    # A writer records itself only after its flock succeeds, so a record whose
+    # writer has exited is not the holder's: the lock was taken by a writer that
+    # has not recorded itself yet, or the record was left by one that was killed.
+    case "$held_pid" in
+        ''|*[!0-9]*) ;;
+        *) if ! kill -0 "$held_pid" 2>/dev/null; then
+               LOCK_NOTE="a writer that has not recorded itself yet; pid $held_pid, which the record names, has exited"
+               return 1
+           fi ;;
+    esac
     case "$held_since" in ''|*[!0-9]*) ;; *) elapsed=$(( $(now_epoch) - held_since )) ;; esac
     LOCK_NOTE="${held_verb:-a writer}, pid ${held_pid:-unknown}${elapsed:+, ${elapsed}s elapsed}"
     if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then return 2; fi
@@ -175,11 +205,16 @@ holder_note() {
     printf 'held by %s, pid %s' "${v:-a writer}" "${p:-unknown}"
 }
 
-# The walk's reader (priority-lib.sh): the named beads at every status and of
-# every class a listing hides by default.
-qp_read() {
-    bd_ list --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null
+# The one listing of the store: every read here asks for every class of bead a
+# listing hides by default, gates, infrastructure beads, template molecules and
+# ephemeral rows, because a bead of any class can be followed. Settle, the move
+# and the pass then read the same beads, so each computes the priority the
+# others compute.
+qp_list() {
+    bd_ list "$@" --include-gates --include-infra --include-templates --include-ephemeral --brief --json --limit 0 2>/dev/null
 }
+# The walk's reader (priority-lib.sh): the named beads at every status.
+qp_read() { qp_list --id "$1" --all; }
 
 # A row read as a JSON array, from either shape a listing answers in. The
 # parentheses make it one term wherever a program places it, because jq before
@@ -206,40 +241,50 @@ WRITABLE_JQ='
         ((((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "") | tostring) == "workflow"
       else true end;'
 
+# A bead found through another belongs to the workflow only when the library
+# says it follows that bead as part of a workflow, so a settle writes the beads
+# whose priority the function computes from the subject and no others.
+# shellcheck disable=SC2016  # jq program, single-quoted on purpose
+POURED_JQ='def poured_for($on): prio_live and (prio_follows | .kind == "workflow" and .on == [$on]);'
+
 # workflow_rows <subject-row-json> — every live workflow poured for the
 # subject, printed as one JSON array of rows: each input convoy gascity made for
 # it, the live root poured over that convoy, and the root's live steps. A
 # subject that is itself a convoy, slung as it is, has its roots poured over it
 # directly. A subject that is itself a workflow root has its own steps: a root
 # whose input convoy is gone, or that a launch poured with none, follows no
-# convoy, so it is the bead its steps were poured for. Returns 1 when a read
-# fails, so a settle never reports a workflow it could not read as settled.
+# convoy, so it is the bead its steps were poured for. Each bead is one that
+# follows the bead it was found through (POURED_JQ), so an input convoy that
+# tracks more than one bead, which follows none of them, is no bead's workflow.
+# Returns 1 when a read fails, so a settle never reports a workflow it could not
+# read as settled.
 workflow_rows() {
-    local row="$1" subject is_convoy raw convoys all c roots root_ids="" r steps
+    local row="$1" subject is_convoy raw ids convoys all c roots root_ids="" r steps
     subject="$(printf '%s' "$row" | jq -r '.id')"
     is_convoy="$(printf '%s' "$row" | jq -r '(.issue_type // "") == "convoy"')"
     printf '%s' "$row" | jq -e '(((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "" | tostring) == "workflow"' >/dev/null 2>&1 \
         && root_ids="$subject"
+    # A row of `dep list` carries none of the convoy's own edges, so each convoy
+    # is read again to count the beads it tracks.
     raw="$(bd_ dep list "$subject" --direction up -t tracks --json 2>/dev/null)" || return 1
-    convoys="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
-        | select((.issue_type // "") == "convoy")
-        | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned")
-        | select((((.metadata // {})["gc.synthetic"] // "") | tostring | ascii_downcase) == "true") ]' 2>/dev/null)" || return 1
-    [ -n "$convoys" ] || return 1
+    ids="$(printf '%s' "$raw" | scrub | jq -r "$ROWS_JQ"' | [ .[] | objects | select((.issue_type // "") == "convoy") | .id | tostring ] | unique | join(",")' 2>/dev/null)" || return 1
+    convoys='[]'
+    if [ -n "$ids" ]; then
+        raw="$(qp_read "$ids")" || return 1
+        convoys="$(printf '%s' "$raw" | scrub | jq -c --arg on "$subject" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
+        [ -n "$convoys" ] || return 1
+    fi
     all="$convoys"
     for c in $(printf '%s' "$convoys" | jq -r '.[].id') $( [ "$is_convoy" = true ] && printf '%s' "$subject" ); do
-        raw="$(bd_ list --metadata-field "gc.input_convoy_id=$c" --brief --json --limit 0 2>/dev/null)" || return 1
-        roots="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
-            | select((((.metadata // {})["gc.kind"] // "") | tostring) == "workflow")
-            | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned") ]' 2>/dev/null)" || return 1
+        raw="$(qp_list --metadata-field "gc.input_convoy_id=$c")" || return 1
+        roots="$(printf '%s' "$raw" | scrub | jq -c --arg on "$c" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
         [ -n "$roots" ] || return 1
         all="$(jq -cn --argjson a "$all" --argjson b "$roots" '$a + $b')" || return 1
         root_ids="$root_ids $(printf '%s' "$roots" | jq -r '.[].id')"
     done
     for r in $root_ids; do
-        raw="$(bd_ list --metadata-field "gc.root_bead_id=$r" --brief --json --limit 0 2>/dev/null)" || return 1
-        steps="$(printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
-            | select(((.status // "") | tostring) as $s | $s != "closed" and $s != "pinned") ]' 2>/dev/null)" || return 1
+        raw="$(qp_list --metadata-field "gc.root_bead_id=$r")" || return 1
+        steps="$(printf '%s' "$raw" | scrub | jq -c --arg on "$r" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
         [ -n "$steps" ] || return 1
         all="$(jq -cn --argjson a "$all" --argjson b "$steps" '$a + $b')" || return 1
     done
@@ -461,12 +506,12 @@ cmd_move() {
         fi
     fi
 
-    # The live beads, among them every bead that can follow the moved one.
-    # Gates are listed too: gc-helm.sh demand files its gate under the gated
-    # bead's parent, so the gate follows that parent like any member.
+    # The live beads of every class, among them every bead that can follow the
+    # moved one: gc-helm.sh demand files its gate under the gated bead's parent,
+    # so the gate follows that parent like any member.
     local listing raw one status out
     mktemp_tracked || return 1; listing="$REPLY"
-    raw="$(bd_ list --status=open,in_progress,blocked,deferred,hooked --include-gates --brief --json --limit 0 2>/dev/null)" \
+    raw="$(qp_list --status=open,in_progress,blocked,deferred,hooked)" \
         || { echo "$PROG: move: could not list the store $BD_DB to find what follows $bead. Nothing was written." >&2; return 1; }
     printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ" > "$listing" 2>/dev/null \
         || { echo "$PROG: move: the listing of $BD_DB did not parse. Nothing was written." >&2; return 1; }
@@ -483,8 +528,7 @@ cmd_move() {
                 echo "$PROG: move: $bead is $status, so nothing that follows it waits in a queue. Nothing was written." >&2
                 return 2 ;;
         esac
-        # A live bead of a class the listing hides, such as an infra bead,
-        # joins it.
+        # A live bead the listing missed, written after it was read, joins it.
         mktemp_tracked || return 1
         jq -c --argjson one "$one" '. + [$one]' "$listing" > "$REPLY" 2>/dev/null && listing="$REPLY" \
             || { echo "$PROG: move: could not add $bead to the listing of $BD_DB. Nothing was written." >&2; return 1; }
@@ -644,14 +688,26 @@ cmd_reconcile() {
         esac
     fi
 
-    local raw seed graph rows
+    local raw ids seed graph rows
     mktemp_tracked || return 1; seed="$REPLY"
     mktemp_tracked || return 1; graph="$REPLY"
     mktemp_tracked || return 1; rows="$REPLY"
-    raw="$(bd_ ready --metadata-field "gc.routed_to=$pool" --unassigned --json --limit 0 2>/dev/null)" \
+    # The queue as the pool's claim reads it, ephemeral beads included.
+    raw="$(bd_ ready --metadata-field "gc.routed_to=$pool" --unassigned --include-ephemeral --json --limit 0 2>/dev/null)" \
         || { echo "$PROG: reconcile: could not read the queue for $pool; NOT treating it as empty" >&2; return 1; }
-    printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ" > "$seed" 2>/dev/null \
+    ids="$(printf '%s' "$raw" | scrub | jq -r "$ROWS_JQ"' | [ .[] | objects | (.id // "") | tostring | select(. != "") ] | unique | join(",")' 2>/dev/null)" \
         || { echo "$PROG: reconcile: the queue for $pool did not parse; NOT treating it as empty" >&2; return 1; }
+    # Only the ids are taken from the queue. Each queued bead is read again
+    # through qp_read, so the pass computes from the rows settle and the move
+    # read, and a bead claimed or closed since the queue was read has left it.
+    if [ -n "$ids" ]; then
+        raw="$(qp_read "$ids")" || { echo "$PROG: reconcile: could not read the beads queued for $pool" >&2; return 1; }
+    else
+        raw='[]'
+    fi
+    printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ"' | [ .[] | objects
+        | select(((.status // "") | tostring) == "open" and ((.assignee // "") | tostring) == "") ]' > "$seed" 2>/dev/null \
+        || { echo "$PROG: reconcile: the read of the beads queued for $pool did not parse" >&2; return 1; }
     local queued
     queued="$(jq 'length' "$seed")"
     if [ "$queued" = 0 ]; then
@@ -660,34 +716,40 @@ cmd_reconcile() {
     fi
     priority_graph qp_read "$seed" "$graph" \
         || { echo "$PROG: reconcile: could not read what the queued beads follow" >&2; return 1; }
-    # One line per queued bead: its own priority, the one it competes at now,
-    # its subject (the bead a workflow bead was poured for) and the subject's
-    # priority and row. Most urgent first, so a short pass fixes the head first.
-    jq -c --slurpfile g "$graph" "$PRIORITY_JQ"'
-        [ .[] | objects | priority_of($g[0]) as $r
-          | (priority_subject($g[0])) as $s
-          | ($s | priority_of($g[0])) as $sr
-          | {id: (.id | tostring), stored: .priority, r: $r, subject: $s, sp: $sr} ]
-        | sort_by((.r.priority // 9), .id) | .[]' "$seed" > "$rows" 2>/dev/null \
+    # One line for each queued bead whose priority cannot be computed, then one
+    # for each subject (the bead a workflow bead was poured for) of the queued
+    # beads at a stale priority: its row and priority, those queued beads, and
+    # every bead between one of them and the subject that reads another level.
+    # Subjects come most urgent first, so a short pass fixes the head first.
+    jq -c --slurpfile g "$graph" "$PRIORITY_JQ$WRITABLE_JQ"'
+        $g[0] as $g
+        | [ .[] | objects | priority_of($g) as $r | priority_chain($g) as $c
+            | {id: (.id | tostring), stored: .priority, r: $r, chain: $c, subject: ($c | last),
+               sp: ($c | last | priority_of($g))} ] as $q
+        | ($q[] | select((.r | has("error")) or (.sp | has("error"))) | {id, error: (.r.error // .sp.error)}),
+          ([ $q[] | select(((.r | has("error")) or (.sp | has("error"))) | not) | select(.stored != .r.priority) ]
+           | group_by(.subject.id | tostring)
+           | map(.[0].sp.priority as $p | (.[0].subject.id | tostring) as $s
+               | {subject: .[0].subject, sp: .[0].sp, rank: (map(.r.priority) | min), first: (map(.id) | min),
+                  queued: [ .[] | {id, stored} ],
+                  chain: ([ .[] | .chain[] | select(((.id // "") | tostring) != $s) | select(writable)
+                            | select(.priority != $p) | {id: (.id | tostring), to: $p} ] | unique_by(.id))})
+           | sort_by(.rank, .first) | .[])' "$seed" > "$rows" 2>/dev/null \
         || { echo "$PROG: reconcile: could not compute the queued beads' priorities" >&2; return 1; }
 
-    local line id subject sp stored derivation failed=0 settled=0 stale=0 left=0 wf_plan done_subjects=" "
+    local line subject sp derivation queued_note missing next failed=0 settled=0 stale=0 left=0 wf_plan
     local -a left_ids=() scopes=()
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        id="$(printf '%s' "$line" | jq -r '.id')"
-        if printf '%s' "$line" | jq -e '(.r | has("error")) or (.sp | has("error"))' >/dev/null 2>&1; then
-            echo "$PROG: WARN the priority of queued $id cannot be computed: $(printf '%s' "$line" | jq -r '(.r.error // .sp.error)')" >&2
+        if printf '%s' "$line" | jq -e 'has("error")' >/dev/null 2>&1; then
+            echo "$PROG: WARN the priority of queued $(printf '%s' "$line" | jq -r '.id') cannot be computed: $(printf '%s' "$line" | jq -r '.error')" >&2
             failed=$((failed + 1)); continue
         fi
-        stored="$(printf '%s' "$line" | jq -r '.stored')"
-        [ "$stored" != "$(printf '%s' "$line" | jq -r '.r.priority')" ] || continue
-        stale=$((stale + 1))
+        stale=$((stale + $(printf '%s' "$line" | jq '.queued | length')))
         subject="$(printf '%s' "$line" | jq -r '.subject.id')"
-        case "$done_subjects" in *" $subject "*) continue ;; esac
-        done_subjects="$done_subjects$subject "
         sp="$(printf '%s' "$line" | jq -r '.sp.priority')"
         derivation="$(printf '%s' "$line" | jq -r ".sp | $DERIVATION_JQ")"
+        queued_note="$(printf '%s' "$line" | jq -r '[ .queued[] | "\(.id) was P\(.stored)" ] | join(", ")')"
         if ! settle_fits_budget; then
             left=$((left + 1)); left_ids+=("$subject"); scopes+=("$subject" "settle left for the next pass")
             continue
@@ -698,17 +760,34 @@ cmd_reconcile() {
             echo "$PROG: WARN could not read the workflows poured for $subject; left at its old priority" >&2
             failed=$((failed + 1)); continue
         fi
+        # The beads between each queued bead and its subject join the plan: a
+        # workflow poured for a step of another workflow is not one of the
+        # workflows poured for the subject, and still follows it.
+        next="$(jq -c --argjson line "$line" '. + $line.chain | unique_by(.id)' "$wf_plan")" && printf '%s\n' "$next" > "$wf_plan" \
+            || { echo "$PROG: WARN could not plan the queued beads of $subject; left at their old priority" >&2; failed=$((failed + 1)); continue; }
+        # A queued bead the plan does not reach would stay stale on every pass,
+        # so the pass names it and counts the subject failed.
+        missing="$(jq -r --argjson line "$line" 'map(.id) as $ids | [ $line.queued[].id | select(. as $q | $ids | index($q) | not) ] | join(" ")' "$wf_plan")"
         if [ "$DRY_RUN" = 1 ]; then
-            echo "$PROG: DRY-RUN would settle $subject at $derivation, queued $id P$stored: $(jq -r '[ .[] | "\(.id)->P\(.to)" ] | join(" ")' "$wf_plan")"
-            settled=$((settled + 1)); continue
+            echo "$PROG: DRY-RUN would settle $subject at $derivation, queued $queued_note: $(jq -r '[ .[] | "\(.id)->P\(.to)" ] | join(" ")' "$wf_plan")"
+            if [ -n "$missing" ]; then
+                echo "$PROG: WARN settling $subject would not reach queued $missing" >&2
+                failed=$((failed + 1))
+            else
+                settled=$((settled + 1))
+            fi
+            continue
         fi
-        if write_priorities "$wf_plan"; then
-            echo "$PROG: settled $subject at $derivation (queued $id was P$stored)${SKIPPED:+, claimed $SKIPPED left as it is}: wrote $WROTE bead(s)"
-            settled=$((settled + 1))
-        else
+        if ! write_priorities "$wf_plan"; then
             echo "$PROG: WARN $subject did not settle at P$sp: $MISMATCH" >&2
-            failed=$((failed + 1))
+            failed=$((failed + 1)); continue
         fi
+        if [ -n "$missing" ]; then
+            echo "$PROG: WARN settled $subject at $derivation, but its writes did not reach queued $missing, left at the old priority" >&2
+            failed=$((failed + 1)); continue
+        fi
+        echo "$PROG: settled $subject at $derivation (queued $queued_note)${SKIPPED:+, claimed $SKIPPED left as it is}: wrote $WROTE bead(s)"
+        settled=$((settled + 1))
     done < "$rows"
 
     if [ "$left" -gt 0 ]; then

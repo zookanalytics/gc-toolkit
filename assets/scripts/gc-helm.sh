@@ -1984,7 +1984,9 @@ cmd_park() {
 # that follows it, held ones included, their live workflows and their anchors'
 # PR-finishing work, leaves claimed beads as they are, and reads it all back.
 # This verb names the store the bead lives in and relays the answer: a refusal
-# exits 2 with nothing written, and a write that did not land exits 4.
+# exits 2 with nothing written, and a write that did not land exits 4. A move
+# that fails can fail after it wrote some of its beads, so every exit but a
+# refusal busts the board cache.
 cmd_priority() {
     [ $# -gt 0 ] || { echo "$PROG: priority needs <bead-id> and a priority, P0 to P4, or --shift <±n>" >&2; usage; exit 2; }
     case "$1" in
@@ -2002,7 +2004,7 @@ cmd_priority() {
     case "$_pr_rc" in
         0) bust_cache; exit 0 ;;
         2) exit 2 ;;
-        *) exit 4 ;;
+        *) bust_cache; exit 4 ;;
     esac
 }
 

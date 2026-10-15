@@ -10,7 +10,9 @@
 #               and its workflows take it, and a workflow root that follows
 #               nothing writes its own steps; --print computes and writes
 #               nothing; a write that does not read back, an unreadable bead and
-#               a lock held past the wait each exit 1.
+#               a lock held past the wait each exit 1. A writer records itself
+#               as the lock's holder while it holds it and clears the record as
+#               it exits.
 #   (MOVE)      gc-helm.sh priority <bead> <P> sets a bead that follows nothing,
 #               and --shift sets a bead that follows a parent or an anchor; the
 #               move then writes every bead that follows it, held ones and gates
@@ -20,7 +22,13 @@
 #               is refused naming the shift that lands it there; a shift on a
 #               bead that follows nothing, either form on a workflow's convoy,
 #               root or step, a closed bead and malformed input are refused with
-#               nothing written.
+#               nothing written. A move that fails busts the board cache, and a
+#               refusal leaves it.
+#   (CLASSES)   settle, the move and the pass read gates, infra beads,
+#               templates and ephemeral beads, which bd hides from a listing
+#               that does not ask for them, and agree on the priority of each.
+#   (CONVOY)    an input convoy that tracks two beads follows neither, so a
+#               settle of either leaves it and its workflow as they are.
 #   (RULES)     the done-when cases of the priority flow: shift -1 under a P1
 #               epic queues at P0, then P1 once the epic moves to P2; under a P0
 #               epic a feature at -1 stays P0 and a task under it at +1 is P1; two
@@ -28,16 +36,21 @@
 #   (FIXTURE)   settle on every bead and the move on every bead that follows
 #               nothing leave priority-lib.fixture.json's store at the same
 #               priorities, the ones its cases name.
-#   (PASS)      reconcile reads the polecat queue and what each queued bead
-#               follows, never the whole store, and settles a queued bead's
-#               whole workflow in one pass after a raw edit on its epic, and a
-#               queued step whose root lost its input convoy with that root; it
-#               finds the rig's polecat pool in the roster under whatever
-#               binding the rig imports the pack, and fails, reading no queue,
-#               when the roster names no such pool or several, or cannot be
-#               read; it skips a tick while the lock is held, fails on a wedged
-#               lock or an unreadable queue, writes nothing on --dry-run, and
-#               leaves what its budget cannot cover for the next pass.
+#   (PASS)      reconcile reads the polecat queue, ephemeral beads included,
+#               and what each queued bead follows, never the whole store, and
+#               computes from the queued beads as it reads them itself, not as
+#               bd ready prints them. It settles a queued bead's whole workflow
+#               in one pass after a raw edit on its epic, a queued step whose
+#               root lost its input convoy with that root, and a queued step of
+#               a workflow poured for a step of another workflow with every
+#               bead between them; it finds the rig's polecat pool in the roster
+#               under whatever binding the rig imports the pack, and fails,
+#               reading no queue, when the roster names no such pool or
+#               several, or cannot be read; it skips a tick while the lock is
+#               held, a holder record whose writer has exited included, fails on
+#               a wedged lock or an unreadable queue, writes nothing on
+#               --dry-run, and leaves what its budget cannot cover for the next
+#               pass.
 #   (CROSSING)  a pass that read the old priority before a move cannot write it
 #               back after the move: the move waits for the pass's lock.
 #   (ORDER)     orders/queue-priority.toml runs reconcile per rig every fifteen
@@ -90,12 +103,18 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 #                      (repeatable, ANDed) and --has-metadata-key filter the
 #                      store; with neither --all nor --status it leaves out
 #                      closed and pinned beads, without --include-gates every
-#                      gate, and without --include-infra every agent, role and
-#                      message bead, as bd does. STUB_LIST_FAIL fails it.
+#                      gate, without --include-infra every agent, role and
+#                      message bead, without --include-templates every template
+#                      (is_template), and without --include-ephemeral or
+#                      --include-infra every ephemeral bead, as bd 1.3.1 does.
+#                      STUB_LIST_FAIL fails it.
 #   bd ready           the open beads that no open blocker holds, on themselves
 #                      or on a parent-child ancestor, filtered by
-#                      --metadata-field and --unassigned, most urgent first.
-#                      STUB_READY_FAIL fails it.
+#                      --metadata-field and --unassigned, most urgent first. As
+#                      bd does, it leaves out every gate and infra bead, and
+#                      every ephemeral bead without --include-ephemeral.
+#                      STUB_READY_FAIL fails it; STUB_READY_BARE prints each row
+#                      with no dependencies, parent or metadata.
 #   bd dep list <id> --direction up -t tracks
 #                      the beads carrying a tracks edge onto <id>, at every
 #                      status, in the row shape `dep list` prints.
@@ -145,7 +164,7 @@ mf_json() { printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0) |
 case "$verb" in
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
-    ids=""; all=0; st=""; hk=""; gates=0; infra=0; mf=()
+    ids=""; all=0; st=""; hk=""; gates=0; infra=0; tmpl=0; eph=0; mf=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --id) shift; ids="${1:-}" ;;
@@ -158,7 +177,9 @@ case "$verb" in
         --has-metadata-key) shift; hk="${1:-}" ;;
         --include-gates) gates=1 ;;
         --include-infra) infra=1 ;;
-        --brief|--json|--include-templates) : ;;
+        --include-templates) tmpl=1 ;;
+        --include-ephemeral) eph=1 ;;
+        --brief|--json) : ;;
         --limit) shift ;;
         --limit=*) : ;;
         *) echo "gc stub: list: unexpected argument '$1'" >&2; exit 2 ;;
@@ -166,7 +187,7 @@ case "$verb" in
       shift || true
     done
     jq -c --arg ids "$ids" --argjson all "$all" --arg st "$st" --arg hk "$hk" --argjson gates "$gates" --argjson infra "$infra" \
-      --argjson mf "$(mf_json ${mf[@]+"${mf[@]}"})" "$LIVE"'
+      --argjson tmpl "$tmpl" --argjson eph "$eph" --argjson mf "$(mf_json ${mf[@]+"${mf[@]}"})" "$LIVE"'
       [ .[]
         | select($ids == "" or (.id as $i | ($ids | split(",")) | index($i)))
         | select(if $st != "" then (.status as $s | ($st | split(",")) | index($s))
@@ -174,15 +195,18 @@ case "$verb" in
         | select(. as $r | all($mf[]; (($r.metadata // {})[.k] // "" | tostring) == .v))
         | select($hk == "" or ((.metadata // {}) | has($hk)))
         | select($gates == 1 or .issue_type != "gate")
-        | select($infra == 1 or ((.issue_type // "") as $t | (["agent", "role", "message"] | index($t)) == null)) ]' "$S" ;;
+        | select($infra == 1 or ((.issue_type // "") as $t | (["agent", "role", "message"] | index($t)) == null))
+        | select($tmpl == 1 or (.is_template // false) != true)
+        | select($eph == 1 or $infra == 1 or (.ephemeral // false) != true) ]' "$S" ;;
   ready)
     [ -n "${STUB_READY_FAIL:-}" ] && { echo "gc: simulated ready failure" >&2; exit 1; }
-    un=0; mf=()
+    un=0; eph=0; mf=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata-field) shift; mf+=("${1:-}") ;;
         --metadata-field=*) mf+=("${1#--metadata-field=}") ;;
         --unassigned) un=1 ;;
+        --include-ephemeral) eph=1 ;;
         --json) : ;;
         --limit) shift ;;
         --limit=*) : ;;
@@ -190,7 +214,8 @@ case "$verb" in
       esac
       shift || true
     done
-    jq -c --argjson un "$un" --argjson mf "$(mf_json ${mf[@]+"${mf[@]}"})" "$LIVE"'
+    jq -c --argjson un "$un" --argjson eph "$eph" --argjson bare "$([ -n "${STUB_READY_BARE:-}" ] && echo true || echo false)" \
+      --argjson mf "$(mf_json ${mf[@]+"${mf[@]}"})" "$LIVE"'
       . as $all | (map({key: .id, value: .}) | from_entries) as $by
       | def blocked($id; $seen):
           ($by[$id] // null) as $r
@@ -199,10 +224,14 @@ case "$verb" in
                  or any(($r.dependencies // [])[] | select(.type == "parent-child") | .depends_on_id
                         | select(. as $p | $seen | index($p) | not); blocked(.; $seen + [.])) end;
         [ $all[] | select(.status == "open")
+          | select(.issue_type != "gate")
+          | select((.issue_type // "") as $t | (["agent", "role", "message"] | index($t)) == null)
+          | select($eph == 1 or (.ephemeral // false) != true)
           | select(blocked(.id; [.id]) | not)
           | select($un == 0 or ((.assignee // "") == ""))
           | select(. as $r | all($mf[]; (($r.metadata // {})[.k] // "" | tostring) == .v)) ]
-        | sort_by(.priority, .id)' "$S" ;;
+        | sort_by(.priority, .id)
+        | if $bare then map(del(.dependencies, .parent, .metadata)) else . end' "$S" ;;
   dep)
     [ "${1:-}" = list ] || { echo "gc stub: unsupported 'bd dep ${1:-}'" >&2; exit 2; }
     id="${2:-}"; shift 2 || true
@@ -282,10 +311,26 @@ run() {
 }
 qp() { run "$QP" "$@"; }
 helm() { run sh "$HELM" "$@"; }
+# held_record <cmd...> -> RC, OUT, ERR as run gives them, and HELD, the lock's
+# holder record read while the writer holds the lock: the writer's first
+# priority write waits at a gate until the record is read.
+held_record() {
+  local gate="$TMP/held-gate" pid n=0
+  : > "$gate"; rm -f "$gate.reached"
+  : > "$STUB_CALLS"
+  STUB_GATE="$gate" "$@" > "$TMP/out" 2> "$TMP/err" &
+  pid=$!
+  until [ -e "$gate.reached" ] || [ "$n" -ge 100 ]; do sleep 0.1; n=$((n + 1)); done
+  HELD="$(cat "$DB/queue-priority.holder" 2>/dev/null)"
+  rm -f "$gate"
+  wait "$pid"; RC=$?
+  OUT="$(cat "$TMP/out")"; ERR="$(cat "$TMP/err")"; CALLS="$(cat "$STUB_CALLS")"
+}
 prio() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .priority) // "<absent>"' "$STUB_STORE"; }
 meta() { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | (.metadata // {})[$k]) // "<absent>" | tostring' "$STUB_STORE"; }
 updates() { printf '%s\n' "$CALLS" | grep -c '^bd update' || true; }
 set_prio() { jq -c --arg id "$1" --argjson p "$2" 'map(if .id == $id then .priority = $p else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"; }
+add_beads() { jq -c --argjson add "$1" '. + $add' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"; }
 
 # The store most cases start from. Stored priorities of beads that follow
 # something are stale on purpose.
@@ -371,7 +416,14 @@ done
 eq "$(prio tk-s1c)" 2 "(SETTLE) a claimed step is left as it is"
 eq "$(prio tk-s1d)" 2 "(SETTLE) a closed step is left as it is"
 eq "$(prio tk-e1)" 1 "(SETTLE) the epic it follows is not written"
-eq "$(awk '{print $3}' "$DB/queue-priority.holder" 2>/dev/null)" "settle" "(SETTLE) settle takes the lock beside the store"
+[ -e "$DB/queue-priority.lock" ] && ok "(SETTLE) settle takes the lock beside the store" || bad "(SETTLE) settle takes the lock beside the store"
+eq "$(cat "$DB/queue-priority.holder" 2>/dev/null)" "" "(SETTLE) and clears its holder record as it releases the lock"
+reset_store
+held_record "$QP" settle tk-w1
+eq "$RC" 0 "(SETTLE) a settle held at its first write exits 0 once let go"
+eq "$(awk '{print $3}' <<< "$HELD")" "settle" "(SETTLE) while settle holds the lock, the holder record names it"
+[ -n "$(awk '{print $1}' <<< "$HELD")" ] && ok "(SETTLE) and its pid" || bad "(SETTLE) and its pid (record '$HELD')"
+eq "$(cat "$DB/queue-priority.holder" 2>/dev/null)" "" "(SETTLE) the record is cleared once settle exits"
 qp settle tk-w1
 eq "$(updates)" 0 "(SETTLE) a settled bead settles again with no write"
 has "$OUT" "nothing to write" "(SETTLE) and says there was nothing to write"
@@ -457,8 +509,12 @@ eq "$(prio tk-rv)" 2 "(MOVE) PR-finishing work with no shift takes the anchor's 
 eq "$(prio tk-two)" 3 "(RULES) a member of two epics follows the more urgent, plus its shift"
 eq "$(prio tk-e0)" 0 "(MOVE) another epic is not touched"
 eq "$(prio tk-solo)" 3 "(MOVE) a bead that follows nothing elsewhere is not touched"
-eq "$(awk '{print $3}' "$DB/queue-priority.holder" 2>/dev/null)" "move" "(MOVE) the move takes the lock beside the store"
 hasnt "$CALLS" "bd update tk-wc" "(MOVE) no write names the claimed member"
+reset_store
+held_record sh "$HELM" priority tk-e1 P2
+eq "$RC" 0 "(MOVE) a move held at its first write exits 0 once let go"
+eq "$(awk '{print $3}' <<< "$HELD")" "move" "(MOVE) while the move holds the lock beside the store, the holder record names it"
+eq "$(cat "$DB/queue-priority.holder" 2>/dev/null)" "" "(MOVE) the record is cleared once the move exits"
 
 reset_store
 qp settle tk-w2 --print; eq "$OUT" "0" "(RULES) a member at shift -1 under a P1 epic queues at P0"
@@ -519,7 +575,7 @@ eq "$(prio tk-g1)" 0 "(MOVE) and is written"
 jq -c '. + [{"id":"tk-ag","status":"open","issue_type":"agent","priority":2,"metadata":{},"dependencies":[]}]' \
   "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
 helm priority tk-ag P1
-eq "$RC" 0 "(MOVE) a live bead of a class the listing hides, an infra bead, takes a P-value"
+eq "$RC" 0 "(MOVE) a live infra bead that follows nothing takes a P-value"
 eq "$(prio tk-ag)" 1 "(MOVE) and is written"
 helm priority tk-e1 P7;         eq "$RC" 2 "(MOVE) a priority past P4 is refused"
 helm priority tk-e1 --shift up; eq "$RC" 2 "(MOVE) a shift that is not a number is refused"
@@ -543,10 +599,20 @@ has "$OUT" "tk-w1 P2->P0" "(MOVE) --dry-run names what it would write"
 eq "$(updates)" 0 "(MOVE) --dry-run writes nothing"
 eq "$(prio tk-e1)" 1 "(MOVE) and leaves the epic as it is"
 
+# A move that fails can fail after it wrote, so gc-helm.sh busts the board cache
+# on every exit but a refusal, which writes nothing.
 reset_store
+CACHE="$TMP/gc-helm-cache.$(id -u 2>/dev/null || echo 0)/board2-$(printf '%s' default | cksum | cut -d' ' -f1).ndjson"
+mkdir -p "${CACHE%/*}"; : > "$CACHE"
 STUB_DROP_PRIORITY=1 helm priority tk-e1 P0
 eq "$RC" 4 "(MOVE) a move whose writes do not read back exits 4"
 has "$ERR" "did not all settle" "(MOVE) and says so"
+[ ! -e "$CACHE" ] && ok "(MOVE) a move that fails after writing busts the board cache" || bad "(MOVE) a move that fails after writing busts the board cache"
+: > "$CACHE"
+helm priority tk-w1 P3
+eq "$RC" 2 "(MOVE) a refused move exits 2"
+[ -e "$CACHE" ] && ok "(MOVE) and leaves the board cache, since it wrote nothing" || bad "(MOVE) and leaves the board cache, since it wrote nothing"
+rm -f "$CACHE"
 
 # A park on the epic: its members are out of every queue, and the move still
 # reaches them, so each is at its priority when the park is released.
@@ -626,7 +692,7 @@ for b in tk-w1 tk-cv1 tk-r1 tk-s1a tk-s1b; do
 done
 eq "$(prio tk-s1c)" 2 "(PASS) a claimed step is left as it is"
 eq "$(printf '%s\n' "$CALLS" | grep -c '^bd ready')" 1 "(PASS) the pass reads the queue once"
-has "$CALLS" "bd ready --metadata-field gc.routed_to=$POOL --unassigned --json --limit 0" "(PASS) the queue is what bd ready offers the pool, unassigned"
+has "$CALLS" "bd ready --metadata-field gc.routed_to=$POOL --unassigned --include-ephemeral --json --limit 0" "(PASS) the queue is what bd ready offers the pool, unassigned, ephemeral beads included as the pool's claim reads them"
 store_wide="$(printf '%s\n' "$CALLS" | grep '^bd list' | grep -v -e '--id ' -e '--metadata-field ' || true)"
 eq "$store_wide" "" "(PASS) the pass reads only the queue and what it follows, never the whole store"
 has "$OUT" "settled tk-w1 at P0: parent tk-e1 P0, shift 0 (queued tk-s1a was P1)" "(PASS) the pass names what it settled and why"
@@ -749,7 +815,114 @@ printf '%s %s move\n' "${HOLDERS[-1]}" "$(( $(date -u +%s) - 1000 ))" > "$DB/que
 qp reconcile --db "$DB" --pool "$POOL"
 eq "$RC" 1 "(PASS) a lock held past the stall bound fails the pass"
 has "$ERR" "held past 900s" "(PASS) naming the wedge"
+# A writer records itself only after its flock succeeds, so a pass can read the
+# record of a writer that took the lock long ago and has exited, while the
+# writer holding it now has not recorded itself yet. That lock is held, not
+# wedged.
+( exit 0 ) & gone=$!; wait "$gone" 2>/dev/null
+printf '%s %s settle\n' "$gone" "$(( $(date -u +%s) - 1000 ))" > "$DB/queue-priority.holder"
+GC_ORDER_OUTCOME_FILE="$TMP/outcome.json" qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(PASS) a lock whose holder record names a writer that has exited is held, not wedged"
+has "$OUT" "skipping this tick" "(PASS) so the pass skips its tick"
+hasnt "$ERR" "wedged" "(PASS) and reports no wedge"
+eq "$(jq -r '.outcome' "$TMP/outcome.json" 2>/dev/null)" "skipped" "(PASS) and declares the tick skipped"
 kill "${HOLDERS[-1]}" 2>/dev/null; wait "${HOLDERS[-1]}" 2>/dev/null
+
+echo "# every class of bead"
+# bd leaves gates, infra beads, templates and ephemeral beads out of a listing
+# that does not ask for them, and a bead of any class can be followed, so
+# settle, the move and the pass read every class and agree on each bead.
+CLASS_BEADS='[
+ {"id":"tk-s1g","status":"open","issue_type":"gate","priority":2,"metadata":{"gc.root_bead_id":"tk-r1","gc.step_ref":"mol-polecat-work.await"},"dependencies":[]},
+ {"id":"tk-s1e","status":"open","issue_type":"task","ephemeral":true,"priority":2,"metadata":{"gc.root_bead_id":"tk-r1","gc.step_ref":"mol-polecat-work.self-review","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]},
+ {"id":"tk-we","status":"open","issue_type":"task","ephemeral":true,"priority":3,"metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},
+  "dependencies":[{"issue_id":"tk-we","depends_on_id":"tk-e1","type":"parent-child"}]},
+ {"id":"tk-ia","status":"open","issue_type":"agent","priority":0,"metadata":{},"dependencies":[]},
+ {"id":"tk-ti","status":"open","issue_type":"task","priority":3,"metadata":{},
+  "dependencies":[{"issue_id":"tk-ti","depends_on_id":"tk-e3","type":"parent-child"},{"issue_id":"tk-ti","depends_on_id":"tk-ia","type":"parent-child"}]},
+ {"id":"tk-tt","status":"open","issue_type":"task","is_template":true,"priority":0,"metadata":{},"dependencies":[]},
+ {"id":"tk-tm","status":"open","issue_type":"task","priority":4,"metadata":{},
+  "dependencies":[{"issue_id":"tk-tm","depends_on_id":"tk-e3","type":"parent-child"},{"issue_id":"tk-tm","depends_on_id":"tk-tt","type":"parent-child"}]}
+]'
+reset_store; add_beads "$CLASS_BEADS"
+qp settle tk-w1
+eq "$RC" 0 "(CLASSES) settle on a member whose workflow holds a gate step and an ephemeral step exits 0"
+eq "$(prio tk-s1g)" 1 "(CLASSES) settle writes the gate step"
+eq "$(prio tk-s1e)" 1 "(CLASSES) and the ephemeral step"
+
+reset_store; add_beads "$CLASS_BEADS"
+helm priority tk-e1 P0
+eq "$RC" 0 "(CLASSES) a move on an epic with an ephemeral member exits 0"
+eq "$(prio tk-we)" 0 "(CLASSES) the move re-ranks the ephemeral member"
+eq "$(prio tk-s1e)" 0 "(CLASSES) and an ephemeral step of a member's workflow"
+qp settle tk-we --print
+eq "$OUT" "0" "(CLASSES) at the priority settle computes for it"
+helm priority tk-e3 P2
+eq "$RC" 0 "(CLASSES) a move on an epic whose members have a more urgent parent of a hidden class exits 0"
+qp settle tk-ti --print
+eq "$OUT" "0" "(CLASSES) settle computes P0 for a member whose more urgent parent is an infra bead"
+eq "$(prio tk-ti)" "$OUT" "(CLASSES) and the move wrote that member the same priority"
+qp settle tk-tm --print
+eq "$OUT" "0" "(CLASSES) settle computes P0 for a member whose more urgent parent is a template"
+eq "$(prio tk-tm)" "$OUT" "(CLASSES) and the move wrote that member the same priority"
+
+reset_store; add_beads "$CLASS_BEADS"
+qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(CLASSES) a pass over a queue holding ephemeral beads exits 0"
+eq "$(prio tk-s1e)" 1 "(CLASSES) the pass reads a queued ephemeral step, as the pool's claim does, and settles it"
+eq "$(prio tk-we)" 1 "(CLASSES) and a queued ephemeral member"
+eq "$(prio tk-s1g)" 1 "(CLASSES) and settles the gate step of the same workflow"
+
+echo "# a convoy that tracks two beads"
+# An input convoy follows the bead it tracks only when it tracks exactly one,
+# so a convoy that tracks two follows neither, and its workflow takes the
+# convoy's own priority whichever of the two is settled.
+reset_store
+add_beads '[
+ {"id":"tk-pa","status":"open","issue_type":"task","priority":1,"metadata":{},"dependencies":[]},
+ {"id":"tk-pb","status":"open","issue_type":"task","priority":3,"metadata":{},"dependencies":[]},
+ {"id":"tk-cv2","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
+  "dependencies":[{"issue_id":"tk-cv2","depends_on_id":"tk-pa","type":"tracks"},{"issue_id":"tk-cv2","depends_on_id":"tk-pb","type":"tracks"}]},
+ {"id":"tk-r2","status":"in_progress","issue_type":"task","priority":2,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv2"},"dependencies":[]},
+ {"id":"tk-s2","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-r2","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]}
+]'
+qp settle tk-pa
+eq "$RC" 0 "(CONVOY) settle on one of the two beads exits 0"
+for b in tk-cv2 tk-r2 tk-s2; do eq "$(prio "$b")" 2 "(CONVOY) settle on the P1 bead leaves $b at the convoy's own priority"; done
+qp settle tk-pb
+for b in tk-cv2 tk-r2 tk-s2; do eq "$(prio "$b")" 2 "(CONVOY) and so does settle on the P3 bead, so no settle order wins $b"; done
+qp settle tk-s2 --print
+eq "$OUT" "2" "(CONVOY) the convoy's own priority is the one its step computes to"
+
+echo "# what the pass reaches"
+# A workflow poured for a step of another workflow follows that step, and so
+# the bead the outer workflow was poured for, but it is not one of the
+# workflows poured for that bead. The pass still writes its queued step and
+# every bead between that step and the subject.
+reset_store
+add_beads '[
+ {"id":"tk-cvn","status":"open","issue_type":"convoy","priority":3,"metadata":{"gc.synthetic":"true"},
+  "dependencies":[{"issue_id":"tk-cvn","depends_on_id":"tk-s1c","type":"tracks"}]},
+ {"id":"tk-rn","status":"in_progress","issue_type":"task","priority":3,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvn"},"dependencies":[]},
+ {"id":"tk-sn","status":"open","issue_type":"task","priority":3,"metadata":{"gc.root_bead_id":"tk-rn","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]}
+]'
+qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(PASS) a pass over a step of a workflow poured for a step of another exits 0"
+for b in tk-sn tk-rn tk-cvn; do eq "$(prio "$b")" 1 "(PASS) the pass writes $b, between the queued step and the bead its workflows were poured for"; done
+eq "$(prio tk-s1c)" 2 "(PASS) the claimed step between them is left as it is"
+has "$OUT" "tk-sn was P3" "(PASS) the pass names the queued step it settled"
+qp reconcile --db "$DB" --pool "$POOL"
+has "$OUT" "0 at a stale priority" "(PASS) so the next pass finds nothing stale"
+
+# The pass takes only the ids from bd ready and reads each queued bead again
+# through the reader settle and the move use, so the rows it computes from do
+# not depend on the shape bd ready prints.
+reset_store
+STUB_READY_BARE=1 qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(PASS) a pass whose queue rows carry no edges, parent or metadata exits 0"
+eq "$(prio tk-s1a)" 1 "(PASS) and settles the queued step from the rows it reads itself"
+eq "$(prio tk-srw)" 0 "(PASS) and the queued step of PR-finishing work"
+has "$CALLS" "bd list --id " "(PASS) reading the queued beads by id"
 
 echo "# a pass that crosses a move"
 # The pass reads the queue with the epic at P1 and is held at its first write.

@@ -297,7 +297,9 @@ kept within P0 to P4 at each level.
   urgent one, the parent with the lowest P-number.
 - PR-finishing work, a bead carrying `anchor_bead`, follows its anchor.
 - A workflow's input convoy, root and steps follow the bead the workflow was
-  poured for, at shift 0. They carry no shift of their own.
+  poured for, at shift 0. They carry no shift of their own. An input convoy
+  follows the bead it tracks only when it tracks exactly one; a convoy that
+  tracks several follows none of them.
 - A bead that follows nothing has its priority set directly. An epic with no
   parent is such a bead, and its priority is where its work starts.
 
@@ -334,6 +336,11 @@ priority, so the root is written while it is live. A move's input is not a
 computed priority. The move writes its P-value or its shift to the bead it
 moves even when that bead is claimed, because everything that follows the bead
 is computed from that input.
+
+Each writer reads the store asking for every class of bead a listing hides by
+default: gates, infrastructure beads, template molecules and ephemeral rows. A
+bead of any class can be followed, so the move, settle and the pass read the
+same beads and compute the same priority for each.
 
 ### Moving a priority
 
@@ -373,16 +380,25 @@ the number and writes nothing, for a writer that puts the priority in the same
 
 `orders/queue-priority.toml` runs `queue-priority.sh reconcile` in each rig every
 fifteen minutes. The pass reads the beads `bd ready` offers the polecat pool,
-and settles each one queued at a priority other than the one it follows,
-together with its whole workflow. It is there for the raw writes no writer
-sees: a hand `bd update --priority` on an epic, a parent edge written by hand or
-by `bd create --parent`, and a bead routed or slung without a settle, which
-queues at the priority it was filed with until the pass reaches it. Nothing
-tells the pack such a write happened, so the pass looks. It reads the queue and
-what each queued bead follows, never the whole store. A bead that is not queued
-waits for its own writer, or for the pass once it is queued. A pass settles the
-most urgent beads first and leaves what its time budget cannot cover for the
-next pass.
+ephemeral ones included, as the pool's claim reads them, and settles each one
+queued at a priority other than the one it follows, together with its whole
+workflow. It is there for the raw writes no writer sees: a hand
+`bd update --priority` on an epic, a parent edge written by hand or by
+`bd create --parent`, and a bead routed or slung without a settle, which queues
+at the priority it was filed with until the pass reaches it. Nothing tells the
+pack such a write happened, so the pass looks. It takes only the ids from the
+queue and reads each queued bead again, the way settle and the move read beads,
+then reads what each queued bead follows, never the whole store. A bead that is
+not queued waits for its own writer, or for the pass once it is queued. A pass
+settles the most urgent beads first and leaves what its time budget cannot
+cover for the next pass.
+
+A queued workflow bead is settled with the bead its workflow was poured for.
+The pass also writes the queued bead itself and every bead between it and that
+bead, because a workflow poured for a step of another workflow is not one of
+the workflows poured for the outer one, and still follows it. A pass whose
+writes do not reach a stale queued bead names it and fails, so a bead it cannot
+settle is never reported settled.
 
 The pool is the agent that `gc agent list` places in the rig under the name
 `polecat`. That agent's name carries the binding the city imports the pack
@@ -397,3 +413,12 @@ The move, settle and the pass take one lock per store, a `flock` on
 names the same way. A pass or a settle that read an old priority therefore
 cannot write it back after a move. The move and settle wait for the lock, and a
 pass that finds it held skips its tick.
+
+The writer that holds the lock records its pid and the time it took the lock in
+`queue-priority.holder` beside it, and clears the record when it exits, while it
+still holds the lock. A pass that finds the lock held fails, reporting the lock
+wedged, only when the writer the record names is still running and took the
+lock longer ago than the stall bound (`QUEUE_PRIORITY_LOCK_STALL_SECS`, 900
+seconds, above the order's timeout). A writer records itself only after it
+takes the lock, so a record whose writer has exited is not the holder's: the
+pass skips its tick.

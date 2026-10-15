@@ -6,12 +6,12 @@
 # `bd ready` offers the polecat pool, and settles each one queued at another
 # priority together with its whole workflow. It reads the queue and what each
 # queued bead follows, never the whole store. Exec, not a formula: one roster
-# read, one ready read, one read per generation of followed beads and a few
-# writes per stale bead need no LLM. Rig-scoped: one pass per importing rig
-# against its own store. The order names no pool, because the pool's name
-# carries the binding the city imports the pack under: the script finds the
-# rig's agent named polecat in `gc agent list`, and fails when it finds none or
-# several.
+# read, one ready read, one read of the queued beads, one read per generation
+# of followed beads and a few writes per stale bead need no LLM. Rig-scoped:
+# one pass per importing rig against its own store. The order names no pool,
+# because the pool's name carries the binding the city imports the pack under:
+# the script finds the rig's agent named polecat in `gc agent list`, and fails
+# when it finds none or several.
 # Single-flight is the runtime's open-tracking gate plus the store's priority
 # lock, which the script holds for the life of a pass and which a priority move
 # and a settle take too, so a pass that read an old priority never writes it
