@@ -69,8 +69,14 @@ case "$1 ${2:-}" in
                                 ?*)   : ;;
                                 *)    printf '%s' "${_a#placement=}" > "$FAKE_STATE.placement" ;;
                               esac ;;
+                            # The notice the real deferred-dispatch.sh records,
+                            # which its own notice listing reads back below.
+                            gc.notify_when_ready=*) printf '%s' "${_a#gc.notify_when_ready=}" > "$FAKE_STATE.notice" ;;
                           esac ;;
-        --unset-metadata) [ "$_a" = "gc.recommended_formula" ] && _reco_unset=1 ;;
+        --unset-metadata) case "$_a" in
+                            gc.recommended_formula) _reco_unset=1 ;;
+                            gc.notify_when_ready) rm -f "$FAKE_STATE.notice" ;;
+                          esac ;;
         # An emergency's P0, read back before its route. FAKE_DROP_PRIORITY
         # models a priority write that reports success and does not move.
         --priority) [ -n "${FAKE_DROP_PRIORITY:-}" ] || printf '%s' "$_a" > "$FAKE_STATE.priority" ;;
@@ -121,10 +127,31 @@ case "$1 ${2:-}" in
     fi
     [ -n "$_placement" ] && _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_placement" '.[0].metadata.placement = $v' 2>/dev/null || printf '%s' "$_shown")
     [ -n "$_priority" ] && _shown=$(printf '%s' "$_shown" | jq -c --argjson v "$_priority" '.[0].priority = $v' 2>/dev/null || printf '%s' "$_shown")
+    # The release's --assign, which the helm stub records: the bead is open and
+    # held by that agent from then on.
+    _assignee="$(cat "$FAKE_STATE.assignee" 2>/dev/null || printf '')"
+    [ -n "$_assignee" ] && _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_assignee" '.[0].assignee = $v | .[0].status = "open"' 2>/dev/null || printf '%s' "$_shown")
     printf '%s\n' "$_shown" ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
-    printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
+    case " $* " in
+      *" --has-metadata-key gc.notify_when_ready "*)
+        # The notice recorded above, as the real deferred-dispatch.sh lists it.
+        # Every listing carries it, and a --ready one only while
+        # FAKE_SUBJECT_READY says bd reports the bead ready.
+        _notice="$(cat "$FAKE_STATE.notice" 2>/dev/null || printf '')"
+        case " $* " in *" --ready "*) [ -n "${FAKE_SUBJECT_READY:-}" ] || _notice="" ;; esac
+        if [ -n "$_notice" ]; then
+          jq -cn --arg a "$_notice" --arg who "$(cat "$FAKE_STATE.assignee" 2>/dev/null)" \
+            '[{id: "tk-sub", status: "open", assignee: $who, metadata: {"gc.notify_when_ready": $a}}]'
+        else
+          printf '[]\n'
+        fi ;;
+      *) printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
+    esac ;;
+  "mail send")
+    printf 'MAIL %s\n' "$*" >> "$FAKE_LOG"
+    [ -n "${FAKE_MAIL_FAILS:-}" ] && exit 1 ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
     # `dep list --json` answers with what the store holds AFTER the helm call;
@@ -156,6 +183,16 @@ cat > "$TMP/helm" <<'HELM'
 #!/usr/bin/env bash
 printf 'HELM %s\n' "$*" >> "$FAKE_LOG"
 [ -n "${FAKE_HELM_FAILS:-}" ] && exit 4
+# A release with --assign makes that agent the bead's assignee, which a later
+# `bd show` reflects.
+case " $* " in
+  *" --release "*)
+    _prev=""
+    for _a in "$@"; do
+      [ "$_prev" = "--assign" ] && printf '%s' "$_a" > "$FAKE_STATE.assignee"
+      _prev="$_a"
+    done ;;
+esac
 # demand files the human gate a ruling or recommend holds on, and names it the
 # way gc-helm.sh does: a `demand <id> blocks <gated> …` line on stdout.
 # FAKE_DEMAND_FAILS models a gate that did not file (gc-helm.sh exits 4);
@@ -282,7 +319,8 @@ R="tk-react"   # the reaction bead the worker holds
 # Reset per run, then seed the recommendation state from the fixture so the first
 # `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
 run() {
-  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped" "$FAKE_STATE.placement" "$FAKE_STATE.placement-dropped" "$FAKE_STATE.priority"
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped" "$FAKE_STATE.placement" "$FAKE_STATE.placement-dropped" "$FAKE_STATE.priority" \
+    "$FAKE_STATE.assignee" "$FAKE_STATE.notice"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
   RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")";
@@ -391,6 +429,14 @@ has "HELM takeaway tk-sub city.toml edit routed to mechanik --by proactive --rel
 hasnt "--route" "$LOG" "(ACTASSIGN) …and stamps no pool route beside the assignee"
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(ACTASSIGN) the exit asks whether the agent's hook would offer this bead"
 hasnt "PROACTIVE deliverable" "$LOG" "(ACTASSIGN) …and does not ask the pool question of a named agent"
+# (ACTNOTIFY) nothing wakes an idle named session for a new assignee, so the
+# exit asks deferred-dispatch.sh to tell the agent it assigned: once the release
+# has made it the assignee, and before the landed proof.
+has "DEFERRED notify tk-sub --agent gc-toolkit.mechanik --reason first reaction: the remedy is a city.toml edit, mechanik's direct edit" \
+    "$LOG" "(ACTNOTIFY) the exit asks deferred-dispatch.sh to tell the agent about the bead"
+before '^HELM takeaway' '^DEFERRED notify' "(ACTNOTIFY) …after the release makes the agent its assignee"
+before '^DEFERRED notify' 'gc.reacted_by' "(ACTNOTIFY) …and before the landed proof"
+hasnt "DEFERRED arm" "$LOG" "(ACTNOTIFY) …arming no sling for a named agent"
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign mechanik
@@ -428,7 +474,30 @@ eq "$LOG" "" "(ASSIGNEXIT) …and no gate was filed"
 OUT="$("$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --dry-run 2>"$TMP/err")" || RC=$?
 eq "$RC" "0" "(ASSIGNDRY) a dry run of the --assign exit succeeds"
 has "would release tk-sub to named agent gc-toolkit.mechanik" "$OUT" "(ASSIGNDRY) …and names the agent it would hand the bead to"
+has "would tell gc-toolkit.mechanik about tk-sub once bd reports it ready" "$OUT" "(ASSIGNDRY) …and that it would tell the agent"
 hasnt "UPDATE" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …writing nothing"
+hasnt "DEFERRED" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …and telling no one"
+
+# (NOTIFYFAIL) a notice deferred-dispatch.sh neither sent nor recorded leaves the
+# agent unwoken for its bead, so the exit fails before the landed proof and the
+# reaction bead stays open for the re-run.
+export FAKE_DEFERRED_FAILS=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(NOTIFYFAIL) an --assign whose notice did not land fails the exit"
+has "gc-toolkit.mechanik was not told about it" "$ERR" "(NOTIFYFAIL) …saying the agent was not told"
+has "fake refusal" "$ERR" "(NOTIFYFAIL) …with the tool's own reason"
+has "HELM takeaway tk-sub" "$LOG" "(NOTIFYFAIL) …after the release, which stands"
+hasnt "gc.reacted_by" "$LOG" "(NOTIFYFAIL) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(NOTIFYFAIL) …and the reaction bead left open"
+unset FAKE_DEFERRED_FAILS
+
+# (NOTIFYTOOL) with no deferred-dispatch.sh to tell the agent, the exit cannot
+# land, so it is refused before the first write.
+GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+    run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(NOTIFYTOOL) --assign with no deferred-dispatch.sh is refused"
+has "no-such-deferred-dispatch" "$ERR" "(NOTIFYTOOL) …naming the tool it looked for"
+eq "$LOG" "" "(NOTIFYTOOL) …before anything is written"
 
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)      the release carries the wait as --waiting-on
@@ -628,9 +697,10 @@ unset FAKE_POOL_DEAD FAKE_DEPS_JSON
 
 # (BLKASSIGN) a town-repo edit that must wait on a rig change is held on that
 # change AND assigned to mechanik in the same release. An assigned bead reaches
-# its agent's hook only once bd reports it ready, so the edge is the gate and
-# nothing is armed: a deferred dispatch slings a pool, and a named agent is not
-# one.
+# its agent's hook only once bd reports it ready, so the edge is the gate and no
+# sling is armed: a deferred dispatch slings a pool, and a named agent is not
+# one. What is armed is the notice that tells the agent when the wait lifts
+# (BLKNOTIFY), since nothing else wakes an idle named session then.
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
     --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
@@ -643,8 +713,12 @@ has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.wor
 has "--release --waiting-on tk-blk1 --assign gc-toolkit.mechanik" "$LOG" \
     "(BLKASSIGN) the wait and the assignee ride one release"
 hasnt "--no-wait" "$LOG" "(BLKASSIGN) …and the named wait is not called settled"
-hasnt "DEFERRED arm" "$LOG" "(BLKASSIGN) …and no deferred dispatch is armed for a named agent"
+hasnt "DEFERRED arm" "$LOG" "(BLKASSIGN) …and no sling is armed for a named agent"
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(BLKASSIGN) the exit asks whether the agent's hook would offer the bead"
+has "DEFERRED notify tk-sub --agent gc-toolkit.mechanik --reason first reaction: the comment can change only once the order lands" \
+    "$LOG" "(BLKNOTIFY) the exit asks deferred-dispatch.sh for the notice that tells the agent when the wait lifts"
+before '^DEP bd dep list' '^DEFERRED notify' "(BLKNOTIFY) …once the hold is proven"
+before '^DEFERRED notify' 'gc.reacted_by' "(BLKNOTIFY) …and before the landed proof"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --then-assign gc-toolkit.mechanik
@@ -657,7 +731,21 @@ eq "$RC" "2" "(BLKASSIGN) blocked refuses --assign, the actionable exit's flag"
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --dry-run
 eq "$RC" "0" "(BLKASSIGN) a dry run of the --then-assign exit succeeds"
 has "would wait tk-sub on: tk-blk1, assigned to gc-toolkit.mechanik" "$OUT" "(BLKASSIGN) …and names the agent the held bead goes to"
+has "would tell gc-toolkit.mechanik about tk-sub once bd reports it ready" "$OUT" "(BLKASSIGN) …and when the agent would be told"
 hasnt "UPDATE" "$LOG" "(BLKASSIGN) …writing nothing"
+hasnt "DEFERRED" "$LOG" "(BLKASSIGN) …and arming no notice"
+
+export FAKE_DEFERRED_FAILS=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(NOTIFYFAIL) a --then-assign whose notice did not land fails the exit"
+has "no notice was armed" "$ERR" "(NOTIFYFAIL) …saying nothing would tell the agent"
+hasnt "gc.reacted_by" "$LOG" "(NOTIFYFAIL) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(NOTIFYFAIL) …and the reaction bead left open"
+unset FAKE_DEFERRED_FAILS
+GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+    run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(NOTIFYTOOL) --then-assign with no deferred-dispatch.sh is refused"
+eq "$LOG" "" "(NOTIFYTOOL) …before anything is written"
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness
@@ -1648,6 +1736,58 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "2" "(EMERGARGS) …and so is a blank check name"
 eq "$LOG" "" "(EMERGARGS) …and nothing was written"
 unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
+
+# ── The notice, end to end through the real deferred-dispatch.sh ─────────────
+# The stubbed tool above proves each exit asks for the notice. These runs hand
+# the exits the real deferred-dispatch.sh over the same stubbed gc, so what the
+# agent receives is pinned. The store stays unpinned, and the deferred-dispatch
+# pass keeps its lock in this run's tmpdir.
+#   (E2EASSIGN) --assign on a bead bd reports ready: the agent is mailed at
+#               once, asking for its turn and naming the bead, and no notice
+#               is left recorded
+#   (E2EHELD)   --then-assign while the wait holds: no mail, the notice is
+#               recorded for the agent, and a pass while bd still holds the
+#               bead sends nothing
+#   (E2ELIFT)   the wait lifts: the next pass mails the agent, naming the
+#               bead, and retires the notice
+unset GC_RIG_ROOT GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE
+export DEFERRED_DISPATCH_STATE_DIR="$TMP/deferred-state" DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
+REAL_DD="$HERE/deferred-dispatch.sh"
+GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 \
+    run tk-sub --disposition actionable --reason "the remedy is a city.toml edit" \
+    --takeaway "city.toml edit routed to mechanik" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "0" "(E2EASSIGN) the --assign exit lands with the real deferred-dispatch.sh"
+eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2EASSIGN) the agent is mailed once"
+has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2EASSIGN) …the agent the bead went to, asking for its turn"
+has "Ready for you: tk-sub" "$LOG" "(E2EASSIGN) …naming the bead"
+before '^HELM takeaway' '^MAIL ' "(E2EASSIGN) …once the release has made it the assignee"
+before '^MAIL ' 'gc.reacted_by' "(E2EASSIGN) …and before the landed proof"
+[ ! -e "$FAKE_STATE.notice" ] && ok "(E2EASSIGN) …leaving no notice recorded" \
+    || bad "(E2EASSIGN) a notice sent at once is still recorded"
+
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" \
+    run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
+    --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
+    --reaction-bead "$R"
+eq "$RC" "0" "(E2EHELD) the --then-assign exit lands with the real deferred-dispatch.sh"
+hasnt "MAIL " "$LOG" "(E2EHELD) no mail goes while the wait holds the bead"
+has "--set-metadata gc.notify_when_ready=gc-toolkit.mechanik" "$LOG" "(E2EHELD) …the notice is recorded for the agent instead"
+before '^UPDATE bd update tk-sub --set-metadata gc.notify_when_ready' 'gc.reacted_by' "(E2EHELD) …before the landed proof"
+: > "$FAKE_LOG"
+DD_RC=0; "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
+eq "$DD_RC" "0" "(E2EHELD) a deferred-dispatch pass while the wait holds is clean"
+hasnt "MAIL " "$(cat "$FAKE_LOG")" "(E2EHELD) …and sends nothing"
+eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2EHELD) …keeping the notice for the agent"
+DD_RC=0; FAKE_SUBJECT_READY=1 "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
+LOG="$(cat "$FAKE_LOG")"
+eq "$DD_RC" "0" "(E2ELIFT) the pass once the wait lifts is clean"
+eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ELIFT) the agent is mailed once the wait lifts"
+has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2ELIFT) …asking for its turn"
+has "Ready for you: tk-sub" "$LOG" "(E2ELIFT) …naming the bead"
+[ ! -e "$FAKE_STATE.notice" ] && ok "(E2ELIFT) …and the notice retires" \
+    || bad "(E2ELIFT) the notice is still recorded after it was sent"
+unset FAKE_DEPS_JSON DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
 
 echo ""
 echo "first-reaction-dispose (five exits, reaction-bead): $PASS passed, $FAIL failed"
