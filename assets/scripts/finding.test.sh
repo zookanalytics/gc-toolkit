@@ -1018,6 +1018,18 @@ FV2=$(human_finding tk-ancV "assets/scripts/x.sh" "quote the expansion" 4999 500
 eq "$rc" "3" "must-fix is refused too: it would settle the operator's question as keep-and-fix"
 hasnt "$(deps)" "$FV2|blocks|tk-ancV" "…and wires no hold"
 
+# restates rules the body no point of its own and closes it, so the review could
+# dismiss while the operator decides. A body of a review inside the held batch,
+# beside an inline comment of the same review, is refused like any other ruling.
+FV5=$(human_finding tk-ancV "PR review" "Two points, both in the inline comments." 4996 4996)
+human_finding tk-ancV "assets/scripts/z.sh" "the cap reads the wrong budget" 4995 4996 >/dev/null
+err=$("$SUT" set-disposition --finding "$FV5" --anchor tk-ancV --disposition restates --reason "it lists the inline comment" 2>&1 >/dev/null); rc=$?
+eq "$rc" "3" "restates is refused too: it would rule the operator's question no point of its own"
+has "$err" "visV" "…naming the visit that already carries the question"
+eq "$(meta "$FV5" 'finding.disposition')|$(bstatus "$FV5")" "unvalidated|open" "…and the body stays unruled and open, holding the review"
+"$SUT" set-disposition --finding "$FV5" --anchor tk-ancV --disposition restates --unrelated-visit visV; rc=$?
+eq "$rc|$(meta "$FV5" 'finding.disposition')|$(bstatus "$FV5")" "0|restates|closed" "…and goes through once the visit is named as asking something else"
+
 # A Conversation comment names no review, so the anchor's batch ledger is what
 # names its batch's rework.
 FV3=$(human_finding tk-ancV "PR conversation" "why an hourly order at all?" 40)

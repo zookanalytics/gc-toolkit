@@ -116,11 +116,12 @@
 # A human finding's question can reach the operator before this ruling does: the
 # rework minted for its feedback batch put it to them in a visit, which tracks the
 # rework or holds it through a blocks edge. A merits ruling then answers a
-# decision the operator holds. A decline or a deferral overrules it, and closing
-# the finding lets pr-facts.sh dismiss their review while they are still
-# deciding; must-fix settles it as "keep the change and fix it"; a fresh needs-you
-# visit asks them the same question twice. So set-disposition refuses each of
-# those while such a visit is open (exit 3), naming it. needs-you --visit <that
+# decision the operator holds. A decline or a deferral overrules it, and restates
+# rules it no point of its own; each closes the finding, which lets pr-facts.sh
+# dismiss their review while they are still deciding. must-fix settles it as
+# "keep the change and fix it", and a fresh needs-you visit asks them the same
+# question twice. So set-disposition refuses each of those while such a visit is
+# open (exit 3), naming it. needs-you --visit <that
 # visit> is the ruling that defers to it, and --unrelated-visit names a visit that
 # asks something else, so the ruling proceeds past it with that judgment on record.
 #
@@ -620,12 +621,15 @@ cmd_set_disposition() {
   # named --unrelated-visit refuses the ruling, exit 3, before any write, so the
   # finding keeps its current disposition and the validator re-rules it. A merits
   # ruling would answer the operator's pending decision for them: a decline or a
-  # deferral overrules it, and must-fix settles it as "keep the change and fix
-  # it". needs-you --visit is the deferral, so it skips the check. A machine
-  # finding passes: no human raised it, so no visit holds its question.
+  # deferral overrules it, restates rules it no point of its own, and must-fix
+  # settles it as "keep the change and fix it". A decline, a deferral and a
+  # restates ruling also close the finding, which lets the review dismiss while
+  # the operator is still deciding. needs-you --visit is the deferral, so it skips
+  # the check. A machine finding passes: no human raised it, so no visit holds its
+  # question.
   local past=""
   case "$disp" in
-    must-fix|declined|deferred|needs-you)
+    must-fix|declined|deferred|needs-you|restates)
       if [ -z "$visit" ]; then
         local frow held standing
         frow=$(bd_json show "$finding")
